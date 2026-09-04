@@ -38,6 +38,7 @@ vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
 import {
   createAgentSessionOnNode,
   createWorkspaceOnNode,
+  deleteWorkspaceOnNode,
   getCfContainerCreateWorkspaceTimeoutMs,
   NodeAgentRequestError,
   sendPromptToAgentOnNode,
@@ -154,6 +155,20 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     await vi.advanceTimersByTimeAsync(30_100);
     await rejection;
   });
+
+  it('does not start cf-container recovery when a deletion request times out', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
+
+    const deletionPromise = deleteWorkspaceOnNode('node-1', 'ws-1', cfContainerEnv, 'user-1', {
+      requestTimeoutMs: 50,
+    });
+    const rejection = expect(deletionPromise).rejects.toThrow('Request timed out after 50ms');
+    await vi.advanceTimersByTimeAsync(60);
+    await rejection;
+
+    expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
+  });
+
   it('classifies a timed-out prompt before returning and never replays it', async () => {
     mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
     mocks.container.markVmAgentContainerRequestInterrupted.mockResolvedValue({

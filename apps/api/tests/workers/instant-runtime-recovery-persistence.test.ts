@@ -2,8 +2,10 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import {
+  loadRuntimeRecoveryContext,
   persistRuntimeRecovered,
   persistRuntimeRecovering,
+  persistRuntimeRecoveryFailed,
   RUNTIME_RECOVERING_MESSAGE,
   RUNTIME_REQUEST_INTERRUPTED_MESSAGE,
 } from '../../src/durable-objects/vm-agent-container-recovery';
@@ -54,8 +56,17 @@ describe('Instant runtime status reconciliation with Miniflare D1', () => {
       .run();
 
     const bindings = env as unknown as Env;
-    const target = { nodeId, workspaceId, projectId, chatSessionId, agentSessionId };
-    await persistRuntimeRecovering(bindings, target);
+    const target = {
+      nodeId,
+      workspaceId,
+      userId,
+      projectId,
+      chatSessionId,
+      agentSessionId,
+      runtimeIncarnationId: null,
+    };
+    const recoveringTarget = await persistRuntimeRecovering(bindings, target);
+    if (!recoveringTarget) throw new Error('expected the recovery transition to be claimed');
 
     const recoveringNode = await env.DATABASE.prepare(
       `SELECT status, health_status, error_message, runtime_termination_confirmed_at
@@ -97,7 +108,7 @@ describe('Instant runtime status reconciliation with Miniflare D1', () => {
     )
       .bind(nodeId)
       .run();
-    await persistRuntimeRecovered(bindings, target, 'manual_retry');
+    await persistRuntimeRecovered(bindings, recoveringTarget, 'manual_retry');
 
     const recoveredNode = await env.DATABASE.prepare(
       `SELECT status, health_status, error_message, runtime_termination_confirmed_at
@@ -169,9 +180,11 @@ describe('Instant runtime status reconciliation with Miniflare D1', () => {
     await persistRuntimeRecovering(env as unknown as Env, {
       nodeId,
       workspaceId,
+      userId,
       projectId,
       chatSessionId,
       agentSessionId,
+      runtimeIncarnationId: null,
     });
 
     const node = await env.DATABASE.prepare(
@@ -192,5 +205,93 @@ describe('Instant runtime status reconciliation with Miniflare D1', () => {
     });
     expect(workspace).toEqual({ status: 'deleted' });
     expect(agent).toEqual({ status: 'stopped' });
+  });
+
+  it('cannot complete or fail recovery after deletion claims the workspace', async () => {
+    const prefix = `runtime-deletion-fence-${Date.now()}-${crypto.randomUUID()}`;
+    const userId = `${prefix}-user`;
+    const installationId = `${prefix}-installation`;
+    const projectId = `${prefix}-project`;
+    const nodeId = `${prefix}-node`;
+    const workspaceId = `${prefix}-workspace`;
+    const chatSessionId = `${prefix}-chat`;
+    const agentSessionId = `${prefix}-agent`;
+
+    await seedUser(userId);
+    await seedInstallation(installationId, userId, {
+      installationIdValue: `${prefix}-external`,
+    });
+    await seedProject(projectId, userId, installationId);
+    await seedNode(nodeId, userId, { status: 'running' });
+    await env.DATABASE.prepare(
+      `UPDATE nodes
+          SET runtime = 'cf-container', runtime_incarnation_id = ?
+        WHERE id = ?`
+    )
+      .bind(`${prefix}-incarnation`, nodeId)
+      .run();
+    await seedWorkspace(workspaceId, nodeId, userId, {
+      projectId,
+      status: 'running',
+      chatSessionId,
+    });
+    await env.DATABASE.prepare(
+      `INSERT INTO agent_sessions
+         (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
+       VALUES (?, ?, ?, 'running', 'codex', datetime('now'), datetime('now'))`
+    )
+      .bind(agentSessionId, workspaceId, userId)
+      .run();
+
+    const recoveringTarget = await persistRuntimeRecovering(env as unknown as Env, {
+      nodeId,
+      workspaceId,
+      userId,
+      projectId,
+      chatSessionId,
+      agentSessionId,
+      runtimeIncarnationId: `${prefix}-incarnation`,
+    });
+    if (!recoveringTarget) throw new Error('expected the recovery transition to be claimed');
+
+    await env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET status = 'stopping', error_message = 'deletion claimed'
+        WHERE id = ?`
+    )
+      .bind(workspaceId)
+      .run();
+
+    await expect(
+      loadRuntimeRecoveryContext(env as unknown as Env, {
+        workspaceId,
+        preferredAgentSessionId: agentSessionId,
+      })
+    ).resolves.toBeNull();
+    await expect(
+      persistRuntimeRecovered(env as unknown as Env, recoveringTarget, 'manual_retry')
+    ).resolves.toBe(false);
+    await expect(
+      persistRuntimeRecoveryFailed(env as unknown as Env, recoveringTarget)
+    ).resolves.toBe(false);
+
+    expect(
+      await env.DATABASE.prepare('SELECT status, runtime_incarnation_id FROM nodes WHERE id = ?')
+        .bind(nodeId)
+        .first()
+    ).toEqual({
+      status: 'recovery',
+      runtime_incarnation_id: recoveringTarget.runtimeIncarnationId,
+    });
+    expect(
+      await env.DATABASE.prepare('SELECT status, error_message FROM workspaces WHERE id = ?')
+        .bind(workspaceId)
+        .first()
+    ).toEqual({ status: 'stopping', error_message: 'deletion claimed' });
+    expect(
+      await env.DATABASE.prepare('SELECT status FROM agent_sessions WHERE id = ?')
+        .bind(agentSessionId)
+        .first()
+    ).toEqual({ status: 'recovery' });
   });
 });

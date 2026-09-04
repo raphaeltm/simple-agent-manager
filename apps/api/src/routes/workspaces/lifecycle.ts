@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -268,17 +268,49 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
   }
 
   // Clear previous error state and boot logs before starting new provisioning
-  await db
+  const restartTransition = await db
     .update(schema.workspaces)
     .set({ status: 'creating', errorMessage: null, updatedAt: new Date().toISOString() })
-    .where(eq(schema.workspaces.id, workspace.id));
+    .where(
+      and(
+        eq(schema.workspaces.id, workspace.id),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.status, workspace.status),
+        sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
+        sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
+        sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
+      )
+    )
+    .run();
+  if ((restartTransition.meta.changes ?? 0) !== 1) {
+    throw errors.conflict('Workspace changed while restart cancellation was being claimed');
+  }
   await writeBootLogs(c.env.KV, workspace.id, [], c.env);
 
   c.executionCtx.waitUntil(
     (async () => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
       try {
-        await restartWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
+        await restartWorkspaceOnNode(nodeId, workspace.id, c.env, userId, {
+          beforeExternalMutation: async () => {
+            const current = await c.env.DATABASE.prepare(
+              `SELECT id
+                 FROM workspaces
+                WHERE id = ?
+                  AND user_id = ?
+                  AND node_id = ?
+                  AND project_id IS ?
+                  AND chat_session_id IS ?
+                  AND status = 'creating'
+                  AND runtime_deletion_confirmed_at IS NULL
+                LIMIT 1`
+            )
+              .bind(workspace.id, userId, nodeId, workspace.projectId, workspace.chatSessionId)
+              .first<{ id: string }>();
+            if (!current) throw new Error('Workspace restart lost its lifecycle claim');
+          },
+        });
       } catch (err) {
         await innerDb
           .update(schema.workspaces)
@@ -287,7 +319,17 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
             errorMessage: err instanceof Error ? err.message : 'Failed to restart workspace',
             updatedAt: new Date().toISOString(),
           })
-          .where(eq(schema.workspaces.id, workspace.id));
+          .where(
+            and(
+              eq(schema.workspaces.id, workspace.id),
+              eq(schema.workspaces.userId, userId),
+              eq(schema.workspaces.nodeId, nodeId),
+              eq(schema.workspaces.status, 'creating'),
+              sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
+              sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
+              sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
+            )
+          );
       }
     })()
   );

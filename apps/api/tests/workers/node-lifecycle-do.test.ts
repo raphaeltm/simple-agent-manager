@@ -155,6 +155,13 @@ async function getNodeFromD1(
     .first<{ status: string; warm_since: string | null }>();
 }
 
+async function getWorkspaceStatusFromD1(workspaceId: string): Promise<string | null> {
+  const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+    .bind(workspaceId)
+    .first<{ status: string }>();
+  return workspace?.status ?? null;
+}
+
 async function getAgentSessionStatus(
   agentSessionId: string
 ): Promise<{ status: string; stopped_at: string | null } | null> {
@@ -597,6 +604,74 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(await getNodeFromD1(nodeId)).toBeNull();
   });
 
+  it.each(['stopped', 'deleted'] as const)(
+    'preserves an in-flight workspace deletion retry when destroying D1 state is %s',
+    async (nodeStatus) => {
+      const nodeId = `nl-test-destroy-preserves-${nodeStatus}-001`;
+      const wsId = `ws-destroy-preserves-${nodeStatus}-001`;
+      await seedTestNode(nodeId);
+      await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+
+      const stub = getStub(nodeId);
+      await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
+      await env.DATABASE.prepare('UPDATE nodes SET status = ? WHERE id = ?')
+        .bind(nodeStatus, nodeId)
+        .run();
+      await runInDurableObject(stub, async (instance) => {
+        await instance.ctx.storage.put('state', {
+          nodeId,
+          userId: TEST_USER_ID,
+          status: 'destroying',
+          warmSince: null,
+          destroyingSince: Date.now(),
+          claimedByTask: null,
+        } satisfies StoredNodeLifecycleState);
+        const key = `ws-delete:${wsId}`;
+        const pending = await instance.ctx.storage.get<Record<string, unknown>>(key);
+        await instance.ctx.storage.put(key, { ...pending, deleteAt: Date.now() - 1 });
+      });
+
+      let fetchEntered = false;
+      let releaseFetch = false;
+      const fetchMock = vi.fn(async () => {
+        fetchEntered = true;
+        while (!releaseFetch) await new Promise((resolve) => setTimeout(resolve, 1));
+        throw new Error('simulated timeout');
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const alarmInvocation = runInDurableObject(stub, async (instance) => instance.alarm());
+      try {
+        await vi.waitFor(() => expect(fetchEntered).toBe(true));
+        await alarmInvocation;
+
+        expect(await getStoredState(stub)).toBeNull();
+        expect(await getAlarm(stub)).not.toBeNull();
+        expect(
+          await runInDurableObject(stub, async (instance) =>
+            instance.ctx.storage.get(`ws-delete:${wsId}`)
+          )
+        ).toMatchObject({ attemptCount: 1, deadLetteredAt: null });
+      } finally {
+        releaseFetch = true;
+        await alarmInvocation;
+      }
+
+      await vi.waitFor(async () => {
+        const pending = await runInDurableObject(stub, async (instance) =>
+          instance.ctx.storage.get<{ lastError: string | null }>(`ws-delete:${wsId}`)
+        );
+        expect(pending?.lastError).toContain('VM attempt 1');
+        expect(await getAlarm(stub)).not.toBeNull();
+      });
+      expect(
+        await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+          .bind(wsId)
+          .first<{ status: string }>()
+      ).toEqual({ status: 'stopping' });
+    }
+  );
+
   it('finalizeDeletion routes an API-deleted node through destroying terminal cleanup', async () => {
     const nodeId = 'nl-test-api-delete-terminal-001';
     await seedTestNode(nodeId);
@@ -842,6 +917,50 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       ).toBeUndefined();
       expect(await getAlarm(stub)).toBeNull();
     });
+  });
+
+  it('serializes restart cancellation against the durable alarm claim', async () => {
+    for (let iteration = 0; iteration < 8; iteration++) {
+      const nodeId = `nl-test-cancel-claim-race-${iteration}`;
+      const wsId = `ws-cancel-claim-race-${iteration}`;
+      await seedTestNode(nodeId);
+      await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+
+      const stub = getStub(nodeId);
+      await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
+      await runInDurableObject(stub, async (instance) => {
+        const key = `ws-delete:${wsId}`;
+        const pending = await instance.ctx.storage.get<Record<string, unknown>>(key);
+        await instance.ctx.storage.put(key, { ...pending, deleteAt: Date.now() - 1 });
+      });
+
+      let requestedWorkspaceId: string | null = null;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const url =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          requestedWorkspaceId = url.includes(wsId) ? wsId : null;
+          return new Response(null, { status: 204 });
+        })
+      );
+
+      const [, cancelled] = await Promise.all([
+        runInDurableObject(stub, async (instance) => instance.alarm()),
+        stub.cancelWorkspaceDeletion(wsId),
+      ]);
+      if (cancelled) {
+        const status = await getWorkspaceStatusFromD1(wsId);
+        // Cancellation can linearize after a fully confirmed attempt has already
+        // removed its durable entry. In that case the route's exact D1 CAS still
+        // refuses the restart because the workspace is terminal.
+        if (requestedWorkspaceId) expect(status).toBe('deleted');
+        else expect(status).toBe('stopped');
+      } else {
+        await vi.waitFor(async () => expect(await getWorkspaceStatusFromD1(wsId)).toBe('deleted'));
+        expect(requestedWorkspaceId).toBe(wsId);
+      }
+    }
   });
 
   it('retains the durable claim across a D1 claim fault and converges after D1 recovers', async () => {

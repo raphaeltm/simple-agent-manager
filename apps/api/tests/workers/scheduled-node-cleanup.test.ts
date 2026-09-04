@@ -24,6 +24,7 @@ import {
   emptyResult,
   resolveCleanupConfig,
 } from '../../src/scheduled/node-cleanup/shared';
+import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import {
   seedAgentSession,
@@ -580,6 +581,60 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         });
         expect(await instance.ctx.storage.getAlarm()).toBeGreaterThan(Date.now());
       });
+    });
+
+    it('does not enqueue when restart wins after the stale-candidate scan', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-stale-scan-restart-race';
+      const wsId = 'ws-nc-stale-scan-restart-race';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      await seedNode(nodeId, USER_ID);
+      await seedWorkspace(wsId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'stopped',
+        updatedAt: oldDate,
+      });
+
+      const realNamespace = env.NODE_LIFECYCLE;
+      let targetScheduleResult: boolean | null = null;
+      const scheduleAfterRestart = vi.fn(async (...args: unknown[]) => {
+        await env.DATABASE.prepare("UPDATE workspaces SET status = 'running' WHERE id = ?")
+          .bind(wsId)
+          .run();
+        const realStub = realNamespace.get(realNamespace.idFromName(nodeId)) as DurableObjectStub<{
+          scheduleWorkspaceDeletion: (...input: unknown[]) => Promise<boolean>;
+        }>;
+        const scheduled = await realStub.scheduleWorkspaceDeletion(...args);
+        if (args[1] === wsId) targetScheduleResult = scheduled;
+        return scheduled;
+      });
+      const testEnv = {
+        ...env,
+        WORKSPACE_STOPPED_TTL_MS: '1000',
+        NODE_LIFECYCLE: {
+          idFromName: (id: string) => id,
+          get: () => ({ scheduleWorkspaceDeletion: scheduleAfterRestart }),
+        },
+      } as unknown as Env;
+      const result = emptyResult();
+
+      await sweepStaleStoppedWorkspaces(
+        undefined as never,
+        testEnv,
+        new Date(),
+        resolveCleanupConfig(testEnv),
+        result
+      );
+
+      expect(scheduleAfterRestart.mock.calls.filter((call) => call[1] === wsId)).toHaveLength(1);
+      expect(targetScheduleResult).toBe(false);
+      expect(await getWorkspaceStatus(wsId)).toEqual({ status: 'running' });
+      const realStub = realNamespace.get(realNamespace.idFromName(nodeId));
+      expect(
+        await runInDurableObject(realStub, async (instance) =>
+          instance.ctx.storage.get(`ws-delete:${wsId}`)
+        )
+      ).toBeUndefined();
     });
 
     it('does not delete recently stopped workspace', async () => {

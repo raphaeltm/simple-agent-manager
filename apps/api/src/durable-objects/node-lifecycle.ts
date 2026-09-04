@@ -372,7 +372,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     };
 
     await this.ctx.storage.put('state', state);
-    await this.handleDestroyingAlarm(state);
+    await this.cleanupDestroyingState(nodeId, 'explicit_terminal_proof', true);
   }
 
   // =========================================================================
@@ -392,8 +392,8 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       lastError?: string | null;
       expected?: WorkspaceDeletionIdentity;
     }
-  ): Promise<void> {
-    await this.workspaceDeletionQueue().schedule(nodeId, workspaceId, userId, options);
+  ): Promise<boolean> {
+    return await this.workspaceDeletionQueue().schedule(nodeId, workspaceId, userId, options);
   }
 
   /**
@@ -524,7 +524,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     }
 
     if (now - destroyingSince >= this.getMaxDestroyingAgeMs()) {
-      await this.cleanupDestroyingState(state.nodeId, 'max_destroying_age');
+      await this.cleanupDestroyingState(state.nodeId, 'max_destroying_age', false);
       return;
     }
 
@@ -534,12 +534,12 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         .first<{ status: string }>();
 
       if (!node) {
-        await this.cleanupDestroyingState(state.nodeId, 'node_absent');
+        await this.cleanupDestroyingState(state.nodeId, 'node_absent', false);
         return;
       }
 
       if (node.status === 'stopped' || node.status === 'deleted') {
-        await this.cleanupDestroyingState(state.nodeId, `node_${node.status}`);
+        await this.cleanupDestroyingState(state.nodeId, `node_${node.status}`, false);
         return;
       }
 
@@ -560,10 +560,29 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     await this.recalculateAlarm(now + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
   }
 
-  private async cleanupDestroyingState(nodeId: string, reason: string): Promise<void> {
-    log.info('node_lifecycle.destroying_terminal', { nodeId, reason });
-    await this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.deleteAll();
+  private async cleanupDestroyingState(
+    nodeId: string,
+    reason: string,
+    terminalProof: boolean
+  ): Promise<void> {
+    if (terminalProof) {
+      log.info('node_lifecycle.destroying_terminal', { nodeId, reason });
+      await this.ctx.storage.deleteAlarm();
+      await this.ctx.storage.deleteAll();
+      return;
+    }
+
+    // D1 lifecycle labels and row absence only retire the warm-node handoff;
+    // they do not prove that every workspace runtime is gone. Keep durable
+    // deletion claims (including detached in-flight attempts) and their next
+    // alarm until VM/provider proof confirms them or they enter dead letter.
+    log.info('node_lifecycle.destroying_state_retired', {
+      nodeId,
+      reason,
+      workspaceDeletionsPreserved: true,
+    });
+    await this.ctx.storage.delete('state');
+    await this.recalculateAlarm(null);
   }
 
   /**

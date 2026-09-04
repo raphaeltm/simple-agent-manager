@@ -50,6 +50,8 @@ interface NodeAgentRequestOptions extends RequestInit {
   sourceTaskGuard?: VmAgentContainerRequestGuard;
   /** Caller-side fail-closed check repeated at the physical fetch boundary. */
   beforeExternalMutation?: () => Promise<void>;
+  /** Whether a cf-container timeout may initiate normal runtime recovery. */
+  recoverContainerOnTimeout?: boolean;
 }
 
 export interface GuardedNodeAgentMutationOptions {
@@ -172,6 +174,7 @@ export async function nodeAgentRequest(
     requestTimeoutMs: configuredRequestTimeoutMs,
     sourceTaskGuard,
     beforeExternalMutation,
+    recoverContainerOnTimeout = true,
     ...requestOptions
   } = options;
   const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
@@ -206,7 +209,8 @@ export async function nodeAgentRequest(
     { ...requestOptions, headers },
     requestTimeoutMs,
     sourceTaskGuard,
-    beforeExternalMutation
+    beforeExternalMutation,
+    recoverContainerOnTimeout
   );
 
   recordNodeRoutingMetric(
@@ -272,7 +276,8 @@ export async function fetchNodeAgent(
   options: RequestInit,
   requestTimeoutMs: number,
   sourceTaskGuard?: VmAgentContainerRequestGuard,
-  beforeExternalMutation?: () => Promise<void>
+  beforeExternalMutation?: () => Promise<void>,
+  recoverContainerOnTimeout = true
 ): Promise<Response> {
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     await beforeExternalMutation?.();
@@ -339,6 +344,11 @@ export async function fetchNodeAgent(
   } catch (error) {
     const timedOut = error instanceof Error && error.message.startsWith('Request timed out after ');
     if (!timedOut) throw error;
+
+    // A delete timeout is deliberately ambiguous: the container request keeps
+    // running after the caller stops waiting, so starting recovery could revive
+    // or rotate the exact runtime that deletion has quarantined as `stopping`.
+    if (!recoverContainerOnTimeout) throw error;
 
     const recovery = await markVmAgentContainerRequestInterrupted(env, nodeId, {
       method: options.method ?? 'GET',
@@ -431,12 +441,14 @@ export async function restartWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/restart`, {
     method: 'POST',
     userId,
     workspaceId,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 
@@ -453,6 +465,7 @@ export async function deleteWorkspaceOnNode(
     workspaceId,
     requestTimeoutMs: options?.requestTimeoutMs,
     beforeExternalMutation: options?.beforeExternalMutation,
+    recoverContainerOnTimeout: false,
   });
 }
 
