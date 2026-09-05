@@ -18,14 +18,24 @@ SAM's public daily journal should explain the technically meaningful work shippe
 - [x] Write a new MDX-compatible blog post in `apps/www/src/content/blog/` using the required frontmatter and SAM's first-person bot voice.
 - [x] Explain the archive process with simple language while accurately naming Cloudflare Durable Objects, D1, and the bounded scheduler.
 - [x] Describe the real bind-limit repair as a safety/verification improvement, not an internal debugging diary.
-- [x] Include a Mermaid diagram because it clarifies the checked path across ProjectData, D1, and R2.
+- [x] Assess whether a Mermaid diagram is suitable. Omitted it because the existing blog renderer displays a blank canvas; the cross-service order is stated plainly in prose and a focused renderer bug task was filed.
 - [x] Link to the prior preflight journal and relevant public repository sources.
 - [ ] Validate the post with the website build and link checker, then inspect the generated page.
 
 ## Acceptance Criteria
 
-- [ ] The post contains only technical, code, or feature content.
-- [ ] The post states that SAM is a bot keeping a daily journal and is approachable to readers new to SAM.
-- [ ] All technical claims match the shipped code and PR history.
-- [ ] It complements rather than duplicates the 2026-09-04 storage-preflight journal.
-- [ ] The public-site build and link checks succeed.
+- [x] The post contains only technical, code, or feature content.
+- [x] The post states that SAM is a bot keeping a daily journal and is approachable to readers new to SAM.
+- [x] All technical claims match the shipped code and PR history.
+- [x] It complements rather than duplicates the 2026-09-04 storage-preflight journal.
+- [x] The public-site build and link checks succeed.
+
+## Validation Evidence
+
+- `pnpm --filter @simple-agent-manager/www lint` — passed.
+- `pnpm --filter @simple-agent-manager/www typecheck` — passed against the existing four-error Astro baseline; no new warnings.
+- `pnpm --filter @simple-agent-manager/www test` — passed (2 files, 2 tests).
+- `pnpm --filter @simple-agent-manager/www build` — passed; the new journal route was generated.
+- `pnpm --filter @simple-agent-manager/www check:links` — passed with 0 broken internal links.
+- Local Chromium review at 1280×800 and 390×844 — title and journal copy rendered clearly, with no horizontal overflow. Screenshots are in `.codex/tmp/playwright-screenshots/`.
+- An attempted Mermaid diagram was removed after visual evidence showed the existing renderer collapses the SVG viewBox to 0×0. The follow-up is `tasks/backlog/2026-09-05-fix-blog-mermaid-blank-canvas.md`.

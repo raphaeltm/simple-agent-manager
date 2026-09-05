@@ -21,21 +21,7 @@ SAM keeps a project's live chat data in a Cloudflare Durable Object. That is a s
 
 But completed conversations have different needs. They still need to be readable, but they no longer need to be part of the busiest set of records. The archive system gives a completed transcript a new home while D1, SAM's shared SQL database, keeps a simple record of where that home is.
 
-The move has several steps because it crosses several durable systems. This is the shape of the path:
-
-```mermaid
-flowchart LR
-    A[Finished conversation<br/>at least seven days old] --> B[D1 records<br/>a planned move]
-    B --> C[Active ProjectData store<br/>copies a small chunk]
-    C --> D[Archive ProjectData store<br/>writes the chunk]
-    D --> E[Check every row<br/>and the full fingerprint]
-    E --> F[R2 saves<br/>a recovery record]
-    F --> G[Remove the copied payload<br/>from the old home]
-    G --> H[D1 publishes<br/>the new home]
-    H --> I[Future exact reads<br/>go to the archive]
-
-    E -. a check fails .-> J[Stop safely;<br/>keep the original and evidence]
-```
+The move has several steps because it crosses several durable systems. In order, SAM records the proposed move in D1, copies a small piece of the transcript to the archive, checks every copied row and the full fingerprint, saves recovery evidence in R2, removes the copied payload from the old home, and finally publishes the new home in D1.
 
 The important word is **publishes**. The archive is not treated as the official home just because copying started. SAM makes it official only after the copied data has been checked and a recovery record exists. If a move is unfinished, the read-routing code refuses to pick a plausible-looking copy. It reports that the move needs recovery instead.
 
