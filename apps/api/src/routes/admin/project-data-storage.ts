@@ -478,6 +478,7 @@ adminProjectDataStorageRoutes.post(
       if (
         error instanceof ProjectDataArchiveCoordinatorStateError &&
         (error.reason === 'abandon_requires_source_intact' ||
+          error.reason === 'abandon_requires_expired_lease' ||
           error.reason === 'migration_project_mismatch' ||
           error.reason === 'journal_missing')
       ) {

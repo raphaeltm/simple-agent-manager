@@ -2325,6 +2325,22 @@ export async function abandonProjectDataArchiveMigration(
       `ProjectData archive migration ${migration.migration_id} already deleted its source; use copy-back`
     );
   }
+  // A live lease means a sweep or canary may be mid-step on this migration; pulling the DO
+  // state out from under it would surface as spurious intent/target mismatches. Operators
+  // wait for the lease (PROJECT_DATA_ARCHIVE_LEASE_MS) or freeze the project first.
+  if (
+    ACTIVE_RECLAIMABLE_STATES.includes(
+      migration.state as (typeof ACTIVE_RECLAIMABLE_STATES)[number]
+    ) &&
+    migration.state !== 'failed' &&
+    migration.lease_expires_at !== null &&
+    migration.lease_expires_at > now
+  ) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'abandon_requires_expired_lease',
+      `ProjectData archive migration ${migration.migration_id} is leased until ${migration.lease_expires_at}; wait for the lease or freeze the project first`
+    );
+  }
   const source = await ensureOwnerStub(env, migration.source_owner_name, migration.project_id);
   const target = await ensureOwnerStub(env, migration.target_owner_name, migration.project_id);
 

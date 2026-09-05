@@ -1850,6 +1850,39 @@ describe('archive-sharding abandon control', () => {
     }
   });
 
+  it('waits for a live lease on an in-flight migration, then abandons once it expires', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'copying', { leaseExpiresAt: NOW + 60_000 });
+      const source = createFakeSource({ state: 'intent_prepared' });
+      const target = createFakeTarget();
+      const env = controlEnv(sqlite, source, target);
+
+      await expect(
+        abandonProjectDataArchiveMigration(env, {
+          migrationId: MIGRATION_ID,
+          projectId: PROJECT_ID,
+          reason: 'too early',
+          now: NOW,
+        })
+      ).rejects.toMatchObject({ reason: 'abandon_requires_expired_lease' });
+      expect(source.archiveSourceAbandonIntent).not.toHaveBeenCalled();
+      expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
+
+      // Owner control: the identical call after the lease lapses goes through.
+      const result = await abandonProjectDataArchiveMigration(env, {
+        migrationId: MIGRATION_ID,
+        projectId: PROJECT_ID,
+        reason: 'lease lapsed',
+        now: NOW + 60_001,
+      });
+      expect(result).toMatchObject({ previousState: 'copying', restoredToRoot: true });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('rejects a migration that belongs to another project before touching any object', async () => {
     const sqlite = new Database(':memory:');
     try {
