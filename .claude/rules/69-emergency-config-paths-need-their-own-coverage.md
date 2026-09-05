@@ -101,6 +101,31 @@ Two properties made it invisible rather than merely untested:
 2. **The green signal was measuring trivial input.** "It worked 9 times in production" was true and
    worthless, because nothing in the sample was near the boundary.
 
+### Memory Is A Ceiling Too, And It Scales With The Row You Did Not Page
+
+The bind-parameter incident above had a sibling four days later in the same module. On
+2026-09-05 the archive-sharding canary reset the SAM root ProjectData object twice with
+`Durable Object's isolate exceeded its memory limit and was reset.` — once on a
+100,000-message session and once on a tool-heavy 9,906-message session, immediately after
+five 9,9xx-message sessions had published cleanly. `tableAggregateSha256` computed the
+terminal-version hash by `SELECT … WHERE session_id = ?` with no `LIMIT`, `toArray()`, and one
+canonical string; memory scaled with session **bytes**, which no fixture measured and which
+`message_count` does not predict.
+
+Same two properties as the bind ceiling: the limit belongs to the platform (the isolate's
+memory ceiling, not SQLite), and the green signal was measuring trivial input (12-row
+fixtures, two-message canaries). One extra property: **there is no harness that enforces it**.
+The Workers pool does not reset an object on memory either. So the discriminating test cannot
+observe the failure at all; it must observe the _shape_ that prevents it — record how many rows
+each statement materialises and assert the maximum never exceeds the page size, then prove the
+paged digest equals the one-shot digest so the change is safe. Verified: the one-shot
+implementation fails that assertion with `expected 1205 to be less than or equal to 500`.
+
+The rule for unbounded scans: any `SELECT … WHERE <scope> = ?` over a table that grows with
+user data must page (seek by the table's total order, `LIMIT ?`) unless the caller can name the
+bound on the result set. `chat_messages`, `chat_messages_grouped`, and
+`tool_payload_archives` per session are unbounded; `chat_sessions` by id is one row.
+
 ### Hard Requirements
 
 1. **Name the substitutions your harness makes**, and for each, ask which production limits it does
@@ -167,5 +192,9 @@ Two properties made it invisible rather than merely untested:
 - Harness-ceiling incident: `tasks/active/2026-09-04-archive-sharding-bind-variable-limit.md`;
   implementation `apps/api/src/durable-objects/project-data/archive-sharding.ts`
   (`readCommittedRowsForChunk`); shared constant `apps/api/src/lib/d1-limits.ts`
+- Memory-ceiling incident: `tasks/active/2026-09-05-archive-sharding-streaming-hash-abandon-and-size-budget.md`;
+  implementation `tableAggregateSha256` / `forEachGroupedRowPaged` in the same module, hasher
+  `apps/api/src/project-data-archive/hashing.ts` (`createCanonicalRowsHasher`); page-shape test
+  `apps/api/tests/unit/durable-objects/project-data-archive-sharding.test.ts`
 - `.claude/rules/28-credential-resolution-fallback-tests.md` — a mock that ignores the predicate
   proves nothing; the harness-ceiling case is its runtime-level twin

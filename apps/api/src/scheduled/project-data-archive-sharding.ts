@@ -2343,6 +2343,9 @@ export async function abandonProjectDataArchiveMigration(
   const targetResult = await target.archiveTargetAbandonSession({
     ...targetInspectInput(migration),
     migrationId: migration.migration_id,
+    // The source intent was inspected above and is not past deletion, so a sealed target
+    // is a duplicate of a transcript root still holds.
+    sourceIntactVerified: true,
     now,
   });
   const sourceResult = await source.archiveSourceAbandonIntent({
@@ -2614,12 +2617,12 @@ async function processArchiveMigrationBatch(input: {
         input.now,
         error
       ).catch((markError) => {
-          log.error(input.markFailedErrorEvent, {
-            migrationId: migration.migration_id,
-            ...serializeError(markError),
-          });
-          return 'unchanged' as const;
+        log.error(input.markFailedErrorEvent, {
+          migrationId: migration.migration_id,
+          ...serializeError(markError),
         });
+        return 'unchanged' as const;
+      });
       recordMigrationFailure(input.stats, failureState);
       log.warn(input.candidateFailedEvent, {
         migrationId: migration.migration_id,

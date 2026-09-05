@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
+  abandonArchiveSourceIntent,
+  abandonArchiveTargetSession,
   type ArchiveSourceExportChunkInput,
   archiveSourceReadMessages,
   archiveTargetSearchProjectMessages,
@@ -10,10 +12,12 @@ import {
   computeTerminalVersion,
   exportArchiveChunk,
   finalizeSourceDelete,
+  markArchiveTargetRehomeExported,
   markSourceRecoveryManifestPersisted,
   markSourceTargetSealed,
   prepareArchiveSourceIntent,
   prepareArchiveTarget,
+  ProjectDataArchiveInvariantError,
   sealArchiveTarget,
 } from '../../../src/durable-objects/project-data/archive-sharding';
 import {
@@ -707,6 +711,414 @@ describe('ProjectData terminal archive sharding bridge', () => {
       ).rejects.toMatchObject({ reason: 'archive_row_exceeds_chunk_budget' });
     } finally {
       source.db.close();
+    }
+  });
+});
+
+/**
+ * Wrap a SqlStorage so every SELECT records how many rows it materialised.
+ *
+ * The Durable Object memory ceiling that reset production is a platform limit better-sqlite3
+ * does not enforce (rule 69), so the discriminating assertion here is the statement shape:
+ * no single SELECT may return more rows than the hash page size. The one-shot definition
+ * returned the whole session in one statement and fails this at any fixture above the page.
+ */
+function recordSelectRows(base: SqlStorage): {
+  sql: SqlStorage;
+  maxRowsPerSelect: number;
+  selects: number;
+} {
+  const recorder = { maxRowsPerSelect: 0, selects: 0 } as {
+    sql: SqlStorage;
+    maxRowsPerSelect: number;
+    selects: number;
+  };
+  recorder.sql = {
+    exec(query: string, ...params: unknown[]) {
+      const cursor = base.exec(query, ...params);
+      if (!/^\s*SELECT/i.test(query)) return cursor;
+      const rows = cursor.toArray();
+      recorder.selects++;
+      recorder.maxRowsPerSelect = Math.max(recorder.maxRowsPerSelect, rows.length);
+      return { toArray: () => rows, rowsWritten: 0 } as unknown as ReturnType<SqlStorage['exec']>;
+    },
+    get databaseSize() {
+      return base.databaseSize;
+    },
+  } as unknown as SqlStorage;
+  return recorder;
+}
+
+function seedWideGroupedRows(sql: SqlStorage, sessionId: string, count: number): void {
+  for (let index = 0; index < count; index++) {
+    sql.exec(
+      `INSERT INTO chat_messages_grouped (id, session_id, role, content, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      `${sessionId}-group-${String(index).padStart(4, '0')}`,
+      sessionId,
+      index % 2 === 0 ? 'user' : 'assistant',
+      `grouped payload ${index}`,
+      1100 + index
+    );
+  }
+}
+
+const WIDE_SESSION_ROWS = 1205; // two full 500-row pages plus a remainder per table
+
+describe('ProjectData archive terminal-version hashing streams bounded pages', () => {
+  it('never materialises more than one page per statement and is invariant to the page size', async () => {
+    const { db, sql } = makeSql();
+    try {
+      seedWideTerminalSession(sql, 'session-paged', WIDE_SESSION_ROWS);
+      seedWideGroupedRows(sql, 'session-paged', WIDE_SESSION_ROWS);
+      seedWideToolPayloadArchives(sql, 'session-paged', WIDE_SESSION_ROWS);
+
+      const recorder = recordSelectRows(sql);
+      const paged = await computeTerminalVersion(recorder.sql, 'session-paged', {
+        hashPageRows: 500,
+      });
+      expect(recorder.maxRowsPerSelect).toBeLessThanOrEqual(500);
+      // Three archive tables, each needing ceil(1205 / 500) = 3 pages.
+      expect(recorder.selects).toBeGreaterThanOrEqual(9);
+      expect(paged.messageCount).toBe(WIDE_SESSION_ROWS);
+
+      const onePage = await computeTerminalVersion(sql, 'session-paged', { hashPageRows: 10_000 });
+      const rowByRow = await computeTerminalVersion(sql, 'session-paged', { hashPageRows: 1 });
+      const exactPages = await computeTerminalVersion(sql, 'session-paged', {
+        hashPageRows: WIDE_SESSION_ROWS,
+      });
+      expect(onePage.sha256).toBe(paged.sha256);
+      expect(rowByRow.sha256).toBe(paged.sha256);
+      expect(exactPages.sha256).toBe(paged.sha256);
+      expect(paged.sha256).toMatch(/^[a-f0-9]{64}$/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('keeps every source-side scan bounded through seal and finalize on a multi-page session', async () => {
+    const source = makeSql();
+    const target = makeSql();
+    try {
+      seedWideTerminalSession(source.sql, 'session-paged', WIDE_SESSION_ROWS);
+      seedWideGroupedRows(source.sql, 'session-paged', WIDE_SESSION_ROWS);
+      const base = {
+        projectId: 'project-archive',
+        sessionId: 'session-paged',
+        migrationId: 'migration-paged',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s1',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-paged',
+      };
+      const sourceRecorder = recordSelectRows(source.sql);
+      const prepared = await prepareArchiveSourceIntent(sourceRecorder.sql, {
+        ...base,
+        now: NOW,
+        minTerminalAgeMs: 0,
+        hashPageRows: 500,
+      });
+      prepareArchiveTarget(target.sql, {
+        ...base,
+        terminalVersionSha256: prepared.terminalVersionSha256,
+        sessionRow: prepared.sessionRow,
+        expectedMessageCount: prepared.messageCount,
+        now: NOW,
+      });
+      const hashes: string[] = [];
+      for (const tableName of PROJECT_DATA_ARCHIVE_TABLES) {
+        let cursor: string | null = null;
+        let ordinal = 0;
+        do {
+          const chunk = await exportArchiveChunk(source.sql, {
+            ...base,
+            tableName,
+            ordinal,
+            cursor,
+            maxRows: 500,
+            maxBytes: 8 * 1024 * 1024,
+          });
+          await commitArchiveTargetChunk(target.sql, { ...chunk, now: NOW });
+          hashes.push(chunk.sha256);
+          cursor = chunk.hasMore ? chunk.cursor : null;
+          ordinal++;
+        } while (cursor);
+      }
+      const targetRecorder = recordSelectRows(target.sql);
+      const sealed = await sealArchiveTarget(targetRecorder.sql, {
+        ...base,
+        terminalVersionSha256: prepared.terminalVersionSha256,
+        expectedChunkHashes: hashes,
+        now: NOW,
+        hashPageRows: 500,
+      });
+      expect(targetRecorder.maxRowsPerSelect).toBeLessThanOrEqual(500);
+      expect(sealed.messageCount).toBe(WIDE_SESSION_ROWS);
+      expect(sealed.groupedCount).toBe(WIDE_SESSION_ROWS);
+
+      markSourceTargetSealed(source.sql, {
+        sessionId: base.sessionId,
+        migrationId: base.migrationId,
+        sourceIntentToken: base.sourceIntentToken,
+        targetAggregateSha256: sealed.aggregateSha256,
+        now: NOW,
+      });
+      markSourceRecoveryManifestPersisted(source.sql, {
+        sessionId: base.sessionId,
+        migrationId: base.migrationId,
+        sourceIntentToken: base.sourceIntentToken,
+        targetAggregateSha256: sealed.aggregateSha256,
+        r2ManifestKey: 'project-data/session-archives/paged/manifest.json',
+        now: NOW,
+      });
+      const finalizeRecorder = recordSelectRows(source.sql);
+      const finalized = await finalizeSourceDelete(finalizeRecorder.sql, {
+        ...base,
+        expectedTerminalVersionSha256: prepared.terminalVersionSha256,
+        targetAggregateSha256: sealed.aggregateSha256,
+        r2ManifestKey: 'project-data/session-archives/paged/manifest.json',
+        now: NOW,
+        minTerminalAgeMs: 0,
+        hashPageRows: 500,
+      });
+      expect(finalizeRecorder.maxRowsPerSelect).toBeLessThanOrEqual(500);
+      expect(finalized).toMatchObject({
+        messagesDeleted: WIDE_SESSION_ROWS,
+        groupedRowsDeleted: WIDE_SESSION_ROWS,
+      });
+      expect(
+        source.db
+          .prepare('SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?')
+          .get('session-paged')
+      ).toEqual({ count: 0 });
+    } finally {
+      source.db.close();
+      target.db.close();
+    }
+  });
+});
+
+describe('ProjectData archive abandon primitives', () => {
+  const base = {
+    projectId: 'project-archive',
+    sessionId: 'session-archive',
+    migrationId: 'migration-1',
+    sourceOwnerName: 'project-archive',
+    targetOwnerName: 'project-archive:archive:g1:s1',
+    targetGeneration: 1,
+    sourceIntentToken: 'intent-1',
+  };
+
+  function countRows(db: Database.Database, table: string, sessionId = 'session-archive') {
+    const column = table === 'chat_sessions' ? 'id' : 'session_id';
+    return (
+      db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`).get(sessionId) as {
+        count: number;
+      }
+    ).count;
+  }
+
+  it('drops a partial shard copy and the root intent while leaving root transcript rows untouched', async () => {
+    const source = makeSql();
+    const target = makeSql();
+    try {
+      seedTerminalSession(source.sql);
+      const prepared = await prepareArchiveSourceIntent(source.sql, {
+        ...base,
+        now: NOW,
+        minTerminalAgeMs: 0,
+      });
+      prepareArchiveTarget(target.sql, {
+        ...base,
+        terminalVersionSha256: prepared.terminalVersionSha256,
+        sessionRow: prepared.sessionRow,
+        expectedMessageCount: prepared.messageCount,
+        now: NOW,
+      });
+      // Copy only the first message chunk: the shape of a migration interrupted mid-copy.
+      const chunk = await exportArchiveChunk(source.sql, {
+        ...base,
+        tableName: 'chat_messages',
+        ordinal: 0,
+        cursor: null,
+        maxRows: 1,
+        maxBytes: 1024 * 1024,
+      });
+      await commitArchiveTargetChunk(target.sql, { ...chunk, now: NOW });
+      expect(countRows(target.db, 'chat_messages')).toBe(1);
+      expect(countRows(target.db, 'project_data_archive_target_chunks')).toBe(1);
+
+      const targetResult = abandonArchiveTargetSession(target.sql, { ...base, now: NOW });
+      expect(targetResult).toMatchObject({
+        removed: true,
+        state: 'copying',
+        messagesDeleted: 1,
+        chunksDeleted: 1,
+      });
+      for (const table of [
+        'chat_messages',
+        'chat_messages_grouped',
+        'tool_payload_archives',
+        'project_data_archive_target_chunks',
+        'project_data_archive_target_sessions',
+        'chat_sessions',
+      ]) {
+        expect(countRows(target.db, table)).toBe(0);
+      }
+      expect(
+        archiveTargetSearchProjectMessages(
+          target.sql,
+          {
+            kind: 'archive_shard',
+            projectId: 'project-archive',
+            ownerName: 'project-archive:archive:g1:s1',
+            generation: 1,
+          },
+          'hello',
+          null,
+          10
+        )
+      ).toEqual([]);
+      // Idempotent: a rerun after the shard is clean reports nothing removed.
+      expect(abandonArchiveTargetSession(target.sql, { ...base, now: NOW })).toMatchObject({
+        removed: false,
+        state: null,
+      });
+
+      const sourceResult = abandonArchiveSourceIntent(source.sql, { ...base, now: NOW });
+      expect(sourceResult).toMatchObject({ removed: true, state: 'intent_prepared' });
+      expect(countRows(source.db, 'project_data_archive_source_intents')).toBe(0);
+      expect(countRows(source.db, 'chat_messages')).toBe(2);
+      expect(countRows(source.db, 'chat_messages_grouped')).toBe(1);
+      expect(countRows(source.db, 'tool_payload_archives')).toBe(1);
+      expect(abandonArchiveSourceIntent(source.sql, { ...base, now: NOW })).toMatchObject({
+        removed: false,
+        state: null,
+      });
+
+      // The session is migratable again under a fresh migration and hashes identically.
+      const again = await prepareArchiveSourceIntent(source.sql, {
+        ...base,
+        migrationId: 'migration-2',
+        sourceIntentToken: 'intent-2',
+        now: NOW,
+        minTerminalAgeMs: 0,
+      });
+      expect(again.terminalVersionSha256).toBe(prepared.terminalVersionSha256);
+    } finally {
+      source.db.close();
+      target.db.close();
+    }
+  });
+
+  it('refuses to abandon a sealed target without source proof and refuses once the source is deleted', async () => {
+    const source = makeSql();
+    const target = makeSql();
+    try {
+      seedTerminalSession(source.sql);
+      const prepared = await prepareArchiveSourceIntent(source.sql, {
+        ...base,
+        now: NOW,
+        minTerminalAgeMs: 0,
+      });
+      prepareArchiveTarget(target.sql, {
+        ...base,
+        terminalVersionSha256: prepared.terminalVersionSha256,
+        sessionRow: prepared.sessionRow,
+        expectedMessageCount: prepared.messageCount,
+        now: NOW,
+      });
+      const chunkHashes = await copyAllChunks(source.sql, target.sql, base);
+      const sealed = await sealArchiveTarget(target.sql, {
+        ...base,
+        terminalVersionSha256: prepared.terminalVersionSha256,
+        expectedChunkHashes: chunkHashes,
+        now: NOW,
+      });
+
+      // Sealed target, source still intact: refused without proof, allowed with it.
+      expect(() => abandonArchiveTargetSession(target.sql, { ...base, now: NOW })).toThrow(
+        ProjectDataArchiveInvariantError
+      );
+      try {
+        abandonArchiveTargetSession(target.sql, { ...base, now: NOW });
+      } catch (error) {
+        expect((error as ProjectDataArchiveInvariantError).reason).toBe(
+          'target_sealed_requires_source_proof'
+        );
+      }
+      expect(countRows(target.db, 'chat_messages')).toBe(2);
+
+      // Owner control: the same call with source proof is allowed while the source is intact.
+      const sourceIntentBefore = abandonArchiveSourceIntent(source.sql, { ...base, now: NOW });
+      expect(sourceIntentBefore).toMatchObject({ removed: true, state: 'intent_prepared' });
+      expect(
+        abandonArchiveTargetSession(target.sql, { ...base, sourceIntactVerified: true, now: NOW })
+      ).toMatchObject({ removed: true, state: 'sealed', messagesDeleted: 2 });
+
+      // Now drive a second migration all the way through source deletion.
+      const second = { ...base, migrationId: 'migration-2', sourceIntentToken: 'intent-2' };
+      const preparedAgain = await prepareArchiveSourceIntent(source.sql, {
+        ...second,
+        now: NOW,
+        minTerminalAgeMs: 0,
+      });
+      prepareArchiveTarget(target.sql, {
+        ...second,
+        terminalVersionSha256: preparedAgain.terminalVersionSha256,
+        sessionRow: preparedAgain.sessionRow,
+        expectedMessageCount: preparedAgain.messageCount,
+        now: NOW,
+      });
+      const secondHashes = await copyAllChunks(source.sql, target.sql, second);
+      const sealedAgain = await sealArchiveTarget(target.sql, {
+        ...second,
+        terminalVersionSha256: preparedAgain.terminalVersionSha256,
+        expectedChunkHashes: secondHashes,
+        now: NOW,
+      });
+      expect(sealedAgain.aggregateSha256).toBe(sealed.aggregateSha256);
+      markSourceTargetSealed(source.sql, {
+        sessionId: second.sessionId,
+        migrationId: second.migrationId,
+        sourceIntentToken: second.sourceIntentToken,
+        targetAggregateSha256: sealedAgain.aggregateSha256,
+        now: NOW,
+      });
+      markSourceRecoveryManifestPersisted(source.sql, {
+        sessionId: second.sessionId,
+        migrationId: second.migrationId,
+        sourceIntentToken: second.sourceIntentToken,
+        targetAggregateSha256: sealedAgain.aggregateSha256,
+        r2ManifestKey: 'project-data/session-archives/abandon/manifest.json',
+        now: NOW,
+      });
+      await finalizeSourceDelete(source.sql, {
+        ...second,
+        expectedTerminalVersionSha256: preparedAgain.terminalVersionSha256,
+        targetAggregateSha256: sealedAgain.aggregateSha256,
+        r2ManifestKey: 'project-data/session-archives/abandon/manifest.json',
+        now: NOW,
+        minTerminalAgeMs: 0,
+      });
+
+      expect(() => abandonArchiveSourceIntent(source.sql, { ...second, now: NOW })).toThrow(
+        /already been deleted|use copy-back/
+      );
+      expect(countRows(source.db, 'project_data_archive_source_intents')).toBe(1);
+
+      markArchiveTargetRehomeExported(target.sql, { ...second, now: NOW });
+      expect(() =>
+        abandonArchiveTargetSession(target.sql, {
+          ...second,
+          sourceIntactVerified: true,
+          now: NOW,
+        })
+      ).toThrow(/abandon refused/);
+      expect(countRows(target.db, 'chat_messages')).toBe(2);
+    } finally {
+      source.db.close();
+      target.db.close();
     }
   });
 });

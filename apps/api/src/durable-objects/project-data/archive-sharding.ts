@@ -1884,6 +1884,13 @@ export type ArchiveTargetAbandonInput = {
   targetOwnerName: string;
   targetGeneration: number;
   now: number;
+  /**
+   * A `sealed` target may be the only surviving copy: the source is deleted AFTER seal and
+   * the target never transitions past `sealed` inside this object. The shard cannot see
+   * the root object, so the coordinator must inspect the source intent first and assert
+   * it is still intact before a sealed target may be dropped.
+   */
+  sourceIntactVerified?: boolean;
   hashPageRows?: number;
 };
 
@@ -1931,6 +1938,12 @@ export function abandonArchiveTargetSession(
     throw new ProjectDataArchiveInvariantError(
       'target_not_abandonable',
       'ProjectData archive target holds the only copy of a published session; abandon refused'
+    );
+  }
+  if (state === 'sealed' && input.sourceIntactVerified !== true) {
+    throw new ProjectDataArchiveInvariantError(
+      'target_sealed_requires_source_proof',
+      'ProjectData archive sealed target may be the only copy; verify the source intent is intact before abandoning'
     );
   }
   const pageRows = resolveHashPageRows(input.hashPageRows);
