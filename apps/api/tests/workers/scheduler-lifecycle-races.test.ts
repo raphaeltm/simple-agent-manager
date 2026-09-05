@@ -59,6 +59,16 @@ function placement(
     workspaceProfile: 'full',
     devcontainerConfigName: null,
     agentProfileHint: null,
+    resolvedReservation: {
+      cpuMillis: 2_000,
+      memoryMb: 4_096,
+      diskMb: 40_960,
+      exclusiveNode: false,
+      maxCoTenants: 4,
+      source: 'platform',
+      sourceId: 'platform',
+      version: 1,
+    },
     createdAt,
   };
 }
@@ -115,6 +125,16 @@ function taskRunnerInput(taskId: string): StartTaskInput {
       agentProfileHint: null,
       attachments: null,
       projectScaling: { maxWorkspacesPerNode: 1 },
+      resolvedReservation: {
+        cpuMillis: 2_000,
+        memoryMb: 4_096,
+        diskMb: 40_960,
+        exclusiveNode: false,
+        maxCoTenants: 4,
+        source: 'platform',
+        sourceId: 'platform',
+        version: 1,
+      },
     },
   };
 }

@@ -23,6 +23,11 @@ import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
+import {
+  emptyWorkspaceReservationUsage,
+  hasWorkspaceReservationCapacity,
+  loadActiveWorkspaceReservationUsage,
+} from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
 import { parseEnvInt } from './helpers';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -208,13 +213,17 @@ export async function tryClaimWarmNode(
       ? resolveReusableNodeSelection(state, persistedClaim)
       : null;
     if (selection && (await claimWarmNodeCandidate(state, rc, selection))) {
-      return selection;
+      if (await hasReusableNodeReservationCapacity(state, rc, persistedClaim)) {
+        return selection;
+      }
     }
     // The persisted warm claim can no longer be used: either the referenced
     // node is no longer a reusable selection, or claiming it failed. Release
     // the NodeLifecycle claim first (NodeLifecycle.alarm() does not expire
     // active claims), then clear the D1 pointer so the node becomes reusable.
-    await releaseClaimedWarmNode(state, rc, persistedClaim.claimedWarmNodeId).catch(() => undefined);
+    await releaseClaimedWarmNode(state, rc, persistedClaim.claimedWarmNodeId).catch(
+      () => undefined
+    );
     await rc.env.DATABASE.prepare(
       `UPDATE tasks SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
         WHERE id = ? AND claimed_warm_node_id = ?`
@@ -330,18 +339,9 @@ export async function tryClaimWarmNode(
       if (!selection) continue;
 
       if (await claimWarmNodeCandidate(state, rc, selection)) {
-        // Defense-in-depth: verify workspace count even for warm nodes
-        const wsCount = await rc.env.DATABASE.prepare(
-          `SELECT COUNT(*) as c FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
-        )
-          .bind(warmNode.id)
-          .first<{ c: number }>();
-        const warmMaxWs =
-          state.config.projectScaling?.maxWorkspacesPerNode ??
-          parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
-        if ((wsCount?.c ?? 0) >= warmMaxWs) {
+        if (!(await hasReusableNodeReservationCapacity(state, rc, fresh))) {
           await releaseClaimedWarmNode(state, rc, warmNode.id);
-          continue; // At capacity despite being warm — skip
+          continue;
         }
         log.info('task_runner_do.warm_node_claimed', {
           taskId: state.taskId,
@@ -385,6 +385,8 @@ export async function findNodeWithCapacity(
   const maxWorkspaces =
     scaling?.maxWorkspacesPerNode ??
     parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
+  const reservation = state.config.resolvedReservation;
+  if (!reservation) return null;
 
   const nodes = await rc.env.DATABASE.prepare(
     `SELECT
@@ -450,18 +452,9 @@ export async function findNodeWithCapacity(
 
   if (!nodes.results.length) return null;
 
-  // Batch workspace count query to avoid N+1 D1 round-trips
+  // Batch active reservations to avoid N+1 D1 round-trips.
   const nodeIds = nodes.results.map((n) => n.id);
-  const placeholders = nodeIds.map(() => '?').join(',');
-  const wsCounts = await rc.env.DATABASE.prepare(
-    `SELECT node_id, COUNT(*) as c FROM workspaces
-     WHERE node_id IN (${placeholders})
-     AND status IN ('running', 'creating', 'recovery')
-     GROUP BY node_id`
-  )
-    .bind(...nodeIds)
-    .all<{ node_id: string; c: number }>();
-  const countByNode = new Map((wsCounts.results ?? []).map((r) => [r.node_id, r.c]));
+  const usageByNode = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, nodeIds);
 
   type ScoredNode = {
     id: string;
@@ -481,8 +474,16 @@ export async function findNodeWithCapacity(
     const selection = resolveReusableNodeSelection(state, node);
     if (!selection) continue;
 
-    // Hard workspace count limit — reject node regardless of CPU/memory metrics
-    if ((countByNode.get(node.id) ?? 0) >= maxWorkspaces) continue;
+    if (
+      !hasWorkspaceReservationCapacity(
+        node,
+        usageByNode.get(node.id) ?? emptyWorkspaceReservationUsage(),
+        reservation,
+        maxWorkspaces
+      )
+    ) {
+      continue;
+    }
     let metrics: {
       cpuLoadAvg1?: number;
       memoryPercent?: number;
@@ -541,6 +542,25 @@ export async function findNodeWithCapacity(
     return null;
   }
   return { nodeId: best.id, capacityPlacementSnapshot: best.capacityPlacementSnapshot };
+}
+
+export async function hasReusableNodeReservationCapacity(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  node: NodePlacementFields
+): Promise<boolean> {
+  const reservation = state.config.resolvedReservation;
+  if (!reservation) return false;
+  const usageByNode = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, [node.id]);
+  const maxWorkspaces =
+    state.config.projectScaling?.maxWorkspacesPerNode ??
+    parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
+  return hasWorkspaceReservationCapacity(
+    node,
+    usageByNode.get(node.id) ?? emptyWorkspaceReservationUsage(),
+    reservation,
+    maxWorkspaces
+  );
 }
 
 function resolveReusableNodeSelection(
