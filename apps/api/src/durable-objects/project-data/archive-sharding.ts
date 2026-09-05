@@ -1,4 +1,5 @@
 // FILE SIZE EXCEPTION: ProjectData terminal archive migration state machine — keeping source intent, target copy/seal, canonical hash, exact-read guards, and final source-delete invariants in one module avoids cross-file transaction coupling during Fable review. See .claude/rules/18-file-size-limits.md
+import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import {
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
@@ -1131,19 +1132,52 @@ function readCommittedRowsForChunk(
 ): ProjectDataArchiveRow[] {
   if (rowIds.length === 0) return [];
   const spec = validateTableName(tableName);
-  const placeholders = rowIds.map(() => '?').join(', ');
-  const query = `SELECT ${spec.columns.join(', ')} FROM ${tableName}
+  // Cloudflare's SQL surfaces (D1 and Durable Object SqlStorage) reject the 101st bound
+  // parameter, and this verification read binds one placeholder per chunk row. `rowIds` holds up
+  // to PROJECT_DATA_ARCHIVE_CHUNK_ROWS entries (500 in production), so the read is sub-batched.
+  // Sub-batching is safe for the hash because `rowIds` is built by exportArchiveRowsChunk as
+  // rows.map(keyColumn) over `ORDER BY ${spec.orderBy}`, and every spec.orderBy ends in the
+  // unique key column, making it a total order. Every id in one batch therefore sorts before
+  // every id in the next, so concatenating batches in `rowIds` order reproduces the
+  // single-statement result exactly. That ordering is load-bearing: callers re-hash these rows
+  // with canonicalRowsSha256 against the source chunk hash. The order assertion below fails
+  // closed if that precondition ever breaks, rather than surfacing as an opaque hash mismatch.
+  //
+  // Distinctness is asserted rather than assumed. `IN (...)` collapses repeats, so the single
+  // statement read a duplicated id once and the length check below rejected the chunk. Split
+  // across batches, an id repeated either side of a boundary is read once per batch, restoring
+  // the count and hiding it. Every key column is a TEXT PRIMARY KEY so the exporter cannot emit
+  // one -- which is exactly why sub-batching must not be allowed to quietly relax the check.
+  if (new Set(rowIds).size !== rowIds.length) {
+    throw new ProjectDataArchiveInvariantError(
+      'target_chunk_duplicate_row_ids',
+      'ProjectData archive target chunk row ids contain duplicates'
+    );
+  }
+  const rows: ProjectDataArchiveRow[] = [];
+  for (let offset = 0; offset < rowIds.length; offset += D1_MAX_BOUND_PARAMETERS) {
+    const batch = rowIds.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
+    const placeholders = batch.map(() => '?').join(', ');
+    const query = `SELECT ${spec.columns.join(', ')} FROM ${tableName}
        WHERE ${spec.keyColumn} IN (${placeholders})
        ORDER BY ${spec.orderBy}`;
-  const rows = sql
-    .exec(query, ...rowIds)
-    .toArray()
-    .map((row) => toArchiveRow(row, spec.columns));
+    for (const row of sql.exec(query, ...batch).toArray()) {
+      rows.push(toArchiveRow(row, spec.columns));
+    }
+  }
   if (rows.length !== rowIds.length) {
     throw new ProjectDataArchiveInvariantError(
       'target_chunk_missing_rows',
       'ProjectData archive target chunk is missing committed rows'
     );
+  }
+  for (let index = 0; index < rowIds.length; index++) {
+    if (rows[index]?.[spec.keyColumn] !== rowIds[index]) {
+      throw new ProjectDataArchiveInvariantError(
+        'target_chunk_row_order_mismatch',
+        'ProjectData archive target chunk rows are not in source chunk order'
+      );
+    }
   }
   return rows;
 }
