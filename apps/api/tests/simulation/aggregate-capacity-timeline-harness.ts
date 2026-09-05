@@ -189,7 +189,7 @@ export class AggregateCapacityTimeline {
     } = {}
   ): void {
     const task = this.tasks.get(id);
-    if (!task || task.status !== 'retry-wait') return;
+    if (task?.status !== 'retry-wait') return;
     this.submit(id, task.reservation, options);
   }
 
@@ -258,59 +258,7 @@ export class AggregateCapacityTimeline {
   assertSafety(): void {
     const liveTaskOwners = new Set<string>();
     for (const node of this.nodes.values()) {
-      const active = this.activeWorkspaces(node.id);
-      if (active.length === 0) continue;
-      const usage = aggregateWorkspaceReservationRows(
-        active.map((workspace) => ({
-          resolvedReservationJson: workspace.resolvedReservationJson,
-        }))
-      );
-      if (usage.activeCount > this.maxWorkspaces) {
-        this.failInvariant(`workspace count exceeded on ${node.id}`);
-      }
-      if (usage.activeCount > 1 && usage.hasInvalidReservation) {
-        this.failInvariant(`unknown reservation was co-tenanted on ${node.id}`);
-      }
-      if (usage.activeCount > 1 && usage.hasExclusiveReservation) {
-        this.failInvariant(`exclusive reservation was co-tenanted on ${node.id}`);
-      }
-      if (usage.minimumMaxCoTenants !== null && usage.activeCount > usage.minimumMaxCoTenants) {
-        this.failInvariant(`co-tenant cap exceeded on ${node.id}`);
-      }
-      this.assertResourceDimension(
-        node.id,
-        'cpu',
-        usage.cpuMillis,
-        node.providerInstanceVcpuCount,
-        1_000
-      );
-      this.assertResourceDimension(
-        node.id,
-        'memory',
-        usage.memoryMb,
-        node.providerInstanceMemoryMb,
-        1
-      );
-      this.assertResourceDimension(
-        node.id,
-        'disk',
-        usage.diskMb,
-        node.providerInstanceDiskGb,
-        1_024
-      );
-
-      for (const workspace of active) {
-        if (liveTaskOwners.has(workspace.taskId)) {
-          this.failInvariant(`task ${workspace.taskId} owns multiple active workspaces`);
-        }
-        liveTaskOwners.add(workspace.taskId);
-        if (
-          workspace.nodeHeartbeatAtCommit === null ||
-          workspace.committedAt - workspace.nodeHeartbeatAtCommit > this.heartbeatStaleMs
-        ) {
-          this.failInvariant(`task ${workspace.taskId} committed against a stale heartbeat`);
-        }
-      }
+      this.assertNodeSafety(node, liveTaskOwners);
     }
   }
 
@@ -359,7 +307,7 @@ export class AggregateCapacityTimeline {
       return;
     }
     const node = task.nodeId ? this.nodes.get(task.nodeId) : null;
-    if (!node || node.status !== 'running') {
+    if (node?.status !== 'running') {
       task.status = 'retry-wait';
       return;
     }
@@ -458,6 +406,59 @@ export class AggregateCapacityTimeline {
       this.failInvariant(
         `${label} capacity exceeded on ${nodeId}: ${used}/${available * multiplier}`
       );
+    }
+  }
+
+  private assertNodeSafety(node: TimelineNode, liveTaskOwners: Set<string>): void {
+    const active = this.activeWorkspaces(node.id);
+    if (active.length === 0) return;
+    const usage = aggregateWorkspaceReservationRows(
+      active.map((workspace) => ({
+        resolvedReservationJson: workspace.resolvedReservationJson,
+      }))
+    );
+    if (usage.activeCount > this.maxWorkspaces) {
+      this.failInvariant(`workspace count exceeded on ${node.id}`);
+    }
+    if (usage.activeCount > 1 && usage.hasInvalidReservation) {
+      this.failInvariant(`unknown reservation was co-tenanted on ${node.id}`);
+    }
+    if (usage.activeCount > 1 && usage.hasExclusiveReservation) {
+      this.failInvariant(`exclusive reservation was co-tenanted on ${node.id}`);
+    }
+    if (usage.minimumMaxCoTenants !== null && usage.activeCount > usage.minimumMaxCoTenants) {
+      this.failInvariant(`co-tenant cap exceeded on ${node.id}`);
+    }
+    this.assertResourceDimension(
+      node.id,
+      'cpu',
+      usage.cpuMillis,
+      node.providerInstanceVcpuCount,
+      1_000
+    );
+    this.assertResourceDimension(
+      node.id,
+      'memory',
+      usage.memoryMb,
+      node.providerInstanceMemoryMb,
+      1
+    );
+    this.assertResourceDimension(node.id, 'disk', usage.diskMb, node.providerInstanceDiskGb, 1_024);
+    for (const workspace of active) {
+      this.assertWorkspaceSafety(workspace, liveTaskOwners);
+    }
+  }
+
+  private assertWorkspaceSafety(workspace: TimelineWorkspace, liveTaskOwners: Set<string>): void {
+    if (liveTaskOwners.has(workspace.taskId)) {
+      this.failInvariant(`task ${workspace.taskId} owns multiple active workspaces`);
+    }
+    liveTaskOwners.add(workspace.taskId);
+    if (
+      workspace.nodeHeartbeatAtCommit === null ||
+      workspace.committedAt - workspace.nodeHeartbeatAtCommit > this.heartbeatStaleMs
+    ) {
+      this.failInvariant(`task ${workspace.taskId} committed against a stale heartbeat`);
     }
   }
 

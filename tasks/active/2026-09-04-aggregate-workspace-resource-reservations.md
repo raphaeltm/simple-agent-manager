@@ -137,6 +137,11 @@ is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exi
   previous invalid TaskRunner fixture now supplies the required resolved snapshot.
 - Format ratchet, file-size, source-contract, migration, Durable Object migration,
   Wrangler binding, AST, runtime-boundary, and type-boundary checks passed.
+- Recovery exact-head CI at `5193f6b78` passed Build, Lint, Type Check,
+  Workspace Quality, Code Quality, Test, and Durable Object Workers. The main
+  API suite collected 658 files / 8,887 tests (up from the 8,849-test failed
+  predecessor head), web collected 302 / 3,600, and workerd collected the same
+  65 files with 869 tests (up from 828); no suite or file collection disappeared.
 
 ## Acceptance criteria
 
