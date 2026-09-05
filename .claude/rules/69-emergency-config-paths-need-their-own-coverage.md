@@ -192,7 +192,7 @@ bound on the result set. `chat_messages`, `chat_messages_grouped`, and
 - Harness-ceiling incident: `tasks/active/2026-09-04-archive-sharding-bind-variable-limit.md`;
   implementation `apps/api/src/durable-objects/project-data/archive-sharding.ts`
   (`readCommittedRowsForChunk`); shared constant `apps/api/src/lib/d1-limits.ts`
-- Memory-ceiling incident: `tasks/active/2026-09-05-archive-sharding-streaming-hash-abandon-and-size-budget.md`;
+- Memory-ceiling incident: `tasks/archive/2026-09-05-archive-sharding-streaming-hash-abandon-and-size-budget.md`;
   implementation `tableAggregateSha256` / `forEachGroupedRowPaged` in the same module, hasher
   `apps/api/src/project-data-archive/hashing.ts` (`createCanonicalRowsHasher`); page-shape test
   `apps/api/tests/unit/durable-objects/project-data-archive-sharding.test.ts`
