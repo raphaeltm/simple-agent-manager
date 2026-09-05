@@ -4,8 +4,10 @@ import { createModuleLogger, serializeError } from '../../lib/logger';
 import {
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
+  PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS,
   PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS,
   PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES,
+  PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS,
   PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
   PROJECT_DATA_ARCHIVE_TABLES,
   PROJECT_DATA_ARCHIVE_TARGET_STATES,
@@ -22,6 +24,7 @@ import {
   canonicalizeArchiveRow,
   canonicalRowsSha256,
   compareArchiveStrings,
+  createCanonicalRowsHasher,
   sha256Hex,
 } from '../../project-data-archive/hashing';
 import * as messages from './messages';
@@ -172,6 +175,8 @@ export type ArchiveSourcePrepareInput = {
   sourceIntentToken: string;
   now: number;
   minTerminalAgeMs?: number;
+  /** Rows per statement while streaming the terminal-version hash; DO wrappers fill from env. */
+  hashPageRows?: number;
 };
 
 export type ArchiveSourcePrepareResult = {
@@ -269,6 +274,7 @@ export type ArchiveTargetSealInput = {
   terminalVersionSha256: string;
   expectedChunkHashes: string[];
   now: number;
+  hashPageRows?: number;
 };
 
 export type ArchiveTargetSealResult = {
@@ -291,6 +297,7 @@ export type ArchiveSourceFinalizeDeleteInput = {
   r2ManifestKey: string;
   now: number;
   minTerminalAgeMs?: number;
+  hashPageRows?: number;
 };
 
 export type ArchiveSourceFinalizeDeleteResult = {
@@ -473,6 +480,61 @@ function normalizePositiveInteger(
     return Math.min(value, max);
   }
   return fallback;
+}
+
+/**
+ * Rows per statement for streaming hash and grouped-row loops. Read from the Worker env by
+ * the ProjectData DO; pure helpers take it as an explicit argument so tests can pin it.
+ */
+export function resolveArchiveHashPageRows(
+  env: { PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS?: string } | undefined
+): number {
+  const parsed = Number.parseInt(env?.PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS ?? '', 10);
+  return normalizePositiveInteger(
+    Number.isSafeInteger(parsed) ? parsed : undefined,
+    PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS,
+    PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS
+  );
+}
+
+function resolveHashPageRows(value: number | undefined): number {
+  return normalizePositiveInteger(
+    value,
+    PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS,
+    PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS
+  );
+}
+
+/**
+ * Visit every grouped row of a session in bounded pages keyed by rowid, so a session
+ * with hundreds of thousands of rows never materialises in one statement. Rows may be
+ * deleted inside `visit`: the next page seeks past the last rowid seen, not by offset.
+ */
+function forEachGroupedRowPaged(
+  sql: SqlStorage,
+  sessionId: string,
+  pageRows: number,
+  visit: (row: Record<string, unknown>) => void
+): void {
+  let lastRowid = -1;
+  for (;;) {
+    const page = sql
+      .exec(
+        `SELECT rowid, content FROM chat_messages_grouped
+         WHERE session_id = ? AND rowid > ?
+         ORDER BY rowid ASC
+         LIMIT ?`,
+        sessionId,
+        lastRowid,
+        pageRows
+      )
+      .toArray();
+    for (const row of page) visit(row);
+    if (page.length < pageRows) break;
+    const tail = page[page.length - 1];
+    if (!tail) break;
+    lastRowid = strictInteger(tail.rowid, 'grouped.rowid');
+  }
 }
 
 function databaseSize(sql: SqlStorage): number {
@@ -705,24 +767,58 @@ function assertEligibleTerminalSource(
   }
 }
 
+/**
+ * Stream a table's canonical-row digest for one session.
+ *
+ * Reads at most `pageRows` rows per statement using the table spec's seek cursor, so
+ * memory is bounded by page size rather than session size. The digest is byte-identical
+ * to `canonicalRowsSha256` over the same rows (see `createCanonicalRowsHasher`), which is
+ * what keeps every previously recorded terminal-version proof valid.
+ *
+ * Production incident: the one-shot form loaded a 100,000-message session with
+ * `toArray()` and reset the ProjectData object on its memory ceiling; a tool-heavy
+ * 9,906-message session did the same. The object's memory limit is a platform ceiling the
+ * better-sqlite3 unit harness does not enforce (rule 69), so the regression test asserts
+ * the page shape, not the failure.
+ */
 async function tableAggregateSha256(
   sql: SqlStorage,
   tableName: ProjectDataArchiveTableName,
-  sessionId: string
+  sessionId: string,
+  pageRows: number
 ): Promise<string> {
   const spec = validateTableName(tableName);
-  const query = `SELECT ${spec.columns.join(', ')} FROM ${tableName} WHERE session_id = ? ORDER BY ${spec.orderBy}`;
-  const rows = sql
-    .exec(query, sessionId)
-    .toArray()
-    .map((row) => toArchiveRow(row, spec.columns));
-  return canonicalRowsSha256(spec.columns, rows);
+  const hasher = createCanonicalRowsHasher(spec.columns);
+  let cursor: string | null = null;
+  for (;;) {
+    let query = `SELECT ${spec.columns.join(', ')} FROM ${tableName} WHERE session_id = ?`;
+    const params: Array<string | number> = [sessionId];
+    if (cursor) {
+      query += ` AND ${spec.cursorPredicate}`;
+      params.push(...spec.cursorValues(cursor));
+    }
+    query += ` ORDER BY ${spec.orderBy} LIMIT ?`;
+    params.push(pageRows);
+    const page = sql.exec(query, ...params).toArray();
+    for (const raw of page) hasher.update(toArchiveRow(raw, spec.columns));
+    if (page.length < pageRows) break;
+    const tail = page[page.length - 1];
+    if (!tail) break;
+    cursor = spec.cursorFromRow(tail);
+  }
+  return hasher.digestHex();
 }
+
+export type ComputeTerminalVersionOptions = {
+  hashPageRows?: number;
+};
 
 export async function computeTerminalVersion(
   sql: SqlStorage,
-  sessionId: string
+  sessionId: string,
+  options: ComputeTerminalVersionOptions = {}
 ): Promise<TerminalVersion> {
+  const pageRows = resolveHashPageRows(options.hashPageRows);
   const sessionRow = readSessionAnchor(sql, sessionId);
   if (!sessionRow) {
     throw new ProjectDataArchiveInvariantError(
@@ -738,9 +834,9 @@ export async function computeTerminalVersion(
   const lastMessageAt = readLastMessageAt(sql, sessionId);
   const components = [
     `chat_session:${canonicalizeArchiveRow(CHAT_SESSION_ANCHOR_COLUMNS, sessionRow)}`,
-    `chat_messages:${await tableAggregateSha256(sql, 'chat_messages', sessionId)}`,
-    `chat_messages_grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', sessionId)}`,
-    `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', sessionId)}`,
+    `chat_messages:${await tableAggregateSha256(sql, 'chat_messages', sessionId, pageRows)}`,
+    `chat_messages_grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', sessionId, pageRows)}`,
+    `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', sessionId, pageRows)}`,
     `comments:${countRows(sql, 'SELECT COUNT(*) AS count FROM comment_threads WHERE session_id = ?', sessionId)}:${countRows(
       sql,
       'SELECT COUNT(*) AS count FROM comment_replies WHERE session_id = ?',
@@ -903,7 +999,9 @@ export async function prepareArchiveSourceIntent(
       input.now
     );
   }
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId);
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, {
+    hashPageRows: input.hashPageRows,
+  });
   if (existing) {
     const state = assertSameSourceIntentMigration(existing, input);
     if (state === 'source_deleted') {
@@ -1321,7 +1419,8 @@ export async function sealArchiveTarget(
       'ProjectData archive target is not sealable'
     );
   }
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId);
+  const hashPageRows = resolveHashPageRows(input.hashPageRows);
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows });
   if (terminalVersion.sha256 !== input.terminalVersionSha256) {
     throw new ProjectDataArchiveInvariantError(
       'target_terminal_version_mismatch',
@@ -1349,14 +1448,14 @@ export async function sealArchiveTarget(
       'ProjectData archive target chunk inventory does not match the coordinator expectation'
     );
   }
-  rebuildTargetFts(sql, input.sessionId);
+  rebuildTargetFts(sql, input.sessionId, hashPageRows);
   const aggregateSha256 = await sha256Hex(
     [
       `terminal:${input.terminalVersionSha256}`,
       `chunks:${committedChunkHashes.join(',')}`,
-      `messages:${await tableAggregateSha256(sql, 'chat_messages', input.sessionId)}`,
-      `grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', input.sessionId)}`,
-      `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', input.sessionId)}`,
+      `messages:${await tableAggregateSha256(sql, 'chat_messages', input.sessionId, hashPageRows)}`,
+      `grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', input.sessionId, hashPageRows)}`,
+      `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', input.sessionId, hashPageRows)}`,
     ].join('\n')
   );
   const messageCount = countRows(
@@ -1560,14 +1659,8 @@ export async function exportArchiveTargetChunk(
   });
 }
 
-function rebuildTargetFts(sql: SqlStorage, sessionId: string): void {
-  const rows = sql
-    .exec(
-      'SELECT rowid, content FROM chat_messages_grouped WHERE session_id = ? ORDER BY created_at ASC, id ASC',
-      sessionId
-    )
-    .toArray();
-  for (const row of rows) {
+function rebuildTargetFts(sql: SqlStorage, sessionId: string, pageRows: number): void {
+  forEachGroupedRowPaged(sql, sessionId, pageRows, (row) => {
     try {
       sql.exec(
         'INSERT OR IGNORE INTO chat_messages_grouped_fts(rowid, content) VALUES (?, ?)',
@@ -1581,7 +1674,7 @@ function rebuildTargetFts(sql: SqlStorage, sessionId: string): void {
         ...serializeError(error),
       });
     }
-  }
+  });
 }
 
 export async function restoreSourceArchiveChunk(
@@ -1647,6 +1740,7 @@ export async function markSourceCopyBackRestored(
     sourceIntentToken: string;
     expectedTerminalVersionSha256: string;
     now: number;
+    hashPageRows?: number;
   }
 ): Promise<boolean> {
   validateRootSourceOwner(input);
@@ -1657,8 +1751,9 @@ export async function markSourceCopyBackRestored(
       'ProjectData archive source copy-back cannot be marked before source deletion proof'
     );
   }
-  rebuildTargetFts(sql, input.sessionId);
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId);
+  const hashPageRows = resolveHashPageRows(input.hashPageRows);
+  rebuildTargetFts(sql, input.sessionId, hashPageRows);
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows });
   if (terminalVersion.sha256 !== input.expectedTerminalVersionSha256) {
     throw new ProjectDataArchiveInvariantError(
       'copy_back_terminal_version_mismatch',
@@ -1726,6 +1821,173 @@ export function markArchiveTargetRehomeExported(
   return (result.rowsWritten ?? 0) > 0;
 }
 
+export type ArchiveSourceAbandonIntentInput = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string;
+  sourceOwnerName: string;
+  targetOwnerName: string;
+  targetGeneration: number;
+  now: number;
+};
+
+export type ArchiveSourceAbandonIntentResult = {
+  /** True when an intent row for this migration existed and was removed. */
+  removed: boolean;
+  /** The intent state observed before removal, or null when no intent existed. */
+  state: ProjectDataArchiveSourceIntentState | null;
+  databaseSizeBytes: number;
+};
+
+/**
+ * Abandon a migration on the root source BEFORE any source deletion proof exists.
+ *
+ * The only source-side record a pre-copy migration leaves behind is its
+ * `project_data_archive_source_intents` row (`finalizeSourceDelete` is the sole writer of
+ * `chat_sessions.archive_*`), so abandoning is deleting that row. Refuses once the source
+ * transcript has been deleted or re-homed: those migrations need copy-back, not abandon.
+ * Idempotent: a missing intent returns `removed: false` so the coordinator can finish the
+ * D1 side of an interrupted abandon.
+ */
+export function abandonArchiveSourceIntent(
+  sql: SqlStorage,
+  input: ArchiveSourceAbandonIntentInput
+): ArchiveSourceAbandonIntentResult {
+  validateRootSourceOwner(input);
+  const intent = readSourceIntent(sql, input.sessionId);
+  if (!intent) return { removed: false, state: null, databaseSizeBytes: databaseSize(sql) };
+  const state = assertSameSourceIntentMigration(intent, input);
+  if (state === 'source_deleted' || state === 'rehome_exported') {
+    throw new ProjectDataArchiveInvariantError(
+      'abandon_requires_source_intact',
+      'ProjectData archive abandon refuses a migration whose source payload was already deleted; use copy-back'
+    );
+  }
+  const result = sql.exec(
+    `DELETE FROM project_data_archive_source_intents
+     WHERE session_id = ? AND project_id = ? AND migration_id = ?`,
+    input.sessionId,
+    input.projectId,
+    input.migrationId
+  );
+  return {
+    removed: (result.rowsWritten ?? 0) > 0,
+    state,
+    databaseSizeBytes: databaseSize(sql),
+  };
+}
+
+export type ArchiveTargetAbandonInput = {
+  projectId: string;
+  sessionId: string;
+  migrationId: string;
+  targetOwnerName: string;
+  targetGeneration: number;
+  now: number;
+  hashPageRows?: number;
+};
+
+export type ArchiveTargetAbandonResult = {
+  /** True when a target session for this migration existed and was removed. */
+  removed: boolean;
+  /** Target state observed before removal, or null when no target session existed. */
+  state: ProjectDataArchiveTargetState | null;
+  messagesDeleted: number;
+  groupedRowsDeleted: number;
+  ftsRowsDeleted: number;
+  toolArchiveRowsDeleted: number;
+  chunksDeleted: number;
+  databaseSizeBytes: number;
+};
+
+/**
+ * Remove a partially copied session from an archive shard so the migration can be
+ * abandoned and the root session unfenced.
+ *
+ * Every delete is scoped to `session_id`: the shard holds other sessions. Refuses once the
+ * target is `published` or `rehome_exported`, because by then the source transcript is gone
+ * and this copy is the only one. Grouped rows are visited in bounded pages so a large
+ * partial copy cannot reproduce the memory reset this operation exists to recover from.
+ */
+export function abandonArchiveTargetSession(
+  sql: SqlStorage,
+  input: ArchiveTargetAbandonInput
+): ArchiveTargetAbandonResult {
+  const target = readTargetSession(sql, input.sessionId);
+  if (!target) {
+    return {
+      removed: false,
+      state: null,
+      messagesDeleted: 0,
+      groupedRowsDeleted: 0,
+      ftsRowsDeleted: 0,
+      toolArchiveRowsDeleted: 0,
+      chunksDeleted: 0,
+      databaseSizeBytes: databaseSize(sql),
+    };
+  }
+  const state = validateTargetOwner(target, input);
+  if (state === 'published' || state === 'rehome_exported') {
+    throw new ProjectDataArchiveInvariantError(
+      'target_not_abandonable',
+      'ProjectData archive target holds the only copy of a published session; abandon refused'
+    );
+  }
+  const pageRows = resolveHashPageRows(input.hashPageRows);
+  let ftsRowsDeleted = 0;
+  let groupedRowsDeleted = 0;
+  forEachGroupedRowPaged(sql, input.sessionId, pageRows, (row) => {
+    try {
+      sql.exec(
+        `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
+         VALUES('delete', ?, ?)`,
+        row.rowid,
+        row.content
+      );
+      ftsRowsDeleted++;
+    } catch (error) {
+      log.warn('archive_target_abandon_fts_delete_marker_failed', {
+        sessionId: input.sessionId,
+        rowid: row.rowid,
+        ...serializeError(error),
+      });
+    }
+    const deleteGrouped = sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', row.rowid);
+    groupedRowsDeleted += deleteGrouped.rowsWritten ?? 0;
+  });
+  const toolArchiveRowsDeleted =
+    sql.exec('DELETE FROM tool_payload_archives WHERE session_id = ?', input.sessionId)
+      .rowsWritten ?? 0;
+  const messagesDeleted =
+    sql.exec('DELETE FROM chat_messages WHERE session_id = ?', input.sessionId).rowsWritten ?? 0;
+  const chunksDeleted =
+    sql.exec(
+      'DELETE FROM project_data_archive_target_chunks WHERE session_id = ? AND migration_id = ?',
+      input.sessionId,
+      input.migrationId
+    ).rowsWritten ?? 0;
+  sql.exec(
+    `DELETE FROM project_data_archive_target_sessions
+     WHERE session_id = ? AND project_id = ? AND migration_id = ? AND owner_name = ? AND generation = ?`,
+    input.sessionId,
+    input.projectId,
+    input.migrationId,
+    input.targetOwnerName,
+    input.targetGeneration
+  );
+  sql.exec('DELETE FROM chat_sessions WHERE id = ?', input.sessionId);
+  return {
+    removed: true,
+    state,
+    messagesDeleted,
+    groupedRowsDeleted,
+    ftsRowsDeleted,
+    toolArchiveRowsDeleted,
+    chunksDeleted,
+    databaseSizeBytes: databaseSize(sql),
+  };
+}
+
 export async function finalizeSourceDelete(
   sql: SqlStorage,
   input: ArchiveSourceFinalizeDeleteInput
@@ -1766,7 +2028,8 @@ export async function finalizeSourceDelete(
     input.now,
     input.minTerminalAgeMs ?? PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS
   );
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId);
+  const hashPageRows = resolveHashPageRows(input.hashPageRows);
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows });
   if (terminalVersion.sha256 !== input.expectedTerminalVersionSha256) {
     throw new ProjectDataArchiveInvariantError(
       'terminal_version_changed',
@@ -1777,13 +2040,7 @@ export async function finalizeSourceDelete(
   const databaseSizeBeforeBytes = databaseSize(sql);
   let ftsRowsDeleted = 0;
   let groupedRowsDeleted = 0;
-  const groupedRows = sql
-    .exec(
-      'SELECT rowid, content FROM chat_messages_grouped WHERE session_id = ? ORDER BY created_at ASC, id ASC',
-      input.sessionId
-    )
-    .toArray();
-  for (const row of groupedRows) {
+  forEachGroupedRowPaged(sql, input.sessionId, hashPageRows, (row) => {
     try {
       sql.exec(
         `INSERT INTO chat_messages_grouped_fts(chat_messages_grouped_fts, rowid, content)
@@ -1801,7 +2058,7 @@ export async function finalizeSourceDelete(
     }
     const deleteGrouped = sql.exec('DELETE FROM chat_messages_grouped WHERE rowid = ?', row.rowid);
     groupedRowsDeleted += deleteGrouped.rowsWritten ?? 0;
-  }
+  });
   const toolArchiveRowsDeleted =
     sql.exec('DELETE FROM tool_payload_archives WHERE session_id = ?', input.sessionId)
       .rowsWritten ?? 0;

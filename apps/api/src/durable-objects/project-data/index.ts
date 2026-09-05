@@ -526,11 +526,33 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  /**
+   * Rows per statement for the streaming terminal-version hash and grouped-row loops.
+   * Resolved here, at the DO boundary, so the coordinator never has to know it: the
+   * memory ceiling this bounds belongs to this object, not to the Worker calling it.
+   */
+  private archiveHashPageRows(): number {
+    return archiveSharding.resolveArchiveHashPageRows(this.env);
+  }
+
   async archiveSourcePrepareIntent(
     input: archiveSharding.ArchiveSourcePrepareInput
   ): Promise<archiveSharding.ArchiveSourcePrepareResult> {
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.prepareArchiveSourceIntent(this.sql, input)
+      archiveSharding.prepareArchiveSourceIntent(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
+    );
+  }
+
+  archiveSourceAbandonIntent(
+    input: archiveSharding.ArchiveSourceAbandonIntentInput
+  ): Promise<archiveSharding.ArchiveSourceAbandonIntentResult> {
+    return this.withArchiveTranscriptLock(async () =>
+      this.ctx.storage.transactionSync(() =>
+        archiveSharding.abandonArchiveSourceIntent(this.sql, input)
+      )
     );
   }
 
@@ -577,7 +599,10 @@ export class ProjectData extends DurableObject<Env> {
     input: archiveSharding.ArchiveSourceFinalizeDeleteInput
   ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.finalizeSourceDelete(this.sql, input)
+      archiveSharding.finalizeSourceDelete(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
     );
   }
 
@@ -599,9 +624,13 @@ export class ProjectData extends DurableObject<Env> {
     sourceIntentToken: string;
     expectedTerminalVersionSha256: string;
     now: number;
+    hashPageRows?: number;
   }): Promise<boolean> {
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.markSourceCopyBackRestored(this.sql, input)
+      archiveSharding.markSourceCopyBackRestored(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
     );
   }
 
@@ -684,7 +713,21 @@ export class ProjectData extends DurableObject<Env> {
   async archiveTargetSeal(
     input: archiveSharding.ArchiveTargetSealInput
   ): Promise<archiveSharding.ArchiveTargetSealResult> {
-    return archiveSharding.sealArchiveTarget(this.sql, input);
+    return archiveSharding.sealArchiveTarget(this.sql, {
+      ...input,
+      hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+    });
+  }
+
+  archiveTargetAbandonSession(
+    input: archiveSharding.ArchiveTargetAbandonInput
+  ): archiveSharding.ArchiveTargetAbandonResult {
+    return this.ctx.storage.transactionSync(() =>
+      archiveSharding.abandonArchiveTargetSession(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
+    );
   }
 
   archiveTargetInspectSession(

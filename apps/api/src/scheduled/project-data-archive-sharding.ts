@@ -14,11 +14,13 @@ import {
   PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX,
   PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS,
   PROJECT_DATA_ARCHIVE_DEFAULT_SHARD_COUNT,
+  PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_PROJECTS,
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS,
   PROJECT_DATA_ARCHIVE_DEFAULT_WALL_TIME_MS,
   PROJECT_DATA_ARCHIVE_JOURNAL_STATES,
   PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES,
+  PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET,
   PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
   PROJECT_DATA_ARCHIVE_TABLES,
   type ProjectDataArchiveChunk,
@@ -86,7 +88,10 @@ type ArchiveCoordinatorConfig = {
   globalSweepIntervalMs: number;
   shardCount: number;
   sweepProjects: number;
+  /** Hard ceiling on sessions (in-flight plus new) one tick may process. */
   sweepSessions: number;
+  /** Cumulative `message_count` of NEW candidates one tick may journal; largest first. */
+  sweepMessageBudget: number;
   sessionGraceMs: number;
   chunkRows: number;
   chunkBytes: number;
@@ -111,6 +116,7 @@ type ArchiveCoordinatorBudgetOverrides = {
 type CandidateRow = {
   project_id: string;
   session_id: string;
+  message_count: number;
 };
 
 type MigrationRow = {
@@ -304,6 +310,24 @@ export type ProjectDataArchiveCopyBackResult = {
   restoredToRoot: boolean;
 };
 
+export type ProjectDataArchiveAbandonResult = {
+  migrationId: string;
+  projectId: string;
+  sessionId: string;
+  reason: string;
+  /** Journal state before abandon. */
+  previousState: ProjectDataArchiveJournalState;
+  /** True when the D1 journal row was moved to `frozen` by this call (false on an idempotent rerun). */
+  journalFrozen: boolean;
+  /** True when the D1 session location was returned to `root` by this call. */
+  restoredToRoot: boolean;
+  /** True when a source intent row existed on the root object and was removed. */
+  sourceIntentRemoved: boolean;
+  /** True when partial target state existed on the archive shard and was removed. */
+  targetRemoved: boolean;
+  targetRowsDeleted: number;
+};
+
 type CrashGapRecoveryResult = {
   recovered: number;
   failed: number;
@@ -353,6 +377,12 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
       PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS,
       1,
       50
+    ),
+    sweepMessageBudget: envInt(
+      env.PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET,
+      PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
+      1,
+      PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET
     ),
     sessionGraceMs: envInt(
       env.PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS,
@@ -929,6 +959,25 @@ async function selectScopedReclaimableMigrations(
   return rows.results ?? [];
 }
 
+/**
+ * Keep the largest-first candidate prefix whose cumulative `message_count` fits the
+ * tick's message budget. The first candidate is always kept so a single session larger
+ * than the budget still drains (in several passes) instead of starving forever. Sessions
+ * are the unit of work, so `message_count` from `session_summaries` is the size proxy the
+ * coordinator can see without touching a Durable Object.
+ */
+function applyMessageBudget(candidates: CandidateRow[], budget: number): CandidateRow[] {
+  const kept: CandidateRow[] = [];
+  let used = 0;
+  for (const candidate of candidates) {
+    const size = Math.max(0, Number(candidate.message_count) || 0);
+    if (kept.length > 0 && used + size > budget) break;
+    kept.push(candidate);
+    used += size;
+  }
+  return kept;
+}
+
 async function selectCandidates(
   env: Env,
   config: ArchiveCoordinatorConfig,
@@ -939,7 +988,7 @@ async function selectCandidates(
   const cutoff = now.getTime() - config.sessionGraceMs;
   const nowIso = now.toISOString();
   const rows = await env.DATABASE.prepare(
-    `SELECT ss.project_id, ss.id AS session_id
+    `SELECT ss.project_id, ss.id AS session_id, ss.message_count
      FROM session_summaries ss
      LEFT JOIN project_data_session_locations loc
        ON loc.project_id = ss.project_id AND loc.session_id = ss.id
@@ -957,7 +1006,7 @@ async function selectCandidates(
            AND snap.status IN ('available', 'degraded')
            AND snap.expires_at > ?
        )
-     ORDER BY ss.updated_at ASC, ss.id ASC
+     ORDER BY ss.message_count DESC, ss.updated_at ASC, ss.id ASC
      LIMIT ?`
   )
     .bind(cutoff, nowIso, Math.min(limit, config.sweepProjects * config.sweepSessions))
@@ -977,7 +1026,7 @@ async function selectScopedCandidates(
   const nowIso = now.toISOString();
   const sessionPredicate = scope.sessionId ? 'AND ss.id = ?' : '';
   const rows = await env.DATABASE.prepare(
-    `SELECT ss.project_id, ss.id AS session_id
+    `SELECT ss.project_id, ss.id AS session_id, ss.message_count
      FROM session_summaries ss
      LEFT JOIN project_data_session_locations loc
        ON loc.project_id = ss.project_id AND loc.session_id = ss.id
@@ -997,7 +1046,7 @@ async function selectScopedCandidates(
            AND snap.status IN ('available', 'degraded')
            AND snap.expires_at > ?
        )
-     ORDER BY ss.updated_at ASC, ss.id ASC
+     ORDER BY ss.message_count DESC, ss.updated_at ASC, ss.id ASC
      LIMIT ?`
   )
     .bind(scope.projectId, ...(scope.sessionId ? [scope.sessionId] : []), cutoff, nowIso, limit)
@@ -1119,7 +1168,10 @@ async function selectMigrationWork(
   const reclaimable = await selectReclaimableMigrations(env, config.sweepSessions, now);
   const remaining = config.sweepSessions - reclaimable.length;
   if (remaining <= 0) return reclaimable;
-  const candidates = await selectCandidates(env, config, nowDate, remaining);
+  const candidates = applyMessageBudget(
+    await selectCandidates(env, config, nowDate, remaining),
+    config.sweepMessageBudget
+  );
   const created: MigrationRow[] = [];
   for (const candidate of candidates) {
     const migration = await createCandidateJournal(env, candidate, now);
@@ -1155,7 +1207,10 @@ async function selectScopedMigrationWork(
   const remaining = config.sweepSessions - reclaimable.length;
   if (remaining <= 0) return { migrations: reclaimable, selected };
 
-  const candidates = await selectScopedCandidates(env, config, nowDate, scope, remaining);
+  const candidates = applyMessageBudget(
+    await selectScopedCandidates(env, config, nowDate, scope, remaining),
+    config.sweepMessageBudget
+  );
   selected.push(
     ...candidates.map((candidate) => ({
       projectId: candidate.project_id,
@@ -2222,6 +2277,141 @@ export async function inspectFrozenProjectDataArchiveIntents(
             },
           ]
         : [],
+  };
+}
+
+/**
+ * Abandon a migration that never reached source deletion and return the session to root.
+ *
+ * Copy-back is the recovery for migrations whose source transcript was deleted; this is
+ * the recovery for everything before that point (`candidate` .. `recovery_manifest_persisted`,
+ * `failed`, `poisoned`, `frozen`). The root object still holds the transcript, so all that is
+ * needed is to drop the partial copy on the shard, drop the source intent, freeze the journal
+ * with a distinct `operator_abandoned` code, and flip the location back to `root`.
+ *
+ * Ordering is deliberate: the Durable Object cleanups run first and are idempotent, and the
+ * D1 writes run last in one batch. If a DO step throws, the location stays fenced (safe). If
+ * the batch fails after the DO cleanups, a rerun observes "nothing to remove" and finishes
+ * the D1 side. The project circuit breaker is not touched: abandoning one migration is not
+ * evidence that the whole project's archive work is unsafe.
+ */
+export async function abandonProjectDataArchiveMigration(
+  env: Env,
+  input: {
+    migrationId: string;
+    projectId: string;
+    reason: string;
+    now?: number;
+  }
+): Promise<ProjectDataArchiveAbandonResult> {
+  const now = input.now ?? Date.now();
+  const reason = input.reason.trim();
+  if (!reason) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'abandon_reason_required',
+      `ProjectData archive migration ${input.migrationId} abandon requires an explicit reason`
+    );
+  }
+  const migration = await readMigrationOrThrow(env, input.migrationId);
+  if (migration.project_id !== input.projectId) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'migration_project_mismatch',
+      `ProjectData archive migration ${input.migrationId} does not belong to project ${input.projectId}`
+    );
+  }
+  if (migration.state === 'source_deleted' || migration.state === 'published') {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'abandon_requires_source_intact',
+      `ProjectData archive migration ${migration.migration_id} already deleted its source; use copy-back`
+    );
+  }
+  const source = await ensureOwnerStub(env, migration.source_owner_name, migration.project_id);
+  const target = await ensureOwnerStub(env, migration.target_owner_name, migration.project_id);
+
+  // The journal can lag the object: re-verify on the root object before touching anything.
+  const sourceIntent = await inspectSourceIntent(source, migration);
+  if (
+    sourceIntent.exists &&
+    (sourceIntent.state === 'source_deleted' || sourceIntent.state === 'rehome_exported')
+  ) {
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'abandon_requires_source_intact',
+      `ProjectData archive migration ${migration.migration_id} source intent is ${sourceIntent.state}; use copy-back`
+    );
+  }
+
+  const targetResult = await target.archiveTargetAbandonSession({
+    ...targetInspectInput(migration),
+    migrationId: migration.migration_id,
+    now,
+  });
+  const sourceResult = await source.archiveSourceAbandonIntent({
+    ...sourceInspectInput(migration),
+    now,
+  });
+
+  const [journalResult, locationResult] = await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `UPDATE project_data_archive_migrations
+       SET state = 'frozen',
+           error_code = 'operator_abandoned',
+           error_message = ?,
+           lease_owner = NULL,
+           lease_expires_at = NULL,
+           frozen_at = COALESCE(frozen_at, ?),
+           updated_at = ?
+       WHERE migration_id = ?
+         AND project_id = ?
+         AND state NOT IN ('source_deleted', 'published')
+         AND NOT (state = 'frozen' AND error_code = 'operator_abandoned')`
+    ).bind(reason, now, now, migration.migration_id, migration.project_id),
+    env.DATABASE.prepare(
+      `UPDATE project_data_session_locations
+       SET location_state = 'root',
+           owner_kind = 'root',
+           owner_name = ?,
+           generation = 0,
+           migration_id = NULL,
+           target_aggregate_sha256 = NULL,
+           updated_at = ?
+       WHERE project_id = ?
+         AND session_id = ?
+         AND migration_id = ?
+         AND location_state IN ('migrating', 'frozen')`
+    ).bind(
+      migration.source_owner_name,
+      now,
+      migration.project_id,
+      migration.session_id,
+      migration.migration_id
+    ),
+  ]);
+
+  log.warn('project_data_archive_migration_abandoned', {
+    migrationId: migration.migration_id,
+    projectId: migration.project_id,
+    sessionId: migration.session_id,
+    previousState: migration.state,
+    sourceIntentRemoved: sourceResult.removed,
+    targetRemoved: targetResult.removed,
+    reason,
+  });
+
+  return {
+    migrationId: migration.migration_id,
+    projectId: migration.project_id,
+    sessionId: migration.session_id,
+    reason,
+    previousState: migration.state,
+    journalFrozen: (journalResult?.meta.changes ?? 0) > 0,
+    restoredToRoot: (locationResult?.meta.changes ?? 0) > 0,
+    sourceIntentRemoved: sourceResult.removed,
+    targetRemoved: targetResult.removed,
+    targetRowsDeleted:
+      targetResult.messagesDeleted +
+      targetResult.groupedRowsDeleted +
+      targetResult.toolArchiveRowsDeleted +
+      targetResult.chunksDeleted,
   };
 }
 
