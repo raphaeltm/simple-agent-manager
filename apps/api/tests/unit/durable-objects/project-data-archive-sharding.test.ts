@@ -12,6 +12,7 @@ import {
   computeTerminalVersion,
   exportArchiveChunk,
   finalizeSourceDelete,
+  GROUPED_ROW_PAGE_SQL,
   markArchiveTargetRehomeExported,
   markSourceRecoveryManifestPersisted,
   markSourceTargetSealed,
@@ -822,6 +823,37 @@ describe('ProjectData archive terminal-version hashing streams bounded pages', (
       expect(paged.sha256).toMatch(/^[a-f0-9]{64}$/);
     } finally {
       db.close();
+    }
+  });
+
+  it('pages grouped rows through the session index instead of sorting the whole session per page', () => {
+    // A rowid-keyed page over this table plans as a temp b-tree over every remaining row of
+    // the session on EVERY page (O(N^2 / pageRows)); the (created_at, id) seek must be an
+    // index range scan so the memory fix does not become a CPU-time regression.
+    const store = makeSql();
+    try {
+      seedTerminalSession(store.sql, 'session-plan');
+      seedWideGroupedRows(store.sql, 'session-plan', 10);
+      const plan = store.db
+        .prepare(`EXPLAIN QUERY PLAN ${GROUPED_ROW_PAGE_SQL}`)
+        .all('session-plan', -1, -1, '', 500) as Array<{ detail: string }>;
+      const details = plan.map((row) => row.detail);
+      expect(details.some((detail) => detail.includes('idx_grouped_messages_session'))).toBe(true);
+      const fullSort = details.filter(
+        (detail) => /TEMP B-TREE FOR ORDER BY/i.test(detail) && !/LAST TERM/i.test(detail)
+      );
+      expect(fullSort).toEqual([]);
+
+      const rowidPlan = store.db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT rowid, content FROM chat_messages_grouped
+           WHERE session_id = ? AND rowid > ? ORDER BY rowid ASC LIMIT ?`
+        )
+        .all('session-plan', -1, 500) as Array<{ detail: string }>;
+      // Control: the rejected shape really does sort per page on this schema.
+      expect(rowidPlan.some((row) => /TEMP B-TREE FOR ORDER BY/i.test(row.detail))).toBe(true);
+    } finally {
+      store.db.close();
     }
   });
 

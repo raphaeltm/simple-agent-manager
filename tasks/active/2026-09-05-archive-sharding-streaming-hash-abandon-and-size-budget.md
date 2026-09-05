@@ -175,3 +175,38 @@ migration to `root`.
 - `PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS` is now 10. The two coordinator tests that relied on
   the previous default of 1 to prove reclaimable-starvation handling now pin
   `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS='1'` explicitly and were renamed accordingly.
+
+## Review findings fixed before merge (2026-09-05, Phase 5)
+
+- **Abandon race (CRITICAL, cloudflare-specialist + security-auditor).** The first cut deleted the
+  shard copy before the lock-protected source abandon, trusting a point-in-time
+  `inspectSourceIntent` read. A sweep whose lease had expired but which was still mid-finalize could
+  delete the source in that window, leaving zero copies while D1 reported `published`. Fix:
+  `reserveAbandonLease` (D1 CAS, epoch bump, same predicate family as `claimMigrationLease`) runs
+  before any object call; `archiveSourceAbandonIntent` (root transcript lock, refuses once the
+  payload is gone, and removes the intent finalize requires) runs BEFORE
+  `archiveTargetAbandonSession`; the reservation is released if a step throws; the D1 freeze is
+  guarded by the reserved epoch. Class of bug: cross-object check-then-act with the destructive
+  step on the wrong side of the only serialization point (rules 45/58). Tests: `never drops the
+shard copy when the source is finalized between the inspect read and the abandon` (fails with
+  target-first ordering), `fences the journal before touching any object` (fails without the CAS),
+  reservation-takeover with a live-worker control.
+- **Fence-before-process (HIGH, performance-reviewer).** With the ceiling at 10, the sweep journaled
+  every candidate (fencing it `migrating`) up front and only then checked wall time between
+  migrations, so a 5 s tick could leave up to nine sessions unreadable until the next 24 h sweep.
+  Fix: `selectMigrationWork` returns unjournaled `pending` candidates; `processArchiveMigrationBatch`
+  checks wall time, journals, and processes one candidate at a time. Test: `leaves sessions it never
+reached unfenced when wall time runs out mid-tick` (fails against eager journaling).
+- **Per-page sort (HIGH, performance-reviewer).** `forEachGroupedRowPaged` seeked by `rowid`, which
+  no index serves on `chat_messages_grouped`; SQLite planned a temp b-tree over the whole remaining
+  session on every page (measured O(N²/page): 200k rows ≈ 4.5 s). Fix: seek on the indexed
+  `(created_at, id)` order and still select `rowid` for the FTS delete markers. Test: `EXPLAIN QUERY
+PLAN` on `GROUPED_ROW_PAGE_SQL` asserts the index range scan and no full-sort step, with the
+  rejected rowid shape as a control.
+- Also addressed: `abandon_reason_required` mapped to 400 plus a route-level test; env clamp tests
+  for `PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS`; abandon paging bound test on a 1,205-row shard copy;
+  `state !== 'failed'` lease disjunct test; selection tie-break determinism test.
+- Deferred (documented, non-blocking): splitting the two >2,500-line modules (rule 18, pre-existing
+  exceptions); a `session_summaries` index for the terminal-session candidate scan (pre-existing,
+  global sweep is cadence-gated to once per interval); a real-middleware auth integration test for
+  admin routes (repo-wide pattern).

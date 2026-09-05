@@ -512,14 +512,26 @@ function resolveHashPageRows(value: number | undefined): number {
 }
 
 /**
- * Visit every grouped row of a session in bounded pages keyed by rowid, so a session
- * with hundreds of thousands of rows never materialises in one statement. Rows may be
- * deleted inside `visit`: the next page seeks past the last rowid seen, not by offset.
+ * Page statement for `forEachGroupedRowPaged`. Seeks on the indexed
+ * `idx_grouped_messages_session (session_id, created_at)` order with `id` as the tie-break
+ * (the same total order `ARCHIVE_TABLE_SPECS.chat_messages_grouped` uses), so each page is an
+ * index range scan rather than a per-page sort of the whole session. Exported for the plan test.
+ */
+export const GROUPED_ROW_PAGE_SQL = `SELECT rowid, id, content, created_at FROM chat_messages_grouped
+         WHERE session_id = ? AND (created_at > ? OR (created_at = ? AND id > ?))
+         ORDER BY created_at ASC, id ASC
+         LIMIT ?`;
+
+/**
+ * Visit every grouped row of a session in bounded pages, so a session with hundreds of
+ * thousands of rows never materialises in one statement. Rows may be deleted inside
+ * `visit`: the next page seeks past the last `(created_at, id)` seen, not by offset.
  *
- * This pages by SQLite rowid rather than the `ChunkTableSpec` business cursor
- * (`created_at, id`) on purpose: the FTS5 external-content index is keyed by rowid, and the
- * delete markers `rebuildTargetFts` / `abandonArchiveTargetSession` emit need it. Do not fold
- * this into the chunk-spec paging.
+ * The page still selects SQLite `rowid` because the FTS5 external-content index is keyed by
+ * rowid, and the delete markers `rebuildTargetFts` / `abandonArchiveTargetSession` emit need
+ * it. Paging by `rowid` itself is NOT served by any index on this table (a bare
+ * `ORDER BY rowid` plans as a temp b-tree over the whole session on every page), which is
+ * why the seek key is the indexed `(created_at, id)` pair instead.
  */
 function forEachGroupedRowPaged(
   sql: SqlStorage,
@@ -527,24 +539,18 @@ function forEachGroupedRowPaged(
   pageRows: number,
   visit: (row: Record<string, unknown>) => void
 ): void {
-  let lastRowid = -1;
+  let lastCreatedAt = -1;
+  let lastId = '';
   for (;;) {
     const page = sql
-      .exec(
-        `SELECT rowid, content FROM chat_messages_grouped
-         WHERE session_id = ? AND rowid > ?
-         ORDER BY rowid ASC
-         LIMIT ?`,
-        sessionId,
-        lastRowid,
-        pageRows
-      )
+      .exec(GROUPED_ROW_PAGE_SQL, sessionId, lastCreatedAt, lastCreatedAt, lastId, pageRows)
       .toArray();
     for (const row of page) visit(row);
     if (page.length < pageRows) break;
     const tail = page[page.length - 1];
     if (!tail) break;
-    lastRowid = strictInteger(tail.rowid, 'grouped.rowid');
+    lastCreatedAt = strictInteger(tail.created_at, 'grouped.created_at');
+    lastId = strictString(tail.id, 'grouped.id');
   }
 }
 
@@ -1951,6 +1957,10 @@ export function abandonArchiveTargetSession(
     };
   }
   const state = validateTargetOwner(target, input);
+  // `published` is refused for completeness, but no shard writer sets it today: publishing
+  // only touches the D1 location, so a fully published session still reads `sealed` here.
+  // The effective guard for "this may be the only copy" is therefore the `sealed` branch
+  // below, and the coordinator's source-first ordering that backs `sourceIntactVerified`.
   if (state === 'published' || state === 'rehome_exported') {
     throw new ProjectDataArchiveInvariantError(
       'target_not_abandonable',
