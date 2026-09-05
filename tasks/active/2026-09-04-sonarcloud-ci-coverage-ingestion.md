@@ -88,6 +88,10 @@ been completed and a real PR scan exposes nonzero coverage measures through Sona
   secrets out of command-line arguments. The scanner must remain on `pull_request`, not
   `pull_request_target`, and must explicitly skip fork heads:
   <https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets>
+- GitHub also treats Dependabot-triggered `pull_request` workflows like fork workflows and
+  withholds ordinary Actions secrets. The two Sonar jobs must exclude `dependabot[bot]` unless
+  a same-named Dependabot secret is deliberately provisioned:
+  <https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions>
 
 ### Existing incident lesson and root-cause trace
 
@@ -174,8 +178,9 @@ producer/consumer boundary whose missing output has been interpreted as success.
       both artifacts to the configured paths, revalidates them, and runs pinned
       `SonarSource/sonarqube-scan-action` with least privilege.
 - [x] Gate CI scanning on repository variable `SONAR_CI_ENABLED=true`, explicitly skip
-      fork pull requests, scope `SONAR_TOKEN` only to the fail-closed token check and scanner steps, and fail with
-      a non-secret diagnostic when the gate is enabled without the secret.
+      fork pull requests and Dependabot-triggered workflows, scope `SONAR_TOKEN` only to the
+      fail-closed token check and scanner steps, and fail with a non-secret diagnostic when the
+      gate is enabled without the secret.
 - [x] Add structurally parsed workflow tests covering producer/consumer paths, action
       pins, current-run artifacts, change-filter behavior, fork safety, secret scope, and the
       no-duplicate-test invariant.
@@ -224,7 +229,7 @@ producer/consumer boundary whose missing output has been interpreted as success.
 - The scanner consumes artifacts from the existing coverage jobs on the same workflow
   SHA and never duplicates the full pnpm coverage run.
 - The scanner uses immutable action SHAs, `contents: read`, a step-scoped secret, no
-  `pull_request_target`, and an explicit same-repository PR guard.
+  `pull_request_target`, and explicit same-repository plus non-Dependabot guards.
 - Documentation provides a no-double-analysis cutover and rollback. Enabling the gate
   without `SONAR_TOKEN` fails visibly without logging any token.
 - Go-only changes receive both the CLI coverage artifact and the JS/TS project artifact;
@@ -232,7 +237,7 @@ producer/consumer boundary whose missing output has been interpreted as success.
 - Local focused tests, lint, typecheck, full tests, build, task-completion validation,
   domain reviews, ordinary PR CI, and CodeRabbit are recorded. Staging is explicitly
   not applicable for this CI-only change.
-- The draft PR remains unmerged until a real PR scan reports nonzero Sonar measures.
+- The PR remains unmerged until a real PR scan reports nonzero Sonar measures.
 
 ## Validation Evidence
 
@@ -268,11 +273,15 @@ producer/consumer boundary whose missing output has been interpreted as success.
   single repository-wide full coverage invocation, covered every fail-closed parser branch,
   and proved existing outside files and symlink escapes are rejected. The same focused slice
   passes 42/42 tests.
+- Continuation env review found that Dependabot-triggered workflows satisfy a same-repository
+  predicate even though GitHub withholds ordinary Actions secrets. TDD then failed the two exact
+  Sonar condition cases (2 failed, 28 passed) before both jobs gained GitHub's documented
+  `github.actor != 'dependabot[bot]'` exclusion; the focused suite passes 30/30 afterward.
 - GitHub rejected the first two shell feature-branch push attempts because the injected
-  token became invalid. The coherent implementation is preserved at local SHA
-  `5abab4ae3` and remote checkpoint SHA `23d0c4ad`; the latter was published through the
-  authorized GitHub installation connector. PR creation, ordinary CI, CodeRabbit, the
-  external cutover, and real Sonar measures remain pending.
+  token became invalid. The implementation was recovered and published to existing PR #2020.
+  Exact-head ordinary CI and CodeRabbit passed at continuation checkpoint `7bcfea0b2`, with
+  both review threads resolved; they must run again after the Dependabot hardening commit. The
+  external cutover and real Sonar measures remain pending.
 
 ## Post-Mortem
 

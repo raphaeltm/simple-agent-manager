@@ -94,8 +94,11 @@ CLI job produces it when CLI inputs change. When CI-based Sonar analysis is enab
 is skipped, the bounded `Sonar Go Coverage` job runs only the CLI tests needed to produce the
 report. The scanner job downloads both artifacts from the same workflow run, validates every
 input with `pnpm quality:sonar-coverage`, and then invokes the SHA-pinned official scanner action.
-It has `contents: read` permission, does not run for fork pull requests, and exposes
-`SONAR_TOKEN` only to the token check and scanner steps.
+It has `contents: read` permission, does not run for fork pull requests or
+Dependabot-triggered workflows, and exposes `SONAR_TOKEN` only to the token check and scanner
+steps. GitHub treats Dependabot-triggered workflows like fork workflows and withholds ordinary
+Actions secrets, so the explicit Dependabot exclusion prevents an enabled scanner from failing
+on an unavailable token. Do not replace this boundary with `pull_request_target`.
 
 Coverage import requires CI-based analysis; SonarQube Cloud Automatic Analysis does not import
 these reports. Automatic and CI-based analysis must not run together. Complete this one-time
@@ -132,7 +135,9 @@ This follows the official SonarSource guidance for
 [GitHub Actions analysis](https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/ci-based-analysis/github-actions-for-sonarcloud),
 [Automatic Analysis](https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/automatic-analysis),
 and
-[scoped organization tokens](https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/scoped-organization-tokens).
+[scoped organization tokens](https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/scoped-organization-tokens),
+plus GitHub's documentation for
+[Dependabot-triggered Actions workflows](https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions).
 
 ## Rollback switches
 

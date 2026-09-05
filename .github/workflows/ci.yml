@@ -812,6 +812,7 @@ jobs:
     needs: [changes]
     if: >-
       vars.SONAR_CI_ENABLED == 'true' &&
+      github.actor != 'dependabot[bot]' &&
       needs.changes.outputs.repo-quality == 'true' &&
       needs.changes.outputs.cli != 'true' &&
       (github.event_name != 'pull_request' ||
@@ -856,6 +857,7 @@ jobs:
     if: >-
       always() &&
       vars.SONAR_CI_ENABLED == 'true' &&
+      github.actor != 'dependabot[bot]' &&
       needs.changes.result == 'success' &&
       needs.changes.outputs.repo-quality == 'true' &&
       needs.test.result == 'success' &&

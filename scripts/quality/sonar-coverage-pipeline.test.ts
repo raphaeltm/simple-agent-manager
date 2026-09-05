@@ -350,7 +350,7 @@ describe('Sonar CI wiring', () => {
     expect(workflow.on).toHaveProperty('pull_request');
     expect(workflow.on).not.toHaveProperty('pull_request_target');
     expect(normalizedJobCondition(sonarJob)).toBe(
-      "always() && vars.SONAR_CI_ENABLED == 'true' && needs.changes.result == 'success' && needs.changes.outputs.repo-quality == 'true' && needs.test.result == 'success' && (needs.cli-test.result == 'success' || needs.sonar-go-coverage.result == 'success') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+      "always() && vars.SONAR_CI_ENABLED == 'true' && github.actor != 'dependabot[bot]' && needs.changes.result == 'success' && needs.changes.outputs.repo-quality == 'true' && needs.test.result == 'success' && (needs.cli-test.result == 'success' || needs.sonar-go-coverage.result == 'success') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
     );
     expect(scanner).toContain('fetch-depth');
     expect(scanner).toContain('pnpm quality:sonar-coverage');
@@ -392,7 +392,7 @@ describe('Sonar CI wiring', () => {
 
     expect(supplementalGo).toContain('SONAR_CI_ENABLED');
     expect(normalizedJobCondition(jobs['sonar-go-coverage'])).toBe(
-      "vars.SONAR_CI_ENABLED == 'true' && needs.changes.outputs.repo-quality == 'true' && needs.changes.outputs.cli != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+      "vars.SONAR_CI_ENABLED == 'true' && github.actor != 'dependabot[bot]' && needs.changes.outputs.repo-quality == 'true' && needs.changes.outputs.cli != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
     );
     expect(supplementalGo).toContain('go test -coverprofile=coverage.out -covermode=atomic ./...');
     expect(supplementalGo).toContain('go tool cover -func=coverage.out');
