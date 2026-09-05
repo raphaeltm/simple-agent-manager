@@ -11,8 +11,9 @@ production code.
 
 This task owns only the coverage-report and CI scanner pipeline tracked by SAM Idea
 `01M1P3WCG1183BCMED999BYE47`. It must not modify, close, push to, or merge PRs #2010,
-#2011, or #2015. The result must remain a draft PR until the external Sonar cutover has
-been completed and a real PR scan exposes nonzero coverage measures through Sonar's API.
+#2011, or #2015. The merge continuation additionally must not modify PRs #2019 or #2021.
+The result must remain a draft PR until the external Sonar cutover has been completed and a
+real PR scan exposes nonzero coverage measures through Sonar's API.
 
 ## Preflight Classification
 
@@ -115,10 +116,13 @@ producer/consumer boundary whose missing output has been interpreted as success.
   bug and two maintainability findings in `check-sonar-coverage.ts`: S2871 (default
   string sort), S3776 (LCOV parser complexity), and S3358 (nested ternary). The gate
   failed only on the D new-code reliability rating; coverage measures remained absent.
-- The secured workspace credential source includes GitHub login fields. The continuation
-  will test whether that existing authorized identity can administer the linked public
-  Sonar project, generate a least-privilege analysis token, and perform the documented
-  cutover without exposing credential or token values.
+- The secured workspace GitHub identity was tested without logging credential values. It has
+  read-only repository permission, and GitHub left SonarQube Cloud OAuth authorization disabled;
+  it cannot administer the linked Sonar project or create the analysis token. No other
+  SAM/project/repository/environment Sonar credential source exists. The minimum human action is
+  for a Sonar project/org admin to disable Automatic Analysis and store a project-scoped Execute
+  Analysis token as repository Actions secret `SONAR_TOKEN`; the continuation can then enable
+  `SONAR_CI_ENABLED` and complete the live proof.
 
 ### Cross-component data flow
 
@@ -198,8 +202,9 @@ producer/consumer boundary whose missing output has been interpreted as success.
 - [ ] After ordinary CI is green, request iterative CodeRabbit review with the
       `coderabbit-review` label and resolve all findings. The first real Sonar scan remains
       a separate merge blocker until the external cutover is complete.
-- [ ] Do not deploy to staging or production. This is CI-only configuration, staging is
-      reserved, and the user explicitly prohibited deployment without later confirmation.
+- [x] Do not deploy this CI-only change to staging; staging validation is not applicable.
+- [ ] After the now-authorized merge, monitor the repository's automatic production workflow to
+      completion without starting a separate manual deployment.
 
 ### Merge continuation
 
@@ -208,9 +213,11 @@ producer/consumer boundary whose missing output has been interpreted as success.
 - [x] Query the public Sonar API for the exact failed conditions and issues; fix all
       three findings without changing any quality threshold. Add a regression that
       distinguishes locale-aware alphabetical ordering from the unreliable default sort.
-- [ ] Use an existing authorized Sonar identity if available to generate/store
-      `SONAR_TOKEN`, disable Automatic Analysis, and enable `SONAR_CI_ENABLED` in that
-      documented order. Do not log or persist token values outside the GitHub secret.
+- [x] Exhaust the existing authorized GitHub/SAM/project credential sources without exposing
+      values; record that none provides the required Sonar admin/token capability.
+- [ ] Have a Sonar project/org admin create and store `SONAR_TOKEN`, disable Automatic Analysis,
+      and then enable `SONAR_CI_ENABLED` in that documented order. Do not log or persist token
+      values outside the GitHub secret.
 - [ ] Prove on the final PR head that the scanner job executed (not skipped), all exact-head
       CI checks passed, and Sonar's API reports nonzero `lines_to_cover` and coverage with
       a green quality gate.
