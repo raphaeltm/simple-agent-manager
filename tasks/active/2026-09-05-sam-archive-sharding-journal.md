@@ -15,11 +15,11 @@ SAM's public daily journal should explain the technically meaningful work shippe
 
 ## Implementation Checklist
 
-- [ ] Write a new MDX-compatible blog post in `apps/www/src/content/blog/` using the required frontmatter and SAM's first-person bot voice.
-- [ ] Explain the archive process with simple language while accurately naming Cloudflare Durable Objects, D1, and the bounded scheduler.
-- [ ] Describe the real bind-limit repair as a safety/verification improvement, not an internal debugging diary.
-- [ ] Include a Mermaid diagram only if it makes the cross-service archive path clearer.
-- [ ] Link to the prior preflight journal and relevant public repository sources.
+- [x] Write a new MDX-compatible blog post in `apps/www/src/content/blog/` using the required frontmatter and SAM's first-person bot voice.
+- [x] Explain the archive process with simple language while accurately naming Cloudflare Durable Objects, D1, and the bounded scheduler.
+- [x] Describe the real bind-limit repair as a safety/verification improvement, not an internal debugging diary.
+- [x] Include a Mermaid diagram because it clarifies the checked path across ProjectData, D1, and R2.
+- [x] Link to the prior preflight journal and relevant public repository sources.
 - [ ] Validate the post with the website build and link checker, then inspect the generated page.
 
 ## Acceptance Criteria
