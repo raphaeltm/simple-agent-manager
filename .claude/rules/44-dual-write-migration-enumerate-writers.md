@@ -133,6 +133,13 @@ Before merging lifecycle teardown changes:
 - [ ] Add vertical-slice tests for the main teardown paths that assert the
       effective postcondition, not just the helper call. For workspace/node
       deletion, no related `agent_sessions.status='running'` row may remain.
+- [ ] Treat external deletion acknowledgements separately from proof. A VM
+      timeout/error must retain the durable attempt and non-terminal D1 state;
+      only VM-confirmed absence/success or a marker written after strict
+      provider/container termination may release linked replacement authority.
+- [ ] Never infer strict termination from `nodes.status='deleted'`. Enumerate
+      every writer of proof markers and add a migration test showing legacy
+      terminal labels are not backfilled as proof.
 
 ## References
 

@@ -4,6 +4,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { decrypt } from './encryption';
+import { fingerprintEncryptedProviderCredential } from './provider-credential-exact';
 
 /**
  * Look up an enabled platform cloud-provider credential for the given provider.
@@ -12,8 +13,14 @@ import { decrypt } from './encryption';
 export async function getPlatformCloudCredential(
   db: ReturnType<typeof drizzle>,
   encryptionKey: string,
-  targetProvider?: CredentialProvider,
-): Promise<{ decryptedToken: string; provider: CredentialProvider } | null> {
+  targetProvider?: CredentialProvider
+): Promise<{
+  decryptedToken: string;
+  provider: CredentialProvider;
+  credentialId?: string;
+  credentialVersion: number | null;
+  credentialFingerprint: string;
+} | null> {
   const conditions = [
     eq(schema.platformCredentials.credentialType, 'cloud-provider'),
     eq(schema.platformCredentials.isEnabled, true),
@@ -34,7 +41,19 @@ export async function getPlatformCloudCredential(
   }
 
   const decryptedToken = await decrypt(row.encryptedToken, row.iv, encryptionKey);
-  return { decryptedToken, provider: row.provider as CredentialProvider };
+  const credentialFingerprint = await fingerprintEncryptedProviderCredential(
+    row.encryptedToken,
+    row.iv
+  );
+  const timestamp = row.updatedAt ?? row.createdAt;
+  const parsedVersion = timestamp ? Date.parse(timestamp) : Number.NaN;
+  return {
+    decryptedToken,
+    provider: row.provider as CredentialProvider,
+    credentialId: row.id,
+    credentialVersion: Number.isFinite(parsedVersion) ? parsedVersion : null,
+    credentialFingerprint,
+  };
 }
 
 /**
@@ -44,7 +63,7 @@ export async function getPlatformCloudCredential(
 export async function getPlatformAgentCredential(
   db: ReturnType<typeof drizzle>,
   agentType: string,
-  encryptionKey: string,
+  encryptionKey: string
 ): Promise<{ credential: string; credentialKind: 'api-key' | 'oauth-token' } | null> {
   const rows = await db
     .select()
@@ -53,8 +72,8 @@ export async function getPlatformAgentCredential(
       and(
         eq(schema.platformCredentials.credentialType, 'agent-api-key'),
         eq(schema.platformCredentials.agentType, agentType),
-        eq(schema.platformCredentials.isEnabled, true),
-      ),
+        eq(schema.platformCredentials.isEnabled, true)
+      )
     )
     .limit(1);
 

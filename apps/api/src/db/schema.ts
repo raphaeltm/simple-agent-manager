@@ -1240,6 +1240,16 @@ export const nodes = sqliteTable(
     /** Cloudflare Tunnel display name for user-owned tunnel nodes. Null otherwise. */
     tunnelName: text('tunnel_name'),
     errorMessage: text('error_message'),
+    /** Written only after strict provider/container teardown confirms the runtime is absent. */
+    runtimeTerminationConfirmedAt: text('runtime_termination_confirmed_at'),
+    /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
+    runtimeIncarnationId: text('runtime_incarnation_id'),
+    /**
+     * SHA-256 fingerprint of the encrypted provider credential used for this runtime. The
+     * fingerprint is pinned before provider I/O so strict deletion cannot follow a mutable
+     * credential row into a different provider account.
+     */
+    placementCredentialFingerprint: text('placement_credential_fingerprint'),
     /** Candidate-page escape after cleanup failure; ISO-8601 UTC timestamp. */
     cleanupBackoffUntil: text('cleanup_backoff_until'),
     createdAt: text('created_at')
@@ -1305,6 +1315,10 @@ export const workspaces = sqliteTable(
       .notNull()
       .default(false),
     errorMessage: text('error_message'),
+    /** Set only after VM-agent absence/success or strict node-runtime termination proof. */
+    runtimeDeletionConfirmedAt: text('runtime_deletion_confirmed_at'),
+    /** Proof classifier paired with runtimeDeletionConfirmedAt. */
+    runtimeDeletionProof: text('runtime_deletion_proof'),
     dispatchedAt: text('dispatched_at'),
     /** Agent profile ID used for this workspace's task — drives GitHub CLI policy enforcement. */
     agentProfileHint: text('agent_profile_hint'),
@@ -1357,6 +1371,25 @@ export const workspaces = sqliteTable(
     capacityPoolProjectIdx: index('idx_workspaces_capacity_pool_project')
       .on(table.capacityPoolProjectId)
       .where(sql`capacity_pool_project_id IS NOT NULL`),
+  })
+);
+
+/** Atomic throttle claims for payload-free callbacks observed during deletion quarantine. */
+export const workspaceCallbackSignalClaims = sqliteTable(
+  'workspace_callback_signal_claims',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    callbackKind: text('callback_kind').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.callbackKind] }),
+    expiresAtIdx: index('idx_workspace_callback_signal_claims_expires_at').on(table.expiresAt),
   })
 );
 

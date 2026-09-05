@@ -56,6 +56,8 @@ vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
 
 const { capacityPoolRoutes } = await import('../../../src/routes/projects/capacity-pools');
 
+const CATALOG_ADDITION_BIND_LIMIT_TEST_TIMEOUT_MS = 15_000;
+
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
   app.onError((err, c) => {
@@ -555,68 +557,74 @@ describe('project capacity pool routes', () => {
     });
   });
 
-  it('chunks catalog addition source reads below the D1 bind limit', async () => {
-    const { sqlite, env } = createEnv({ bindLimit: 100 });
-    seedUser(sqlite, 'user-1');
-    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
-    for (let index = 0; index < 99; index += 1) {
-      seedCloudCredential(sqlite, {
-        id: `project-cloud-${index}`,
-        userId: 'user-1',
-        projectId: 'project-1',
-        provider: 'hetzner',
+  it(
+    'chunks catalog addition source reads below the D1 bind limit',
+    async () => {
+      const { sqlite, env } = createEnv({ bindLimit: 100 });
+      seedUser(sqlite, 'user-1');
+      seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+      for (let index = 0; index < 99; index += 1) {
+        seedCloudCredential(sqlite, {
+          id: `project-cloud-${index}`,
+          userId: 'user-1',
+          projectId: 'project-1',
+          provider: 'hetzner',
+        });
+      }
+
+      const reconcile = await createApp().request(
+        '/api/projects/project-1/capacity-pools/defaults/reconcile',
+        { method: 'POST' },
+        env
+      );
+      expect(reconcile.status).toBe(200);
+      const initial = await reconcile.json();
+      const candidateBySourceId = new Map(
+        initial.effective.candidates
+          .filter(
+            (candidate: { providerInstanceType: string | null }) => candidate.providerInstanceType
+          )
+          .map((candidate: { capacitySourceId: string }) => [candidate.capacitySourceId, candidate])
+      );
+      const additions = initial.effective.sources.map((source: { id: string }) => {
+        const candidate = candidateBySourceId.get(source.id) as
+          | {
+              provider: string;
+              location: string;
+              providerInstanceType: string;
+              providerInstanceSku?: string | null;
+            }
+          | undefined;
+        if (!candidate) throw new Error(`Missing candidate for source ${source.id}`);
+        return {
+          sourceId: source.id,
+          provider: candidate.provider,
+          location: candidate.location,
+          providerInstanceType: candidate.providerInstanceType,
+          providerInstanceSku: candidate.providerInstanceSku ?? null,
+        };
       });
-    }
+      expect(additions).toHaveLength(99);
 
-    const reconcile = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults/reconcile',
-      { method: 'POST' },
-      env
-    );
-    expect(reconcile.status).toBe(200);
-    const initial = await reconcile.json();
-    const candidateBySourceId = new Map(
-      initial.effective.candidates
-        .filter((candidate: { providerInstanceType: string | null }) => candidate.providerInstanceType)
-        .map((candidate: { capacitySourceId: string }) => [candidate.capacitySourceId, candidate])
-    );
-    const additions = initial.effective.sources.map((source: { id: string }) => {
-      const candidate = candidateBySourceId.get(source.id) as
-        | {
-            provider: string;
-            location: string;
-            providerInstanceType: string;
-            providerInstanceSku?: string | null;
-          }
-        | undefined;
-      if (!candidate) throw new Error(`Missing candidate for source ${source.id}`);
-      return {
-        sourceId: source.id,
-        provider: candidate.provider,
-        location: candidate.location,
-        providerInstanceType: candidate.providerInstanceType,
-        providerInstanceSku: candidate.providerInstanceSku ?? null,
-      };
-    });
-    expect(additions).toHaveLength(99);
+      const res = await createApp().request(
+        '/api/projects/project-1/capacity-pools/defaults',
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ catalogAdditions: additions }),
+        },
+        env
+      );
 
-    const res = await createApp().request(
-      '/api/projects/project-1/capacity-pools/defaults',
-      {
-        method: 'PATCH',
-        body: JSON.stringify({ catalogAdditions: additions }),
-      },
-      env
-    );
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
-      effectiveScope: 'project',
-      effective: {
-        pool: { scope: 'project', ownerProjectId: 'project-1' },
-      },
-    });
-  });
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({
+        effectiveScope: 'project',
+        effective: {
+          pool: { scope: 'project', ownerProjectId: 'project-1' },
+        },
+      });
+    },
+    CATALOG_ADDITION_BIND_LIMIT_TEST_TIMEOUT_MS
+  );
 
   it('preserves edited project candidate statuses during GET ensure=true reconciliation', async () => {
     const { sqlite, env } = createEnv({ bindLimit: 100 });

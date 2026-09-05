@@ -180,9 +180,7 @@ describe('node provisioning success path', () => {
       doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('auto_provisioned_node_id');
-    expect(section.replace(/\s+/g, ' ')).toContain(
-      'UPDATE tasks SET auto_provisioned_node_id = ?'
-    );
+    expect(section.replace(/\s+/g, ' ')).toContain('UPDATE tasks SET auto_provisioned_node_id = ?');
   });
 
   it('persists state to DO storage after creating node', () => {
@@ -517,11 +515,36 @@ describe('provider-aware node provisioning', () => {
     expect(section).toContain('statusCode');
   });
 
-  it('stopNodeResources uses node cloudProvider for credential lookup', () => {
+  it('stopNodeResources delegates managed teardown to strict proof-bearing deletion', () => {
     const section = nodesSource.slice(
       nodesSource.indexOf('async function stopNodeResources'),
       nodesSource.indexOf('async function deleteNodeResources')
     );
+    expect(section).toContain('await deleteNodeResourcesStrict(nodeId, userId, env, {');
+    expect(section).toContain('cleanupDns: false');
+    expect(section).toContain('expectedRuntime:');
+    expect(section).toContain("status: 'stopping'");
+    expect(section).toContain('schema.nodes.runtimeTerminationConfirmedAt} IS');
+    expect(section).toContain('schema.nodes.runtimeIncarnationId} IS');
+    expect(section).not.toContain('providerResult.provider.deleteVM');
+  });
+
+  it('provisionNode clears stale runtime termination proof before allocating a new incarnation', () => {
+    const section = nodesSource.slice(
+      nodesSource.indexOf('async function provisionNode'),
+      nodesSource.indexOf('async function stopNodeResources')
+    );
+    const firstClear = section.indexOf('runtimeTerminationConfirmedAt: null');
+    const providerAllocation = section.indexOf('provider.createVM');
+    expect(firstClear).toBeGreaterThan(-1);
+    expect(providerAllocation).toBeGreaterThan(firstClear);
+  });
+
+  it('deleteNodeResources delegates provider credential lookup to strict deletion', () => {
+    const section = strictNodeDeletionSource.slice(
+      strictNodeDeletionSource.indexOf('function getStrictNodeCredentialContext'),
+      strictNodeDeletionSource.indexOf('async function resolveStrictNodeProvider')
+    );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
     expect(section).toContain('exactProviderCredentialBindingFromPlacementSnapshot(node)');
     expect(section).toMatch(
@@ -529,16 +552,7 @@ describe('provider-aware node provisioning', () => {
     );
   });
 
-  it('deleteNodeResources uses node cloudProvider for credential lookup', () => {
-    const section = nodesSource.slice(nodesSource.indexOf('async function deleteNodeResources'));
-    expect(section).toContain('node.cloudProvider as CredentialProvider');
-    expect(section).toContain('exactProviderCredentialBindingFromPlacementSnapshot(node)');
-    expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
-    );
-  });
-
-  it('deleteNodeResourcesStrict verifies legacy unknown-provider nodes before deleting', () => {
+  it('deleteNodeResourcesStrict fails closed without an exact provider credential binding', () => {
     const strictSection = strictNodeDeletionSource.slice(
       strictNodeDeletionSource.indexOf('async function deleteNodeResourcesStrict')
     );
@@ -551,10 +565,12 @@ describe('provider-aware node provisioning', () => {
       strictNodeDeletionSource.indexOf('async function persistStrictDnsCleanupError')
     );
     expect(strictSection).toContain('await deleteStrictProviderInstance(db, node, userId, env)');
-    expect(verificationSection).toContain('for (const providerName of CREDENTIAL_PROVIDERS)');
-    expect(verificationSection).toContain('candidate.provider.getVM(providerInstanceId)');
-    expect(verificationSection).toContain('presentCandidates.length > 1');
-    expect(verificationSection).toContain('throw new Error');
+    expect(verificationSection).toContain('requireStrictNodeProvider(db, node, userId, env)');
+    expect(strictNodeDeletionSource).toContain(
+      '!targetProvider || !exactCredential?.credentialFingerprint'
+    );
+    expect(verificationSection).not.toContain('CREDENTIAL_PROVIDERS');
+    expect(deletionSection).toContain('await requireSameNodeIncarnation');
     expect(deletionSection).toContain(
       'await providerResult.provider.deleteVM(node.providerInstanceId)'
     );

@@ -12,15 +12,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
+import { deleteNodeResourcesStrict } from '../../../src/services/nodes';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const deleteCalls: string[] = [];
 const stopCalls: string[] = [];
+const RUNTIME_TERMINATION_CONFIRMED_AT = '2026-09-04T00:00:00.000Z';
 
 vi.mock('../../../src/services/nodes', () => ({
   deleteNodeResourcesStrict: vi.fn(async (nodeId: string) => {
     deleteCalls.push(nodeId);
-    return { providerVm: 'deleted' as const };
+    return {
+      providerVm: 'deleted' as const,
+      runtimeTerminationConfirmedAt: RUNTIME_TERMINATION_CONFIRMED_AT,
+      runtimeIncarnationId: null,
+      providerInstanceId: null,
+    };
   }),
   stopNodeResources: vi.fn(async (nodeId: string) => {
     stopCalls.push(nodeId);
@@ -44,6 +51,9 @@ vi.mock('../../../src/services/observability', () => ({
   persistError: vi.fn(async (_db: unknown, input: Record<string, unknown>) => {
     persistErrorCalls.push(input);
   }),
+}));
+vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
+  finalizeWorkspaceLifecycleClosure: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -122,11 +132,13 @@ beforeEach(() => {
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
       warm_since TEXT, node_role TEXT NOT NULL DEFAULT 'workspace', node_class TEXT NOT NULL DEFAULT 'managed',
       runtime TEXT NOT NULL DEFAULT 'vm', health_status TEXT NOT NULL DEFAULT 'unhealthy',
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, cleanup_backoff_until TEXT
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, cleanup_backoff_until TEXT,
+      runtime_termination_confirmed_at TEXT, runtime_incarnation_id TEXT
     );
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY, node_id TEXT, user_id TEXT, status TEXT NOT NULL,
-      project_id TEXT, chat_session_id TEXT, created_at TEXT, updated_at TEXT
+      project_id TEXT, chat_session_id TEXT, created_at TEXT, updated_at TEXT,
+      runtime_deletion_confirmed_at TEXT, runtime_deletion_proof TEXT
     );
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT, auto_provisioned_node_id TEXT,
@@ -137,6 +149,26 @@ beforeEach(() => {
       degradation TEXT NOT NULL, expires_at TEXT NOT NULL
     );
   `);
+  vi.mocked(deleteNodeResourcesStrict).mockImplementation(async (nodeId: string) => {
+    deleteCalls.push(nodeId);
+    sqlite
+      ?.prepare('UPDATE nodes SET runtime_termination_confirmed_at = ? WHERE id = ?')
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    sqlite
+      ?.prepare(
+        `UPDATE workspaces
+            SET status = 'deleted', runtime_deletion_confirmed_at = ?,
+                runtime_deletion_proof = 'node_runtime_terminated'
+          WHERE node_id = ?`
+      )
+      .run(RUNTIME_TERMINATION_CONFIRMED_AT, nodeId);
+    return {
+      providerVm: 'deleted',
+      runtimeTerminationConfirmedAt: RUNTIME_TERMINATION_CONFIRMED_AT,
+      runtimeIncarnationId: null,
+      providerInstanceId: null,
+    };
+  });
 });
 
 afterEach(() => {

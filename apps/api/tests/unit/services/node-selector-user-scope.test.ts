@@ -68,6 +68,7 @@ function createDb() {
       node_role TEXT NOT NULL DEFAULT 'workspace',
       node_mode TEXT NOT NULL DEFAULT 'shared',
       runtime TEXT NOT NULL DEFAULT 'vm',
+      runtime_incarnation_id TEXT,
       node_class TEXT NOT NULL DEFAULT 'managed',
       transport TEXT,
       tunnel_id TEXT,
@@ -76,6 +77,8 @@ function createDb() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       cleanup_backoff_until TEXT
+      ,runtime_termination_confirmed_at TEXT
+      ,placement_credential_fingerprint TEXT
     );
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY,

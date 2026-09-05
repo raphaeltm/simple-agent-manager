@@ -44,6 +44,7 @@ let workspaceRows: Array<{
   nodeId?: string | null;
   nodeStatus?: string | null;
 }> = [];
+let workspaceReadResponses: Array<typeof workspaceRows> = [];
 let latestVersionRows: Array<{ version: number }> = [];
 let environmentRows: Array<{
   id: string;
@@ -72,6 +73,7 @@ const mockTeardownDeploymentEnvironmentOnNode = vi.hoisted(() => vi.fn(async () 
 const recordDeploymentReleaseLifecycleEventBestEffort = vi.hoisted(() =>
   vi.fn(async () => undefined)
 );
+const signalCallbackMock = vi.hoisted(() => vi.fn(async () => undefined));
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
   type: 'callback',
@@ -124,6 +126,9 @@ vi.mock('../../../src/services/node-agent', () => ({
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
   recordDeploymentReleaseLifecycleEventBestEffort,
 }));
+vi.mock('../../../src/services/workspace-deletion-callback-signal', () => ({
+  signalWorkspaceDeletionUnconfirmedCallback: signalCallbackMock,
+}));
 
 function createMockDb() {
   return {
@@ -133,11 +138,11 @@ function createMockDb() {
           return {
             leftJoin: vi.fn().mockReturnValue({
               where: vi.fn().mockReturnValue({
-                limit: vi.fn().mockResolvedValue(workspaceRows),
+                limit: vi.fn(async () => workspaceReadResponses.shift() ?? workspaceRows),
               }),
             }),
             where: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue(workspaceRows),
+              limit: vi.fn(async () => workspaceReadResponses.shift() ?? workspaceRows),
             }),
           };
         }
@@ -255,6 +260,7 @@ describe('compose-publish-release callback (vertical slice)', () => {
         nodeStatus: 'running',
       },
     ];
+    workspaceReadResponses = [];
     latestVersionRows = [{ version: 4 }];
     environmentRows = [
       {
@@ -323,6 +329,26 @@ describe('compose-publish-release callback (vertical slice)', () => {
       })
     );
     expect(waitUntilMock).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['deletion', { status: 'stopping' }],
+    ['node reassignment', { nodeId: 'node-2' }],
+  ])('does not record or provision a release when %s wins after auth', async (_case, change) => {
+    const active = workspaceRows;
+    workspaceReadResponses = [active, [{ ...active[0]!, ...change }]];
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      secretPayload: 'must-not-be-telemetry',
+    });
+
+    expect(res.status).toBe(410);
+    expect(inserted).toHaveLength(0);
+    expect(updated).toHaveLength(0);
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+    expect(recordDeploymentReleaseLifecycleEventBestEffort).not.toHaveBeenCalled();
+    expect(JSON.stringify(signalCallbackMock.mock.calls)).not.toContain('must-not-be-telemetry');
   });
 
   it('records a stopped environment release without provisioning a node', async () => {

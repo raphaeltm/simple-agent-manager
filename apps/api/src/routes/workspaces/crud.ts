@@ -651,17 +651,40 @@ crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
   const workspaceId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspace = await getOwnedWorkspace(db, workspaceId, userId);
+  const workspace = await getOwnedWorkspace(db, workspaceId, userId, { includeDeleted: true });
 
-  await cleanupWorkspaceForDeletion({
+  const deletion = await cleanupWorkspaceForDeletion({
     db,
     env: c.env,
     workspace,
     userId,
-    waitUntil: (promise) => c.executionCtx.waitUntil(promise),
   });
 
-  return c.json({ success: true });
+  if (deletion.status === 'fenced' || deletion.status === 'superseded') {
+    return c.json(
+      {
+        success: false,
+        deletionStatus: 'rejected',
+        workspaceStatus: 'unchanged',
+        reason: deletion.reason,
+      },
+      409
+    );
+  }
+
+  if (deletion.status === 'retry') {
+    return c.json(
+      {
+        success: true,
+        deletionStatus: 'pending',
+        workspaceStatus: 'stopping',
+        reason: deletion.reason,
+      },
+      202
+    );
+  }
+
+  return c.json({ success: true, deletionStatus: 'confirmed' });
 });
 
 export { crudRoutes };

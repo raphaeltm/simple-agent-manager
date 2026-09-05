@@ -309,15 +309,16 @@ export class VmAgentContainer extends Container<Env> {
           const reconciled = await this.withLifecycleLock(async () => {
             const current = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
             if (current !== 'running') return false;
-            await persistRuntimeRecovered(
+            const persisted = await persistRuntimeRecovered(
               this.env,
               toRuntimeRecoveryTarget(config, context),
               'none'
             );
-            return true;
+            return persisted !== false;
           });
           if (reconciled) return { ok: true, status: 'running' };
-          return this.ensureAwake();
+          await this.stop().catch(() => undefined);
+          return stoppedRecoveryResult();
         }
         await this.beginUnexpectedRecovery({
           trigger: 'request',
@@ -471,9 +472,8 @@ export class VmAgentContainer extends Container<Env> {
       const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
       if (config) {
         try {
-          const { isHarnessWorkLeaseActive, parseHarnessWorkConfig } = await import(
-            '../services/session-idleness'
-          );
+          const { isHarnessWorkLeaseActive, parseHarnessWorkConfig } =
+            await import('../services/session-idleness');
           const projectDataService = await import('../services/project-data');
           const timeoutMs = parsePositiveInt(
             this.env.CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS,
@@ -489,7 +489,10 @@ export class VmAgentContainer extends Container<Env> {
               setTimeout(() => reject(new Error('harness lease check timed out')), timeoutMs)
             ),
           ]);
-          if (state && isHarnessWorkLeaseActive(state, new Date(), parseHarnessWorkConfig(this.env))) {
+          if (
+            state &&
+            isHarnessWorkLeaseActive(state, new Date(), parseHarnessWorkConfig(this.env))
+          ) {
             log.info('vm_agent_container_sleep_deferred_harness_work', {
               nodeId: config.nodeId,
               workspaceId: config.workspaceId,
@@ -773,6 +776,12 @@ export class VmAgentContainer extends Container<Env> {
       });
       if (!context) return null;
 
+      const persistedTarget = await persistRuntimeRecovering(
+        this.env,
+        toRuntimeRecoveryTarget(config, context)
+      );
+      if (persistedTarget === null) return null;
+
       const now = Date.now();
       const recovery: RuntimeRecoveryState = {
         version: 1,
@@ -788,7 +797,6 @@ export class VmAgentContainer extends Container<Env> {
       await this.ctx.storage.put(RECOVERY_STATE_KEY, recovery);
       await this.ctx.storage.put('lifecycleStatus', 'recovering' satisfies LifecycleStatus);
       await this.clearKeepaliveSchedule();
-      await persistRuntimeRecovering(this.env, toRuntimeRecoveryTarget(config, context));
       log.warn('vm_agent_container_recovery_started', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,
@@ -902,7 +910,12 @@ export class VmAgentContainer extends Container<Env> {
         // The lock may have been queued behind a stop or another lifecycle
         // operation. Revalidate after entering it and after the D1 commit.
         await this.assertSourceTaskGuard(sourceTaskGuard);
-        await persistRuntimeRecovered(this.env, target, restoring.promptDisposition);
+        const persisted = await persistRuntimeRecovered(
+          this.env,
+          target,
+          restoring.promptDisposition
+        );
+        if (persisted === false) return false;
         await this.assertSourceTaskGuard(sourceTaskGuard);
         await this.ctx.storage.delete(RECOVERY_STATE_KEY);
         await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
@@ -997,7 +1010,10 @@ export class VmAgentContainer extends Container<Env> {
       const exhausted = { ...recovery, phase: 'exhausted' as const, updatedAt: Date.now() };
       await this.ctx.storage.put(RECOVERY_STATE_KEY, exhausted);
       await this.ctx.storage.put('lifecycleStatus', 'error' satisfies LifecycleStatus);
-      if (target) await persistRuntimeRecoveryFailed(this.env, target);
+      if (target) {
+        const persisted = await persistRuntimeRecoveryFailed(this.env, target);
+        if (persisted === false) return false;
+      }
       return true;
     });
     if (!applied) {

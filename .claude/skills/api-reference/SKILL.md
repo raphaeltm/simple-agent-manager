@@ -25,8 +25,9 @@ user-invocable: false
 - `PATCH /api/workspaces/:id` — Rename workspace display name
 - `POST /api/workspaces/:id/sleep` — Strictly checkpoint and sleep a persistent session; verified VM snapshots are resumable on a replacement workspace
 - `POST /api/workspaces/:id/stop` — Permanently stop a running workspace and delete retained session snapshot state
-- `POST /api/workspaces/:id/restart` — Restart a workspace
-- `DELETE /api/workspaces/:id` — Permanently delete a workspace and retained session snapshot state
+- `POST /api/workspaces/:id/restart` — Restart a stopped or errored workspace. Cancellation is allowed only before a deletion attempt is claimed; exact workspace identity/status is rechecked before the VM request.
+- `POST /api/workspaces/:id/rebuild` — Rebuild a running, recovering, or errored workspace. Returns `202`; uses the same claimed-deletion and final VM-request identity fences as restart.
+- `DELETE /api/workspaces/:id` — Request permanent workspace deletion. Returns confirmed success only after VM absence/success proof or an explicit strict provider/container termination marker and terminal finalization; returns `202` with `deletionStatus: "pending"` when durable retry is armed, the same exact attempt is already in flight, or proof-bearing finalization must converge after a concurrent state write. An identity/status fence without retained retry returns `409` with `deletionStatus: "rejected"`. Retained snapshot/session state is removed only after confirmation.
 
 ## Project Management
 

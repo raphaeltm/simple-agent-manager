@@ -18,6 +18,7 @@ const WORKSPACE_ID = `${TEST_PREFIX}-ws`;
 const WORKSPACE_NO_SESSION = `${TEST_PREFIX}-ws-nosess`;
 const WORKSPACE_NO_PROJECT = `${TEST_PREFIX}-ws-noproj`;
 const WORKSPACE_STOPPED = `${TEST_PREFIX}-ws-stopped`;
+const WORKSPACE_STOPPING = `${TEST_PREFIX}-ws-stopping`;
 const PROJECT_ID = `${TEST_PREFIX}-proj`;
 const NODE_ID = `${TEST_PREFIX}-node`;
 const SESSION_ID = `${TEST_PREFIX}-sess`;
@@ -63,6 +64,7 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   let validToken: string;
   let noSessionToken: string;
   let stoppedToken: string;
+  let stoppingToken: string;
 
   beforeAll(async () => {
     // Create test user
@@ -117,6 +119,23 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
        VALUES (?, ?, ?, 'running', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`
     )
       .bind(NODE_ID, USER_ID, 'test-node')
+      .run();
+
+    // Workspace whose runtime deletion has not yet been confirmed.
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'stopping', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
+    )
+      .bind(
+        WORKSPACE_STOPPING,
+        USER_ID,
+        NODE_ID,
+        PROJECT_ID,
+        `${STOPPED_SESSION_ID}-stopping`,
+        'test-ws-stopping',
+        'test-repo',
+        'main'
+      )
       .run();
 
     // Workspace with linked chatSessionId
@@ -197,6 +216,7 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
     validToken = await signCallbackToken(WORKSPACE_ID, env as any);
     noSessionToken = await signCallbackToken(WORKSPACE_NO_SESSION, env as any);
     stoppedToken = await signCallbackToken(WORKSPACE_STOPPED, env as any);
+    stoppingToken = await signCallbackToken(WORKSPACE_STOPPING, env as any);
   });
 
   describe('session validation (Bug 3 fix)', () => {
@@ -336,6 +356,47 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
       );
       expect(response.status).toBe(204);
       expect(await countPlatformErrorsForWorkspace(WORKSPACE_STOPPED)).toBe(beforeErrors);
+    });
+
+    it('rejects a late stopping-workspace callback before parsing payloads and emits bounded telemetry', async () => {
+      const postLateCallback = () =>
+        SELF.fetch(`https://api.test.example.com/api/workspaces/${WORKSPACE_STOPPING}/messages`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${stoppingToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: '{"prompt":"do-not-ingest","token":"super-secret"',
+        });
+      const responses = await Promise.all(Array.from({ length: 8 }, () => postLateCallback()));
+      expect(responses.every((response) => response.status === 204)).toBe(true);
+
+      const projectData = env.PROJECT_DATA.get(
+        env.PROJECT_DATA.idFromName(PROJECT_ID)
+      ) as unknown as {
+        listActivityEvents(
+          eventType: string | null
+        ): Promise<{ events: Array<Record<string, unknown>> }>;
+      };
+      const { events } = await projectData.listActivityEvents(
+        'workspace.deletion_unconfirmed_callback'
+      );
+      const workspaceSignals = events.filter((event) => event.workspaceId === WORKSPACE_STOPPING);
+      expect(workspaceSignals).toHaveLength(1);
+      const signal = workspaceSignals[0];
+      expect(signal).toMatchObject({
+        eventType: 'workspace.deletion_unconfirmed_callback',
+        actorType: 'workspace_callback',
+        actorId: WORKSPACE_STOPPING,
+        workspaceId: WORKSPACE_STOPPING,
+        payload: expect.objectContaining({
+          callback: 'messages',
+          workspaceStatus: 'stopping',
+          action: 'rejected',
+        }),
+      });
+      expect(JSON.stringify(signal)).not.toContain('do-not-ingest');
+      expect(JSON.stringify(signal)).not.toContain('super-secret');
     });
   });
 });
