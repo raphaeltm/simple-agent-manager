@@ -47,6 +47,13 @@ const PROJECT_DATA_ARCHIVE_DEFAULT_GLOBAL_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 100
 const PROJECT_DATA_ARCHIVE_MAX_GLOBAL_SWEEP_INTERVAL_MS = 365 * 24 * 60 * 60 * 1000;
 const PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME = 'archive_sharding_global_sweep';
 
+/**
+ * Journal states a sweep may pick up again. Two consumers: candidate selection
+ * (`selectMigrationWork` / `selectScopedMigrationWork`) and the abandon lease guard in
+ * `abandonProjectDataArchiveMigration`, which treats membership as "a sweep could still hold a
+ * live lease on this row" (terminal states null their lease on transition, `failed` is
+ * exempted there). Adding a state here widens both.
+ */
 const ACTIVE_RECLAIMABLE_STATES = [
   'candidate',
   'leased',

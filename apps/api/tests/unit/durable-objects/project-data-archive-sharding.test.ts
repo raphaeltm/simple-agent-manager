@@ -1040,6 +1040,54 @@ describe('ProjectData archive abandon primitives', () => {
     }
   });
 
+  it('keeps the grouped-row and FTS teardown paged when abandoning a multi-page shard copy', async () => {
+    // The abandon path is the recovery route for exactly the sessions that reset the object,
+    // so its own scans must stay bounded by the page size too (rule 69, memory ceiling).
+    const source = makeSql();
+    const target = makeSql();
+    try {
+      const wide = { ...base, sessionId: 'session-paged', migrationId: 'migration-paged' };
+      seedWideTerminalSession(source.sql, 'session-paged', WIDE_SESSION_ROWS);
+      const prepared = await prepareArchiveSourceIntent(source.sql, {
+        ...wide,
+        now: NOW,
+        minTerminalAgeMs: 0,
+        hashPageRows: 500,
+      });
+      prepareArchiveTarget(target.sql, {
+        ...wide,
+        terminalVersionSha256: prepared.terminalVersionSha256,
+        sessionRow: prepared.sessionRow,
+        expectedMessageCount: prepared.messageCount,
+        now: NOW,
+      });
+      seedWideGroupedRows(target.sql, 'session-paged', WIDE_SESSION_ROWS);
+      expect(
+        target.db
+          .prepare('SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?')
+          .get('session-paged')
+      ).toEqual({ count: WIDE_SESSION_ROWS });
+
+      const recorder = recordSelectRows(target.sql);
+      const result = abandonArchiveTargetSession(recorder.sql, {
+        ...wide,
+        now: NOW,
+        hashPageRows: 500,
+      });
+      expect(result).toMatchObject({ removed: true, groupedRowsDeleted: WIDE_SESSION_ROWS });
+      expect(recorder.maxRowsPerSelect).toBeLessThanOrEqual(500);
+      expect(recorder.selects).toBeGreaterThanOrEqual(Math.ceil(WIDE_SESSION_ROWS / 500));
+      expect(
+        target.db
+          .prepare('SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?')
+          .get('session-paged')
+      ).toEqual({ count: 0 });
+    } finally {
+      source.db.close();
+      target.db.close();
+    }
+  });
+
   it('refuses to abandon a sealed target without source proof and refuses once the source is deleted', async () => {
     const source = makeSql();
     const target = makeSql();

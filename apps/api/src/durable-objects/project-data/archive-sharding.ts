@@ -175,7 +175,11 @@ export type ArchiveSourcePrepareInput = {
   sourceIntentToken: string;
   now: number;
   minTerminalAgeMs?: number;
-  /** Rows per statement while streaming the terminal-version hash; DO wrappers fill from env. */
+  /**
+   * Rows per statement for hash and grouped-row scans. Owned by the ProjectData DO, which
+   * fills it from `PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS`; coordinators never set it. It lives
+   * on the input type (not a second parameter) so the DO can override it uniformly.
+   */
   hashPageRows?: number;
 };
 
@@ -274,6 +278,7 @@ export type ArchiveTargetSealInput = {
   terminalVersionSha256: string;
   expectedChunkHashes: string[];
   now: number;
+  /** See `ArchiveSourcePrepareInput.hashPageRows`: DO-owned page size, never set by coordinators. */
   hashPageRows?: number;
 };
 
@@ -297,6 +302,7 @@ export type ArchiveSourceFinalizeDeleteInput = {
   r2ManifestKey: string;
   now: number;
   minTerminalAgeMs?: number;
+  /** See `ArchiveSourcePrepareInput.hashPageRows`: DO-owned page size, never set by coordinators. */
   hashPageRows?: number;
 };
 
@@ -509,6 +515,11 @@ function resolveHashPageRows(value: number | undefined): number {
  * Visit every grouped row of a session in bounded pages keyed by rowid, so a session
  * with hundreds of thousands of rows never materialises in one statement. Rows may be
  * deleted inside `visit`: the next page seeks past the last rowid seen, not by offset.
+ *
+ * This pages by SQLite rowid rather than the `ChunkTableSpec` business cursor
+ * (`created_at, id`) on purpose: the FTS5 external-content index is keyed by rowid, and the
+ * delete markers `rebuildTargetFts` / `abandonArchiveTargetSession` emit need it. Do not fold
+ * this into the chunk-spec paging.
  */
 function forEachGroupedRowPaged(
   sql: SqlStorage,
@@ -1889,8 +1900,14 @@ export type ArchiveTargetAbandonInput = {
    * the target never transitions past `sealed` inside this object. The shard cannot see
    * the root object, so the coordinator must inspect the source intent first and assert
    * it is still intact before a sealed target may be dropped.
+   *
+   * This is a caller assertion, not evidence the shard can re-derive. The only sanctioned
+   * caller is `abandonProjectDataArchiveMigration` (scheduled/project-data-archive-sharding.ts),
+   * which sets it immediately after `inspectSourceIntent` on the root object. Any new caller
+   * must perform that inspection itself; never pass `true` from a request body.
    */
   sourceIntactVerified?: boolean;
+  /** See `ArchiveSourcePrepareInput.hashPageRows`: DO-owned page size, never set by coordinators. */
   hashPageRows?: number;
 };
 

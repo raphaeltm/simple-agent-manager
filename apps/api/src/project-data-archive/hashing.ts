@@ -57,6 +57,10 @@ export function byteLength(value: string): number {
   return encoder.encode(value).byteLength;
 }
 
+/**
+ * One-shot SHA-256 over a whole string. `createCanonicalRowsHasher` below must stay
+ * byte-identical to `sha256Hex(canonicalizeArchiveRows(...))`; change them together.
+ */
 export async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value));
   return Array.from(new Uint8Array(digest))

@@ -1597,6 +1597,27 @@ describe('archive-sharding candidate selection is size-ordered and budgeted', ()
     }
   });
 
+  it('breaks equal message counts deterministically by oldest update, then id', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-b', messageCount: 200, updatedAt: 2000 });
+      seedSessionSummary(sqlite, { sessionId: 'session-a', messageCount: 200, updatedAt: 2000 });
+      seedSessionSummary(sqlite, { sessionId: 'session-c', messageCount: 200, updatedAt: 1000 });
+      seedSessionSummary(sqlite, { sessionId: 'session-d', messageCount: 300, updatedAt: 9000 });
+      const first = await dryRunSelection(sqlite, {
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000',
+      });
+      expect(first).toEqual(['session-d', 'session-c', 'session-a', 'session-b']);
+      // Identical repeated calls return an identical sequence (rule 65 determinism).
+      expect(
+        await dryRunSelection(sqlite, { PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000' })
+      ).toEqual(first);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('stops selecting once the cumulative message budget is spent', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -1878,6 +1899,58 @@ describe('archive-sharding abandon control', () => {
         now: NOW + 60_001,
       });
       expect(result).toMatchObject({ previousState: 'copying', restoredToRoot: true });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('does not let a stale lease on an already-failed migration block abandon', async () => {
+    // markFailed clears the lease today; this pins the `state !== 'failed'` disjunct so a
+    // future writer that fails a migration without clearing its lease cannot wedge recovery.
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'failed', { leaseExpiresAt: NOW + 60_000 });
+      const source = createFakeSource({ state: 'intent_prepared' });
+      const target = createFakeTarget();
+      const result = await abandonProjectDataArchiveMigration(controlEnv(sqlite, source, target), {
+        migrationId: MIGRATION_ID,
+        projectId: PROJECT_ID,
+        reason: 'failed with a lease still recorded',
+        now: NOW,
+      });
+      expect(result).toMatchObject({ previousState: 'failed', restoredToRoot: true });
+      expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({
+        state: 'frozen',
+        error_code: 'operator_abandoned',
+        lease_expires_at: null,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('requires a non-blank reason before reading the journal or touching any object', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'failed');
+      const source = createFakeSource({ state: 'intent_prepared' });
+      const target = createFakeTarget();
+      for (const reason of ['', '   ', '\n\t']) {
+        await expect(
+          abandonProjectDataArchiveMigration(controlEnv(sqlite, source, target), {
+            migrationId: MIGRATION_ID,
+            projectId: PROJECT_ID,
+            reason,
+            now: NOW,
+          })
+        ).rejects.toMatchObject({ reason: 'abandon_reason_required' });
+      }
+      expect(source.archiveSourceInspectIntent).not.toHaveBeenCalled();
+      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({ state: 'failed' });
+      expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
     } finally {
       sqlite.close();
     }
