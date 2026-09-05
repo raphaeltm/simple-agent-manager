@@ -54,6 +54,23 @@ export const retrySubtaskDef: AnthropicToolDef = {
   },
 };
 
+async function replacementDeletionError(
+  env: Env,
+  sourceTaskId: string,
+  projectId: string,
+  userId: string
+): Promise<{ error: string } | null> {
+  try {
+    await assertReplacementDeletionConfirmed(env, { sourceTaskId, projectId, userId });
+    return null;
+  } catch (error) {
+    if (error instanceof WorkspaceDeletionUnconfirmedError) {
+      return { error: error.message };
+    }
+    throw error;
+  }
+}
+
 export async function retrySubtask(
   input: { taskId: string; newDescription?: string },
   ctx: ToolContext
@@ -115,18 +132,8 @@ export async function retrySubtask(
     };
   }
 
-  try {
-    await assertReplacementDeletionConfirmed(env, {
-      sourceTaskId: taskId,
-      projectId: original.projectId,
-      userId: ctx.userId,
-    });
-  } catch (error) {
-    if (error instanceof WorkspaceDeletionUnconfirmedError) {
-      return { error: error.message };
-    }
-    throw error;
-  }
+  const deletionError = await replacementDeletionError(env, taskId, original.projectId, ctx.userId);
+  if (deletionError) return deletionError;
 
   // Use new description or fall back to original
   const description = input.newDescription?.trim() || original.description;

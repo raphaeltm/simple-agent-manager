@@ -45,6 +45,11 @@ available transcript and focused green evidence are the recovery source.
    tests; local assumptions are insufficient across async boundaries.
 9. PR #2011 is a separate interrupt-reliability change. It was inspected read-only and is
    outside this task; PRs #2010 and #2011 must not be modified.
+10. Recovery of the first PR-release attempt found 20 open Sonar findings on the exact
+    `7bf485be` head: `S3776` x11, `S6582` x4, and one each of `S107`, `S3358`, `S6551`,
+    `S6594`, and `S6660`. Nineteen were created by the September 4 deletion changes. The
+    July `fetchNodeAgent` issue is also PR-introduced for this diff: `main` has seven
+    parameters and the PR added an eighth. No baseline exemption applies.
 
 ## Implementation Checklist
 
@@ -77,6 +82,21 @@ available transcript and focused green evidence are the recovery source.
       converges; return staging to zero VMs.
 - [ ] Open exactly one PR, complete CI and iterative CodeRabbit review, merge, and monitor
       production deployment and deletion telemetry.
+
+### Release recovery remediation
+
+- [x] Refactor all 20 PR-introduced Sonar findings through behavior-preserving helpers;
+      do not exclude production code or weaken thresholds.
+- [x] Re-run the focused deletion, credential, callback, and replacement race suites.
+- [ ] Re-run full lint, typecheck, test, build, and Durable Object Workers validation.
+- [ ] Re-run all required specialist reviews against one final SHA and address every
+      correctness or security finding.
+- [ ] Require direct Sonar issues/measures for the exact final head and a current-head
+      CodeRabbit verdict with zero unresolved feedback.
+- [ ] Preserve the prior destructive staging evidence; run only a compact final-head
+      staging verification and clean staging back to zero VMs.
+- [ ] Refresh after PR #2020's real Sonar gate and ship only after PR #2021's capacity
+      safety is verified in production unless the parent coordinator authorizes otherwise.
 
 ## Acceptance Criteria
 

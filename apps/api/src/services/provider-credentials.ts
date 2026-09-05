@@ -1,6 +1,7 @@
 import type { ProviderConfig, ProviderRequestContext } from '@simple-agent-manager/providers';
 import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
 import {
+  type CCResolvedEnvironment,
   computeAssembler,
   type CredentialProvider,
   type CredentialSource,
@@ -183,6 +184,105 @@ async function createProviderFromDecryptedToken(
   return { provider: createProvider(config), providerName, credentialSource };
 }
 
+type ResolvedComputeCredential = CCResolvedEnvironment;
+
+function providerCredentialSource(resolved: ResolvedComputeCredential): CredentialSource {
+  if (resolved.source === 'project-attachment') return 'project';
+  if (resolved.source === 'user-attachment') return 'user';
+  return 'platform';
+}
+
+async function resolveComputeCredentialWithBackfill(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  encryptionKey: string,
+  targetProvider: CredentialProvider,
+  projectId?: string | null
+): Promise<ResolvedComputeCredential | null | undefined> {
+  const consumer = { kind: 'compute' as const, provider: targetProvider };
+  const hasProjectAttachment = await hasProjectComputeCredentialAttachment(
+    db,
+    userId,
+    targetProvider,
+    projectId
+  );
+  let resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
+  if (!resolved && hasProjectAttachment) return null;
+
+  const platformOnly = resolved?.source === 'platform';
+  if (!resolved || platformOnly) {
+    const didBackfill = await lazyBackfillIfNeeded(db, userId);
+    if (didBackfill) {
+      resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
+    } else if (!resolved) {
+      return undefined;
+    }
+  }
+  return resolved ?? undefined;
+}
+
+async function exactCredentialBindingForResolved(
+  db: ReturnType<typeof drizzle>,
+  resolved: ResolvedComputeCredential,
+  credentialSource: CredentialSource
+): Promise<ExactProviderCredentialBinding | null> {
+  if (!resolved.credential) return null;
+  const credentialTable =
+    credentialSource === 'platform' ? schema.platformCredentials : schema.ccCredentials;
+  const [credentialRow] = await db
+    .select({
+      encryptedToken: credentialTable.encryptedToken,
+      iv: credentialTable.iv,
+      createdAt: credentialTable.createdAt,
+      updatedAt: credentialTable.updatedAt,
+    })
+    .from(credentialTable)
+    .where(eq(credentialTable.id, resolved.credential.id))
+    .limit(1);
+  if (!credentialRow) return null;
+
+  const timestamp = credentialRow.updatedAt ?? credentialRow.createdAt;
+  const parsedVersion = timestamp ? Date.parse(timestamp) : Number.NaN;
+  return {
+    credentialSource,
+    credentialReference:
+      credentialSource === 'platform'
+        ? `platform_credentials:${resolved.credential.id}`
+        : `cc_credentials:${resolved.credential.id}`,
+    credentialVersion: Number.isFinite(parsedVersion) ? parsedVersion : null,
+    credentialFingerprint: await fingerprintEncryptedProviderCredential(
+      credentialRow.encryptedToken,
+      credentialRow.iv
+    ),
+  };
+}
+
+async function createProviderFromComposableConfig(
+  providerName: CredentialProvider,
+  token: string,
+  isPlatform: boolean,
+  credentialSource: CredentialSource,
+  userId: string,
+  projectId: string | null,
+  env: Env & Partial<HetznerRuntimeEnv>
+): Promise<ProviderResolutionResult> {
+  if (providerName === 'gcp') {
+    const gcpCred = parseGcpCredential(token);
+    const { getGcpAccessToken } = await import('./gcp-sts');
+    const cacheUserId = isPlatform ? `platform:${userId}` : userId;
+    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+    const tokenProvider = (context?: ProviderRequestContext) =>
+      getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
+    return {
+      provider: new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone),
+      providerName,
+      credentialSource,
+    };
+  }
+  const config = buildProviderConfig(providerName, token, env);
+  return { provider: createProvider(config), providerName, credentialSource };
+}
+
 /**
  * Try composable-credentials resolution for compute providers with lazy backfill.
  * Returns `undefined` when CC has no data and fallback should be attempted.
@@ -195,39 +295,17 @@ async function resolveProviderViaCC(
   targetProvider: CredentialProvider,
   projectId?: string | null
 ): Promise<ProviderResolutionResult | null | undefined> {
-  const consumer = { kind: 'compute' as const, provider: targetProvider };
-  const hasProjectAttachment = await hasProjectComputeCredentialAttachment(
+  // Rule 28: once a project-scoped compute attachment exists, a null resolution
+  // is an explicit halt. Platform-only resolution still gets one lazy-backfill
+  // pass so a user's own legacy credential can retain precedence.
+  const resolved = await resolveComputeCredentialWithBackfill(
     db,
     userId,
+    encryptionKey,
     targetProvider,
     projectId
   );
-  let resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
-
-  // Rule 28: once a project-scoped compute attachment exists, a null CC
-  // resolution represents an explicit halt or a broken scoped binding, not an
-  // invitation to fall through to personal/platform legacy credentials.
-  if (!resolved && hasProjectAttachment) {
-    return null;
-  }
-
-  // A platform-only first resolution (isPlatform) must be treated like a miss:
-  // an enabled platform default resolves non-null at Tier 3 on the first pass,
-  // which would otherwise short-circuit the lazy backfill of the user's own
-  // legacy credentials. Run the backfill, then re-resolve so the user's own
-  // credential takes precedence over the platform default. Mirrors the
-  // agent-path platformOnly logic in resolveAgentKeyViaCC (credentials.ts).
-  const platformOnly = resolved !== null && resolved.source === 'platform';
-  if (!resolved || platformOnly) {
-    const didBackfill = await lazyBackfillIfNeeded(db, userId);
-    if (didBackfill) {
-      resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
-    } else if (!resolved) {
-      return undefined;
-    }
-  }
-
-  if (!resolved) return undefined;
+  if (!resolved) return resolved;
 
   // Validate the resolved credential's semantic compute contract before the exact-generation
   // snapshot path re-reads its ciphertext. In particular, preserve computeAssembler's specific
@@ -235,41 +313,14 @@ async function resolveProviderViaCC(
   // generic stored-format error during exact credential reconstruction.
   const ccConfig = computeAssembler.assemble(resolved);
   const providerName = targetProvider;
-  const credentialSource: CredentialSource =
-    resolved.source === 'project-attachment'
-      ? 'project'
-      : resolved.source === 'user-attachment'
-        ? 'user'
-        : 'platform';
-  let exactCredentialBinding: ExactProviderCredentialBinding | undefined;
+  const credentialSource = providerCredentialSource(resolved);
   if (resolved.credential) {
-    const credentialTable =
-      credentialSource === 'platform' ? schema.platformCredentials : schema.ccCredentials;
-    const [credentialRow] = await db
-      .select({
-        encryptedToken: credentialTable.encryptedToken,
-        iv: credentialTable.iv,
-        createdAt: credentialTable.createdAt,
-        updatedAt: credentialTable.updatedAt,
-      })
-      .from(credentialTable)
-      .where(eq(credentialTable.id, resolved.credential.id))
-      .limit(1);
-    if (!credentialRow) return null;
-    const timestamp = credentialRow.updatedAt ?? credentialRow.createdAt;
-    const parsedVersion = timestamp ? Date.parse(timestamp) : Number.NaN;
-    exactCredentialBinding = {
-      credentialSource,
-      credentialReference:
-        credentialSource === 'platform'
-          ? `platform_credentials:${resolved.credential.id}`
-          : `cc_credentials:${resolved.credential.id}`,
-      credentialVersion: Number.isFinite(parsedVersion) ? parsedVersion : null,
-      credentialFingerprint: await fingerprintEncryptedProviderCredential(
-        credentialRow.encryptedToken,
-        credentialRow.iv
-      ),
-    };
+    const exactCredentialBinding = await exactCredentialBindingForResolved(
+      db,
+      resolved,
+      credentialSource
+    );
+    if (!exactCredentialBinding) return null;
 
     // The resolver snapshot and this fingerprint query are separate D1 reads. Re-enter exact
     // resolution so provider construction and the persisted fingerprint are guaranteed to use
@@ -285,25 +336,15 @@ async function resolveProviderViaCC(
       createProviderFromDecryptedToken
     );
   }
-  // GCP requires runtime STS token exchange — not a simple token
-  if (providerName === 'gcp') {
-    const gcpCred = parseGcpCredential(ccConfig.token);
-    const { getGcpAccessToken } = await import('./gcp-sts');
-    const cacheUserId = ccConfig.isPlatform ? `platform:${userId}` : userId;
-    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
-    const tokenProvider = (context?: ProviderRequestContext) =>
-      getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
-    const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
-    return { provider, providerName, credentialSource, exactCredentialBinding };
-  }
-
-  const config = buildProviderConfig(providerName, ccConfig.token, env);
-  return {
-    provider: createProvider(config),
+  return createProviderFromComposableConfig(
     providerName,
+    ccConfig.token,
+    ccConfig.isPlatform,
     credentialSource,
-    exactCredentialBinding,
-  };
+    userId,
+    projectId ?? null,
+    env
+  );
 }
 
 async function hasProjectComputeCredentialAttachment(

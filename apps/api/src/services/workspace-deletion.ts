@@ -163,6 +163,25 @@ function isWorkspaceDeletionProof(value: string | null): value is WorkspaceDelet
   );
 }
 
+function confirmedDeletionProof(
+  snapshot: WorkspaceDeletionSnapshot
+): WorkspaceDeletionProof | null {
+  return snapshot.runtimeDeletionConfirmedAt &&
+    isWorkspaceDeletionProof(snapshot.runtimeDeletionProof)
+    ? snapshot.runtimeDeletionProof
+    : null;
+}
+
+function ownershipMatchesForProof(
+  current: WorkspaceDeletionIdentity,
+  expected: WorkspaceDeletionIdentity,
+  proof: WorkspaceDeletionProof
+): boolean {
+  return proof === 'node_runtime_terminated' || proof === 'workspace_never_started'
+    ? sameOwnershipExceptTerminalNode(current, expected)
+    : sameOwnership(current, expected);
+}
+
 function fencedDeletionOutcome(
   expected: WorkspaceDeletionIdentity,
   current: WorkspaceDeletionSnapshot | null,
@@ -184,12 +203,13 @@ function fencedDeletionOutcome(
 function deletionFailureDiagnostic(env: Env, attempt: number, error: unknown): string {
   const errorName = error instanceof Error ? error.name : 'UnknownError';
   const message = error instanceof Error ? error.message : String(error);
-  const statusMatch = message.match(/(?:HTTP|status)\s+(\d{3})/i);
-  const category = /timeout|timed out|abort/i.test(`${errorName} ${message}`)
-    ? 'request_timeout'
-    : statusMatch?.[1]
-      ? `http_status_${statusMatch[1]}`
-      : 'request_failed';
+  const statusMatch = /(?:HTTP|status)\s+(\d{3})/i.exec(message);
+  let category = 'request_failed';
+  if (/timeout|timed out|abort/i.test(`${errorName} ${message}`)) {
+    category = 'request_timeout';
+  } else if (statusMatch?.[1]) {
+    category = `http_status_${statusMatch[1]}`;
+  }
   return boundedDiagnostic(
     env,
     `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: VM attempt ${attempt} (${errorName}: ${category})`
@@ -380,6 +400,31 @@ async function deferConfirmedDeletionFinalization(
   return { status: 'retry', reason: 'runtime_deletion_finalization_pending', diagnostic };
 }
 
+async function resolveTerminalWriteMiss(
+  env: Env,
+  expected: WorkspaceDeletionIdentity,
+  proof: WorkspaceDeletionProof,
+  source: string,
+  beforeFinalize?: () => Promise<void>
+): Promise<WorkspaceDeletionOutcome> {
+  const latest = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
+  if (!latest) return { status: 'confirmed', proof, workspaceFinalized: true };
+  if (!ownershipMatchesForProof(latest, expected, proof)) {
+    return fencedDeletionOutcome(
+      expected,
+      latest,
+      'workspace_assignment_changed',
+      source,
+      'terminal_write'
+    );
+  }
+  const latestProof = confirmedDeletionProof(latest);
+  if (latestProof) {
+    return finalizeConfirmedDeletion(env, expected, latestProof, source, beforeFinalize);
+  }
+  return deferConfirmedDeletionFinalization(env, expected, latest, proof, source, 'terminal_write');
+}
+
 async function finalizeConfirmedDeletion(
   env: Env,
   expected: WorkspaceDeletionIdentity,
@@ -392,12 +437,7 @@ async function finalizeConfirmedDeletion(
     return { status: 'confirmed', proof, workspaceFinalized: true };
   }
 
-  const terminalNodeMayClearAssignment =
-    proof === 'node_runtime_terminated' || proof === 'workspace_never_started';
-  const ownershipMatches = terminalNodeMayClearAssignment
-    ? sameOwnershipExceptTerminalNode(current, expected)
-    : sameOwnership(current, expected);
-  if (!ownershipMatches) {
+  if (!ownershipMatchesForProof(current, expected, proof)) {
     log.warn('workspace_deletion.confirmed_old_incarnation', {
       ...workspaceDeletionIdentityLogContext(expected, current),
       currentStatus: current.status,
@@ -410,20 +450,18 @@ async function finalizeConfirmedDeletion(
       reason: 'workspace_assignment_changed_after_vm_confirmation',
     };
   }
-  if (
-    current.runtimeDeletionConfirmedAt &&
-    isWorkspaceDeletionProof(current.runtimeDeletionProof)
-  ) {
+  const currentProof = confirmedDeletionProof(current);
+  if (currentProof) {
     await beforeFinalize?.();
     const lifecycle = await finalizeWorkspaceLifecycleClosure(env, {
       workspaceIds: [expected.workspaceId],
       userId: expected.userId,
       agentSessionStatus: 'completed',
-      reason: `workspace_deletion_${source}_${current.runtimeDeletionProof}`,
+      reason: `workspace_deletion_${source}_${currentProof}`,
     });
     return {
       status: 'confirmed',
-      proof: current.runtimeDeletionProof,
+      proof: currentProof,
       workspaceFinalized: true,
       lifecycle,
     };
@@ -481,40 +519,7 @@ async function finalizeConfirmedDeletion(
     )
     .run();
   if ((result.meta.changes ?? 0) === 0) {
-    const latest = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
-    if (!latest) return { status: 'confirmed', proof, workspaceFinalized: true };
-    const latestOwnershipMatches = terminalNodeMayClearAssignment
-      ? sameOwnershipExceptTerminalNode(latest, expected)
-      : sameOwnership(latest, expected);
-    if (!latestOwnershipMatches) {
-      return fencedDeletionOutcome(
-        expected,
-        latest,
-        'workspace_assignment_changed',
-        source,
-        'terminal_write'
-      );
-    }
-    if (
-      latest.runtimeDeletionConfirmedAt &&
-      isWorkspaceDeletionProof(latest.runtimeDeletionProof)
-    ) {
-      return finalizeConfirmedDeletion(
-        env,
-        expected,
-        latest.runtimeDeletionProof,
-        source,
-        beforeFinalize
-      );
-    }
-    return deferConfirmedDeletionFinalization(
-      env,
-      expected,
-      latest,
-      proof,
-      source,
-      'terminal_write'
-    );
+    return resolveTerminalWriteMiss(env, expected, proof, source, beforeFinalize);
   }
 
   await beforeFinalize?.();
@@ -535,54 +540,39 @@ async function finalizeConfirmedDeletion(
   return { status: 'confirmed', proof, workspaceFinalized: true, lifecycle };
 }
 
-/**
- * Delete one exact workspace incarnation and classify the evidence. A transport
- * timeout is deliberately a retry outcome: it says nothing about whether the
- * remote handler completed after the client stopped waiting.
- */
-export async function attemptWorkspaceDeletion(
-  options: AttemptWorkspaceDeletionOptions
-): Promise<WorkspaceDeletionOutcome> {
+async function resolveDeletionBeforeClaim(
+  options: AttemptWorkspaceDeletionOptions,
+  initial: WorkspaceDeletionSnapshot | null,
+  proofBeforeRequest: WorkspaceDeletionProof | null
+): Promise<WorkspaceDeletionOutcome | null> {
   const {
     env,
     expected,
-    attempt,
     source,
-    mode,
-    requestTimeoutMs,
     beforeFinalize,
     allowWorkspaceNeverStartedProof = false,
   } = options;
-  const initial = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
-  const proofBeforeRequest = await terminalNodeProof(env.DATABASE, expected);
-
   if (!initial) {
-    return proofBeforeRequest
-      ? finalizeConfirmedDeletion(env, expected, proofBeforeRequest, source, beforeFinalize)
-      : fencedDeletionOutcome(expected, initial, 'workspace_missing', source, 'initial_recheck');
+    if (proofBeforeRequest) {
+      return finalizeConfirmedDeletion(env, expected, proofBeforeRequest, source, beforeFinalize);
+    }
+    return fencedDeletionOutcome(expected, initial, 'workspace_missing', source, 'initial_recheck');
   }
   if (!sameOwnership(initial, expected)) {
-    return proofBeforeRequest
-      ? finalizeConfirmedDeletion(env, expected, proofBeforeRequest, source, beforeFinalize)
-      : fencedDeletionOutcome(
-          expected,
-          initial,
-          'workspace_assignment_changed',
-          source,
-          'initial_recheck'
-        );
-  }
-  if (
-    initial.runtimeDeletionConfirmedAt &&
-    isWorkspaceDeletionProof(initial.runtimeDeletionProof)
-  ) {
-    return finalizeConfirmedDeletion(
-      env,
+    if (proofBeforeRequest) {
+      return finalizeConfirmedDeletion(env, expected, proofBeforeRequest, source, beforeFinalize);
+    }
+    return fencedDeletionOutcome(
       expected,
-      initial.runtimeDeletionProof,
+      initial,
+      'workspace_assignment_changed',
       source,
-      beforeFinalize
+      'initial_recheck'
     );
+  }
+  const existingProof = confirmedDeletionProof(initial);
+  if (existingProof) {
+    return finalizeConfirmedDeletion(env, expected, existingProof, source, beforeFinalize);
   }
   if (allowWorkspaceNeverStartedProof && !expected.nodeId && initial.status === 'pending') {
     return finalizeConfirmedDeletion(
@@ -596,29 +586,117 @@ export async function attemptWorkspaceDeletion(
   if (proofBeforeRequest) {
     return finalizeConfirmedDeletion(env, expected, proofBeforeRequest, source, beforeFinalize);
   }
+  return null;
+}
 
-  const claimed = await claimDeletionTransition(env, expected, mode, attempt);
-  if (!claimed) {
+async function deletionClaimFailureOutcome(
+  env: Env,
+  expected: WorkspaceDeletionIdentity,
+  source: string
+): Promise<WorkspaceDeletionOutcome> {
+  const current = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
+  const reason =
+    current && sameOwnership(current, expected)
+      ? 'workspace_active'
+      : 'workspace_assignment_changed';
+  return fencedDeletionOutcome(expected, current, reason, source, 'd1_claim');
+}
+
+function deletionTargetIsReady(
+  current: WorkspaceDeletionSnapshot | null,
+  expected: WorkspaceDeletionIdentity
+): boolean {
+  return current?.status === 'stopping' && sameOwnership(current, expected);
+}
+
+async function requestWorkspaceDeletion(
+  options: AttemptWorkspaceDeletionOptions
+): Promise<WorkspaceDeletionProof | Extract<WorkspaceDeletionOutcome, { status: 'retry' }>> {
+  const { env, expected, attempt, requestTimeoutMs } = options;
+  if (!expected.nodeId) {
+    const diagnostic = boundedDiagnostic(
+      env,
+      `Runtime deletion unconfirmed after attempt ${attempt} (node assignment unavailable)`
+    );
+    await persistDeletionDiagnostic(env, expected, diagnostic);
+    return { status: 'retry', reason: 'runtime_deletion_unconfirmed', diagnostic };
+  }
+
+  try {
+    await deleteWorkspaceOnNode(expected.nodeId, expected.workspaceId, env, expected.userId, {
+      requestTimeoutMs,
+      beforeExternalMutation: async () => {
+        await requireDeletionTargetAtBoundary(env, expected);
+      },
+    });
+  } catch (error) {
+    // The VM agent's workspace-specific 404 means the exact runtime is already
+    // absent and is therefore an idempotent deletion confirmation. DNS loop-back
+    // 404s are converted to a different error in node-agent.
+    if (!(error instanceof NodeAgentHttpError) || error.statusCode !== 404) throw error;
+  }
+  return 'vm_agent_confirmed';
+}
+
+async function classifyWorkspaceDeletionError(
+  options: AttemptWorkspaceDeletionOptions,
+  error: unknown
+): Promise<WorkspaceDeletionOutcome> {
+  const { env, expected, attempt, source, beforeFinalize } = options;
+  if (error instanceof WorkspaceDeletionFenceError) {
     const current = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
-    if (current && sameOwnership(current, expected)) {
-      return fencedDeletionOutcome(expected, current, 'workspace_active', source, 'd1_claim');
-    }
     return fencedDeletionOutcome(
       expected,
       current,
       'workspace_assignment_changed',
       source,
-      'd1_claim'
+      'vm_request_boundary'
     );
+  }
+
+  // The node can become authoritatively terminal while the request is in
+  // flight. That is valid proof; heartbeat age and health are intentionally ignored.
+  const proofAfterError = await terminalNodeProof(env.DATABASE, expected);
+  if (proofAfterError) {
+    return finalizeConfirmedDeletion(env, expected, proofAfterError, source, beforeFinalize);
+  }
+
+  const diagnostic = deletionFailureDiagnostic(env, attempt, error);
+  await persistDeletionDiagnostic(env, expected, diagnostic);
+  log.warn('workspace_deletion.unconfirmed', {
+    workspaceId: expected.workspaceId,
+    nodeId: expected.nodeId,
+    userId: expected.userId,
+    attempt,
+    source,
+    diagnostic,
+    action: 'retry',
+  });
+  return { status: 'retry', reason: 'runtime_deletion_unconfirmed', diagnostic };
+}
+
+/**
+ * Delete one exact workspace incarnation and classify the evidence. A transport
+ * timeout is deliberately a retry outcome: it says nothing about whether the
+ * remote handler completed after the client stopped waiting.
+ */
+export async function attemptWorkspaceDeletion(
+  options: AttemptWorkspaceDeletionOptions
+): Promise<WorkspaceDeletionOutcome> {
+  const { env, expected, attempt, source, mode, beforeFinalize } = options;
+  const initial = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
+  const proofBeforeRequest = await terminalNodeProof(env.DATABASE, expected);
+  const earlyOutcome = await resolveDeletionBeforeClaim(options, initial, proofBeforeRequest);
+  if (earlyOutcome) return earlyOutcome;
+
+  const claimed = await claimDeletionTransition(env, expected, mode, attempt);
+  if (!claimed) {
+    return deletionClaimFailureOutcome(env, expected, source);
   }
 
   // Rule 49 / TOCTOU fence: re-read immediately before the external mutation.
   const beforeRequest = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
-  if (
-    !beforeRequest ||
-    !sameOwnership(beforeRequest, expected) ||
-    beforeRequest.status !== 'stopping'
-  ) {
+  if (!deletionTargetIsReady(beforeRequest, expected)) {
     return fencedDeletionOutcome(
       expected,
       beforeRequest,
@@ -629,62 +707,11 @@ export async function attemptWorkspaceDeletion(
   }
 
   try {
-    let proof: WorkspaceDeletionProof;
-    if (!expected.nodeId) {
-      const diagnostic = boundedDiagnostic(
-        env,
-        `Runtime deletion unconfirmed after attempt ${attempt} (node assignment unavailable)`
-      );
-      await persistDeletionDiagnostic(env, expected, diagnostic);
-      return { status: 'retry', reason: 'runtime_deletion_unconfirmed', diagnostic };
-    } else {
-      try {
-        await deleteWorkspaceOnNode(expected.nodeId, expected.workspaceId, env, expected.userId, {
-          requestTimeoutMs,
-          beforeExternalMutation: async () => {
-            await requireDeletionTargetAtBoundary(env, expected);
-          },
-        });
-      } catch (error) {
-        // The VM agent's workspace-specific 404 means the exact runtime is
-        // already absent and is therefore an idempotent deletion confirmation.
-        // DNS loop-back 404s are converted to a different error in node-agent.
-        if (!(error instanceof NodeAgentHttpError) || error.statusCode !== 404) throw error;
-      }
-      proof = 'vm_agent_confirmed';
-    }
-    return finalizeConfirmedDeletion(env, expected, proof, source, beforeFinalize);
+    const requestResult = await requestWorkspaceDeletion(options);
+    if (typeof requestResult !== 'string') return requestResult;
+    return finalizeConfirmedDeletion(env, expected, requestResult, source, beforeFinalize);
   } catch (error) {
-    if (error instanceof WorkspaceDeletionFenceError) {
-      const current = await loadWorkspaceDeletionRow(env.DATABASE, expected.workspaceId);
-      return fencedDeletionOutcome(
-        expected,
-        current,
-        'workspace_assignment_changed',
-        source,
-        'vm_request_boundary'
-      );
-    }
-    // The node can become authoritatively terminal while the request is in
-    // flight. That is valid proof; heartbeat age and health are intentionally
-    // ignored here.
-    const proofAfterError = await terminalNodeProof(env.DATABASE, expected);
-    if (proofAfterError) {
-      return finalizeConfirmedDeletion(env, expected, proofAfterError, source, beforeFinalize);
-    }
-
-    const diagnostic = deletionFailureDiagnostic(env, attempt, error);
-    await persistDeletionDiagnostic(env, expected, diagnostic);
-    log.warn('workspace_deletion.unconfirmed', {
-      workspaceId: expected.workspaceId,
-      nodeId: expected.nodeId,
-      userId: expected.userId,
-      attempt,
-      source,
-      diagnostic,
-      action: 'retry',
-    });
-    return { status: 'retry', reason: 'runtime_deletion_unconfirmed', diagnostic };
+    return classifyWorkspaceDeletionError(options, error);
   }
 }
 

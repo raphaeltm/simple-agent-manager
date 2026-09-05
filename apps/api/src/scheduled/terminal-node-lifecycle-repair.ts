@@ -10,6 +10,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { findRestorableOrInFlightSleepSnapshot } from '../services/session-snapshot-sleep-predicate';
 import { cleanupWorkspaceForDeletion } from '../services/workspace-cleanup';
+import type { FinalizeWorkspaceLifecycleClosureResult } from '../services/workspace-lifecycle-finalizer';
 import { parsePositiveInt } from './node-cleanup/shared';
 
 interface TerminalNodeWorkspaceRow {
@@ -73,6 +74,94 @@ function repairWallBudgetMs(env: Env): number {
   );
 }
 
+function createRepairStats(selected: number): TerminalNodeLifecycleRepairStats {
+  return {
+    selected,
+    skippedProtectedSleep: 0,
+    workspacesTerminalized: 0,
+    agentSessionsClosed: 0,
+    computeUsageClosed: 0,
+    projectSessionsClosed: 0,
+    projectSessionErrors: 0,
+    workspaceActivityCleaned: 0,
+    workspaceActivityErrors: 0,
+    errors: 0,
+    budgetExhausted: false,
+  };
+}
+
+function recordConfirmedRepair(
+  stats: TerminalNodeLifecycleRepairStats,
+  lifecycle: FinalizeWorkspaceLifecycleClosureResult | undefined
+): void {
+  stats.workspacesTerminalized++;
+  stats.agentSessionsClosed += lifecycle?.agentSessionsClosed ?? 0;
+  stats.computeUsageClosed += lifecycle?.computeUsageClosed ?? 0;
+  stats.projectSessionsClosed += lifecycle?.projectSessionsClosed ?? 0;
+  stats.projectSessionErrors += lifecycle?.projectSessionErrors ?? 0;
+  stats.workspaceActivityCleaned += lifecycle?.workspaceActivityCleaned ?? 0;
+  stats.workspaceActivityErrors += lifecycle?.workspaceActivityErrors ?? 0;
+}
+
+function shouldLogRepairStats(stats: TerminalNodeLifecycleRepairStats): boolean {
+  return (
+    stats.workspacesTerminalized > 0 ||
+    stats.agentSessionsClosed > 0 ||
+    stats.computeUsageClosed > 0 ||
+    stats.projectSessionsClosed > 0 ||
+    stats.errors > 0 ||
+    stats.budgetExhausted
+  );
+}
+
+async function hasProtectedSleep(env: Env, row: TerminalNodeWorkspaceRow): Promise<boolean> {
+  if (!row.project_id || !row.chat_session_id) return false;
+  return Boolean(
+    await findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
+      projectId: row.project_id,
+      workspaceId: row.workspace_id,
+      chatSessionId: row.chat_session_id,
+    })
+  );
+}
+
+async function repairTerminalNodeWorkspace(
+  env: Env,
+  row: TerminalNodeWorkspaceRow,
+  stats: TerminalNodeLifecycleRepairStats
+): Promise<void> {
+  try {
+    if (await hasProtectedSleep(env, row)) {
+      stats.skippedProtectedSleep++;
+      return;
+    }
+    const outcome = await cleanupWorkspaceForDeletion({
+      db: drizzle(env.DATABASE, { schema }),
+      env,
+      workspace: {
+        id: row.workspace_id,
+        nodeId: row.node_id,
+        userId: row.user_id,
+        projectId: row.project_id,
+        chatSessionId: row.chat_session_id,
+        status: row.status,
+      } as schema.Workspace,
+      userId: row.user_id,
+      deleteConfirmedRow: false,
+      logContext: { closePath: 'terminal_node_lifecycle_repair' },
+    });
+    if (outcome.status === 'confirmed') recordConfirmedRepair(stats, outcome.lifecycle);
+    else stats.errors++;
+  } catch (error) {
+    stats.errors++;
+    log.warn('terminal_node_lifecycle_repair.workspace_failed', {
+      workspaceId: row.workspace_id,
+      nodeId: row.node_id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export async function runTerminalNodeLifecycleRepair(
   env: Env
 ): Promise<TerminalNodeLifecycleRepairStats> {
@@ -92,81 +181,17 @@ export async function runTerminalNodeLifecycleRepair(
     .bind(...ACTIVE_WORKSPACE_STATUSES, limit)
     .all<TerminalNodeWorkspaceRow>();
 
-  const stats: TerminalNodeLifecycleRepairStats = {
-    selected: rows.results.length,
-    skippedProtectedSleep: 0,
-    workspacesTerminalized: 0,
-    agentSessionsClosed: 0,
-    computeUsageClosed: 0,
-    projectSessionsClosed: 0,
-    projectSessionErrors: 0,
-    workspaceActivityCleaned: 0,
-    workspaceActivityErrors: 0,
-    errors: 0,
-    budgetExhausted: false,
-  };
+  const stats = createRepairStats(rows.results.length);
 
   for (const row of rows.results) {
     if (Date.now() - startedAt >= repairWallBudgetMs(env)) {
       stats.budgetExhausted = true;
       break;
     }
-    try {
-      if (row.project_id && row.chat_session_id) {
-        const protectedSleep = await findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
-          projectId: row.project_id,
-          workspaceId: row.workspace_id,
-          chatSessionId: row.chat_session_id,
-        });
-        if (protectedSleep) {
-          stats.skippedProtectedSleep++;
-          continue;
-        }
-      }
-      const outcome = await cleanupWorkspaceForDeletion({
-        db: drizzle(env.DATABASE, { schema }),
-        env,
-        workspace: {
-          id: row.workspace_id,
-          nodeId: row.node_id,
-          userId: row.user_id,
-          projectId: row.project_id,
-          chatSessionId: row.chat_session_id,
-          status: row.status,
-        } as schema.Workspace,
-        userId: row.user_id,
-        deleteConfirmedRow: false,
-        logContext: { closePath: 'terminal_node_lifecycle_repair' },
-      });
-      if (outcome.status === 'confirmed') {
-        stats.workspacesTerminalized++;
-        stats.agentSessionsClosed += outcome.lifecycle?.agentSessionsClosed ?? 0;
-        stats.computeUsageClosed += outcome.lifecycle?.computeUsageClosed ?? 0;
-        stats.projectSessionsClosed += outcome.lifecycle?.projectSessionsClosed ?? 0;
-        stats.projectSessionErrors += outcome.lifecycle?.projectSessionErrors ?? 0;
-        stats.workspaceActivityCleaned += outcome.lifecycle?.workspaceActivityCleaned ?? 0;
-        stats.workspaceActivityErrors += outcome.lifecycle?.workspaceActivityErrors ?? 0;
-      } else {
-        stats.errors++;
-      }
-    } catch (error) {
-      stats.errors++;
-      log.warn('terminal_node_lifecycle_repair.workspace_failed', {
-        workspaceId: row.workspace_id,
-        nodeId: row.node_id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    await repairTerminalNodeWorkspace(env, row, stats);
   }
 
-  if (
-    stats.workspacesTerminalized > 0 ||
-    stats.agentSessionsClosed > 0 ||
-    stats.computeUsageClosed > 0 ||
-    stats.projectSessionsClosed > 0 ||
-    stats.errors > 0 ||
-    stats.budgetExhausted
-  ) {
+  if (shouldLogRepairStats(stats)) {
     log.info('terminal_node_lifecycle_repair.completed', { ...stats });
   }
 

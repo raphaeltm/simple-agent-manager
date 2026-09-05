@@ -135,7 +135,8 @@ describe('workspace lifecycle synchronization', () => {
       const deleteSection = nodeDeletionFile.slice(
         nodeDeletionFile.indexOf('export async function deleteNodeResources(')
       );
-      expect(deleteSection).toContain('runtime_termination_unconfirmed');
+      expect(nodeDeletionFile).toContain('runtime_termination_unconfirmed');
+      expect(deleteSection).toContain('deleteManagedNodeRuntime');
     });
   });
 

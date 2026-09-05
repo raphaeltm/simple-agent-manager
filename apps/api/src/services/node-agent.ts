@@ -54,6 +54,12 @@ interface NodeAgentRequestOptions extends RequestInit {
   recoverContainerOnTimeout?: boolean;
 }
 
+interface FetchNodeAgentControls {
+  sourceTaskGuard?: VmAgentContainerRequestGuard;
+  beforeExternalMutation?: () => Promise<void>;
+  recoverContainerOnTimeout?: boolean;
+}
+
 export interface GuardedNodeAgentMutationOptions {
   sourceTaskGuard?: VmAgentContainerRequestGuard;
   beforeExternalMutation?: () => Promise<void>;
@@ -208,9 +214,7 @@ export async function nodeAgentRequest(
     url,
     { ...requestOptions, headers },
     requestTimeoutMs,
-    sourceTaskGuard,
-    beforeExternalMutation,
-    recoverContainerOnTimeout
+    { sourceTaskGuard, beforeExternalMutation, recoverContainerOnTimeout }
   );
 
   recordNodeRoutingMetric(
@@ -275,10 +279,9 @@ export async function fetchNodeAgent(
   url: string,
   options: RequestInit,
   requestTimeoutMs: number,
-  sourceTaskGuard?: VmAgentContainerRequestGuard,
-  beforeExternalMutation?: () => Promise<void>,
-  recoverContainerOnTimeout = true
+  controls: FetchNodeAgentControls = {}
 ): Promise<Response> {
+  const { sourceTaskGuard, beforeExternalMutation, recoverContainerOnTimeout = true } = controls;
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     await beforeExternalMutation?.();
     return fetchWithTimeout(url, options, requestTimeoutMs);

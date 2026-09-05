@@ -11,6 +11,16 @@ import {
   type WorkspaceDeletionMode,
 } from '../services/workspace-deletion';
 import {
+  claimedDeletionEntry,
+  deletionEntryClaimedWithoutNodeIncarnation,
+  deletionEntryMatchesClaimIdentity,
+  deletionEntryMatchesScheduledIdentity,
+  deletionIdentityForAttempt,
+  deletionIdentityFromEntry,
+  scheduledDeletionEntry,
+  scheduledDeletionIdentity,
+} from './node-lifecycle-workspace-deletion-entry';
+import {
   backfillWorkspaceDeletionDueIndexBatch,
   isPendingWorkspaceDeletion,
   recalculateWorkspaceDeletionAlarm,
@@ -104,39 +114,14 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       return false;
     }
     const existing = await this.storage.get<PendingWorkspaceDeletion>(key);
-    const scheduledIdentity: WorkspaceDeletionIdentity = options?.expected ??
-      identity ?? {
-        workspaceId,
-        nodeId,
-        nodeUserId: null,
-        nodeRuntime: null,
-        nodeProviderInstanceId: null,
-        nodeRuntimeIncarnationId: null,
-        userId,
-        projectId: null,
-        chatSessionId: null,
-      };
-    const existingClaimedWithoutNodeIncarnation =
-      existing !== undefined &&
-      (existing.attemptCount ?? 0) > 0 &&
-      (existing.nodeUserId === undefined ||
-        existing.nodeRuntime === undefined ||
-        existing.nodeProviderInstanceId === undefined ||
-        existing.nodeRuntimeIncarnationId === undefined);
-    const existingMatches =
-      existing !== undefined &&
-      !existingClaimedWithoutNodeIncarnation &&
-      existing.nodeId === scheduledIdentity.nodeId &&
-      (existing.nodeUserId === undefined || existing.nodeUserId === scheduledIdentity.nodeUserId) &&
-      (existing.nodeRuntime === undefined ||
-        existing.nodeRuntime === scheduledIdentity.nodeRuntime) &&
-      (existing.nodeProviderInstanceId === undefined ||
-        existing.nodeProviderInstanceId === scheduledIdentity.nodeProviderInstanceId) &&
-      (existing.nodeRuntimeIncarnationId === undefined ||
-        existing.nodeRuntimeIncarnationId === scheduledIdentity.nodeRuntimeIncarnationId) &&
-      existing.userId === scheduledIdentity.userId &&
-      existing.projectId === scheduledIdentity.projectId &&
-      existing.chatSessionId === scheduledIdentity.chatSessionId;
+    const scheduledIdentity = scheduledDeletionIdentity({
+      supplied: options?.expected,
+      current: identity,
+      workspaceId,
+      nodeId,
+      userId,
+    });
+    const existingMatches = deletionEntryMatchesScheduledIdentity(existing, scheduledIdentity);
     if (existing && !existingMatches) {
       log.warn('node_lifecycle.workspace_deletion_schedule_fenced', {
         workspaceId,
@@ -148,30 +133,21 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       await this.recalculateAlarm(await this.getWarmAlarmTime());
       return false;
     }
-    if (existingMatches && existing.deadLetteredAt) {
+    if (existingMatches && existing?.deadLetteredAt) {
       await this.recalculateAlarm(await this.getWarmAlarmTime());
       return false;
     }
 
-    const entry: PendingWorkspaceDeletion = {
-      nodeId: scheduledIdentity.nodeId ?? nodeId,
-      nodeUserId: scheduledIdentity.nodeUserId,
-      nodeRuntime: scheduledIdentity.nodeRuntime,
-      nodeProviderInstanceId: scheduledIdentity.nodeProviderInstanceId,
-      nodeRuntimeIncarnationId: scheduledIdentity.nodeRuntimeIncarnationId,
+    const entry = scheduledDeletionEntry({
+      existing,
+      existingMatches,
+      identity: scheduledIdentity,
+      fallbackNodeId: nodeId,
       workspaceId,
-      userId: scheduledIdentity.userId,
-      projectId: scheduledIdentity.projectId,
-      chatSessionId: scheduledIdentity.chatSessionId,
-      deleteAt: existingMatches ? Math.min(existing.deleteAt, now + delayMs) : now + delayMs,
-      firstScheduledAt: existingMatches ? (existing.firstScheduledAt ?? now) : now,
-      attemptCount: existingMatches ? (existing.attemptCount ?? 0) : 0,
-      lastAttemptAt: existingMatches ? (existing.lastAttemptAt ?? null) : null,
-      lastError: options?.lastError ?? (existingMatches ? (existing.lastError ?? null) : null),
-      claimId: existingMatches ? (existing.claimId ?? null) : null,
-      deadLetteredAt: existingMatches ? (existing.deadLetteredAt ?? null) : null,
-      deadLetterReason: existingMatches ? (existing.deadLetterReason ?? null) : null,
-    };
+      now,
+      delayMs,
+      lastError: options?.lastError,
+    });
     await this.putEntryWithAlarm(key, entry);
 
     log.info('node_lifecycle.workspace_deletion_scheduled', {
@@ -193,18 +169,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     mode: WorkspaceDeletionMode
   ): Promise<WorkspaceDeletionClaimResult> {
     const current = await loadWorkspaceDeletionSnapshot(this.env.DATABASE, workspaceId);
-    if (
-      !current ||
-      current.workspaceId !== expected.workspaceId ||
-      current.nodeId !== expected.nodeId ||
-      current.nodeUserId !== expected.nodeUserId ||
-      current.nodeRuntime !== expected.nodeRuntime ||
-      current.nodeProviderInstanceId !== expected.nodeProviderInstanceId ||
-      current.nodeRuntimeIncarnationId !== expected.nodeRuntimeIncarnationId ||
-      current.userId !== expected.userId ||
-      current.projectId !== expected.projectId ||
-      current.chatSessionId !== expected.chatSessionId
-    ) {
+    if (!current || !sameDeletionIdentity(current, expected)) {
       log.warn('node_lifecycle.workspace_deletion_claim_identity_fenced', {
         ...workspaceDeletionIdentityLogContext(expected, current),
         currentStatus: current?.status ?? 'missing',
@@ -220,22 +185,12 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     const warmAlarmTime = await this.getWarmAlarmTime();
     const claim = await this.storage.transaction(async (transaction) => {
       const existing = await transaction.get<PendingWorkspaceDeletion>(key);
-      const existingMatches =
-        !existing ||
-        ((existing.nodeId ?? nodeId) === (expected.nodeId ?? nodeId) &&
-          (existing.nodeUserId === undefined ? expected.nodeUserId : existing.nodeUserId) ===
-            expected.nodeUserId &&
-          (existing.nodeRuntime === undefined ? expected.nodeRuntime : existing.nodeRuntime) ===
-            expected.nodeRuntime &&
-          (existing.nodeProviderInstanceId === undefined
-            ? expected.nodeProviderInstanceId
-            : existing.nodeProviderInstanceId) === expected.nodeProviderInstanceId &&
-          (existing.nodeRuntimeIncarnationId === undefined
-            ? expected.nodeRuntimeIncarnationId
-            : existing.nodeRuntimeIncarnationId) === expected.nodeRuntimeIncarnationId &&
-          existing.userId === userId &&
-          (existing.projectId ?? expected.projectId) === expected.projectId &&
-          (existing.chatSessionId ?? expected.chatSessionId) === expected.chatSessionId);
+      const existingMatches = deletionEntryMatchesClaimIdentity({
+        entry: existing,
+        nodeId,
+        userId,
+        expected,
+      });
       if (!existingMatches || existing?.deadLetteredAt) {
         return { result: 'fenced' as const, entry: existing ?? null };
       }
@@ -266,19 +221,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     });
     if (claim.result !== 'claimed') {
       const currentEntry = claim.entry;
-      const currentEntryIdentity: WorkspaceDeletionIdentity | null = currentEntry
-        ? {
-            workspaceId: currentEntry.workspaceId,
-            nodeId: currentEntry.nodeId ?? null,
-            nodeUserId: currentEntry.nodeUserId ?? null,
-            nodeRuntime: currentEntry.nodeRuntime ?? null,
-            nodeProviderInstanceId: currentEntry.nodeProviderInstanceId ?? null,
-            nodeRuntimeIncarnationId: currentEntry.nodeRuntimeIncarnationId ?? null,
-            userId: currentEntry.userId,
-            projectId: currentEntry.projectId ?? null,
-            chatSessionId: currentEntry.chatSessionId ?? null,
-          }
-        : null;
+      const currentEntryIdentity = deletionIdentityFromEntry(currentEntry);
       log.warn('node_lifecycle.workspace_deletion_claim_fenced', {
         ...workspaceDeletionIdentityLogContext(expected, currentEntryIdentity),
         attemptCount: currentEntry?.attemptCount ?? 0,
@@ -376,6 +319,16 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     const storedNodeId = await this.getStoredNodeId();
     const batchSize = workspaceDeletionAlarmBatchSize(this.env);
     await backfillWorkspaceDeletionDueIndexBatch(this.storage, batchSize);
+    const due = await this.collectDueEntries(now, batchSize);
+    for (const [key, entry] of due) {
+      await this.processDueEntry(key, entry, now, storedNodeId, dispatch);
+    }
+  }
+
+  private async collectDueEntries(
+    now: number,
+    batchSize: number
+  ): Promise<Array<[string, PendingWorkspaceDeletion]>> {
     const indexed = await this.storage.list<string>({
       prefix: WORKSPACE_DELETION_DUE_INDEX_PREFIX,
       limit: batchSize,
@@ -399,169 +352,148 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       if (entry.deleteAt > now) break;
       due.push([entryKey, entry]);
     }
+    return due;
+  }
 
-    for (const [key, entry] of due) {
-      entry.firstScheduledAt ??= now;
-      const currentIdentity = await loadWorkspaceDeletionSnapshot(
-        this.env.DATABASE,
-        entry.workspaceId
+  private async processDueEntry(
+    key: string,
+    entry: PendingWorkspaceDeletion,
+    now: number,
+    storedNodeId: string | undefined,
+    dispatch: WorkspaceDeletionAttemptDispatcher
+  ): Promise<void> {
+    entry.firstScheduledAt ??= now;
+    const currentIdentity = await loadWorkspaceDeletionSnapshot(
+      this.env.DATABASE,
+      entry.workspaceId
+    );
+    if (deletionEntryClaimedWithoutNodeIncarnation(entry)) {
+      dispatch(
+        this.deadLetterExact(
+          key,
+          entry.claimId ?? null,
+          entry,
+          'claimed attempt lacks an immutable node-incarnation snapshot'
+        )
       );
-      const legacyStartedWithoutNodeIncarnation =
-        (entry.attemptCount ?? 0) > 0 &&
-        (entry.nodeUserId === undefined ||
-          entry.nodeRuntime === undefined ||
-          entry.nodeProviderInstanceId === undefined ||
-          entry.nodeRuntimeIncarnationId === undefined);
-      if (legacyStartedWithoutNodeIncarnation) {
-        dispatch(
-          this.deadLetterExact(
-            key,
-            entry.claimId ?? null,
-            entry,
-            'claimed attempt lacks an immutable node-incarnation snapshot'
-          )
-        );
-        continue;
-      }
-      if (now - entry.firstScheduledAt >= workspaceDeletionMaxResidenceMs(this.env)) {
-        dispatch(
-          this.deadLetterExact(
-            key,
-            entry.claimId ?? null,
-            entry,
-            'maximum retry residence exceeded'
-          )
-        );
-        continue;
-      }
-      const nodeId = entry.nodeId ?? storedNodeId;
-      if (!nodeId && !currentIdentity) {
-        dispatch(
-          this.deadLetterExact(
-            key,
-            entry.claimId ?? null,
-            entry,
-            'workspace and node identity unavailable'
-          )
-        );
-        continue;
-      }
-
-      const expected: WorkspaceDeletionIdentity = {
-        workspaceId: entry.workspaceId,
-        nodeId: nodeId ?? currentIdentity?.nodeId ?? null,
-        nodeUserId:
-          entry.nodeUserId === undefined ? (currentIdentity?.nodeUserId ?? null) : entry.nodeUserId,
-        nodeRuntime:
-          entry.nodeRuntime === undefined
-            ? (currentIdentity?.nodeRuntime ?? null)
-            : entry.nodeRuntime,
-        nodeProviderInstanceId:
-          entry.nodeProviderInstanceId === undefined
-            ? (currentIdentity?.nodeProviderInstanceId ?? null)
-            : entry.nodeProviderInstanceId,
-        nodeRuntimeIncarnationId:
-          entry.nodeRuntimeIncarnationId === undefined
-            ? (currentIdentity?.nodeRuntimeIncarnationId ?? null)
-            : entry.nodeRuntimeIncarnationId,
-        userId: entry.userId,
-        projectId:
-          entry.projectId === undefined ? (currentIdentity?.projectId ?? null) : entry.projectId,
-        chatSessionId:
-          entry.chatSessionId === undefined
-            ? (currentIdentity?.chatSessionId ?? null)
-            : entry.chatSessionId,
-      };
-      const attempt = (entry.attemptCount ?? 0) + 1;
-      const claimId = crypto.randomUUID();
-      const claimedEntry: PendingWorkspaceDeletion = {
-        ...entry,
-        nodeId: expected.nodeId ?? undefined,
-        nodeUserId: expected.nodeUserId,
-        nodeRuntime: expected.nodeRuntime,
-        nodeProviderInstanceId: expected.nodeProviderInstanceId,
-        nodeRuntimeIncarnationId: expected.nodeRuntimeIncarnationId,
-        projectId: expected.projectId,
-        chatSessionId: expected.chatSessionId,
-        deleteAt: now + workspaceDeletionRetryDelayMs(this.env, attempt),
-        firstScheduledAt: entry.firstScheduledAt,
-        attemptCount: attempt,
-        lastAttemptAt: now,
-        claimId,
-        deadLetteredAt: null,
-        deadLetterReason: null,
-      };
-      if (!(await this.claimExactEntryWithAlarm(key, entry, claimedEntry))) continue;
-
-      if (currentIdentity?.runtimeDeletionConfirmedAt && currentIdentity.runtimeDeletionProof) {
-        // A previous attempt may have persisted proof and crashed before lifecycle closure.
-        // Re-enter the central classifier so closure finishes before the durable claim is removed.
-        dispatch(this.runClaimedAttempt(key, claimId, claimedEntry, expected, attempt));
-        continue;
-      }
-
-      if (!currentIdentity) {
-        // A missing workspace can converge only through strict node-runtime proof.
-        // attemptWorkspaceDeletion checks that proof before making any VM request.
-        dispatch(this.runClaimedAttempt(key, claimId, claimedEntry, expected, attempt));
-        continue;
-      }
-
-      try {
-        const d1Claimed = await claimWorkspaceDeletionInD1(
-          this.env,
-          expected,
-          attempt,
-          `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: durable attempt ${attempt} claimed`,
-          'automatic'
-        );
-        if (!d1Claimed) {
-          const latestIdentity = await loadWorkspaceDeletionSnapshot(
-            this.env.DATABASE,
-            claimedEntry.workspaceId
-          );
-          if (
-            latestIdentity &&
-            sameDeletionIdentity(latestIdentity, expected) &&
-            !isWorkspaceDeletionEligibleStatus(latestIdentity.status)
-          ) {
-            dispatch(this.deleteExact(key, claimId));
-            log.info('node_lifecycle.workspace_deletion_stale_schedule_removed', {
-              workspaceId: claimedEntry.workspaceId,
-              nodeId: claimedEntry.nodeId,
-              status: latestIdentity.status,
-              action: 'claim_removed_without_vm_request',
-            });
-          } else {
-            dispatch(
-              this.deadLetterExact(
-                key,
-                claimId,
-                claimedEntry,
-                'workspace identity or status changed before VM deletion'
-              )
-            );
-          }
-          continue;
-        }
-      } catch (error) {
-        await this.updateExactClaim(key, claimId, {
-          lastError: 'D1 deletion claim failed before VM request',
-        });
-        log.error('node_lifecycle.workspace_deletion_d1_claim_failed', {
-          workspaceId: claimedEntry.workspaceId,
-          userId: claimedEntry.userId,
-          attempt,
-          error: error instanceof Error ? error.message : String(error),
-          action: 'durable_claim_retained',
-        });
-        continue;
-      }
-
-      // The network path begins only after both durable claim and exact D1 claim exist. It is
-      // deliberately detached from the alarm critical section under Rule 47.
-      dispatch(this.runClaimedAttempt(key, claimId, claimedEntry, expected, attempt));
+      return;
     }
+    if (now - entry.firstScheduledAt >= workspaceDeletionMaxResidenceMs(this.env)) {
+      dispatch(
+        this.deadLetterExact(key, entry.claimId ?? null, entry, 'maximum retry residence exceeded')
+      );
+      return;
+    }
+    if (!entry.nodeId && !storedNodeId && !currentIdentity) {
+      dispatch(
+        this.deadLetterExact(
+          key,
+          entry.claimId ?? null,
+          entry,
+          'workspace and node identity unavailable'
+        )
+      );
+      return;
+    }
+
+    const expected = deletionIdentityForAttempt({ entry, current: currentIdentity, storedNodeId });
+    const attempt = (entry.attemptCount ?? 0) + 1;
+    const claimId = crypto.randomUUID();
+    const claimedEntry = claimedDeletionEntry({
+      entry,
+      expected,
+      attempt,
+      claimId,
+      now,
+      retryDelayMs: workspaceDeletionRetryDelayMs(this.env, attempt),
+    });
+    if (!(await this.claimExactEntryWithAlarm(key, entry, claimedEntry))) return;
+
+    const proofAlreadyPersisted = Boolean(
+      currentIdentity?.runtimeDeletionConfirmedAt && currentIdentity.runtimeDeletionProof
+    );
+    if (!currentIdentity || proofAlreadyPersisted) {
+      // Missing workspaces can converge only through strict node proof. Persisted
+      // workspace proof re-enters the classifier to finish lifecycle closure.
+      dispatch(this.runClaimedAttempt(key, claimId, claimedEntry, expected, attempt));
+      return;
+    }
+
+    await this.claimInD1AndDispatch(key, claimId, claimedEntry, expected, attempt, dispatch);
+  }
+
+  private async claimInD1AndDispatch(
+    key: string,
+    claimId: string,
+    entry: PendingWorkspaceDeletion,
+    expected: WorkspaceDeletionIdentity,
+    attempt: number,
+    dispatch: WorkspaceDeletionAttemptDispatcher
+  ): Promise<void> {
+    try {
+      const d1Claimed = await claimWorkspaceDeletionInD1(
+        this.env,
+        expected,
+        attempt,
+        `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: durable attempt ${attempt} claimed`,
+        'automatic'
+      );
+      if (!d1Claimed) {
+        await this.handleRejectedD1Claim(key, claimId, entry, expected, dispatch);
+        return;
+      }
+    } catch (error) {
+      await this.updateExactClaim(key, claimId, {
+        lastError: 'D1 deletion claim failed before VM request',
+      });
+      log.error('node_lifecycle.workspace_deletion_d1_claim_failed', {
+        workspaceId: entry.workspaceId,
+        userId: entry.userId,
+        attempt,
+        error: error instanceof Error ? error.message : String(error),
+        action: 'durable_claim_retained',
+      });
+      return;
+    }
+
+    // The network path begins only after both durable claim and exact D1 claim exist.
+    // It is deliberately detached from the alarm critical section under Rule 47.
+    dispatch(this.runClaimedAttempt(key, claimId, entry, expected, attempt));
+  }
+
+  private async handleRejectedD1Claim(
+    key: string,
+    claimId: string,
+    entry: PendingWorkspaceDeletion,
+    expected: WorkspaceDeletionIdentity,
+    dispatch: WorkspaceDeletionAttemptDispatcher
+  ): Promise<void> {
+    const latestIdentity = await loadWorkspaceDeletionSnapshot(
+      this.env.DATABASE,
+      entry.workspaceId
+    );
+    if (
+      latestIdentity &&
+      sameDeletionIdentity(latestIdentity, expected) &&
+      !isWorkspaceDeletionEligibleStatus(latestIdentity.status)
+    ) {
+      dispatch(this.deleteExact(key, claimId));
+      log.info('node_lifecycle.workspace_deletion_stale_schedule_removed', {
+        workspaceId: entry.workspaceId,
+        nodeId: entry.nodeId,
+        status: latestIdentity.status,
+        action: 'claim_removed_without_vm_request',
+      });
+      return;
+    }
+    dispatch(
+      this.deadLetterExact(
+        key,
+        claimId,
+        entry,
+        'workspace identity or status changed before VM deletion'
+      )
+    );
   }
 
   private async runClaimedAttempt(
@@ -714,7 +646,8 @@ export class NodeLifecycleWorkspaceDeletionQueue {
   private async deleteExact(key: string, claimId: string | null): Promise<void> {
     await this.storage.transaction(async (transaction) => {
       const current = await transaction.get<PendingWorkspaceDeletion>(key);
-      if (current && (current.claimId ?? null) === claimId) {
+      const currentClaimId = current?.claimId ?? null;
+      if (current && currentClaimId === claimId) {
         await transaction.delete(workspaceDeletionDueIndexKey(current));
         await transaction.delete(key);
       }

@@ -43,6 +43,58 @@ function deletionDiagnostic(env: Env): string {
   );
 }
 
+async function deleteManagedNodeRuntime(
+  nodeId: string,
+  userId: string,
+  env: Env,
+  node: schema.Node,
+  result: DeleteNodeResourcesResult
+): Promise<boolean> {
+  try {
+    const strictResult = await deleteNodeResourcesStrict(nodeId, userId, env, {
+      cleanupDns: false,
+      expectedRuntime: {
+        userId: node.userId,
+        runtime: node.runtime,
+        providerInstanceId: node.providerInstanceId,
+        runtimeIncarnationId: node.runtimeIncarnationId,
+      },
+    });
+    result.runtimeTerminationConfirmedAt = strictResult.runtimeTerminationConfirmedAt;
+    result.runtimeIncarnationId = strictResult.runtimeIncarnationId;
+    result.providerVmDeleted = strictResult.providerVm === 'deleted';
+    if (!result.providerVmDeleted) {
+      result.providerVmDeleteSkippedReason =
+        strictResult.providerVm === 'already-absent'
+          ? 'provider VM already absent'
+          : 'strict deletion confirmed no provider instance';
+    }
+    return true;
+  } catch (err) {
+    result.errors.push(RUNTIME_TERMINATION_PENDING_ERROR);
+    log.error('node_delete.runtime_termination_unconfirmed', {
+      nodeId,
+      ...serializeError(err),
+    });
+    return false;
+  }
+}
+
+async function deleteNodeBackendDns(
+  nodeId: string,
+  backendDnsRecordId: string,
+  env: Env,
+  result: DeleteNodeResourcesResult
+): Promise<void> {
+  try {
+    await deleteDNSRecord(backendDnsRecordId, env);
+    result.backendDnsDeleted = true;
+  } catch (err) {
+    result.errors.push(DNS_CLEANUP_PENDING_ERROR);
+    log.error('node_delete.delete_dns_failed', { nodeId, ...serializeError(err) });
+  }
+}
+
 /**
  * Best-effort node deletion adapter for API callers. Managed runtimes are delegated to the strict
  * provider/container boundary; failures are returned as a durable quarantine rather than hidden.
@@ -78,45 +130,13 @@ export async function deleteNodeResources(
   if (userOwned) {
     result.providerVmDeleteSkippedReason = 'user-owned node — no cloud VM to delete';
   } else {
-    try {
-      const strictResult = await deleteNodeResourcesStrict(nodeId, userId, env, {
-        cleanupDns: false,
-        expectedRuntime: {
-          userId: node.userId,
-          runtime: node.runtime,
-          providerInstanceId: node.providerInstanceId,
-          runtimeIncarnationId: node.runtimeIncarnationId,
-        },
-      });
-      runtimeTerminationConfirmed = true;
-      result.runtimeTerminationConfirmedAt = strictResult.runtimeTerminationConfirmedAt;
-      result.runtimeIncarnationId = strictResult.runtimeIncarnationId;
-      result.providerVmDeleted = strictResult.providerVm === 'deleted';
-      if (!result.providerVmDeleted) {
-        result.providerVmDeleteSkippedReason =
-          strictResult.providerVm === 'already-absent'
-            ? 'provider VM already absent'
-            : 'strict deletion confirmed no provider instance';
-      }
-    } catch (err) {
-      result.errors.push(RUNTIME_TERMINATION_PENDING_ERROR);
-      log.error('node_delete.runtime_termination_unconfirmed', {
-        nodeId,
-        ...serializeError(err),
-      });
-    }
+    runtimeTerminationConfirmed = await deleteManagedNodeRuntime(nodeId, userId, env, node, result);
   }
 
   result.runtimeTerminationConfirmed = runtimeTerminationConfirmed;
 
   if (node.backendDnsRecordId) {
-    try {
-      await deleteDNSRecord(node.backendDnsRecordId, env);
-      result.backendDnsDeleted = true;
-    } catch (err) {
-      result.errors.push(DNS_CLEANUP_PENDING_ERROR);
-      log.error('node_delete.delete_dns_failed', { nodeId, ...serializeError(err) });
-    }
+    await deleteNodeBackendDns(nodeId, node.backendDnsRecordId, env, result);
   }
 
   const now = new Date().toISOString();

@@ -34,6 +34,7 @@ import {
   listNodeContainersFromNode,
 } from '../services/node-agent-diagnostics';
 import { finalizeDeletion as finalizeNodeLifecycleDeletion } from '../services/node-lifecycle';
+import type { DeleteNodeResourcesResult } from '../services/node-resource-deletion';
 import {
   createNodeRecord,
   deleteNodeResources,
@@ -95,6 +96,107 @@ function deriveHealthStatus(node: schema.Node, now: number): NodeHealthStatus {
 }
 
 type DeploymentEnvironmentNodeSummary = NonNullable<NodeResponse['deploymentEnvironments']>[number];
+type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
+
+async function cleanupHostedDeploymentRouteDns(
+  db: NodesDb,
+  env: Env,
+  nodeId: string
+): Promise<void> {
+  const hostedEnvs = await db
+    .select({ id: schema.deploymentEnvironments.id })
+    .from(schema.deploymentEnvironments)
+    .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
+
+  for (const envRow of hostedEnvs) {
+    const releases = await db
+      .select({ manifest: schema.deploymentReleases.manifest })
+      .from(schema.deploymentReleases)
+      .where(eq(schema.deploymentReleases.environmentId, envRow.id));
+    const hostnames = collectEnvironmentRouteHostnames(
+      releases.map((release) => release.manifest),
+      {
+        environmentId: envRow.id,
+        baseDomain: env.BASE_DOMAIN,
+        routePortBase: env.DEPLOYMENT_ROUTE_PORT_BASE,
+        routePortSpan: env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      }
+    );
+    const dnsRecordsDeleted = await cleanupAppRouteDNSRecords(hostnames, env);
+    log.info('node.deployment_dns_cleaned_up', {
+      nodeId,
+      environmentId: envRow.id,
+      dnsRecordsDeleted,
+    });
+  }
+}
+
+async function removeManagedNodeRecords(
+  db: NodesDb,
+  nodeId: string,
+  userId: string,
+  cleanup: DeleteNodeResourcesResult
+): Promise<void> {
+  if (!cleanup.runtimeTerminationConfirmedAt) {
+    throw errors.conflict('Managed node deletion proof is unavailable');
+  }
+  await db
+    .delete(schema.workspaces)
+    .where(
+      and(
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.runtimeDeletionConfirmedAt, cleanup.runtimeTerminationConfirmedAt)
+      )
+    );
+  const deletedNode = await db
+    .delete(schema.nodes)
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        eq(schema.nodes.userId, userId),
+        sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${cleanup.runtimeTerminationConfirmedAt}`,
+        sql`${schema.nodes.runtimeIncarnationId} IS ${cleanup.runtimeIncarnationId}`
+      )
+    )
+    .run();
+  if ((deletedNode.meta.changes ?? 0) !== 1) {
+    throw errors.conflict('Managed node incarnation changed after deletion proof');
+  }
+}
+
+async function removeDeletedNodeRecords(input: {
+  db: NodesDb;
+  env: Env;
+  nodeId: string;
+  userId: string;
+  nodeRole: string | null;
+  nodeClass: string | null;
+  cleanup: DeleteNodeResourcesResult;
+}): Promise<void> {
+  if ((input.nodeRole ?? 'workspace') === 'deployment') {
+    await retireDeletedDeploymentNodeRecord(
+      input.db,
+      input.env,
+      input.nodeId,
+      input.userId,
+      input.cleanup
+    );
+    return;
+  }
+  if (isUserOwnedNodeClass(input.nodeClass)) {
+    await input.db
+      .delete(schema.workspaces)
+      .where(
+        and(eq(schema.workspaces.nodeId, input.nodeId), eq(schema.workspaces.userId, input.userId))
+      );
+    await input.db
+      .delete(schema.nodes)
+      .where(and(eq(schema.nodes.id, input.nodeId), eq(schema.nodes.userId, input.userId)));
+    return;
+  }
+  await removeManagedNodeRecords(input.db, input.nodeId, input.userId, input.cleanup);
+}
 
 function toNodeResponse(
   node: schema.Node,
@@ -379,74 +481,16 @@ nodesRoutes.delete('/:id', async (c) => {
   // Deprovision app-route DNS records for any deployment environments hosted on
   // this node. The environment rows survive (nodeId is set null by the FK), but
   // their grey-cloud A records would otherwise point at the now-freed VM IP.
-  const hostedEnvs = await db
-    .select({ id: schema.deploymentEnvironments.id })
-    .from(schema.deploymentEnvironments)
-    .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
-
-  for (const envRow of hostedEnvs) {
-    const releases = await db
-      .select({ manifest: schema.deploymentReleases.manifest })
-      .from(schema.deploymentReleases)
-      .where(eq(schema.deploymentReleases.environmentId, envRow.id));
-
-    const hostnames = collectEnvironmentRouteHostnames(
-      releases.map((r) => r.manifest),
-      {
-        environmentId: envRow.id,
-        baseDomain: c.env.BASE_DOMAIN,
-        routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
-        routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-      }
-    );
-
-    const dnsRecordsDeleted = await cleanupAppRouteDNSRecords(hostnames, c.env);
-    log.info('node.deployment_dns_cleaned_up', {
-      nodeId,
-      environmentId: envRow.id,
-      dnsRecordsDeleted,
-    });
-  }
-
-  if ((node.nodeRole ?? 'workspace') === 'deployment') {
-    await retireDeletedDeploymentNodeRecord(db, c.env, nodeId, userId, cleanup);
-  } else {
-    if (isUserOwnedNodeClass(node.nodeClass)) {
-      await db
-        .delete(schema.workspaces)
-        .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
-      await db
-        .delete(schema.nodes)
-        .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
-    } else {
-      if (!cleanup.runtimeTerminationConfirmedAt) {
-        throw errors.conflict('Managed node deletion proof is unavailable');
-      }
-      await db
-        .delete(schema.workspaces)
-        .where(
-          and(
-            eq(schema.workspaces.nodeId, nodeId),
-            eq(schema.workspaces.userId, userId),
-            eq(schema.workspaces.runtimeDeletionConfirmedAt, cleanup.runtimeTerminationConfirmedAt)
-          )
-        );
-      const deletedNode = await db
-        .delete(schema.nodes)
-        .where(
-          and(
-            eq(schema.nodes.id, nodeId),
-            eq(schema.nodes.userId, userId),
-            sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${cleanup.runtimeTerminationConfirmedAt}`,
-            sql`${schema.nodes.runtimeIncarnationId} IS ${cleanup.runtimeIncarnationId}`
-          )
-        )
-        .run();
-      if ((deletedNode.meta.changes ?? 0) !== 1) {
-        throw errors.conflict('Managed node incarnation changed after deletion proof');
-      }
-    }
-  }
+  await cleanupHostedDeploymentRouteDns(db, c.env, nodeId);
+  await removeDeletedNodeRecords({
+    db,
+    env: c.env,
+    nodeId,
+    userId,
+    nodeRole: node.nodeRole,
+    nodeClass: node.nodeClass,
+    cleanup,
+  });
 
   await finalizeNodeLifecycleDeletion(c.env, nodeId, userId);
 

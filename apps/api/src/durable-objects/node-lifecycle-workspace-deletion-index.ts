@@ -98,55 +98,86 @@ export async function repairWorkspaceDeletionDueIndex(
   });
 }
 
+type WorkspaceDeletionIndexInspection =
+  | { status: 'empty' }
+  | { status: 'valid'; deleteAt: number }
+  | { status: 'repaired' };
+
+async function inspectFirstWorkspaceDeletionIndex(
+  storage: DurableObjectStorage
+): Promise<WorkspaceDeletionIndexInspection> {
+  const indexed = await storage.list<string>({
+    prefix: WORKSPACE_DELETION_DUE_INDEX_PREFIX,
+    limit: 1,
+  });
+  const first = indexed.entries().next().value as [string, string] | undefined;
+  if (!first) return { status: 'empty' };
+
+  const [indexKey, entryKey] = first;
+  const indexedDeleteAt = workspaceDeletionDueIndexTimestamp(indexKey);
+  const entry = await storage.get<unknown>(entryKey);
+  if (
+    indexedDeleteAt !== null &&
+    isPendingWorkspaceDeletion(entryKey, entry) &&
+    !entry.deadLetteredAt &&
+    workspaceDeletionDueIndexKey(entry) === indexKey
+  ) {
+    return { status: 'valid', deleteAt: indexedDeleteAt };
+  }
+  await repairWorkspaceDeletionDueIndex(storage, indexKey, entryKey);
+  return { status: 'repaired' };
+}
+
+async function findEarliestWorkspaceDeletion(
+  storage: DurableObjectStorage,
+  warmAlarmTime: number | null,
+  inspectionLimit: number
+): Promise<{ earliest: number | null; inspected: number }> {
+  let earliest = warmAlarmTime;
+  let inspected = 0;
+  while (inspected < inspectionLimit) {
+    const inspection = await inspectFirstWorkspaceDeletionIndex(storage);
+    if (inspection.status === 'empty') break;
+    inspected += 1;
+    if (inspection.status !== 'valid') continue;
+    if (earliest === null || inspection.deleteAt < earliest) earliest = inspection.deleteAt;
+    break;
+  }
+  return { earliest, inspected };
+}
+
+async function loadOrInitializeBackfillState(
+  storage: DurableObjectStorage
+): Promise<WorkspaceDeletionDueIndexBackfillState | undefined> {
+  const backfill = await storage.get<WorkspaceDeletionDueIndexBackfillState>(
+    WORKSPACE_DELETION_DUE_INDEX_BACKFILL_KEY
+  );
+  if (backfill) return backfill;
+
+  const legacyEntries = await storage.list<unknown>({
+    prefix: WORKSPACE_DELETION_ENTRY_PREFIX,
+    limit: 1,
+  });
+  if (legacyEntries.size > 0) return undefined;
+  const completed = { cursor: null, done: true } satisfies WorkspaceDeletionDueIndexBackfillState;
+  await storage.put(WORKSPACE_DELETION_DUE_INDEX_BACKFILL_KEY, completed);
+  return completed;
+}
+
 export async function recalculateWorkspaceDeletionAlarm(input: {
   storage: DurableObjectStorage;
   warmAlarmTime: number | null;
   inspectionLimit: number;
   boundedRescanDelayMs: number;
 }): Promise<void> {
-  let earliest = input.warmAlarmTime;
-  let inspected = 0;
-  while (inspected < input.inspectionLimit) {
-    const indexed = await input.storage.list<string>({
-      prefix: WORKSPACE_DELETION_DUE_INDEX_PREFIX,
-      limit: 1,
-    });
-    const first = indexed.entries().next().value as [string, string] | undefined;
-    if (!first) break;
-    inspected += 1;
-    const [indexKey, entryKey] = first;
-    const indexedDeleteAt = workspaceDeletionDueIndexTimestamp(indexKey);
-    const entry = await input.storage.get<unknown>(entryKey);
-    if (
-      indexedDeleteAt !== null &&
-      isPendingWorkspaceDeletion(entryKey, entry) &&
-      !entry.deadLetteredAt
-    ) {
-      const expectedIndexKey = workspaceDeletionDueIndexKey(entry);
-      if (expectedIndexKey === indexKey) {
-        if (earliest === null || indexedDeleteAt < earliest) earliest = indexedDeleteAt;
-        break;
-      }
-      await repairWorkspaceDeletionDueIndex(input.storage, indexKey, entryKey);
-      continue;
-    }
-    await repairWorkspaceDeletionDueIndex(input.storage, indexKey, entryKey);
-  }
-
-  let backfill = await input.storage.get<WorkspaceDeletionDueIndexBackfillState>(
-    WORKSPACE_DELETION_DUE_INDEX_BACKFILL_KEY
+  const selection = await findEarliestWorkspaceDeletion(
+    input.storage,
+    input.warmAlarmTime,
+    input.inspectionLimit
   );
-  if (!backfill) {
-    const legacyEntries = await input.storage.list<unknown>({
-      prefix: WORKSPACE_DELETION_ENTRY_PREFIX,
-      limit: 1,
-    });
-    if (legacyEntries.size === 0) {
-      backfill = { cursor: null, done: true };
-      await input.storage.put(WORKSPACE_DELETION_DUE_INDEX_BACKFILL_KEY, backfill);
-    }
-  }
-  if (!backfill?.done || inspected === input.inspectionLimit) {
+  let { earliest } = selection;
+  const backfill = await loadOrInitializeBackfillState(input.storage);
+  if (!backfill?.done || selection.inspected === input.inspectionLimit) {
     const boundedRescanAt = Date.now() + input.boundedRescanDelayMs;
     if (earliest === null || boundedRescanAt < earliest) earliest = boundedRescanAt;
   }
