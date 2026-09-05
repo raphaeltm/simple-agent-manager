@@ -106,9 +106,11 @@ is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exi
       resource predicates in the one-statement D1 CAS.
 - [x] Run lint, typecheck, build, formatting, repository policy checks, the full
       unit suite, and the complete Workers/D1 suite.
-- [ ] Run task-completion, Cloudflare, test-engineer, constitution, doc-sync, full
-      staging, CodeRabbit, CI, production deploy, and production verification
-      gates.
+- [x] Run task-completion, Cloudflare, test-engineer, constitution, doc-sync, full
+      staging, and CI gates.
+- [ ] Run the label-triggered CodeRabbit gate after marking the PR ready, then
+      address or document any feedback.
+- [ ] After merge, verify production deploy and production placement telemetry.
 
 ## Local validation evidence
 
@@ -142,6 +144,42 @@ is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exi
   API suite collected 658 files / 8,887 tests (up from the 8,849-test failed
   predecessor head), web collected 302 / 3,600, and workerd collected the same
   65 files with 869 tests (up from 828); no suite or file collection disappeared.
+- After rebasing onto the #2019 merge, GitHub Actions completed green at
+  `d06ac9880`: Lint, Type Check, Test, Build, Durable Object Workers,
+  VM Agent Smoke, UI Compliance, Workspace Quality Surfaces, Marketing Site,
+  Code Quality Checks, SonarCloud Code Analysis, Secret Scan, Preflight
+  Evidence, Specialist Review Evidence, and CodSpeed/benchmarks.
+- `pnpm quality:observability-noise` passed after staging deployment; available
+  credentials skipped D1 and Workers telemetry subchecks, and no significant
+  log noise was detected.
+
+## Staging validation evidence
+
+- Deploy Staging workflow `33970133289` succeeded on candidate `d06ac9880` for
+  branch `sam/finish-aggregate-capacity-reservation-6j1kap`.
+- Playwright authenticated against `https://api.sammy.party/api/auth/token-login`
+  with `SAM_PLAYWRIGHT_PRIMARY_USER`, loaded `https://app.sammy.party`, navigated
+  to project `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` and `/settings`, verified
+  `https://api.sammy.party/health` returned 200, and observed no browser console
+  errors or page errors.
+- Staging D1 preflight confirmed an enabled Hetzner platform cloud credential
+  (`platform_credentials.id=01KNY6DC06C9QCYQM0389NAGNT`) and zero active
+  workspace-role nodes before VM validation.
+- Whole-small-node live validation used marker
+  `pr2021-capacity-seq-1788618253219` with task-level requirements
+  `{minVcpu:2,minMemoryGb:4,minDiskGb:40,exclusiveNode:false,maxCoTenants:3}`.
+  Task `01M1RZ9J4SG28P9T07WF5QGN7P` created workspace
+  `01M1RZHW5D5ZFG1N4S3YNE4P9Z` on Hetzner `cx23` node
+  `01M1RZ9RW02Z3PN0BRBCVD93HX` with provider capacity `2 vCPU / 4096 MB /
+  40 GB` and exact persisted reservation
+  `{"cpuMillis":2000,"memoryMb":4096,"diskMb":40960,"exclusiveNode":false,"maxCoTenants":3,"source":"task","sourceId":"01M1RZ9J4SG28P9T07WF5QGN7P","version":1}`.
+- While that workspace was active, task `01M1RZJM8VV2A2254EZZF7DVA1` was
+  submitted with the same whole-node reservation. It was not placed on
+  `01M1RZ9RW02Z3PN0BRBCVD93HX`; it created workspace
+  `01M1RZV4V4GGGFWDJ1E1VSAQA1` on a different Hetzner `cx23` node
+  `01M1RZJV1X5PFDDDKAZHX1BP1P` with the same exact reservation shape.
+- Cleanup cancelled both staging tasks, deleted both staging workspaces, and
+  D1 reported zero active workspace-role nodes afterward.
 
 ## Acceptance criteria
 
@@ -157,11 +195,12 @@ is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exi
       not.
 - [x] Capacity placement and resolved reservation snapshots persist unchanged.
 - [x] Existing same-user cross-project and project-pool isolation tests remain green.
-- [ ] Staging provisions a real small/`cx23`-equivalent node, submits two whole-node
+- [x] Staging provisions a real small/`cx23`-equivalent node, submits two whole-node
       tasks concurrently, proves the second is not placed on that node, and returns
       all staging VMs to zero.
 - [ ] Production deploy is green; new workspace rows contain reservation snapshots;
-      no active node exceeds its aggregate declared capacity.
+      no active node exceeds its aggregate declared capacity. This is a post-merge
+      verification gate.
 
 ## Post-mortem
 
