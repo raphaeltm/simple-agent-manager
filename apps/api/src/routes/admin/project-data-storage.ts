@@ -391,7 +391,7 @@ adminProjectDataStorageRoutes.post(
  * POST /api/admin/project-data/storage/:projectId/archive-sharding/unfreeze
  *
  * Alias for closing the project circuit breaker. Frozen migration rows remain
- * frozen until copy-back or a later explicit thaw operation exists.
+ * frozen until copy-back (source already deleted) or abandon (source intact) resolves them.
  */
 adminProjectDataStorageRoutes.post(
   '/:projectId/archive-sharding/unfreeze',
