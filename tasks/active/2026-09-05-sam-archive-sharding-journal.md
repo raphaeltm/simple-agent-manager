@@ -20,6 +20,7 @@ SAM's public daily journal should explain the technically meaningful work shippe
 - [x] Describe the real bind-limit repair as a safety/verification improvement, not an internal debugging diary.
 - [x] Assess whether a Mermaid diagram is suitable. Omitted it because the existing blog renderer displays a blank canvas; the cross-service order is stated plainly in prose and a focused renderer bug task was filed.
 - [x] Link to the prior preflight journal and relevant public repository sources.
+- [x] Correct the public configuration and self-hosting references that still called the now-enabled archive path production-disabled.
 - [ ] Validate the post with the website build and link checker, then inspect the generated page.
 
 ## Acceptance Criteria
