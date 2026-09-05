@@ -656,7 +656,7 @@ export async function setProjectDataArchiveCircuitBreaker(
     updatedAt: now,
     note:
       input.state === 'closed'
-        ? 'Circuit breaker closed for future archive work; existing frozen migrations and frozen locations remain frozen until copy-back or a follow-up operator action resolves them.'
+        ? 'Circuit breaker closed for future archive work; existing frozen migrations and frozen locations remain frozen until copy-back (source already deleted) or abandon (source intact) resolves them.'
         : null,
   };
 }

@@ -88,7 +88,25 @@ export const PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS = 500;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SHARD_COUNT = 128;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_PROJECTS = 1;
-export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS = 1;
+/**
+ * Hard ceiling on sessions one sweep tick may journal. The primary throttle is
+ * `PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET`; this only bounds the number of
+ * `migrating` fences a single tick can open.
+ */
+export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS = 10;
+/**
+ * Cumulative `session_summaries.message_count` a sweep tick may select as NEW candidates.
+ * Candidates are ordered largest-first, so this budgets bytes moved per tick by proxy;
+ * a single session larger than the budget is still selected on its own.
+ */
+export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET = 20_000;
+export const PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET = 5_000_000;
+/**
+ * Rows read per statement while streaming a session's terminal-version hash.
+ * Bounds Durable Object memory by page size instead of session size.
+ */
+export const PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS = 500;
+export const PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS = 10_000;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_LEASE_MS = 5 * 60 * 1000;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_WALL_TIME_MS = 5_000;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX = 'project-data/session-archives';
