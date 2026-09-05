@@ -26,6 +26,7 @@ import type {
   TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
 } from './placement-resolver';
+import { assertReplacementDeletionConfirmed } from './replacement-deletion-fence';
 
 const TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES = 96 * 1024;
 
@@ -195,8 +196,18 @@ export async function startTaskRunnerDO(
     resumeSnapshotChatSessionId?: string | null;
     /** Original parent whose live status authorizes this snapshot-recovery runner. */
     recoverySourceTaskId?: string | null;
+    /** Original attempt whose runtime deletion fences this replacement. */
+    retrySourceTaskId?: string | null;
   }
 ): Promise<void> {
+  const deletionSourceTaskId = input.retrySourceTaskId ?? input.recoverySourceTaskId ?? null;
+  if (deletionSourceTaskId) {
+    await assertReplacementDeletionConfirmed(env, {
+      sourceTaskId: deletionSourceTaskId,
+      projectId: input.projectId,
+      userId: input.userId,
+    });
+  }
   const stub = getStub(env, input.taskId);
   const capacityPoolSelection = capacityPoolSelectionForStart(input);
   const initialCapacityCandidate = capacityPoolSelection?.candidates[0] ?? null;
@@ -254,6 +265,7 @@ export async function startTaskRunnerDO(
       vmSizeSource: input.vmSizeSource ?? null,
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
       recoverySourceTaskId: input.recoverySourceTaskId ?? null,
+      retrySourceTaskId: input.retrySourceTaskId ?? null,
     },
   };
 

@@ -102,6 +102,42 @@ at 2026-08-31T16:58Z mid clean-baseline validation. Branch state audited, not tr
   rebased onto `4e6765d1e`), so a third implementation attempt does not die on unreviewed design
   assumptions.
 
+## Production canary defect: SQL bind-variable ceiling (2026-09-04, task `01M1Q8NH6D8K8QG18JKKYP8PKF`)
+
+The first production canary runs on project `01KHRJGANBBWGDY1NZ0KVF0D4J` showed 9 published
+sessions and 2 failures. All 9 "successes" had `message_count = 2`; both failures carried
+`error_message = 'too many SQL variables at offset 421: SQLITE_ERROR'`. The canary had therefore
+validated nothing beyond trivial sessions, and the acceptance criterion above — *a logical session
+larger than 32 MiB migrates over multiple idempotent chunks under configured row and byte limits* —
+was not actually met.
+
+Cause: `readCommittedRowsForChunk` (`archive-sharding.ts`), the post-insert verification read,
+bound one placeholder per chunk row. Cloudflare's SQL surfaces reject the 101st bound parameter and
+`PROJECT_DATA_ARCHIVE_CHUNK_ROWS` is 500 in production, so every session above 100 messages failed
+deterministically. Offset 421 pins it: for the `chat_messages` column list the first `?` is at byte
+121 and `421 = 121 + 3 * 100`. The INSERT was never implicated — `insertArchiveRow` writes one row
+per statement (8/5/15 binds).
+
+Both callers were affected: `commitArchiveTargetChunk` (forward copy) and
+`restoreSourceArchiveChunk` (rollback recovery).
+
+Fix: the verification read is sub-batched at the existing shared `D1_MAX_BOUND_PARAMETERS`
+(`apps/api/src/lib/d1-limits.ts`). `chunkRows` is unchanged — lowering it to 100 would turn a
+5190-message session into ~52 chunks x 3 tables of (DO RPC + R2 put + DO RPC) inside one
+invocation, because the wall-time break only fires between migrations, never inside `copyChunks`.
+
+Why the suite missed it: the DO unit suite runs on `better-sqlite3`, whose bound-parameter ceiling
+is far above 100, so it cannot reproduce this at any fixture size; the largest fixture anywhere was
+12 rows. The regression tests therefore live in the Workers pool
+(`tests/workers/project-data-archive-sharding.test.ts`) against real workerd SQLite, and drive
+`runScopedProjectDataArchiveCanary` and `copyBackProjectDataArchiveMigration` — the exact entry
+points that failed in production. Verified discriminating: against pre-fix code they reproduce the
+byte-identical `too many SQL variables at offset 421: SQLITE_ERROR`.
+
+Operational note: sessions `e2c249ce` (5190 msgs) and `13329d54` (1600 msgs) are `failed`, and
+`e2c249ce` sits at `attempt_count = 2` against `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS = 3`.
+Do not re-run the canary until this fix is deployed, or that session is poisoned.
+
 ## Reader/writer inventory and disposition
 
 This inventory is machine-checked by the archive-sharding inventory test. New direct references to a

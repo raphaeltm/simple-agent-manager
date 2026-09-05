@@ -12,7 +12,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { decrypt } from '../../../src/services/encryption';
-import { createProviderForExactCredential } from '../../../src/services/provider-credential-exact';
+import {
+  createProviderForExactCredential,
+  fingerprintEncryptedProviderCredential,
+} from '../../../src/services/provider-credential-exact';
 import {
   buildProviderConfig,
   createProviderForUser,
@@ -345,6 +348,7 @@ describe('createProviderForUser exact credential binding', () => {
       },
     ]) as any;
 
+    const credentialFingerprint = await fingerprintEncryptedProviderCredential('ciphertext', 'iv');
     const result = await createProviderForUser(
       db,
       'project-member',
@@ -356,6 +360,7 @@ describe('createProviderForUser exact credential binding', () => {
         credentialSource: 'project',
         credentialReference: 'credentials:project-cloud-1',
         credentialVersion: 1700000000000,
+        credentialFingerprint,
       }
     );
 
@@ -387,6 +392,10 @@ describe('createProviderForUser exact credential binding', () => {
       }),
     } as any;
 
+    const credentialFingerprint = await fingerprintEncryptedProviderCredential(
+      'cc-ciphertext',
+      'cc-iv'
+    );
     const result = await createProviderForUser(
       db,
       'project-member',
@@ -398,6 +407,7 @@ describe('createProviderForUser exact credential binding', () => {
         credentialSource: 'project',
         credentialReference: 'cc_credentials:cc-project-cloud-1',
         credentialVersion: 1700000000000,
+        credentialFingerprint,
       }
     );
 
@@ -406,6 +416,49 @@ describe('createProviderForUser exact credential binding', () => {
       credentialSource: 'project',
     });
     expect(mockDecrypt).toHaveBeenCalledWith('cc-ciphertext', 'cc-iv', 'enc-key');
+  });
+
+  it('refuses a rotated credential row even when the replacement account has a colliding VM ID', async () => {
+    mockDecrypt.mockClear();
+    const accountAFingerprint = await fingerprintEncryptedProviderCredential(
+      'account-a-ciphertext',
+      'account-a-iv'
+    );
+    const db = makeDbMock([
+      {
+        id: 'project-cloud-1',
+        userId: 'project-owner',
+        projectId: 'project-1',
+        provider: 'hetzner',
+        credentialType: 'cloud-provider',
+        isActive: true,
+        encryptedToken: 'account-b-ciphertext',
+        iv: 'account-b-iv',
+      },
+    ]) as any;
+    const providerFactory = vi.fn(() => {
+      throw new Error('account B provider must not be constructed');
+    });
+
+    const result = await createProviderForExactCredential(
+      db,
+      'project-member',
+      'enc-key',
+      {} as any,
+      'hetzner',
+      'project-1',
+      {
+        credentialSource: 'project',
+        credentialReference: 'credentials:project-cloud-1',
+        credentialVersion: 1700000000000,
+        credentialFingerprint: accountAFingerprint,
+      },
+      providerFactory
+    );
+
+    expect(result).toBeNull();
+    expect(providerFactory).not.toHaveBeenCalled();
+    expect(mockDecrypt).not.toHaveBeenCalled();
   });
 
   it('refuses an exact project composable credential with mismatched owner lineage', async () => {
@@ -471,6 +524,71 @@ describe('createProviderForUser exact credential binding', () => {
 });
 
 describe('createProviderForUser composable credential project halt', () => {
+  it('re-resolves the exact ciphertext generation when a credential rotates after snapshot resolution', async () => {
+    mockDecrypt.mockClear();
+    mockDecrypt.mockResolvedValue('account-b-provider-token');
+    composableMocks.resolveForConsumer.mockResolvedValueOnce({
+      consumer: { kind: 'compute', provider: 'hetzner' },
+      configuration: {
+        id: 'cfg-user-cloud-1',
+        ownerId: 'user-1',
+        name: 'User cloud',
+        consumer: { kind: 'compute', provider: 'hetzner' },
+        credentialId: 'cc-user-cloud-1',
+        settings: {},
+        isActive: true,
+      },
+      credential: {
+        id: 'cc-user-cloud-1',
+        ownerId: 'user-1',
+        name: 'Account A before rotation',
+        kind: 'cloud-provider',
+        secret: { kind: 'cloud-provider', provider: 'hetzner', token: 'account-a-token' },
+        isActive: true,
+      },
+      source: 'user-attachment',
+    });
+    const accountBRow = {
+      encryptedToken: 'account-b-ciphertext',
+      iv: 'account-b-iv',
+      createdAt: '2026-09-04T08:00:00.000Z',
+      updatedAt: '2026-09-04T08:01:00.000Z',
+    };
+    const db = {
+      select: vi.fn(() => {
+        const builder = {
+          from: () => builder,
+          innerJoin: () => builder,
+          where: () => builder,
+          limit: () => Promise.resolve([accountBRow]),
+        };
+        return builder;
+      }),
+    } as any;
+
+    const result = await createProviderForUser(db, 'user-1', 'enc-key', {} as any, 'hetzner', null);
+    const accountBFingerprint = await fingerprintEncryptedProviderCredential(
+      accountBRow.encryptedToken,
+      accountBRow.iv
+    );
+
+    expect(result).toMatchObject({
+      providerName: 'hetzner',
+      credentialSource: 'user',
+      exactCredentialBinding: {
+        credentialReference: 'cc_credentials:cc-user-cloud-1',
+        credentialFingerprint: accountBFingerprint,
+      },
+    });
+    expect(mockDecrypt).toHaveBeenCalledTimes(1);
+    expect(mockDecrypt).toHaveBeenCalledWith(accountBRow.encryptedToken, accountBRow.iv, 'enc-key');
+    expect(mockDecrypt).not.toHaveBeenCalledWith(
+      expect.stringContaining('account-a'),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
   it('does not fall through to legacy user or platform credentials after a project CC halt', async () => {
     mockDecrypt.mockClear();
     composableMocks.resolveForConsumer.mockResolvedValueOnce(null);

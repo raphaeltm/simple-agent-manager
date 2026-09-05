@@ -529,15 +529,15 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
     });
   });
 
-  it('returns conclusive node_not_live only after a failed node health probe', async () => {
+  it('preserves the task after a failed node health probe response', async () => {
     fetchWithTimeoutMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
 
     const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
 
     expect(verdict).toMatchObject({
       live: false,
-      conclusive: true,
-      reason: 'node_not_live',
+      conclusive: false,
+      reason: 'node_health_probe_failed',
     });
   });
 

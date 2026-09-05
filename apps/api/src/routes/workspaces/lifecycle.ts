@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -27,11 +27,13 @@ import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-life
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,
-  assertWorkspaceAcceptsCallback,
+  assertWorkspaceCallbackIdentityCurrent,
+  assertWorkspaceCallbackResourceById,
   getOwnedNode,
   getOwnedWorkspace,
   isActiveWorkspaceStatus,
   normalizeWorkspaceReadyStatus,
+  transitionWorkspaceFromCallback,
   verifyWorkspaceCallbackAuth,
   WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES,
 } from './_helpers';
@@ -81,6 +83,88 @@ async function requireWorkspaceRestartGitHubAccess(
     throw errors.notFound('Project');
   }
   await requireRepositoryOwnerAccess(env, db, project, userId, flow);
+}
+
+type WorkspaceRuntimeRecreationOperation = 'restart' | 'rebuild';
+
+class WorkspaceRuntimeRecreationFenceError extends Error {
+  constructor(readonly operation: WorkspaceRuntimeRecreationOperation) {
+    super(`Workspace ${operation} lost its lifecycle claim`);
+    this.name = 'WorkspaceRuntimeRecreationFenceError';
+  }
+}
+
+async function recordWorkspaceRuntimeRecreationFailure(
+  env: Env,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  workspace: schema.Workspace,
+  userId: string,
+  nodeId: string,
+  operation: WorkspaceRuntimeRecreationOperation,
+  error: unknown
+): Promise<void> {
+  const result = await db
+    .update(schema.workspaces)
+    .set({
+      status: 'error',
+      errorMessage: error instanceof Error ? error.message : `Failed to ${operation} workspace`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(schema.workspaces.id, workspace.id),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.status, 'creating'),
+        sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
+        sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
+        sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
+      )
+    )
+    .run();
+
+  if (error instanceof WorkspaceRuntimeRecreationFenceError || (result.meta.changes ?? 0) === 0) {
+    const current = await env.DATABASE.prepare(
+      `SELECT user_id AS userId,
+              project_id AS projectId,
+              chat_session_id AS chatSessionId,
+              node_id AS nodeId,
+              status,
+              runtime_deletion_confirmed_at AS runtimeDeletionConfirmedAt
+         FROM workspaces
+        WHERE id = ?
+        LIMIT 1`
+    )
+      .bind(workspace.id)
+      .first<{
+        userId: string;
+        projectId: string | null;
+        chatSessionId: string | null;
+        nodeId: string | null;
+        status: string;
+        runtimeDeletionConfirmedAt: string | null;
+      }>();
+    log.warn('workspace_runtime_recreation.identity_fenced', {
+      workspaceId: workspace.id,
+      operation,
+      expectedUserId: userId,
+      currentUserId: current?.userId ?? null,
+      expectedProjectId: workspace.projectId,
+      currentProjectId: current?.projectId ?? null,
+      expectedChatSessionId: workspace.chatSessionId,
+      currentChatSessionId: current?.chatSessionId ?? null,
+      expectedNodeId: nodeId,
+      currentNodeId: current?.nodeId ?? null,
+      expectedStatus: 'creating',
+      currentStatus: current?.status ?? 'missing',
+      currentRuntimeDeletionConfirmedAt: current?.runtimeDeletionConfirmedAt ?? null,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      action:
+        error instanceof WorkspaceRuntimeRecreationFenceError
+          ? 'network_request_refused'
+          : 'error_state_update_refused',
+    });
+  }
 }
 
 // --- User-authenticated lifecycle routes ---
@@ -254,38 +338,71 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
   assertNodeOperational(node, 'restart workspace');
   await requireWorkspaceRestartGitHubAccess(c.env, db, workspace, userId, 'workspace-restart');
 
-  // Cancel any pending auto-deletion before restarting
-  try {
-    const doId = c.env.NODE_LIFECYCLE.idFromName(nodeId);
-    const stub = c.env.NODE_LIFECYCLE.get(doId);
-    await (
-      stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
-    ).cancelWorkspaceDeletion(workspace.id);
-  } catch (e) {
-    log.warn('workspace.cancel_deletion_failed', { workspaceId: workspace.id, error: String(e) });
+  // Fail closed: once a delete attempt is claimed, restart could create a
+  // second live incarnation while the first delete is still in flight.
+  const doId = c.env.NODE_LIFECYCLE.idFromName(nodeId);
+  const stub = c.env.NODE_LIFECYCLE.get(doId);
+  const cancelled = await (
+    stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
+  ).cancelWorkspaceDeletion(workspace.id);
+  if (!cancelled) {
+    throw errors.conflict('Workspace deletion has already started; restart is fenced');
   }
 
   // Clear previous error state and boot logs before starting new provisioning
-  await db
+  const restartTransition = await db
     .update(schema.workspaces)
     .set({ status: 'creating', errorMessage: null, updatedAt: new Date().toISOString() })
-    .where(eq(schema.workspaces.id, workspace.id));
+    .where(
+      and(
+        eq(schema.workspaces.id, workspace.id),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.status, workspace.status),
+        sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
+        sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
+        sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
+      )
+    )
+    .run();
+  if ((restartTransition.meta.changes ?? 0) !== 1) {
+    throw errors.conflict('Workspace changed while restart cancellation was being claimed');
+  }
   await writeBootLogs(c.env.KV, workspace.id, [], c.env);
 
   c.executionCtx.waitUntil(
     (async () => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
       try {
-        await restartWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
+        await restartWorkspaceOnNode(nodeId, workspace.id, c.env, userId, {
+          beforeExternalMutation: async () => {
+            const current = await c.env.DATABASE.prepare(
+              `SELECT id
+                 FROM workspaces
+                WHERE id = ?
+                  AND user_id = ?
+                  AND node_id = ?
+                  AND project_id IS ?
+                  AND chat_session_id IS ?
+                  AND status = 'creating'
+                  AND runtime_deletion_confirmed_at IS NULL
+                LIMIT 1`
+            )
+              .bind(workspace.id, userId, nodeId, workspace.projectId, workspace.chatSessionId)
+              .first<{ id: string }>();
+            if (!current) throw new WorkspaceRuntimeRecreationFenceError('restart');
+          },
+        });
       } catch (err) {
-        await innerDb
-          .update(schema.workspaces)
-          .set({
-            status: 'error',
-            errorMessage: err instanceof Error ? err.message : 'Failed to restart workspace',
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(schema.workspaces.id, workspace.id));
+        await recordWorkspaceRuntimeRecreationFailure(
+          c.env,
+          innerDb,
+          workspace,
+          userId,
+          nodeId,
+          'restart',
+          err
+        );
       }
     })()
   );
@@ -337,27 +454,71 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
   assertNodeOperational(node, 'rebuild workspace');
   await requireWorkspaceRestartGitHubAccess(c.env, db, workspace, userId, 'workspace-rebuild');
 
+  // Rebuild also recreates runtime state, so it must obey the same point-of-no-
+  // return fence as restart. A claimed delete cannot be cancelled or crossed.
+  const doId = c.env.NODE_LIFECYCLE.idFromName(nodeId);
+  const stub = c.env.NODE_LIFECYCLE.get(doId);
+  const cancelled = await (
+    stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
+  ).cancelWorkspaceDeletion(workspace.id);
+  if (!cancelled) {
+    throw errors.conflict('Workspace deletion has already started; rebuild is fenced');
+  }
+
   // Clear previous error state and boot logs before starting new provisioning
-  await db
+  const rebuildTransition = await db
     .update(schema.workspaces)
     .set({ status: 'creating', errorMessage: null, updatedAt: new Date().toISOString() })
-    .where(eq(schema.workspaces.id, workspace.id));
+    .where(
+      and(
+        eq(schema.workspaces.id, workspace.id),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.status, workspace.status),
+        sql`${schema.workspaces.projectId} IS ${workspace.projectId}`,
+        sql`${schema.workspaces.chatSessionId} IS ${workspace.chatSessionId}`,
+        sql`${schema.workspaces.runtimeDeletionConfirmedAt} IS NULL`
+      )
+    )
+    .run();
+  if ((rebuildTransition.meta.changes ?? 0) !== 1) {
+    throw errors.conflict('Workspace changed while rebuild cancellation was being claimed');
+  }
   await writeBootLogs(c.env.KV, workspace.id, [], c.env);
 
   c.executionCtx.waitUntil(
     (async () => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
       try {
-        await rebuildWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
+        await rebuildWorkspaceOnNode(nodeId, workspace.id, c.env, userId, {
+          beforeExternalMutation: async () => {
+            const current = await c.env.DATABASE.prepare(
+              `SELECT id
+                 FROM workspaces
+                WHERE id = ?
+                  AND user_id = ?
+                  AND node_id = ?
+                  AND project_id IS ?
+                  AND chat_session_id IS ?
+                  AND status = 'creating'
+                  AND runtime_deletion_confirmed_at IS NULL
+                LIMIT 1`
+            )
+              .bind(workspace.id, userId, nodeId, workspace.projectId, workspace.chatSessionId)
+              .first<{ id: string }>();
+            if (!current) throw new WorkspaceRuntimeRecreationFenceError('rebuild');
+          },
+        });
       } catch (err) {
-        await innerDb
-          .update(schema.workspaces)
-          .set({
-            status: 'error',
-            errorMessage: err instanceof Error ? err.message : 'Failed to rebuild workspace',
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(schema.workspaces.id, workspace.id));
+        await recordWorkspaceRuntimeRecreationFailure(
+          c.env,
+          innerDb,
+          workspace,
+          userId,
+          nodeId,
+          'rebuild',
+          err
+        );
       }
     })()
   );
@@ -375,36 +536,14 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
 
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
-  const rows = await db
-    .select({
-      id: schema.workspaces.id,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = rows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'ready');
-
-  const updateValues: {
-    status: string;
-    lastActivityAt: string;
-    updatedAt: string;
-    workspaceProfile?: 'full' | 'lightweight';
-  } = {
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'ready');
+  const now = new Date().toISOString();
+  const transitionedWorkspace = await transitionWorkspaceFromCallback(c.env, workspace, 'ready', {
     status: nextStatus,
-    lastActivityAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  if (body.workspaceProfile) {
-    updateValues.workspaceProfile = body.workspaceProfile;
-  }
-
-  await db.update(schema.workspaces).set(updateValues).where(eq(schema.workspaces.id, workspaceId));
+    lastActivityAt: now,
+    updatedAt: now,
+    ...(body.workspaceProfile ? { workspaceProfile: body.workspaceProfile } : {}),
+  });
 
   // Notify TaskRunner DO inline if a task is associated with this workspace.
   // TDF-5: moved from waitUntil() to inline await so the VM agent gets an error
@@ -421,6 +560,7 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
     .limit(1);
 
   if (readyTask) {
+    await assertWorkspaceCallbackIdentityCurrent(c.env, transitionedWorkspace, 'ready');
     const { advanceTaskRunnerWorkspaceReady } = await import('../../services/task-runner-do');
     const readyStatus = getTaskRunnerReadyStatus(nextStatus);
     await advanceTaskRunnerWorkspaceReady(c.env, readyTask.id, readyStatus, null);
@@ -438,44 +578,37 @@ lifecycleRoutes.post('/:id/provisioning-failed', async (c) => {
   const providedMessage = typeof body.errorMessage === 'string' ? body.errorMessage.trim() : '';
   const errorMessage = providedMessage || 'Workspace provisioning failed';
 
-  const rows = await db
-    .select({
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = rows[0];
-  assertWorkspaceAcceptsCallback(
-    workspace,
+  const workspace = await assertWorkspaceCallbackResourceById(
+    c.env,
     workspaceId,
     'provisioning_failed',
     WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
   );
 
-  // Allow retries: if the workspace is already in 'error' state (from a previous
-  // attempt where D1 was updated but the DO notification failed), skip the D1
-  // update and retry the DO notification. Any other non-'creating' status is invalid.
+  // An error callback retry still performs an exact CAS. This keeps DO
+  // notification retryability while ensuring deletion wins any interleaving.
+  const transitionedWorkspace = await transitionWorkspaceFromCallback(
+    c.env,
+    workspace,
+    'provisioning_failed',
+    {
+      status: 'error',
+      errorMessage,
+      updatedAt: new Date().toISOString(),
+    },
+    WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
+  );
   if (workspace.status === 'creating') {
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'error',
-        errorMessage,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
-
+    await assertWorkspaceCallbackIdentityCurrent(
+      c.env,
+      transitionedWorkspace,
+      'provisioning_failed',
+      WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
+    );
     // Stop compute metering on provisioning failure (best-effort)
     await stopComputeTracking(db, workspaceId).catch((e) => {
       log.warn('workspace.compute_tracking_stop_failed', { workspaceId, error: String(e) });
     });
-  } else if (workspace.status !== 'error') {
-    return c.json({ success: false, reason: 'workspace_not_creating' });
   }
 
   // Notify TaskRunner DO of workspace error inline.
@@ -493,6 +626,12 @@ lifecycleRoutes.post('/:id/provisioning-failed', async (c) => {
     .limit(1);
 
   if (failedTask) {
+    await assertWorkspaceCallbackIdentityCurrent(
+      c.env,
+      transitionedWorkspace,
+      'provisioning_failed',
+      WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES
+    );
     const { advanceTaskRunnerWorkspaceReady } = await import('../../services/task-runner-do');
     await advanceTaskRunnerWorkspaceReady(c.env, failedTask.id, 'error', errorMessage);
   }

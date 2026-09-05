@@ -2,10 +2,11 @@
 --
 -- IF NOT EXISTS is deliberate. This migration was originally numbered 0137 and has
 -- already been applied under that name to the staging database; PR #2017 then took 0137
--- on main, so it was renumbered to 0138. Wrangler tracks applied migrations by FILE NAME,
--- so the renumbered file is re-applied to any environment that already ran the 0137 name.
--- Making it idempotent is what keeps that re-application a no-op instead of a failure.
--- A plan ID is immutable for one project and one fixed eligibility cutoff.
+-- on main, so it was renumbered to 0138. The deletion-safety wave independently shipped
+-- 0138-0142 to staging before this branch merged main, so this idempotent migration moves
+-- once more to 0143. Wrangler tracks applied migrations by FILE NAME, making any replay
+-- a safe no-op instead of a failure. A plan ID is immutable for one project and one fixed
+-- eligibility cutoff.
 
 CREATE TABLE IF NOT EXISTS project_data_storage_relief_preflights (
   plan_id TEXT PRIMARY KEY,

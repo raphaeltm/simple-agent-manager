@@ -126,15 +126,14 @@ describe('workspace/node terminal writers route through shared lifecycle finaliz
   it('finds the known terminal writer inventory (guards against a silent no-op scan)', () => {
     expect(terminalWriterFiles.map((file) => file.relative)).toEqual(
       expect.arrayContaining([
-        'durable-objects/node-lifecycle.ts',
         'durable-objects/vm-agent-container-runtime.ts',
         'routes/nodes.ts',
-        'scheduled/node-cleanup/workspace-phases.ts',
         'scheduled/trial-expire.ts',
         'services/instant-session.ts',
         'services/nodes.ts',
         'services/task-runner.ts',
         'services/workspace-cleanup.ts',
+        'services/workspace-deletion.ts',
       ])
     );
     expect(terminalWriterFiles.length).toBeGreaterThanOrEqual(20);

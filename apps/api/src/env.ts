@@ -378,6 +378,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP?: string; // Max reporter-scoped tasks inspected by each ProjectData idle-cleanup pass (default: 5)
   // Auto-delete stopped workspaces after this TTL (default: 300000 = 5 minutes)
   WORKSPACE_STOPPED_TTL_MS?: string;
+  WORKSPACE_DELETION_RETRY_BASE_MS?: string; // Initial retry delay for unconfirmed VM deletion (default: 60000)
+  WORKSPACE_DELETION_RETRY_MAX_MS?: string; // Maximum exponential retry delay (default: 3600000)
+  WORKSPACE_DELETION_MAX_RESIDENCE_MS?: string; // Hot retry lifetime before durable dead-letter quarantine (default: 86400000)
+  WORKSPACE_DELETION_ALARM_BATCH_SIZE?: string; // Maximum due deletions per NodeLifecycle alarm (default: 3)
+  WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT?: string; // Maximum expired callback throttle claims pruned per signal (default: 25)
+  WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS?: string; // Per-workspace/callback activity dedupe window (default: 300)
+  WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH?: string; // Sanitized workspaces.error_message bound (default: 500)
   // Task agent configuration
   DEFAULT_TASK_AGENT_TYPE?: string;
   // Task execution timeout (stuck task recovery)
@@ -789,8 +796,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS?: string; // Hard ceiling for check-in expiry deferral by active prompt/tool work (default: 7200000 = 2 hours)
   TASK_RECONCILIATION_MIN_ALARM_DELAY_MS?: string; // Minimum reconciliation alarm delay (default: 10000 = 10 seconds)
   TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP?: string; // Max candidates processed per alarm sweep (default: 5)
-  TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS?: string; // Node heartbeat freshness threshold for reconciliation delivery (default: 300000 = 5 minutes)
   TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS?: string; // Short timeout for reconciliation-originated node calls (default: 5000 = 5 seconds)
+  TASK_RECONCILIATION_CANDIDATE_LEASE_MS?: string; // Durable claim floor; effective lease covers configured liveness + delivery I/O budgets (default: 30000 = 30 seconds)
+  TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS?: string; // Inconclusive attempts before task reconciliation quarantine (default: 3)
+  TASK_RECONCILIATION_QUARANTINE_MS?: string; // Cooldown after inconclusive attempt exhaustion (default: 300000 = 5 minutes)
   TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string; // Short timeout for task-liveness VM-agent health probes (default: 5000 = 5 seconds)
   // Durable mailbox (Phase 1 orchestrator messaging)
   MAILBOX_ACK_TIMEOUT_MS?: string; // Ack timeout before re-delivery (default: 300000)

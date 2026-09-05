@@ -91,9 +91,11 @@ describe('Instant runtime terminal reconciliation with Miniflare D1', () => {
     await persistRuntimeRecoveryFailed(env as unknown as Env, {
       nodeId,
       workspaceId,
+      userId,
       projectId,
       chatSessionId,
       agentSessionId,
+      runtimeIncarnationId: null,
     });
 
     const node = await env.DATABASE.prepare(
