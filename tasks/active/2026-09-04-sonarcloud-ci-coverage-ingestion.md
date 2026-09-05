@@ -10,10 +10,10 @@ coverage measures and `0` new lines to cover even when the test suites exercise 
 production code.
 
 This task owns only the coverage-report and CI scanner pipeline tracked by SAM Idea
-`01M1P3WCG1183BCMED999BYE47`. It must not modify, close, push to, or merge PRs #2010,
-#2011, or #2015. The merge continuation additionally must not modify PRs #2019 or #2021.
-The result must remain a draft PR until the external Sonar cutover has been completed and a
-real PR scan exposes nonzero coverage measures through Sonar's API.
+`01M1P3WCG1183BCMED999BYE47`. It must not modify, close, push to, or merge PRs `#2010`,
+`#2011`, or `#2015`. The merge continuation additionally must not modify PRs `#2019` or
+`#2021`. The result must remain a draft PR until the external Sonar cutover has been completed
+and a real PR scan exposes nonzero coverage measures through Sonar's API.
 
 ## Preflight Classification
 
