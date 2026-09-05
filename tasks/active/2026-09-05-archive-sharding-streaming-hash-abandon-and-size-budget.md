@@ -1,6 +1,6 @@
 # Archive sharding: streaming terminal hash, abandon operation, size-ordered budget
 
-**Status:** backlog
+**Status:** active
 **Branch:** `claude/sam-project-loading-zlgaux`
 **Parent work:** `tasks/active/2026-08-31-projectdata-terminal-archive-sharding.md`,
 `tasks/active/2026-09-04-archive-sharding-bind-variable-limit.md`,
