@@ -18,6 +18,7 @@ import {
   prepareArchiveSourceIntent,
   prepareArchiveTarget,
   ProjectDataArchiveInvariantError,
+  resolveArchiveHashPageRows,
   sealArchiveTarget,
 } from '../../../src/durable-objects/project-data/archive-sharding';
 import {
@@ -26,6 +27,8 @@ import {
 } from '../../../src/durable-objects/project-data/messages';
 import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
+  PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS,
+  PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS,
   PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY,
   PROJECT_DATA_ARCHIVE_TABLES,
   type ProjectDataArchiveSurface,
@@ -764,6 +767,32 @@ function seedWideGroupedRows(sql: SqlStorage, sessionId: string, count: number):
 }
 
 const WIDE_SESSION_ROWS = 1205; // two full 500-row pages plus a remainder per table
+
+describe('resolveArchiveHashPageRows clamps the memory-safety page size at the env boundary', () => {
+  it('honors an in-range override', () => {
+    expect(resolveArchiveHashPageRows({ PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS: '250' })).toBe(250);
+  });
+
+  it('falls back to the default when the env var is absent, blank, or unparseable', () => {
+    expect(resolveArchiveHashPageRows(undefined)).toBe(PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS);
+    expect(resolveArchiveHashPageRows({})).toBe(PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS);
+    for (const value of ['', ' ', 'abc', 'NaN', '0', '-5', '-0']) {
+      expect(resolveArchiveHashPageRows({ PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS: value })).toBe(
+        PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS
+      );
+    }
+  });
+
+  it('clamps an oversize override to the configured ceiling instead of honoring it', () => {
+    const over = String(PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS * 100);
+    expect(resolveArchiveHashPageRows({ PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS: over })).toBe(
+      PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS
+    );
+    expect(
+      resolveArchiveHashPageRows({ PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS: '99999999999999999999' })
+    ).toBe(PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS);
+  });
+});
 
 describe('ProjectData archive terminal-version hashing streams bounded pages', () => {
   it('never materialises more than one page per statement and is invariant to the page size', async () => {
