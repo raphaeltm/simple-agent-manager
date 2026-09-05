@@ -66,6 +66,79 @@ Scanner jobs install the frozen lockfile without lifecycle scripts, and CI passe
 binary paths to the wrappers. Do not publish scanner reports, hashes, advisories, or candidate
 secret material in logs, PR text, or public issues.
 
+## SonarQube Cloud coverage ingestion
+
+The CI workflow retains LCOV from the existing `pnpm test:coverage` run instead of running the
+JavaScript/TypeScript suites again. `pnpm quality:sonar-coverage:javascript` invokes `runCli` and
+`prepareJavaScriptCoverageReports` only to normalize every `SF:` entry to a repository-relative
+source path and reject missing, empty, malformed, or mispointed reports. The CI `test` job then
+separately uploads these current-run files as the `js-ts-lcov` artifact:
+
+```text
+apps/api/coverage/lcov.info
+apps/tail-worker/coverage/lcov.info
+apps/web/coverage/lcov.info
+apps/www/coverage/lcov.info
+infra/coverage/lcov.info
+packages/acp-client/coverage/lcov.info
+packages/cloud-init/coverage/lcov.info
+packages/eslint-plugin-sam/coverage/lcov.info
+packages/providers/coverage/lcov.info
+packages/shared/coverage/lcov.info
+packages/terminal/coverage/lcov.info
+packages/ui/coverage/lcov.info
+```
+
+Go coverage remains at `packages/cli/coverage.out` in the `cli-go-coverage` artifact. The ordinary
+CLI job produces it when CLI inputs change. When CI-based Sonar analysis is enabled and that job
+is skipped, the bounded `Sonar Go Coverage` job runs only the CLI tests needed to produce the
+report. The scanner job downloads both artifacts from the same workflow run, validates every
+input with `pnpm quality:sonar-coverage`, and then invokes the SHA-pinned official scanner action.
+It has `contents: read` permission, does not run for fork pull requests or
+Dependabot-triggered workflows, and exposes `SONAR_TOKEN` only to the token check and scanner
+steps. GitHub treats Dependabot-triggered workflows like fork workflows and withholds ordinary
+Actions secrets, so the explicit Dependabot exclusion prevents an enabled scanner from failing
+on an unavailable token. Do not replace this boundary with `pull_request_target`.
+
+Coverage import requires CI-based analysis; SonarQube Cloud Automatic Analysis does not import
+these reports. Automatic and CI-based analysis must not run together. Complete this one-time
+cutover in order:
+
+1. In SonarQube Cloud, create an expiring token limited to this project and the **Execute
+   Analysis** permission when the organization plan supports scoped tokens. Otherwise, use a
+   dedicated analysis-only user token with the narrowest available permissions.
+2. From a trusted terminal for `raphaeltm/simple-agent-manager`, run `gh secret set SONAR_TOKEN`
+   and provide the value through its standard-input prompt. Never put the token in a command-line
+   argument, log, issue, or pull-request body.
+3. In the SonarQube Cloud project, open **Administration → Analysis Method** and disable
+   **Automatic Analysis**.
+4. Only after the secret exists and Automatic Analysis is off, enable the repository gate with
+   `gh variable set SONAR_CI_ENABLED --body true`.
+5. Push or rerun the draft pull request. Require the `SonarQube Cloud` job to succeed, then query
+   the pull-request measures (replace `<PR>`):
+
+   ```bash
+   curl --fail --silent --show-error \
+     'https://sonarcloud.io/api/measures/component?component=raphaeltm_simple-agent-manager&pullRequest=<PR>&metricKeys=coverage,lines_to_cover,new_coverage,new_lines_to_cover'
+   ```
+
+   Do not mark the rollout complete or merge the draft until this response maps nonzero lines to
+   cover and real coverage values to the pull request.
+
+If the CI scanner must be rolled back, first run
+`gh variable set SONAR_CI_ENABLED --body false`; only then re-enable Automatic Analysis. This
+ordering avoids double analysis. Rotate or revoke `SONAR_TOKEN` through SonarQube Cloud and update
+the repository secret with the same standard-input command.
+
+This follows the official SonarSource guidance for
+[JavaScript/TypeScript coverage](https://docs.sonarsource.com/sonarqube-cloud/enriching/test-coverage/javascript-typescript-test-coverage),
+[GitHub Actions analysis](https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/ci-based-analysis/github-actions-for-sonarcloud),
+[Automatic Analysis](https://docs.sonarsource.com/sonarqube-cloud/advanced-setup/automatic-analysis),
+and
+[scoped organization tokens](https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/scoped-organization-tokens),
+plus GitHub's documentation for
+[Dependabot-triggered Actions workflows](https://docs.github.com/en/code-security/reference/supply-chain-security/troubleshoot-dependabot/dependabot-on-actions).
+
 ## Rollback switches
 
 Each layer is independently reversible:
