@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import { findNodeWithCapacity } from '../../src/durable-objects/task-runner/node-selection';
 import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
+import { aggregateWorkspaceReservationRows } from '../../src/services/workspace-resource-capacity';
 import { seedWorkspace } from './helpers/seed-d1';
 import {
   assignNodeCapacity,
@@ -20,8 +21,58 @@ import {
 
 beforeAll(seedVmAdmissionPlacementScope);
 
+function interceptDatabase(
+  statements: string[],
+  options: {
+    transformSql?: (sql: string) => string;
+    transformBinds?: (values: unknown[]) => unknown[];
+  } = {}
+): D1Database {
+  return {
+    prepare(sql: string) {
+      statements.push(sql);
+      const statement = env.DATABASE.prepare(options.transformSql?.(sql) ?? sql);
+      return {
+        bind(...values: unknown[]) {
+          return statement.bind(...(options.transformBinds?.(values) ?? values));
+        },
+      } as D1PreparedStatement;
+    },
+  } as D1Database;
+}
+
+function removeAggregateResourcePredicates(sql: string): string {
+  const patterns = [
+    /active\.cpu_millis\s*\+\s*requested\.cpu_millis\s*<=\s*n\.provider_instance_vcpu_count\s*\*\s*1000/,
+    /active\.memory_mb\s*\+\s*requested\.memory_mb\s*<=\s*n\.provider_instance_memory_mb/,
+    /active\.disk_mb\s*\+\s*requested\.disk_mb\s*<=\s*n\.provider_instance_disk_gb\s*\*\s*1024/,
+  ];
+  let mutated = sql;
+  for (const pattern of patterns) {
+    if (!pattern.test(mutated)) throw new Error(`mutation target not found: ${pattern.source}`);
+    mutated = mutated.replace(pattern, '1 = 1');
+  }
+  return mutated;
+}
+
+function assertExactReservationSnapshot(
+  actual: string | null | undefined,
+  expected: ReturnType<typeof reservation>
+): void {
+  if (actual !== JSON.stringify(expected)) {
+    throw new Error('persisted reservation changed after placement resolution');
+  }
+}
+
+function assertUsageWithinSmallNode(rows: Array<{ resolvedReservationJson: string | null }>): void {
+  const usage = aggregateWorkspaceReservationRows(rows);
+  if (usage.cpuMillis > 2_000) throw new Error('CPU overcommit detected');
+  if (usage.memoryMb > 4_096) throw new Error('memory overcommit detected');
+  if (usage.diskMb > 40_960) throw new Error('disk overcommit detected');
+}
+
 describe('workspace resource-capacity D1 races', () => {
-  it('persists capacity and resolved reservation snapshots during final reservation', async () => {
+  it('uses one final D1 statement and persists exact placement snapshots', async () => {
     const nodeId = 'node-vm-admission-capacity-snapshot';
     const workspaceId = 'workspace-vm-admission-capacity-snapshot';
     const snapshot = capacitySnapshot({
@@ -40,9 +91,10 @@ describe('workspace resource-capacity D1 races', () => {
       sourceId: 'task-capacity-snapshot',
     });
 
+    const statements: string[] = [];
     await expect(
       reserveWorkspacePlacement(
-        env.DATABASE,
+        interceptDatabase(statements),
         placement(workspaceId, nodeId, {
           vmSize: 'large',
           resolvedReservation,
@@ -51,6 +103,11 @@ describe('workspace resource-capacity D1 races', () => {
         2
       )
     ).resolves.toBe(true);
+
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toMatch(/^WITH requested_reservation AS/);
+    expect(statements[0]).toContain('INSERT INTO workspaces');
+    expect(statements[0]).toContain('FROM nodes n, requested_reservation requested');
 
     const row = await env.DATABASE.prepare(
       `SELECT capacity_pool_id, capacity_pool_scope, capacity_source_id,
@@ -79,8 +136,40 @@ describe('workspace resource-capacity D1 races', () => {
       capacity_pool_project_id: VM_ADMISSION_PROJECT_ID,
       workload_role: 'workspace',
       placement_explanation_json: snapshot.placementExplanationJson,
-      resolved_reservation_json: JSON.stringify(resolvedReservation),
     });
+    assertExactReservationSnapshot(row?.resolved_reservation_json, resolvedReservation);
+  });
+
+  it('calibrates the exact-snapshot assertion against a bind mutation', async () => {
+    const nodeId = 'node-vm-reservation-mutated-snapshot';
+    const workspaceId = 'workspace-vm-reservation-mutated-snapshot';
+    const exact = reservation({ source: 'task', sourceId: 'task-exact-before-async-work' });
+    const expectedJson = JSON.stringify(exact);
+    const mutatedJson = JSON.stringify({ ...exact, sourceId: 're-resolved-too-late' });
+    await makeReadyNode(nodeId, VM_ADMISSION_USER_ID, 'large');
+
+    await expect(
+      reserveWorkspacePlacement(
+        interceptDatabase([], {
+          transformBinds: (values) =>
+            values.map((value) => (value === expectedJson ? mutatedJson : value)),
+        }),
+        placement(workspaceId, nodeId, {
+          vmSize: 'large',
+          resolvedReservation: exact,
+        }),
+        2
+      )
+    ).resolves.toBe(true);
+
+    const row = await env.DATABASE.prepare(
+      `SELECT resolved_reservation_json AS resolvedReservationJson FROM workspaces WHERE id = ?`
+    )
+      .bind(workspaceId)
+      .first<{ resolvedReservationJson: string | null }>();
+    expect(() => assertExactReservationSnapshot(row?.resolvedReservationJson, exact)).toThrow(
+      /changed after placement resolution/
+    );
   });
 
   it('rejects cx23 overpacking in reusable selection and the final reservation CAS', async () => {
@@ -173,6 +262,41 @@ describe('workspace resource-capacity D1 races', () => {
     ]);
 
     expect(outcomes.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('calibrates the aggregate invariant against removal of all resource CAS predicates', async () => {
+    const nodeId = 'node-vm-reservation-mutated-cas';
+    await makeReadyNode(nodeId, VM_ADMISSION_USER_ID, 'small');
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-reservation-mutated-cas-existing', nodeId, {
+          vmSize: 'small',
+        }),
+        3
+      )
+    ).resolves.toBe(true);
+
+    const statements: string[] = [];
+    await expect(
+      reserveWorkspacePlacement(
+        interceptDatabase(statements, { transformSql: removeAggregateResourcePredicates }),
+        placement('workspace-vm-reservation-mutated-cas-overflow', nodeId, {
+          vmSize: 'small',
+        }),
+        3
+      )
+    ).resolves.toBe(true);
+    expect(statements).toHaveLength(1);
+
+    const rows = await env.DATABASE.prepare(
+      `SELECT resolved_reservation_json AS resolvedReservationJson
+       FROM workspaces
+       WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
+    )
+      .bind(nodeId)
+      .all<{ resolvedReservationJson: string | null }>();
+    expect(() => assertUsageWithinSmallNode(rows.results)).toThrow(/overcommit detected/);
   });
 
   it('enforces exclusive reservations in selection and final reservation', async () => {

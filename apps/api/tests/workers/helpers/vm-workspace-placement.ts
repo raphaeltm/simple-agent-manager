@@ -85,7 +85,7 @@ export function taskState(
   overrides: Partial<Pick<TaskRunnerState, 'projectId'>> & {
     installationId?: string;
     repository?: string;
-    capacityPoolSelection?: TaskRunnerState['config']['capacityPoolSelection'];
+    capacityPoolSelection?: NonNullable<TaskRunnerState['config']['capacityPoolSelection']>;
     resolvedReservation?: ResolvedResourceReservation;
   } = {}
 ): TaskRunnerState {
@@ -296,6 +296,11 @@ export async function makeReadyNode(
   opts: { nodeClass?: 'managed' | 'user-owned' } = {}
 ): Promise<void> {
   const now = new Date().toISOString();
+  const capacity = {
+    small: { instanceType: 'cx23', vcpuCount: 2, memoryMb: 4_096, diskGb: 40 },
+    medium: { instanceType: 'cx42', vcpuCount: 4, memoryMb: 8_192, diskGb: 80 },
+    large: { instanceType: 'cx52', vcpuCount: 8, memoryMb: 16_384, diskGb: 160 },
+  }[vmSize];
   await seedNode(nodeId, userId, {
     vmSize,
     vmLocation: 'nbg1',
@@ -313,10 +318,10 @@ export async function makeReadyNode(
     .bind(
       now,
       now,
-      vmSize === 'small' ? 'cx23' : vmSize === 'medium' ? 'cx42' : 'cx52',
-      vmSize === 'small' ? 2 : vmSize === 'medium' ? 4 : 8,
-      vmSize === 'small' ? 4_096 : vmSize === 'medium' ? 8_192 : 16_384,
-      vmSize === 'small' ? 40 : vmSize === 'medium' ? 80 : 160,
+      capacity.instanceType,
+      capacity.vcpuCount,
+      capacity.memoryMb,
+      capacity.diskGb,
       JSON.stringify({ cpuLoadAvg1: 5, memoryPercent: 10 }),
       nodeId
     )

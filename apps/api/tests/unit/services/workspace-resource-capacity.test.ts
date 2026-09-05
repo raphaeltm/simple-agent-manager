@@ -109,6 +109,33 @@ describe('workspace resource capacity', () => {
     ).toBe(false);
   });
 
+  it('enforces both the platform count cap and every reservation co-tenant cap', () => {
+    const occupied = aggregateWorkspaceReservationRows([
+      { resolvedReservationJson: JSON.stringify({ ...REQUEST, maxCoTenants: 2 }) },
+    ]);
+    const largeNode = {
+      providerInstanceVcpuCount: 8,
+      providerInstanceMemoryMb: 16_384,
+      providerInstanceDiskGb: 160,
+    };
+
+    expect(hasWorkspaceReservationCapacity(largeNode, occupied, REQUEST, 1)).toBe(false);
+    expect(hasWorkspaceReservationCapacity(largeNode, occupied, REQUEST, 10)).toBe(true);
+    expect(
+      hasWorkspaceReservationCapacity(largeNode, occupied, { ...REQUEST, maxCoTenants: 1 }, 10)
+    ).toBe(false);
+    expect(
+      hasWorkspaceReservationCapacity(
+        largeNode,
+        aggregateWorkspaceReservationRows([
+          { resolvedReservationJson: JSON.stringify({ ...REQUEST, maxCoTenants: 1 }) },
+        ]),
+        REQUEST,
+        10
+      )
+    ).toBe(false);
+  });
+
   it('treats missing disk capacity conservatively once a node is occupied', () => {
     const occupied = aggregateWorkspaceReservationRows([
       { resolvedReservationJson: JSON.stringify(REQUEST) },

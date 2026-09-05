@@ -97,6 +97,13 @@ is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exi
 - [x] Document the capacity policy and update `MAX_WORKSPACES_PER_NODE` wording.
 - [x] Add a retained process rule requiring aggregate resource invariants to be
       enforced at the final atomic reservation boundary.
+- [x] Add a bounded single-thread virtual timeline with deterministic event
+      ordering for full-node and final-capacity races, stale/delayed heartbeats,
+      overlapping provisioning, retries, cancellation/failure, legacy data,
+      exclusivity, and exact snapshot persistence.
+- [x] Automate mutation calibration for the final capacity recheck, heartbeat
+      freshness, provisioning serialization, exact snapshot bind, and all three
+      resource predicates in the one-statement D1 CAS.
 - [x] Run lint, typecheck, build, formatting, repository policy checks, the full
       unit suite, and the complete Workers/D1 suite.
 - [ ] Run task-completion, Cloudflare, test-engineer, constitution, doc-sync, full
@@ -122,6 +129,12 @@ is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exi
   final-capacity race produce two winners; mutating the serialized `sourceId`
   made the exact-snapshot persistence assertion fail. Restoring the production
   code returned both Worker suites to green.
+- Recovery validation added `test:scheduler` coverage for both lifecycle and
+  aggregate-capacity simulations: 2 files / 15 tests passed with stable virtual
+  event ordering. The real workerd/D1 capacity suite passed 8/8, including an
+  intercepted one-`prepare()` assertion and automated resource/snapshot mutation
+  calibration. The repaired focused API suite passed 5 files / 173 tests; the
+  previous invalid TaskRunner fixture now supplies the required resolved snapshot.
 - Format ratchet, file-size, source-contract, migration, Durable Object migration,
   Wrangler binding, AST, runtime-boundary, and type-boundary checks passed.
 
