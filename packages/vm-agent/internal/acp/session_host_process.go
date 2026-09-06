@@ -322,6 +322,11 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 		err = h.startAgent(ctx, agentType, cred, settings, previousAcpSessionID)
 	}
 	if err != nil {
+		// startAgent can fail after installing a replacement process (for example,
+		// when Codex rejects an explicitly requested model during the ACP
+		// handshake). Detach and stop that partial replacement before publishing
+		// the terminal restart failure.
+		h.stopCurrentAgentLocked()
 		h.setStatusLocked(HostError)
 		h.statusErr = err.Error()
 		if crashRecovery.inProgress {
