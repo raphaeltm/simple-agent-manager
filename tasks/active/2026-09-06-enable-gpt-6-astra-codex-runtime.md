@@ -98,10 +98,10 @@ per image build. No request-path query or persistent-data cost changes are invol
 - [x] Update the agent startup contract rule so wrapper upgrades verify the actual
       launched companion and model/capability, not a separately installed binary.
 - [x] Update synchronized runtime documentation and the post-mortem below.
-- [ ] Run focused package/quality tests, the full repository quality suite, and
+- [x] Run focused package/quality tests, the full repository quality suite, and
       required specialist reviews.
 - [ ] Archive this task record, open the PR, and keep CI/CodeRabbit green.
-- [ ] Skip staging per the user's explicit instruction and document that exception
+- [x] Skip staging per the user's explicit instruction and document that exception
       in the PR.
 
 ## Acceptance Criteria
