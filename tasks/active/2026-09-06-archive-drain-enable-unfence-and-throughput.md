@@ -173,8 +173,9 @@ time or at PR time.
       frozen-intents; abandon note unchanged.
 - [x] `CLAUDE.md` Recent Changes entry.
 - [ ] Post-mortem (rule 02) in the PR: root cause, class of bug, why not caught, process fix.
-- [ ] Follow-up SAM idea: `session_state.activity='error'` on terminal sessions blocks archiving
-      (rule 57 stale-activity class); decide whether terminal sessions past grace should clear it.
+- [x] Follow-up SAM idea `01M1V3WYT6D88Z41WQWP0ASVC3`: `session_state.activity='error'` on terminal
+      sessions blocks archiving (rule 57 stale-activity class); decide whether terminal sessions past
+      grace should clear it.
 
 ## Acceptance criteria
 
