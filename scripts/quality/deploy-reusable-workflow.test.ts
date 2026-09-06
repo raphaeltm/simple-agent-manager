@@ -28,7 +28,10 @@ function stepBlock(stepName: string): string {
 }
 
 function extractOptionalWorkerEnvVars(): string[] {
-  const match = syncWranglerConfig.match(/getOptionalProcessEnvVars\(\[\s*([\s\S]*?)\s*\]\)/);
+  // The checked-in `[vars]` argument precedes the list so differing overrides can be logged.
+  const match = syncWranglerConfig.match(
+    /getOptionalProcessEnvVars\((?:[A-Za-z_.]+,\s*)?\[\s*([\s\S]*?)\s*\]\)/
+  );
   const optionalEnvBlock = match?.[1];
 
   expect(optionalEnvBlock).toBeDefined();

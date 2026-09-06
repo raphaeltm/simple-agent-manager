@@ -433,6 +433,12 @@ const formattedDate = date.toLocaleDateString('en-US', {
     overflow: hidden;
   }
 
+  /* `main` is a root stacking context, so raise it above the fixed header while
+     a diagram is full screen. Otherwise the header can cover the close control. */
+  :global(body.mermaid-fullscreen-open) .blog-post {
+    z-index: 301;
+  }
+
   .post-body :global(.mermaid-shell.is-fullscreen) {
     position: fixed;
     inset: 16px;

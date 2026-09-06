@@ -16,7 +16,7 @@ import {
   markArchiveTargetRehomeExported,
   markSourceRecoveryManifestPersisted,
   markSourceTargetSealed,
-  prepareArchiveSourceIntent,
+  prepareArchiveSourceIntentOrRefuse,
   prepareArchiveTarget,
   ProjectDataArchiveInvariantError,
   resolveArchiveHashPageRows,
@@ -28,6 +28,7 @@ import {
 } from '../../../src/durable-objects/project-data/messages';
 import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import {
+  isProjectDataArchiveSourcePrepareRefusal,
   PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS,
   PROJECT_DATA_ARCHIVE_MAX_HASH_PAGE_ROWS,
   PROJECT_DATA_ARCHIVE_SURFACE_INVENTORY,
@@ -37,6 +38,22 @@ import {
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const NOW = 2_000_000;
+
+/**
+ * Test seam over the production RPC body: re-throws a typed refusal as the invariant error so
+ * the eligibility assertions below read as "prepare rejects", which is exactly what the
+ * coordinator's `failed`/fenced path sees once an intent exists.
+ */
+async function prepareArchiveSourceIntent(
+  sql: SqlStorage,
+  input: Parameters<typeof prepareArchiveSourceIntentOrRefuse>[1]
+) {
+  const outcome = await prepareArchiveSourceIntentOrRefuse(sql, input);
+  if (isProjectDataArchiveSourcePrepareRefusal(outcome)) {
+    throw new ProjectDataArchiveInvariantError(outcome.reason, outcome.message);
+  }
+  return outcome;
+}
 
 function makeSql(): { db: Database.Database; sql: SqlStorage } {
   const db = new Database(':memory:');
@@ -603,6 +620,108 @@ describe('ProjectData terminal archive sharding bridge', () => {
           null
         )
       ).toThrow(expect.objectContaining({ code: PROJECT_DATA_TRANSCRIPT_WRITE_FENCED }));
+    } finally {
+      source.db.close();
+    }
+  });
+
+  it('returns a typed pre-copy refusal before any write, and throws once an intent exists', async () => {
+    const source = makeSql();
+    try {
+      seedTerminalSession(source.sql, 'session-refused');
+      // The DO-local guard the D1 candidate query cannot see (production `ea87d375`).
+      source.sql.exec(
+        `INSERT INTO session_state (session_id, activity, activity_at)
+         VALUES ('session-refused', 'prompting', ?)`,
+        NOW
+      );
+      const input = {
+        projectId: 'project-archive',
+        sessionId: 'session-refused',
+        migrationId: 'migration-refused',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s3',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-refused',
+        now: NOW,
+        minTerminalAgeMs: 0,
+      };
+      const countIntents = () =>
+        (
+          source.db
+            .prepare(
+              'SELECT COUNT(*) AS count FROM project_data_archive_source_intents WHERE session_id = ?'
+            )
+            .get('session-refused') as { count: number }
+        ).count;
+
+      // Returned, not thrown: the value crosses the RPC boundary with its reason intact.
+      await expect(prepareArchiveSourceIntentOrRefuse(source.sql, input)).resolves.toMatchObject({
+        refused: true,
+        reason: 'active_session_state',
+        message: 'ProjectData archive refuses sessions with active session_state rows',
+      });
+      expect(countIntents()).toBe(0);
+      // Every pre-copy eligibility invariant refuses the same way (rule 69: one case per
+      // disjunct would be ideal; the comment-thread case is the other production-observed one).
+      seedTerminalSession(source.sql, 'session-refused-comments');
+      source.sql.exec(
+        `INSERT INTO comment_threads
+           (id, session_id, anchor_kind, message_id, body, author_type, author_id,
+            status, created_at, updated_at, sequence, version)
+         VALUES ('thread-refused', 'session-refused-comments', 'message',
+                 'session-refused-comments-message-1', 'comment', 'human', 'user-1', 'open',
+                 1600, 1600, 1, 1)`
+      );
+      await expect(
+        prepareArchiveSourceIntentOrRefuse(source.sql, {
+          ...input,
+          sessionId: 'session-refused-comments',
+          migrationId: 'migration-refused-comments',
+        })
+      ).resolves.toMatchObject({ refused: true, reason: 'message_comments_present' });
+      expect(
+        (
+          source.db
+            .prepare('SELECT COUNT(*) AS count FROM project_data_archive_source_intents')
+            .get() as { count: number }
+        ).count
+      ).toBe(0);
+      // An owner mismatch is a coordinator bug, not an eligibility refusal: it must throw
+      // before the eligibility check can turn it into a soft return, intent row or not.
+      await expect(
+        prepareArchiveSourceIntentOrRefuse(source.sql, {
+          ...input,
+          sourceOwnerName: 'other-project',
+        })
+      ).rejects.toMatchObject({ reason: 'source_owner_mismatch' });
+      expect(countIntents()).toBe(0);
+
+      // Owner control: once the condition clears the same call prepares the intent.
+      source.sql.exec(
+        "UPDATE session_state SET activity = 'idle' WHERE session_id = 'session-refused'"
+      );
+      await expect(prepareArchiveSourceIntentOrRefuse(source.sql, input)).resolves.toMatchObject({
+        idempotent: false,
+        sourceIntentToken: 'intent-refused',
+      });
+      expect(countIntents()).toBe(1);
+
+      // With an intent row present the transcript is fenced on this object: the same invariant
+      // must THROW so the coordinator keeps its fail-closed retry path, never unfence.
+      source.sql.exec(
+        "UPDATE session_state SET activity = 'prompting' WHERE session_id = 'session-refused'"
+      );
+      await expect(prepareArchiveSourceIntentOrRefuse(source.sql, input)).rejects.toMatchObject({
+        reason: 'active_session_state',
+      });
+      expect(countIntents()).toBe(1);
+      await expect(
+        prepareArchiveSourceIntentOrRefuse(source.sql, {
+          ...input,
+          sourceOwnerName: 'other-project',
+        })
+      ).rejects.toMatchObject({ reason: 'source_owner_mismatch' });
     } finally {
       source.db.close();
     }

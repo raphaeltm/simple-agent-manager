@@ -2,6 +2,7 @@ import type { Env } from '../env';
 import {
   PROJECT_DATA_ARCHIVE_JOURNAL_STATES,
   PROJECT_DATA_ARCHIVE_LOCATION_STATES,
+  PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
   type ProjectDataArchiveJournalState,
   type ProjectDataArchiveLocationState,
 } from '../project-data-archive/contract';
@@ -425,7 +426,10 @@ function mapRowsWithIsolation<RawRow, MappedRow>(
   };
 }
 
-function filterSql(filters: ArchiveRolloutFilters, alias: string): { sql: string; params: string[] } {
+function filterSql(
+  filters: ArchiveRolloutFilters,
+  alias: string
+): { sql: string; params: string[] } {
   const clauses: string[] = [];
   const params: string[] = [];
   if (filters.projectId) {
@@ -447,52 +451,50 @@ export async function getProjectDataArchiveRolloutState(
   filters: ArchiveRolloutFilters = {}
 ): Promise<ProjectDataArchiveRolloutState> {
   const limitConfig = getProjectDataArchiveRolloutListConfig(env);
-  const limit = Math.max(1, Math.min(filters.limit ?? limitConfig.defaultLimit, limitConfig.maxLimit));
+  const limit = Math.max(
+    1,
+    Math.min(filters.limit ?? limitConfig.defaultLimit, limitConfig.maxLimit)
+  );
   const migrationFilter = filterSql(filters, 'm');
   const locationFilter = filterSql(filters, 'loc');
   const breakerFilter = filters.projectId ? 'WHERE breaker.project_id = ?' : '';
   const breakerParams = filters.projectId ? [filters.projectId] : [];
 
-  const [
-    migrationCounts,
-    locationCounts,
-    breakers,
-    migrationListResult,
-    locationListResult,
-  ] = await Promise.all([
-    env.DATABASE.prepare(
-      `SELECT m.project_id, m.state, COUNT(*) AS count,
+  const [migrationCounts, locationCounts, breakers, migrationListResult, locationListResult] =
+    await Promise.all([
+      env.DATABASE.prepare(
+        `SELECT m.project_id, m.state, COUNT(*) AS count,
               MIN(m.updated_at) AS oldest_updated_at,
               MAX(m.updated_at) AS newest_updated_at
        FROM project_data_archive_migrations m
        ${migrationFilter.sql}
        GROUP BY m.project_id, m.state
        ORDER BY m.project_id ASC, m.state ASC`
-    )
-      .bind(...migrationFilter.params)
-      .all<RawCountRow>(),
-    env.DATABASE.prepare(
-      `SELECT loc.project_id, loc.location_state AS state, COUNT(*) AS count,
+      )
+        .bind(...migrationFilter.params)
+        .all<RawCountRow>(),
+      env.DATABASE.prepare(
+        `SELECT loc.project_id, loc.location_state AS state, COUNT(*) AS count,
               MIN(loc.updated_at) AS oldest_updated_at,
               MAX(loc.updated_at) AS newest_updated_at
        FROM project_data_session_locations loc
        ${locationFilter.sql}
        GROUP BY loc.project_id, loc.location_state
        ORDER BY loc.project_id ASC, loc.location_state ASC`
-    )
-      .bind(...locationFilter.params)
-      .all<RawCountRow>(),
-    env.DATABASE.prepare(
-      `SELECT breaker.project_id, breaker.state, breaker.reason, breaker.opened_at, breaker.updated_at
+      )
+        .bind(...locationFilter.params)
+        .all<RawCountRow>(),
+      env.DATABASE.prepare(
+        `SELECT breaker.project_id, breaker.state, breaker.reason, breaker.opened_at, breaker.updated_at
        FROM project_data_archive_circuit_breakers breaker
        ${breakerFilter}
        ORDER BY breaker.updated_at DESC
        LIMIT ?`
-    )
-      .bind(...breakerParams, limit)
-      .all<RawBreakerRow>(),
-    env.DATABASE.prepare(
-      `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+      )
+        .bind(...breakerParams, limit)
+        .all<RawBreakerRow>(),
+      env.DATABASE.prepare(
+        `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
               m.target_owner_name, m.target_generation, m.lease_owner, m.lease_epoch,
               m.lease_expires_at, m.attempt_count, m.error_code, m.error_message,
               m.candidate_at, m.frozen_at, m.poisoned_at, m.published_at, m.updated_at,
@@ -505,11 +507,11 @@ export async function getProjectDataArchiveRolloutState(
        ${migrationFilter.sql}
        ORDER BY m.updated_at DESC, m.migration_id ASC
        LIMIT ?`
-    )
-      .bind(...migrationFilter.params, limit + 1)
-      .all<RawMigrationRow>(),
-    env.DATABASE.prepare(
-      `SELECT loc.project_id, loc.session_id, loc.location_state, loc.owner_kind,
+      )
+        .bind(...migrationFilter.params, limit + 1)
+        .all<RawMigrationRow>(),
+      env.DATABASE.prepare(
+        `SELECT loc.project_id, loc.session_id, loc.location_state, loc.owner_kind,
               loc.owner_name, loc.generation, loc.migration_id, loc.source_owner_name,
               loc.target_owner_name, loc.target_aggregate_sha256, loc.routing_schema_version,
               loc.published_at, loc.updated_at
@@ -517,10 +519,10 @@ export async function getProjectDataArchiveRolloutState(
        ${locationFilter.sql}
        ORDER BY loc.updated_at DESC, loc.session_id ASC
        LIMIT ?`
-    )
-      .bind(...locationFilter.params, limit + 1)
-      .all<RawLocationRow>(),
-  ]);
+      )
+        .bind(...locationFilter.params, limit + 1)
+        .all<RawLocationRow>(),
+    ]);
   const manualCanaryConfig = getProjectDataArchiveManualCanaryConfig(env);
   const warningConfig = getProjectDataArchiveRolloutWarningConfig(env);
   const migrationRows = migrationListResult.results ?? [];
@@ -590,7 +592,10 @@ export async function listProjectDataArchiveProblemMigrations(
   filters: ArchiveRolloutFilters = {}
 ): Promise<ProjectDataArchiveProblemMigrationsResult> {
   const limitConfig = getProjectDataArchiveRolloutListConfig(env);
-  const limit = Math.max(1, Math.min(filters.limit ?? limitConfig.defaultLimit, limitConfig.maxLimit));
+  const limit = Math.max(
+    1,
+    Math.min(filters.limit ?? limitConfig.defaultLimit, limitConfig.maxLimit)
+  );
   const scoped = filterSql(filters, 'm');
   const prefix = scoped.sql ? `${scoped.sql} AND` : 'WHERE';
   const rows = await env.DATABASE.prepare(
@@ -605,10 +610,15 @@ export async function listProjectDataArchiveProblemMigrations(
      LEFT JOIN project_data_archive_circuit_breakers breaker
        ON breaker.project_id = m.project_id
      ${prefix} (m.state IN ('failed', 'poisoned', 'frozen') OR loc.location_state = 'frozen')
-     ORDER BY m.updated_at ASC, m.migration_id ASC
+     ORDER BY CASE WHEN m.state = 'frozen' AND m.error_code = ? THEN 1 ELSE 0 END ASC,
+              m.updated_at ASC,
+              m.migration_id ASC
      LIMIT ?`
   )
-    .bind(...scoped.params, limit)
+    // Rows that need a human first (rule 65): a pre-copy refusal is self-healing — the session
+    // is already back at `root` and the sweep retries it after the refusal window — so a
+    // chronically refused session must not push actionable failed/poisoned rows past the page.
+    .bind(...scoped.params, PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE, limit)
     .all<RawMigrationRow>();
   const mapped = mapRowsWithIsolation(
     'problem_migrations',

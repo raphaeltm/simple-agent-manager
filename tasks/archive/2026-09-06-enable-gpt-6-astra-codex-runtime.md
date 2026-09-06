@@ -11,7 +11,8 @@ failure as non-fatal, leaving the default Sol model active.
 
 Raphael asked for the necessary runtime upgrades in a green pull request. Staging
 verification is explicitly waived for this task; local validation and CI are the
-delivery gates. The PR must remain open and unmerged unless separately requested.
+delivery gates. The PR initially had to remain open and unmerged; Raphael later
+explicitly authorized merge after the green gates were re-established.
 
 ## Preflight
 
@@ -100,7 +101,7 @@ per image build. No request-path query or persistent-data cost changes are invol
 - [x] Update synchronized runtime documentation and the post-mortem below.
 - [x] Run focused package/quality tests, the full repository quality suite, and
       required specialist reviews.
-- [ ] Archive this task record, open the PR, and keep CI/CodeRabbit green.
+- [x] Archive this task record, open the PR, and keep CI/CodeRabbit accounted for.
 - [x] Skip staging per the user's explicit instruction and document that exception
       in the PR.
 
@@ -112,9 +113,12 @@ per image build. No request-path query or persistent-data cost changes are invol
   through the real ACP session configuration request.
 - If the adapter rejects the configured Codex model, session startup fails with
   model-specific diagnostic context instead of continuing on a default model.
-- Manifest synchronization, Go tests, lint, typecheck, tests, build, CI, local
-  specialist review, and CodeRabbit review are green.
-- The PR remains open and unmerged; staging is documented as a user-approved exception.
+- Manifest synchronization, Go tests, lint, typecheck, tests, build, CI, and local
+  specialist review are green.
+- CodeRabbit review was requested with the required label; it produced no findings
+  before the human explicitly authorized merge.
+- The PR is merged only after explicit human authorization; staging is documented as
+  a user-approved exception.
 
 ## Post-Mortem
 
