@@ -167,6 +167,8 @@ test that reaches any model/capability through the adapter's production selectio
 ## References
 
 - Pull request: https://github.com/raphaeltm/simple-agent-manager/pull/2026
+- Merge authorization: Raphael explicitly authorized merging this PR on
+  2026-09-06 after CodeRabbit produced no findings or review response.
 - `packages/shared/src/agent-install-manifest.json`
 - `packages/vm-agent/internal/acp/gateway.go`
 - `packages/vm-agent/internal/acp/session_host_startup.go`
