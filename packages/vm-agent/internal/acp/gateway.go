@@ -26,6 +26,9 @@ const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.73.0"
 const claudeCodeMinVersion = "2.1.251"
 const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.260"
 const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
+const codexACPInstallPackage = "@agentclientprotocol/codex-acp@1.10.0"
+const codexCLIInstallPackage = "@openai/codex@0.153.4"
+const codexACPInstallCommand = "npm install -g " + codexACPInstallPackage + " " + codexCLIInstallPackage
 
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
@@ -920,6 +923,16 @@ func claudeCodeVersionCheckCommand() string {
 	)
 }
 
+func codexVersionCheckCommand() string {
+	adapterVersion := strings.TrimPrefix(codexACPInstallPackage, "@agentclientprotocol/codex-acp@")
+	cliVersion := strings.TrimPrefix(codexCLIInstallPackage, "@openai/codex@")
+	return fmt.Sprintf(
+		`[ "$(codex-acp --version 2>/dev/null)" = "@agentclientprotocol/codex-acp %s" ] && [ "$(codex --version 2>/dev/null)" = "codex-cli %s" ]`,
+		adapterVersion,
+		cliVersion,
+	)
+}
+
 func agentInstalledCheckScript(info agentCommandInfo) string {
 	checkScript := "command -v " + info.command + " >/dev/null 2>&1"
 	if info.validationCmd != "" {
@@ -941,8 +954,6 @@ type agentCommandInfo struct {
 	injectionMode string // "env" (default) or "auth-file" — how the credential is injected
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
-
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.8.0 @openai/codex@0.153.2"
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
@@ -968,7 +979,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 	case "openai-codex":
 		// Sandbox and approval overrides are injected through CODEX_CONFIG by
-		// writeCodexStartupConfig. codex-acp (verified through 1.8.0) does not parse Codex CLI -c
+		// writeCodexStartupConfig. codex-acp (verified through 1.10.0) does not parse Codex CLI -c
 		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
 		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {
@@ -978,15 +989,17 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 				envVarName:    "",
 				installCmd:    codexACPInstallCommand,
 				isNpmBased:    true,
+				validationCmd: codexVersionCheckCommand(),
 				injectionMode: "auth-file",
 				authFilePath:  ".codex/auth.json",
 			}
 		}
 		return agentCommandInfo{
-			command:    "codex-acp",
-			envVarName: "OPENAI_API_KEY",
-			installCmd: codexACPInstallCommand,
-			isNpmBased: true,
+			command:       "codex-acp",
+			envVarName:    "OPENAI_API_KEY",
+			installCmd:    codexACPInstallCommand,
+			isNpmBased:    true,
+			validationCmd: codexVersionCheckCommand(),
 		}
 	case "google-gemini":
 		return agentCommandInfo{

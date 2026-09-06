@@ -85,19 +85,19 @@ per image build. No request-path query or persistent-data cost changes are invol
 
 ## Implementation Checklist
 
-- [ ] Upgrade `@agentclientprotocol/codex-acp` to 1.10.0 and `@openai/codex` to
+- [x] Upgrade `@agentclientprotocol/codex-acp` to 1.10.0 and `@openai/codex` to
       0.153.4 in the canonical manifest and all synchronized runtime images/installers.
-- [ ] Add exact Codex adapter/CLI version validation so stale workspace installs
+- [x] Add exact Codex adapter/CLI version validation so stale workspace installs
       are refreshed on the next agent start.
-- [ ] Set `CODEX_PATH=codex` in both VM/devcontainer and standalone/cf-container
+- [x] Set `CODEX_PATH=codex` in both VM/devcontainer and standalone/cf-container
       startup paths so the adapter executes the explicitly pinned companion CLI.
-- [ ] Make failure to apply an explicitly requested Codex model fail session
+- [x] Make failure to apply an explicitly requested Codex model fail session
       establishment instead of silently retaining the adapter default.
-- [ ] Add discriminating Go tests for current/stale versions, exact launch env on
+- [x] Add discriminating Go tests for current/stale versions, exact launch env on
       both runtime paths, successful Astra selection, and rejected selection.
-- [ ] Update the agent startup contract rule so wrapper upgrades verify the actual
+- [x] Update the agent startup contract rule so wrapper upgrades verify the actual
       launched companion and model/capability, not a separately installed binary.
-- [ ] Update synchronized runtime documentation and the post-mortem below.
+- [x] Update synchronized runtime documentation and the post-mortem below.
 - [ ] Run focused package/quality tests, the full repository quality suite, and
       required specialist reviews.
 - [ ] Archive this task record, open the PR, and keep CI/CodeRabbit green.

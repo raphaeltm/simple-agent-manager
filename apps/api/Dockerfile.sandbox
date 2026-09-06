@@ -30,7 +30,7 @@ RUN set -eux; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh; \
-    npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.260 @openai/codex@0.153.2; \
+    npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.260 @openai/codex@0.153.4; \
     # --ignore-scripts blocks implicit third-party lifecycle scripts (supply-chain
     # guard). claude-code's postinstall only links the platform-native binary from
     # its pinned optionalDependencies over the bin placeholder, so run that one

@@ -57,6 +57,7 @@ type agentStartup struct {
 
 const codexACPManagedConfigEnv = `CODEX_CONFIG={"sandbox_mode":"danger-full-access","approval_policy":"never"}`
 const codexACPManagedAgentModeEnv = "INITIAL_AGENT_MODE=agent-full-access"
+const codexACPManagedCodexPathEnv = "CODEX_PATH=codex"
 
 func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) (*agentStartup, error) {
 	var containerID string
@@ -475,15 +476,19 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: write SAM MCP config.toml: %w", err)
 	}
-	// codex-acp (verified through 1.8.0) ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
+	// codex-acp (verified through 1.10.0) ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
 	// each app-server thread, but every turn then applies the ACP agent mode's
 	// approval and sandbox policy on top. Select the wrapper's supported full-access
 	// mode as well so main turns and spawned subagents cannot fall back to bwrap
-	// inside SAM-managed containers.
+	// inside SAM-managed containers. CODEX_PATH makes the adapter execute the
+	// explicitly installed and version-validated companion instead of resolving a
+	// potentially different nested @openai/codex dependency.
 	startup.envVars = removeEnvVar(startup.envVars, "CODEX_CONFIG")
 	startup.envVars = removeEnvVar(startup.envVars, "INITIAL_AGENT_MODE")
+	startup.envVars = removeEnvVar(startup.envVars, "CODEX_PATH")
 	startup.envVars = append(startup.envVars, codexACPManagedConfigEnv)
 	startup.envVars = append(startup.envVars, codexACPManagedAgentModeEnv)
+	startup.envVars = append(startup.envVars, codexACPManagedCodexPathEnv)
 	for _, envVar := range codexMcpEnvVars {
 		key, _, ok := strings.Cut(envVar, "=")
 		if ok {

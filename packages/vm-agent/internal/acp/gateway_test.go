@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -334,6 +335,9 @@ func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
 	if info.installCmd != codexACPInstallCommand {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
+	if info.validationCmd != codexVersionCheckCommand() {
+		t.Fatalf("validationCmd=%q, want %q", info.validationCmd, codexVersionCheckCommand())
+	}
 	if info.injectionMode != "" {
 		t.Fatalf("injectionMode=%q, want empty for api-key", info.injectionMode)
 	}
@@ -361,8 +365,48 @@ func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
 	if info.installCmd != codexACPInstallCommand {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
+	if info.validationCmd != codexVersionCheckCommand() {
+		t.Fatalf("validationCmd=%q, want %q", info.validationCmd, codexVersionCheckCommand())
+	}
 	if info.args != nil {
 		t.Fatalf("args=%v, want nil; codex-acp config belongs in CODEX_CONFIG", info.args)
+	}
+}
+
+func TestCodexInstalledCheckRequiresExactAdapterAndCLI(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	writeVersionCommand := func(name, output string) {
+		t.Helper()
+		path := filepath.Join(tmpDir, name)
+		script := "#!/bin/sh\nprintf '%s\\n' '" + output + "'\n"
+		if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+			t.Fatalf("write fake %s: %v", name, err)
+		}
+	}
+	runCheck := func() error {
+		t.Helper()
+		cmd := exec.Command(localShellPath, "-c", agentInstalledCheckScript(getAgentCommandInfo("openai-codex", "api-key")))
+		cmd.Env = append(os.Environ(), "PATH="+tmpDir)
+		return cmd.Run()
+	}
+
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.10.0")
+	writeVersionCommand("codex", "codex-cli 0.153.4")
+	if err := runCheck(); err != nil {
+		t.Fatalf("current Codex adapter and CLI should pass validation: %v", err)
+	}
+
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.8.0")
+	if err := runCheck(); err == nil {
+		t.Fatal("stale Codex adapter unexpectedly passed validation")
+	}
+
+	writeVersionCommand("codex-acp", "@agentclientprotocol/codex-acp 1.10.0")
+	writeVersionCommand("codex", "codex-cli 0.153.2")
+	if err := runCheck(); err == nil {
+		t.Fatal("stale Codex CLI unexpectedly passed validation")
 	}
 }
 
@@ -1735,6 +1779,7 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 	startup := &agentStartup{containerID: "", envVars: []string{
 		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
 		"INITIAL_AGENT_MODE=agent",
+		"CODEX_PATH=/stale/codex",
 		"SAM_MCP_TOKEN=stale-standalone-token",
 	}}
 
@@ -1764,6 +1809,10 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
 	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
+	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
+	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
+		t.Fatalf("CODEX_PATH count=%d, want 1", got)
+	}
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "test-standalone-token")
 }
 
@@ -1797,6 +1846,7 @@ esac
 	startup := &agentStartup{containerID: "container-123", envVars: []string{
 		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
 		"INITIAL_AGENT_MODE=agent",
+		"CODEX_PATH=/stale/codex",
 		"SAM_MCP_TOKEN=stale-container-token",
 	}}
 
@@ -1818,6 +1868,10 @@ esac
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
 	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
+	assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
+	if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
+		t.Fatalf("CODEX_PATH count=%d, want 1", got)
+	}
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "container-token")
 }
 
@@ -1894,6 +1948,7 @@ esac
 					`USER_SETTING=preserved`,
 					`CODEX_CONFIG={"sandbox_mode":"read-only","approval_policy":"on-request"}`,
 					`INITIAL_AGENT_MODE=agent`,
+					`CODEX_PATH=/stale/codex`,
 				},
 			}
 
@@ -1911,6 +1966,10 @@ esac
 			}
 			assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 			assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
+			assertEnvContains(t, startup.envVars, "CODEX_PATH", "codex")
+			if got := countEnvKey(startup.envVars, "CODEX_PATH"); got != 1 {
+				t.Fatalf("CODEX_PATH count=%d, want 1", got)
+			}
 			assertEnvContains(t, startup.envVars, "USER_SETTING", "preserved")
 		})
 	}
