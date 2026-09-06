@@ -949,6 +949,7 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET`                      | `20000`                         | Cumulative `session_summaries.message_count` of new candidates one pass may journal; candidates are selected largest first, and a single session above the budget is still selected alone                                                         |
 | `PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS`                          | `604800000`                     | Minimum terminal-session age before archive-sharding may consider a session                                                                                                                                                                       |
 | `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS`                  | `604800000`                     | How long a session the root object refused at prepare (pre-copy invariant, e.g. `active_session_state`) stays out of unscoped sweep selection; journal `frozen`/`precopy_refused`, location back at `root`; a named-session canary bypasses it    |
+| `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS`                     | `3600000`                       | Minimum age of a `failed` archive journal before an unscoped sweep reclaims it, so `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` spans hours rather than consecutive cadence ticks; `0` disables it and a named-session canary bypasses it         |
 | `PROJECT_DATA_ARCHIVE_CHUNK_ROWS`                                | `500`                           | Maximum rows exported in one idempotent transcript archive chunk                                                                                                                                                                                  |
 | `PROJECT_DATA_ARCHIVE_CHUNK_BYTES`                               | `16777216`                      | Maximum bytes exported in one archive chunk; clamped below Cloudflare's 32MiB RPC ceiling                                                                                                                                                         |
 | `PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS`                            | `500`                           | Rows read per statement while streaming a session's terminal-version hash inside the ProjectData Durable Object; bounds object memory by page size instead of session size                                                                        |
@@ -1010,7 +1011,11 @@ The shipped cadence (`900000`) and wall budget (`30000`) were sized against the 
 non-trivial session because the wall-time break fires between candidates, so a daily tick can
 never keep up. Idle ticks cost two D1 statements, per-tick copy work is bounded by the wall
 budget, the session ceiling and the message budget, and the sweep runs after every lifecycle sweep
-in the cron chain so that budget cannot delay them. Before changing the global sweep switch, operators
+in the cron chain so that budget cannot delay them. `failed` journals wait
+`PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` before a sweep retries them, so the three-attempt poison
+budget still spans hours at the shorter cadence. The frozen-intent inspection route skips
+`precopy_refused` rows (nothing exists on either object to inspect) and the problem-migrations list
+sorts them after rows that need a human. Before changing the global sweep switch, operators
 use the superadmin routes in `apps/api/src/routes/admin/project-data-storage.ts` to inspect one
 project's D1 journal/location/breaker state and run a scoped dry-run canary for a specific project
 and optional session. Dry-runs work while both rollout switches are false and never call source deletion RPCs.

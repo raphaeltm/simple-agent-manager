@@ -97,6 +97,13 @@ export const PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS = 7 * 24 * 60 * 60 * 
  */
 export const PROJECT_DATA_ARCHIVE_DEFAULT_PRECOPY_REFUSAL_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
 export const PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE = 'precopy_refused';
+/**
+ * Minimum age of a `failed` journal before an unscoped sweep reclaims it. With a 15-minute
+ * cadence and `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS = 3`, no delay would poison a
+ * migration (and open its project breaker) 45 minutes after a transient fault; one hour between
+ * attempts keeps the poison budget a multi-hour window. `0` disables the delay.
+ */
+export const PROJECT_DATA_ARCHIVE_DEFAULT_FAILED_RETRY_DELAY_MS = 60 * 60 * 1000;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_PROJECTS = 1;
 /**
  * Hard ceiling on sessions one sweep tick may journal. The primary throttle is

@@ -2,7 +2,6 @@
 import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import {
-  isProjectDataArchiveSourcePrepareRefusal,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
   PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS,
@@ -997,20 +996,9 @@ export function inspectArchiveSourceIntent(
   };
 }
 
-export async function prepareArchiveSourceIntent(
-  sql: SqlStorage,
-  input: ArchiveSourcePrepareInput
-): Promise<ArchiveSourcePrepareResult> {
-  const outcome = await prepareArchiveSourceIntentOrRefuse(sql, input);
-  if (isProjectDataArchiveSourcePrepareRefusal(outcome)) {
-    throw new ProjectDataArchiveInvariantError(outcome.reason, outcome.message);
-  }
-  return outcome;
-}
-
 /**
  * Prepare the source intent, or return a typed refusal when a pre-copy eligibility invariant
- * rejects the session before any write.
+ * rejects the session before any write. This is the `archiveSourcePrepareIntent` RPC body.
  *
  * The D1 candidate query cannot see the DO-local eligibility guards (`session_state`, ACP
  * rows, comments, attention markers, ...), so the coordinator fences a session `migrating` and

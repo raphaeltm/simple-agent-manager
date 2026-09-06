@@ -113,4 +113,39 @@ describe('scheduled operational sweep kill switch', () => {
       expect.objectContaining({ type: 'sweep', failedSweeps: [] })
     );
   });
+
+  it('carries the archive-sharding refused count into cron.completed', async () => {
+    enabledMock.mockResolvedValue(true);
+    isolateMock.mockImplementation(async (name: string) =>
+      name === 'project_data_archive_sharding'
+        ? {
+            enabled: true,
+            skipped: false,
+            skipReason: null,
+            selected: 3,
+            migrated: 1,
+            recoveredCrashGaps: 0,
+            refused: 2,
+            failed: 0,
+            poisoned: 0,
+            chunksCopied: 4,
+            rowsCopied: 40,
+          }
+        : undefined
+    );
+
+    await scheduled(controller, env, context);
+
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        projectDataArchiveShardingEnabled: true,
+        projectDataArchiveShardingSkipped: false,
+        projectDataArchiveShardingSelected: 3,
+        projectDataArchiveShardingMigrated: 1,
+        projectDataArchiveShardingRefused: 2,
+        projectDataArchiveShardingFailed: 0,
+      })
+    );
+  });
 });

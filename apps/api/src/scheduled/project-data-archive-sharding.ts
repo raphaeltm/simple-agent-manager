@@ -13,6 +13,7 @@ import {
   isProjectDataArchiveSourcePrepareRefusal,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
+  PROJECT_DATA_ARCHIVE_DEFAULT_FAILED_RETRY_DELAY_MS,
   PROJECT_DATA_ARCHIVE_DEFAULT_LEASE_MS,
   PROJECT_DATA_ARCHIVE_DEFAULT_PRECOPY_REFUSAL_RETRY_MS,
   PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX,
@@ -52,6 +53,8 @@ const PROJECT_DATA_ARCHIVE_DEFAULT_FROZEN_INTENT_INSPECTION_MAX_LIMIT = 10;
 const PROJECT_DATA_ARCHIVE_DEFAULT_GLOBAL_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PROJECT_DATA_ARCHIVE_MAX_GLOBAL_SWEEP_INTERVAL_MS = 365 * 24 * 60 * 60 * 1000;
 const PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME = 'archive_sharding_global_sweep';
+/** The refusal window exists to stop per-tick thrash; a floor keeps a stray env value from disabling it. */
+const PROJECT_DATA_ARCHIVE_MIN_PRECOPY_REFUSAL_RETRY_MS = 60_000;
 
 /**
  * Journal states a sweep may pick up again. Two consumers: candidate selection
@@ -111,6 +114,13 @@ type ArchiveCoordinatorConfig = {
    * of candidate selection. Explicit session-scoped canaries bypass it.
    */
   precopyRefusalRetryMs: number;
+  /**
+   * Minimum age of a `failed` journal before a sweep reclaims it. Keeps the poison budget
+   * (`poisonAfterAttempts`) a wall-clock window rather than N consecutive cadence ticks, so a
+   * transient fault cannot open the project breaker within one cadence interval. Explicit
+   * session-scoped canaries bypass it.
+   */
+  failedRetryDelayMs: number;
   chunkRows: number;
   chunkBytes: number;
   leaseMs: number;
@@ -416,8 +426,14 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
     precopyRefusalRetryMs: envInt(
       env.PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS,
       PROJECT_DATA_ARCHIVE_DEFAULT_PRECOPY_REFUSAL_RETRY_MS,
-      1,
+      PROJECT_DATA_ARCHIVE_MIN_PRECOPY_REFUSAL_RETRY_MS,
       365 * 24 * 60 * 60 * 1000
+    ),
+    failedRetryDelayMs: envInt(
+      env.PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS,
+      PROJECT_DATA_ARCHIVE_DEFAULT_FAILED_RETRY_DELAY_MS,
+      0,
+      7 * 24 * 60 * 60 * 1000
     ),
     chunkRows: envInt(
       env.PROJECT_DATA_ARCHIVE_CHUNK_ROWS,
@@ -929,8 +945,17 @@ async function readMigrationOrThrow(env: Env, migrationId: string): Promise<Migr
   return migration;
 }
 
+/**
+ * A `failed` journal is reclaimable only once it is older than `failedRetryDelayMs`. Without
+ * this, `poisonAfterAttempts` consecutive faults poison the row and open the project breaker
+ * within a few cadence ticks (45 minutes at the 15-minute cadence) instead of over a window a
+ * transient fault can outlast.
+ */
+const FAILED_RETRY_DELAY_SQL = `AND NOT (m.state = 'failed' AND m.updated_at > ?)`;
+
 async function selectReclaimableMigrations(
   env: Env,
+  config: ArchiveCoordinatorConfig,
   limit: number,
   now: number
 ): Promise<MigrationRow[]> {
@@ -946,22 +971,26 @@ async function selectReclaimableMigrations(
      WHERE m.state IN (${placeholders(ACTIVE_RECLAIMABLE_STATES.length)})
        AND (m.lease_expires_at IS NULL OR m.lease_expires_at <= ?)
        AND COALESCE(breaker.state, 'closed') = 'closed'
+       ${FAILED_RETRY_DELAY_SQL}
      ORDER BY m.updated_at ASC, m.migration_id ASC
      LIMIT ?`
   )
-    .bind(...ACTIVE_RECLAIMABLE_STATES, now, limit)
+    .bind(...ACTIVE_RECLAIMABLE_STATES, now, now - config.failedRetryDelayMs, limit)
     .all<MigrationRow>();
   return rows.results ?? [];
 }
 
 async function selectScopedReclaimableMigrations(
   env: Env,
+  config: ArchiveCoordinatorConfig,
   scope: ArchiveCoordinatorScope,
   limit: number,
   now: number
 ): Promise<MigrationRow[]> {
   if (limit <= 0) return [];
   const sessionPredicate = scope.sessionId ? 'AND m.session_id = ?' : '';
+  // An operator who names the session is asking for it now; the delay only paces the sweep.
+  const retryDelayPredicate = scope.sessionId ? '' : FAILED_RETRY_DELAY_SQL;
   const rows = await env.DATABASE.prepare(
     `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
@@ -975,6 +1004,7 @@ async function selectScopedReclaimableMigrations(
        AND m.state IN (${placeholders(ACTIVE_RECLAIMABLE_STATES.length)})
        AND (m.lease_expires_at IS NULL OR m.lease_expires_at <= ?)
        AND COALESCE(breaker.state, 'closed') = 'closed'
+       ${retryDelayPredicate}
      ORDER BY m.updated_at ASC, m.migration_id ASC
      LIMIT ?`
   )
@@ -983,6 +1013,7 @@ async function selectScopedReclaimableMigrations(
       ...(scope.sessionId ? [scope.sessionId] : []),
       ...ACTIVE_RECLAIMABLE_STATES,
       now,
+      ...(scope.sessionId ? [] : [now - config.failedRetryDelayMs]),
       limit
     )
     .all<MigrationRow>();
@@ -1254,7 +1285,7 @@ async function selectMigrationWork(
   nowDate: Date,
   now: number
 ): Promise<ArchiveMigrationWork> {
-  const reclaimable = await selectReclaimableMigrations(env, config.sweepSessions, now);
+  const reclaimable = await selectReclaimableMigrations(env, config, config.sweepSessions, now);
   const remaining = config.sweepSessions - reclaimable.length;
   if (remaining <= 0) return { migrations: reclaimable, pending: [] };
   const pending = applyMessageBudget(
@@ -1274,6 +1305,7 @@ async function selectScopedMigrationWork(
 ): Promise<ArchiveMigrationWork & { selected: ProjectDataArchiveManualCanaryCandidate[] }> {
   const reclaimable = await selectScopedReclaimableMigrations(
     env,
+    config,
     scope,
     config.sweepSessions,
     now
@@ -1757,6 +1789,10 @@ async function ensureSourcePrepared(
   | { refusal: null; migration: ClaimedMigrationRow; prepared: ArchiveSourcePrepareResult }
 > {
   const sourceIntentToken = crypto.randomUUID();
+  // Eligibility is decided inside the same DO call that writes the intent, and a refusal comes
+  // back as a value. A separate pre-check RPC before journaling would spend one extra DO round
+  // trip on every candidate that turns out to be eligible (the common case) to avoid a rare
+  // unwind that costs two D1 statements in a batch this worker already owns.
   const outcome = await source.archiveSourcePrepareIntent(
     sourcePrepareInput(migration, sourceIntentToken, now, config.sessionGraceMs)
   );
@@ -1777,6 +1813,38 @@ async function ensureSourcePrepared(
         })
       : await persistPreparedJournalFields(env, migration, prepared, sourceIntentToken, now);
   return { refusal: null, migration: updated, prepared };
+}
+
+/**
+ * The one statement that returns a session's D1 location to `root` (owner = the root object,
+ * generation 0, no migration, no target proof). Abandon, copy-back and the pre-copy refusal
+ * unwind all restore this same shape; each appends the guard that proves the caller owns the
+ * fence it is removing (`guardSql` is ANDed after `project_id` / `session_id`).
+ */
+function restoreSessionLocationToRootStatement(
+  env: Env,
+  input: {
+    projectId: string;
+    sessionId: string;
+    sourceOwnerName: string;
+    now: number;
+    guardSql: string;
+    guardParams: readonly unknown[];
+  }
+): D1PreparedStatement {
+  return env.DATABASE.prepare(
+    `UPDATE project_data_session_locations
+     SET location_state = 'root',
+         owner_kind = 'root',
+         owner_name = ?,
+         generation = 0,
+         migration_id = NULL,
+         target_aggregate_sha256 = NULL,
+         updated_at = ?
+     WHERE project_id = ?
+       AND session_id = ?
+       AND ${input.guardSql}`
+  ).bind(input.sourceOwnerName, input.now, input.projectId, input.sessionId, ...input.guardParams);
 }
 
 /**
@@ -1805,7 +1873,7 @@ async function refusePreCopyMigration(
 ): Promise<void> {
   assertArchiveJournalTransition(migration.state, 'frozen');
   const errorMessage = `${refusal.reason}: ${refusal.message}`.slice(0, 1000);
-  const [journalResult, locationResult] = await env.DATABASE.batch([
+  const [journalResult, supersededRefusals, locationResult] = await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE project_data_archive_migrations
        SET state = 'frozen',
@@ -1828,19 +1896,17 @@ async function refusePreCopyMigration(
       migration.lease_owner,
       migration.lease_epoch
     ),
+    // A chronically refused session is re-selected once per window and each selection mints a
+    // new journal row, so keep only the newest refusal marker per session: older ones carry no
+    // proof (no intent, no target, no manifest) and would otherwise accumulate forever. Guarded
+    // on this refusal having landed, so a lost fence deletes nothing.
     env.DATABASE.prepare(
-      `UPDATE project_data_session_locations
-       SET location_state = 'root',
-           owner_kind = 'root',
-           owner_name = ?,
-           generation = 0,
-           migration_id = NULL,
-           target_aggregate_sha256 = NULL,
-           updated_at = ?
+      `DELETE FROM project_data_archive_migrations
        WHERE project_id = ?
          AND session_id = ?
-         AND migration_id = ?
-         AND location_state = 'migrating'
+         AND state = 'frozen'
+         AND error_code = ?
+         AND migration_id != ?
          AND EXISTS (
            SELECT 1
            FROM project_data_archive_migrations m
@@ -1849,19 +1915,51 @@ async function refusePreCopyMigration(
              AND m.error_code = ?
          )`
     ).bind(
-      migration.source_owner_name,
-      now,
       migration.project_id,
       migration.session_id,
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
       migration.migration_id,
       migration.migration_id,
       PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE
     ),
+    restoreSessionLocationToRootStatement(env, {
+      projectId: migration.project_id,
+      sessionId: migration.session_id,
+      sourceOwnerName: migration.source_owner_name,
+      now,
+      // Only the fence this migration opened, and only once the journal freeze above landed in
+      // this same batch: a lost lease fence (changes = 0 above) must leave the location alone.
+      guardSql: `migration_id = ?
+         AND location_state = 'migrating'
+         AND EXISTS (
+           SELECT 1
+           FROM project_data_archive_migrations m
+           WHERE m.migration_id = ?
+             AND m.state = 'frozen'
+             AND m.error_code = ?
+         )`,
+      guardParams: [
+        migration.migration_id,
+        migration.migration_id,
+        PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
+      ],
+    }),
   ]);
   if ((journalResult?.meta.changes ?? 0) === 0) {
     throw new ProjectDataArchiveCoordinatorStateError(
       'lease_fence_lost',
       `ProjectData archive migration ${migration.migration_id} lost its lease fence before recording a pre-copy refusal`
+    );
+  }
+  void supersededRefusals;
+  if ((locationResult?.meta.changes ?? 0) === 0) {
+    // Every writer that moves the location off `migrating` also moves the journal off `leased`,
+    // so a frozen journal with an unrestored fence is an invariant violation, not a race. Fail
+    // loudly (the journal is terminal, so `markFailed` leaves it alone) rather than stranding a
+    // readable-in-theory session behind a fence nothing will retry.
+    throw new ProjectDataArchiveCoordinatorStateError(
+      'precopy_refusal_location_not_restored',
+      `ProjectData archive migration ${migration.migration_id} was frozen as ${PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE} but its session location was not returned to root`
     );
   }
   log.warn('project_data_archive_candidate_refused', {
@@ -1870,7 +1968,6 @@ async function refusePreCopyMigration(
     sessionId: migration.session_id,
     reason: refusal.reason,
     message: refusal.message,
-    restoredToRoot: (locationResult?.meta.changes ?? 0) > 0,
   });
 }
 
@@ -2133,14 +2230,48 @@ async function migrateCandidate(
   chunksCopied: number;
   rowsCopied: number;
 }> {
-  let migration = await claimMigrationLease(env, selected, now, config.leaseMs);
-  if (!migration) {
+  const claimedRow = await claimMigrationLease(env, selected, now, config.leaseMs);
+  if (!claimedRow) {
     return { migrated: false, recoveredCrashGap: false, chunksCopied: 0, rowsCopied: 0 };
   }
+  try {
+    return await migrateClaimedCandidate(env, config, r2, claimedRow, now);
+  } catch (error) {
+    throw new ClaimedMigrationFailure(error, {
+      leaseOwner: claimedRow.lease_owner,
+      leaseEpoch: claimedRow.lease_epoch,
+    });
+  }
+}
+
+async function migrateClaimedCandidate(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  r2: R2Bucket,
+  claimedRow: ClaimedMigrationRow,
+  now: number
+): Promise<{
+  migrated: boolean;
+  refused?: boolean;
+  recoveredCrashGap: boolean;
+  chunksCopied: number;
+  rowsCopied: number;
+}> {
+  let migration = claimedRow;
   const source = await ensureOwnerStub(env, migration.source_owner_name, migration.project_id);
   const target = await ensureOwnerStub(env, migration.target_owner_name, migration.project_id);
   let chunksCopied = 0;
   let rowsCopied = 0;
+  // Wall time per phase, logged on completion so production ticks quantify what each phase
+  // costs the root object (finalize in particular deletes a whole session inside one RPC).
+  const phaseStartedAt = Date.now();
+  const phaseDurationsMs: Record<string, number> = {};
+  let phaseMark = phaseStartedAt;
+  const markPhase = (phase: string) => {
+    const at = Date.now();
+    phaseDurationsMs[phase] = at - phaseMark;
+    phaseMark = at;
+  };
 
   const local = await inspectSourceIntent(source, migration);
   migration = await alignJournalToLocalSourceProof(env, migration, local, now);
@@ -2154,6 +2285,7 @@ async function migrateCandidate(
   }
 
   const preparedResult = await ensureSourcePrepared(env, config, source, migration, now);
+  markPhase('prepare');
   if (preparedResult.refusal) {
     // The object only refuses while it holds no intent row for the session. A journal past
     // `leased` says an intent SHOULD exist, so the two disagree; keep the fail-closed
@@ -2177,6 +2309,7 @@ async function migrateCandidate(
     const copyResult = await copySourceChunks(source, target, config, r2, migration, now);
     chunksCopied += copyResult.chunksCopied;
     rowsCopied += copyResult.rowsCopied;
+    markPhase('copy');
     migration = await sealTargetAndSource(
       env,
       source,
@@ -2186,15 +2319,29 @@ async function migrateCandidate(
       copyResult.chunkHashes,
       now
     );
+    markPhase('seal');
   }
 
   if (migration.state === 'target_sealed') {
     migration = await persistRecoveryManifest(env, config, r2, source, target, migration, now);
+    markPhase('manifest');
   }
 
   if (migration.state === 'recovery_manifest_persisted') {
     const finalized = await finalizeSourceAndPublish(env, config, source, migration, now);
+    markPhase('finalize');
     migration = finalized.migration as ClaimedMigrationRow;
+    log.info('project_data_archive_candidate_migrated', {
+      migrationId: migration.migration_id,
+      projectId: migration.project_id,
+      sessionId: migration.session_id,
+      state: migration.state,
+      messageCount: prepared.messageCount,
+      chunksCopied,
+      rowsCopied,
+      totalMs: Date.now() - phaseStartedAt,
+      phaseDurationsMs,
+    });
     return {
       migrated: migration.state === 'published',
       recoveredCrashGap: finalized.recoveredCrashGap,
@@ -2216,15 +2363,47 @@ async function migrateCandidate(
   };
 }
 
+/** The lease a worker held when its migration attempt failed. */
+type HeldLease = { leaseOwner: string; leaseEpoch: number };
+
+/**
+ * Wraps a failure that happened while this worker held the journal lease, so the failure
+ * handler can refuse to overwrite a row another worker (or an abandon reservation) has since
+ * taken over. `cause` is the original error; `errorCode`/`errorMessage` read through it.
+ */
+class ClaimedMigrationFailure extends Error {
+  constructor(
+    readonly cause: unknown,
+    readonly lease: HeldLease
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = 'ClaimedMigrationFailure';
+  }
+}
+
 async function markFailed(
   env: Env,
   config: ArchiveCoordinatorConfig,
   migration: MigrationRow,
   now: number,
-  error: unknown
+  error: unknown,
+  lease?: HeldLease
 ): Promise<'failed' | 'poisoned' | 'unchanged'> {
   const current = await readMigration(env, migration.migration_id);
   if (!current || ['source_deleted', 'published', 'poisoned', 'frozen'].includes(current.state)) {
+    return 'unchanged';
+  }
+  // A worker that lost its lease fence must not record a failure on the row its successor now
+  // owns (the successor may be mid-copy); only the lease holder's verdict counts.
+  if (
+    lease &&
+    (current.lease_owner !== lease.leaseOwner || current.lease_epoch !== lease.leaseEpoch)
+  ) {
+    log.warn('project_data_archive_mark_failed_lease_fence_lost', {
+      migrationId: current.migration_id,
+      projectId: current.project_id,
+      state: current.state,
+    });
     return 'unchanged';
   }
   if (current.attempt_count >= config.poisonAfterAttempts) {
@@ -2237,7 +2416,8 @@ async function markFailed(
     });
     return 'poisoned';
   }
-  await env.DATABASE.prepare(
+  const leaseGuard = lease ? 'AND lease_owner = ? AND lease_epoch = ?' : '';
+  const result = await env.DATABASE.prepare(
     `UPDATE project_data_archive_migrations
      SET state = 'failed',
          error_code = ?,
@@ -2246,11 +2426,18 @@ async function markFailed(
          lease_expires_at = NULL,
          updated_at = ?
      WHERE migration_id = ?
-       AND state NOT IN ('source_deleted', 'published', 'poisoned', 'frozen')`
+       AND state NOT IN ('source_deleted', 'published', 'poisoned', 'frozen')
+       ${leaseGuard}`
   )
-    .bind(errorCode(error), errorMessage(error), now, current.migration_id)
+    .bind(
+      errorCode(error),
+      errorMessage(error),
+      now,
+      current.migration_id,
+      ...(lease ? [lease.leaseOwner, lease.leaseEpoch] : [])
+    )
     .run();
-  return 'failed';
+  return (result.meta.changes ?? 0) > 0 ? 'failed' : 'unchanged';
 }
 
 export async function freezeProjectDataArchiveMigration(
@@ -2371,11 +2558,19 @@ export async function inspectFrozenProjectDataArchiveIntents(
      LEFT JOIN project_data_archive_circuit_breakers breaker
        ON breaker.project_id = m.project_id
      WHERE (m.state IN ('failed', 'poisoned', 'frozen') OR loc.location_state = 'frozen')
+       AND NOT (m.state = 'frozen' AND m.error_code = ?)
        ${projectPredicate}
      ORDER BY m.updated_at ASC
      LIMIT ?`
   )
-    .bind(...(input.projectId ? [input.projectId] : []), limit)
+    .bind(
+      // A pre-copy refusal never created a source intent or a target row, so there is nothing
+      // on either object to inspect; excluding it keeps this 5-10 row, two-RPC-per-row queue for
+      // migrations that need a human. Refused rows stay visible in the problem-migrations list.
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
+      ...(input.projectId ? [input.projectId] : []),
+      limit
+    )
     .all<MigrationRow & { location_state: string | null; breaker_state: string | null }>();
 
   const inspections: ProjectDataArchiveFrozenIntentInspection[] = [];
@@ -2677,26 +2872,14 @@ export async function abandonProjectDataArchiveMigration(
          AND state NOT IN ('source_deleted', 'published')
          AND NOT (state = 'frozen' AND error_code = 'operator_abandoned')`
     ).bind(reason, now, now, migration.migration_id, migration.project_id, fenced.lease_epoch),
-    env.DATABASE.prepare(
-      `UPDATE project_data_session_locations
-       SET location_state = 'root',
-           owner_kind = 'root',
-           owner_name = ?,
-           generation = 0,
-           migration_id = NULL,
-           target_aggregate_sha256 = NULL,
-           updated_at = ?
-       WHERE project_id = ?
-         AND session_id = ?
-         AND migration_id = ?
-         AND location_state IN ('migrating', 'frozen')`
-    ).bind(
-      migration.source_owner_name,
+    restoreSessionLocationToRootStatement(env, {
+      projectId: migration.project_id,
+      sessionId: migration.session_id,
+      sourceOwnerName: migration.source_owner_name,
       now,
-      migration.project_id,
-      migration.session_id,
-      migration.migration_id
-    ),
+      guardSql: `migration_id = ? AND location_state IN ('migrating', 'frozen')`,
+      guardParams: [migration.migration_id],
+    }),
   ]);
 
   log.warn('project_data_archive_migration_abandoned', {
@@ -2832,28 +3015,14 @@ export async function copyBackProjectDataArchiveMigration(
     targetGeneration: migration.target_generation,
     now,
   });
-  const locationResult = await env.DATABASE.prepare(
-    `UPDATE project_data_session_locations
-     SET location_state = 'root',
-         owner_kind = 'root',
-         owner_name = ?,
-         generation = 0,
-         migration_id = NULL,
-         target_aggregate_sha256 = NULL,
-         updated_at = ?
-     WHERE project_id = ?
-       AND session_id = ?
-       AND (migration_id = ? OR owner_name = ?)`
-  )
-    .bind(
-      migration.source_owner_name,
-      now,
-      migration.project_id,
-      migration.session_id,
-      migration.migration_id,
-      migration.target_owner_name
-    )
-    .run();
+  const locationResult = await restoreSessionLocationToRootStatement(env, {
+    projectId: migration.project_id,
+    sessionId: migration.session_id,
+    sourceOwnerName: migration.source_owner_name,
+    now,
+    guardSql: `(migration_id = ? OR owner_name = ?)`,
+    guardParams: [migration.migration_id, migration.target_owner_name],
+  }).run();
   await env.DATABASE.prepare(
     `UPDATE project_data_archive_migrations
      SET state = 'frozen',
@@ -2921,13 +3090,16 @@ async function processArchiveMigrationBatch(input: {
       if (result.recoveredCrashGap) input.stats.recoveredCrashGaps++;
       input.stats.chunksCopied += result.chunksCopied;
       input.stats.rowsCopied += result.rowsCopied;
-    } catch (error) {
+    } catch (caught) {
+      const error = caught instanceof ClaimedMigrationFailure ? caught.cause : caught;
+      const lease = caught instanceof ClaimedMigrationFailure ? caught.lease : undefined;
       const failureState = await markFailed(
         input.env,
         input.config,
         migration,
         input.now,
-        error
+        error,
+        lease
       ).catch((markError) => {
         log.error(input.markFailedErrorEvent, {
           migrationId: migration.migration_id,

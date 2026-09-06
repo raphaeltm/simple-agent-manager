@@ -2310,6 +2310,117 @@ describe('archive-sharding pre-copy refusal unwinds the fence in the same tick',
     }
   });
 
+  it('never restores the session to root when the lease fence is lost between claim and refusal', async () => {
+    // A concurrent worker (or an abandon reservation) bumps the lease epoch while this worker
+    // waits on the prepare RPC. The journal freeze must miss its CAS, and the location restore
+    // in the same batch is conditioned on that freeze, so both rows stay exactly as the new
+    // owner left them.
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-race', messageCount: 500 });
+      const source = createFakeSource();
+      source.archiveSourcePrepareIntent.mockImplementationOnce(async () => {
+        sqlite
+          .prepare(
+            `UPDATE project_data_archive_migrations
+             SET lease_owner = 'worker-concurrent', lease_epoch = lease_epoch + 1
+             WHERE session_id = ?`
+          )
+          .run('session-race');
+        return REFUSAL;
+      });
+
+      const result = await runCanary(sqlite, source);
+
+      expect(result.stats).toMatchObject({ selected: 1, refused: 0, failed: 1 });
+      expect(readLocationRow(sqlite, 'session-race')).toMatchObject({
+        location_state: 'migrating',
+      });
+      // The successor's row is exactly as it left it: not frozen, not marked failed by the
+      // loser, lease intact.
+      expect(readJournal(sqlite, 'session-race')).toMatchObject({
+        state: 'leased',
+        lease_owner: 'worker-concurrent',
+        error_code: null,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('unwinds only the leased migration even when another project fences the same session id', async () => {
+    // Cross-tenant control (rule 28): project B holds an unrelated `migrating` fence for a
+    // session with the same id. Refusing project A's candidate must leave B untouched.
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-shared', messageCount: 500 });
+      seedMigration(sqlite, 'copying', {
+        migrationId: 'migration-other-project',
+        projectId: 'project-other',
+        sessionId: 'session-shared',
+        leaseExpiresAt: NOW + 60_000,
+      });
+      const source = createFakeSource();
+      source.archiveSourcePrepareIntent.mockResolvedValue(REFUSAL);
+
+      const result = await runCanary(sqlite, source);
+
+      expect(result.stats).toMatchObject({ selected: 1, refused: 1, failed: 0 });
+      expect(readLocationRow(sqlite, 'session-shared')).toMatchObject({ location_state: 'root' });
+      expect(readLocationRow(sqlite, 'session-shared', 'project-other')).toMatchObject({
+        location_state: 'migrating',
+        owner_name: TARGET_OWNER,
+      });
+      expect(readMigrationRow(sqlite, 'migration-other-project')).toMatchObject({
+        state: 'copying',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps only the newest refusal marker per session, leaving other frozen journals alone', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-chronic', messageCount: 500 });
+      const seedFrozen = (migrationId: string, errorCode: string, updatedAt: number) =>
+        sqlite
+          .prepare(
+            `INSERT INTO project_data_archive_migrations
+               (migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
+                target_generation, lease_epoch, attempt_count, error_code, created_at, updated_at)
+             VALUES (?, ?, 'session-chronic', 'frozen', ?, ?, 1, 1, 1, ?, ?, ?)`
+          )
+          .run(migrationId, PROJECT_ID, PROJECT_ID, TARGET_OWNER, errorCode, updatedAt, updatedAt);
+      // Two earlier refusals (both older than the window) and one operator abandon.
+      seedFrozen('migration-refusal-1', 'precopy_refused', NOW - 20 * 24 * 60 * 60 * 1000);
+      seedFrozen('migration-refusal-2', 'precopy_refused', NOW - 10 * 24 * 60 * 60 * 1000);
+      seedFrozen('migration-abandoned', 'operator_abandoned', NOW - 5 * 24 * 60 * 60 * 1000);
+      const source = createFakeSource();
+      source.archiveSourcePrepareIntent.mockResolvedValue(REFUSAL);
+
+      const result = await runCanary(sqlite, source);
+      expect(result.stats).toMatchObject({ selected: 1, refused: 1 });
+
+      const frozen = sqlite
+        .prepare(
+          `SELECT migration_id, error_code FROM project_data_archive_migrations
+           WHERE session_id = 'session-chronic' AND state = 'frozen' ORDER BY updated_at ASC`
+        )
+        .all() as Array<{ migration_id: string; error_code: string }>;
+      expect(frozen.filter((row) => row.error_code === 'precopy_refused')).toHaveLength(1);
+      expect(frozen.map((row) => row.migration_id)).not.toContain('migration-refusal-1');
+      expect(frozen.map((row) => row.migration_id)).not.toContain('migration-refusal-2');
+      // Owner control: the abandon record is a real ledger entry and stays.
+      expect(frozen.map((row) => row.migration_id)).toContain('migration-abandoned');
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('keeps a mid-copy failure fenced for retry (discriminating control)', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -2385,7 +2496,8 @@ describe('archive-sharding pre-copy refusal unwinds the fence in the same tick',
 });
 
 describe('archive-sharding selection honours the pre-copy refusal retry window', () => {
-  const REFUSED_AT = NOW - 1_000;
+  // Older than the 60 s floor of the retry window, so a configured minimum re-admits it.
+  const REFUSED_AT = NOW - 61_000;
 
   function seedTerminalJournal(
     sqlite: Database.Database,
@@ -2462,10 +2574,14 @@ describe('archive-sharding selection honours the pre-copy refusal retry window',
           }
         )
       ).toEqual(['session-refused', 'session-abandoned', 'session-plain']);
-      // The window is env-configurable.
+      // The window is env-configurable, with a one-minute floor: a value below it falls back
+      // to the default window instead of disabling the anti-thrash marker.
       expect(
-        await scopedSelection(sqlite, { PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: '500' })
+        await scopedSelection(sqlite, { PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: '60000' })
       ).toEqual(['session-refused', 'session-abandoned', 'session-plain']);
+      expect(
+        await scopedSelection(sqlite, { PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: '1' })
+      ).toEqual(['session-abandoned', 'session-plain']);
       // Identical repeated calls return an identical sequence (rule 65 determinism).
       expect(await scopedSelection(sqlite, {})).toEqual(['session-abandoned', 'session-plain']);
     } finally {
@@ -2513,6 +2629,177 @@ describe('archive-sharding selection honours the pre-copy refusal retry window',
       expect(readLocationRow(sqlite, 'session-plain')).toMatchObject({
         location_state: 'archive_shard',
       });
+
+      // Liveness: once the window elapses the same unscoped sweep re-admits the session.
+      sqlite
+        .prepare(
+          `UPDATE project_data_archive_global_sweep_cadence SET next_eligible_at = 0, last_status = 'succeeded'`
+        )
+        .run();
+      const later = await runProjectDataArchiveSharding(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '5',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: namespace,
+        }),
+        new Date(REFUSED_AT + 7 * 24 * 60 * 60 * 1000 + 1)
+      );
+      expect(later).toMatchObject({ skipped: false, selected: 1, migrated: 1 });
+      expect(readLocationRow(sqlite, 'session-refused')).toMatchObject({
+        location_state: 'archive_shard',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe('archive-sharding failed journals wait a retry delay before a sweep reclaims them', () => {
+  function seedFailedAt(sqlite: Database.Database, updatedAt: number): void {
+    seedSessionSummary(sqlite, { sessionId: SESSION_ID, messageCount: 500 });
+    seedMigration(sqlite, 'failed', { leaseExpiresAt: null, attemptCount: 1, updatedAt });
+  }
+
+  async function reclaimed(sqlite: Database.Database, overrides: Partial<Env>, nowDate: Date) {
+    const source = createFakeSource();
+    const stubs: Record<string, unknown> = { [SOURCE_OWNER]: source };
+    const namespace = {
+      idFromName: (name: string) => name,
+      get: (id: string) => stubs[id] ?? createFakeTarget(),
+    } as unknown as DurableObjectNamespace;
+    const stats = await runProjectDataArchiveSharding(
+      makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+        PROJECT_DATA: namespace,
+        ...overrides,
+      }),
+      nowDate
+    );
+    sqlite
+      .prepare(`UPDATE project_data_archive_global_sweep_cadence SET next_eligible_at = 0`)
+      .run();
+    return { stats, prepareCalls: source.archiveSourcePrepareIntent.mock.calls.length };
+  }
+
+  it('skips a fresh failure inside the delay and reclaims it once the delay has elapsed', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedFailedAt(sqlite, NOW - 1_000);
+      // Inside the default one-hour delay: not reclaimed, so no attempt is spent.
+      const first = await reclaimed(sqlite, {}, new Date(NOW));
+      expect(first.stats).toMatchObject({ selected: 0, migrated: 0 });
+      expect(first.prepareCalls).toBe(0);
+      expect(readMigrationRow(sqlite)).toMatchObject({ state: 'failed' });
+      // After the delay the same row is reclaimed and completes (liveness).
+      const second = await reclaimed(sqlite, {}, new Date(NOW + 60 * 60 * 1000 + 1));
+      expect(second.stats).toMatchObject({ selected: 1, migrated: 1 });
+      expect(readMigrationRow(sqlite)).toMatchObject({ state: 'published' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('honours a configured delay, including zero, and lets a named-session canary bypass it', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedFailedAt(sqlite, NOW - 1_000);
+      // Zero disables the delay entirely.
+      const immediate = await reclaimed(
+        sqlite,
+        { PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS: '0' },
+        new Date(NOW)
+      );
+      expect(immediate.stats).toMatchObject({ selected: 1, migrated: 1 });
+    } finally {
+      sqlite.close();
+    }
+    const scoped = new Database(':memory:');
+    try {
+      createCoordinatorTables(scoped);
+      seedFailedAt(scoped, NOW - 1_000);
+      const source = createFakeSource();
+      const stubs: Record<string, unknown> = { [SOURCE_OWNER]: source };
+      const namespace = {
+        idFromName: (name: string) => name,
+        get: (id: string) => stubs[id] ?? createFakeTarget(),
+      } as unknown as DurableObjectNamespace;
+      // Project-scoped (no session named): the delay applies.
+      const projectScoped = await runScopedProjectDataArchiveCanary(
+        makeEnv(scoped, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: namespace,
+        }),
+        { projectId: PROJECT_ID, dryRun: true, limit: 5, nowDate: new Date(NOW) }
+      );
+      expect(projectScoped.selected.map((item) => item.migrationId)).toEqual([]);
+      // Naming the session is operator intent: the delay is bypassed.
+      const sessionScoped = await runScopedProjectDataArchiveCanary(
+        makeEnv(scoped, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: namespace,
+        }),
+        {
+          projectId: PROJECT_ID,
+          sessionId: SESSION_ID,
+          dryRun: true,
+          limit: 5,
+          nowDate: new Date(NOW),
+        }
+      );
+      expect(sessionScoped.selected.map((item) => item.migrationId)).toEqual([MIGRATION_ID]);
+    } finally {
+      scoped.close();
+    }
+  });
+});
+
+describe('archive-sharding frozen-intent inspection skips self-healing pre-copy refusals', () => {
+  it('inspects failed and operator-frozen rows but never a precopy_refused row', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      // Oldest first: a chronic refusal that would otherwise occupy the front of the page.
+      sqlite
+        .prepare(
+          `INSERT INTO project_data_archive_migrations
+             (migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
+              target_generation, lease_epoch, attempt_count, error_code, created_at, updated_at)
+           VALUES ('migration-refused', ?, 'session-refused', 'frozen', ?, ?, 1, 1, 1,
+                   'precopy_refused', 100, 100)`
+        )
+        .run(PROJECT_ID, PROJECT_ID, TARGET_OWNER);
+      seedMigration(sqlite, 'failed', {
+        migrationId: 'migration-failed',
+        sessionId: 'session-failed',
+        updatedAt: 2000,
+      });
+      const source = createFakeSource({ state: 'source_deleted' });
+      const target = createFakeTarget();
+
+      const inspectionResult = await inspectFrozenProjectDataArchiveIntents(
+        makeEnv(sqlite, {
+          PROJECT_DATA: createProjectDataNamespace({
+            [SOURCE_OWNER]: source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        { projectId: PROJECT_ID, limit: 1 }
+      );
+
+      expect(inspectionResult.inspections.map((row) => row.migrationId)).toEqual([
+        'migration-failed',
+      ]);
+      // No DO fan-out was spent on the refused row.
+      expect(source.archiveSourceInspectIntent).toHaveBeenCalledTimes(1);
+      expect(target.archiveTargetInspectSession).toHaveBeenCalledTimes(1);
     } finally {
       sqlite.close();
     }

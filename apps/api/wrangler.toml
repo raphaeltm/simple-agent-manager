@@ -146,6 +146,8 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 # sessions plus 4-233 newly terminal sessions/day drained. Idle ticks cost two D1 statements;
 # the per-tick copy work is bounded by PROJECT_DATA_ARCHIVE_WALL_TIME_MS, _SWEEP_SESSIONS and
 # _SWEEP_MESSAGE_BUDGET. Load review: tasks/active/2026-09-06-archive-drain-enable-unfence-and-throughput.md
+# (moves to tasks/archive/ on completion) and the archive-sharding notes in
+# apps/www/src/content/docs/docs/reference/configuration.md.
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "900000"
 PROJECT_DATA_ARCHIVE_SHARD_COUNT = "128"
 PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
@@ -153,6 +155,9 @@ PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "10"
 PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "20000"
 PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS = "604800000"
 PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS = "604800000"
+# Failed journals wait this long before a sweep retries them, so three faults poison a row over
+# hours, not three consecutive 15-minute ticks.
+PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS = "3600000"
 PROJECT_DATA_ARCHIVE_CHUNK_ROWS = "500"
 PROJECT_DATA_ARCHIVE_CHUNK_BYTES = "16777216"
 PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS = "500"

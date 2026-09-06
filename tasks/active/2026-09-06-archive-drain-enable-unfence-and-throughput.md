@@ -151,7 +151,7 @@ time or at PR time.
       `frozen/precopy_refused`; then `reportActivity(..., 'idle')` and the explicit-session canary
       migrates it (owner control).
 - [x] DO unit test: new `returns a typed pre-copy refusal before any write, and throws once an intent
-    exists` asserts the typed refusal (`resolves`) with no intent row written, the throwing wrapper's
+exists` asserts the typed refusal (`resolves`) with no intent row written, the throwing wrapper's
       unchanged contract, the owner control, and the throw once an intent exists; the pre-existing
       `refuses active sessions ...` test is untouched.
 - [x] Verify the unit test goes red against the pre-fix coordinator (record in PR).
@@ -168,6 +168,23 @@ time or at PR time.
 - [ ] Rule 47 load review in the PR: expected candidate volume, worst-case per-candidate cost,
       tiered timeouts, escape paths, and the policy justification for a sub-daily cadence.
 - [x] Docs: `configuration.md`, env-reference skill, `.env.example` describe the shipped cadence.
+
+### 3b. Review follow-ups (Phase 5, 2026-09-06)
+
+- [x] `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` (default 1 h, `0` disables; session-scoped canary
+      bypasses): `failed` journals are reclaimable only once older than the delay, so the 3-attempt
+      poison budget spans hours at the 15-minute cadence instead of 45 minutes (performance review).
+- [x] Problem-migrations list ranks `frozen`/`precopy_refused` after rows that need a human; the
+      frozen-intent DO inspection excludes them (architecture review).
+- [x] One `restoreSessionLocationToRootStatement` shared by abandon, copy-back and the refusal unwind;
+      the test-only throwing `prepareArchiveSourceIntent` wrapper removed (architecture review).
+- [x] `refusePreCopyMigration` fails loudly when the journal froze but the location did not restore
+      (security review); lost-lease-fence, cross-tenant, owner-mismatch, comment-thread refusal,
+      `cron.completed` `refused` field, and window-liveness tests added (security + test reviews).
+- [x] Per-phase migration timing logged (`project_data_archive_candidate_migrated`) so production
+      ticks quantify the root-object cost of finalize (performance review).
+- [x] Follow-up ideas: `01M1V4F453MEYWTMSJ2S02SW95` (crash-gap escape path), markFailed
+      lease-blind overwrite (see idea filed in Phase 5).
 
 ### 4. Docs, post-mortem, memory
 
