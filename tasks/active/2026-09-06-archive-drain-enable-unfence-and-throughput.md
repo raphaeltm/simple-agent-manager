@@ -30,15 +30,15 @@ canary is publishing sessions, but the automated drain is not running and cannot
 
 ### Problem 1 root cause: a GitHub Environment override pins the sweep off
 
-| Evidence                                                                                                                                                                                                                   | Source                                                                                                                               |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `cron.completed` at 2026-09-06T09:30:20.607Z: `projectDataArchiveShardingEnabled: false`, `projectDataArchiveShardingSkipped: true`, `projectDataArchiveShardingSkipReason: "disabled"`                                    | Workers Observability query, `$metadata.service = sam-api-prod`, needle `projectDataArchiveShardingSkipReason`                       |
-| Deployed `sam-api-prod` Worker var `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=false` (every other `PROJECT_DATA_ARCHIVE_*` var matches wrangler.toml)                                                                      | `GET /accounts/{prod}/workers/scripts/sam-api-prod/settings` (plain_text bindings)                                                   |
-| GitHub `production` Environment variable `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=false`, created 2026-09-04T03:47:47Z, never updated                                                                                    | `gh api repos/raphaeltm/simple-agent-manager/environments/production/variables`                                                      |
-| PR #2023 (`3cf385865`, merged 2026-09-05T13:39Z) flipped only `apps/api/wrangler.toml` to `"true"`                                                                                                                         | `git show 3cf385865 --stat`                                                                                                          |
-| `deploy-reusable.yml` `wrangler_sync_env` passes `${{ vars.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED }}`; `getOptionalProcessEnvVars` in `scripts/deploy/sync-wrangler-config.ts` spreads any non-empty value over `topLevel.vars`, silently | `.github/workflows/deploy-reusable.yml:517,1064`; `scripts/deploy/sync-wrangler-config.ts:425-433,459`                                |
-| `runProjectDataArchiveSharding` returns `emptyStats(config, true, 'disabled')` before touching the cadence row when `env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED !== 'true'`                                             | `apps/api/src/scheduled/project-data-archive-sharding.ts:365,2784`                                                                    |
-| Staging ran the cron path once when it was enabled (cadence row `run_count=1`, `last_status=succeeded`, 2026-09-02T10:01Z), so the code path itself works                                                                  | staging D1 `project_data_archive_global_sweep_cadence`                                                                               |
+| Evidence                                                                                                                                                                                                                                     | Source                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `cron.completed` at 2026-09-06T09:30:20.607Z: `projectDataArchiveShardingEnabled: false`, `projectDataArchiveShardingSkipped: true`, `projectDataArchiveShardingSkipReason: "disabled"`                                                      | Workers Observability query, `$metadata.service = sam-api-prod`, needle `projectDataArchiveShardingSkipReason` |
+| Deployed `sam-api-prod` Worker var `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=false` (every other `PROJECT_DATA_ARCHIVE_*` var matches wrangler.toml)                                                                                        | `GET /accounts/{prod}/workers/scripts/sam-api-prod/settings` (plain_text bindings)                             |
+| GitHub `production` Environment variable `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=false`, created 2026-09-04T03:47:47Z, never updated                                                                                                      | `gh api repos/raphaeltm/simple-agent-manager/environments/production/variables`                                |
+| PR #2023 (`3cf385865`, merged 2026-09-05T13:39Z) flipped only `apps/api/wrangler.toml` to `"true"`                                                                                                                                           | `git show 3cf385865 --stat`                                                                                    |
+| `deploy-reusable.yml` `wrangler_sync_env` passes `${{ vars.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED }}`; `getOptionalProcessEnvVars` in `scripts/deploy/sync-wrangler-config.ts` spreads any non-empty value over `topLevel.vars`, silently | `.github/workflows/deploy-reusable.yml:517,1064`; `scripts/deploy/sync-wrangler-config.ts:425-433,459`         |
+| `runProjectDataArchiveSharding` returns `emptyStats(config, true, 'disabled')` before touching the cadence row when `env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED !== 'true'`                                                               | `apps/api/src/scheduled/project-data-archive-sharding.ts:365,2784`                                             |
+| Staging ran the cron path once when it was enabled (cadence row `run_count=1`, `last_status=succeeded`, 2026-09-02T10:01Z), so the code path itself works                                                                                    | staging D1 `project_data_archive_global_sweep_cadence`                                                         |
 
 Class of bug: **a checked-in default flipped in a PR while a deploy-time override pinned the old
 value, and the PR's evidence was the diff rather than the deployed value.** The override mechanism is
@@ -113,65 +113,65 @@ time or at PR time.
 - [ ] Remove the GitHub `production` Environment override `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED`
       so the checked-in `wrangler.toml` value (`"true"`, PR #2023) governs. Do this only at merge time,
       after the staging feature pass, so no earlier deploy enables the sweep without the Problem 2 fix.
-- [ ] `scripts/deploy/sync-wrangler-config.ts`: when a process-env value overrides a top-level
+- [x] `scripts/deploy/sync-wrangler-config.ts`: when a process-env value overrides a top-level
       `wrangler.toml` var with a DIFFERENT value, print one deploy-log line naming the var and both
       values (values are non-secret `[vars]`). Test in `scripts/quality/sync-wrangler-config.test.ts`.
-- [ ] New rule `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`: a PR that changes a
+- [x] New rule `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`: a PR that changes a
       `wrangler.toml` var must list GitHub Environment overrides for staging and production and verify
       the deployed value (CF script settings or the feature's own skip-reason log) after deploy.
 
 ### 2. Problem 2 — a pre-copy refusal must not fence the session
 
-- [ ] DO `prepareArchiveSourceIntent`: catch `ProjectDataArchiveInvariantError` thrown by
+- [x] DO `prepareArchiveSourceIntent`: catch `ProjectDataArchiveInvariantError` thrown by
       `assertEligibleTerminalSource` (before any write) and return a typed
       `ArchiveSourcePrepareRefusal = { refused: true, reason, message, databaseSizeBytes }`;
       every other invariant keeps throwing. `finalizeSourceDelete` unchanged.
-- [ ] Coordinator `ensureSourcePrepared`: on refusal while the journal is `leased`, run
+- [x] Coordinator `ensureSourcePrepared`: on refusal while the journal is `leased`, run
       `refusePreCopyMigration`: one D1 batch, journal `leased -> frozen` with
       `error_code = 'precopy_refused'`, `error_message = '<reason>: <message>'`, lease cleared,
       guarded by `lease_owner`/`lease_epoch`; location `migrating -> root` guarded by
       `migration_id`. On refusal past `leased` (intent exists), throw so `markFailed` keeps the
       fenced retry path. `stats.refused` counts refusals (not `failed`; cadence stays `succeeded`).
-- [ ] `selectCandidates` / `selectScopedCandidates`: `NOT EXISTS` a `frozen`/`precopy_refused`
+- [x] `selectCandidates` / `selectScopedCandidates`: `NOT EXISTS` a `frozen`/`precopy_refused`
       journal for the session newer than `now - precopyRefusalRetryMs`. An explicit `sessionId`
       scope (operator canary) bypasses the marker.
-- [ ] New env `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS`
+- [x] New env `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS`
       (`PROJECT_DATA_ARCHIVE_DEFAULT_PRECOPY_REFUSAL_RETRY_MS = 7 d`, clamp 1 ms..365 d): `env.ts`,
       `wrangler.toml`, `sync-wrangler-config.ts` optional list, `deploy-reusable.yml` (both
       `wrangler_sync_env` blocks), `.env.example`, env-reference skill, `configuration.md`.
-- [ ] `handler.ts` logs `projectDataArchiveShardingRefused`.
-- [ ] Coordinator unit tests (real SQLite): refused-at-prepare candidate ends the tick `root` +
+- [x] `handler.ts` logs `projectDataArchiveShardingRefused`.
+- [x] Coordinator unit tests (real SQLite): refused-at-prepare candidate ends the tick `root` +
       `frozen/precopy_refused`, breaker closed, `stats.refused=1`, `failed=0`; discriminating
       controls: mid-copy failure stays `migrating`/`failed`; refusal after an intent exists (journal
       `intent_prepared`) stays fenced `failed`; a plain prepare error stays fenced `failed`.
-- [ ] Selection tests (real SQLite): refused session excluded inside the window, selected after it,
+- [x] Selection tests (real SQLite): refused session excluded inside the window, selected after it,
       selected immediately when the scope names the session; determinism preserved.
-- [ ] Workers-pool test at RPC fidelity: real DO session with an active `session_state` row
+- [x] Workers-pool test at RPC fidelity: real DO session with an active `session_state` row
       (`reportActivity(..., 'prompting')`), scoped non-dry canary → readable `root`,
       `frozen/precopy_refused`; then `reportActivity(..., 'idle')` and the explicit-session canary
       migrates it (owner control).
-- [ ] DO unit test: `refuses active sessions ...` now asserts the typed refusal (`resolves`), and the
+- [x] DO unit test: `refuses active sessions ...` now asserts the typed refusal (`resolves`), and the
       comment-thread case proves no intent row was written.
-- [ ] Verify the unit test goes red against the pre-fix coordinator (record in PR).
+- [x] Verify the unit test goes red against the pre-fix coordinator (record in PR).
 
 ### 3. Problem 3 — bounded higher throughput
 
-- [ ] `apps/api/wrangler.toml`: `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "900000"` (15 min)
+- [x] `apps/api/wrangler.toml`: `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "900000"` (15 min)
       and `PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "30000"` with a comment pointing at the load review.
       Code fallbacks stay daily / 5 s (unset-var behaviour unchanged). Budget 20,000 and ceiling 10
       unchanged; grace 7 d unchanged; wall-time break kept.
-- [ ] `handler.ts`: run `project_data_archive_sharding` after `trial_expire` (before the relief
+- [x] `handler.ts`: run `project_data_archive_sharding` after `trial_expire` (before the relief
       preflight, which stays last) so its wall budget cannot delay `session_sleep`; update
       `handler-kill-switch.test.ts` ordering pins.
 - [ ] Rule 47 load review in the PR: expected candidate volume, worst-case per-candidate cost,
       tiered timeouts, escape paths, and the policy justification for a sub-daily cadence.
-- [ ] Docs: `configuration.md`, env-reference skill, `.env.example` describe the shipped cadence.
+- [x] Docs: `configuration.md`, env-reference skill, `.env.example` describe the shipped cadence.
 
 ### 4. Docs, post-mortem, memory
 
-- [ ] `.claude/skills/api-reference/SKILL.md`: `precopy_refused` appears in problem-migrations /
+- [x] `.claude/skills/api-reference/SKILL.md`: `precopy_refused` appears in problem-migrations /
       frozen-intents; abandon note unchanged.
-- [ ] `CLAUDE.md` Recent Changes entry.
+- [x] `CLAUDE.md` Recent Changes entry.
 - [ ] Post-mortem (rule 02) in the PR: root cause, class of bug, why not caught, process fix.
 - [ ] Follow-up SAM idea: `session_state.activity='error'` on terminal sessions blocks archiving
       (rule 57 stale-activity class); decide whether terminal sessions past grace should clear it.

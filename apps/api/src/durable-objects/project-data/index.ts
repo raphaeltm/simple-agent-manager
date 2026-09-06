@@ -537,9 +537,9 @@ export class ProjectData extends DurableObject<Env> {
 
   async archiveSourcePrepareIntent(
     input: archiveSharding.ArchiveSourcePrepareInput
-  ): Promise<archiveSharding.ArchiveSourcePrepareResult> {
+  ): Promise<archiveSharding.ArchiveSourcePrepareOutcome> {
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.prepareArchiveSourceIntent(this.sql, {
+      archiveSharding.prepareArchiveSourceIntentOrRefuse(this.sql, {
         ...input,
         hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
       })

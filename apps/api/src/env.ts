@@ -643,6 +643,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET?: string;
   PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS?: string;
+  PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS?: string; // Retry window for sessions the root object refused at prepare before any copy (default: 604800000)
   PROJECT_DATA_ARCHIVE_CHUNK_ROWS?: string;
   PROJECT_DATA_ARCHIVE_CHUNK_BYTES?: string;
   PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS?: string;

@@ -422,13 +422,56 @@ function getApiWorkerRoutes(baseDomain: string): NonNullable<WranglerEnvConfig['
   ];
 }
 
-function getOptionalProcessEnvVars(names: readonly string[]): Record<string, string> {
+export type EnvironmentVarOverride = {
+  name: string;
+  /** Value checked into the top-level `[vars]` section of wrangler.toml. */
+  checkedIn: string;
+  /** Value the GitHub Environment (process env) supplied instead. */
+  override: string;
+};
+
+/**
+ * Optional process-env vars silently replace the checked-in top-level `[vars]` value. PR #2023
+ * flipped `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` to "true" in wrangler.toml while the
+ * production GitHub Environment still pinned "false"; the deployed Worker kept the override and
+ * the archive sweep never ran, with nothing in the deploy log saying so. List every override whose
+ * value differs from wrangler.toml so the log records what actually shipped. `[vars]` are
+ * non-secret by construction (secrets go through `wrangler secret`), so printing values is safe.
+ * See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ */
+export function listEnvironmentVarOverrides(
+  checkedIn: Record<string, unknown> | undefined,
+  overrides: Record<string, string>
+): EnvironmentVarOverride[] {
+  const listed: EnvironmentVarOverride[] = [];
+  for (const [name, override] of Object.entries(overrides)) {
+    if (!checkedIn || !Object.prototype.hasOwnProperty.call(checkedIn, name)) continue;
+    const checkedInValue = String(checkedIn[name]);
+    if (checkedInValue === override) continue;
+    listed.push({ name, checkedIn: checkedInValue, override });
+  }
+  return listed;
+}
+
+/**
+ * Read the optional GitHub Environment vars that may replace checked-in `[vars]`, and print each
+ * one whose value differs from wrangler.toml so the deploy log shows what actually shipped.
+ */
+function getOptionalProcessEnvVars(
+  checkedIn: Record<string, unknown> | undefined,
+  names: readonly string[]
+): Record<string, string> {
   const vars: Record<string, string> = {};
   for (const name of names) {
     const value = process.env[name];
     if (value) {
       vars[name] = value;
     }
+  }
+  for (const entry of listEnvironmentVarOverrides(checkedIn, vars)) {
+    console.log(
+      `  Environment override: ${entry.name}="${entry.override}" replaces wrangler.toml "${entry.checkedIn}"`
+    );
   }
   return vars;
 }
@@ -456,7 +499,7 @@ function getApiWorkerVars(
     SESSION_SNAPSHOT_TTL_DAYS: String(outputs.sessionSnapshotTtlDays),
     VM_INCIDENT_R2_PREFIX: outputs.diagnosticIncidentPrefix,
     VM_INCIDENT_RETENTION_DAYS: String(outputs.diagnosticIncidentTtlDays),
-    ...getOptionalProcessEnvVars([
+    ...getOptionalProcessEnvVars(topLevel.vars, [
       'REQUIRE_APPROVAL',
       'CRON_SWEEPS_ENABLED_KV_KEY',
       'DO_ALARMS_ENABLED_KV_KEY',
@@ -613,6 +656,7 @@ function getApiWorkerVars(
       'PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS',
       'PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET',
       'PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS',
+      'PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS',
       'PROJECT_DATA_ARCHIVE_CHUNK_ROWS',
       'PROJECT_DATA_ARCHIVE_CHUNK_BYTES',
       'PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS',

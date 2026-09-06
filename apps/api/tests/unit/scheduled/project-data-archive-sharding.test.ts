@@ -2203,3 +2203,318 @@ describe('archive-sharding abandon control', () => {
     }
   });
 });
+
+describe('archive-sharding pre-copy refusal unwinds the fence in the same tick', () => {
+  // Exactly what the root object returns for `ea87d375` in production: the D1 candidate query
+  // cannot see a live `session_state` row, so the session is journaled, fenced `migrating`,
+  // and only then refused before anything is written on either object.
+  const REFUSAL = {
+    refused: true as const,
+    reason: 'active_session_state',
+    message: 'ProjectData archive refuses sessions with active session_state rows',
+    databaseSizeBytes: 1000,
+  };
+
+  function namespaceFor(source: ReturnType<typeof createFakeSource>): DurableObjectNamespace {
+    return {
+      idFromName: (name: string) => name,
+      get: (id: string) => (id === SOURCE_OWNER ? source : createFakeTarget()),
+    } as unknown as DurableObjectNamespace;
+  }
+
+  function readJournal(sqlite: Database.Database, sessionId: string) {
+    return sqlite
+      .prepare(
+        `SELECT state, error_code, error_message, lease_owner, lease_expires_at, attempt_count
+         FROM project_data_archive_migrations
+         WHERE session_id = ?`
+      )
+      .get(sessionId) as Record<string, unknown> | undefined;
+  }
+
+  function readLocationMigration(sqlite: Database.Database, sessionId: string) {
+    return sqlite
+      .prepare(
+        `SELECT location_state, migration_id FROM project_data_session_locations
+         WHERE project_id = ? AND session_id = ?`
+      )
+      .get(PROJECT_ID, sessionId) as { location_state: string; migration_id: string | null };
+  }
+
+  function readBreaker(sqlite: Database.Database) {
+    return sqlite
+      .prepare('SELECT state FROM project_data_archive_circuit_breakers WHERE project_id = ?')
+      .get(PROJECT_ID) as { state: string } | undefined;
+  }
+
+  async function runCanary(sqlite: Database.Database, source: ReturnType<typeof createFakeSource>) {
+    return runScopedProjectDataArchiveCanary(
+      makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+        PROJECT_DATA: namespaceFor(source),
+      }),
+      {
+        projectId: PROJECT_ID,
+        dryRun: false,
+        reason: 'refusal canary',
+        limit: 5,
+        nowDate: new Date(NOW),
+      }
+    );
+  }
+
+  it('returns a refused candidate to root with a frozen precopy_refused journal and no breaker change', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-refused', messageCount: 500 });
+      const source = createFakeSource();
+      source.archiveSourcePrepareIntent.mockResolvedValue(REFUSAL);
+
+      const result = await runCanary(sqlite, source);
+
+      expect(result.stats).toMatchObject({
+        selected: 1,
+        refused: 1,
+        migrated: 0,
+        failed: 0,
+        poisoned: 0,
+      });
+      // Liveness beside the absence assertions (rule 62): the object really was asked, and
+      // nothing past prepare ran.
+      expect(source.archiveSourcePrepareIntent).toHaveBeenCalledTimes(1);
+      expect(source.archiveSourceExportChunk).not.toHaveBeenCalled();
+      expect(source.archiveSourceFinalizeDelete).not.toHaveBeenCalled();
+      // The session reads again: exact routing resolves `root`, not a fence.
+      expect(readLocationRow(sqlite, 'session-refused')).toMatchObject({
+        location_state: 'root',
+        owner_kind: 'root',
+        owner_name: SOURCE_OWNER,
+        generation: 0,
+      });
+      expect(readLocationMigration(sqlite, 'session-refused').migration_id).toBeNull();
+      // Terminal for reclaim, never poisoned, lease released, reason preserved for operators.
+      expect(readJournal(sqlite, 'session-refused')).toEqual({
+        state: 'frozen',
+        error_code: 'precopy_refused',
+        error_message:
+          'active_session_state: ProjectData archive refuses sessions with active session_state rows',
+        lease_owner: null,
+        lease_expires_at: null,
+        attempt_count: 1,
+      });
+      expect(readBreaker(sqlite)).toBeUndefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps a mid-copy failure fenced for retry (discriminating control)', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-midcopy', messageCount: 500 });
+      const source = createFakeSource();
+      source.archiveSourceExportChunk.mockRejectedValue(new Error('shard export failed'));
+
+      const result = await runCanary(sqlite, source);
+
+      expect(result.stats).toMatchObject({ selected: 1, refused: 0, migrated: 0, failed: 1 });
+      expect(readLocationRow(sqlite, 'session-midcopy')).toMatchObject({
+        location_state: 'migrating',
+      });
+      expect(readJournal(sqlite, 'session-midcopy')).toMatchObject({
+        state: 'failed',
+        error_code: 'Error',
+        error_message: 'shard export failed',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps a transient prepare error fenced for retry, so only a typed refusal unwinds', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-reset', messageCount: 500 });
+      const source = createFakeSource();
+      source.archiveSourcePrepareIntent.mockRejectedValue(
+        new Error("Durable Object's isolate exceeded its memory limit and was reset.")
+      );
+
+      const result = await runCanary(sqlite, source);
+
+      expect(result.stats).toMatchObject({ selected: 1, refused: 0, failed: 1 });
+      expect(readLocationRow(sqlite, 'session-reset')).toMatchObject({
+        location_state: 'migrating',
+      });
+      expect(readJournal(sqlite, 'session-reset')).toMatchObject({ state: 'failed' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('keeps the fail-closed fenced path when a refusal arrives after an intent already exists', async () => {
+    // A journal past `leased` says an intent row exists; the object only refuses while none
+    // does. The two disagree, so the coordinator must not unfence on the contradiction.
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: SESSION_ID, messageCount: 500 });
+      seedMigration(sqlite, 'intent_prepared', { leaseExpiresAt: 1000, attemptCount: 1 });
+      const source = createFakeSource({ state: 'intent_prepared' });
+      source.archiveSourcePrepareIntent.mockResolvedValue(REFUSAL);
+
+      const result = await runCanary(sqlite, source);
+
+      expect(result.stats).toMatchObject({ selected: 1, refused: 0, failed: 1 });
+      expect(readLocationRow(sqlite, SESSION_ID)).toMatchObject({ location_state: 'migrating' });
+      expect(readJournal(sqlite, SESSION_ID)).toMatchObject({
+        state: 'failed',
+        error_code: 'ProjectDataArchiveCoordinatorStateError',
+        error_message: expect.stringContaining(
+          'was refused at prepare (active_session_state) while its journal is intent_prepared'
+        ) as unknown,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe('archive-sharding selection honours the pre-copy refusal retry window', () => {
+  const REFUSED_AT = NOW - 1_000;
+
+  function seedTerminalJournal(
+    sqlite: Database.Database,
+    sessionId: string,
+    errorCode: string,
+    updatedAt: number
+  ): void {
+    sqlite
+      .prepare(
+        `INSERT INTO project_data_archive_migrations
+           (migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
+            target_generation, lease_epoch, attempt_count, error_code, created_at, updated_at)
+         VALUES (?, ?, ?, 'frozen', ?, ?, 1, 1, 1, ?, ?, ?)`
+      )
+      .run(
+        `migration-${sessionId}`,
+        PROJECT_ID,
+        sessionId,
+        PROJECT_ID,
+        TARGET_OWNER,
+        errorCode,
+        updatedAt,
+        updatedAt
+      );
+    sqlite
+      .prepare(
+        `INSERT INTO project_data_session_locations
+           (project_id, session_id, location_state, owner_kind, owner_name, generation,
+            routing_schema_version, updated_at)
+         VALUES (?, ?, 'root', 'root', ?, 0, 1, ?)`
+      )
+      .run(PROJECT_ID, sessionId, PROJECT_ID, updatedAt);
+  }
+
+  function seedAll(sqlite: Database.Database): void {
+    createCoordinatorTables(sqlite);
+    seedSessionSummary(sqlite, { sessionId: 'session-refused', messageCount: 300 });
+    seedTerminalJournal(sqlite, 'session-refused', 'precopy_refused', REFUSED_AT);
+    // Owner controls: a frozen journal with a DIFFERENT code, and a `failed` one, must not
+    // hide their sessions — the marker is precisely `frozen` + `precopy_refused`.
+    seedSessionSummary(sqlite, { sessionId: 'session-abandoned', messageCount: 200 });
+    seedTerminalJournal(sqlite, 'session-abandoned', 'operator_abandoned', REFUSED_AT);
+    seedSessionSummary(sqlite, { sessionId: 'session-plain', messageCount: 100 });
+  }
+
+  async function scopedSelection(
+    sqlite: Database.Database,
+    overrides: Partial<Env>,
+    scope: { sessionId?: string; nowDate?: Date } = {}
+  ): Promise<string[]> {
+    const result = await runScopedProjectDataArchiveCanary(makeEnv(sqlite, overrides), {
+      projectId: PROJECT_ID,
+      sessionId: scope.sessionId,
+      dryRun: true,
+      limit: 5,
+      nowDate: scope.nowDate ?? new Date(NOW),
+    });
+    return result.selected.map((candidate) => candidate.sessionId);
+  }
+
+  it('skips a refused session inside the window and selects it again once the window elapses', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedAll(sqlite);
+      // Inside the 7-day default window: excluded, and the owner controls are still selected.
+      expect(await scopedSelection(sqlite, {})).toEqual(['session-abandoned', 'session-plain']);
+      // The window is measured from the refusal, not from the tick: a later `now` re-admits it.
+      expect(
+        await scopedSelection(
+          sqlite,
+          {},
+          {
+            nowDate: new Date(REFUSED_AT + 7 * 24 * 60 * 60 * 1000 + 1),
+          }
+        )
+      ).toEqual(['session-refused', 'session-abandoned', 'session-plain']);
+      // The window is env-configurable.
+      expect(
+        await scopedSelection(sqlite, { PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: '500' })
+      ).toEqual(['session-refused', 'session-abandoned', 'session-plain']);
+      // Identical repeated calls return an identical sequence (rule 65 determinism).
+      expect(await scopedSelection(sqlite, {})).toEqual(['session-abandoned', 'session-plain']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('still selects the refused session when the operator scope names it', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedAll(sqlite);
+      expect(await scopedSelection(sqlite, {}, { sessionId: 'session-refused' })).toEqual([
+        'session-refused',
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('applies the same window to the unscoped scheduled sweep', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedAll(sqlite);
+      const source = createFakeSource();
+      const namespace = {
+        idFromName: (name: string) => name,
+        get: (id: string) => (id === SOURCE_OWNER ? source : createFakeTarget()),
+      } as unknown as DurableObjectNamespace;
+      const stats = await runProjectDataArchiveSharding(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '5',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: namespace,
+        }),
+        new Date(NOW)
+      );
+      expect(stats).toMatchObject({ skipped: false, selected: 2, migrated: 2, refused: 0 });
+      // The refused session was never journaled again; the controls were.
+      expect(readLocationRow(sqlite, 'session-refused')).toMatchObject({ location_state: 'root' });
+      expect(readLocationRow(sqlite, 'session-abandoned')).toMatchObject({
+        location_state: 'archive_shard',
+      });
+      expect(readLocationRow(sqlite, 'session-plain')).toMatchObject({
+        location_state: 'archive_shard',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+});

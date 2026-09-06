@@ -643,6 +643,117 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     );
   });
 
+  it('leaves a session the root object refuses at prepare readable in root, then migrates it once the refusal clears', async () => {
+    const projectId = `archive-refusal-${crypto.randomUUID()}`;
+    const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 5);
+    // The refusal condition the D1 candidate query cannot see: a live `session_state` row
+    // (production `ea87d375`). Reported through the real RPC, exactly as the vm-agent does.
+    await source.reportActivity(sessionId, 'prompting', { promptStartedAt: Date.now() });
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '4',
+      },
+      async () => {
+        // Project-scoped, not session-scoped: the session is discovered by the same D1
+        // candidate query the sweep uses (an explicit sessionId would bypass the refusal
+        // window below), and the refusal crosses the real Durable Object RPC boundary as a
+        // returned value. The shared test D1 carries other files' sessions, which is why the
+        // unscoped scheduled entry point is not used here.
+        const nowDate = new Date(Date.now() + 60_000);
+        const first = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          dryRun: false,
+          reason: 'refusal canary',
+          limit: 4,
+          nowDate,
+        });
+        expect(first.selected.map((candidate) => candidate.sessionId)).toEqual([sessionId]);
+        expect(first.stats).toMatchObject({
+          selected: 1,
+          refused: 1,
+          migrated: 0,
+          failed: 0,
+          poisoned: 0,
+        });
+
+        expect(await readLocation(projectId, sessionId)).toMatchObject({
+          location_state: 'root',
+          owner_kind: 'root',
+          owner_name: projectId,
+          generation: 0,
+          migration_id: null,
+        });
+        // Readable through exact routing in the same tick — no abandon needed.
+        expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(5);
+        const journal = await env.DATABASE.prepare(
+          `SELECT state, error_code, error_message, attempt_count
+           FROM project_data_archive_migrations
+           WHERE project_id = ? AND session_id = ?`
+        )
+          .bind(projectId, sessionId)
+          .first<{
+            state: string;
+            error_code: string;
+            error_message: string;
+            attempt_count: number;
+          }>();
+        expect(journal).toMatchObject({
+          state: 'frozen',
+          error_code: 'precopy_refused',
+          attempt_count: 1,
+        });
+        expect(journal?.error_message).toContain('active_session_state');
+        const breaker = await env.DATABASE.prepare(
+          'SELECT state FROM project_data_archive_circuit_breakers WHERE project_id = ?'
+        )
+          .bind(projectId)
+          .first<{ state: string }>();
+        expect(breaker).toBeNull();
+        const rootIntent = await runInDurableObject(source, async (_instance, state) => {
+          const row = state.storage.sql
+            .exec(
+              'SELECT COUNT(*) AS count FROM project_data_archive_source_intents WHERE session_id = ?',
+              sessionId
+            )
+            .toArray()[0] as { count: number };
+          return row.count;
+        });
+        expect(rootIntent).toBe(0);
+
+        // Inside the retry window the same candidate query does not re-select it, so the next
+        // tick cannot spend a slot on it again.
+        const later = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          dryRun: true,
+          limit: 4,
+          nowDate: new Date(nowDate.getTime() + 1_000),
+        });
+        expect(later.selected).toEqual([]);
+
+        // Owner control: once the refusal condition clears, the operator-scoped canary (which
+        // bypasses the window) migrates the very same session.
+        await source.reportActivity(sessionId, 'idle', { observedAt: Date.now() });
+        const result = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'post-refusal re-migration',
+          limit: 1,
+          nowDate: new Date(Date.now() + 120_000),
+        });
+        expect(result.stats).toMatchObject({ migrated: 1, refused: 0, failed: 0 });
+        expect(await readLocation(projectId, sessionId)).toMatchObject({
+          location_state: 'archive_shard',
+        });
+        expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(5);
+      }
+    );
+  });
+
   it('abandon returns a fenced pre-copy migration to root so the session reads again', async () => {
     const projectId = `archive-abandon-${crypto.randomUUID()}`;
     const { sessionId } = await seedTerminalSessionWithMessages(projectId, 5);

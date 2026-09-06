@@ -17,6 +17,7 @@ import {
   markSourceRecoveryManifestPersisted,
   markSourceTargetSealed,
   prepareArchiveSourceIntent,
+  prepareArchiveSourceIntentOrRefuse,
   prepareArchiveTarget,
   ProjectDataArchiveInvariantError,
   resolveArchiveHashPageRows,
@@ -603,6 +604,73 @@ describe('ProjectData terminal archive sharding bridge', () => {
           null
         )
       ).toThrow(expect.objectContaining({ code: PROJECT_DATA_TRANSCRIPT_WRITE_FENCED }));
+    } finally {
+      source.db.close();
+    }
+  });
+
+  it('returns a typed pre-copy refusal before any write, and throws once an intent exists', async () => {
+    const source = makeSql();
+    try {
+      seedTerminalSession(source.sql, 'session-refused');
+      // The DO-local guard the D1 candidate query cannot see (production `ea87d375`).
+      source.sql.exec(
+        `INSERT INTO session_state (session_id, activity, activity_at)
+         VALUES ('session-refused', 'prompting', ?)`,
+        NOW
+      );
+      const input = {
+        projectId: 'project-archive',
+        sessionId: 'session-refused',
+        migrationId: 'migration-refused',
+        sourceOwnerName: 'project-archive',
+        targetOwnerName: 'project-archive:archive:g1:s3',
+        targetGeneration: 1,
+        sourceIntentToken: 'intent-refused',
+        now: NOW,
+        minTerminalAgeMs: 0,
+      };
+      const countIntents = () =>
+        (
+          source.db
+            .prepare(
+              'SELECT COUNT(*) AS count FROM project_data_archive_source_intents WHERE session_id = ?'
+            )
+            .get('session-refused') as { count: number }
+        ).count;
+
+      // Returned, not thrown: the value crosses the RPC boundary with its reason intact.
+      await expect(prepareArchiveSourceIntentOrRefuse(source.sql, input)).resolves.toMatchObject({
+        refused: true,
+        reason: 'active_session_state',
+        message: 'ProjectData archive refuses sessions with active session_state rows',
+      });
+      expect(countIntents()).toBe(0);
+      // The throwing entry point keeps its contract for callers that expect success.
+      await expect(prepareArchiveSourceIntent(source.sql, input)).rejects.toMatchObject({
+        reason: 'active_session_state',
+      });
+      expect(countIntents()).toBe(0);
+
+      // Owner control: once the condition clears the same call prepares the intent.
+      source.sql.exec(
+        "UPDATE session_state SET activity = 'idle' WHERE session_id = 'session-refused'"
+      );
+      await expect(prepareArchiveSourceIntentOrRefuse(source.sql, input)).resolves.toMatchObject({
+        idempotent: false,
+        sourceIntentToken: 'intent-refused',
+      });
+      expect(countIntents()).toBe(1);
+
+      // With an intent row present the transcript is fenced on this object: the same invariant
+      // must THROW so the coordinator keeps its fail-closed retry path, never unfence.
+      source.sql.exec(
+        "UPDATE session_state SET activity = 'prompting' WHERE session_id = 'session-refused'"
+      );
+      await expect(prepareArchiveSourceIntentOrRefuse(source.sql, input)).rejects.toMatchObject({
+        reason: 'active_session_state',
+      });
+      expect(countIntents()).toBe(1);
     } finally {
       source.db.close();
     }

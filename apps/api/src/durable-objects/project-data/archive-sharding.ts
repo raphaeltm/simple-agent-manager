@@ -2,6 +2,7 @@
 import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import {
+  isProjectDataArchiveSourcePrepareRefusal,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
   PROJECT_DATA_ARCHIVE_DEFAULT_HASH_PAGE_ROWS,
@@ -16,6 +17,7 @@ import {
   type ProjectDataArchiveOwnerRef,
   type ProjectDataArchiveRow,
   type ProjectDataArchiveSourceIntentState,
+  type ProjectDataArchiveSourcePrepareRefusal,
   type ProjectDataArchiveTableName,
   type ProjectDataArchiveTargetState,
 } from '../../project-data-archive/contract';
@@ -192,6 +194,14 @@ export type ArchiveSourcePrepareResult = {
   sessionRow: ProjectDataArchiveRow;
   databaseSizeBytes: number;
 };
+
+/**
+ * What the root object's prepare RPC returns: the prepared source proof, or a typed refusal
+ * when a pre-copy eligibility invariant rejected the session before anything was written.
+ */
+export type ArchiveSourcePrepareOutcome =
+  | ArchiveSourcePrepareResult
+  | ProjectDataArchiveSourcePrepareRefusal;
 
 export type ArchiveSourceInspectIntentInput = {
   projectId: string;
@@ -991,10 +1001,46 @@ export async function prepareArchiveSourceIntent(
   sql: SqlStorage,
   input: ArchiveSourcePrepareInput
 ): Promise<ArchiveSourcePrepareResult> {
+  const outcome = await prepareArchiveSourceIntentOrRefuse(sql, input);
+  if (isProjectDataArchiveSourcePrepareRefusal(outcome)) {
+    throw new ProjectDataArchiveInvariantError(outcome.reason, outcome.message);
+  }
+  return outcome;
+}
+
+/**
+ * Prepare the source intent, or return a typed refusal when a pre-copy eligibility invariant
+ * rejects the session before any write.
+ *
+ * The D1 candidate query cannot see the DO-local eligibility guards (`session_state`, ACP
+ * rows, comments, attention markers, ...), so the coordinator fences a session `migrating` and
+ * only then learns here that it cannot move. A refusal is returned ONLY while no source intent
+ * row exists for the session — every later invariant (including the same eligibility check on a
+ * re-prepare with an intent present, and at finalize) still throws, because by then the
+ * transcript is fenced on this object and the coordinator must keep the journal on its
+ * fail-closed retry path. Returning instead of throwing is what lets the refusal cross the RPC
+ * boundary with its `reason` intact (rule 63) so the caller can unwind the fence.
+ */
+export async function prepareArchiveSourceIntentOrRefuse(
+  sql: SqlStorage,
+  input: ArchiveSourcePrepareInput
+): Promise<ArchiveSourcePrepareOutcome> {
   validateRootSourceOwner(input);
   const minTerminalAgeMs = input.minTerminalAgeMs ?? PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS;
-  assertEligibleTerminalSource(sql, input.sessionId, input.now, minTerminalAgeMs);
   const existing = readSourceIntent(sql, input.sessionId);
+  try {
+    assertEligibleTerminalSource(sql, input.sessionId, input.now, minTerminalAgeMs);
+  } catch (error) {
+    if (!existing && error instanceof ProjectDataArchiveInvariantError) {
+      return {
+        refused: true,
+        reason: error.reason,
+        message: error.message,
+        databaseSizeBytes: databaseSize(sql),
+      };
+    }
+    throw error;
+  }
   if (!existing) {
     sql.exec(
       `INSERT INTO project_data_archive_source_intents (
