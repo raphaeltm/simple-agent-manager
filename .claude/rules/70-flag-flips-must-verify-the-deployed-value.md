@@ -93,8 +93,7 @@ Tells:
 
 ## References
 
-- Task: `tasks/active/2026-09-06-archive-drain-enable-unfence-and-throughput.md` (moves to
-  `tasks/archive/` on completion); PR #2023 (the flip), this fix's PR
+- Task: `tasks/archive/2026-09-06-archive-drain-enable-unfence-and-throughput.md`; PR #2023 (the flip), this fix's PR
 - `scripts/deploy/sync-wrangler-config.ts` (`getOptionalProcessEnvVars`,
   `listEnvironmentVarOverrides`), `.github/workflows/deploy-reusable.yml` (`wrangler_sync_env`)
 - `.claude/rules/07-env-and-urls.md` — how environment sections are generated

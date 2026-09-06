@@ -1,6 +1,6 @@
 # Archive drain: enable the production global sweep, unwind pre-copy refusals, bounded throughput
 
-**Status:** active
+**Status:** archived (PR open 2026-09-06; production override removal and post-merge verification recorded in the PR)
 **Branch:** `sam/get-sams-production-projectdata-ztxn42`
 **SAM task:** `01M1V0NPQB3E5TNB8D0QZTXN42`
 **Parent work:** `tasks/archive/2026-09-05-archive-sharding-streaming-hash-abandon-and-size-budget.md` (PR #2024),
@@ -110,7 +110,7 @@ time or at PR time.
 
 ### 1. Problem 1 — make the sweep run through the normal deploy path (+ process fix)
 
-- [ ] Remove the GitHub `production` Environment override `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED`
+- [ ] (merge-time) Remove the GitHub `production` Environment override `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED`
       so the checked-in `wrangler.toml` value (`"true"`, PR #2023) governs. Do this only at merge time,
       after the staging feature pass, so no earlier deploy enables the sweep without the Problem 2 fix.
 - [x] `scripts/deploy/sync-wrangler-config.ts`: when a process-env value overrides a top-level
@@ -165,7 +165,7 @@ exists` asserts the typed refusal (`resolves`) with no intent row written, the t
 - [x] `handler.ts`: run `project_data_archive_sharding` after `trial_expire` (before the relief
       preflight, which stays last) so its wall budget cannot delay `session_sleep`; update
       `handler-kill-switch.test.ts` ordering pins.
-- [ ] Rule 47 load review in the PR: expected candidate volume, worst-case per-candidate cost,
+- [x] Rule 47 load review in the PR: expected candidate volume, worst-case per-candidate cost,
       tiered timeouts, escape paths, and the policy justification for a sub-daily cadence.
 - [x] Docs: `configuration.md`, env-reference skill, `.env.example` describe the shipped cadence.
 
@@ -191,7 +191,7 @@ exists` asserts the typed refusal (`resolves`) with no intent row written, the t
 - [x] `.claude/skills/api-reference/SKILL.md`: `precopy_refused` appears in problem-migrations /
       frozen-intents; abandon note unchanged.
 - [x] `CLAUDE.md` Recent Changes entry.
-- [ ] Post-mortem (rule 02) in the PR: root cause, class of bug, why not caught, process fix.
+- [x] Post-mortem (rule 02) in the PR: root cause, class of bug, why not caught, process fix.
 - [x] Follow-up SAM idea `01M1V3WYT6D88Z41WQWP0ASVC3`: `session_state.activity='error'` on terminal
       sessions blocks archiving (rule 57 stale-activity class); decide whether terminal sessions past
       grace should clear it.
@@ -201,15 +201,20 @@ exists` asserts the typed refusal (`resolves`) with no intent row written, the t
 - [ ] With the override removed and the PR deployed, a production `cron.completed` log shows
       `projectDataArchiveShardingEnabled: true` and the cadence row is claimed
       (`run_count >= 1`).
-- [ ] A refused-at-prepare candidate ends the same tick readable (`location_state='root'`), its
+- [x] A refused-at-prepare candidate ends the same tick readable (`location_state='root'`), its
       journal `frozen`/`precopy_refused`, the breaker `closed`; a mid-copy failure control still
       ends `migrating`/`failed` (test-pinned, verified red on pre-fix code).
-- [ ] A refused session is not re-selected inside the retry window and does not consume a slot;
-      an operator-scoped canary can still target it.
-- [ ] Staging: the sweep runs through the real cron path after deploy (cadence row claimed, a
-      terminal session migrates through `runProjectDataArchiveSharding`), and a session with an
-      active `session_state` row is left readable with a `precopy_refused` journal.
-- [ ] Deploy log names any GitHub Environment override that differs from `wrangler.toml`.
+- [x] A refused session is not re-selected inside the retry window and does not consume a slot;
+      an operator-scoped canary can still target it (unit + Workers pool + live on staging).
+- [x] Staging (2026-09-06, run 34028819491): the real cron path claimed the cadence row at
+      11:05:39Z (`run_count` 2, `succeeded`) and migrated four sessions largest-first across three
+      projects in 34 s; the second cron invocation in the same minute skipped with
+      `cadence_not_due`; a superadmin canary on `4305e7e3` (unresolved attention marker) returned
+      `refused: 1`, the session stayed readable at `root` with a `frozen`/`precopy_refused` journal,
+      and the next project-scoped selection skipped it. (`session_state` on staging could not be
+      seeded from outside; the attention-marker invariant exercises the same refusal path.)
+- [x] Deploy log names any GitHub Environment override that differs from `wrangler.toml`
+      (tested; the staging deploy printed none once the four staging overrides were removed).
 
 ## Non-goals
 
@@ -225,3 +230,23 @@ exists` asserts the typed refusal (`resolves`) with no intent row written, the t
 - `scripts/deploy/sync-wrangler-config.ts`, `.github/workflows/deploy-reusable.yml`
 - `.claude/rules/47-control-loop-io-budget.md`, `.claude/rules/62-tests-must-observe-the-real-trigger.md`,
   `.claude/rules/63-widening-a-table-can-delete-an-auth-check.md`, `.claude/rules/67-shared-predicates-that-trigger-actions.md`
+
+## Staging evidence (2026-09-06)
+
+- Deployed `sam-api-staging` vars (CF script settings): `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED=true`,
+  `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=true`, `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS=900000`,
+  `PROJECT_DATA_ARCHIVE_WALL_TIME_MS=30000`, `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS=604800000`,
+  `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS=3600000` (the four staging GitHub Environment
+  overrides created 2026-09-03/04 were deleted first; the deploy log printed no differing override).
+- Cron: cadence row `last_started_at` 11:05:39.904Z, `last_completed_at` 11:06:14.039Z, `succeeded`,
+  `run_count` 2, `next_eligible_at` 11:20:39Z; published `3a1a7624` (1,650), `5f90bfc4` (1,124),
+  `ed7d2631` (1,085), `e955988f` (968) — largest-first across three projects — then the 30 s wall
+  budget ended the tick. Per-phase timings (`project_data_archive_candidate_migrated`): 1,650
+  messages in 7.6 s (prepare 0.56 s, copy 4.9 s, seal 0.42 s, manifest 0.91 s, finalize 0.82 s).
+- Refusal: `POST …/01KJVGMWX26SGQ5DX94GMTJRQN/archive-sharding/canary` for `4305e7e3` →
+  `stats.refused: 1, migrated: 0, failed: 0`; journal `5537a3a5` `frozen`/`precopy_refused`
+  (`unresolved_attention: ProjectData archive refuses sessions with unresolved attention markers`),
+  location `root` with `migration_id` null; `GET …/sessions/4305e7e3/messages` 200 afterwards;
+  project-scoped dry-run listed five other sessions and not `4305e7e3`.
+- Playwright (Chromium 1280×800, token-login against `api.sammy.party`): dashboard, project page and
+  settings rendered; `console errors []`; `/health` 200.
