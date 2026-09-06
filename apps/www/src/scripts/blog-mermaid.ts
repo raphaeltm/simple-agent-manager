@@ -407,6 +407,16 @@ const renderDiagram = async (diagram: Diagram, theme: 'light' | 'dark') => {
 
   diagram.wrapper.classList.remove('mermaid-shell--error');
 
+  // `attachPanZoom` calculates its first viewBox from this element's layout box.
+  // Put the surface in the document first: an unattached element has a 0 × 0 box,
+  // which would replace Mermaid's valid viewBox with an invisible zero-size one.
+  if (diagram.surface) {
+    diagram.surface.replaceWith(surface);
+  } else {
+    diagram.wrapper.append(surface);
+  }
+  diagram.surface = surface;
+
   try {
     const { svg } = await mermaid.render(
       `sam-diagram-${diagram.index}-${renderCounter++}`,
@@ -435,13 +445,6 @@ const renderDiagram = async (diagram: Diagram, theme: 'light' | 'dark') => {
       </div>
     `;
   }
-
-  if (diagram.surface) {
-    diagram.surface.replaceWith(surface);
-  } else {
-    diagram.wrapper.append(surface);
-  }
-  diagram.surface = surface;
 };
 
 const diagrams: Diagram[] = [];

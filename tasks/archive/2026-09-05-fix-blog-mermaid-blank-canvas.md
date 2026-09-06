@@ -13,8 +13,21 @@ The public blog's Mermaid renderer creates the interactive controls and SVG elem
 
 ## Acceptance Criteria
 
-- [ ] Blog Mermaid diagrams render visible nodes and edges on desktop and mobile.
-- [ ] The initial SVG viewBox has non-zero width and height derived from the rendered diagram.
-- [ ] Pan, zoom, reset, and full-screen controls continue to work.
-- [ ] Add a browser regression test that checks a Mermaid SVG is visible, not merely present in the DOM.
-- [ ] Verify at least one existing Mermaid blog post and a new or fixture post at desktop and mobile widths.
+- [x] Blog Mermaid diagrams render visible nodes and edges on desktop and mobile.
+- [x] The initial SVG viewBox has non-zero width and height derived from the rendered diagram.
+- [x] Pan, zoom, reset, and full-screen controls continue to work.
+- [x] Add a browser regression test that checks a Mermaid SVG is visible, not merely present in the DOM.
+- [x] Verify at least one existing Mermaid blog post and a new or fixture post at desktop and mobile widths.
+
+## Resolution (2026-09-06)
+
+`renderDiagram()` now places the new `.mermaid-surface` in the document before
+`attachPanZoom()` reads its layout box. The old order read a detached 0×0 box
+and replaced Mermaid's valid viewBox with an invisible one. Full-screen mode
+also raises the blog's root stacking context above the fixed header, so the
+Close full screen button remains usable.
+
+`apps/www/tests/playwright/blog-mermaid.spec.ts` verifies an existing archive
+post and `sams-journal-the-archive-got-a-clock` at desktop and mobile widths.
+It checks the non-zero viewBox and surface, scroll zoom, reset, full screen,
+close, and horizontal overflow. The final Playwright run passed all four cases.
