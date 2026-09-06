@@ -22,8 +22,8 @@ The post must be written by SAM in a first-person bot voice, state that it is a 
 - [x] Explain the archive scheduler, deploy-time configuration override check, and safe pre-copy refusal in plain language.
 - [x] Include an accurate Mermaid diagram of the archive control flow.
 - [x] Fix the Mermaid viewer's zero-size viewBox defect and add a desktop/mobile browser regression test that proves an SVG is visible.
-- [ ] Validate content links, the site build, and the rendered post at desktop and mobile viewports.
-- [ ] Complete documentation/content, UI/UX, constitution, test, and task-completion review before opening the PR.
+- [x] Validate content links, the site build, and the rendered post at desktop and mobile viewports.
+- [x] Complete documentation/content, UI/UX, constitution, test, and task-completion review before opening the PR.
 
 ## Acceptance criteria
 
@@ -31,7 +31,7 @@ The post must be written by SAM in a first-person bot voice, state that it is a 
 - [x] The post accurately describes code shipped in PR #2027 without duplicating the preceding archive journal.
 - [x] The post identifies SAM as a bot keeping a daily journal.
 - [x] The Mermaid diagram renders with a non-zero SVG viewBox on desktop and mobile, including an existing post that uses Mermaid.
-- [ ] Narrow marketing-site checks pass: lint, typecheck, test, build, link check, and relevant Playwright browser checks.
+- [x] Narrow marketing-site checks pass: lint, typecheck, test, build, link check, and relevant Playwright browser checks.
 - [ ] The change is published by a merged PR and its production deployment completes successfully.
 
 ## References
@@ -42,3 +42,14 @@ The post must be written by SAM in a first-person bot voice, state that it is a 
 - `scripts/deploy/sync-wrangler-config.ts`
 - `apps/www/src/scripts/blog-mermaid.ts`
 - `tasks/backlog/2026-09-05-fix-blog-mermaid-blank-canvas.md`
+
+## Validation and review evidence
+
+- `pnpm --filter @simple-agent-manager/www lint` — passed.
+- `pnpm --filter @simple-agent-manager/www typecheck` — passed with the existing four-error Astro baseline and no warnings.
+- `pnpm --filter @simple-agent-manager/www test` — passed (2 files, 2 tests).
+- `PUBLIC_BASE_DOMAIN=localhost pnpm --filter @simple-agent-manager/www build` — passed and generated the new journal route.
+- `pnpm --filter @simple-agent-manager/www check:links` — passed (0 broken internal links).
+- `PLAYWRIGHT_BASE_URL=http://127.0.0.1:4321 pnpm exec playwright test tests/playwright/blog-mermaid.spec.ts` — passed (4 cases): existing and new archive posts on Desktop Chrome and Mobile Chrome. The test checks visible non-zero SVG viewBoxes, no overflow, zoom, reset, fullscreen, and close.
+- Task-completion review: all research findings and checked implementation items have substantive changes in the PR. The only remaining acceptance item is publication, intentionally held until the PR merges and its production deployment succeeds.
+- Documentation/content, constitution, test-engineering, and public-site UX reviews passed. The change introduces no API, environment, database, or deployment interface, and no new configurable business value.

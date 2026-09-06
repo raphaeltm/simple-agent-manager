@@ -38,6 +38,30 @@ for (const post of mermaidPosts) {
     expect(surfaceBox?.width).toBeGreaterThan(0);
     expect(surfaceBox?.height).toBeGreaterThan(0);
 
+    const initialViewBox = await diagram.getAttribute('viewBox');
+    await surface.hover();
+    await page.mouse.wheel(0, -400);
+    await expect.poll(() => diagram.getAttribute('viewBox')).not.toBe(initialViewBox);
+
+    await page.getByRole('button', { name: 'Reset view' }).click();
+    await expect.poll(() => diagram.getAttribute('viewBox')).toBe(initialViewBox);
+
+    await page.getByRole('button', { name: 'Full screen' }).click();
+    await expect(page.locator('.mermaid-shell')).toHaveClass(/is-fullscreen/);
+    await expect
+      .poll(() =>
+        diagram.evaluate((svg) => {
+          const values = svg
+            .getAttribute('viewBox')
+            ?.split(/[\s,]+/)
+            .map(Number);
+          return values && values[2] > 0 && values[3] > 0;
+        })
+      )
+      .toBe(true);
+    await page.getByRole('button', { name: 'Close full screen' }).click();
+    await expect(page.locator('.mermaid-shell')).not.toHaveClass(/is-fullscreen/);
+
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
