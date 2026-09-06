@@ -68,7 +68,16 @@ function seedArchiveMigration(
        VALUES (?, ?, ?, ?, ?, ?, 1, 'old-token', ?, ?, 'manifest-key',
                0, 1, 'test_error', 'test message', 900, 1000)`
     )
-    .run(input.migrationId, projectId, sessionId, state, SOURCE_OWNER, TARGET_OWNER, TERMINAL_SHA, TARGET_SHA);
+    .run(
+      input.migrationId,
+      projectId,
+      sessionId,
+      state,
+      SOURCE_OWNER,
+      TARGET_OWNER,
+      TERMINAL_SHA,
+      TARGET_SHA
+    );
   sqlite
     .prepare(
       `INSERT INTO project_data_session_locations
@@ -109,7 +118,9 @@ function makeArchiveChunk(tableName: ProjectDataArchiveTableName, ordinal: numbe
   };
 }
 
-function createArchiveProjectDataNamespace(overrides: Record<string, unknown> = {}): DurableObjectNamespace {
+function createArchiveProjectDataNamespace(
+  overrides: Record<string, unknown> = {}
+): DurableObjectNamespace {
   const source = {
     ensureProjectId: vi.fn(async () => true),
     archiveSourceInspectIntent: vi.fn(async () => ({
@@ -247,9 +258,9 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
       });
       expect(
         (
-          sqlite
-            .prepare('SELECT COUNT(*) AS count FROM project_data_archive_migrations')
-            .get() as { count: number }
+          sqlite.prepare('SELECT COUNT(*) AS count FROM project_data_archive_migrations').get() as {
+            count: number;
+          }
         ).count
       ).toBe(0);
       expect(projectDataGet).not.toHaveBeenCalled();
@@ -313,9 +324,9 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
       });
       expect(
         (
-          sqlite
-            .prepare('SELECT COUNT(*) AS count FROM project_data_archive_migrations')
-            .get() as { count: number }
+          sqlite.prepare('SELECT COUNT(*) AS count FROM project_data_archive_migrations').get() as {
+            count: number;
+          }
         ).count
       ).toBe(0);
     } finally {
@@ -375,6 +386,151 @@ describe('admin ProjectData archive-sharding rollout routes', () => {
         error: 'BAD_REQUEST',
         message: 'limit must be between 1 and 10',
       });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('abandons a pre-copy migration through the route and maps refusals to 400', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      seedArchiveMigration(sqlite, { migrationId: 'migration-abandon', state: 'failed' });
+      seedArchiveMigration(sqlite, {
+        migrationId: 'migration-abandon-deleted',
+        sessionId: 'session-deleted',
+        state: 'source_deleted',
+      });
+      const archiveTargetAbandonSession = vi.fn(async () => ({
+        removed: true,
+        state: 'copying',
+        messagesDeleted: 3,
+        groupedRowsDeleted: 2,
+        toolArchiveRowsDeleted: 1,
+        chunksDeleted: 4,
+        databaseSizeBytes: 10,
+      }));
+      const archiveSourceAbandonIntent = vi.fn(async () => ({
+        removed: true,
+        state: 'intent_prepared',
+        databaseSizeBytes: 100,
+      }));
+      const namespace = createArchiveProjectDataNamespace({
+        [SOURCE_OWNER]: {
+          ensureProjectId: vi.fn(async () => true),
+          archiveSourceInspectIntent: vi.fn(async () => ({
+            exists: true,
+            state: 'intent_prepared',
+            sourceIntentToken: 'old-token',
+            terminalVersionSha256: TERMINAL_SHA,
+            targetAggregateSha256: null,
+            r2ManifestKey: null,
+            messageCount: 3,
+            sourceDeletedAt: null,
+            databaseSizeBeforeBytes: 100,
+            databaseSizeAfterBytes: null,
+            databaseSizeBytes: 100,
+          })),
+          archiveSourceAbandonIntent,
+        },
+        [TARGET_OWNER]: {
+          ensureProjectId: vi.fn(async () => true),
+          archiveTargetAbandonSession,
+        },
+      });
+      const request = (migrationId: string, body: unknown) =>
+        createAdminProjectDataStorageApp().request(
+          `/api/admin/project-data/storage/project-archive/archive-sharding/migrations/${migrationId}/abandon`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
+            body: JSON.stringify(body),
+          },
+          makeEnv(sqlite, { PROJECT_DATA: namespace })
+        );
+
+      const missingReason = await request('migration-abandon', {});
+      expect(missingReason.status).toBe(400);
+
+      // Whitespace passes the schema's minLength but not the coordinator's trimmed check;
+      // the route must still answer with a designed 400, not a raw 500.
+      const blankReason = await request('migration-abandon', { reason: '   ' });
+      expect(blankReason.status).toBe(400);
+      expect(await blankReason.json()).toMatchObject({ error: 'BAD_REQUEST' });
+      expect(archiveTargetAbandonSession).not.toHaveBeenCalled();
+
+      const pastDeletion = await request('migration-abandon-deleted', { reason: 'operator' });
+      expect(pastDeletion.status).toBe(400);
+      expect(await pastDeletion.json()).toMatchObject({
+        error: 'BAD_REQUEST',
+        message: expect.stringContaining('use copy-back'),
+      });
+      expect(archiveTargetAbandonSession).not.toHaveBeenCalled();
+
+      const wrongProject = await createAdminProjectDataStorageApp().request(
+        '/api/admin/project-data/storage/project-other/archive-sharding/migrations/migration-abandon/abandon',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
+          body: JSON.stringify({ reason: 'operator' }),
+        },
+        makeEnv(sqlite, { PROJECT_DATA: namespace })
+      );
+      expect(wrongProject.status).toBe(400);
+      expect(archiveTargetAbandonSession).not.toHaveBeenCalled();
+
+      const response = await request('migration-abandon', { reason: '  operator abandon  ' });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        result: {
+          migrationId: 'migration-abandon',
+          projectId: PROJECT_ID,
+          sessionId: SESSION_ID,
+          reason: 'operator abandon',
+          previousState: 'failed',
+          journalFrozen: true,
+          restoredToRoot: true,
+          sourceIntentRemoved: true,
+          targetRemoved: true,
+          targetRowsDeleted: 10,
+        },
+      });
+      expect(archiveTargetAbandonSession).toHaveBeenCalledTimes(1);
+      expect(archiveTargetAbandonSession.mock.calls[0]?.[0]).toMatchObject({
+        migrationId: 'migration-abandon',
+        sourceIntactVerified: true,
+      });
+      expect(archiveSourceAbandonIntent).toHaveBeenCalledTimes(1);
+
+      const journal = sqlite
+        .prepare(
+          `SELECT state, error_code, error_message, lease_owner, lease_expires_at
+             FROM project_data_archive_migrations WHERE migration_id = ?`
+        )
+        .get('migration-abandon') as Record<string, unknown>;
+      expect(journal).toMatchObject({
+        state: 'frozen',
+        error_code: 'operator_abandoned',
+        error_message: 'operator abandon',
+        lease_owner: null,
+        lease_expires_at: null,
+      });
+      const location = sqlite
+        .prepare(
+          `SELECT location_state, owner_kind, owner_name, migration_id
+             FROM project_data_session_locations WHERE project_id = ? AND session_id = ?`
+        )
+        .get(PROJECT_ID, SESSION_ID) as Record<string, unknown>;
+      expect(location).toMatchObject({
+        location_state: 'root',
+        owner_kind: 'root',
+        owner_name: SOURCE_OWNER,
+        migration_id: null,
+      });
+      const untouched = sqlite
+        .prepare(`SELECT state FROM project_data_archive_migrations WHERE migration_id = ?`)
+        .get('migration-abandon-deleted') as Record<string, unknown>;
+      expect(untouched.state).toBe('source_deleted');
     } finally {
       sqlite.close();
     }

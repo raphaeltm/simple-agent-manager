@@ -9,6 +9,7 @@ import type {
   ProjectDataArchiveTableName,
 } from '../../../src/project-data-archive/contract';
 import {
+  abandonProjectDataArchiveMigration,
   copyBackProjectDataArchiveMigration,
   freezeProjectDataArchiveMigration,
   inspectFrozenProjectDataArchiveIntents,
@@ -224,6 +225,14 @@ function createFakeSource(options: FakeSourceOptions = {}) {
       sha256: 'copy',
     })),
     archiveSourceMarkCopyBackRestored: vi.fn(async () => true),
+    archiveSourceAbandonIntent: vi.fn(async () => {
+      if (state === 'source_deleted') {
+        throw new Error('abandon_requires_source_intact');
+      }
+      const previous = state;
+      state = null;
+      return { removed: previous !== null, state: previous, databaseSizeBytes: 1000 };
+    }),
     prepareTokens,
     get state() {
       return state;
@@ -285,6 +294,27 @@ function createFakeTarget() {
     archiveTargetMarkRehomeExported: vi.fn(async () => {
       state = 'rehome_exported';
       return true;
+    }),
+    archiveTargetAbandonSession: vi.fn(async (input: { sourceIntactVerified?: boolean }) => {
+      if (state === 'rehome_exported') throw new Error('target_not_abandonable');
+      if (state === 'sealed' && input.sourceIntactVerified !== true) {
+        throw new Error('target_sealed_requires_source_proof');
+      }
+      const removed = chunks.length > 0 || state !== 'prepared';
+      const previous = state;
+      const rowsDeleted = chunks.reduce((sum, chunk) => sum + chunk.rowCount, 0);
+      chunks.length = 0;
+      state = 'prepared';
+      return {
+        removed,
+        state: removed ? previous : null,
+        messagesDeleted: rowsDeleted,
+        groupedRowsDeleted: 0,
+        ftsRowsDeleted: 0,
+        toolArchiveRowsDeleted: 0,
+        chunksDeleted: removed ? 1 : 0,
+        databaseSizeBytes: 750,
+      };
     }),
   };
   return target;
@@ -416,6 +446,7 @@ function seedSessionSummary(
     status?: 'stopped' | 'failed' | 'active';
     endedAt?: number | null;
     updatedAt?: number;
+    messageCount?: number;
   } = {}
 ): void {
   const projectId = input.projectId ?? PROJECT_ID;
@@ -425,9 +456,16 @@ function seedSessionSummary(
     .prepare(
       `INSERT INTO session_summaries
          (id, project_id, user_id, status, topic, message_count, started_at, ended_at, updated_at)
-       VALUES (?, ?, 'owner', ?, 'Terminal session', 2, 500, ?, ?)`
+       VALUES (?, ?, 'owner', ?, 'Terminal session', ?, 500, ?, ?)`
     )
-    .run(sessionId, projectId, input.status ?? 'stopped', input.endedAt ?? 1000, updatedAt);
+    .run(
+      sessionId,
+      projectId,
+      input.status ?? 'stopped',
+      input.messageCount ?? 2,
+      input.endedAt ?? 1000,
+      updatedAt
+    );
 }
 
 function countMigrations(sqlite: Database.Database): number {
@@ -1036,7 +1074,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
     }
   });
 
-  it('does not let an older verified-published row starve a later source_deleted crash gap with the default sweep size', async () => {
+  it('does not let an older verified-published row starve a later source_deleted crash gap with a sweep size of one', async () => {
     const sqlite = new Database(':memory:');
     try {
       createCoordinatorTables(sqlite);
@@ -1057,6 +1095,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         makeEnv(sqlite, {
           PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
           PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
           PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
         }),
         new Date(NOW)
@@ -1142,7 +1181,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
     }
   });
 
-  it('skips non-actionable published rows before the default sweep limit so later published-location gaps recover', async () => {
+  it('skips non-actionable published rows before a sweep limit of one so later published-location gaps recover', async () => {
     const sqlite = new Database(':memory:');
     try {
       createCoordinatorTables(sqlite);
@@ -1179,6 +1218,7 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
         makeEnv(sqlite, {
           PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
           PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
           PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
         }),
         new Date(NOW)
@@ -1517,6 +1557,647 @@ describe('scheduled ProjectData archive sharding coordinator', () => {
       ).rejects.toMatchObject({
         reason: 'migration_project_mismatch',
       });
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe('archive-sharding candidate selection is size-ordered and budgeted', () => {
+  function seedSized(sqlite: Database.Database): void {
+    seedSessionSummary(sqlite, { sessionId: 'session-small', messageCount: 100, updatedAt: 1000 });
+    seedSessionSummary(sqlite, { sessionId: 'session-medium', messageCount: 200, updatedAt: 2000 });
+    seedSessionSummary(sqlite, { sessionId: 'session-large', messageCount: 300, updatedAt: 3000 });
+  }
+
+  async function dryRunSelection(
+    sqlite: Database.Database,
+    overrides: Partial<Env>
+  ): Promise<string[]> {
+    const result = await runScopedProjectDataArchiveCanary(makeEnv(sqlite, overrides), {
+      projectId: PROJECT_ID,
+      dryRun: true,
+      limit: 5,
+      nowDate: new Date(NOW),
+    });
+    expect(countMigrations(sqlite)).toBe(0);
+    return result.selected.map((candidate) => candidate.sessionId);
+  }
+
+  it('picks the largest eligible session first even when a smaller one is older', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSized(sqlite);
+      expect(
+        await dryRunSelection(sqlite, { PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000' })
+      ).toEqual(['session-large', 'session-medium', 'session-small']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('breaks equal message counts deterministically by oldest update, then id', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-b', messageCount: 200, updatedAt: 2000 });
+      seedSessionSummary(sqlite, { sessionId: 'session-a', messageCount: 200, updatedAt: 2000 });
+      seedSessionSummary(sqlite, { sessionId: 'session-c', messageCount: 200, updatedAt: 1000 });
+      seedSessionSummary(sqlite, { sessionId: 'session-d', messageCount: 300, updatedAt: 9000 });
+      const first = await dryRunSelection(sqlite, {
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000',
+      });
+      expect(first).toEqual(['session-d', 'session-c', 'session-a', 'session-b']);
+      // Identical repeated calls return an identical sequence (rule 65 determinism).
+      expect(
+        await dryRunSelection(sqlite, { PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000' })
+      ).toEqual(first);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('stops selecting once the cumulative message budget is spent', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSized(sqlite);
+      // 300 fits; 300 + 200 = 500 exceeds 450, so the medium and small sessions wait.
+      expect(
+        await dryRunSelection(sqlite, { PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '450' })
+      ).toEqual(['session-large']);
+      // 300 + 200 = 500 fits exactly; adding 100 would exceed it.
+      expect(
+        await dryRunSelection(sqlite, { PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '500' })
+      ).toEqual(['session-large', 'session-medium']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('still selects a single session larger than the whole budget so it cannot starve', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSized(sqlite);
+      expect(
+        await dryRunSelection(sqlite, { PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '1' })
+      ).toEqual(['session-large']);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('journals only the budgeted prefix on a non-dry run and leaves the rest unfenced', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSized(sqlite);
+      const stubs: Record<string, unknown> = {};
+      const source = createFakeSource();
+      stubs[SOURCE_OWNER] = source;
+      // Every shard owner name resolves to one fake target; the fake ignores identity.
+      const namespace = {
+        idFromName: (name: string) => name,
+        get: (id: string) => stubs[id] ?? createFakeTarget(),
+      } as unknown as DurableObjectNamespace;
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '450',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: namespace,
+        }),
+        {
+          projectId: PROJECT_ID,
+          dryRun: false,
+          reason: 'budgeted canary',
+          limit: 5,
+          nowDate: new Date(NOW),
+        }
+      );
+      expect(result.selected.map((candidate) => candidate.sessionId)).toEqual(['session-large']);
+      expect(countMigrations(sqlite)).toBe(1);
+      expect(readLocationRow(sqlite, 'session-medium')).toBeUndefined();
+      expect(readLocationRow(sqlite, 'session-small')).toBeUndefined();
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe('archive-sharding fences a session only when it is about to process it', () => {
+  it('leaves sessions it never reached unfenced when wall time runs out mid-tick', async () => {
+    // Three eligible small sessions, a ten-session ceiling, and a wall-time budget the first
+    // migration exhausts. Journaling all three up front would fence two sessions `migrating`
+    // for the whole next cadence interval; only the processed one may be journaled.
+    const sqlite = new Database(':memory:');
+    const realNow = Date.now;
+    let clock = realNow();
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      createCoordinatorTables(sqlite);
+      seedSessionSummary(sqlite, { sessionId: 'session-a', messageCount: 30, updatedAt: 1000 });
+      seedSessionSummary(sqlite, { sessionId: 'session-b', messageCount: 20, updatedAt: 2000 });
+      seedSessionSummary(sqlite, { sessionId: 'session-c', messageCount: 10, updatedAt: 3000 });
+      const source = createFakeSource();
+      const prepare = source.archiveSourcePrepareIntent.getMockImplementation()!;
+      source.archiveSourcePrepareIntent.mockImplementation(async (input) => {
+        clock += 10_000; // one migration costs more than the whole wall-time budget
+        return prepare(input);
+      });
+      const stubs: Record<string, unknown> = { [SOURCE_OWNER]: source };
+      const namespace = {
+        idFromName: (name: string) => name,
+        get: (id: string) => stubs[id] ?? createFakeTarget(),
+      } as unknown as DurableObjectNamespace;
+      const result = await runScopedProjectDataArchiveCanary(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
+          PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '5000',
+          PROJECT_DATA_ARCHIVE_R2: createMemoryR2(),
+          PROJECT_DATA: namespace,
+        }),
+        {
+          projectId: PROJECT_ID,
+          dryRun: false,
+          reason: 'wall time canary',
+          limit: 10,
+          nowDate: new Date(NOW),
+        }
+      );
+      expect(result.stats.selected).toBe(3);
+      // Liveness: the first (largest) session really was journaled and worked on.
+      expect(source.archiveSourcePrepareIntent).toHaveBeenCalledTimes(1);
+      expect(countMigrations(sqlite)).toBe(1);
+      expect(readLocationRow(sqlite, 'session-a')).toBeDefined();
+      expect(result.selected.map((item) => [item.sessionId, item.migrationId !== null])).toEqual([
+        ['session-a', true],
+        ['session-b', false],
+        ['session-c', false],
+      ]);
+      expect(readLocationRow(sqlite, 'session-b')).toBeUndefined();
+      expect(readLocationRow(sqlite, 'session-c')).toBeUndefined();
+    } finally {
+      nowSpy.mockRestore();
+      sqlite.close();
+    }
+  });
+});
+
+describe('archive-sharding abandon control', () => {
+  function readJournal(sqlite: Database.Database, migrationId: string) {
+    return sqlite
+      .prepare(
+        `SELECT state, error_code, error_message, lease_owner, lease_expires_at, frozen_at
+         FROM project_data_archive_migrations
+         WHERE migration_id = ?`
+      )
+      .get(migrationId) as Record<string, unknown>;
+  }
+
+  function breakerRow(sqlite: Database.Database) {
+    return sqlite
+      .prepare('SELECT state FROM project_data_archive_circuit_breakers WHERE project_id = ?')
+      .get(PROJECT_ID) as { state: string } | undefined;
+  }
+
+  function controlEnv(
+    sqlite: Database.Database,
+    source: ReturnType<typeof createFakeSource>,
+    target: ReturnType<typeof createFakeTarget>
+  ): Env {
+    return makeEnv(sqlite, {
+      PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+      PROJECT_DATA: createProjectDataNamespace({
+        [SOURCE_OWNER]: source,
+        [TARGET_OWNER]: target,
+      }),
+    });
+  }
+
+  it('returns a failed pre-copy migration to root, freezes the journal, and leaves the breaker closed', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'failed', { attemptCount: 1 });
+      seedSessionSummary(sqlite, { endedAt: 1000 });
+      const source = createFakeSource({ state: 'intent_prepared' });
+      const target = createFakeTarget();
+      await target.archiveTargetCommitChunk({ ...makeChunk('chat_messages', 0), rowCount: 3 });
+      const env = controlEnv(sqlite, source, target);
+
+      const result = await abandonProjectDataArchiveMigration(env, {
+        migrationId: MIGRATION_ID,
+        projectId: PROJECT_ID,
+        reason: 'memory reset during prepare',
+        now: NOW,
+      });
+      expect(result).toMatchObject({
+        migrationId: MIGRATION_ID,
+        sessionId: SESSION_ID,
+        previousState: 'failed',
+        journalFrozen: true,
+        restoredToRoot: true,
+        sourceIntentRemoved: true,
+        targetRemoved: true,
+        targetRowsDeleted: 4,
+      });
+      expect(target.archiveTargetAbandonSession).toHaveBeenCalledWith(
+        expect.objectContaining({ sourceIntactVerified: true, migrationId: MIGRATION_ID })
+      );
+      expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({
+        state: 'frozen',
+        error_code: 'operator_abandoned',
+        error_message: 'memory reset during prepare',
+        lease_owner: null,
+        lease_expires_at: null,
+        frozen_at: NOW,
+      });
+      expect(readLocationRow(sqlite)).toMatchObject({
+        location_state: 'root',
+        owner_kind: 'root',
+        owner_name: SOURCE_OWNER,
+        generation: 0,
+      });
+      expect(breakerRow(sqlite)).toBeUndefined();
+
+      // Idempotent rerun: nothing left to remove, D1 already converged.
+      const rerun = await abandonProjectDataArchiveMigration(env, {
+        migrationId: MIGRATION_ID,
+        projectId: PROJECT_ID,
+        reason: 'rerun',
+        now: NOW + 1,
+      });
+      expect(rerun).toMatchObject({
+        journalFrozen: false,
+        restoredToRoot: false,
+        sourceIntentRemoved: false,
+        targetRemoved: false,
+      });
+      expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({
+        error_message: 'memory reset during prepare',
+      });
+
+      // The session is a fresh candidate again and gets a new journal row.
+      const dryRun = await runScopedProjectDataArchiveCanary(env, {
+        projectId: PROJECT_ID,
+        sessionId: SESSION_ID,
+        dryRun: true,
+        nowDate: new Date(NOW),
+      });
+      expect(dryRun.selected).toEqual([
+        expect.objectContaining({ sessionId: SESSION_ID, source: 'eligible_session' }),
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('abandons a poisoned migration whose shard holds a partial copy', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'poisoned', { attemptCount: 3, locationState: 'frozen' });
+      const source = createFakeSource({ state: 'intent_prepared' });
+      const target = createFakeTarget();
+      await target.archiveTargetCommitChunk({ ...makeChunk('chat_messages', 0), rowCount: 2 });
+      const env = controlEnv(sqlite, source, target);
+
+      const result = await abandonProjectDataArchiveMigration(env, {
+        migrationId: MIGRATION_ID,
+        projectId: PROJECT_ID,
+        reason: 'bind ceiling failure, fixed',
+        now: NOW,
+      });
+      expect(result).toMatchObject({
+        previousState: 'poisoned',
+        journalFrozen: true,
+        restoredToRoot: true,
+        targetRemoved: true,
+      });
+      expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'root', generation: 0 });
+      expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({
+        state: 'frozen',
+        error_code: 'operator_abandoned',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('refuses once the source payload is deleted, per the journal or per the root object', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'source_deleted', { migrationId: 'migration-deleted' });
+      seedMigration(sqlite, 'published', {
+        migrationId: 'migration-published',
+        sessionId: 'session-published',
+        locationState: 'archive_shard',
+      });
+      // Journal lags the object: D1 still says copying, the root already deleted the source.
+      seedMigration(sqlite, 'copying', {
+        migrationId: 'migration-lagging',
+        sessionId: 'session-lagging',
+      });
+      const source = createFakeSource({ state: 'source_deleted' });
+      const target = createFakeTarget();
+      const env = controlEnv(sqlite, source, target);
+
+      for (const migrationId of ['migration-deleted', 'migration-published', 'migration-lagging']) {
+        await expect(
+          abandonProjectDataArchiveMigration(env, {
+            migrationId,
+            projectId: PROJECT_ID,
+            reason: 'should refuse',
+            now: NOW,
+          })
+        ).rejects.toMatchObject({ reason: 'abandon_requires_source_intact' });
+      }
+      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(source.archiveSourceAbandonIntent).not.toHaveBeenCalled();
+      expect(readLocationRow(sqlite, 'session-lagging')).toMatchObject({
+        location_state: 'migrating',
+      });
+      expect(readLocationRow(sqlite, 'session-published')).toMatchObject({
+        location_state: 'archive_shard',
+      });
+      expect(readJournal(sqlite, 'migration-lagging')).toMatchObject({ state: 'copying' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('waits for a live lease on an in-flight migration, then abandons once it expires', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'copying', { leaseExpiresAt: NOW + 60_000 });
+      const source = createFakeSource({ state: 'intent_prepared' });
+      const target = createFakeTarget();
+      const env = controlEnv(sqlite, source, target);
+
+      await expect(
+        abandonProjectDataArchiveMigration(env, {
+          migrationId: MIGRATION_ID,
+          projectId: PROJECT_ID,
+          reason: 'too early',
+          now: NOW,
+        })
+      ).rejects.toMatchObject({ reason: 'abandon_requires_expired_lease' });
+      expect(source.archiveSourceAbandonIntent).not.toHaveBeenCalled();
+      expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
+
+      // Owner control: the identical call after the lease lapses goes through.
+      const result = await abandonProjectDataArchiveMigration(env, {
+        migrationId: MIGRATION_ID,
+        projectId: PROJECT_ID,
+        reason: 'lease lapsed',
+        now: NOW + 60_001,
+      });
+      expect(result).toMatchObject({ previousState: 'copying', restoredToRoot: true });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('does not let a stale lease on an already-failed migration block abandon', async () => {
+    // markFailed clears the lease today; this pins the `state !== 'failed'` disjunct so a
+    // future writer that fails a migration without clearing its lease cannot wedge recovery.
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'failed', { leaseExpiresAt: NOW + 60_000 });
+      const source = createFakeSource({ state: 'intent_prepared' });
+      const target = createFakeTarget();
+      const result = await abandonProjectDataArchiveMigration(controlEnv(sqlite, source, target), {
+        migrationId: MIGRATION_ID,
+        projectId: PROJECT_ID,
+        reason: 'failed with a lease still recorded',
+        now: NOW,
+      });
+      expect(result).toMatchObject({ previousState: 'failed', restoredToRoot: true });
+      expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({
+        state: 'frozen',
+        error_code: 'operator_abandoned',
+        lease_expires_at: null,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('requires a non-blank reason before reading the journal or touching any object', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'failed');
+      const source = createFakeSource({ state: 'intent_prepared' });
+      const target = createFakeTarget();
+      for (const reason of ['', '   ', '\n\t']) {
+        await expect(
+          abandonProjectDataArchiveMigration(controlEnv(sqlite, source, target), {
+            migrationId: MIGRATION_ID,
+            projectId: PROJECT_ID,
+            reason,
+            now: NOW,
+          })
+        ).rejects.toMatchObject({ reason: 'abandon_reason_required' });
+      }
+      expect(source.archiveSourceInspectIntent).not.toHaveBeenCalled();
+      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({ state: 'failed' });
+      expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('never drops the shard copy when the source is finalized between the inspect read and the abandon', async () => {
+    // Race reproduction: the root object reports the intent intact when inspected, but a
+    // concurrent finalize lands before the lock-protected source abandon runs. The source
+    // RPC refuses (as the real DO does once the payload is gone) and the target copy, now
+    // the only copy, must survive. A target-first ordering deletes it before finding out.
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'recovery_manifest_persisted', { leaseExpiresAt: NOW - 1 });
+      const source = createFakeSource({ state: 'recovery_manifest_persisted' });
+      const target = createFakeTarget();
+      await target.archiveTargetCommitChunk({ ...makeChunk('chat_messages', 0), rowCount: 3 });
+      await target.archiveTargetSeal();
+      source.archiveSourceAbandonIntent.mockImplementationOnce(async () => {
+        // Production: a plain Error crosses the DO RPC boundary.
+        throw new Error('abandon_requires_source_intact');
+      });
+
+      await expect(
+        abandonProjectDataArchiveMigration(controlEnv(sqlite, source, target), {
+          migrationId: MIGRATION_ID,
+          projectId: PROJECT_ID,
+          reason: 'looked stuck',
+          now: NOW,
+        })
+      ).rejects.toThrow('abandon_requires_source_intact');
+
+      expect(source.archiveSourceInspectIntent).toHaveBeenCalledTimes(1);
+      expect(source.archiveSourceAbandonIntent).toHaveBeenCalledTimes(1);
+      expect(target.archiveTargetAbandonSession).not.toHaveBeenCalled();
+      expect((await target.archiveTargetInspectSession()).state).toBe('sealed');
+      // The reservation is released so a sweep can finish publishing; the journal and the
+      // location are left exactly as they were.
+      expect(readJournal(sqlite, MIGRATION_ID)).toMatchObject({
+        state: 'recovery_manifest_persisted',
+        error_code: null,
+        lease_owner: null,
+        lease_expires_at: null,
+      });
+      expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('fences the journal before touching any object so a sweep cannot claim the row mid-abandon', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'target_sealed', { leaseExpiresAt: NOW - 1 });
+      sqlite
+        .prepare(
+          `UPDATE project_data_archive_migrations
+           SET lease_owner = 'worker-stale', lease_epoch = 3 WHERE migration_id = ?`
+        )
+        .run(MIGRATION_ID);
+      const source = createFakeSource({ state: 'target_sealed' });
+      const target = createFakeTarget();
+      await target.archiveTargetCommitChunk({ ...makeChunk('chat_messages', 0), rowCount: 3 });
+      await target.archiveTargetSeal();
+      const sweepClaims: number[] = [];
+      const staleFences: number[] = [];
+      const original = source.archiveSourceAbandonIntent.getMockImplementation();
+      source.archiveSourceAbandonIntent.mockImplementationOnce(async () => {
+        // A sweep tick racing the operator: the same CAS `claimMigrationLease` issues.
+        sweepClaims.push(
+          sqlite
+            .prepare(
+              `UPDATE project_data_archive_migrations
+               SET lease_owner = 'worker-new', lease_epoch = lease_epoch + 1, lease_expires_at = ?
+               WHERE migration_id = ? AND state = 'target_sealed'
+                 AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`
+            )
+            .run(NOW + 300_000, MIGRATION_ID, NOW).changes
+        );
+        // The stale worker from before the abandon: its `assertLeaseStillHeld` epoch check.
+        staleFences.push(
+          (
+            sqlite
+              .prepare(
+                `SELECT COUNT(*) AS count FROM project_data_archive_migrations
+                 WHERE migration_id = ? AND lease_owner = 'worker-stale' AND lease_epoch = 3`
+              )
+              .get(MIGRATION_ID) as { count: number }
+          ).count
+        );
+        return original!();
+      });
+
+      const result = await abandonProjectDataArchiveMigration(controlEnv(sqlite, source, target), {
+        migrationId: MIGRATION_ID,
+        projectId: PROJECT_ID,
+        reason: 'fenced',
+        now: NOW,
+      });
+      expect(sweepClaims).toEqual([0]);
+      expect(staleFences).toEqual([0]);
+      expect(result).toMatchObject({ restoredToRoot: true, journalFrozen: true });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT state, lease_owner, lease_epoch FROM project_data_archive_migrations
+             WHERE migration_id = ?`
+          )
+          .get(MIGRATION_ID)
+      ).toMatchObject({ state: 'frozen', lease_owner: null, lease_epoch: 4 });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('lets an interrupted abandon rerun take over its own unexpired reservation, but not a worker lease', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'copying', { leaseExpiresAt: NOW + 60_000 });
+      const setOwner = (owner: string) =>
+        sqlite
+          .prepare(
+            'UPDATE project_data_archive_migrations SET lease_owner = ? WHERE migration_id = ?'
+          )
+          .run(owner, MIGRATION_ID);
+      const run = () =>
+        abandonProjectDataArchiveMigration(
+          controlEnv(sqlite, createFakeSource({ state: 'intent_prepared' }), createFakeTarget()),
+          { migrationId: MIGRATION_ID, projectId: PROJECT_ID, reason: 'rerun', now: NOW }
+        );
+
+      // Control: a live lease held by a sweep worker still refuses.
+      setOwner('worker-live');
+      await expect(run()).rejects.toMatchObject({ reason: 'abandon_requires_expired_lease' });
+      expect(readLocationRow(sqlite)).toMatchObject({ location_state: 'migrating' });
+
+      // A live reservation left by an earlier abandon attempt is ours to take over.
+      setOwner('abandon:earlier-attempt');
+      // The pre-fence guard reads the same row; an operator reservation is not a sweep lease.
+      const result = await run();
+      expect(result).toMatchObject({ previousState: 'copying', restoredToRoot: true });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rejects a migration that belongs to another project before touching any object', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedMigration(sqlite, 'failed', {
+        migrationId: 'migration-foreign',
+        projectId: 'project-other',
+      });
+      const source = createFakeSource({ state: 'intent_prepared' });
+      const target = createFakeTarget();
+      await expect(
+        abandonProjectDataArchiveMigration(controlEnv(sqlite, source, target), {
+          migrationId: 'migration-foreign',
+          projectId: PROJECT_ID,
+          reason: 'cross-project',
+          now: NOW,
+        })
+      ).rejects.toMatchObject({ reason: 'migration_project_mismatch' });
+      expect(source.archiveSourceAbandonIntent).not.toHaveBeenCalled();
+      expect(readLocationRow(sqlite, SESSION_ID, 'project-other')).toMatchObject({
+        location_state: 'migrating',
+      });
+      // Owner control: the same row abandons cleanly when addressed by its own project.
+      const owned = await abandonProjectDataArchiveMigration(
+        makeEnv(sqlite, {
+          PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+          PROJECT_DATA: createProjectDataNamespace({
+            'project-other': source,
+            [TARGET_OWNER]: target,
+          }),
+        }),
+        {
+          migrationId: 'migration-foreign',
+          projectId: 'project-other',
+          reason: 'owner abandon',
+          now: NOW,
+        }
+      );
+      expect(owned).toMatchObject({ restoredToRoot: true, journalFrozen: true });
     } finally {
       sqlite.close();
     }

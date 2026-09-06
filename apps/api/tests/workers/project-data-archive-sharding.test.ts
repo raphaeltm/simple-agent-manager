@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { Env as WorkerEnv } from '../../src/env';
 import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
 import {
+  abandonProjectDataArchiveMigration,
   copyBackProjectDataArchiveMigration,
   runProjectDataArchiveSharding,
   runScopedProjectDataArchiveCanary,
@@ -203,6 +204,42 @@ async function seedSourceDeletedCrashGap(
     ),
   ]);
 }
+
+/**
+ * Seed a failed pre-copy journal for an existing root session: the exact production shape
+ * left behind when the terminal-version hash reset the object mid-prepare (journal `failed`,
+ * location `migrating`, no source intent, nothing on the shard).
+ */
+async function seedFailedPreCopyMigration(
+  projectId: string,
+  sessionId: string,
+  migrationId: string
+): Promise<{ targetOwnerName: string }> {
+  const sourceOwnerName = projectId;
+  const targetOwnerName = `${projectId}:archive:g1:s9`;
+  await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `INSERT INTO project_data_archive_migrations (
+         migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
+         source_generation, target_generation, lease_epoch, attempt_count, error_code,
+         error_message, candidate_at, created_at, updated_at
+       )
+       VALUES (?, ?, ?, 'failed', ?, ?, 0, 1, 1, 1, 'Error',
+               'Durable Object''s isolate exceeded its memory limit and was reset.', 1000, 1000, 1000)`
+    ).bind(migrationId, projectId, sessionId, sourceOwnerName, targetOwnerName),
+    env.DATABASE.prepare(
+      `INSERT INTO project_data_session_locations (
+         project_id, session_id, location_state, owner_kind, owner_name, generation,
+         migration_id, source_owner_name, target_owner_name, routing_schema_version, updated_at
+       )
+       VALUES (?, ?, 'migrating', 'archive_shard', ?, 1, ?, ?, ?, 1, 1000)`
+    ).bind(projectId, sessionId, targetOwnerName, migrationId, sourceOwnerName, targetOwnerName),
+  ]);
+  return { targetOwnerName };
+}
+
+/** Two full default hash pages plus a remainder, so every archive table streams three pages. */
+const MULTI_PAGE_MESSAGES = 1_001;
 
 describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
   it('migrates a terminal transcript through real DO SQLite, publishes archive routing, and records databaseSize reclaim evidence', async () => {
@@ -561,6 +598,110 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     expect(captured).toMatchObject({
       threw: true,
       code: 'PROJECT_DATA_TRANSCRIPT_WRITE_FENCED',
+    });
+  });
+  it('migrates a session larger than one hash page through the real DO, streaming every terminal-version proof', async () => {
+    const projectId = `archive-multipage-${crypto.randomUUID()}`;
+    const { sessionId } = await seedTerminalSessionWithMessages(projectId, MULTI_PAGE_MESSAGES);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '500',
+        PROJECT_DATA_ARCHIVE_CHUNK_BYTES: String(4 * 1024 * 1024),
+        PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS: '500',
+      },
+      async () => {
+        const result = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'multi-page streaming hash canary',
+          limit: 1,
+          wallTimeMs: 15_000,
+          nowDate: new Date(Date.now() + 60_000),
+        });
+        expect(result.stats).toMatchObject({ selected: 1, migrated: 1, failed: 0, poisoned: 0 });
+
+        const location = await readLocation(projectId, sessionId);
+        expect(location).toMatchObject({ location_state: 'archive_shard', generation: 1 });
+        expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(
+          MULTI_PAGE_MESSAGES
+        );
+        expect(await countTargetMessages(location!.owner_name, sessionId)).toBe(
+          MULTI_PAGE_MESSAGES
+        );
+        const journal = await env.DATABASE.prepare(
+          `SELECT state, error_message FROM project_data_archive_migrations
+           WHERE project_id = ? AND session_id = ?`
+        )
+          .bind(projectId, sessionId)
+          .first<{ state: string; error_message: string | null }>();
+        expect(journal).toMatchObject({ state: 'published', error_message: null });
+      }
+    );
+  });
+
+  it('abandon returns a fenced pre-copy migration to root so the session reads again', async () => {
+    const projectId = `archive-abandon-${crypto.randomUUID()}`;
+    const { sessionId } = await seedTerminalSessionWithMessages(projectId, 5);
+    const migrationId = crypto.randomUUID();
+    await seedFailedPreCopyMigration(projectId, sessionId, migrationId);
+
+    await withArchiveEnv({ PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true' }, async () => {
+      // Fenced: the exact read owner is neither root nor a published shard.
+      await expect(
+        projectDataService.getMessageCount(testEnv, projectId, sessionId)
+      ).rejects.toMatchObject({ code: 'PROJECT_DATA_ARCHIVE_ROUTING_UNSAFE' });
+
+      const abandoned = await abandonProjectDataArchiveMigration(testEnv, {
+        projectId,
+        migrationId,
+        reason: 'memory reset during prepare; hash now streams',
+      });
+      expect(abandoned).toMatchObject({
+        previousState: 'failed',
+        journalFrozen: true,
+        restoredToRoot: true,
+        sourceIntentRemoved: false,
+        targetRemoved: false,
+        targetRowsDeleted: 0,
+      });
+
+      expect(await readLocation(projectId, sessionId)).toMatchObject({
+        location_state: 'root',
+        owner_kind: 'root',
+        owner_name: projectId,
+        generation: 0,
+        migration_id: null,
+      });
+      expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(5);
+      const journal = await env.DATABASE.prepare(
+        `SELECT state, error_code FROM project_data_archive_migrations WHERE migration_id = ?`
+      )
+        .bind(migrationId)
+        .first<{ state: string; error_code: string }>();
+      expect(journal).toEqual({ state: 'frozen', error_code: 'operator_abandoned' });
+
+      // Discriminating control: the same session migrates cleanly afterwards.
+      await withArchiveEnv(
+        { PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1', PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '3' },
+        async () => {
+          const result = await runScopedProjectDataArchiveCanary(testEnv, {
+            projectId,
+            sessionId,
+            dryRun: false,
+            reason: 'post-abandon re-migration',
+            limit: 1,
+            nowDate: new Date(Date.now() + 60_000),
+          });
+          expect(result.stats).toMatchObject({ migrated: 1, failed: 0 });
+          expect(await readLocation(projectId, sessionId)).toMatchObject({
+            location_state: 'archive_shard',
+          });
+        }
+      );
     });
   });
 });
