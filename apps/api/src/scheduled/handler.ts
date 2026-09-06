@@ -163,9 +163,6 @@ export async function scheduled(
   const terminalSessionLedger = await sweeps.isolate('terminal_session_ledger_reconciliation', () =>
     runTerminalSessionLedgerReconciliation(env)
   );
-  const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
-    runProjectDataArchiveSharding(env)
-  );
   const sessionSleep = await sweeps.isolate('session_sleep', () =>
     runSessionSleepSweep(env, new Date(), ctx)
   );
@@ -187,6 +184,16 @@ export async function scheduled(
     runComputeUsageCleanup(env)
   );
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
+
+  // Runs after every lifecycle sweep on purpose. When its persisted cadence is due it copies
+  // whole terminal sessions between ProjectData objects under PROJECT_DATA_ARCHIVE_WALL_TIME_MS
+  // (checked only between candidates, so one large session can run well past it). Earlier in
+  // the chain that budget would delay session_sleep and the other lifecycle sweeps on every
+  // tick the cadence fires (`.claude/rules/47`); on the ticks it is not due it costs two D1
+  // statements.
+  const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
+    runProjectDataArchiveSharding(env)
+  );
 
   // Runs LAST on purpose. The relief preflight is read-only, but it is the only
   // sweep whose run budget is operator-tuned into the minutes
@@ -329,6 +336,7 @@ export async function scheduled(
     projectDataArchiveShardingSelected: projectDataArchiveSharding?.selected,
     projectDataArchiveShardingMigrated: projectDataArchiveSharding?.migrated,
     projectDataArchiveShardingRecoveredCrashGaps: projectDataArchiveSharding?.recoveredCrashGaps,
+    projectDataArchiveShardingRefused: projectDataArchiveSharding?.refused,
     projectDataArchiveShardingFailed: projectDataArchiveSharding?.failed,
     projectDataArchiveShardingChunksCopied: projectDataArchiveSharding?.chunksCopied,
     projectDataArchiveShardingRowsCopied: projectDataArchiveSharding?.rowsCopied,

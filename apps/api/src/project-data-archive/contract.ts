@@ -87,6 +87,23 @@ export const PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES = 16 * 1024 * 1024;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS = 500;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SHARD_COUNT = 128;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * How long a session the root object refused at prepare (a pre-copy eligibility invariant such
+ * as `active_session_state`) stays out of sweep candidate selection before a sweep may try it
+ * again. The refusal is recorded as a `frozen` journal with
+ * `error_code = PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE`; this window is the rule-47
+ * expiring marker that keeps such a session from re-consuming a slot every tick while the
+ * refusal condition persists. An operator canary that names the session bypasses it.
+ */
+export const PROJECT_DATA_ARCHIVE_DEFAULT_PRECOPY_REFUSAL_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
+export const PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE = 'precopy_refused';
+/**
+ * Minimum age of a `failed` journal before an unscoped sweep reclaims it. With a 15-minute
+ * cadence and `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS = 3`, no delay would poison a
+ * migration (and open its project breaker) 45 minutes after a transient fault; one hour between
+ * attempts keeps the poison budget a multi-hour window. `0` disables the delay.
+ */
+export const PROJECT_DATA_ARCHIVE_DEFAULT_FAILED_RETRY_DELAY_MS = 60 * 60 * 1000;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_PROJECTS = 1;
 /**
  * Hard ceiling on sessions one sweep tick may journal. The primary throttle is
@@ -112,6 +129,29 @@ export const PROJECT_DATA_ARCHIVE_DEFAULT_WALL_TIME_MS = 5_000;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX = 'project-data/session-archives';
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SEARCH_MAX_OWNERS = 4;
 export const PROJECT_DATA_ARCHIVE_MAX_SEARCH_OWNERS = 64;
+
+/**
+ * Returned (not thrown) by the root object's prepare RPC when a pre-copy eligibility invariant
+ * refuses the session before anything is written on either object. A returned value crosses the
+ * Durable Object RPC boundary intact, whereas a thrown error arrives as a bare `Error` carrying
+ * only `name` and `message` (rule 63). The coordinator uses it to unwind the `migrating` fence
+ * in the same tick instead of leaving the session unreadable behind a `failed` journal.
+ */
+export type ProjectDataArchiveSourcePrepareRefusal = {
+  refused: true;
+  /** `ProjectDataArchiveInvariantError.reason`, e.g. `active_session_state`. */
+  reason: string;
+  message: string;
+  databaseSizeBytes: number;
+};
+
+export function isProjectDataArchiveSourcePrepareRefusal(
+  value: unknown
+): value is ProjectDataArchiveSourcePrepareRefusal {
+  return (
+    typeof value === 'object' && value !== null && (value as { refused?: unknown }).refused === true
+  );
+}
 
 export type ProjectDataArchiveOwnerRef = {
   kind: ProjectDataArchiveOwnerKind;

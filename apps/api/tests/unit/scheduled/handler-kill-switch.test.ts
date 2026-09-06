@@ -75,9 +75,16 @@ describe('scheduled operational sweep kill switch', () => {
     expect(sweepNames.indexOf('terminal_session_ledger_reconciliation')).toBeLessThan(
       sweepNames.indexOf('project_data_archive_sharding')
     );
-    expect(sweepNames.indexOf('project_data_archive_sharding')).toBeLessThan(
-      sweepNames.indexOf('session_sleep')
+    // Archive sharding copies whole sessions between ProjectData objects when its cadence is
+    // due; it runs after every lifecycle sweep (session_sleep, trial_expire) so that copy budget
+    // cannot push them back (`.claude/rules/47`). Only the relief preflight runs later.
+    expect(sweepNames.indexOf('session_sleep')).toBeLessThan(
+      sweepNames.indexOf('project_data_archive_sharding')
     );
+    expect(sweepNames.indexOf('trial_expire')).toBeLessThan(
+      sweepNames.indexOf('project_data_archive_sharding')
+    );
+    expect(sweepNames.indexOf('project_data_archive_sharding')).toBe(sweepNames.length - 2);
     // The relief preflight runs LAST. Its run budget is operator-tuned into the minutes
     // while an emergency plan converges, so anywhere earlier it would push every later
     // lifecycle sweep — session_sleep above all — back by that budget on every tick
@@ -104,6 +111,41 @@ describe('scheduled operational sweep kill switch', () => {
     expect(logInfoMock).toHaveBeenCalledWith(
       'cron.completed',
       expect.objectContaining({ type: 'sweep', failedSweeps: [] })
+    );
+  });
+
+  it('carries the archive-sharding refused count into cron.completed', async () => {
+    enabledMock.mockResolvedValue(true);
+    isolateMock.mockImplementation(async (name: string) =>
+      name === 'project_data_archive_sharding'
+        ? {
+            enabled: true,
+            skipped: false,
+            skipReason: null,
+            selected: 3,
+            migrated: 1,
+            recoveredCrashGaps: 0,
+            refused: 2,
+            failed: 0,
+            poisoned: 0,
+            chunksCopied: 4,
+            rowsCopied: 40,
+          }
+        : undefined
+    );
+
+    await scheduled(controller, env, context);
+
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        projectDataArchiveShardingEnabled: true,
+        projectDataArchiveShardingSkipped: false,
+        projectDataArchiveShardingSelected: 3,
+        projectDataArchiveShardingMigrated: 1,
+        projectDataArchiveShardingRefused: 2,
+        projectDataArchiveShardingFailed: 0,
+      })
     );
   });
 });
