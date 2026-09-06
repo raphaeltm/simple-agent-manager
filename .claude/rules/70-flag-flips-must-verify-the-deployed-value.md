@@ -17,9 +17,10 @@ stayed empty for a day while the root object sat at 102% of its storage ceiling.
 
 The deployed Worker carried `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED=false`. The GitHub
 `production` Environment held a variable of the same name, created 2026-09-04T03:47Z as an
-emergency brake, and `deploy-reusable.yml` passes every such variable through
-`wrangler_sync_env` into `sync-wrangler-config.ts`, whose `getOptionalProcessEnvVars` spreads any
-non-empty value **over** the checked-in `[vars]`. That is the designed override path and it worked
+emergency brake, and `deploy-reusable.yml` passes every such variable through the `env:` block of its
+"Sync Wrangler Config" steps (this repo's shorthand: `wrangler_sync_env`) into
+`sync-wrangler-config.ts`, whose `getOptionalProcessEnvVars` spreads any non-empty value **over**
+the checked-in `[vars]`. That is the designed override path and it worked
 exactly as designed. What did not exist was any signal: the deploy log did not mention the
 override, the PR's evidence was its own diff, and the one place the truth was visible — every
 five-minute `cron.completed` log said `projectDataArchiveShardingSkipReason: "disabled"` — was

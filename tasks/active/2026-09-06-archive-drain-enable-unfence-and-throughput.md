@@ -150,8 +150,10 @@ time or at PR time.
       (`reportActivity(..., 'prompting')`), scoped non-dry canary → readable `root`,
       `frozen/precopy_refused`; then `reportActivity(..., 'idle')` and the explicit-session canary
       migrates it (owner control).
-- [x] DO unit test: `refuses active sessions ...` now asserts the typed refusal (`resolves`), and the
-      comment-thread case proves no intent row was written.
+- [x] DO unit test: new `returns a typed pre-copy refusal before any write, and throws once an intent
+    exists` asserts the typed refusal (`resolves`) with no intent row written, the throwing wrapper's
+      unchanged contract, the owner control, and the throw once an intent exists; the pre-existing
+      `refuses active sessions ...` test is untouched.
 - [x] Verify the unit test goes red against the pre-fix coordinator (record in PR).
 
 ### 3. Problem 3 — bounded higher throughput
