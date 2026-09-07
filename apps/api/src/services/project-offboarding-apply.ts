@@ -11,6 +11,7 @@ import * as schema from '../db/schema';
 import { AppError, errors } from '../middleware/error';
 import type { AppDb } from '../middleware/project-auth';
 import { enumerateOffboardingResources } from './project-offboarding-preview-resources';
+import { selectTriggerExecutionPrincipal } from './trigger-execution-principal';
 
 const TASK_BLOCKED_REASON = 'member_removed_credentials_unavailable';
 const TRIGGER_BLOCKED_REASON = 'member_removed';
@@ -173,7 +174,9 @@ function stringDetail(details: Record<string, unknown>, key: string): string | n
 async function applyTriggerAction(input: {
   tx: OffboardingMutationDb;
   projectId: string;
+  memberUserId: string;
   actorUserId: string;
+  executionPrincipalUserId: string | null;
   nowIso: string;
   resource: CurrentResource;
   action: ProjectMemberOffboardingAction;
@@ -188,11 +191,24 @@ async function applyTriggerAction(input: {
     });
   }
   if (input.action === 'reattach_to_project') {
+    // The installed principal must be someone who REMAINS and is currently
+    // authorized. Using the actor unconditionally installed the departing member
+    // on self-offboarding, and the removal below then left the trigger executing
+    // as a removed member. Fail closed rather than install an unusable principal.
+    const executionPrincipalUserId = input.executionPrincipalUserId;
+    if (!executionPrincipalUserId || executionPrincipalUserId === input.memberUserId) {
+      throw conflict(
+        'unresolved_credential_attribution',
+        'No remaining project member is authorized to execute this trigger; choose break_and_flag or defer_removal'
+      );
+    }
     const rows = await input.tx
       .update(schema.triggers)
       .set({
-        executionUserId: input.actorUserId,
+        executionUserId: executionPrincipalUserId,
         executionUserAuthorizedAt: input.nowIso,
+        // Who approved the transfer stays the acting user, even when the
+        // principal itself had to fall back to another authorized member.
         executionUserAuthorizedBy: input.actorUserId,
         credentialBlockedReason: null,
         credentialBlockedAt: null,
@@ -551,6 +567,7 @@ async function applyResourceAction(input: {
   projectId: string;
   memberUserId: string;
   actorUserId: string;
+  executionPrincipalUserId: string | null;
   nowIso: string;
   resource: CurrentResource;
   action: ProjectMemberOffboardingAction;
@@ -660,6 +677,19 @@ export async function applyProjectMemberOffboarding(input: {
   assertAllLiveResourcesAddressed({ selectionsByKey, currentResources });
   assertSelectedActionsAreAvailable({ selectionsByKey, currentResources });
 
+  // Resolved once per apply from CURRENT membership. The actor wins when they
+  // remain and are still capable — that keeps ordinary offboarding unchanged and
+  // preserves the explicit-decision model. Self-offboarding, or an actor who has
+  // lost `task:write`, deterministically falls back to another authorized
+  // remaining member; `null` means keep-active is impossible and reattach fails
+  // closed instead of installing a principal that is about to be removed.
+  const executionPrincipalUserId =
+    selectTriggerExecutionPrincipal({
+      members,
+      departingUserId: input.memberUserId,
+      preferredUserId: input.actorUserId,
+    })?.userId ?? null;
+
   const resourceResults: ProjectMemberOffboardingResourceResult[] = [];
   const mutationDb: OffboardingMutationDb = input.db;
   for (const resource of currentResources) {
@@ -675,6 +705,7 @@ export async function applyProjectMemberOffboarding(input: {
       projectId: input.project.id,
       memberUserId: input.memberUserId,
       actorUserId: input.actorUserId,
+      executionPrincipalUserId,
       nowIso,
       resource,
       action: selection.action,
