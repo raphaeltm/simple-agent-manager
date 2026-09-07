@@ -60,6 +60,7 @@
     "quality:type-boundaries": "tsx scripts/quality/check-type-boundaries.ts",
     "quality:runtime-boundary-semantics": "tsx scripts/quality/check-runtime-boundary-semantics.ts",
     "quality:node-pool-boundary": "tsx scripts/quality/node-pool-boundary.ts",
+    "quality:node-pool-boundary:report": "tsx scripts/quality/node-pool-boundary.ts --report",
     "quality:direct-dependency-evidence": "tsx scripts/quality/check-direct-dependency-evidence.ts",
     "quality:govulncheck-diff": "tsx scripts/quality/check-go-vulnerability-diff.ts",
     "quality:gitleaks:current": "tsx scripts/quality/run-gitleaks.ts --mode=current-tree",

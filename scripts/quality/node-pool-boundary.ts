@@ -72,10 +72,16 @@ export function scanRepositoryNodePoolBoundary(repoRoot = findRepoRoot()): Bound
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  const reportOnly = process.argv.includes('--report');
   const violations = scanRepositoryNodePoolBoundary();
   if (violations.length > 0) {
-    console.error(formatBoundaryViolations(violations).join('\n'));
-    console.error(`\n${violations.length} node-pool boundary violation(s).`);
-    process.exit(1);
+    const stream = reportOnly ? console.log : console.error;
+    stream(formatBoundaryViolations(violations).join('\n'));
+    stream(`\n${violations.length} node-pool boundary violation(s).`);
+    // `--report` prints the current inventory of leaks without failing, for the
+    // migration owners. The default exit code stays honest: the boundary is not
+    // clean yet. Regressions are what CI blocks on, through the ratcheted count
+    // in apps/api/tests/unit/services/node-pool-legacy-boundary.test.ts.
+    if (!reportOnly) process.exit(1);
   }
 }
