@@ -239,3 +239,23 @@ recovery integration, native resource/effective-pool diagnostics, comprehensive
 compatibility/upgrade gates, documentation, final specialist reviews, and one
 coordinated staging sweep. Every original criterion remains required. The final
 deliverable is one green **open** PR; no merge is authorized by this request.
+
+### Recovery validation and review follow-up
+
+Request-persistence corrective commits are integrated at `eb89a8370`. API typecheck
+and 20 focused request-plan, retry, trigger-schema, dispatch-authority, and migration
+tests passed. The real Workers/D1 capacity-race suite also passed all six tests.
+These checkpoint checks do not replace final integrated acceptance.
+
+The allocation-authority and pool-reconciliation continuations stopped on provider
+usage limits. Their pushed application checkpoints were preserved, including
+meaningful autosaves. Replacement agents are recovering the remaining changes and
+addressing independent review findings on their own branches; failed workspaces
+remain untouched. Request authorization and form browser completion continue.
+
+The first executable boundary scanner is available at `93bfa4246` but remains
+unaccepted. Independent injected-fixture review found bypasses, metadata false
+positives, and incomplete allocation inventory evidence. A dedicated correction
+assignment owns those scanner defects. Its initial count of 76 findings is not a
+verified count of forbidden authority paths. Runtime, display, rollout, and final
+validation requirements remain unchanged.
