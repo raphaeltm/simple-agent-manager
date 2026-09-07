@@ -50,6 +50,10 @@ import {
 import { createNodeRecord, provisionNode } from '../../services/nodes';
 import { buildPlacementAuthoritySqlPredicate } from '../../services/placement-authority';
 import * as projectDataService from '../../services/project-data';
+import {
+  assertTrialProvisioningAuthority,
+  cleanupFreshProvisioningNode,
+} from '../../services/provisioning-authority';
 import { DISCOVERY_PROMPT } from '../../services/trial/discovery-prompt';
 import { startDiscoveryAgent } from '../../services/trial/trial-runner';
 import { readTrial, writeTrial } from '../../services/trial/trial-store';
@@ -126,6 +130,29 @@ async function resolveTrialVmAllocation(
   }
 
   return allocation;
+}
+
+async function failIfTrialNodeProvisioningTerminal(
+  rc: TrialOrchestratorContext,
+  nodeId: string
+): Promise<void> {
+  const node = await rc.env.DATABASE.prepare(
+    `SELECT status, error_message AS errorMessage
+       FROM nodes
+      WHERE id = ?
+      LIMIT 1`
+  )
+    .bind(nodeId)
+    .first<{ status: string; errorMessage: string | null }>();
+  if (!node) {
+    throw Object.assign(new Error('Trial node disappeared during provisioning'), { permanent: true });
+  }
+  if (node.status === 'error' || node.status === 'stopped' || node.status === 'deleted') {
+    throw Object.assign(
+      new Error(node.errorMessage || `Trial node provisioning ended with status ${node.status}`),
+      { permanent: true }
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -460,6 +487,18 @@ export async function handleNodeProvisioning(
   const userId = resolveAnonymousUserId(rc.env);
   const limits = getRuntimeLimits(rc.env);
   const allocation = await resolveTrialVmAllocation(state, rc);
+  const projectId = state.projectId;
+  if (!projectId) {
+    throw Object.assign(new Error('Trial project is missing'), { permanent: true });
+  }
+  const assertExternalMutationAuthority = async () => {
+    await assertTrialProvisioningAuthority(rc.env, {
+      trialId: state.trialId,
+      projectId,
+      userId,
+    });
+  };
+  await assertExternalMutationAuthority();
 
   const createdNode = await createNodeRecord(rc.env, {
     userId,
@@ -498,7 +537,11 @@ export async function handleNodeProvisioning(
   // first heartbeat backfill. Do NOT synchronously require status='running'
   // here; the next step (node_agent_ready) polls heartbeat freshness, which
   // correctly waits for the VM to boot + heartbeat regardless of provider.
-  await provisionNode(createdNode.id, rc.env, undefined, { authorityProjectId: state.projectId });
+  await provisionNode(createdNode.id, rc.env, undefined, {
+    authorityProjectId: projectId,
+    assertExternalMutationAuthority,
+  });
+  await failIfTrialNodeProvisioningTerminal(rc, createdNode.id);
 
   await rc.advanceToStep(state, 'node_agent_ready');
 }
@@ -645,7 +688,16 @@ export async function handleWorkspaceCreation(
     resolveWorkspaceAdmissionPolicy(rc.env)
   );
   if (!placementReserved) {
+    if (state.autoProvisionedNode) {
+      await cleanupFreshProvisioningNode(rc.env, {
+        nodeId: state.nodeId,
+        userId,
+        nodeRole: 'workspace',
+        reason: 'trial_workspace_final_admission_failed',
+      });
+    }
     state.nodeId = null;
+    state.autoProvisionedNode = false;
     await rc.ctx.storage.put('state', state);
     await rc.advanceToStep(state, 'node_selection');
     return;

@@ -54,15 +54,45 @@ vi.mock('../../../src/services/project-data', () => ({
   transitionAcpSession: vi.fn(async () => {}),
 }));
 
+const {
+  assertTrialProvisioningAuthorityMock,
+  cleanupFreshProvisioningNodeMock,
+  createWorkspaceOnNodeMock,
+  reserveWorkspacePlacementMock,
+  resolveUniqueWorkspaceDisplayNameMock,
+} = vi.hoisted(() => ({
+  assertTrialProvisioningAuthorityMock: vi.fn(async () => {}),
+  cleanupFreshProvisioningNodeMock: vi.fn(async () => 'placeholder-deleted'),
+  createWorkspaceOnNodeMock: vi.fn(async () => {}),
+  reserveWorkspacePlacementMock: vi.fn(async () => true),
+  resolveUniqueWorkspaceDisplayNameMock: vi.fn(async () => ({
+    displayName: 'trial-repo',
+    normalizedDisplayName: 'trial-repo',
+  })),
+}));
+
 vi.mock('../../../src/services/node-agent', () => ({
   createAgentSessionOnNode: vi.fn(async () => {}),
   startAgentSessionOnNode: vi.fn(async () => {}),
-  createWorkspaceOnNode: vi.fn(async () => {}),
+  createWorkspaceOnNode: createWorkspaceOnNodeMock,
 }));
 
 vi.mock('../../../src/services/mcp-token', () => ({
   generateMcpToken: vi.fn(() => 'mcp_tok_idempotent'),
   storeMcpToken: vi.fn(async () => {}),
+}));
+
+vi.mock('../../../src/services/provisioning-authority', () => ({
+  assertTrialProvisioningAuthority: assertTrialProvisioningAuthorityMock,
+  cleanupFreshProvisioningNode: cleanupFreshProvisioningNodeMock,
+}));
+
+vi.mock('../../../src/services/workspace-placement', () => ({
+  reserveWorkspacePlacement: reserveWorkspacePlacementMock,
+}));
+
+vi.mock('../../../src/services/workspace-names', () => ({
+  resolveUniqueWorkspaceDisplayName: resolveUniqueWorkspaceDisplayNameMock,
 }));
 
 // Mock services/nodes so handleNodeProvisioning doesn't reach real provider code.
@@ -94,28 +124,36 @@ vi.mock('../../../src/services/limits', () => ({
 
 import { drizzle } from 'drizzle-orm/d1';
 
-const { handleRunning, handleDiscoveryAgentStart, handleNodeProvisioning, handleNodeAgentReady } =
-  await import('../../../src/durable-objects/trial-orchestrator/steps');
+const {
+  handleRunning,
+  handleDiscoveryAgentStart,
+  handleNodeProvisioning,
+  handleNodeAgentReady,
+  handleWorkspaceCreation,
+} = await import('../../../src/durable-objects/trial-orchestrator/steps');
 
-function makeProjectDb() {
+function makeProjectDb(selectResults?: unknown[][]) {
+  const rows = selectResults ? [...selectResults] : null;
   return {
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
-          limit: vi.fn(async () => [
-            {
-              id: 'proj_trial',
-              defaultVmSize: 'medium',
-              defaultProvider: 'hetzner',
-              defaultLocation: 'fsn1',
-              defaultWorkspaceProfile: 'lightweight',
-              defaultDevcontainerConfigName: null,
-              defaultAgentType: null,
-            },
-          ]),
+          limit: vi.fn(async () => rows?.shift() ?? [projectRow()]),
         }),
       }),
     }),
+  };
+}
+
+function projectRow() {
+  return {
+    id: 'proj_trial',
+    defaultVmSize: 'medium',
+    defaultProvider: 'hetzner',
+    defaultLocation: 'fsn1',
+    defaultWorkspaceProfile: 'lightweight',
+    defaultDevcontainerConfigName: null,
+    defaultAgentType: null,
   };
 }
 
@@ -231,6 +269,14 @@ describe('handleNodeProvisioning', () => {
     vi.mocked(drizzle).mockReturnValue(makeProjectDb() as any);
     placementProjectDefaultsFromRowMock.mockImplementation((project) => project);
     resolveCanonicalVmAllocationPlanMock.mockResolvedValue(trialAllocation());
+    assertTrialProvisioningAuthorityMock.mockResolvedValue(undefined);
+    cleanupFreshProvisioningNodeMock.mockResolvedValue('placeholder-deleted');
+    reserveWorkspacePlacementMock.mockResolvedValue(true);
+    resolveUniqueWorkspaceDisplayNameMock.mockResolvedValue({
+      displayName: 'trial-repo',
+      normalizedDisplayName: 'trial-repo',
+    });
+    createWorkspaceOnNodeMock.mockResolvedValue(undefined);
     createNodeRecordMock.mockResolvedValue({ id: 'node_new_123' });
     provisionNodeMock.mockResolvedValue(undefined);
   });
@@ -245,7 +291,10 @@ describe('handleNodeProvisioning', () => {
   it('advances to node_agent_ready even when provisionNode leaves status=creating', async () => {
     const ctx = makeCtx();
     const advanced: string[] = [];
-    const rc = makeRc(ctx, advanced);
+    const rc = makeRc(ctx, advanced) as Parameters<typeof handleNodeProvisioning>[1] & {
+      _dbFirst: ReturnType<typeof vi.fn>;
+    };
+    rc._dbFirst.mockResolvedValue({ status: 'creating', errorMessage: null });
     const state = makeState({
       currentStep: 'node_provisioning',
       projectId: 'proj_trial',
@@ -266,12 +315,114 @@ describe('handleNodeProvisioning', () => {
         requiredCredentialSource: 'platform',
       })
     );
-    expect(provisionNodeMock).toHaveBeenCalledWith('node_new_123', expect.anything(), undefined, {
-      authorityProjectId: 'proj_trial',
+    expect(provisionNodeMock).toHaveBeenCalledWith(
+      'node_new_123',
+      expect.anything(),
+      undefined,
+      expect.objectContaining({
+        authorityProjectId: 'proj_trial',
+        assertExternalMutationAuthority: expect.any(Function),
+      })
+    );
+    const options = provisionNodeMock.mock.calls[0]![3] as {
+      assertExternalMutationAuthority: () => Promise<void>;
+    };
+    await options.assertExternalMutationAuthority();
+    expect(assertTrialProvisioningAuthorityMock).toHaveBeenCalledWith(expect.anything(), {
+      trialId: 'trial_steps_test',
+      projectId: 'proj_trial',
+      userId: 'system_anonymous_trials',
     });
     expect(state.nodeId).toBe('node_new_123');
     expect(state.autoProvisionedNode).toBe(true);
     expect(advanced).toEqual(['node_agent_ready']);
+  });
+
+  it('does not advance when provisioning leaves a trial node in a terminal error state', async () => {
+    const ctx = makeCtx();
+    const advanced: string[] = [];
+    const rc = makeRc(ctx, advanced) as Parameters<typeof handleNodeProvisioning>[1] & {
+      _dbFirst: ReturnType<typeof vi.fn>;
+    };
+    rc._dbFirst.mockResolvedValue({
+      status: 'error',
+      errorMessage: 'provider cleanup failed after VM create',
+    });
+    const state = makeState({
+      currentStep: 'node_provisioning',
+      projectId: 'proj_trial',
+      nodeId: null,
+      autoProvisionedNode: false,
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toThrow(
+      'provider cleanup failed after VM create'
+    );
+
+    expect(advanced).toEqual([]);
+  });
+});
+
+describe('handleWorkspaceCreation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(drizzle).mockReturnValue(
+      makeProjectDb([
+        [projectRow()],
+        [
+          {
+            id: 'node_trial_auto',
+            capacityPoolId: null,
+            capacityPoolScope: null,
+            capacityPoolRevision: null,
+            capacitySourceId: null,
+            capacitySourceGeneration: null,
+            capacitySourceExternalRef: null,
+            capacityPoolCandidateId: null,
+            placementCredentialSource: null,
+            placementCredentialReference: null,
+            placementCredentialVersion: null,
+            capacityPoolProjectId: null,
+            workloadRole: null,
+          },
+        ],
+      ]) as any
+    );
+    placementProjectDefaultsFromRowMock.mockImplementation((project) => project);
+    resolveCanonicalVmAllocationPlanMock.mockResolvedValue(trialAllocation());
+    cleanupFreshProvisioningNodeMock.mockResolvedValue('placeholder-deleted');
+    reserveWorkspacePlacementMock.mockResolvedValue(false);
+    resolveUniqueWorkspaceDisplayNameMock.mockResolvedValue({
+      displayName: 'trial-repo',
+      normalizedDisplayName: 'trial-repo',
+    });
+  });
+
+  it('cleans up an auto-provisioned trial node when final admission fails', async () => {
+    const ctx = makeCtx();
+    const advanced: string[] = [];
+    const rc = makeRc(ctx, advanced);
+    const state = makeState({
+      currentStep: 'workspace_creation',
+      projectId: 'proj_trial',
+      nodeId: 'node_trial_auto',
+      autoProvisionedNode: true,
+      workspaceId: null,
+    });
+
+    await handleWorkspaceCreation(state, rc);
+
+    expect(reserveWorkspacePlacementMock).toHaveBeenCalled();
+    expect(cleanupFreshProvisioningNodeMock).toHaveBeenCalledWith(rc.env, {
+      nodeId: 'node_trial_auto',
+      userId: 'system_anonymous_trials',
+      nodeRole: 'workspace',
+      reason: 'trial_workspace_final_admission_failed',
+    });
+    expect(createWorkspaceOnNodeMock).not.toHaveBeenCalled();
+    expect(state.nodeId).toBeNull();
+    expect(state.autoProvisionedNode).toBe(false);
+    expect(advanced).toEqual(['node_selection']);
   });
 });
 

@@ -108,10 +108,15 @@ describe('workspace dispatch race prevention', () => {
 
   it('UI workspace creation path sets dispatched_at after successful VM agent workspace creation', () => {
     const scheduleSection = sectionAfter(workspaceHelpersSource, 'export async function scheduleWorkspaceCreateOnNode');
-    const dispatchIndex = scheduleSection.indexOf('await createWorkspaceOnNode(nodeId, env, userId');
-    const markerIndex = scheduleSection.indexOf('UPDATE workspaces SET dispatched_at = ? WHERE id = ?');
+    const dispatchIndex = scheduleSection.indexOf('await createWorkspaceOnNode(');
+    const markerIndex = scheduleSection.indexOf('SET dispatched_at = ?, updated_at = ?');
 
     expect(dispatchIndex).toBeGreaterThanOrEqual(0);
     expect(markerIndex).toBeGreaterThan(dispatchIndex);
+    expect(scheduleSection).toContain('AND user_id = ?');
+    expect(scheduleSection).toContain('AND node_id = ?');
+    expect(scheduleSection).toContain("AND status = 'creating'");
+    expect(scheduleSection).toContain('AND dispatched_at IS NULL');
+    expect(scheduleSection).toContain('AND runtime_deletion_confirmed_at IS NULL');
   });
 });

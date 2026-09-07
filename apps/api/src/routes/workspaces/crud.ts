@@ -46,6 +46,10 @@ import {
   provisionNode,
 } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
+import {
+  assertDirectWorkspaceProvisioningAuthority,
+  cleanupFreshProvisioningNode,
+} from '../../services/provisioning-authority';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
 import { cleanupWorkspaceForDeletion } from '../../services/workspace-cleanup';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
@@ -706,6 +710,28 @@ crudRoutes.post(
       });
     }
 
+    const assertDirectWorkspacePlaceholderAuthority = async () => {
+      await assertDirectWorkspaceProvisioningAuthority(c.env, {
+        workspaceId,
+        taskId: chatTaskId,
+        userId,
+        projectId: linkedProject.id,
+        expectedNodeId: null,
+        chatSessionId,
+      });
+    };
+
+    const assertDirectWorkspaceDispatchAuthority = async () => {
+      await assertDirectWorkspaceProvisioningAuthority(c.env, {
+        workspaceId,
+        taskId: chatTaskId,
+        userId,
+        projectId: linkedProject.id,
+        expectedNodeId: targetNodeId,
+        chatSessionId,
+      });
+    };
+
     const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
     const reusedExistingNode = !mustProvisionNode;
     const workspaceCountOnNodeBefore = nodeWorkspaceCountVal;
@@ -750,6 +776,42 @@ crudRoutes.post(
     c.executionCtx.waitUntil(
       (async () => {
         const innerDb = drizzle(c.env.DATABASE, { schema });
+        const markDirectWorkspaceProvisioningFailed = async (message: string) => {
+          const failedAt = new Date().toISOString();
+          const workspaceFailed = await c.env.DATABASE.prepare(
+            `UPDATE workspaces
+                SET status = 'error',
+                    error_message = ?,
+                    updated_at = ?
+              WHERE id = ?
+                AND user_id = ?
+                AND project_id = ?
+                AND node_id IS NULL
+                AND chat_session_id IS ?
+                AND status = 'creating'
+                AND runtime_deletion_confirmed_at IS NULL`
+          )
+            .bind(message, failedAt, workspaceId, userId, linkedProject.id, chatSessionId)
+            .run();
+          if ((workspaceFailed.meta?.changes ?? 0) !== 1) return;
+          await c.env.DATABASE.prepare(
+            `UPDATE tasks
+                SET status = 'failed',
+                    execution_step = 'workspace_creation',
+                    error_message = ?,
+                    completed_at = ?,
+                    updated_at = ?
+              WHERE id = ?
+                AND workspace_id = ?
+                AND user_id = ?
+                AND project_id = ?
+                AND status IN ('queued', 'in_progress')
+                AND task_mode = 'conversation'
+                AND triggered_by = 'user'`
+          )
+            .bind(message, failedAt, failedAt, chatTaskId, workspaceId, userId, linkedProject.id)
+            .run();
+        };
         if (mustProvisionNode) {
           await provisionNode(
             targetNodeId,
@@ -762,7 +824,10 @@ crudRoutes.post(
                   taskMode: 'conversation',
                 }
               : undefined,
-            { authorityProjectId: linkedProject.id }
+            {
+              authorityProjectId: linkedProject.id,
+              assertExternalMutationAuthority: assertDirectWorkspacePlaceholderAuthority,
+            }
           );
 
           const nodeRows = await innerDb
@@ -776,14 +841,15 @@ crudRoutes.post(
 
           const provisionedNode = nodeRows[0];
           if (!provisionedNode || provisionedNode.status !== 'running') {
-            await innerDb
-              .update(schema.workspaces)
-              .set({
-                status: 'error',
-                errorMessage: provisionedNode?.errorMessage || 'Node provisioning failed',
-                updatedAt: new Date().toISOString(),
-              })
-              .where(eq(schema.workspaces.id, workspaceId));
+            await cleanupFreshProvisioningNode(c.env, {
+              nodeId: targetNodeId,
+              userId,
+              nodeRole: 'workspace',
+              reason: 'direct_workspace_node_not_running',
+            });
+            await markDirectWorkspaceProvisioningFailed(
+              provisionedNode?.errorMessage || 'Node provisioning failed'
+            );
             return;
           }
 
@@ -813,14 +879,15 @@ crudRoutes.post(
             admissionPolicy
           );
           if (!placementAttached) {
-            await innerDb
-              .update(schema.workspaces)
-              .set({
-                status: 'error',
-                errorMessage: 'Node lost capacity or placement authority before workspace creation',
-                updatedAt: new Date().toISOString(),
-              })
-              .where(eq(schema.workspaces.id, workspaceId));
+            await cleanupFreshProvisioningNode(c.env, {
+              nodeId: targetNodeId,
+              userId,
+              nodeRole: 'workspace',
+              reason: 'direct_workspace_final_admission_failed',
+            });
+            await markDirectWorkspaceProvisioningFailed(
+              'Node lost capacity or placement authority before workspace creation'
+            );
             return;
           }
 
@@ -861,7 +928,8 @@ crudRoutes.post(
           branch,
           linkedProject,
           auth.user.name,
-          auth.user.email
+          auth.user.email,
+          { beforeExternalMutation: assertDirectWorkspaceDispatchAuthority }
         );
       })()
     );

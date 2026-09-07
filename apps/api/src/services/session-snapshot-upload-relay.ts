@@ -15,6 +15,10 @@ import { verifyCallbackToken } from './jwt';
 import { getRuntimeLimits } from './limits';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
+import {
+  assertRelayProvisioningAuthority,
+  cleanupFreshProvisioningNode,
+} from './provisioning-authority';
 
 const RELAY_NODE_NAME_PREFIX = 'Session snapshot relay';
 
@@ -399,6 +403,16 @@ export async function ensureSessionSnapshotUploadRelay(
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
     capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
   });
+  const assertExternalMutationAuthority = async () => {
+    await assertRelayProvisioningAuthority(env, {
+      userId: input.userId,
+      projectId: input.projectId,
+      sourceNode: source,
+      requiredAgentVersion: requiredVersion,
+      relayNodeId: created.id,
+      relayName: name,
+    });
+  };
 
   log.warn('session_snapshot.relay_provision_started', {
     userId: input.userId,
@@ -406,12 +420,24 @@ export async function ensureSessionSnapshotUploadRelay(
     relayNodeId: created.id,
     requiredVersion,
   });
-  await provisionNode(created.id, env, undefined, { authorityProjectId: input.projectId });
+  await provisionNode(created.id, env, undefined, {
+    authorityProjectId: input.projectId,
+    assertExternalMutationAuthority,
+  });
 
   const provisioned = await env.DATABASE.prepare(`SELECT status FROM nodes WHERE id = ? LIMIT 1`)
     .bind(created.id)
     .first<{ status: string }>();
-  if (provisioned?.status !== 'running') return;
+  if (provisioned?.status !== 'running') {
+    await cleanupFreshProvisioningNode(env, {
+      nodeId: created.id,
+      userId: input.userId,
+      nodeRole: 'workspace',
+      reason: 'session_snapshot_relay_not_running',
+    });
+    return;
+  }
+  await assertExternalMutationAuthority();
 
   const lifecycleId = env.NODE_LIFECYCLE.idFromName(created.id);
   const lifecycle = env.NODE_LIFECYCLE.get(lifecycleId) as DurableObjectStub<

@@ -122,6 +122,16 @@ async function makeReadyNode(
       : size === 'small'
         ? { vcpu: 2, memoryMb: 4096, diskGb: 40 }
         : { vcpu: 4, memoryMb: 8192, diskGb: 80 };
+  const providerInstanceVcpuCount =
+    'providerInstanceVcpuCount' in overrides
+      ? overrides.providerInstanceVcpuCount
+      : capacity.vcpu;
+  const providerInstanceMemoryMb =
+    'providerInstanceMemoryMb' in overrides
+      ? overrides.providerInstanceMemoryMb
+      : capacity.memoryMb;
+  const providerInstanceDiskGb =
+    'providerInstanceDiskGb' in overrides ? overrides.providerInstanceDiskGb : capacity.diskGb;
   await seedNode(nodeId, userId, {
     vmSize: size,
     vmLocation: 'nbg1',
@@ -136,20 +146,31 @@ async function makeReadyNode(
          runtime = 'vm',
          node_role = 'workspace',
          last_metrics = ?,
+         provider_instance_id = ?,
          provider_instance_type = ?,
          provider_instance_vcpu_count = ?,
          provider_instance_memory_mb = ?,
-         provider_instance_disk_gb = ?
+         provider_instance_disk_gb = ?,
+         observed_provider_instance_type = ?,
+         observed_provider_instance_vcpu_count = ?,
+         observed_provider_instance_memory_mb = ?,
+         observed_provider_instance_disk_gb = ?,
+         observed_hardware_source = 'observed'
      WHERE id = ?`
   )
     .bind(
       now,
       overrides.lastMetrics ??
         JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+      `server-${nodeId}`,
       `test-${size}`,
-      overrides.providerInstanceVcpuCount ?? capacity.vcpu,
-      overrides.providerInstanceMemoryMb ?? capacity.memoryMb,
-      overrides.providerInstanceDiskGb ?? capacity.diskGb,
+      providerInstanceVcpuCount,
+      providerInstanceMemoryMb,
+      providerInstanceDiskGb,
+      `test-${size}`,
+      providerInstanceVcpuCount,
+      providerInstanceMemoryMb,
+      providerInstanceDiskGb,
       nodeId
     )
     .run();
@@ -431,7 +452,7 @@ describe('workspace resource capacity final reservation CAS', () => {
     }
   });
 
-  it('fails closed for malformed active snapshots but preserves empty unknown-capacity placement', async () => {
+  it('fails closed for malformed active snapshots and unknown observed hardware', async () => {
     const occupiedNode = 'node-wrc-invalid-active';
     const unknownNode = 'node-wrc-empty-unknown';
     await makeReadyNode(occupiedNode);
@@ -457,12 +478,12 @@ describe('workspace resource capacity final reservation CAS', () => {
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
-        placement('workspace-wrc-empty-unknown-allowed', unknownNode, {
+        placement('workspace-wrc-empty-unknown-denied', unknownNode, {
           resolvedReservation: reservation({ memoryMb: 4096, diskMb: 40960 }),
         }),
         admissionPolicy()
       )
-    ).resolves.toBe(true);
+    ).resolves.toBe(false);
   });
 });
 

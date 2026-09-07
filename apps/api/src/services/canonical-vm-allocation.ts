@@ -96,6 +96,7 @@ export function placementProjectDefaultsFromRow(project: {
   defaultWorkspaceProfile?: string | null;
   defaultDevcontainerConfigName?: string | null;
   defaultAgentType?: string | null;
+  resourceRequirementsJson?: string | null;
 }): PlacementProjectDefaults {
   return {
     id: project.id,
@@ -105,6 +106,7 @@ export function placementProjectDefaultsFromRow(project: {
     defaultWorkspaceProfile: project.defaultWorkspaceProfile ?? null,
     defaultDevcontainerConfigName: project.defaultDevcontainerConfigName ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
+    resourceRequirementsJson: project.resourceRequirementsJson ?? null,
   };
 }
 

@@ -13,6 +13,8 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 const mocks = vi.hoisted(() => ({
+  assertDeploymentProvisioningAuthority: vi.fn(),
+  cleanupFreshProvisioningNode: vi.fn(),
   createNodeRecord: vi.fn(),
   placementProjectDefaultsFromRow: vi.fn(),
   provisionNode: vi.fn(),
@@ -27,6 +29,11 @@ vi.mock('../../src/services/canonical-vm-allocation', () => ({
 vi.mock('../../src/services/nodes', () => ({
   createNodeRecord: mocks.createNodeRecord,
   provisionNode: mocks.provisionNode,
+}));
+
+vi.mock('../../src/services/provisioning-authority', () => ({
+  assertDeploymentProvisioningAuthority: mocks.assertDeploymentProvisioningAuthority,
+  cleanupFreshProvisioningNode: mocks.cleanupFreshProvisioningNode,
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -185,6 +192,9 @@ function createRawMockEnv(resolver?: RawResolver, overrides: Record<string, unkn
   const defaultResolver: RawResolver = (_sql, _binds, method) => {
     if (method === 'all') return { results: [] };
     if (method === 'run') return { meta: { changes: 1 } };
+    if (_sql.includes('SELECT status, error_message AS errorMessage')) {
+      return { status: 'running', errorMessage: null };
+    }
     return null;
   };
 
@@ -225,6 +235,8 @@ describe('provisionDeploymentNode', () => {
     vi.clearAllMocks();
     mocks.placementProjectDefaultsFromRow.mockImplementation((project) => project);
     mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue(canonicalAllocation());
+    mocks.assertDeploymentProvisioningAuthority.mockResolvedValue(undefined);
+    mocks.cleanupFreshProvisioningNode.mockResolvedValue('placeholder-deleted');
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult());
     vi.mocked(provisionNode).mockResolvedValue();
   });
@@ -266,9 +278,28 @@ describe('provisionDeploymentNode', () => {
       'node-deploy-1',
       env,
       undefined,
-      { rethrowProviderError: true, authorityProjectId: 'proj-1' },
+      expect.objectContaining({
+        rethrowProviderError: true,
+        authorityProjectId: 'proj-1',
+        assertExternalMutationAuthority: expect.any(Function),
+      }),
       { environmentId: 'env-12345678-abcd', projectId: 'proj-1' }
     );
+    const options = vi.mocked(provisionNode).mock.calls[0]![3] as {
+      assertExternalMutationAuthority: () => Promise<void>;
+    };
+    await options.assertExternalMutationAuthority();
+    expect(mocks.assertDeploymentProvisioningAuthority).toHaveBeenCalledWith(env, {
+      environmentId: 'env-12345678-abcd',
+      projectId: 'proj-1',
+      userId: 'user-1',
+      nodeId: 'node-deploy-1',
+      provider: 'hetzner',
+      location: 'fsn1',
+      vmSize: 'small',
+      nodeMode: 'shared',
+      requiresVolumes: false,
+    });
   });
 
   it('links environment to a fresh node with authority-aware raw SQL', async () => {
@@ -473,6 +504,12 @@ describe('provisionDeploymentNode', () => {
     expect(result).not.toBeNull();
     await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
     expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', null);
+    expect(mocks.cleanupFreshProvisioningNode).toHaveBeenCalledWith(env, {
+      nodeId: 'node-deploy-err',
+      userId: 'user-1',
+      nodeRole: 'deployment',
+      reason: 'deployment_provisioning_failed',
+    });
   });
 
   it('rolls back only the nodeId written by this provisioning attempt', async () => {
@@ -488,6 +525,12 @@ describe('provisionDeploymentNode', () => {
     await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
     expect(mockDb._tracker.updateSetValues).toHaveLength(1);
     expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', null);
+    expect(mocks.cleanupFreshProvisioningNode).toHaveBeenCalledWith(env, {
+      nodeId: 'node-rollback-1',
+      userId: 'user-1',
+      nodeRole: 'deployment',
+      reason: 'deployment_provisioning_failed',
+    });
 
     const rollbackWhere = mockDb._tracker.updateWhereArgs[0]![0] as {
       op: string;
@@ -516,6 +559,39 @@ describe('provisionDeploymentNode', () => {
     expect(result).not.toBeNull();
     await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
     expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', null);
+    expect(mocks.cleanupFreshProvisioningNode).toHaveBeenCalledWith(env, {
+      nodeId: 'node-rollback-fail',
+      userId: 'user-1',
+      nodeRole: 'deployment',
+      reason: 'deployment_provisioning_failed',
+    });
+  });
+
+  it('rolls back and cleans up when provider provisioning returns an errored fresh node', async () => {
+    const mockDb = createMockDb();
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-terminal-error' }));
+    vi.mocked(provisionNode).mockResolvedValue();
+    const { env } = createRawMockEnv((sql, _binds, method) => {
+      if (method === 'all') return { results: [] };
+      if (method === 'run') return { meta: { changes: 1 } };
+      if (method === 'first' && sql.includes('SELECT status, error_message AS errorMessage')) {
+        return { status: 'error', errorMessage: 'DNS setup failed after VM create' };
+      }
+      return null;
+    });
+
+    const result = await provisionDeploymentNode('env-terminal-error', 'proj-1', 'user-1', env);
+
+    expect(result).not.toBeNull();
+    await expect(result!.provisioningPromise).rejects.toThrow('DNS setup failed after VM create');
+    expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', null);
+    expect(mocks.cleanupFreshProvisioningNode).toHaveBeenCalledWith(env, {
+      nodeId: 'node-terminal-error',
+      userId: 'user-1',
+      nodeRole: 'deployment',
+      reason: 'deployment_provisioning_failed',
+    });
   });
 });
 
@@ -524,6 +600,8 @@ describe('deployment node skips DNS record creation', () => {
     vi.clearAllMocks();
     mocks.placementProjectDefaultsFromRow.mockImplementation((project) => project);
     mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue(canonicalAllocation());
+    mocks.assertDeploymentProvisioningAuthority.mockResolvedValue(undefined);
+    mocks.cleanupFreshProvisioningNode.mockResolvedValue('placeholder-deleted');
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult());
     vi.mocked(provisionNode).mockResolvedValue();
   });

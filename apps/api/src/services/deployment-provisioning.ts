@@ -29,6 +29,10 @@ import {
 } from './canonical-vm-allocation';
 import { createNodeRecord, provisionNode } from './nodes';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
+import {
+  assertDeploymentProvisioningAuthority,
+  cleanupFreshProvisioningNode,
+} from './provisioning-authority';
 
 type VMArchitecture = NonNullable<NativeVMConfig['architecture']>;
 
@@ -283,6 +287,66 @@ async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promis
   return (result.meta?.changes ?? 0) > 0;
 }
 
+async function rollbackEnvironmentNodeLink(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  envId: string,
+  nodeId: string
+): Promise<void> {
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({ nodeId: null, updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, envId),
+        eq(schema.deploymentEnvironments.nodeId, nodeId)
+      )
+    );
+}
+
+async function assertFreshDeploymentProvisioningAuthority(input: {
+  env: Env;
+  envId: string;
+  projectId: string;
+  userId: string;
+  nodeId: string;
+  placement: DeploymentPlacement;
+  nodeMode: 'shared' | 'exclusive';
+  requiresVolumes: boolean;
+}): Promise<void> {
+  await assertDeploymentProvisioningAuthority(input.env, {
+    environmentId: input.envId,
+    projectId: input.projectId,
+    userId: input.userId,
+    nodeId: input.nodeId,
+    provider: input.placement.provider,
+    location: input.placement.location,
+    vmSize: input.placement.vmSize,
+    nodeMode: input.nodeMode,
+    requiresVolumes: input.requiresVolumes,
+  });
+}
+
+async function failIfFreshDeploymentNodeNotProvisionable(
+  env: Env,
+  nodeId: string,
+  userId: string
+): Promise<void> {
+  const row = await env.DATABASE.prepare(
+    `SELECT status, error_message AS errorMessage
+       FROM nodes
+      WHERE id = ? AND user_id = ?
+      LIMIT 1`
+  )
+    .bind(nodeId, userId)
+    .first<{ status: string; errorMessage: string | null }>();
+  if (!row) {
+    throw new Error('Deployment node disappeared during provisioning');
+  }
+  if (row.status === 'error' || row.status === 'deleted' || row.status === 'stopped') {
+    throw new Error(row.errorMessage || `Deployment node provisioning ended with status ${row.status}`);
+  }
+}
+
 export async function resolveDeploymentPlacement(
   userId: string,
   env: Env,
@@ -502,16 +566,37 @@ export async function provisionDeploymentNode(
   });
 
   // Return the provisioning promise for the caller to pass to waitUntil()
-  const provisioningPromise = provisionNode(
-    node.id,
-    env,
-    undefined,
-    { rethrowProviderError: true, authorityProjectId: projectId },
-    {
-      environmentId: envId,
+  const assertExternalMutationAuthority = async () => {
+    await assertFreshDeploymentProvisioningAuthority({
+      env,
+      envId,
       projectId,
-    }
-  ).catch(async (err) => {
+      userId,
+      nodeId: node.id,
+      placement,
+      nodeMode,
+      requiresVolumes,
+    });
+  };
+
+  const provisioningPromise = (async () => {
+    await provisionNode(
+      node.id,
+      env,
+      undefined,
+      {
+        rethrowProviderError: true,
+        authorityProjectId: projectId,
+        assertExternalMutationAuthority,
+      },
+      {
+        environmentId: envId,
+        projectId,
+      }
+    );
+    await assertExternalMutationAuthority();
+    await failIfFreshDeploymentNodeNotProvisionable(env, node.id, userId);
+  })().catch(async (err) => {
     log.error('deployment_provisioning.provision_failed', {
       nodeId: node.id,
       envId,
@@ -523,15 +608,7 @@ export async function provisionDeploymentNode(
     // Guard on nodeId = our node to avoid stomping a concurrent successful
     // re-provisioning that already wrote a different nodeId.
     try {
-      await db
-        .update(schema.deploymentEnvironments)
-        .set({ nodeId: null, updatedAt: new Date().toISOString() })
-        .where(
-          and(
-            eq(schema.deploymentEnvironments.id, envId),
-            eq(schema.deploymentEnvironments.nodeId, node.id)
-          )
-        );
+      await rollbackEnvironmentNodeLink(db, envId, node.id);
       log.info('deployment_provisioning.nodeId_rolled_back', { envId, nodeId: node.id });
     } catch (rollbackErr) {
       log.error('deployment_provisioning.nodeId_rollback_failed', {
@@ -540,6 +617,12 @@ export async function provisionDeploymentNode(
         ...serializeError(rollbackErr),
       });
     }
+    await cleanupFreshProvisioningNode(env, {
+      nodeId: node.id,
+      userId,
+      nodeRole: 'deployment',
+      reason: 'deployment_provisioning_failed',
+    });
     throw err;
   });
 

@@ -10,7 +10,9 @@ import {
 } from '../../../src/services/session-snapshot-upload-relay';
 
 const mocks = vi.hoisted(() => ({
+  assertRelayProvisioningAuthority: vi.fn(),
   checkQuotaForUser: vi.fn(),
+  cleanupFreshProvisioningNode: vi.fn(),
   createNodeRecord: vi.fn(),
   markIdle: vi.fn(),
   placementProjectDefaultsFromRow: vi.fn(),
@@ -29,6 +31,10 @@ vi.mock('../../../src/services/compute-quotas', () => ({
 vi.mock('../../../src/services/nodes', () => ({
   createNodeRecord: mocks.createNodeRecord,
   provisionNode: mocks.provisionNode,
+}));
+vi.mock('../../../src/services/provisioning-authority', () => ({
+  assertRelayProvisioningAuthority: mocks.assertRelayProvisioningAuthority,
+  cleanupFreshProvisioningNode: mocks.cleanupFreshProvisioningNode,
 }));
 vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: mocks.verifyCallbackToken,
@@ -118,6 +124,8 @@ describe('session snapshot upload relay', () => {
     mocks.placementProjectDefaultsFromRow.mockImplementation((project) => project);
     mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue(canonicalAllocation());
     mocks.checkQuotaForUser.mockResolvedValue({ allowed: true });
+    mocks.assertRelayProvisioningAuthority.mockResolvedValue(undefined);
+    mocks.cleanupFreshProvisioningNode.mockResolvedValue('placeholder-deleted');
     mocks.createNodeRecord.mockResolvedValue({ id: 'relay-node' });
     mocks.provisionNode.mockResolvedValue(undefined);
     mocks.markIdle.mockResolvedValue(undefined);
@@ -321,9 +329,53 @@ describe('session snapshot upload relay', () => {
         providerInstanceType: 'cx22',
       })
     );
-    expect(mocks.provisionNode).toHaveBeenCalledWith('relay-node', env, undefined, {
-      authorityProjectId: 'project-1',
+    expect(mocks.provisionNode).toHaveBeenCalledWith(
+      'relay-node',
+      env,
+      undefined,
+      expect.objectContaining({
+        authorityProjectId: 'project-1',
+        assertExternalMutationAuthority: expect.any(Function),
+      })
+    );
+    const options = mocks.provisionNode.mock.calls[0]![3] as {
+      assertExternalMutationAuthority: () => Promise<void>;
+    };
+    await options.assertExternalMutationAuthority();
+    expect(mocks.assertRelayProvisioningAuthority).toHaveBeenCalledWith(env, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      sourceNode: sourceNode(),
+      requiredAgentVersion: 'abcdef1234567890',
+      relayNodeId: 'relay-node',
+      relayName: 'Session snapshot relay abcdef123456',
     });
     expect(mocks.markIdle).toHaveBeenCalledWith('relay-node', 'user-1', 7_200_000);
+  });
+
+  it('cleans up a replacement relay when provisioning does not leave it running', async () => {
+    const env = makeEnv((sql) => {
+      if (sql.includes('agent_version = ?')) return null;
+      if (sql.includes('FROM projects') && sql.includes('default_vm_size'))
+        return projectDefaultsRow();
+      if (sql.includes('name = ?')) return null;
+      if (sql.includes('agent_version, provider_instance_type')) return sourceNode();
+      if (sql.includes('SELECT status FROM nodes')) return { status: 'error' };
+      throw new Error(`unexpected SQL: ${sql}`);
+    });
+
+    await ensureSessionSnapshotUploadRelay(env, {
+      userId: 'user-1',
+      sourceNodeId: 'legacy-node',
+      projectId: 'project-1',
+    });
+
+    expect(mocks.cleanupFreshProvisioningNode).toHaveBeenCalledWith(env, {
+      nodeId: 'relay-node',
+      userId: 'user-1',
+      nodeRole: 'workspace',
+      reason: 'session_snapshot_relay_not_running',
+    });
+    expect(mocks.markIdle).not.toHaveBeenCalled();
   });
 });
