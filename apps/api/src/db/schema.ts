@@ -2562,11 +2562,6 @@ export const projectEventSourceOutbox = sqliteTable(
       table.expiresAt,
       table.id
     ),
-    activeAttemptsIdx: index('idx_project_event_source_outbox_active_attempts').on(
-      table.state,
-      table.attemptCount,
-      table.id
-    ),
     terminalRetentionIdx: index('idx_project_event_source_outbox_terminal_retention').on(
       table.state,
       table.terminalizedAt,
