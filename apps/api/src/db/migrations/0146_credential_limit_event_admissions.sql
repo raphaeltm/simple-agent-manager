@@ -12,6 +12,9 @@ ALTER TABLE agent_sessions
 CREATE INDEX idx_credential_limit_windows_project_updated
   ON credential_limit_windows(project_id, updated_at, credential_reference, window_type);
 
+CREATE INDEX idx_credential_limit_windows_updated_global
+  ON credential_limit_windows(updated_at, project_id, credential_reference, window_type);
+
 CREATE INDEX idx_credential_limit_windows_project_delivery
   ON credential_limit_windows(project_id, last_event_delivery_key)
   WHERE last_event_delivery_key IS NOT NULL;

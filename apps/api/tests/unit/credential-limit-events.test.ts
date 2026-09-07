@@ -21,6 +21,7 @@ import {
   parseOpenAIDurationMs,
   recordCredentialLimitObservation,
 } from '../../src/services/credential-limit-events';
+import { purgeExpiredCredentialLimitWindows } from '../../src/services/credential-limit-events/admissions';
 import * as jwtService from '../../src/services/jwt';
 import * as projectDataService from '../../src/services/project-data';
 import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
@@ -50,6 +51,7 @@ type TestEnv = {
   CREDENTIAL_LIMIT_WARNING_PERCENT?: string;
   CREDENTIAL_LIMIT_CRITICAL_PERCENT?: string;
   CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT?: string;
+  CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS?: string;
   CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS?: string;
   CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS?: string;
   CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS?: string;
@@ -273,6 +275,50 @@ function failFirstAdmissionResultPersistence(database: D1Database): D1Database {
   } as D1Database;
 }
 
+function pauseFirstCredentialWindowUpdate(database: D1Database): {
+  database: D1Database;
+  waitUntilPaused: () => Promise<void>;
+  release: () => void;
+} {
+  let paused = false;
+  let releasePaused!: () => void;
+  let markPaused!: () => void;
+  const pausedPromise = new Promise<void>((resolve) => {
+    markPaused = resolve;
+  });
+  const releasePromise = new Promise<void>((resolve) => {
+    releasePaused = resolve;
+  });
+  return {
+    database: {
+      ...database,
+      prepare(sql: string) {
+        const statement = database.prepare(sql);
+        if (!sql.trimStart().startsWith('UPDATE credential_limit_windows') || paused) {
+          return statement;
+        }
+        return {
+          ...statement,
+          bind(...params: unknown[]) {
+            const bound = statement.bind(...params);
+            return {
+              ...bound,
+              async run() {
+                paused = true;
+                markPaused();
+                await releasePromise;
+                return bound.run();
+              },
+            };
+          },
+        } as D1PreparedStatement;
+      },
+    } as D1Database,
+    waitUntilPaused: () => pausedPromise,
+    release: releasePaused,
+  };
+}
+
 function createProjectEventStore() {
   const sqlite = new Database(':memory:');
   const sql = createSqlStorage(sqlite);
@@ -427,6 +473,73 @@ describe('credential limit producer', () => {
     ]);
   });
 
+  it('recomputes against the replaced predecessor so a delayed ok emits reset after newer critical', async () => {
+    const { sqlite, env } = createCredentialD1();
+    const eventStore = createProjectEventStore();
+    try {
+      vi.mocked(projectDataService.admitProjectEvent).mockImplementation(
+        async (_env, projectId, input) =>
+          admitProjectDataEvent(eventStore.sql, eventStore.env, projectId, { projectId, ...input })
+      );
+
+      await expect(
+        recordCredentialLimitObservation(
+          env as never,
+          baseObservation({ observedAt: 100_000, utilizationPercent: 10, status: 'allowed' })
+        )
+      ).resolves.toEqual({ outcome: 'ignored', reason: 'ok' });
+
+      const paused = pauseFirstCredentialWindowUpdate(env.DATABASE);
+      const delayedOk = recordCredentialLimitObservation(
+        { ...env, DATABASE: paused.database } as never,
+        baseObservation({ observedAt: 102_000, utilizationPercent: 10, status: 'allowed' })
+      );
+      await paused.waitUntilPaused();
+
+      await expect(
+        recordCredentialLimitObservation(
+          env as never,
+          baseObservation({
+            observedAt: 101_000,
+            utilizationPercent: 95,
+            status: 'allowed_warning',
+          })
+        )
+      ).resolves.toMatchObject({ outcome: 'event_admitted', transition: 'critical' });
+
+      paused.release();
+      await expect(delayedOk).resolves.toMatchObject({
+        outcome: 'event_admitted',
+        transition: 'reset',
+        dispatchOutcome: 'created',
+      });
+
+      expect(window(sqlite)).toMatchObject({ last_event_level: 'ok', observed_at: 102_000 });
+      expect(admissions(sqlite)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event_type: CREDENTIAL_LIMIT_EVENT_TYPES.critical,
+            state: 'admitted',
+          }),
+          expect.objectContaining({
+            event_type: CREDENTIAL_LIMIT_EVENT_TYPES.reset,
+            state: 'admitted',
+          }),
+        ])
+      );
+      expect(
+        eventStore.sqlite
+          .prepare('SELECT event_type FROM project_events ORDER BY occurred_at ASC, id ASC')
+          .all()
+      ).toEqual([
+        { event_type: CREDENTIAL_LIMIT_EVENT_TYPES.critical },
+        { event_type: CREDENTIAL_LIMIT_EVENT_TYPES.reset },
+      ]);
+    } finally {
+      eventStore.sqlite.close();
+    }
+  });
+
   it('captures D1 admission before ProjectData and suppresses superseded stale retry', async () => {
     const { sqlite, env } = createCredentialD1();
     vi.mocked(projectDataService.admitProjectEvent)
@@ -565,6 +678,54 @@ describe('credential limit producer', () => {
       dispatchOutcome: 'created',
     });
     expect(window(sqlite)).toMatchObject({ last_event_level: 'critical', observed_at: 102_000 });
+  });
+
+  it('uses a global seekable retention path when no credential windows are due', async () => {
+    const { sqlite, env } = createCredentialD1({
+      CREDENTIAL_LIMIT_ADMISSION_RETRY_BATCH_SIZE: '10',
+      CREDENTIAL_LIMIT_ADMISSION_RETENTION_DAYS: '30',
+    });
+    const insert = sqlite.prepare(
+      `INSERT INTO credential_limit_windows
+        (project_id, credential_reference, window_type, credential_source, provider,
+         provider_mode, user_id, source, status, last_event_level, observed_at,
+         freshness_ms, duplicate_sample_count, stale_sample_count, created_at, updated_at)
+       VALUES ('project-1', ?, 'claude.five_hour', 'user', 'anthropic', 'direct',
+        'user-1', 'claude-acp.rate_limit', 'allowed', 'ok', ?, 0, 0, 0, ?, ?)`
+    );
+    const seed = sqlite.transaction(() => {
+      for (let index = 0; index < 20_000; index += 1) {
+        insert.run(`cc_credentials:fresh-${index}`, 100_000 + index, 100_000, 100_000);
+      }
+    });
+    seed();
+
+    const cutoff = 100_000 - 30 * 24 * 60 * 60_000;
+    const plan = sqlite
+      .prepare(
+        `EXPLAIN QUERY PLAN DELETE FROM credential_limit_windows
+          WHERE rowid IN (
+            SELECT rowid
+              FROM credential_limit_windows
+             WHERE updated_at <= ?
+             ORDER BY updated_at ASC, project_id ASC, credential_reference ASC, window_type ASC
+             LIMIT ?
+          )`
+      )
+      .all(cutoff, 10) as Array<{ detail: string }>;
+    const details = plan.map((row) => row.detail).join('\n');
+    expect(details).toContain('idx_credential_limit_windows_updated_global');
+    expect(details).not.toContain('USE TEMP B-TREE');
+
+    await expect(
+      purgeExpiredCredentialLimitWindows(env as never, 100_000, {
+        admissionRetryBatchSize: 10,
+        admissionRetentionDays: 30,
+      })
+    ).resolves.toBe(0);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM credential_limit_windows').get()).toEqual({
+      count: 20_000,
+    });
   });
 
   it('records duplicate, stale, unknown, and timestamp outcomes through real SQL', async () => {

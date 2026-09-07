@@ -75,6 +75,36 @@ export function projectEventSourceOutboxInsertStatement(
     const guard = options.capture;
     const credentialColumns = `${columns.slice(0, -1)},
        credential_limit_window_type, credential_limit_observed_at)`;
+    const previousObservedAt = guard.previousObservedAt ?? null;
+    const predecessorSql =
+      previousObservedAt === null
+        ? `AND NOT EXISTS (
+            SELECT 1 FROM credential_limit_windows
+             WHERE project_id = ?
+               AND credential_reference = ?
+               AND window_type = ?
+          )`
+        : `AND EXISTS (
+            SELECT 1 FROM credential_limit_windows
+             WHERE project_id = ?
+               AND credential_reference = ?
+               AND window_type = ?
+               AND observed_at = ?
+               AND last_event_level = ?
+               AND ((? IS NULL AND last_event_delivery_key IS NULL) OR last_event_delivery_key = ?)
+          )`;
+    const predecessorValues =
+      previousObservedAt === null
+        ? [guard.projectId, guard.credentialReference, guard.windowType]
+        : [
+            guard.projectId,
+            guard.credentialReference,
+            guard.windowType,
+            previousObservedAt,
+            guard.previousLevel,
+            guard.previousDeliveryKey ?? null,
+            guard.previousDeliveryKey ?? null,
+          ];
     return env.DATABASE.prepare(
       `INSERT OR IGNORE INTO project_event_source_outbox ${credentialColumns}
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?, ?, ?
@@ -87,13 +117,7 @@ export function projectEventSourceOutboxInsertStatement(
              LIMIT ?
           )
         ) < ?
-          AND NOT EXISTS (
-            SELECT 1 FROM credential_limit_windows
-             WHERE project_id = ?
-               AND credential_reference = ?
-               AND window_type = ?
-               AND observed_at >= ?
-        )`
+          ${predecessorSql}`
     ).bind(
       ...values,
       guard.windowType,
@@ -103,10 +127,7 @@ export function projectEventSourceOutboxInsertStatement(
       values[10],
       guard.maxActiveIntentsPerProject,
       guard.maxActiveIntentsPerProject,
-      guard.projectId,
-      guard.credentialReference,
-      guard.windowType,
-      guard.observedAt
+      ...predecessorValues
     );
   }
   return env.DATABASE.prepare(
@@ -125,7 +146,10 @@ async function loadIntentByDelivery(
             delivery_key AS deliveryKey, payload_fingerprint AS payloadFingerprint,
             event_payload_json AS eventPayloadJson, state,
             attempt_count AS attemptCount, max_attempts AS maxAttempts,
-            expires_at AS expiresAt, claim_token AS claimToken,
+            expires_at AS expiresAt,
+            credential_limit_window_type AS credentialLimitWindowType,
+            credential_limit_observed_at AS credentialLimitObservedAt,
+            claim_token AS claimToken,
             admitted_event_id AS admittedEventId, admission_outcome AS admissionOutcome,
             last_error AS lastError,
             terminalized_at AS terminalizedAt
@@ -147,7 +171,10 @@ async function loadIntentById(
             delivery_key AS deliveryKey, payload_fingerprint AS payloadFingerprint,
             event_payload_json AS eventPayloadJson, state,
             attempt_count AS attemptCount, max_attempts AS maxAttempts,
-            expires_at AS expiresAt, claim_token AS claimToken,
+            expires_at AS expiresAt,
+            credential_limit_window_type AS credentialLimitWindowType,
+            credential_limit_observed_at AS credentialLimitObservedAt,
+            claim_token AS claimToken,
             admitted_event_id AS admittedEventId, admission_outcome AS admissionOutcome,
             last_error AS lastError,
             terminalized_at AS terminalizedAt
@@ -170,7 +197,10 @@ async function loadIntentByClaim(
             delivery_key AS deliveryKey, payload_fingerprint AS payloadFingerprint,
             event_payload_json AS eventPayloadJson, state,
             attempt_count AS attemptCount, max_attempts AS maxAttempts,
-            expires_at AS expiresAt, claim_token AS claimToken,
+            expires_at AS expiresAt,
+            credential_limit_window_type AS credentialLimitWindowType,
+            credential_limit_observed_at AS credentialLimitObservedAt,
+            claim_token AS claimToken,
             admitted_event_id AS admittedEventId, admission_outcome AS admissionOutcome,
             last_error AS lastError,
             terminalized_at AS terminalizedAt

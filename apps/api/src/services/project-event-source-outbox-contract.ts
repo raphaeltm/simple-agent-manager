@@ -9,6 +9,8 @@ import {
   DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS,
   DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS,
   DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS,
+  CREDENTIAL_LIMIT_EVENT_SOURCE,
+  CREDENTIAL_LIMIT_EVENT_TYPES,
   type ProjectEventAdmissionOutcome,
   type ProjectEventJsonValue,
 } from '@simple-agent-manager/shared';
@@ -117,6 +119,9 @@ type CredentialLimitWindowCaptureGuard = {
   credentialReference: string;
   windowType: string;
   observedAt: number;
+  previousObservedAt?: number | null;
+  previousLevel?: string | null;
+  previousDeliveryKey?: string | null;
   maxActiveIntentsPerProject: number;
 };
 
@@ -177,12 +182,47 @@ export function assertProjectEventSourceOutboxCaptureMatchesInput(
   if (capture.projectId !== input.projectId) {
     throw new Error('Project event source outbox capture project does not match intent project');
   }
-  if (capture.kind !== 'credential_limit_window_transition') return;
+  if (capture.kind === 'task_terminal_transition') return;
+  if (capture.kind !== 'credential_limit_window_transition') {
+    throw new Error('Unsupported project event source outbox capture kind');
+  }
+  if (input.source !== CREDENTIAL_LIMIT_EVENT_SOURCE) {
+    throw new Error('Credential limit capture source does not match credential event source');
+  }
+  if (!Object.values(CREDENTIAL_LIMIT_EVENT_TYPES).includes(input.eventType)) {
+    throw new Error('Credential limit capture event type is invalid');
+  }
+  if (input.subject.type !== 'credential') {
+    throw new Error('Credential limit capture subject type must be credential');
+  }
   if (capture.credentialReference !== input.subject.id) {
     throw new Error('Credential limit capture credential does not match intent subject');
   }
+  if (input.metadata?.windowType !== capture.windowType) {
+    throw new Error('Credential limit capture window does not match event metadata');
+  }
+  if (input.metadata?.observedAt !== capture.observedAt) {
+    throw new Error('Credential limit capture observedAt does not match event metadata');
+  }
   if (!Number.isInteger(capture.observedAt) || capture.observedAt < 0) {
     throw new Error('Credential limit capture observedAt must be a non-negative integer');
+  }
+  const previousObservedAt = capture.previousObservedAt ?? null;
+  if (previousObservedAt !== null) {
+    if (!Number.isInteger(previousObservedAt) || previousObservedAt < 0) {
+      throw new Error('Credential limit capture previousObservedAt must be a non-negative integer');
+    }
+    if (previousObservedAt >= capture.observedAt) {
+      throw new Error('Credential limit capture observedAt must advance the predecessor');
+    }
+    if (
+      capture.previousLevel !== 'ok' &&
+      capture.previousLevel !== 'warning' &&
+      capture.previousLevel !== 'critical' &&
+      capture.previousLevel !== 'rejected'
+    ) {
+      throw new Error('Credential limit capture previousLevel is invalid');
+    }
   }
   if (
     !Number.isInteger(capture.maxActiveIntentsPerProject) ||

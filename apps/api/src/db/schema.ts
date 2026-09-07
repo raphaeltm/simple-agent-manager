@@ -1571,6 +1571,12 @@ export const credentialLimitWindows = sqliteTable(
       table.credentialReference,
       table.windowType
     ),
+    updatedGlobalIdx: index('idx_credential_limit_windows_updated_global').on(
+      table.updatedAt,
+      table.projectId,
+      table.credentialReference,
+      table.windowType
+    ),
     projectDeliveryIdx: index('idx_credential_limit_windows_project_delivery')
       .on(table.projectId, table.lastEventDeliveryKey)
       .where(sql`last_event_delivery_key IS NOT NULL`),

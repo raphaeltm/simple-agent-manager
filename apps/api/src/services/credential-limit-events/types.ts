@@ -88,6 +88,7 @@ export type CredentialLimitThresholds = {
 
 export type CredentialLimitRuntimeConfig = CredentialLimitThresholds & {
   maxObservationsPerReport: number;
+  transitionRecomputeAttempts: number;
   observationMaxAgeMs: number;
   observationFutureSkewMs: number;
   resetMaxFutureMs: number;

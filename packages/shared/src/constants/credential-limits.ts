@@ -51,6 +51,9 @@ export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES = [
 /** Maximum credential-limit observations accepted from one usage callback/report. */
 export const DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT = 16;
 
+/** Maximum predecessor-CAS recomputes for one credential-limit observation. */
+export const DEFAULT_CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS = 4;
+
 /** Maximum raw JSON request body accepted for one VM usage callback. */
 export const DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES = 32 * 1024;
 

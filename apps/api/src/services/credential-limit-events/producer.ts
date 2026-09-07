@@ -8,6 +8,7 @@ import {
   updateDuplicateSample,
   updateStaleSample,
   upsertCredentialLimitWindow,
+  type CredentialLimitWindowPredecessor,
 } from './admissions';
 import { resolveCredentialLimitConfig } from './config';
 import { buildEventInput, computeLevel, transitionFromLevels } from './event-builders';
@@ -31,6 +32,8 @@ import {
 type SanitizedResult =
   | { ok: true; observation: SanitizedCredentialLimitObservation }
   | { ok: false; reason: CredentialLimitObservationIgnoreReason };
+
+type RecordSanitizedResult = CredentialLimitObservationResult | { outcome: 'contended' };
 
 function sanitizeObservation(
   input: CredentialLimitObservation,
@@ -119,9 +122,39 @@ export async function recordCredentialLimitObservation(
   const config = resolveCredentialLimitConfig(env);
   const sanitized = sanitizeObservation(input, config, Date.now());
   if (!sanitized.ok) return { outcome: 'ignored', reason: sanitized.reason };
-  const observation = sanitized.observation;
 
+  for (let attempt = 0; attempt < config.transitionRecomputeAttempts; attempt += 1) {
+    const result = await recordSanitizedCredentialLimitObservation(
+      env,
+      sanitized.observation,
+      config
+    );
+    if (result.outcome !== 'contended') return result;
+  }
+
+  log.warn('credential_limit.transition_recompute_exhausted', {
+    projectId: sanitized.observation.projectId,
+    credentialReference: sanitized.observation.credentialReference,
+    windowType: sanitized.observation.windowType,
+    observedAt: sanitized.observation.observedAt,
+    attempts: config.transitionRecomputeAttempts,
+  });
+  return { outcome: 'ignored', reason: 'capacity' };
+}
+
+async function recordSanitizedCredentialLimitObservation(
+  env: Env,
+  observation: SanitizedCredentialLimitObservation,
+  config: CredentialLimitRuntimeConfig
+): Promise<RecordSanitizedResult> {
   const existing = await loadWindow(env, observation);
+  const predecessor: CredentialLimitWindowPredecessor = existing
+    ? {
+        observed_at: existing.observed_at,
+        last_event_level: existing.last_event_level,
+        last_event_delivery_key: existing.last_event_delivery_key,
+      }
+    : null;
   const computedLevel = computeLevel(observation, config);
   const level = windowLevelForNonEdge(existing?.last_event_level, computedLevel);
 
@@ -139,23 +172,27 @@ export async function recordCredentialLimitObservation(
   }
 
   if (computedLevel === null) {
-    await upsertCredentialLimitWindow(
+    const writeOutcome = await upsertCredentialLimitWindow(
       env,
       observation,
       level,
-      existing?.last_event_delivery_key ?? null
+      existing?.last_event_delivery_key ?? null,
+      predecessor
     );
+    if (writeOutcome === 'contended') return { outcome: 'contended' };
     return { outcome: 'ignored', reason: 'ok' };
   }
 
   const transition = transitionFromLevels(existing?.last_event_level ?? null, computedLevel);
   if (!transition) {
-    await upsertCredentialLimitWindow(
+    const writeOutcome = await upsertCredentialLimitWindow(
       env,
       observation,
       computedLevel,
-      existing?.last_event_delivery_key ?? null
+      existing?.last_event_delivery_key ?? null,
+      predecessor
     );
+    if (writeOutcome === 'contended') return { outcome: 'contended' };
     return { outcome: 'ignored', reason: 'ok' };
   }
 
@@ -172,9 +209,11 @@ export async function recordCredentialLimitObservation(
     computedLevel,
     eventInput,
     transition,
-    config
+    config,
+    predecessor
   );
 
+  if (captured.outcome === 'contended') return { outcome: 'contended' };
   if (captured.outcome === 'capacity') return { outcome: 'ignored', reason: 'capacity' };
   if (captured.outcome === 'stale') return { outcome: 'ignored', reason: 'stale' };
   if (captured.outcome === 'duplicate') return { outcome: 'ignored', reason: 'duplicate' };

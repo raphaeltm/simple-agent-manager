@@ -10,6 +10,7 @@ import {
   DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS,
   DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_SOURCES,
   DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES,
+  DEFAULT_CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS,
   DEFAULT_CREDENTIAL_LIMIT_WARNING_PERCENT,
 } from '@simple-agent-manager/shared';
 
@@ -34,7 +35,10 @@ function parseIntegerEnv(
   return parsed;
 }
 
-function parseCsvAllowlist(value: string | undefined, fallback: readonly string[]): ReadonlySet<string> {
+function parseCsvAllowlist(
+  value: string | undefined,
+  fallback: readonly string[]
+): ReadonlySet<string> {
   if (value === undefined || value.trim() === '') return new Set(fallback);
   const entries = value
     .split(',')
@@ -57,11 +61,18 @@ export function resolveCredentialLimitConfig(env: Env): CredentialLimitRuntimeCo
     warningPercent:
       warningPercent <= criticalPercent ? warningPercent : DEFAULT_CREDENTIAL_LIMIT_WARNING_PERCENT,
     criticalPercent:
-      warningPercent <= criticalPercent ? criticalPercent : DEFAULT_CREDENTIAL_LIMIT_CRITICAL_PERCENT,
+      warningPercent <= criticalPercent
+        ? criticalPercent
+        : DEFAULT_CREDENTIAL_LIMIT_CRITICAL_PERCENT,
     maxObservationsPerReport: parseIntegerEnv(
       env.CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT,
       DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT,
       { min: 1, max: 100 }
+    ),
+    transitionRecomputeAttempts: parseIntegerEnv(
+      env.CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS,
+      DEFAULT_CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS,
+      { min: 1, max: 20 }
     ),
     observationMaxAgeMs: parseIntegerEnv(
       env.CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS,

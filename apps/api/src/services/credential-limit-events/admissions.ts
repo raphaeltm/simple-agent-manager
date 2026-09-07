@@ -1,14 +1,13 @@
-import type { AdmitProjectEventInput, ProjectEventJsonValue } from '@simple-agent-manager/shared';
+import type { AdmitProjectEventInput } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
-import { canonicalJson } from '../../lib/canonical-json';
 import { ulid } from '../../lib/ulid';
 import {
   admitProjectEventSourceIntentById,
+  projectEventSourceOutboxInsertStatement,
   type ProjectEventSourceAdmissionResult,
   type ProjectEventSourceOutboxState,
 } from '../project-event-source-outbox';
-import { resolveProjectEventSourceOutboxConfig } from '../project-event-source-outbox-contract';
 import type {
   CredentialLimitDispatchOutcome,
   CredentialLimitLevel,
@@ -42,33 +41,23 @@ type SourceIntentRow = {
   admissionOutcome: string | null;
 };
 
+export type CredentialLimitWindowPredecessor = Pick<
+  CredentialLimitWindowRow,
+  'observed_at' | 'last_event_level' | 'last_event_delivery_key'
+> | null;
+
 export type CredentialLimitAdmissionCaptureResult =
   | { outcome: 'created'; admission: SourceIntentRow }
   | { outcome: 'duplicate_replay'; admission: SourceIntentRow }
   | { outcome: 'conflict'; admission: SourceIntentRow | null }
   | { outcome: 'capacity' }
   | { outcome: 'stale' }
-  | { outcome: 'duplicate' };
+  | { outcome: 'duplicate' }
+  | { outcome: 'contended' };
 
 function changeCount(result: unknown): number {
   const changes = (result as D1RunLike | undefined)?.meta?.changes;
   return typeof changes === 'number' ? changes : 0;
-}
-
-function withoutProjectId(
-  input: AdmitProjectEventInput
-): Omit<AdmitProjectEventInput, 'projectId'> {
-  const { projectId, ...event } = input;
-  void projectId;
-  return event;
-}
-
-function eventPayloadJson(input: AdmitProjectEventInput): string {
-  return canonicalJson(withoutProjectId(input) as unknown as ProjectEventJsonValue);
-}
-
-function expiresAtIso(now: Date, ttlMs: number): string {
-  return new Date(now.getTime() + ttlMs).toISOString();
 }
 
 export async function purgeExpiredCredentialLimitWindows(
@@ -181,13 +170,31 @@ export async function upsertCredentialLimitWindow(
   env: Env,
   observation: SanitizedCredentialLimitObservation,
   level: CredentialLimitLevel,
-  deliveryKey: string | null
-): Promise<number> {
+  deliveryKey: string | null,
+  predecessor: CredentialLimitWindowPredecessor
+): Promise<'advanced' | 'contended'> {
   const now = Date.now();
-  const result = await env.DATABASE.prepare(windowUpsertValuesSql())
-    .bind(...windowUpsertBindings(observation, level, deliveryKey, now))
+  if (predecessor === null) {
+    const result = await env.DATABASE.prepare(windowInsertIfMissingSql())
+      .bind(...windowUpsertBindings(observation, level, deliveryKey, now))
+      .run();
+    return changeCount(result) === 1 ? 'advanced' : 'contended';
+  }
+
+  const result = await env.DATABASE.prepare(windowUpdateFromPredecessorSql())
+    .bind(
+      ...windowUpdateBindings(observation, level, deliveryKey, now),
+      observation.projectId,
+      observation.credentialReference,
+      observation.windowType,
+      predecessor.observed_at,
+      predecessor.last_event_level,
+      predecessor.last_event_delivery_key,
+      predecessor.last_event_delivery_key,
+      observation.observedAt
+    )
     .run();
-  return changeCount(result);
+  return changeCount(result) === 1 ? 'advanced' : 'contended';
 }
 
 async function readSourceIntentByDeliveryKey(
@@ -205,6 +212,29 @@ async function readSourceIntentByDeliveryKey(
 
 async function readSourceIntentById(env: Env, id: string): Promise<SourceIntentRow | null> {
   return env.DATABASE.prepare(sourceIntentSelectSql('id = ?')).bind(id).first<SourceIntentRow>();
+}
+
+async function credentialSourceOutboxCapacityFull(
+  env: Env,
+  eventInput: AdmitProjectEventInput,
+  nowIso: string,
+  config: Pick<CredentialLimitRuntimeConfig, 'admissionMaxActivePerProject'>
+): Promise<boolean> {
+  const row = await env.DATABASE.prepare(
+    `SELECT COUNT(*) AS count
+       FROM (
+         SELECT id
+           FROM project_event_source_outbox
+          WHERE project_id = ?
+            AND source = ?
+            AND state IN (${ACTIVE_SOURCE_OUTBOX_STATES})
+            AND expires_at > ?
+          LIMIT ?
+       )`
+  )
+    .bind(eventInput.projectId, eventInput.source, nowIso, config.admissionMaxActivePerProject)
+    .first<{ count: number }>();
+  return Number(row?.count ?? 0) >= config.admissionMaxActivePerProject;
 }
 
 async function supersedeOlderCredentialLimitSourceIntents(
@@ -272,7 +302,8 @@ export async function captureCredentialLimitEventAdmission(
   level: CredentialLimitLevel,
   eventInput: AdmitProjectEventInput,
   _transition: CredentialLimitTransition,
-  config: CredentialLimitRuntimeConfig
+  config: CredentialLimitRuntimeConfig,
+  predecessor: CredentialLimitWindowPredecessor
 ): Promise<CredentialLimitAdmissionCaptureResult> {
   const existingIntent = await readSourceIntentByDeliveryKey(
     env,
@@ -289,64 +320,43 @@ export async function captureCredentialLimitEventAdmission(
   const now = Date.now();
   await purgeExpiredCredentialLimitWindows(env, now, config, observation.projectId);
 
-  const sourceConfig = resolveProjectEventSourceOutboxConfig(env);
   const intentId = ulid();
   const nowDate = new Date(now);
-  const nowIso = nowDate.toISOString();
-  const insertIntent = env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO project_event_source_outbox
-      (id, project_id, source, event_type, subject_type, subject_id, delivery_key,
-       payload_fingerprint, event_payload_json, state, attempt_count, max_attempts,
-       next_attempt_at, expires_at, created_at, updated_at,
-       credential_limit_window_type, credential_limit_observed_at)
-     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?, ?, ?
-      WHERE (
-        SELECT COUNT(*)
-          FROM project_event_source_outbox
-         WHERE project_id = ?
-           AND source = ?
-           AND state IN (${ACTIVE_SOURCE_OUTBOX_STATES})
-           AND expires_at > ?
-      ) < ?
-        AND NOT EXISTS (
-          SELECT 1
-            FROM credential_limit_windows
-           WHERE project_id = ?
-             AND credential_reference = ?
-             AND window_type = ?
-             AND observed_at >= ?
-        )`
-  ).bind(
-    intentId,
-    eventInput.projectId,
-    eventInput.source,
-    eventInput.eventType,
-    eventInput.subject.type,
-    eventInput.subject.id,
-    eventInput.deliveryKey,
-    eventInput.payloadFingerprint,
-    eventPayloadJson(eventInput),
-    sourceConfig.maxAttempts,
-    nowIso,
-    expiresAtIso(nowDate, sourceConfig.ttlMs),
-    nowIso,
-    nowIso,
-    observation.windowType,
-    observation.observedAt,
-    eventInput.projectId,
-    eventInput.source,
-    nowIso,
-    config.admissionMaxActivePerProject,
-    observation.projectId,
-    observation.credentialReference,
-    observation.windowType,
-    observation.observedAt
-  );
-  const upsertWindow = env.DATABASE.prepare(windowUpsertAfterIntentSql()).bind(
-    ...windowUpsertBindings(observation, level, eventInput.deliveryKey, now),
-    intentId,
-    eventInput.payloadFingerprint
-  );
+  const insertIntent = projectEventSourceOutboxInsertStatement(env, eventInput, {
+    id: intentId,
+    now: nowDate,
+    capture: {
+      kind: 'credential_limit_window_transition',
+      projectId: observation.projectId,
+      credentialReference: observation.credentialReference,
+      windowType: observation.windowType,
+      observedAt: observation.observedAt,
+      previousObservedAt: predecessor?.observed_at ?? null,
+      previousLevel: predecessor?.last_event_level ?? null,
+      previousDeliveryKey: predecessor?.last_event_delivery_key ?? null,
+      maxActiveIntentsPerProject: config.admissionMaxActivePerProject,
+    },
+  });
+  const upsertWindow =
+    predecessor === null
+      ? env.DATABASE.prepare(windowInsertAfterIntentSql()).bind(
+          ...windowUpsertBindings(observation, level, eventInput.deliveryKey, now),
+          intentId,
+          eventInput.payloadFingerprint
+        )
+      : env.DATABASE.prepare(windowUpdateAfterIntentSql()).bind(
+          ...windowUpdateBindings(observation, level, eventInput.deliveryKey, now),
+          observation.projectId,
+          observation.credentialReference,
+          observation.windowType,
+          predecessor.observed_at,
+          predecessor.last_event_level,
+          predecessor.last_event_delivery_key,
+          predecessor.last_event_delivery_key,
+          observation.observedAt,
+          intentId,
+          eventInput.payloadFingerprint
+        );
 
   let results: unknown[];
   try {
@@ -375,7 +385,7 @@ export async function captureCredentialLimitEventAdmission(
           ? { outcome: 'duplicate' }
           : { outcome: 'stale' };
       }
-      return { outcome: 'capacity' };
+      return { outcome: 'contended' };
     }
     const raced = await readSourceIntentByDeliveryKey(
       env,
@@ -394,7 +404,14 @@ export async function captureCredentialLimitEventAdmission(
         ? { outcome: 'duplicate' }
         : { outcome: 'stale' };
     }
-    return { outcome: 'capacity' };
+    return (await credentialSourceOutboxCapacityFull(
+      env,
+      eventInput,
+      new Date(now).toISOString(),
+      config
+    ))
+      ? { outcome: 'capacity' }
+      : { outcome: 'contended' };
   }
 
   await supersedeOlderCredentialLimitSourceIntents(
@@ -448,43 +465,22 @@ function credentialDispatchOutcome(
   return 'deferred';
 }
 
-function windowUpsertValuesSql(): string {
-  return `INSERT INTO credential_limit_windows (
-        project_id, credential_reference, window_type, credential_source, provider, provider_mode,
+function credentialLimitWindowColumns(): string {
+  return `project_id, credential_reference, window_type, credential_source, provider, provider_mode,
         agent_type, user_id, workspace_id, agent_session_id, chat_session_id, source, status,
         last_event_level, utilization_percent, limit_amount, remaining_amount, window_minutes,
-        resets_at, observed_at, freshness_ms, last_event_delivery_key, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(project_id, credential_reference, window_type) DO UPDATE SET
-        credential_source = excluded.credential_source,
-        provider = excluded.provider,
-        provider_mode = excluded.provider_mode,
-        agent_type = excluded.agent_type,
-        user_id = excluded.user_id,
-        workspace_id = excluded.workspace_id,
-        agent_session_id = excluded.agent_session_id,
-        chat_session_id = excluded.chat_session_id,
-        source = excluded.source,
-        status = excluded.status,
-        last_event_level = excluded.last_event_level,
-        utilization_percent = excluded.utilization_percent,
-        limit_amount = excluded.limit_amount,
-        remaining_amount = excluded.remaining_amount,
-        window_minutes = excluded.window_minutes,
-        resets_at = excluded.resets_at,
-        observed_at = excluded.observed_at,
-        freshness_ms = excluded.freshness_ms,
-        last_event_delivery_key = excluded.last_event_delivery_key,
-        updated_at = excluded.updated_at
-      WHERE excluded.observed_at > credential_limit_windows.observed_at`;
+        resets_at, observed_at, freshness_ms, last_event_delivery_key, created_at, updated_at`;
 }
 
-function windowUpsertAfterIntentSql(): string {
-  return `INSERT INTO credential_limit_windows (
-        project_id, credential_reference, window_type, credential_source, provider, provider_mode,
-        agent_type, user_id, workspace_id, agent_session_id, chat_session_id, source, status,
-        last_event_level, utilization_percent, limit_amount, remaining_amount, window_minutes,
-        resets_at, observed_at, freshness_ms, last_event_delivery_key, created_at, updated_at
+function windowInsertIfMissingSql(): string {
+  return `INSERT OR IGNORE INTO credential_limit_windows (
+        ${credentialLimitWindowColumns()}
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+}
+
+function windowInsertAfterIntentSql(): string {
+  return `INSERT OR IGNORE INTO credential_limit_windows (
+        ${credentialLimitWindowColumns()}
       )
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        WHERE EXISTS (
@@ -493,29 +489,61 @@ function windowUpsertAfterIntentSql(): string {
           WHERE id = ?
             AND payload_fingerprint = ?
             AND state IN (${ACTIVE_SOURCE_OUTBOX_STATES}, 'admitted')
-       )
-      ON CONFLICT(project_id, credential_reference, window_type) DO UPDATE SET
-        credential_source = excluded.credential_source,
-        provider = excluded.provider,
-        provider_mode = excluded.provider_mode,
-        agent_type = excluded.agent_type,
-        user_id = excluded.user_id,
-        workspace_id = excluded.workspace_id,
-        agent_session_id = excluded.agent_session_id,
-        chat_session_id = excluded.chat_session_id,
-        source = excluded.source,
-        status = excluded.status,
-        last_event_level = excluded.last_event_level,
-        utilization_percent = excluded.utilization_percent,
-        limit_amount = excluded.limit_amount,
-        remaining_amount = excluded.remaining_amount,
-        window_minutes = excluded.window_minutes,
-        resets_at = excluded.resets_at,
-        observed_at = excluded.observed_at,
-        freshness_ms = excluded.freshness_ms,
-        last_event_delivery_key = excluded.last_event_delivery_key,
-        updated_at = excluded.updated_at
-      WHERE excluded.observed_at > credential_limit_windows.observed_at`;
+       )`;
+}
+
+function windowUpdateSetSql(): string {
+  return `credential_source = ?,
+        provider = ?,
+        provider_mode = ?,
+        agent_type = ?,
+        user_id = ?,
+        workspace_id = ?,
+        agent_session_id = ?,
+        chat_session_id = ?,
+        source = ?,
+        status = ?,
+        last_event_level = ?,
+        utilization_percent = ?,
+        limit_amount = ?,
+        remaining_amount = ?,
+        window_minutes = ?,
+        resets_at = ?,
+        observed_at = ?,
+        freshness_ms = ?,
+        last_event_delivery_key = ?,
+        updated_at = ?`;
+}
+
+function windowUpdateFromPredecessorSql(): string {
+  return `UPDATE credential_limit_windows
+      SET ${windowUpdateSetSql()}
+    WHERE project_id = ?
+      AND credential_reference = ?
+      AND window_type = ?
+      AND observed_at = ?
+      AND last_event_level = ?
+      AND ((? IS NULL AND last_event_delivery_key IS NULL) OR last_event_delivery_key = ?)
+      AND ? > observed_at`;
+}
+
+function windowUpdateAfterIntentSql(): string {
+  return `UPDATE credential_limit_windows
+      SET ${windowUpdateSetSql()}
+    WHERE project_id = ?
+      AND credential_reference = ?
+      AND window_type = ?
+      AND observed_at = ?
+      AND last_event_level = ?
+      AND ((? IS NULL AND last_event_delivery_key IS NULL) OR last_event_delivery_key = ?)
+      AND ? > observed_at
+      AND EXISTS (
+        SELECT 1
+          FROM project_event_source_outbox
+         WHERE id = ?
+           AND payload_fingerprint = ?
+           AND state IN (${ACTIVE_SOURCE_OUTBOX_STATES}, 'admitted')
+      )`;
 }
 
 function windowUpsertBindings(
@@ -548,6 +576,36 @@ function windowUpsertBindings(
     observation.freshnessMs,
     deliveryKey,
     now,
+    now,
+  ];
+}
+
+function windowUpdateBindings(
+  observation: SanitizedCredentialLimitObservation,
+  level: CredentialLimitLevel,
+  deliveryKey: string | null,
+  now: number
+): unknown[] {
+  return [
+    observation.credentialSource,
+    observation.provider,
+    observation.providerMode,
+    observation.agentType,
+    observation.userId,
+    observation.workspaceId,
+    observation.agentSessionId,
+    observation.chatSessionId,
+    observation.source,
+    observation.status,
+    level,
+    observation.utilizationPercent,
+    observation.limitAmount,
+    observation.remainingAmount,
+    observation.windowMinutes,
+    observation.resetsAt,
+    observation.observedAt,
+    observation.freshnessMs,
+    deliveryKey,
     now,
   ];
 }

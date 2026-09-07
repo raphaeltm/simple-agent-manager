@@ -701,7 +701,7 @@ describe('project event source outbox', () => {
       subject: { type: 'credential', id: 'cc_credentials:cred-1' },
       deliveryKey: 'credential-limit:winning',
       payloadFingerprint: 'sha256:credential-window',
-      metadata: { level: 'warning', windowType: 'openai.tokens' },
+      metadata: { level: 'warning', windowType: 'openai.tokens', observedAt },
     };
 
     const inserted = await projectEventSourceOutboxInsertStatement(env, event, {
@@ -788,6 +788,31 @@ describe('project event source outbox', () => {
         },
       })
     ).toThrow('Credential limit capture credential does not match intent subject');
+    expect(() =>
+      projectEventSourceOutboxInsertStatement(
+        env,
+        { ...event, metadata: { ...event.metadata, windowType: 'openai.requests' } },
+        {
+          id: 'credential-window-mismatch-window',
+          now: NOW,
+          capture: {
+            kind: 'credential_limit_window_transition',
+            projectId: 'project-1',
+            credentialReference: 'cc_credentials:cred-1',
+            windowType: 'openai.tokens',
+            observedAt,
+            maxActiveIntentsPerProject: 2,
+          },
+        }
+      )
+    ).toThrow('Credential limit capture window does not match event metadata');
+    expect(() =>
+      projectEventSourceOutboxInsertStatement(env, event, {
+        id: 'unsupported-capture-kind',
+        now: NOW,
+        capture: { kind: 'unsupported', projectId: 'project-1' } as never,
+      })
+    ).toThrow('Unsupported project event source outbox capture kind');
     expect(
       sqlite
         .prepare(
