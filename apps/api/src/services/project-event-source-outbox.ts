@@ -1,27 +1,26 @@
-import type {
-  AdmitProjectEventInput,
-  ProjectEventJsonValue,
-} from '@simple-agent-manager/shared';
+import type { AdmitProjectEventInput } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { canonicalJson } from '../lib/canonical-json';
 import { createModuleLogger } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import * as projectDataService from './project-data';
 import {
   PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES,
   PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES,
+  assertProjectEventSourceOutboxCaptureMatchesInput,
   type ProjectEventSourceAdmissionResult,
   ProjectEventSourceAdmissionTimeoutError,
   type ProjectEventSourceAdmissionTiming,
   type ProjectEventSourceOutboxActiveState,
-  type ProjectEventSourceOutboxCaptureGuard,
   type ProjectEventSourceOutboxConfig,
   type ProjectEventSourceOutboxInsertOptions,
   type ProjectEventSourceOutboxIntent,
   type ProjectEventSourceOutboxState,
   type ProjectEventSourceOutboxStats,
+  type ProjectEventSourceOutboxSupersedeInput,
   type ProjectEventSourceOutboxTerminalState,
+  projectEventSourceOutboxInsertValues,
+  projectEventSourceOutboxReplayConflict,
   resolveProjectEventSourceOutboxConfig,
 } from './project-event-source-outbox-contract';
 
@@ -30,76 +29,29 @@ export type {
   ProjectEventSourceAdmissionTiming,
   ProjectEventSourceOutboxCaptureGuard,
   ProjectEventSourceOutboxConfig,
+  ProjectEventSourceOutboxInsertOptions,
   ProjectEventSourceOutboxIntent,
   ProjectEventSourceOutboxState,
   ProjectEventSourceOutboxStats,
+  ProjectEventSourceOutboxSupersedeInput,
+} from './project-event-source-outbox-contract';
+export {
+  projectEventSourceOutboxPayload,
+  projectEventSourceOutboxReplayConflict,
+  resolveProjectEventSourceOutboxConfig,
 } from './project-event-source-outbox-contract';
 
 const log = createModuleLogger('project_event_source_outbox');
 const ACTIVE_STATES = PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES;
 const TERMINAL_STATES = PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES;
 
-function withoutProjectId(
-  input: AdmitProjectEventInput
-): Omit<AdmitProjectEventInput, 'projectId'> {
-  const { projectId, ...event } = input;
-  void projectId;
-  return event;
-}
-
-function jsonPayload(input: AdmitProjectEventInput): string {
-  return canonicalJson(withoutProjectId(input) as unknown as ProjectEventJsonValue);
-}
-
-function insertValues(
-  env: Env,
-  input: AdmitProjectEventInput,
-  options: ProjectEventSourceOutboxInsertOptions
-) {
-  const config = resolveProjectEventSourceOutboxConfig(env);
-  const now = options.now ?? new Date();
-  const nowIso = now.toISOString();
-  const expiresAt = new Date(now.getTime() + config.ttlMs).toISOString();
-  return [
-    options.id ?? ulid(),
-    input.projectId,
-    input.source,
-    input.eventType,
-    input.subject.type,
-    input.subject.id,
-    input.deliveryKey,
-    input.payloadFingerprint,
-    jsonPayload(input),
-    config.maxAttempts,
-    nowIso,
-    expiresAt,
-    nowIso,
-    nowIso,
-  ] as const;
-}
-
-function assertCaptureMatchesInput(
-  input: AdmitProjectEventInput,
-  capture: ProjectEventSourceOutboxCaptureGuard
-): void {
-  if (capture.projectId !== input.projectId) {
-    throw new Error('Project event source outbox capture project does not match intent project');
-  }
-  if (
-    capture.kind === 'credential_limit_window_transition' &&
-    capture.lastEventDeliveryKey !== input.deliveryKey
-  ) {
-    throw new Error('Credential limit capture delivery key does not match intent delivery key');
-  }
-}
-
 export function projectEventSourceOutboxInsertStatement(
   env: Env,
   input: AdmitProjectEventInput,
   options: ProjectEventSourceOutboxInsertOptions = {}
 ): D1PreparedStatement {
-  if (options.capture) assertCaptureMatchesInput(input, options.capture);
-  const values = insertValues(env, input, options);
+  if (options.capture) assertProjectEventSourceOutboxCaptureMatchesInput(input, options.capture);
+  const values = projectEventSourceOutboxInsertValues(env, input, options);
   const columns = `(id, project_id, source, event_type, subject_type, subject_id, delivery_key,
        payload_fingerprint, event_payload_json, state, attempt_count, max_attempts,
        next_attempt_at, expires_at, created_at, updated_at)`;
@@ -116,24 +68,36 @@ export function projectEventSourceOutboxInsertStatement(
   }
   if (options.capture?.kind === 'credential_limit_window_transition') {
     const guard = options.capture;
+    const credentialColumns = `${columns.slice(0, -1)},
+       credential_limit_window_type, credential_limit_observed_at)`;
     return env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO project_event_source_outbox ${columns}
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?
-        WHERE EXISTS (
-          SELECT 1 FROM credential_limit_windows
-           WHERE project_id = ?
-             AND credential_reference = ?
-             AND window_type = ?
-             AND observed_at = ?
-             AND last_event_delivery_key = ?
+      `INSERT OR IGNORE INTO project_event_source_outbox ${credentialColumns}
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?, ?, ?
+        WHERE (
+          SELECT COUNT(*) FROM project_event_source_outbox
+           WHERE project_id = ? AND source = ?
+             AND state IN ('pending', 'processing', 'retryable_failed')
+             AND expires_at > ?
+        ) < ?
+          AND NOT EXISTS (
+            SELECT 1 FROM credential_limit_windows
+             WHERE project_id = ?
+               AND credential_reference = ?
+               AND window_type = ?
+               AND observed_at >= ?
         )`
     ).bind(
       ...values,
+      guard.windowType,
+      guard.observedAt,
+      input.projectId,
+      input.source,
+      values[10],
+      guard.maxActiveIntentsPerProject,
       guard.projectId,
       guard.credentialReference,
       guard.windowType,
-      guard.observedAt,
-      guard.lastEventDeliveryKey
+      guard.observedAt
     );
   }
   return env.DATABASE.prepare(
@@ -209,18 +173,48 @@ async function loadIntentByClaim(
     .first<ProjectEventSourceOutboxIntent>();
 }
 
-function replayConflict(intent: ProjectEventSourceOutboxIntent, input: AdmitProjectEventInput) {
-  const incomingPayload = jsonPayload(input);
-  if (intent.projectId !== input.projectId) return 'project_mismatch';
-  if (intent.source !== input.source) return 'source_mismatch';
-  if (intent.eventType !== input.eventType) return 'event_type_mismatch';
-  if (intent.deliveryKey !== input.deliveryKey) return 'delivery_key_mismatch';
-  if (intent.subjectType !== input.subject.type || intent.subjectId !== input.subject.id) {
-    return 'subject_mismatch';
-  }
-  if (intent.payloadFingerprint !== input.payloadFingerprint) return 'payload_fingerprint_mismatch';
-  if (intent.eventPayloadJson !== incomingPayload) return 'event_payload_mismatch';
-  return null;
+export async function readProjectEventSourceIntentByDelivery(
+  env: Env,
+  input: Pick<AdmitProjectEventInput, 'projectId' | 'source' | 'deliveryKey'>
+): Promise<ProjectEventSourceOutboxIntent | null> {
+  return loadIntentByDelivery(env, input);
+}
+
+export async function readProjectEventSourceIntentById(
+  env: Env,
+  id: string
+): Promise<ProjectEventSourceOutboxIntent | null> {
+  return loadIntentById(env, id);
+}
+
+export async function markProjectEventSourceIntentSuperseded(
+  env: Env,
+  input: ProjectEventSourceOutboxSupersedeInput
+): Promise<ProjectEventSourceOutboxIntent | null> {
+  const nowIso = (input.now ?? new Date()).toISOString();
+  await env.DATABASE.prepare(
+    `UPDATE project_event_source_outbox
+        SET state = 'permanent_failed', processing_lease_expires_at = NULL,
+            claim_token = NULL, terminalized_at = ?, last_error = ?, updated_at = ?
+      WHERE id = ? AND project_id = ? AND source = ? AND delivery_key = ?
+        AND (
+          state IN ('pending', 'retryable_failed')
+          OR (state = 'processing' AND processing_lease_expires_at IS NOT NULL
+              AND processing_lease_expires_at <= ?)
+        )`
+  )
+    .bind(
+      nowIso,
+      input.reason ?? 'Superseded by newer source observation',
+      nowIso,
+      input.id,
+      input.projectId,
+      input.source,
+      input.deliveryKey,
+      nowIso
+    )
+    .run();
+  return loadIntentById(env, input.id);
 }
 
 async function markLocalReplayConflict(
@@ -269,11 +263,11 @@ export async function enqueueProjectEventSourceIntent(
   await projectEventSourceOutboxInsertStatement(env, input, options).run();
   const intentById = options.id ? await loadIntentById(env, options.id) : null;
   const intent =
-    intentById && replayConflict(intentById, input) === null
+    intentById && projectEventSourceOutboxReplayConflict(intentById, input) === null
       ? intentById
       : await loadIntentByDelivery(env, input);
   if (!intent) throw new Error('Project event source outbox intent was not persisted');
-  const conflict = replayConflict(intent, input);
+  const conflict = projectEventSourceOutboxReplayConflict(intent, input);
   if (conflict) {
     await markLocalReplayConflict(env, intent, input, conflict, options.now ?? new Date());
     throw new Error(`Project event source outbox delivery replay conflict: ${conflict}`);
@@ -543,7 +537,7 @@ export async function enqueueAndAdmitProjectEventSourceIntent(
   } catch (error) {
     const existing = await loadIntentByDelivery(env, input);
     if (!existing) throw error;
-    const reason = replayConflict(existing, input);
+    const reason = projectEventSourceOutboxReplayConflict(existing, input);
     if (!reason) throw error;
     return markLocalReplayConflict(env, existing, input, reason);
   }
