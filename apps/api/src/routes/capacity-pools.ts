@@ -1,6 +1,7 @@
 import type {
   CapacityPoolScope,
   ProjectDefaultCapacityPoolsResponse,
+  SafeCapacityPoolPlacementSettingsSummary,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -8,6 +9,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { resolveSafeCapacityPoolPlacementSettingsSummary } from '../services/capacity-pool-placement-settings';
 import { updateDefaultCapacityPool } from '../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
@@ -31,7 +33,8 @@ function parseEnsureQuery(value: string | undefined): boolean {
 
 function buildUserDefaultPoolResponse(
   summaries: DefaultCapacityPoolsEnsureResult,
-  ensure: boolean
+  ensure: boolean,
+  placementSettings: SafeCapacityPoolPlacementSettingsSummary
 ): ProjectDefaultCapacityPoolsResponse {
   const effective = summaries.user;
   const effectiveSummary = toSafeEffectiveCapacityPoolSummary(
@@ -68,6 +71,7 @@ function buildUserDefaultPoolResponse(
     precedence: PRECEDENCE,
     reconciledScopes: ensure ? ['user'] : [],
     policyMutationSupported: true,
+    placementSettings,
   };
 }
 
@@ -112,9 +116,10 @@ capacityPoolsRoutes.get('/defaults', async (c) => {
     ensure,
     env: c.env,
   });
+  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
 
   c.header('Cache-Control', 'private, no-store');
-  return c.json(buildUserDefaultPoolResponse(summaries, ensure));
+  return c.json(buildUserDefaultPoolResponse(summaries, ensure, placementSettings));
 });
 
 /**
@@ -131,9 +136,10 @@ capacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
     ensure: true,
     env: c.env,
   });
+  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
 
   c.header('Cache-Control', 'private, no-store');
-  return c.json(buildUserDefaultPoolResponse(summaries, true));
+  return c.json(buildUserDefaultPoolResponse(summaries, true, placementSettings));
 });
 
 /**
@@ -170,8 +176,9 @@ capacityPoolsRoutes.patch('/defaults', async (c) => {
     ensure: false,
     env: c.env,
   });
+  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
   c.header('Cache-Control', 'private, no-store');
-  return c.json(buildUserDefaultPoolResponse(summaries, false));
+  return c.json(buildUserDefaultPoolResponse(summaries, false, placementSettings));
 });
 
 export { capacityPoolsRoutes };

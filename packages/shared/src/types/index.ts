@@ -65,6 +65,7 @@ export type {
   DefaultCapacityPoolSummary,
   DefaultCapacityPoolUpdateRequest,
   ProjectDefaultCapacityPoolsResponse,
+  SafeCapacityPoolPlacementSettingsSummary,
   SafeEffectiveCapacityPoolReason,
   SafeEffectiveCapacityPoolSummary,
 } from './capacity-pool';

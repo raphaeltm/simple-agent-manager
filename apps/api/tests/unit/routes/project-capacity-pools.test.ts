@@ -63,6 +63,7 @@ const { drizzle } = await import('drizzle-orm/d1');
 const { capacityPoolRoutes } = await import('../../../src/routes/projects/capacity-pools');
 const { readDefaultCapacityPoolSummaries } =
   await import('../../../src/services/default-capacity-pools');
+const providerCatalogs = await import('../../../src/services/provider-catalogs');
 
 const CATALOG_ADDITION_BIND_LIMIT_TEST_TIMEOUT_MS = 15_000;
 
@@ -134,6 +135,52 @@ function requestProjectDefaults(
   return createApp().request(`/api/projects/project-1${pathSuffix}`, init, env);
 }
 
+function expectSafePlacementSettings(body: Record<string, any>) {
+  expect(body.placementSettings).toMatchObject({
+    version: 1,
+    legacyWorkloadAdapterVersion: 1,
+    source: {
+      legacyWorkloadMapping: 'default',
+      platformDefaults: 'default',
+      selection: 'default',
+    },
+    resourceDefaults: {
+      legacyWorkloadMapping: {
+        small: {
+          minVcpu: 1,
+          minMemoryGb: 2,
+          minDiskGb: 20,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+        },
+      },
+      platformDefaults: {
+        minVcpu: 2,
+        minMemoryGb: 4,
+        minDiskGb: 40,
+        exclusiveNode: false,
+        maxCoTenants: 4,
+      },
+    },
+  });
+  expect(body.placementSettings.sourceGeneration).toEqual(expect.any(Number));
+  expect(body.placementSettings).not.toHaveProperty('diagnostics');
+}
+
+function countRows(sqlite: Database.Database, tableName: string, whereSql: string) {
+  return (
+    sqlite.prepare(`SELECT COUNT(*) AS count FROM ${tableName} WHERE ${whereSql}`).get() as {
+      count: number;
+    }
+  ).count;
+}
+
+function catalogCredentialSources() {
+  return vi
+    .mocked(providerCatalogs.buildProviderCatalogForCredential)
+    .mock.calls.map((call) => call[0].seed.credentialSource);
+}
+
 async function reconcileExistingDefaults(
   env: Env,
   input: {
@@ -156,6 +203,7 @@ describe('project capacity pool routes', () => {
   beforeEach(() => {
     authState.userId = 'user-1';
     authState.role = 'user';
+    vi.mocked(providerCatalogs.buildProviderCatalogForCredential).mockClear();
   });
 
   it('returns the project default as effective and hides installation details for non-superadmins', async () => {
@@ -184,6 +232,7 @@ describe('project capacity pool routes', () => {
     expect(text).not.toContain('platform-encrypted-token-for-platform-cloud-1');
 
     const body = JSON.parse(text);
+    expectSafePlacementSettings(body);
     expect(body.policyMutationSupported).toBe(false);
     expect(body.effectiveScope).toBe('project');
     expect(body.effective.pool).toMatchObject({
@@ -220,6 +269,62 @@ describe('project capacity pool routes', () => {
       .prepare(`SELECT COUNT(*) AS count FROM capacity_pools WHERE scope = 'installation'`)
       .get() as { count: number };
     expect(installationPoolCount.count).toBe(0);
+    expect(catalogCredentialSources()).toEqual(['user', 'project']);
+  });
+
+  it('does not reconcile installation defaults for non-superadmin project ensure or reconcile calls', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, {
+      projectId: 'project-1',
+      userId: 'user-1',
+      role: 'maintainer',
+    });
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+    });
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+
+    const ensured = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
+      { method: 'GET' },
+      env
+    );
+    expect(ensured.status).toBe(200);
+    const ensuredBody = await ensured.json();
+    expect(ensuredBody).toMatchObject({
+      effectiveScope: 'project',
+      reconciledScopes: ['project', 'user'],
+      defaults: expect.arrayContaining([
+        expect.objectContaining({
+          scope: 'installation',
+          visibility: 'hidden',
+          canReconcile: false,
+          summary: null,
+        }),
+      ]),
+    });
+    expectSafePlacementSettings(ensuredBody);
+
+    const reconciled = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconciled.status).toBe(200);
+    const reconciledBody = await reconciled.json();
+    expect(reconciledBody).toMatchObject({
+      effectiveScope: 'project',
+      reconciledScopes: ['project', 'user'],
+      policyMutationSupported: false,
+    });
+
+    expect(catalogCredentialSources()).toEqual(['user', 'project', 'user', 'project']);
+    expect(countRows(sqlite, 'capacity_pools', "scope = 'installation'")).toBe(0);
+    expect(countRows(sqlite, 'capacity_sources', "scope = 'installation'")).toBe(0);
   });
 
   it('GET ensure=true reconciles project defaults without exceeding D1 bind limits', async () => {

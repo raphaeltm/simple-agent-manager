@@ -39,7 +39,7 @@ export async function ensureCandidatesForSource(
   sourceId: string,
   provider: CredentialProvider,
   offerings: ProviderInstanceOffering[],
-  options: { sourceGeneration?: number } = {}
+  options: { sourceGeneration?: number; catalogComplete?: boolean } = {}
 ): Promise<void> {
   const now = nextCapacityPoolTimestamp();
   const existingStatuses = await readExistingCandidateStatuses(db, poolId, sourceId);
@@ -139,14 +139,16 @@ export async function ensureCandidatesForSource(
     }
   }
 
-  await markMissingCandidatesForSource(
-    db,
-    poolId,
-    sourceId,
-    existingStatuses,
-    candidateIds,
-    options
-  );
+  if (options.catalogComplete !== false) {
+    await markMissingCandidatesForSource(
+      db,
+      poolId,
+      sourceId,
+      existingStatuses,
+      candidateIds,
+      options
+    );
+  }
 }
 
 async function upsertCandidateIfSourceGenerationCurrent(

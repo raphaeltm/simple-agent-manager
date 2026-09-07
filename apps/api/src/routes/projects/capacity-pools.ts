@@ -2,6 +2,7 @@ import type {
   CapacityPoolScope,
   DefaultCapacityPoolScopeSummary,
   ProjectDefaultCapacityPoolsResponse,
+  SafeCapacityPoolPlacementSettingsSummary,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -10,6 +11,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { hasProjectCapability, requireProjectCapability } from '../../middleware/project-auth';
+import { resolveSafeCapacityPoolPlacementSettingsSummary } from '../../services/capacity-pool-placement-settings';
 import { updateDefaultCapacityPool } from '../../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
@@ -173,6 +175,7 @@ async function buildDefaultPoolResponse(
     includeDetails: boolean;
     ensure: boolean;
     policyMutationSupported: boolean;
+    placementSettings: SafeCapacityPoolPlacementSettingsSummary;
     env: Env;
   }
 ): Promise<ProjectDefaultCapacityPoolsResponse> {
@@ -197,6 +200,7 @@ async function buildDefaultPoolResponse(
     precedence: PRECEDENCE,
     reconciledScopes: input.ensure ? reconciledScopes(input.includeInstallation) : [],
     policyMutationSupported: input.policyMutationSupported,
+    placementSettings: input.placementSettings,
   };
 }
 
@@ -218,6 +222,7 @@ capacityPoolRoutes.get('/:id/capacity-pools/defaults', async (c) => {
   const includeInstallation = auth.user.role === 'superadmin';
   const includeDetails = await hasProjectCapability(db, projectId, userId, 'secret:read');
   const policyMutationSupported = await hasProjectCapability(db, projectId, userId, 'secret:write');
+  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
   c.header('Cache-Control', 'private, no-store');
   return c.json(
     await buildDefaultPoolResponse(db, {
@@ -227,6 +232,7 @@ capacityPoolRoutes.get('/:id/capacity-pools/defaults', async (c) => {
       includeDetails,
       ensure: includeDetails && parseEnsureQuery(c.req.query('ensure')),
       policyMutationSupported,
+      placementSettings,
       env: c.env,
     })
   );
@@ -247,6 +253,7 @@ capacityPoolRoutes.post('/:id/capacity-pools/defaults/reconcile', async (c) => {
 
   await requireProjectCapability(db, projectId, userId, 'secret:read');
   const policyMutationSupported = await hasProjectCapability(db, projectId, userId, 'secret:write');
+  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
 
   c.header('Cache-Control', 'private, no-store');
   return c.json(
@@ -257,6 +264,7 @@ capacityPoolRoutes.post('/:id/capacity-pools/defaults/reconcile', async (c) => {
       includeDetails: true,
       ensure: true,
       policyMutationSupported,
+      placementSettings,
       env: c.env,
     })
   );
@@ -276,6 +284,7 @@ capacityPoolRoutes.patch('/:id/capacity-pools/defaults', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'secret:write');
+  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
 
   const update = await readDefaultCapacityPoolUpdateRequest(c);
   await readDefaultCapacityPoolSummaries(db, {
@@ -307,6 +316,7 @@ capacityPoolRoutes.patch('/:id/capacity-pools/defaults', async (c) => {
       includeDetails: true,
       ensure: false,
       policyMutationSupported: true,
+      placementSettings,
       env: c.env,
     })
   );
