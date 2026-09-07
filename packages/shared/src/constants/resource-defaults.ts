@@ -253,10 +253,14 @@ export function resolveResourceReservation(
   let winningSourceId = 'platform';
   let firstWinnerFound = false;
 
-  const recordLayerContribution = (
-    layer: ResolutionLayer,
-    req: { requirements: ResourceRequirements; provenance: ResourceRequirementProvenance }
-  ): void => {
+  for (const layer of layers) {
+    const req = validatedLayerWithLegacyDefaults(layer, {
+      mapping: legacyWorkloadMapping,
+      adapterVersion: compatibilityAdapterVersion,
+      diagnostics,
+    });
+    if (!req) continue;
+
     for (const field of RESOURCE_REQUIREMENT_FIELDS) {
       if (seen.has(field)) continue;
       const fieldValue = req.requirements[field];
@@ -271,20 +275,6 @@ export function resolveResourceReservation(
         }
       }
     }
-  };
-
-  for (const layer of layers) {
-    const explicit = validatedExplicitLayer(layer);
-    if (explicit) recordLayerContribution(layer, explicit);
-  }
-
-  for (const layer of layers) {
-    const legacy = validatedLegacyLayer(layer, {
-      mapping: legacyWorkloadMapping,
-      adapterVersion: compatibilityAdapterVersion,
-      diagnostics,
-    });
-    if (legacy) recordLayerContribution(layer, legacy);
   }
 
   // Fill remaining fields from platform defaults
@@ -317,25 +307,7 @@ export function resolveResourceReservation(
   };
 }
 
-function validatedExplicitLayer(
-  layer: ResolutionLayer
-): { requirements: ResourceRequirements; provenance: ResourceRequirementProvenance } | null {
-  const explicit = validateResourceRequirementsLayer(layer.source, layer.sourceId, layer.requirements);
-  if (!explicit) return null;
-  const provenance: ResourceRequirementProvenance = {};
-  let hasValue = false;
-
-  for (const field of RESOURCE_REQUIREMENT_FIELDS) {
-    const explicitValue = explicit[field];
-    if (explicitValue === undefined) continue;
-    provenance[field] = { source: layer.source, sourceId: layer.sourceId, value: explicitValue };
-    hasValue = true;
-  }
-
-  return hasValue ? { requirements: explicit, provenance } : null;
-}
-
-function validatedLegacyLayer(
+function validatedLayerWithLegacyDefaults(
   layer: ResolutionLayer,
   options: {
     mapping: Record<VMSize, Required<ResourceRequirements>>;
@@ -343,21 +315,34 @@ function validatedLegacyLayer(
     diagnostics: string[];
   }
 ): { requirements: ResourceRequirements; provenance: ResourceRequirementProvenance } | null {
+  const explicit = validateResourceRequirementsLayer(layer.source, layer.sourceId, layer.requirements);
   const provenance: ResourceRequirementProvenance = {};
   const merged: ResourceRequirements = {};
-  if (!layer.legacyVmSize) return null;
+  let hasValue = false;
 
-  const legacyDefaults = options.mapping[layer.legacyVmSize];
   for (const field of RESOURCE_REQUIREMENT_FIELDS) {
-    const legacyValue = legacyDefaults[field];
-    setResourceRequirementField(merged, field, legacyValue);
-    provenance[field] = legacyFieldProvenance(layer, legacyValue, options.adapterVersion);
+    const explicitValue = explicit?.[field];
+    if (explicitValue === undefined) continue;
+    setResourceRequirementField(merged, field, explicitValue);
+    provenance[field] = { source: layer.source, sourceId: layer.sourceId, value: explicitValue };
+    hasValue = true;
   }
-  options.diagnostics.push(
-    `${layer.source}:${layer.legacyVmSize}:mapped-by-${LEGACY_VM_SIZE_WORKLOAD_ADAPTER}-v${options.adapterVersion}`
-  );
 
-  return { requirements: merged, provenance };
+  if (layer.legacyVmSize) {
+    const legacyDefaults = options.mapping[layer.legacyVmSize];
+    for (const field of RESOURCE_REQUIREMENT_FIELDS) {
+      if (merged[field] !== undefined) continue;
+      const legacyValue = legacyDefaults[field];
+      setResourceRequirementField(merged, field, legacyValue);
+      provenance[field] = legacyFieldProvenance(layer, legacyValue, options.adapterVersion);
+      hasValue = true;
+    }
+    options.diagnostics.push(
+      `${layer.source}:${layer.legacyVmSize}:mapped-by-${LEGACY_VM_SIZE_WORKLOAD_ADAPTER}-v${options.adapterVersion}`
+    );
+  }
+
+  return hasValue ? { requirements: merged, provenance } : null;
 }
 
 function legacyFieldProvenance(

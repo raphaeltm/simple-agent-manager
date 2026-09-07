@@ -197,6 +197,27 @@ describe('resolveResourceReservation', () => {
     expect(result.fieldProvenance?.minMemoryGb?.compatibility).toBeUndefined();
   });
 
+  it('keeps higher-priority legacy fields authoritative over lower-layer modern fields', () => {
+    const result = resolveResourceReservation(
+      { skill: { minMemoryGb: 16 } },
+      { taskId: 'task-legacy', skillId: 'skill-modern' },
+      { legacyVmSizes: { task: 'small' } },
+    );
+
+    expect(result.memoryMb).toBe(
+      DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minMemoryGb * 1024,
+    );
+    expect(result.fieldProvenance?.minMemoryGb).toMatchObject({
+      source: 'task',
+      sourceId: 'task-legacy',
+      value: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minMemoryGb,
+      compatibility: {
+        adapter: 'legacy-vm-size-workload',
+        legacyVmSize: 'small',
+      },
+    });
+  });
+
   it('applies field precedence across task, skill, profile, project, user, and platform layers', () => {
     const result = resolveResourceReservation(
       {
