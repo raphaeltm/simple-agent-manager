@@ -780,6 +780,24 @@ describe('default capacity pool creation', () => {
     }).toEqual(firstCounts);
   });
 
+  it('bounds unscoped backfill work so repeated calls can resume safely', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    seedUserCredential({ id: 'user-2-hetzner', userId: 'user-2' });
+    seedUserCredential({ id: 'project-1-hetzner', projectId: 'project-1' });
+    seedUserCredential({ id: 'project-2-hetzner', projectId: 'project-2' });
+
+    const result = await backfillDefaultCapacityPoolsForExistingCredentials(db as never, {
+      includeInstallation: false,
+      scopeBatchSize: 1,
+    });
+
+    expect(result.usersEnsured).toBe(1);
+    expect(result.projectsEnsured).toBe(1);
+    expect(getCount('capacity_pools', "scope = 'user'")).toBe(1);
+    expect(getCount('capacity_pools', "scope = 'project'")).toBe(1);
+  });
+
   it('keeps one default pool per scope while allowing multiple credential-backed sources', async () => {
     const db = createDb();
     seedPlatformCredential({ id: 'platform-hetzner' });
@@ -1283,7 +1301,8 @@ describe('default capacity pool creation', () => {
       includeInstallation: false,
       offeringResolver: async () => offerings,
     });
-    expect(ensured.user).toBeNull();
+    expect(ensured.user?.effectiveState).toBe('configured-empty');
+    expect(ensured.user?.activeCandidateCount).toBe(0);
     const editorRead = await readDefaultCapacityPoolSummaries(db as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -2331,7 +2350,183 @@ describe('default capacity pool creation', () => {
     );
   });
 
-  it('keeps zero-active default pools visible only for editor reads', async () => {
+  it('preserves active membership when a catalog entry disappears and restores it when it returns', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const offering = liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: 'cx23',
+      displayName: 'CX23',
+    });
+
+    const initial = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [offering],
+    });
+    const candidate = initial.user?.candidates.find((row) => row.providerInstanceType === 'cx23');
+    expect(candidate?.status).toBe('active');
+
+    const missing = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [],
+    });
+    expect(missing.user?.effectiveState).toBe('catalog-unavailable');
+    expect(
+      getRows<{ status: string; catalog_availability: string; provider_instance_catalog_source: string | null }>(
+        "SELECT status, catalog_availability, provider_instance_catalog_source FROM capacity_pool_candidates WHERE provider_instance_type = 'cx23'"
+      )[0]
+    ).toMatchObject({
+      status: 'active',
+      catalog_availability: 'last-known-unavailable',
+      provider_instance_catalog_source: null,
+    });
+    const missingSelection = await resolveTaskStartCapacityPoolSelection(
+      db as never,
+      resolveTaskStartPlacement({
+        entryPoint: 'task-submit',
+        taskId: 'catalog-missing-task',
+        projectId: 'project-1',
+        userId: 'user-1',
+        project: {
+          id: 'project-1',
+          defaultProvider: 'hetzner',
+          defaultLocation: 'fsn1',
+          defaultVmSize: 'small',
+        },
+        credentialProjectPolicy: 'current-project-unless-inherited',
+        taskModeDefault: 'task',
+      }),
+      { ensure: false }
+    );
+    expect(missingSelection?.effectiveState).toBe('catalog-unavailable');
+    expect(missingSelection?.candidates).toHaveLength(0);
+
+    const returned = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [offering],
+    });
+    expect(returned.user?.effectiveState).toBe('configured-ready');
+    expect(
+      getRows<{ status: string; catalog_availability: string; provider_instance_catalog_source: string | null }>(
+        "SELECT status, catalog_availability, provider_instance_catalog_source FROM capacity_pool_candidates WHERE provider_instance_type = 'cx23'"
+      )[0]
+    ).toMatchObject({
+      status: 'active',
+      catalog_availability: 'available',
+      provider_instance_catalog_source: 'api',
+    });
+  });
+
+  it('keeps deliberately removed catalog entries removed when they disappear and return', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const offering = liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: 'cx23',
+      displayName: 'CX23',
+    });
+
+    const initial = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [offering],
+    });
+    const candidate = initial.user?.candidates.find((row) => row.providerInstanceType === 'cx23');
+    expect(candidate?.id).toBeTruthy();
+
+    await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      candidates: [{ id: candidate!.id, status: 'deleted' }],
+    });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [],
+    });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [offering],
+    });
+
+    expect(
+      getRows<{ status: string; catalog_availability: string }>(
+        "SELECT status, catalog_availability FROM capacity_pool_candidates WHERE provider_instance_type = 'cx23'"
+      )[0]
+    ).toEqual({ status: 'deleted', catalog_availability: 'available' });
+  });
+
+  it('normalizes hourly and monthly prices before balanced selection', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'expensive-hourly',
+          displayName: 'Expensive hourly',
+          priceMonthly: null,
+          priceHourly: 0.2,
+        }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cheap-monthly',
+          displayName: 'Cheap monthly',
+          priceMonthly: 10,
+          priceHourly: null,
+        }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'unknown-price',
+          displayName: 'Unknown price',
+          price: null,
+          priceMonthly: null,
+          priceHourly: null,
+          currency: null,
+        }),
+      ],
+    });
+    sqlite
+      ?.prepare(
+        "UPDATE capacity_pool_candidates SET priority = 0, status = 'active' WHERE pool_id LIKE 'cap-pool-default:user:%'"
+      )
+      .run();
+
+    const selection = await resolveTaskStartCapacityPoolSelection(
+      db as never,
+      resolveTaskStartPlacement({
+        entryPoint: 'task-submit',
+        taskId: 'price-normalization-task',
+        projectId: 'project-1',
+        userId: 'user-1',
+        project: {
+          id: 'project-1',
+          defaultProvider: 'hetzner',
+          defaultLocation: 'fsn1',
+          defaultVmSize: 'small',
+        },
+        credentialProjectPolicy: 'current-project-unless-inherited',
+        taskModeDefault: 'task',
+      }),
+      { ensure: false }
+    );
+
+    expect(selection?.candidates.map((candidate) => candidate.providerInstanceType)).toEqual([
+      'cheap-monthly',
+      'expensive-hourly',
+      'unknown-price',
+    ]);
+    expect(selection?.candidates[2]?.priceComparability).toBe('unknown');
+  });
+
+  it('keeps zero-active configured default pools authoritative for placement reads', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
 
@@ -2350,7 +2545,12 @@ describe('default capacity pool creation', () => {
     });
 
     expect(update.poolFound).toBe(true);
-    expect(update.summary?.pool).toMatchObject({ scope: 'user', status: 'disabled' });
+    expect(update.summary?.pool).toMatchObject({
+      scope: 'user',
+      status: 'active',
+      configurationState: 'configured-empty',
+    });
+    expect(update.summary?.effectiveState).toBe('configured-empty');
     expect(update.summary?.activeCandidateCount).toBe(0);
     expect(update.summary?.candidates).toHaveLength(candidates.length);
 
@@ -2358,14 +2558,18 @@ describe('default capacity pool creation', () => {
       userId: 'user-1',
       includeInstallation: false,
     });
-    expect(activeOnly.user).toBeNull();
+    expect(activeOnly.user?.effectiveState).toBe('configured-empty');
 
     const editorRead = await readDefaultCapacityPoolSummaries(db as never, {
       userId: 'user-1',
       includeInstallation: false,
       includeDisabled: true,
     });
-    expect(editorRead.user?.pool).toMatchObject({ scope: 'user', status: 'disabled' });
+    expect(editorRead.user?.pool).toMatchObject({
+      scope: 'user',
+      status: 'active',
+      configurationState: 'configured-empty',
+    });
     expect(editorRead.user?.activeCandidateCount).toBe(0);
     expect(editorRead.user?.candidates).toHaveLength(candidates.length);
 
@@ -2375,10 +2579,11 @@ describe('default capacity pool creation', () => {
       ensure: false,
       includeInstallation: false,
     });
-    expect(placementRead).toBeNull();
+    expect(placementRead?.pool.scope).toBe('user');
+    expect(placementRead?.effectiveState).toBe('configured-empty');
   });
 
-  it('disables pool availability when a backing credential is disabled', async () => {
+  it('marks pool sources disabled without widening when a backing credential is disabled', async () => {
     const db = createDb();
     seedPlatformCredential({ id: 'platform-hetzner' });
     seedUserCredential({ id: 'user-hetzner' });
@@ -2393,10 +2598,17 @@ describe('default capacity pool creation', () => {
       ensure: true,
     });
 
-    expect(effective?.pool.scope).toBe('installation');
+    expect(effective?.pool.scope).toBe('user');
+    expect(effective?.effectiveState).toBe('source-disabled');
     expect(
-      getRows<{ source_status: string; candidate_status: string; pool_status: string }>(`
-        SELECT src.status AS source_status, cand.status AS candidate_status, pool.status AS pool_status
+      getRows<{
+        source_status: string;
+        candidate_status: string;
+        pool_status: string;
+        configuration_state: string;
+      }>(`
+        SELECT src.status AS source_status, cand.status AS candidate_status,
+               pool.status AS pool_status, pool.configuration_state
         FROM capacity_pools pool
         JOIN capacity_pool_candidates cand ON cand.pool_id = pool.id
         JOIN capacity_sources src ON src.id = cand.capacity_source_id
@@ -2406,11 +2618,12 @@ describe('default capacity pool creation', () => {
     ).toEqual({
       source_status: 'disabled',
       candidate_status: 'active',
-      pool_status: 'disabled',
+      pool_status: 'active',
+      configuration_state: 'source-disabled',
     });
   });
 
-  it('disables an empty default pool after backing credential deletion cascades sources', async () => {
+  it('marks an empty default pool without widening after backing credential deletion cascades sources', async () => {
     const db = createDb();
     seedPlatformCredential({ id: 'platform-hetzner' });
     seedUserCredential({ id: 'user-hetzner' });
@@ -2428,12 +2641,13 @@ describe('default capacity pool creation', () => {
       ensure: true,
     });
 
-    expect(effective?.pool.scope).toBe('user');
+    expect(effective?.pool.scope).toBe('project');
+    expect(effective?.effectiveState).toBe('configured-empty');
     expect(getCount('capacity_sources', "credential_id = 'project-hetzner'")).toBe(0);
     expect(
-      getRows<{ status: string }>(
-        "SELECT status FROM capacity_pools WHERE scope = 'project' AND owner_project_id = 'project-1'"
+      getRows<{ status: string; configuration_state: string }>(
+        "SELECT status, configuration_state FROM capacity_pools WHERE scope = 'project' AND owner_project_id = 'project-1'"
       )[0]
-    ).toEqual({ status: 'disabled' });
+    ).toEqual({ status: 'active', configuration_state: 'configured-empty' });
   });
 });

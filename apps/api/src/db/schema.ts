@@ -2558,8 +2558,12 @@ export const capacityPools = sqliteTable(
     isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
     revision: integer('revision').notNull().default(1),
     status: text('status').notNull().default('active'),
+    configurationState: text('configuration_state').notNull().default('configured-ready'),
     strategy: text('strategy').notNull().default('balanced'),
     exhaustionPolicy: text('exhaustion_policy').notNull().default('queue'),
+    lastReconciledAt: text('last_reconciled_at'),
+    migrationVersion: text('migration_version'),
+    migrationState: text('migration_state').notNull().default('complete'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: text('created_at')
       .notNull()
@@ -2579,6 +2583,9 @@ export const capacityPools = sqliteTable(
       .on(table.ownerProjectId)
       .where(sql`scope = 'project' AND is_default = 1`),
     scopeStatusIdx: index('idx_capacity_pools_scope_status').on(table.scope, table.status),
+    configurationStateIdx: index('idx_capacity_pools_configuration_state').on(
+      table.configurationState
+    ),
   })
 );
 
@@ -2613,6 +2620,9 @@ export const capacityPoolCandidates = sqliteTable(
     providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     providerInstanceCatalogSource: text('provider_instance_catalog_source'),
     providerInstanceCatalogLastSeenAt: text('provider_instance_catalog_last_seen_at'),
+    catalogAvailability: text('catalog_availability').notNull().default('available'),
+    catalogUnavailableAt: text('catalog_unavailable_at'),
+    catalogReturnedAt: text('catalog_returned_at'),
     priority: integer('priority').notNull().default(0),
     candidateOrder: integer('candidate_order').notNull().default(0),
     status: text('status').notNull().default('active'),
@@ -2631,6 +2641,9 @@ export const capacityPoolCandidates = sqliteTable(
       table.candidateOrder
     ),
     sourceIdx: index('idx_capacity_pool_candidates_source').on(table.capacitySourceId),
+    catalogAvailabilityIdx: index('idx_capacity_pool_candidates_catalog_availability').on(
+      table.catalogAvailability
+    ),
   })
 );
 

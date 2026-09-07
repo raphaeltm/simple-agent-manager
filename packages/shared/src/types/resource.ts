@@ -22,6 +22,8 @@ export interface ResourceRequirements {
   maxCoTenants?: number;
 }
 
+export type ResourceRequirementField = keyof ResourceRequirements;
+
 // =============================================================================
 // Resource Requirements Source (provenance tracking)
 // =============================================================================
@@ -35,6 +37,21 @@ export type ResourceRequirementsSource =
   | 'project'
   | 'user'
   | 'platform';
+
+export interface ResourceRequirementFieldProvenance {
+  source: ResourceRequirementsSource;
+  sourceId: string;
+  value: number | boolean;
+  compatibility?: {
+    adapter: string;
+    version: number;
+    legacyVmSize: VMSize;
+  };
+}
+
+export type ResourceRequirementProvenance = Partial<
+  Record<ResourceRequirementField, ResourceRequirementFieldProvenance>
+>;
 
 // =============================================================================
 // Resolved Resource Reservation (scheduler-facing)
@@ -61,6 +78,10 @@ export interface ResolvedResourceReservation {
   sourceId: string;
   /** Schema version for forward compatibility. */
   version: number;
+  /** Per-field provenance, including compatibility translations where used. */
+  fieldProvenance?: ResourceRequirementProvenance;
+  /** Non-secret diagnostics for rollout/shadow comparison. */
+  diagnostics?: string[];
 }
 
 // =============================================================================
@@ -100,3 +121,5 @@ export interface ResourceResolutionInput {
   /** User-level default (future). */
   user?: ResourceRequirements;
 }
+
+export type LegacyVmSizeResolutionInput = Partial<Record<ResourceRequirementsSource, VMSize>>;

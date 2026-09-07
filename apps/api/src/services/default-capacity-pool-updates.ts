@@ -308,6 +308,7 @@ async function readCandidateStatuses(
     id: string;
     status: string;
     providerInstanceCatalogSource: string | null;
+    catalogAvailability: string;
   }[] = [];
   for (let offset = 0; offset < candidateIds.length; offset += READ_CANDIDATE_STATUS_CHUNK_SIZE) {
     const chunk = candidateIds.slice(offset, offset + READ_CANDIDATE_STATUS_CHUNK_SIZE);
@@ -317,6 +318,7 @@ async function readCandidateStatuses(
           id: schema.capacityPoolCandidates.id,
           status: schema.capacityPoolCandidates.status,
           providerInstanceCatalogSource: schema.capacityPoolCandidates.providerInstanceCatalogSource,
+          catalogAvailability: schema.capacityPoolCandidates.catalogAvailability,
         })
         .from(schema.capacityPoolCandidates)
         .where(
@@ -333,7 +335,9 @@ async function readCandidateStatuses(
       candidate.id,
       {
         status: candidate.status as CapacityPoolStatus,
-        currentlyAddable: candidate.providerInstanceCatalogSource !== null,
+        currentlyAddable:
+          candidate.catalogAvailability === 'available' &&
+          candidate.providerInstanceCatalogSource !== null,
       },
     ])
   );

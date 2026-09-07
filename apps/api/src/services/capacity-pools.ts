@@ -5,6 +5,7 @@ import type {
   CapacityPlacementSnapshot,
   CapacityPool as CapacityPoolDto,
   CapacityPoolCandidate as CapacityPoolCandidateDto,
+  CapacityPoolConfigurationState,
   CapacityPoolScope,
   CapacityPoolStatus,
   CapacityPoolStrategy,
@@ -16,6 +17,7 @@ import {
   isCapacityCredentialSource,
   isCapacityExhaustionPolicy,
   isCapacityPlacementCredentialSource,
+  isCapacityPoolConfigurationState,
   isCapacityPoolScope,
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
@@ -100,6 +102,11 @@ export function toCapacityPool(row: schema.CapacityPool): CapacityPoolDto {
       row.status,
       isCapacityPoolStatus
     ),
+    configurationState: expectPersistedValue<CapacityPoolConfigurationState>(
+      'capacity_pools.configuration_state',
+      row.configurationState,
+      isCapacityPoolConfigurationState
+    ),
     strategy: expectPersistedValue<CapacityPoolStrategy>(
       'capacity_pools.strategy',
       row.strategy,
@@ -110,6 +117,9 @@ export function toCapacityPool(row: schema.CapacityPool): CapacityPoolDto {
       row.exhaustionPolicy,
       isCapacityExhaustionPolicy
     ),
+    lastReconciledAt: row.lastReconciledAt,
+    migrationVersion: row.migrationVersion,
+    migrationState: row.migrationState,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -148,6 +158,9 @@ export function toCapacityPoolCandidate(
       isProviderInstanceCatalogSource
     ),
     providerInstanceCatalogLastSeenAt: row.providerInstanceCatalogLastSeenAt ?? null,
+    catalogAvailability: row.catalogAvailability as CapacityPoolCandidateDto['catalogAvailability'],
+    catalogUnavailableAt: row.catalogUnavailableAt,
+    catalogReturnedAt: row.catalogReturnedAt,
     priority: row.priority,
     candidateOrder: row.candidateOrder,
     status: expectPersistedValue<CapacityPoolStatus>(

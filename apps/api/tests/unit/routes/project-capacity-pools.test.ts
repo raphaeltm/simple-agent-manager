@@ -339,13 +339,15 @@ describe('project capacity pool routes', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('private, no-store');
     const body = await res.json();
-    expect(body.effectiveScope).toBe('user');
-    expect(body.effective.pool).toMatchObject({ scope: 'user', ownerUserId: 'user-1' });
+    expect(body.effectiveScope).toBe('project');
+    expect(body.effectiveState).toBe('configured-empty');
+    expect(body.effective.pool).toMatchObject({ scope: 'project', status: 'active' });
     expect(body.defaults.find((item: { scope: string }) => item.scope === 'project')).toMatchObject(
       {
         visibility: 'visible',
         summary: {
-          pool: { scope: 'project', status: 'disabled' },
+          pool: { scope: 'project', status: 'active', configurationState: 'configured-empty' },
+          effectiveState: 'configured-empty',
           activeCandidateCount: 0,
           candidates: expect.arrayContaining([
             expect.objectContaining({ id: projectDefault.candidates[0].id, status: 'deleted' }),

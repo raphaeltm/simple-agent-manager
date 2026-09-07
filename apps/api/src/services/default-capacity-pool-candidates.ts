@@ -22,7 +22,7 @@ const DEFAULT_MACHINE_CLASS = 'shared-vm';
 const ACTIVE_STATUS = 'active' satisfies CapacityPoolStatus;
 const DISABLED_STATUS = 'disabled' satisfies CapacityPoolStatus;
 const DELETED_STATUS = 'deleted' satisfies CapacityPoolStatus;
-const CANDIDATE_INSERT_BIND_COUNT = 26;
+const CANDIDATE_INSERT_BIND_COUNT = 29;
 const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
 const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
   1,
@@ -80,6 +80,9 @@ export async function ensureCandidatesForSource(
       machineClass: DEFAULT_MACHINE_CLASS,
       machineSize: legacyVmSize,
       ...providerInstanceOfferingDbValues(offering),
+      catalogAvailability: 'available',
+      catalogUnavailableAt: null,
+      catalogReturnedAt: now,
       priority: candidateOrder,
       candidateOrder,
       status: initialStatus,
@@ -115,6 +118,8 @@ export async function ensureCandidatesForSource(
           providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
           providerInstanceCatalogSource: sql`excluded.provider_instance_catalog_source`,
           providerInstanceCatalogLastSeenAt: sql`excluded.provider_instance_catalog_last_seen_at`,
+          catalogAvailability: 'available',
+          catalogReturnedAt: now,
           updatedAt: now,
         },
       });
@@ -220,7 +225,7 @@ async function markMissingCandidatesForSource(
   const missingCandidateIds = [...existingStatuses.keys()].filter(
     (id) => !nextCandidateIds.has(id)
   );
-  const fixedBindCount = 5; // status/update metadata plus pool/source/status predicates
+  const fixedBindCount = 4; // update metadata plus pool/source predicates
   const chunkSize = Math.max(1, D1_MAX_BOUND_PARAMETERS - fixedBindCount);
 
   for (let offset = 0; offset < missingCandidateIds.length; offset += chunkSize) {
@@ -230,6 +235,8 @@ async function markMissingCandidatesForSource(
       .set({
         providerInstanceCatalogSource: null,
         providerInstanceCatalogLastSeenAt: null,
+        catalogAvailability: 'last-known-unavailable',
+        catalogUnavailableAt: now,
         updatedAt: now,
       })
       .where(
@@ -240,20 +247,5 @@ async function markMissingCandidatesForSource(
         )
       );
 
-    const staleActiveCandidateIds = chunk.filter(
-      (id) => existingStatuses.get(id) === ACTIVE_STATUS
-    );
-    if (staleActiveCandidateIds.length === 0) continue;
-    await db
-      .update(schema.capacityPoolCandidates)
-      .set({ status: DISABLED_STATUS, updatedAt: now })
-      .where(
-        and(
-          eq(schema.capacityPoolCandidates.poolId, poolId),
-          eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
-          eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS),
-          inArray(schema.capacityPoolCandidates.id, staleActiveCandidateIds)
-        )
-      );
   }
 }

@@ -22,6 +22,9 @@ export const candidateCatalogMetadataMigrationSql = readDbMigration(
 export const capacitySourceExternalCredentialsMigrationSql = readDbMigration(
   '0129_capacity_source_external_credentials.sql'
 );
+export const capacityPoolPolicyContractMigrationSql = readDbMigration(
+  '0144_capacity_pool_policy_contract.sql'
+);
 
 export function applyCapacityPoolSchemaMigrations(database: SqliteMigrationTarget): void {
   database.exec(migrationSql);
@@ -29,4 +32,5 @@ export function applyCapacityPoolSchemaMigrations(database: SqliteMigrationTarge
   database.exec(concreteOfferingMigrationSql);
   database.exec(candidateCatalogMetadataMigrationSql);
   database.exec(capacitySourceExternalCredentialsMigrationSql);
+  database.exec(capacityPoolPolicyContractMigrationSql);
 }

@@ -634,7 +634,10 @@ export {
 // Resource Defaults & Resolver
 export type { VmCapacity } from './resource-defaults';
 export {
+  DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
   DEFAULT_VM_CAPACITY,
+  LEGACY_VM_SIZE_WORKLOAD_ADAPTER,
+  LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
   PLATFORM_RESOURCE_DEFAULTS,
   PROVIDER_VM_CAPACITY,
   resolveResourceReservation,
