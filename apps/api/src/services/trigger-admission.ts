@@ -10,6 +10,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
+import { resolveTriggerExecutionUserId } from './trigger-execution-principal';
 import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 import { submitTriggeredTask } from './trigger-submit';
 
@@ -18,12 +19,6 @@ export type TriggerTaskSubmitter = typeof submitTriggeredTask;
 type AdmissionSkipReason = Extract<TriggerSkipReason, 'still_running' | 'concurrent_limit'>;
 const TERMINAL_TASK_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
 const TERMINAL_TASK_STATUS_SQL = TASK_TERMINAL_STATUSES.map((status) => `'${status}'`).join(', ');
-
-function resolveTriggerExecutionUserId(
-  trigger: Pick<schema.TriggerRow, 'executionUserId' | 'userId'>
-): string {
-  return trigger.executionUserId ?? trigger.userId;
-}
 
 export type TriggerAdmissionResult =
   | {
