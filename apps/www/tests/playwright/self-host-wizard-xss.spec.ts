@@ -1,4 +1,5 @@
 import { expect, test, type Page } from './fixtures';
+import { expectNoHorizontalOverflow } from './self-host-overflow-helpers';
 
 async function openWizard(page: Page) {
   await page.goto('/self-host/');
@@ -60,12 +61,6 @@ async function expectNoXssExecution(page: Page) {
     () => (window as unknown as Record<string, unknown>).__xss_fired__
   );
   expect(xssFired).toBeFalsy();
-}
-
-async function expectNoHorizontalOverflow(page: Page) {
-  await expect
-    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-    .toBe(true);
 }
 
 const XSS_PAYLOADS = [

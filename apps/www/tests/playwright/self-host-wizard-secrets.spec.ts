@@ -1,4 +1,5 @@
 import { expect, test, type Page } from './fixtures';
+import { expectNoHorizontalOverflow } from './self-host-overflow-helpers';
 
 const STORAGE_KEY = 'sam-self-host-wizard-v1';
 const LEGACY_WEBHOOK_CANARY = 'legacy-webhook-secret-canary-0123456789abcdef';
@@ -21,12 +22,6 @@ async function expectStorageAbsent(page: Page, values: string[]) {
   const parsed = raw ? JSON.parse(raw) : {};
   expect(parsed).not.toHaveProperty('webhookSecret');
   expect(parsed).not.toHaveProperty('passphrase');
-}
-
-async function expectNoHorizontalOverflow(page: Page) {
-  await expect
-    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-    .toBe(true);
 }
 
 async function openWizard(page: Page) {
