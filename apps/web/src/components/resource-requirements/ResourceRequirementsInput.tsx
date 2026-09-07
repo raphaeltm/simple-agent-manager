@@ -2,6 +2,7 @@ import type { FC } from 'react';
 
 import type { ResourceRequirementsFormState, ResourceValidationErrors } from './resource-requirements-utils';
 import {
+  clearStoredFieldError,
   EMPTY_RESOURCE_STATE,
   formatLegacyVmSize,
   hasAnyResourceValue,
@@ -48,9 +49,12 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
     onClearLegacy?.();
   };
 
-  const update = (patch: Partial<ResourceRequirementsFormState>) => {
-    onChange({ ...value, ...patch, storedJsonError: undefined });
+  const update = (patch: Partial<ResourceRequirementsFormState>, editedField?: string) => {
+    const fieldClear = editedField ? clearStoredFieldError(value, editedField) : {};
+    onChange({ ...value, ...fieldClear, ...patch });
   };
+
+  const hasInvalidRaw = value._rawInvalidFields && Object.keys(value._rawInvalidFields).length > 0;
 
   if (compact) {
     return (
@@ -58,6 +62,11 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
         {value.storedJsonError && (
           <div role="alert" className="rounded-sm bg-danger-tint px-2 py-1 text-[10px] text-danger">
             {value.storedJsonError}
+          </div>
+        )}
+        {hasInvalidRaw && !value.storedJsonError && (
+          <div role="alert" className="rounded-sm bg-danger-tint px-2 py-1 text-[10px] text-danger">
+            Invalid stored fields: {Object.keys(value._rawInvalidFields!).join(', ')}. Clear to fix.
           </div>
         )}
         <div className="flex flex-wrap items-end gap-2">
@@ -68,7 +77,7 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
               min={0}
               step="any"
               value={value.minVcpu}
-              onChange={(e) => update({ minVcpu: e.target.value })}
+              onChange={(e) => update({ minVcpu: e.target.value }, 'minVcpu')}
               placeholder="—"
               disabled={disabled}
               className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minVcpu)} w-[68px]`}
@@ -83,7 +92,7 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
               min={0}
               step="any"
               value={value.minMemoryGb}
-              onChange={(e) => update({ minMemoryGb: e.target.value })}
+              onChange={(e) => update({ minMemoryGb: e.target.value }, 'minMemoryGb')}
               placeholder="—"
               disabled={disabled}
               className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minMemoryGb)} w-[68px]`}
@@ -99,7 +108,7 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
                 min={0}
                 step="any"
                 value={value.minDiskGb}
-                onChange={(e) => update({ minDiskGb: e.target.value })}
+                onChange={(e) => update({ minDiskGb: e.target.value }, 'minDiskGb')}
                 placeholder="—"
                 disabled={disabled}
                 className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minDiskGb)} w-[68px]`}
@@ -117,11 +126,11 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
               }}
               onChange={() => {
                 if (value.exclusiveNode === undefined) {
-                  update({ exclusiveNode: true });
+                  update({ exclusiveNode: true }, 'exclusiveNode');
                 } else if (value.exclusiveNode === true) {
-                  update({ exclusiveNode: false, maxCoTenants: '' });
+                  update({ exclusiveNode: false }, 'exclusiveNode');
                 } else {
-                  update({ exclusiveNode: undefined });
+                  update({ exclusiveNode: undefined }, 'exclusiveNode');
                 }
               }}
               disabled={disabled}
@@ -165,6 +174,11 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
           {value.storedJsonError}
         </div>
       )}
+      {hasInvalidRaw && !value.storedJsonError && (
+        <div role="alert" className="rounded-sm bg-danger-tint px-2.5 py-1.5 text-xs text-danger">
+          Invalid stored fields: {Object.keys(value._rawInvalidFields!).join(', ')}. Clear to fix.
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <label className="grid gap-0.5">
@@ -205,7 +219,7 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
               min={0}
               step="any"
               value={value.minDiskGb}
-              onChange={(e) => update({ minDiskGb: e.target.value })}
+              onChange={(e) => update({ minDiskGb: e.target.value }, 'minDiskGb')}
               placeholder="Auto"
               disabled={disabled}
               className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minDiskGb)}`}

@@ -10,6 +10,7 @@ import { ProjectChatComposer } from '../../components/project-chat/ProjectChatCo
 import {
   EMPTY_RESOURCE_STATE,
   hasAnyResourceValue,
+  hasValidationErrors,
   type ResourceRequirementsFormState,
   ResourceRequirementsInput,
   type ResourceValidationErrors,
@@ -109,6 +110,8 @@ type ChatInputProps = Readonly<{
   onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<void>;
   taskResourceReqs: ResourceRequirementsFormState;
   onTaskResourceReqsChange: (next: ResourceRequirementsFormState) => void;
+  taskResourceErrors: ResourceValidationErrors;
+  onTaskResourceErrorsClear: () => void;
   profileWizard: ProfileWizardState;
   onOpenProfileWizard: () => void;
   onCloseProfileWizard: () => void;
@@ -196,6 +199,8 @@ export function ChatInput({
   onUpdateProfile,
   taskResourceReqs,
   onTaskResourceReqsChange,
+  taskResourceErrors,
+  onTaskResourceErrorsClear,
   profileWizard,
   onOpenProfileWizard,
   onCloseProfileWizard,
@@ -212,8 +217,8 @@ export function ChatInput({
   const isMobile = useIsMobile();
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [resourceOverrideOpen, setResourceOverrideOpen] = useState(false);
-  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
   const hasTaskResources = hasAnyResourceValue(taskResourceReqs);
+  const hasResourceErrors = hasValidationErrors(taskResourceErrors);
 
   const selectedProfile = selectedProfileId
     ? agentProfiles.find((p) => p.id === selectedProfileId) ?? null
@@ -493,14 +498,14 @@ export function ChatInput({
         </div>
       )}
 
-      {resourceOverrideOpen && !profileWizard.open && (
+      {(resourceOverrideOpen || hasResourceErrors) && !profileWizard.open && (
         <div className="mb-2 rounded-md border border-border-default bg-surface px-3 py-2">
           <ResourceRequirementsInput
             value={taskResourceReqs}
-            onChange={(next) => { onTaskResourceReqsChange(next); setResourceErrors({}); }}
+            onChange={(next) => { onTaskResourceReqsChange(next); onTaskResourceErrorsClear(); }}
             disabled={submitting}
             inheritLabel="profile/project default"
-            errors={resourceErrors}
+            errors={taskResourceErrors}
             compact={isMobile}
           />
           <p className="m-0 mt-1 text-[10px] text-fg-muted">Override resources for this task only. Leave blank to inherit.</p>

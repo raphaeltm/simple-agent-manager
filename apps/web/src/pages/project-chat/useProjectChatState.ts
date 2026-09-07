@@ -19,8 +19,11 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 
 import {
   EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
+  hasAnyResourceValue,
+  hasValidationErrors,
   serializeResourceRequirements,
   toResourceRequirements,
+  validateResourceState,
 } from '../../components/resource-requirements';
 import { useAgentCatalog } from '../../hooks/useAgentCatalog';
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
@@ -233,6 +236,9 @@ export function useProjectChatState() {
   const [taskResourceReqs, setTaskResourceReqs] = useState<
     import('../../components/resource-requirements').ResourceRequirementsFormState
   >({ ...EMPTY_RESOURCE_STATE_IMPORT });
+  const [taskResourceErrors, setTaskResourceErrors] = useState<
+    import('../../components/resource-requirements').ResourceValidationErrors
+  >({});
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
@@ -672,6 +678,19 @@ export function useProjectChatState() {
       return;
     }
     setSubmitError(null);
+
+    // Fix 4: validate resource overrides before dispatch and surface per-field errors
+    const hasResources = hasAnyResourceValue(taskResourceReqs);
+    if (hasResources) {
+      const resErrors = validateResourceState(taskResourceReqs);
+      if (hasValidationErrors(resErrors)) {
+        setTaskResourceErrors(resErrors);
+        setSubmitError('Fix resource requirement errors before sending');
+        return;
+      }
+    }
+    setTaskResourceErrors({});
+
     setSubmitting(true);
     try {
       const submitProfileId = await resolveProfileIdForSubmit();
@@ -685,7 +704,10 @@ export function useProjectChatState() {
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
       const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
       const requiresTaskSubmission = attachmentRefs.length > 0 || executeIdeaIdRef.current !== null;
-      const useInstantSession = selectedRuntime === 'cf-container' && !requiresTaskSubmission;
+      // Fix 2: when task has explicit resource overrides, route through submitTask
+      // so the backend can honor them; Instant cannot carry resource requirements.
+      const useInstantSession =
+        selectedRuntime === 'cf-container' && !requiresTaskSubmission && !hasResources;
 
       if (useInstantSession) {
         const result = await startInstantChatSession(projectId, {
@@ -698,6 +720,7 @@ export function useProjectChatState() {
         setMessage('');
         setPendingDerived(null);
         attachments.clearAttachments();
+        setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
         newChatIntentRef.current = false;
         navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
         loadSessions().catch(() => undefined);
@@ -726,6 +749,8 @@ export function useProjectChatState() {
       setMessage('');
       setPendingDerived(null);
       attachments.clearAttachments();
+      // Fix 3: reset per-task resource overrides after successful submit
+      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
       setProvisioning({
         taskId: result.taskId,
         sessionId: result.sessionId,
@@ -769,6 +794,7 @@ export function useProjectChatState() {
     setMessage('');
     setSubmitError(null);
     setProvisioning(null);
+    setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
   }, [navigate, projectId]);
 
   const handleSelect = useCallback(
@@ -1014,6 +1040,8 @@ export function useProjectChatState() {
     handleTaskModeChange,
     taskResourceReqs,
     setTaskResourceReqs,
+    taskResourceErrors,
+    setTaskResourceErrors,
     ...attachments,
     provisioning,
     bootLogs,

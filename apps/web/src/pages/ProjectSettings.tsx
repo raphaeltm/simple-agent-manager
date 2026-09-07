@@ -5,7 +5,7 @@ import {
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 import { Button, Tabs } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
@@ -321,18 +321,26 @@ export function ProjectSettingsInfrastructure() {
     project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
   );
   const [savingWorkspaceTimeout, setSavingWorkspaceTimeout] = useState(false);
+  const resourceDirtyRef = useRef(false);
+  const lastProjectIdRef = useRef<string | null>(null);
 
   const legacyVmSize = project?.defaultVmSize ?? null;
 
   useEffect(() => {
-    if (project) {
+    if (!project) return;
+    const isProjectSwitch = lastProjectIdRef.current !== project.id;
+    lastProjectIdRef.current = project.id;
+    // Always sync timeout (it has its own save button, no dirty tracking needed)
+    setWorkspaceIdleTimeoutMs(
+      project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
+    );
+    // Only reset resource draft on project switch or when not dirty
+    if (isProjectSwitch || !resourceDirtyRef.current) {
       setResourceReqs(
         deserializeResourceRequirements(project.resourceRequirementsJson)
       );
-      setWorkspaceIdleTimeoutMs(
-        project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
-      );
       setLegacyCleared(false);
+      resourceDirtyRef.current = false;
     }
   }, [project]);
 
@@ -350,6 +358,7 @@ export function ProjectSettingsInfrastructure() {
         defaultVmSize: legacyCleared ? null : (legacyVmSize ?? undefined),
         resourceRequirementsJson: json,
       });
+      resourceDirtyRef.current = false;
       await reload();
       toast.success('Default resource requirements saved');
     } catch (err) {
@@ -386,8 +395,8 @@ export function ProjectSettingsInfrastructure() {
         </div>
         <ResourceRequirementsInput
           value={resourceReqs}
-          onChange={(next) => { setResourceReqs(next); setResourceErrors({}); }}
-          onClearLegacy={() => setLegacyCleared(true)}
+          onChange={(next) => { setResourceReqs(next); setResourceErrors({}); resourceDirtyRef.current = true; }}
+          onClearLegacy={() => { setLegacyCleared(true); resourceDirtyRef.current = true; }}
           disabled={savingResources}
           legacyVmSize={legacyCleared ? null : legacyVmSize}
           inheritLabel="platform default"

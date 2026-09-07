@@ -453,18 +453,20 @@ describe('per-task chat payload carries overrides', () => {
 });
 
 describe('malformed-type stored JSON (canonical validation on deserialize)', () => {
-  it('wrong-typed minMemoryGb with valid minVcpu flags storedJsonError and projects raw value', () => {
+  it('wrong-typed minMemoryGb with valid minVcpu flags per-field error and preserves raw', () => {
     const json = JSON.stringify({ minMemoryGb: 'oops', minVcpu: 2 });
     const result = deserializeResourceRequirements(json);
-    expect(result.storedJsonError).toBeTruthy();
+    expect(result.storedFieldErrors?.minMemoryGb).toBeTruthy();
+    expect(result._rawInvalidFields?.minMemoryGb).toBe('oops');
     expect(result.minVcpu).toBe('2');
-    expect(result.minMemoryGb).toBe('oops');
+    expect(result.minMemoryGb).toBe('');
   });
 
-  it('exclusiveNode string "false" flags storedJsonError instead of silently becoming undefined', () => {
+  it('exclusiveNode string "false" flags per-field error instead of silently becoming undefined', () => {
     const json = JSON.stringify({ exclusiveNode: 'false' });
     const result = deserializeResourceRequirements(json);
-    expect(result.storedJsonError).toBeTruthy();
+    expect(result.storedFieldErrors?.exclusiveNode).toBeTruthy();
+    expect(result._rawInvalidFields?.exclusiveNode).toBe('false');
     expect(result.exclusiveNode).toBeUndefined();
   });
 
@@ -480,6 +482,32 @@ describe('malformed-type stored JSON (canonical validation on deserialize)', () 
     const json = JSON.stringify({ minMemoryGb: 'oops', minVcpu: 2 });
     const result = deserializeResourceRequirements(json);
     expect(() => serializeResourceRequirements(result)).toThrow();
+  });
+
+  it('editing valid field does NOT clear invalid field error on another field', () => {
+    const json = JSON.stringify({ minMemoryGb: 'oops', minVcpu: 2 });
+    const result = deserializeResourceRequirements(json);
+    const edited = { ...result, minVcpu: '3' };
+    expect(edited._rawInvalidFields?.minMemoryGb).toBe('oops');
+    expect(edited.storedFieldErrors?.minMemoryGb).toBeTruthy();
+    expect(() => serializeResourceRequirements(edited)).toThrow();
+  });
+
+  it('unknown stored fields are preserved through round-trip', () => {
+    const json = JSON.stringify({ minVcpu: 2, futureField: 'hello' });
+    const result = deserializeResourceRequirements(json);
+    expect(result._opaqueFields).toEqual({ futureField: 'hello' });
+    expect(result.minVcpu).toBe('2');
+    const serialized = serializeResourceRequirements(result);
+    expect(JSON.parse(serialized!)).toEqual({ futureField: 'hello', minVcpu: 2 });
+  });
+
+  it('null-typed numeric field is tracked as raw invalid', () => {
+    const json = JSON.stringify({ minMemoryGb: null, minVcpu: 2 });
+    const result = deserializeResourceRequirements(json);
+    expect(result._rawInvalidFields?.minMemoryGb).toBeNull();
+    expect(result.storedFieldErrors?.minMemoryGb).toBeTruthy();
+    expect(result.minMemoryGb).toBe('');
   });
 });
 
