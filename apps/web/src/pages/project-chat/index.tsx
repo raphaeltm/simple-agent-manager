@@ -474,10 +474,6 @@ export function ProjectChat() {
               selectedSkillId={state.selectedSkillId}
               onSkillChange={state.setSelectedSkillId}
               onUpdateProfile={state.handleUpdateProfile}
-              providerCatalogs={state.providerCatalogs}
-              projectDefaultProvider={state.project?.defaultProvider}
-              projectDefaultLocation={state.project?.defaultLocation}
-              hasUserCloudCredentials={state.hasUserCloudCredentials}
               profileWizard={state.profileWizard}
               onOpenProfileWizard={state.openProfileWizard}
               onCloseProfileWizard={state.closeProfileWizard}
