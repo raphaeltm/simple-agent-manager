@@ -240,6 +240,16 @@ export function useProjectChatState() {
     import('../../components/resource-requirements').ResourceValidationErrors
   >({});
 
+  // Reset per-task resource overrides and errors on project switch
+  const prevProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    if (prevProjectIdRef.current !== projectId) {
+      prevProjectIdRef.current = projectId;
+      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
+      setTaskResourceErrors({});
+    }
+  }, [projectId]);
+
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
 
@@ -795,6 +805,7 @@ export function useProjectChatState() {
     setSubmitError(null);
     setProvisioning(null);
     setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
+    setTaskResourceErrors({});
   }, [navigate, projectId]);
 
   const handleSelect = useCallback(
