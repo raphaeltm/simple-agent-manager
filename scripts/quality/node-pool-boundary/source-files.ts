@@ -103,6 +103,21 @@ export function enclosingFunctionName(node: ts.Node): string {
     ) {
       return current.parent.name.text;
     }
+    // Hono route handlers are anonymous arrows registered on a router. Name them
+    // by their method + path so each registration is separately ownable.
+    if (
+      (ts.isFunctionExpression(current) || ts.isArrowFunction(current)) &&
+      current.parent &&
+      ts.isCallExpression(current.parent) &&
+      ts.isPropertyAccessExpression(current.parent.expression)
+    ) {
+      const method = current.parent.expression.name.text;
+      const [firstArgument] = current.parent.arguments;
+      if (firstArgument && ts.isStringLiteralLike(firstArgument)) {
+        return `${method} ${firstArgument.text}`;
+      }
+      return method;
+    }
     current = current.parent;
   }
   return '<module>';

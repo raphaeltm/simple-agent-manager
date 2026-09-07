@@ -2,6 +2,7 @@ import ts from 'typescript';
 
 import {
   type BoundaryViolation,
+  enclosingFunctionName,
   parseSourceFile,
   pathStartsWithAny,
   positionOf,
@@ -94,6 +95,51 @@ const LEGACY_AUTHORITY_CLASSIFIED_PATHS = new Set([
   'apps/api/src/services/instant-session.ts',
 ]);
 
+/**
+ * Narrow, reviewed exceptions: functions that validate a DEPRECATED legacy-size
+ * request field against the legacy vocabulary. Keeping the old API/MCP/CLI
+ * fields accepting `small|medium|large` is a required compatibility contract, so
+ * validating them is transport, not placement authority.
+ *
+ * The exception is scoped to comparison classifications only. A catalog lookup,
+ * a legacy-authority call or a plain authority-scope read inside the same
+ * function is still reported. Adding an entry requires editing this file, and
+ * every entry is paired with a discriminating test.
+ */
+export interface ReviewedLegacyValidator {
+  filePath: string;
+  owner: string;
+  reason: string;
+}
+
+export const REVIEWED_LEGACY_REQUEST_VALIDATORS: readonly ReviewedLegacyValidator[] = [
+  {
+    filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts',
+    owner: 'dispatchTask',
+    reason: 'validates the deprecated dispatch_task vmSize argument before translation',
+  },
+  {
+    filePath: 'apps/api/src/routes/mcp/dispatch-tool-params.ts',
+    owner: 'parseDispatchTaskParams',
+    reason: 'validates the deprecated MCP dispatch vmSize parameter',
+  },
+  {
+    filePath: 'apps/api/src/routes/mcp/trigger-create-tool.ts',
+    owner: 'handleCreateTrigger',
+    reason: 'validates the deprecated trigger vmSizeOverride parameter',
+  },
+  {
+    filePath: 'apps/api/src/routes/mcp/trigger-tools.ts',
+    owner: 'handleUpdateTrigger',
+    reason: 'validates the deprecated trigger vmSizeOverride parameter',
+  },
+  {
+    filePath: 'apps/api/src/routes/projects/crud.ts',
+    owner: 'patch /:id',
+    reason: 'validates the deprecated project defaultVmSize body field',
+  },
+] as const;
+
 export type LegacyReadClassification =
   | 'authority-lookup'
   | 'authority-comparison'
@@ -103,6 +149,7 @@ export type LegacyReadClassification =
   | 'legacy-propagation'
   | 'metadata-property'
   | 'adapter-guard'
+  | 'adapter-validation'
   | 'plain-read';
 
 const AUTHORITY_CLASSIFICATIONS = new Set<LegacyReadClassification>([
@@ -120,6 +167,7 @@ const CLASSIFICATION_REASON: Record<LegacyReadClassification, string> = {
   'legacy-propagation': '',
   'metadata-property': '',
   'adapter-guard': '',
+  'adapter-validation': '',
   'plain-read': 'reads a legacy VM size in placement/provider/metering authority scope',
 };
 
@@ -136,6 +184,10 @@ const COMPARISON_OPERATORS = new Set<ts.SyntaxKind>([
 ]);
 
 const MEMBERSHIP_METHODS = new Set(['includes', 'indexOf', 'has', 'lastIndexOf']);
+const PRESENCE_KEYWORDS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.UndefinedKeyword,
+  ts.SyntaxKind.NullKeyword,
+]);
 const PERSISTED_TRANSPORT_CALLS = new Set(['bind', 'values', 'set', 'stringify']);
 
 /** Legacy size property/identifier names, excluding `*Source` provenance labels. */
@@ -146,9 +198,10 @@ export function isLegacySizeName(name: string): boolean {
     lower.includes('vmsize') ||
     lower.includes('vm_size') ||
     lower === 'machinesize' ||
+    // `serverType` is deliberately absent: it names a persisted column and the
+    // observed-hardware provenance record, not legacy VM-tier authority.
     lower === 'legacysize' ||
-    lower === 'deprecatedsize' ||
-    lower === 'servertype'
+    lower === 'deprecatedsize'
   );
 }
 
@@ -171,6 +224,12 @@ export function isLegacyAuthorityScope(filePath: string): boolean {
   if (pathStartsWithAny(filePath, LEGACY_AUTHORITY_SCOPE_DIRECTORIES)) return true;
   if (!pathStartsWithAny(filePath, LEGACY_AUTHORITY_FAMILY_ROOTS)) return false;
   return fileNameTokens(filePath).some((token) => LEGACY_AUTHORITY_FAMILY_TOKENS.has(token));
+}
+
+export function isReviewedLegacyValidator(filePath: string, owner: string): boolean {
+  return REVIEWED_LEGACY_REQUEST_VALIDATORS.some(
+    (entry) => entry.filePath === filePath && entry.owner === owner
+  );
 }
 
 function fileNameTokens(filePath: string): string[] {
@@ -231,9 +290,13 @@ function scanLegacyAuthorityFile(file: SourceFileInput): BoundaryViolation[] {
 
     if (isLegacySizeValueExpression(node, bindings)) {
       const classification = classifyLegacyRead(node, bindings);
+      const reviewed =
+        classification === 'authority-comparison' &&
+        isReviewedLegacyValidator(file.filePath, enclosingFunctionName(node));
       const isViolation =
-        AUTHORITY_CLASSIFICATIONS.has(classification) ||
-        (classification === 'plain-read' && inScope);
+        !reviewed &&
+        (AUTHORITY_CLASSIFICATIONS.has(classification) ||
+          (classification === 'plain-read' && inScope));
       if (isViolation) record(node, CLASSIFICATION_REASON[classification]);
     }
 
@@ -352,20 +415,24 @@ export function classifyLegacyRead(
 ): LegacyReadClassification {
   if (isInTypePosition(node)) return 'type-position';
 
+  // A write target is not a read. `state.config.vmSize = x` moves a value into a
+  // legacy field, which is propagation, not authority.
+  if (
+    node.parent &&
+    ts.isBinaryExpression(node.parent) &&
+    node.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    node.parent.left === node
+  ) {
+    return 'legacy-propagation';
+  }
+
   let child: ts.Node = node;
   let parent: ts.Node | undefined = node.parent;
 
-  // Step through value-preserving wrappers so `(x.vmSize as VMSize)` and
-  // `x.vmSize ?? y` classify by the sink that actually consumes the value.
-  while (
-    parent &&
-    (ts.isParenthesizedExpression(parent) ||
-      ts.isAsExpression(parent) ||
-      ts.isNonNullExpression(parent) ||
-      ts.isSatisfiesExpression(parent) ||
-      (ts.isBinaryExpression(parent) &&
-        parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken))
-  ) {
+  // Step through value-preserving wrappers so `(x.vmSize as VMSize)`,
+  // `x.vmSize ?? y`, `x.vmSize || DEFAULT` and `x.vmSize?.trim()` classify by the
+  // sink that actually consumes the value.
+  while (parent && isValuePreservingWrapper(child, parent)) {
     child = parent;
     parent = parent.parent;
   }
@@ -377,6 +444,10 @@ export function classifyLegacyRead(
   }
 
   if (ts.isBinaryExpression(parent) && COMPARISON_OPERATORS.has(parent.operatorToken.kind)) {
+    // `x !== undefined` / `x === null` tests PRESENCE of a deprecated field, it
+    // does not compare sizes.
+    const other = parent.left === child ? parent.right : parent.left;
+    if (isPresenceOperand(other)) return 'adapter-guard';
     return 'authority-comparison';
   }
 
@@ -432,9 +503,45 @@ export function classifyLegacyRead(
   return 'plain-read';
 }
 
+function isValuePreservingWrapper(child: ts.Node, parent: ts.Node): boolean {
+  if (
+    ts.isParenthesizedExpression(parent) ||
+    ts.isAsExpression(parent) ||
+    ts.isNonNullExpression(parent) ||
+    ts.isSatisfiesExpression(parent)
+  ) {
+    return true;
+  }
+  if (ts.isBinaryExpression(parent)) {
+    const kind = parent.operatorToken.kind;
+    return kind === ts.SyntaxKind.QuestionQuestionToken || kind === ts.SyntaxKind.BarBarToken;
+  }
+  // Receiver position only: `x.vmSize.trim()` keeps the legacy value, whereas
+  // `offers[x.vmSize]` consumes it as a lookup key and must not be skipped.
+  if (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) {
+    return parent.expression === child;
+  }
+  if (ts.isCallExpression(parent)) return parent.expression === child;
+  return false;
+}
+
+function isPresenceOperand(node: ts.Node): boolean {
+  if (ts.isIdentifier(node) && node.text === 'undefined') return true;
+  if (PRESENCE_KEYWORDS.has(node.kind)) return true;
+  return node.kind === ts.SyntaxKind.NullKeyword;
+}
+
 function isLegacyAssignmentTarget(target: ts.Expression): boolean {
   if (ts.isIdentifier(target)) return isLegacySizeName(target.text);
-  if (ts.isPropertyAccessExpression(target)) return isLegacySizeName(target.name.text);
+  if (ts.isPropertyAccessExpression(target)) {
+    if (isLegacySizeName(target.name.text)) return true;
+    let root: ts.Expression = target.expression;
+    while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) {
+      if (ts.isPropertyAccessExpression(root) && isLegacySizeName(root.name.text)) return true;
+      root = root.expression;
+    }
+    return ts.isIdentifier(root) && isLegacySizeName(root.text);
+  }
   if (ts.isElementAccessExpression(target)) {
     let root: ts.Expression = target.expression;
     while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root)) {
