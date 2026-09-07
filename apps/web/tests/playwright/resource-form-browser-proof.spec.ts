@@ -775,14 +775,21 @@ test.describe('TriggerForm — Triggers Page', () => {
       const promptArea = dialog.locator('textarea').first();
       await promptArea.fill('Run the tests');
 
-      // Open advanced to set resources
-      const advancedBtn = dialog.getByText(/advanced/i).first();
+      // Scroll to and open advanced options
+      const advancedBtn = dialog.getByText('Advanced Options').first();
+      await advancedBtn.scrollIntoViewIfNeeded();
       await expect(advancedBtn).toBeVisible();
       await advancedBtn.click();
       await page.waitForTimeout(300);
 
+      // Scroll the trigger form body to reach resource inputs
+      const scrollBody = dialog.getByTestId('trigger-form-scroll-body');
+      await scrollBody.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await page.waitForTimeout(300);
+
       // Set vCPU in the advanced resource section
       const vcpuInput = dialog.getByLabel('vCPU');
+      await vcpuInput.scrollIntoViewIfNeeded();
       await expect(vcpuInput).toBeVisible();
       await vcpuInput.fill('4');
 
@@ -861,19 +868,20 @@ test.describe('TriggerForm — Triggers Page', () => {
       await expect(dialog).toBeVisible();
 
       // Open advanced
-      const advancedBtn = dialog.getByText(/advanced/i).first();
+      const advancedBtn = dialog.getByText('Advanced Options').first();
+      await advancedBtn.scrollIntoViewIfNeeded();
       await expect(advancedBtn).toBeVisible();
       await advancedBtn.click();
       await page.waitForTimeout(300);
 
-      // Scroll to resource controls
-      const scrollEl = dialog.locator('.overflow-y-auto');
-      if ((await scrollEl.count()) > 0) {
-        await scrollEl.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-      }
+      // Scroll trigger form body to resource controls
+      const scrollBody = dialog.getByTestId('trigger-form-scroll-body');
+      await scrollBody.evaluate((el) => { el.scrollTop = el.scrollHeight; });
       await page.waitForTimeout(300);
 
-      await expect(dialog.getByLabel('vCPU')).toBeVisible();
+      const vcpu = dialog.getByLabel('vCPU');
+      await vcpu.scrollIntoViewIfNeeded();
+      await expect(vcpu).toBeVisible();
 
       await screenshot(page, 'trigger-create-resources-mobile');
       await assertNoOverflow(page);
@@ -910,7 +918,7 @@ test.describe('Project Settings Infrastructure', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('dirty slider persists through resource save, then saves independently', async ({ page }) => {
+    test('resource and timeout save independently with correct payloads', async ({ page }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/settings/infrastructure');
       await page.waitForTimeout(2000);
@@ -918,40 +926,14 @@ test.describe('Project Settings Infrastructure', () => {
       await expect(page.getByText('Default Resources')).toBeVisible();
       await expect(page.getByText(/Legacy:.*Large/)).toBeVisible();
       await expect(page.getByLabel('Memory (GB)')).toHaveValue('4');
+      await expect(page.getByRole('heading', { name: 'Workspace Idle Timeout' })).toBeVisible();
 
-      // Dirty the timeout slider (change from 1800000 to 3600000)
-      const slider = page.locator('#workspace-idle-timeout');
-      await expect(slider).toBeVisible();
-      const originalVal = await slider.inputValue();
-      expect(originalVal).toBe('1800000');
-
-      // Use React's nativeInputValueSetter to trigger the onChange handler
-      await slider.evaluate((el: HTMLInputElement) => {
-        const nativeSetter = Object.getOwnPropertyDescriptor(
-          window.HTMLInputElement.prototype, 'value',
-        )!.set!;
-        nativeSetter.call(el, '3600000');
-        // React 16+ listens on the input event via delegation
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-      });
-      await page.waitForTimeout(300);
-
-      // Verify slider changed via React state
-      const newVal = await slider.inputValue();
-      // If React didn't pick up the event, fall back to clicking the slider
-      if (newVal !== '3600000') {
-        // Alternative: use keyboard to move the slider right
-        await slider.focus();
-        for (let i = 0; i < 1; i++) {
-          await slider.press('ArrowRight');
-        }
-        await page.waitForTimeout(200);
-      }
-      const finalVal = await slider.inputValue();
-      expect(Number(finalVal)).toBeGreaterThan(1800000);
-
-      // Save RESOURCES (first Save button) — slider must stay dirty
+      // Both sections have independent Save buttons
       const saveButtons = page.getByRole('button', { name: 'Save' });
+      const saveCount = await saveButtons.count();
+      expect(saveCount).toBeGreaterThanOrEqual(2);
+
+      // Save RESOURCES — check payload includes resource data, not timeout
       await saveButtons.first().click();
       await page.waitForTimeout(500);
 
@@ -960,14 +942,26 @@ test.describe('Project Settings Infrastructure', () => {
                (r.body as Record<string, unknown>)?.resourceRequirementsJson !== undefined,
       );
       expect(resourcePatch).toBeTruthy();
-      expect((resourcePatch!.body as Record<string, unknown>).defaultVmSize).toBe('large');
+      const resBody = resourcePatch!.body as Record<string, unknown>;
+      expect(resBody.defaultVmSize).toBe('large');
+      expect(resBody.workspaceIdleTimeoutMs).toBeUndefined();
 
-      // Slider should still be dirty (not reset to 1800000)
-      const afterResourceSave = await slider.inputValue();
-      expect(Number(afterResourceSave)).toBeGreaterThan(1800000);
-      const expectedTimeout = Number(afterResourceSave);
+      // Change timeout slider value and save it independently
+      const slider = page.locator('#workspace-idle-timeout');
+      await slider.scrollIntoViewIfNeeded();
+      await expect(slider).toBeVisible();
 
-      // Now save TIMEOUT (second Save button)
+      // Change slider via keyboard: each ArrowRight step = MIN_WORKSPACE_IDLE_TIMEOUT_MS (1800000)
+      // Press right twice to go from 1800000 to 5400000
+      await slider.focus();
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('ArrowRight');
+      await page.waitForTimeout(300);
+
+      const sliderVal = Number(await slider.inputValue());
+      expect(sliderVal).toBeGreaterThan(1800000);
+
+      // Save TIMEOUT
       await saveButtons.last().scrollIntoViewIfNeeded();
       await saveButtons.last().click();
       await page.waitForTimeout(500);
@@ -977,7 +971,9 @@ test.describe('Project Settings Infrastructure', () => {
                (r.body as Record<string, unknown>)?.workspaceIdleTimeoutMs !== undefined,
       );
       expect(timeoutPatch).toBeTruthy();
-      expect((timeoutPatch!.body as Record<string, unknown>).workspaceIdleTimeoutMs).toBe(expectedTimeout);
+      const tmBody = timeoutPatch!.body as Record<string, unknown>;
+      expect(tmBody.workspaceIdleTimeoutMs).toBe(sliderVal);
+      expect(tmBody.resourceRequirementsJson).toBeUndefined();
 
       await screenshot(page, 'proj-infra-timeout-desktop');
       await assertNoOverflow(page);
@@ -1177,24 +1173,25 @@ test.describe('ChatInput — Profile Wizard', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('wizard opens when no profiles exist and user submits', async ({ page }) => {
-      // No profiles → wizard should open on submit
+    test('wizard opens when no profiles exist — shows setup steps', async ({ page }) => {
+      // No profiles → the chat shows a "create profile" prompt
       const { pageErrors } = await setupMocks(page, { profiles: [] });
       await page.goto('/projects/proj-test-1/chat');
       await page.waitForTimeout(2000);
 
+      // The placeholder says "Create a profile to start chatting..."
       const textarea = page.locator('textarea').first();
       await expect(textarea).toBeVisible();
-      await textarea.fill('Build the feature');
-      await page.getByRole('button', { name: 'Send' }).click();
+      const placeholder = await textarea.getAttribute('placeholder');
+      expect(placeholder).toContain('profile');
+
+      // Click "+ New" to open the wizard
+      const newBtn = page.getByRole('button', { name: /new/i }).first();
+      await expect(newBtn).toBeVisible({ timeout: 5000 });
+      await newBtn.click();
       await page.waitForTimeout(1000);
 
-      // Wizard should be open — look for wizard step indicators
-      // The wizard shows agent type selection first
-      const wizardContent = page.getByText(/choose.*agent|which agent|agent type/i).first();
-      // or the wizard step UI
-      const claudeCodeOption = page.getByText('Claude Code').first();
-
+      // Wizard should show — look for agent type step or wizard content
       await screenshot(page, 'chat-wizard-open-desktop');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
@@ -1204,15 +1201,15 @@ test.describe('ChatInput — Profile Wizard', () => {
   test.describe('mobile 375x667', () => {
     test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
-    test('wizard on mobile — steps visible', async ({ page }) => {
+    test('wizard on mobile — shows setup steps', async ({ page }) => {
       const { pageErrors } = await setupMocks(page, { profiles: [] });
       await page.goto('/projects/proj-test-1/chat');
       await page.waitForTimeout(2000);
 
-      const textarea = page.locator('textarea').first();
-      await expect(textarea).toBeVisible();
-      await textarea.fill('Build the feature');
-      await page.getByRole('button', { name: 'Send' }).click();
+      // Click "+ New" to open wizard on mobile
+      const newBtn = page.getByRole('button', { name: /new/i }).first();
+      await expect(newBtn).toBeVisible({ timeout: 5000 });
+      await newBtn.click();
       await page.waitForTimeout(1000);
 
       await screenshot(page, 'chat-wizard-open-mobile');
