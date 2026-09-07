@@ -61,10 +61,15 @@ const SQL_EXECUTION_METHODS = new Set([
 /**
  * `INSERT [OR IGNORE|REPLACE|ABORT|FAIL|ROLLBACK] INTO` and `REPLACE INTO`,
  * tolerating `"quoted"`, `` `backticked` ``, `[bracketed]` and `schema.`-qualified
- * table names, and terminating on a word boundary so `nodes_history` is not `nodes`.
+ * table names.
+ *
+ * The table-name group is GREEDY and anchored to a full identifier, which is what
+ * gives the word boundary: `nodes_history` captures `nodes_history` and matches no
+ * tracked table, rather than prefix-matching `nodes`. A lazy quantifier or a
+ * substring search here reintroduces exactly that false positive.
  */
 const INSERT_STATEMENT_PATTERN =
-  /\b(?:insert(?:\s+or\s+(?:ignore|replace|abort|fail|rollback))?|replace)\s+into\s+(?:["'`[]?(?:main|temp)["'`\]]?\s*\.\s*)?["'`[]?([a-z_][a-z0-9_]*)["'`\]]?(?![a-z0-9_])/gi;
+  /\b(?:insert(?:\s+or\s+(?:ignore|replace|abort|fail|rollback))?|replace)\s+into\s+(?:["'`[]?(?:main|temp)["'`\]]?\s*\.\s*)?["'`[]?([a-z_][a-z0-9_]*)["'`\]]?/gi;
 
 export function sqlInsertTables(text: string): AllocationTable[] {
   const tables: AllocationTable[] = [];
@@ -72,7 +77,8 @@ export function sqlInsertTables(text: string): AllocationTable[] {
   INSERT_STATEMENT_PATTERN.lastIndex = 0;
   let match = INSERT_STATEMENT_PATTERN.exec(normalized);
   while (match) {
-    const table = SQL_TABLE_NAMES[match[1].toLowerCase()];
+    const captured = match[1];
+    const table = captured ? SQL_TABLE_NAMES[captured.toLowerCase()] : undefined;
     if (table && !tables.includes(table)) tables.push(table);
     match = INSERT_STATEMENT_PATTERN.exec(normalized);
   }

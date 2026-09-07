@@ -91,10 +91,7 @@ function containsProperty(root: ts.Node, name: string, value: string | undefined
         ts.isIdentifier(node.name) || ts.isStringLiteralLike(node.name) ? node.name.text : null;
       if (key === name) {
         if (value === undefined) found = true;
-        else if (
-          ts.isStringLiteralLike(node.initializer) &&
-          node.initializer.text === value
-        ) {
+        else if (ts.isStringLiteralLike(node.initializer) && node.initializer.text === value) {
           found = true;
         }
       }

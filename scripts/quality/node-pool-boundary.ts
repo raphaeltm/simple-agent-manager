@@ -34,14 +34,14 @@ export {
   validateAllocationEntrypointInventory,
   validateAllocationWriterInventory,
 } from './node-pool-boundary/inventory';
+export { classifyLegacyRead, scanLegacyAuthority } from './node-pool-boundary/legacy-authority';
 export {
-  classifyLegacyRead,
   COMPATIBILITY_MODULES,
   isLegacyAuthorityScope,
   LEGACY_AUTHORITY_SYMBOLS,
   type LegacyReadClassification,
-  scanLegacyAuthority,
-} from './node-pool-boundary/legacy-authority';
+  REVIEWED_LEGACY_REQUEST_VALIDATORS,
+} from './node-pool-boundary/legacy-authority-scope';
 export {
   type BoundaryViolation,
   findRepoRoot,
@@ -50,7 +50,10 @@ export {
   type SourceFileInput,
 } from './node-pool-boundary/source-files';
 
-import { validateAllocationEntrypointInventory, validateAllocationWriterInventory } from './node-pool-boundary/inventory';
+import {
+  validateAllocationEntrypointInventory,
+  validateAllocationWriterInventory,
+} from './node-pool-boundary/inventory';
 import { scanLegacyAuthority } from './node-pool-boundary/legacy-authority';
 import {
   type BoundaryViolation,

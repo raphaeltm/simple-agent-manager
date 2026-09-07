@@ -61,7 +61,9 @@ export function parseSourceFile(file: SourceFileInput): ts.SourceFile {
 
 export function pathStartsWithAny(filePath: string, roots: readonly string[]): boolean {
   return roots.some((root) =>
-    root.endsWith('/') ? filePath.startsWith(root) : filePath === root || filePath.startsWith(`${root}/`)
+    root.endsWith('/')
+      ? filePath.startsWith(root)
+      : filePath === root || filePath.startsWith(`${root}/`)
   );
 }
 
