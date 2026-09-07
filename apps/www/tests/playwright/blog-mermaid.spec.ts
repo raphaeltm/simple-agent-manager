@@ -11,6 +11,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-the-archive-got-a-clock/',
     screenshotName: 'archive-drain',
   },
+  {
+    name: 'the current daily journal',
+    path: '/blog/sams-journal-the-start-had-to-be-true/',
+    screenshotName: 'daily-start',
+  },
 ];
 
 for (const post of mermaidPosts) {
