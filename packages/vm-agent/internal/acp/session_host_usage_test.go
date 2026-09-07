@@ -324,27 +324,23 @@ func TestUsageReportConvertsClaudeNumericResetSecondsToMillis(t *testing.T) {
 	}
 }
 
-func TestUsageReporterCoalescesPendingReportsAndFlushes(t *testing.T) {
+func TestUsageReporterPreservesDistinctPendingWindowsAndFlushes(t *testing.T) {
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
-	done := make(chan struct{})
-	var received []string
+	received := make(chan string, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload usageReportPayload
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Errorf("decode usage report: %v", err)
 		}
 		if len(payload.RateLimits) > 0 {
-			received = append(received, payload.RateLimits[0].WindowType)
+			received <- payload.RateLimits[0].WindowType
 		}
-		if len(received) == 1 {
+		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "claude.five_hour" {
 			close(firstStarted)
 			<-releaseFirst
 		}
 		w.WriteHeader(http.StatusNoContent)
-		if len(received) >= 2 {
-			close(done)
-		}
 	}))
 	defer server.Close()
 
@@ -360,30 +356,233 @@ func TestUsageReporterCoalescesPendingReportsAndFlushes(t *testing.T) {
 			url:           server.URL,
 			callbackToken: "callback-token",
 			payload: usageReportPayload{
-				NodeID: "node-1",
+				NodeID:              "node-1",
+				AgentType:           "claude-code",
+				CredentialSource:    "user",
+				CredentialReference: "cc_credentials:cred-1",
+				Source:              "claude-acp.usage_update",
 				RateLimits: []usageLimitPayload{{
+					Provider:   "anthropic",
+					Source:     "claude-acp.rate_limit",
 					WindowType: window,
+					Status:     "allowed_warning",
 				}},
 			},
 		}
 	}
 
-	host.enqueueUsageReport(request("first"))
+	host.enqueueUsageReport(request("claude.five_hour"))
 	<-firstStarted
-	host.enqueueUsageReport(request("second"))
-	host.enqueueUsageReport(request("third"))
+	host.enqueueUsageReport(request("claude.seven_day"))
+	host.enqueueUsageReport(request("anthropic.requests"))
 	close(releaseFirst)
 
+	if err := host.flushUsageReports(time.Second); err != nil {
+		t.Fatalf("flushUsageReports: %v", err)
+	}
+	got := []string{
+		readUsageWindow(t, received),
+		readUsageWindow(t, received),
+		readUsageWindow(t, received),
+	}
+	want := []string{"claude.five_hour", "claude.seven_day", "anthropic.requests"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("received reports = %#v, want %#v", got, want)
+		}
+	}
+}
+
+func TestUsageReporterCoalescesEquivalentPendingReportsToLatest(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	received := make(chan usageReportPayload, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload usageReportPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode usage report: %v", err)
+		}
+		received <- payload
+		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 1,
+			ActivityReportTimeout:          time.Second,
+		},
+	})
+	request := func(window string, observedAt int64) usageReportRequest {
+		return usageReportRequest{
+			url:           server.URL,
+			callbackToken: "callback-token",
+			payload: usageReportPayload{
+				NodeID:              "node-1",
+				AgentType:           "claude-code",
+				CredentialSource:    "user",
+				CredentialReference: "cc_credentials:cred-1",
+				Source:              "claude-acp.usage_update",
+				ObservedAt:          observedAt,
+				RateLimits: []usageLimitPayload{{
+					Provider:   "anthropic",
+					Source:     "claude-acp.rate_limit",
+					WindowType: window,
+					Status:     "allowed_warning",
+					ObservedAt: observedAt,
+				}},
+			},
+		}
+	}
+
+	host.enqueueUsageReport(request("blocker", 1))
+	<-firstStarted
+	host.enqueueUsageReport(request("claude.five_hour", 2))
+	host.enqueueUsageReport(request("claude.five_hour", 3))
+	close(releaseFirst)
+
+	if err := host.flushUsageReports(time.Second); err != nil {
+		t.Fatalf("flushUsageReports: %v", err)
+	}
+	first := readUsagePayload(t, received)
+	latest := readUsagePayload(t, received)
+	if first.RateLimits[0].WindowType != "blocker" {
+		t.Fatalf("first window = %q", first.RateLimits[0].WindowType)
+	}
+	if latest.RateLimits[0].WindowType != "claude.five_hour" || latest.RateLimits[0].ObservedAt != 3 {
+		t.Fatalf("coalesced payload = %#v, want latest five-hour observation", latest.RateLimits[0])
+	}
 	select {
-	case <-done:
+	case extra := <-received:
+		t.Fatalf("unexpected extra report: %#v", extra)
+	default:
+	}
+}
+
+func TestUsageReporterFlushReportsDeliveryFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 1,
+			ActivityReportTimeout:          time.Second,
+		},
+	})
+	host.enqueueUsageReport(usageReportRequest{
+		url:           server.URL,
+		callbackToken: "callback-token",
+		payload: usageReportPayload{
+			NodeID:     "node-1",
+			RateLimits: []usageLimitPayload{{WindowType: "claude.five_hour"}},
+		},
+	})
+
+	if err := host.flushUsageReports(time.Second); err == nil {
+		t.Fatal("flushUsageReports returned nil after failed delivery")
+	}
+}
+
+func TestSessionUpdateUsesOriginatingACPConnectionCredentialAttribution(t *testing.T) {
+	fixedNow := time.UnixMilli(1_700_000_000_000)
+	received := make(chan usageReportPayload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload usageReportPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode usage report: %v", err)
+		}
+		received <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			ControlPlaneURL:                server.URL,
+			ProjectID:                      "project-1",
+			NodeID:                         "node-1",
+			WorkspaceID:                    "workspace-1",
+			SessionID:                      "session-1",
+			CallbackToken:                  "callback-token",
+			Now:                            func() time.Time { return fixedNow },
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 1,
+			ActivityReportTimeout:          time.Second,
+		},
+	})
+	host.storeCredentialAttribution("claude-code", &agentCredential{
+		credentialSource:    "project",
+		credentialReference: "cc_credentials:new",
+		credentialProvider:  "anthropic",
+		providerMode:        "direct",
+	})
+	oldAttribution := credentialAttribution{
+		AgentType:           "claude-code",
+		CredentialSource:    "user",
+		CredentialReference: "cc_credentials:old",
+		CredentialProvider:  "anthropic",
+		ProviderMode:        "direct",
+	}
+	client := &sessionHostClient{
+		host:                host,
+		usageAttribution:    oldAttribution,
+		hasUsageAttribution: true,
+	}
+
+	if err := client.SessionUpdate(context.Background(), acpsdk.SessionNotification{
+		Update: acpsdk.SessionUpdate{
+			UsageUpdate: &acpsdk.SessionUsageUpdate{
+				SessionUpdate: "usage_update",
+				Used:          50,
+				Size:          100,
+				Meta: map[string]any{
+					"_claude/rateLimit": map[string]any{
+						"status":        "allowed_warning",
+						"rateLimitType": "five_hour",
+						"utilization":   0.82,
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SessionUpdate: %v", err)
+	}
+	if err := host.flushUsageReports(time.Second); err != nil {
+		t.Fatalf("flushUsageReports: %v", err)
+	}
+	payload := readUsagePayload(t, received)
+	if payload.CredentialReference != "cc_credentials:old" || payload.CredentialSource != "user" {
+		t.Fatalf("payload credential = %s/%s, want old originating attribution", payload.CredentialSource, payload.CredentialReference)
+	}
+}
+
+func readUsageWindow(t *testing.T, received <-chan string) string {
+	t.Helper()
+	select {
+	case window := <-received:
+		return window
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for coalesced usage report")
+		t.Fatal("timed out waiting for usage report")
+		return ""
 	}
-	if !host.flushUsageReports(time.Second) {
-		t.Fatal("flushUsageReports returned false")
-	}
-	if len(received) != 2 || received[0] != "first" || received[1] != "third" {
-		t.Fatalf("received reports = %#v, want first and coalesced latest third", received)
+}
+
+func readUsagePayload(t *testing.T, received <-chan usageReportPayload) usageReportPayload {
+	t.Helper()
+	select {
+	case payload := <-received:
+		return payload
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for usage report")
+		return usageReportPayload{}
 	}
 }
 

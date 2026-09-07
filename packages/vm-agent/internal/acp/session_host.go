@@ -142,6 +142,10 @@ const DefaultMessageBufferSize = 5000
 // Override via ACP_VIEWER_SEND_BUFFER.
 const DefaultViewerSendBuffer = 256
 
+// DefaultUsageReportPendingWindows bounds distinct credential/window reports
+// queued while the serialized usage reporter is busy.
+const DefaultUsageReportPendingWindows = 16
+
 // SessionHostConfig holds configuration for a SessionHost.
 // It extends GatewayConfig with multi-viewer settings.
 type SessionHostConfig struct {
@@ -165,6 +169,10 @@ type SessionHostConfig struct {
 	// SDK's concurrent goroutine dispatch from reordering streaming tokens.
 	// Override via ACP_NOTIF_SERIALIZE_TIMEOUT. Default: 5s.
 	NotifSerializeTimeout time.Duration
+
+	// UsageReportPendingLimit bounds distinct credential/window reports queued
+	// while one usage callback is being delivered. Zero uses the package default.
+	UsageReportPendingLimit int
 
 	// StartProcess is an internal test hook. Production code leaves it nil and
 	// uses StartProcess via startAgentProcess.
@@ -278,10 +286,14 @@ type SessionHost struct {
 	credAuthFilePath  string // relative to home dir, e.g. ".codex/auth.json"
 	credKind          string // "api-key" or "oauth-token"
 
-	usageReportMu      sync.Mutex
-	usageReportPending *usageReportRequest
-	usageReportRunning bool
-	usageReportDone    chan struct{}
+	usageReportMu           sync.Mutex
+	usageReportPending      map[string]usageReportRequest
+	usageReportOrder        []string
+	usageReportRunning      bool
+	usageReportDone         chan struct{}
+	usageReportCancel       context.CancelFunc
+	usageReportFailureCount int
+	usageReportLastError    string
 
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
@@ -872,10 +884,10 @@ func (h *SessionHost) Stop() {
 	// Report idle to the control plane so the browser status bar clears.
 	h.stopPromptActivityRereport()
 	h.clearHarnessWork()
-	h.reportActivity("idle")
-	if !h.flushUsageReports(h.activityReportTimeout()) {
-		slog.Warn("usageReport: shutdown flush timed out")
+	if err := h.flushUsageReports(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: shutdown flush failed", "error", err)
 	}
+	h.reportActivity("idle")
 
 	// Cancel any pending auto-suspend timer.
 	h.viewerMu.Lock()

@@ -1565,54 +1565,7 @@ export const credentialLimitWindows = sqliteTable(
   })
 );
 
-export const credentialLimitEventAdmissions = sqliteTable(
-  'credential_limit_event_admissions',
-  {
-    id: text('id').primaryKey(),
-    projectId: text('project_id')
-      .notNull()
-      .references(() => projects.id, { onDelete: 'cascade' }),
-    credentialReference: text('credential_reference').notNull(),
-    windowType: text('window_type').notNull(),
-    eventSource: text('event_source').notNull(),
-    deliveryKey: text('delivery_key').notNull(),
-    payloadFingerprint: text('payload_fingerprint').notNull(),
-    eventType: text('event_type').notNull(),
-    transition: text('transition').notNull(),
-    observedAt: integer('observed_at').notNull(),
-    receivedAt: integer('received_at').notNull(),
-    eventPayloadJson: text('event_payload_json').notNull(),
-    dispatchState: text('dispatch_state', {
-      enum: ['pending', 'delivered', 'failed', 'conflicted', 'superseded'],
-    })
-      .notNull()
-      .default('pending'),
-    dispatchOutcome: text('dispatch_outcome'),
-    dispatchAttempts: integer('dispatch_attempts').notNull().default(0),
-    dispatchError: text('dispatch_error'),
-    nextAttemptAt: integer('next_attempt_at'),
-    lastAttemptAt: integer('last_attempt_at'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
-    expiresAt: integer('expires_at').notNull(),
-  },
-  (table) => ({
-    projectCredentialIdx: index('idx_credential_limit_admissions_project_credential').on(
-      table.projectId,
-      table.credentialReference,
-      table.windowType
-    ),
-    retryIdx: index('idx_credential_limit_admissions_retry')
-      .on(table.nextAttemptAt, table.createdAt)
-      .where(sql`dispatch_state IN ('pending', 'failed')`),
-    expiryIdx: index('idx_credential_limit_admissions_expires').on(table.expiresAt),
-    deliveryKeyUnique: uniqueIndex('idx_credential_limit_admissions_delivery_key_unique').on(
-      table.projectId,
-      table.eventSource,
-      table.deliveryKey
-    ),
-  })
-);
+
 
 // =============================================================================
 // Runtime-neutral Session Snapshots
@@ -2262,8 +2215,6 @@ export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
 export type CredentialLimitWindow = typeof credentialLimitWindows.$inferSelect;
 export type NewCredentialLimitWindow = typeof credentialLimitWindows.$inferInsert;
-export type CredentialLimitEventAdmission = typeof credentialLimitEventAdmissions.$inferSelect;
-export type NewCredentialLimitEventAdmission = typeof credentialLimitEventAdmissions.$inferInsert;
 export type SessionSnapshot = typeof sessionSnapshots.$inferSelect;
 export type NewSessionSnapshot = typeof sessionSnapshots.$inferInsert;
 export type UIStandard = typeof uiStandards.$inferSelect;
@@ -2640,6 +2591,8 @@ export const projectEventSourceOutbox = sqliteTable(
     admittedEventId: text('admitted_event_id'),
     admissionOutcome: text('admission_outcome'),
     lastError: text('last_error'),
+    credentialLimitWindowType: text('credential_limit_window_type'),
+    credentialLimitObservedAt: integer('credential_limit_observed_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2669,6 +2622,19 @@ export const projectEventSourceOutbox = sqliteTable(
       table.subjectId,
       table.state
     ),
+    credentialLimitActiveIdx: index('idx_project_event_source_outbox_credential_limit_active')
+      .on(
+        table.projectId,
+        table.source,
+        table.subjectId,
+        table.credentialLimitWindowType,
+        table.state,
+        table.credentialLimitObservedAt,
+        table.id
+      )
+      .where(
+        sql`credential_limit_window_type IS NOT NULL AND credential_limit_observed_at IS NOT NULL`
+      ),
   })
 );
 

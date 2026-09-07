@@ -1,5 +1,6 @@
 import {
   PROJECT_EVENT_DELIVERY_ATTEMPT_STATES,
+  PROJECT_EVENT_AUDIENCE_SCOPES,
   PROJECT_EVENT_DELIVERY_BATCH_STATES,
   PROJECT_EVENT_REQUESTED_DELIVERY_MODES,
   PROJECT_EVENT_RESOLVED_DELIVERY_MODES,
@@ -23,6 +24,9 @@ export const ProjectEventRowSchema = v.object({
   delivery_key: v.string(),
   payload_fingerprint: v.string(),
   metadata_json: v.string(),
+  audience_scope: v.optional(v.picklist(PROJECT_EVENT_AUDIENCE_SCOPES), 'project'),
+  audience_project_id: v.optional(v.nullable(v.string()), null),
+  audience_user_id: v.optional(v.nullable(v.string()), null),
   display_json: v.string(),
   raw_payload_ref_json: v.nullable(v.string()),
   occurred_at: v.number(),

@@ -4,6 +4,7 @@ import type {
   ProjectEventJsonValue,
 } from '@simple-agent-manager/shared';
 import {
+  CREDENTIAL_LIMIT_EVENT_SOURCE,
   DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS,
   DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS,
   DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS,
@@ -51,6 +52,8 @@ export interface ProjectEventSourceOutboxIntent {
   attemptCount: number;
   maxAttempts: number;
   expiresAt: string;
+  credentialLimitWindowType?: string | null;
+  credentialLimitObservedAt?: number | null;
 }
 
 export interface ProjectEventSourceAdmissionResult {
@@ -104,7 +107,9 @@ export function resolveProjectEventSourceOutboxConfig(env: Env): ProjectEventSou
   };
 }
 
-function withoutProjectId(input: AdmitProjectEventInput): Omit<AdmitProjectEventInput, 'projectId'> {
+function withoutProjectId(
+  input: AdmitProjectEventInput
+): Omit<AdmitProjectEventInput, 'projectId'> {
   const { projectId, ...event } = input;
   void projectId;
   return event;
@@ -157,7 +162,9 @@ async function loadIntentByDelivery(
             delivery_key AS deliveryKey, payload_fingerprint AS payloadFingerprint,
             event_payload_json AS eventPayloadJson, state,
             attempt_count AS attemptCount, max_attempts AS maxAttempts,
-            expires_at AS expiresAt
+            expires_at AS expiresAt,
+            credential_limit_window_type AS credentialLimitWindowType,
+            credential_limit_observed_at AS credentialLimitObservedAt
        FROM project_event_source_outbox
       WHERE project_id = ? AND source = ? AND delivery_key = ?
       LIMIT 1`
@@ -176,7 +183,9 @@ async function loadIntentById(
             delivery_key AS deliveryKey, payload_fingerprint AS payloadFingerprint,
             event_payload_json AS eventPayloadJson, state,
             attempt_count AS attemptCount, max_attempts AS maxAttempts,
-            expires_at AS expiresAt
+            expires_at AS expiresAt,
+            credential_limit_window_type AS credentialLimitWindowType,
+            credential_limit_observed_at AS credentialLimitObservedAt
        FROM project_event_source_outbox
       WHERE id = ?
       LIMIT 1`
@@ -222,7 +231,11 @@ async function claimIntent(env: Env, id: string, now: Date): Promise<boolean> {
   return Number(result.meta.changes ?? 0) > 0;
 }
 
-function nextRetryAt(now: Date, attemptCount: number, config: ProjectEventSourceOutboxConfig): Date {
+function nextRetryAt(
+  now: Date,
+  attemptCount: number,
+  config: ProjectEventSourceOutboxConfig
+): Date {
   const exponent = Math.min(Math.max(0, attemptCount - 1), 16);
   const delay = Math.min(config.retryMaxMs, config.retryBaseMs * 2 ** exponent);
   return new Date(now.getTime() + delay);
@@ -260,6 +273,71 @@ async function markIntentFailed(
     .bind(state, nextAttemptAt.toISOString(), errorText(error), nowIso, intent.id)
     .run();
   return { intentId: intent.id, state };
+}
+
+function credentialLimitWindowFromIntent(
+  intent: ProjectEventSourceOutboxIntent,
+  payload: Omit<AdmitProjectEventInput, 'projectId'>
+): { windowType: string; observedAt: number } | null {
+  if (intent.source !== CREDENTIAL_LIMIT_EVENT_SOURCE) return null;
+  if (intent.credentialLimitWindowType && typeof intent.credentialLimitObservedAt === 'number') {
+    return {
+      windowType: intent.credentialLimitWindowType,
+      observedAt: intent.credentialLimitObservedAt,
+    };
+  }
+  const metadata = payload.metadata;
+  const windowType =
+    metadata && typeof metadata.windowType === 'string' ? metadata.windowType : null;
+  const observedAt =
+    metadata && typeof metadata.observedAt === 'number' ? metadata.observedAt : null;
+  if (!windowType || observedAt === null) return null;
+  return { windowType, observedAt };
+}
+
+async function credentialLimitIntentSuperseded(
+  env: Env,
+  intent: ProjectEventSourceOutboxIntent,
+  payload: Omit<AdmitProjectEventInput, 'projectId'>
+): Promise<boolean> {
+  const window = credentialLimitWindowFromIntent(intent, payload);
+  if (!window) return false;
+  const newer = await env.DATABASE.prepare(
+    `SELECT 1
+       FROM credential_limit_windows
+      WHERE project_id = ?
+        AND credential_reference = ?
+        AND window_type = ?
+        AND observed_at > ?
+        AND (last_event_delivery_key IS NULL OR last_event_delivery_key != ?)
+      LIMIT 1`
+  )
+    .bind(
+      intent.projectId,
+      intent.subjectId,
+      window.windowType,
+      window.observedAt,
+      intent.deliveryKey
+    )
+    .first<{ '1': number }>();
+  return Boolean(newer);
+}
+
+async function markCredentialLimitIntentSuperseded(
+  env: Env,
+  intent: ProjectEventSourceOutboxIntent,
+  now: Date
+): Promise<ProjectEventSourceAdmissionResult> {
+  await env.DATABASE.prepare(
+    `UPDATE project_event_source_outbox
+        SET state = 'permanent_failed', processing_lease_expires_at = NULL,
+            last_error = 'Superseded by newer credential limit window before admission',
+            updated_at = ?
+      WHERE id = ? AND state = 'processing'`
+  )
+    .bind(now.toISOString(), intent.id)
+    .run();
+  return { intentId: intent.id, state: 'permanent_failed' };
 }
 
 function parseEventPayload(
@@ -304,8 +382,11 @@ async function admitClaimedIntent(
   }
 
   try {
+    if (await credentialLimitIntentSuperseded(env, intent, payload)) {
+      return markCredentialLimitIntentSuperseded(env, intent, now);
+    }
     const result = await projectDataService.admitProjectEvent(env, intent.projectId, payload);
-    await env.DATABASE.prepare(
+    const stored = await env.DATABASE.prepare(
       `UPDATE project_event_source_outbox
           SET state = 'admitted',
               processing_lease_expires_at = NULL,
@@ -317,6 +398,9 @@ async function admitClaimedIntent(
     )
       .bind(result.event.id, result.outcome, now.toISOString(), intent.id)
       .run();
+    if ((stored.meta.changes ?? 0) !== 1) {
+      throw new Error('Project event source outbox admission result was not persisted');
+    }
     return {
       intentId: intent.id,
       state: 'admitted',
@@ -357,10 +441,12 @@ export async function enqueueAndAdmitProjectEventSourceIntent(
   input: AdmitProjectEventInput
 ): Promise<ProjectEventSourceAdmissionResult> {
   const intent = await enqueueProjectEventSourceIntent(env, input);
-  return (await admitProjectEventSourceIntentById(env, intent.id)) ?? {
-    intentId: intent.id,
-    state: intent.state,
-  };
+  return (
+    (await admitProjectEventSourceIntentById(env, intent.id)) ?? {
+      intentId: intent.id,
+      state: intent.state,
+    }
+  );
 }
 
 export async function reconcileProjectEventSourceOutbox(

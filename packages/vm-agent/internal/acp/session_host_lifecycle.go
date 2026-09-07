@@ -127,6 +127,9 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 
 	// Report idle to the control plane so the browser status bar clears.
 	h.clearHarnessWork()
+	if err := h.flushUsageReports(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: suspend flush failed", "error", err)
+	}
 	h.reportActivity("idle")
 
 	h.cancel()

@@ -76,8 +76,8 @@ func (h *SessionHost) credentialAttributionSnapshot() (credentialAttribution, bo
 	return attr, true
 }
 
-func (h *SessionHost) captureSessionUsageUpdate(params acpsdk.SessionNotification) {
-	request, ok := h.prepareUsageReport(params)
+func (h *SessionHost) captureSessionUsageUpdate(params acpsdk.SessionNotification, attr credentialAttribution, hasAttr bool) {
+	request, ok := h.prepareUsageReportWithAttribution(params, attr, hasAttr)
 	if !ok {
 		return
 	}
@@ -85,6 +85,11 @@ func (h *SessionHost) captureSessionUsageUpdate(params acpsdk.SessionNotificatio
 }
 
 func (h *SessionHost) prepareUsageReport(params acpsdk.SessionNotification) (usageReportRequest, bool) {
+	attr, ok := h.credentialAttributionSnapshot()
+	return h.prepareUsageReportWithAttribution(params, attr, ok)
+}
+
+func (h *SessionHost) prepareUsageReportWithAttribution(params acpsdk.SessionNotification, attr credentialAttribution, hasAttr bool) (usageReportRequest, bool) {
 	projectID := h.config.ProjectID
 	nodeID := h.config.NodeID
 	controlPlaneURL := h.config.ControlPlaneURL
@@ -94,8 +99,7 @@ func (h *SessionHost) prepareUsageReport(params acpsdk.SessionNotification) (usa
 		return usageReportRequest{}, false
 	}
 
-	attr, ok := h.credentialAttributionSnapshot()
-	if !ok {
+	if !hasAttr || attr.CredentialReference == "" || attr.CredentialSource == "" {
 		return usageReportRequest{}, false
 	}
 
@@ -298,38 +302,79 @@ func safeUsageIdentifier(value string) string {
 
 func (h *SessionHost) enqueueUsageReport(request usageReportRequest) {
 	h.usageReportMu.Lock()
-	h.usageReportPending = &request
+	if h.usageReportPending == nil {
+		h.usageReportPending = make(map[string]usageReportRequest)
+	}
+	if !h.usageReportRunning && len(h.usageReportPending) == 0 {
+		h.usageReportFailureCount = 0
+		h.usageReportLastError = ""
+	}
+	key := usageReportCoalesceKey(request)
+	if _, exists := h.usageReportPending[key]; !exists {
+		h.usageReportOrder = append(h.usageReportOrder, key)
+	}
+	limit := h.usageReportPendingLimit()
+	for len(h.usageReportOrder) > limit {
+		evicted := h.usageReportOrder[0]
+		h.usageReportOrder = h.usageReportOrder[1:]
+		delete(h.usageReportPending, evicted)
+		slog.Warn("usageReport: pending report evicted due to capacity", "pendingLimit", limit)
+	}
+	h.usageReportPending[key] = request
 	if h.usageReportRunning {
 		h.usageReportMu.Unlock()
 		return
 	}
 	h.usageReportRunning = true
+	reporterCtx, cancel := context.WithCancel(context.Background())
+	h.usageReportCancel = cancel
 	done := make(chan struct{})
 	h.usageReportDone = done
 	h.usageReportMu.Unlock()
 
-	go h.runUsageReporter(done)
+	go h.runUsageReporter(reporterCtx, done)
 }
 
-func (h *SessionHost) runUsageReporter(done chan struct{}) {
+func (h *SessionHost) runUsageReporter(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	for {
-		h.usageReportMu.Lock()
-		pending := h.usageReportPending
-		if pending == nil {
-			h.usageReportRunning = false
-			h.usageReportMu.Unlock()
+		request, ok := h.nextUsageReport()
+		if !ok {
 			return
 		}
-		request := *pending
-		h.usageReportPending = nil
-		h.usageReportMu.Unlock()
 
-		h.sendUsageReportWithContext(h.ctx, request)
+		if !h.sendUsageReportWithContext(ctx, request) {
+			h.recordUsageReportFailure("usage report delivery failed")
+		}
 	}
 }
 
-func (h *SessionHost) flushUsageReports(timeout time.Duration) bool {
+func (h *SessionHost) nextUsageReport() (usageReportRequest, bool) {
+	h.usageReportMu.Lock()
+	defer h.usageReportMu.Unlock()
+	for len(h.usageReportOrder) > 0 {
+		key := h.usageReportOrder[0]
+		h.usageReportOrder = h.usageReportOrder[1:]
+		request, ok := h.usageReportPending[key]
+		if !ok {
+			continue
+		}
+		delete(h.usageReportPending, key)
+		return request, true
+	}
+	h.usageReportRunning = false
+	h.usageReportCancel = nil
+	return usageReportRequest{}, false
+}
+
+func (h *SessionHost) recordUsageReportFailure(message string) {
+	h.usageReportMu.Lock()
+	h.usageReportFailureCount++
+	h.usageReportLastError = message
+	h.usageReportMu.Unlock()
+}
+
+func (h *SessionHost) flushUsageReports(timeout time.Duration) error {
 	if timeout <= 0 {
 		timeout = h.activityReportTimeout()
 	}
@@ -339,22 +384,67 @@ func (h *SessionHost) flushUsageReports(timeout time.Duration) bool {
 	for {
 		h.usageReportMu.Lock()
 		if !h.usageReportRunning {
+			err := h.usageReportDrainErrorLocked()
 			h.usageReportMu.Unlock()
-			return true
+			return err
 		}
 		done := h.usageReportDone
+		cancel := h.usageReportCancel
 		h.usageReportMu.Unlock()
 
 		if done == nil {
-			return true
+			return nil
 		}
 		select {
 		case <-done:
 			continue
 		case <-timer.C:
-			return false
+			if cancel != nil {
+				cancel()
+			}
+			return fmt.Errorf("usage report flush timed out after %s", timeout)
 		}
 	}
+}
+
+func (h *SessionHost) usageReportDrainErrorLocked() error {
+	if h.usageReportFailureCount == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d usage report(s) failed; last error: %s", h.usageReportFailureCount, h.usageReportLastError)
+}
+
+func (h *SessionHost) usageReportPendingLimit() int {
+	if h.config.UsageReportPendingLimit > 0 {
+		return h.config.UsageReportPendingLimit
+	}
+	return DefaultUsageReportPendingWindows
+}
+
+func usageReportCoalesceKey(request usageReportRequest) string {
+	limit := usageLimitPayload{}
+	if len(request.payload.RateLimits) > 0 {
+		limit = request.payload.RateLimits[0]
+	}
+	return strings.Join([]string{
+		request.url,
+		request.payload.AgentType,
+		request.payload.CredentialSource,
+		request.payload.CredentialReference,
+		request.payload.Source,
+		limit.Provider,
+		limit.Source,
+		limit.WindowType,
+		limit.Status,
+		int64PointerKey(limit.ResetsAt),
+	}, "\x1f")
+}
+
+func int64PointerKey(value *int64) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", *value)
 }
 
 func (h *SessionHost) sendUsageReport(request usageReportRequest) bool {

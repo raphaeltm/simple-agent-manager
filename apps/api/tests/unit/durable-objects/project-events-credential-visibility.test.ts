@@ -16,6 +16,7 @@ import {
   getProjectEvent,
   listProjectEventSubscriptionEvents,
 } from '../../../src/durable-objects/project-data/project-events';
+import { runProjectEventWakeMaterializationBatch } from '../../../src/durable-objects/project-data/project-events-materialization';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
@@ -74,7 +75,8 @@ function admitCredentialEvent(
     affectedUserId?: string;
     chatSessionId?: string;
     agentSessionId?: string;
-  }) {
+  }
+) {
   const metadata = {
     credentialSource: input.credentialSource,
     credentialReference: `${input.credentialSource}:cred-1`,
@@ -97,6 +99,21 @@ function admitCredentialEvent(
     occurredAt: 2_000,
     receivedAt: 2_001,
   });
+}
+
+function seedActiveChatSession(sql: SqlStorage): void {
+  sql.exec(
+    `INSERT INTO chat_sessions (
+      id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
+    'chat-1',
+    'workspace-1',
+    'task-1',
+    'Credential limit target',
+    1_000,
+    1_000,
+    1_000
+  );
 }
 
 describe('ProjectData credential event visibility', () => {
@@ -147,6 +164,30 @@ describe('ProjectData credential event visibility', () => {
     expect(admitted.matches.map((match) => match.subscriptionId)).toEqual([affected.id]);
     expect(admitted.matches.map((match) => match.subscriptionId)).not.toContain(other.id);
     expect(admitted.matches.map((match) => match.subscriptionId)).not.toContain(unrelated.id);
+  });
+
+  it('does not match a wrong human owner even when the target session id matches the credential event', () => {
+    const affected = createCredentialSubscription(sql, env, {
+      owner: { type: 'human', id: 'user-1', name: 'Affected user' },
+      target: AFFECTED_TARGET,
+      key: 'affected-human-personal',
+    });
+    const attacker = createCredentialSubscription(sql, env, {
+      owner: { type: 'human', id: 'user-2', name: 'Other user' },
+      target: AFFECTED_TARGET,
+      key: 'attacker-human-personal',
+    });
+
+    const admitted = admitCredentialEvent(sql, env, {
+      credentialSource: 'user',
+      deliveryKey: 'personal-warning-human-owner',
+      affectedUserId: 'user-1',
+      chatSessionId: 'chat-1',
+      agentSessionId: 'agent-session-1',
+    });
+
+    expect(admitted.matches.map((match) => match.subscriptionId)).toEqual([affected.id]);
+    expect(admitted.matches.map((match) => match.subscriptionId)).not.toContain(attacker.id);
   });
 
   it('allows shared credential events across authorized project subscription targets', () => {
@@ -241,5 +282,60 @@ describe('ProjectData credential event visibility', () => {
       })?.id
     ).toBe(admitted.event.id);
     expect(affected.id).toBeDefined();
+  });
+
+  it('terminalizes unauthorized historical personal matches before automatic wake materialization', () => {
+    seedActiveChatSession(sql);
+    const attacker = createCredentialSubscription(sql, env, {
+      owner: { type: 'human', id: 'user-2', name: 'Other user' },
+      target: AFFECTED_TARGET,
+      key: 'attacker-wake-history',
+    });
+    sql.exec(
+      `UPDATE project_event_subscriptions
+          SET contract_version = 2,
+              resolved_delivery = 'queued_for_prompt_delivery'
+        WHERE id = ?`,
+      attacker.id
+    );
+    const admitted = admitCredentialEvent(sql, env, {
+      credentialSource: 'user',
+      deliveryKey: 'personal-warning-wake-history',
+      affectedUserId: 'user-1',
+      chatSessionId: 'chat-1',
+      agentSessionId: 'agent-session-1',
+    });
+    sql.exec(
+      `INSERT INTO project_event_matches (
+        id, project_id, event_id, subscription_id, state, matched_at, lifecycle_checked_at,
+        batch_id, reason
+      ) VALUES (?, ?, ?, ?, 'matched', ?, ?, NULL, NULL)`,
+      'historical-bad-wake-match',
+      PROJECT_ID,
+      admitted.event.id,
+      attacker.id,
+      2_000,
+      2_000
+    );
+
+    expect(
+      runProjectEventWakeMaterializationBatch(
+        sql,
+        { ...env, PROJECT_EVENT_WAKE_ENABLED: 'true' } as Env,
+        PROJECT_ID,
+        3_000
+      )
+    ).toMatchObject({ status: 'no_due_work', materialized: 0 });
+    expect(
+      db
+        .prepare('SELECT state, reason FROM project_event_matches WHERE id = ?')
+        .get('historical-bad-wake-match')
+    ).toEqual({
+      state: 'recorded_not_injected',
+      reason: 'event audience not authorized for wake target',
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM session_inbox').get()).toEqual({
+      count: 0,
+    });
   });
 });

@@ -10,6 +10,7 @@ import { resolveMaxMessagesPerSession } from './messages-persist-helpers';
 import { resolveProjectEventDelivery } from './project-events-delivery-resolver';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEvent, mapProjectEventSubscription } from './project-events-mappers';
+import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import {
   claimProjectEventMatchesForBatch,
   mapRows,
@@ -132,9 +133,24 @@ export function runProjectEventWakeMaterializationBatch(
     matches.map((match) => match.eventId),
     limits.maxDeliveryBatchEvents
   );
+  const authorized = authorizedWakeMatches(subscription, matches, events);
+  if (authorized.rejected.length > 0) {
+    terminalizeMatches(
+      sql,
+      projectId,
+      authorized.rejected,
+      'recorded_not_injected',
+      now,
+      'event audience not authorized for wake target'
+    );
+  }
+  if (authorized.matches.length === 0) {
+    markSchedulerSuccess(sql, projectId, now, 'materialization');
+    return { status: 'no_due_work', materialized: 0, accepted: [] };
+  }
   const resolution = resolveProjectEventDelivery({
     subscription,
-    events,
+    events: authorized.events,
     now,
     maxSummaryEvents: limits.maxDeliveryBatchEvents,
     adapterCapabilities: [
@@ -158,7 +174,7 @@ export function runProjectEventWakeMaterializationBatch(
     terminalizeMatches(
       sql,
       projectId,
-      matches.map((match) => match.id),
+      authorized.matches.map((match) => match.id),
       resolution.batchState,
       now
     );
@@ -167,8 +183,8 @@ export function runProjectEventWakeMaterializationBatch(
   }
 
   const batchId = generateId();
-  const matchIds = matches.map((match) => match.id);
-  const eventIds = matches.map((match) => match.eventId);
+  const matchIds = authorized.matches.map((match) => match.id);
+  const eventIds = authorized.matches.map((match) => match.eventId);
   const promptInput = buildWakePromptInput({
     batchId,
     subscription,
@@ -311,6 +327,7 @@ export function invalidProjectEventWakeDeliveryTargetResult(
   const row = sql
     .exec(
       `SELECT b.id,
+              b.subscription_id,
               b.target_session_id,
               b.delivery_expires_at,
               s.lifecycle_state,
@@ -339,6 +356,7 @@ export function invalidProjectEventWakeDeliveryTargetResult(
       capabilities: null,
     };
   }
+  const subscriptionId = typeof row.subscription_id === 'string' ? row.subscription_id : null;
   const targetSessionId = typeof row.target_session_id === 'string' ? row.target_session_id : null;
   const expiresAt = typeof row.delivery_expires_at === 'number' ? row.delivery_expires_at : null;
   const subscriptionExpiresAt = typeof row.expires_at === 'number' ? row.expires_at : null;
@@ -364,6 +382,26 @@ export function invalidProjectEventWakeDeliveryTargetResult(
             : chatStatus !== 'active' && chatStatus !== 'sleeping'
               ? 'Project event wake target session is no longer active'
               : 'Project event wake delivery lease expired',
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
+  if (!subscriptionId) {
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake subscription binding is missing',
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
+  const subscription = readSubscription(sql, projectId, subscriptionId);
+  const events = readEventsForBatch(sql, projectId, claim.message.id);
+  if (events.some((event) => !subscriptionCanMatchProjectEvent(subscription, event))) {
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake audience is no longer authorized for target',
       runtimeIdentity: claim.message.runtimeIdentity,
       capabilities: null,
     };
@@ -854,6 +892,46 @@ function readEvents(
   return mapRows(rows, mapProjectEvent, limit, 'project_event');
 }
 
+function readEventsForBatch(sql: SqlStorage, projectId: string, batchId: string): ProjectEventRecord[] {
+  return sql
+    .exec(
+      `SELECT e.*
+       FROM project_event_matches m
+       JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id
+       WHERE m.project_id = ? AND m.batch_id = ?
+       ORDER BY m.matched_at ASC, m.id ASC`,
+      projectId,
+      batchId
+    )
+    .toArray()
+    .map(mapProjectEvent);
+}
+
+function authorizedWakeMatches(
+  subscription: ProjectEventSubscriptionRecord,
+  matches: Array<{ id: string; eventId: string }>,
+  events: ProjectEventRecord[]
+): {
+  matches: Array<{ id: string; eventId: string }>;
+  events: ProjectEventRecord[];
+  rejected: string[];
+} {
+  const eventsById = new Map(events.map((event) => [event.id, event]));
+  const allowedMatches: Array<{ id: string; eventId: string }> = [];
+  const allowedEvents: ProjectEventRecord[] = [];
+  const rejected: string[] = [];
+  for (const match of matches) {
+    const event = eventsById.get(match.eventId);
+    if (!event || !subscriptionCanMatchProjectEvent(subscription, event)) {
+      rejected.push(match.id);
+      continue;
+    }
+    allowedMatches.push(match);
+    allowedEvents.push(event);
+  }
+  return { matches: allowedMatches, events: allowedEvents, rejected };
+}
+
 function insertPromptQueueBatch(
   sql: SqlStorage,
   projectId: string,
@@ -951,7 +1029,8 @@ function terminalizeMatches(
   projectId: string,
   matchIds: string[],
   batchState: string,
-  now: number
+  now: number,
+  reason = 'event wake resolver returned terminal delivery'
 ): void {
   if (matchIds.length === 0) return;
   const state =
@@ -967,7 +1046,7 @@ function terminalizeMatches(
      WHERE project_id = ? AND id IN (${placeholders}) AND state = 'matched' AND batch_id IS NULL`,
     state,
     now,
-    'event wake resolver returned terminal delivery',
+    reason,
     projectId,
     ...matchIds
   );

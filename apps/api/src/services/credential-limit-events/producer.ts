@@ -4,7 +4,6 @@ import {
   captureCredentialLimitEventAdmission,
   dispatchCredentialLimitAdmission,
   loadWindow,
-  retryPendingCredentialLimitEventAdmissions,
   sameSample,
   updateDuplicateSample,
   updateStaleSample,
@@ -140,7 +139,12 @@ export async function recordCredentialLimitObservation(
   }
 
   if (computedLevel === null) {
-    await upsertCredentialLimitWindow(env, observation, level, existing?.last_event_delivery_key ?? null);
+    await upsertCredentialLimitWindow(
+      env,
+      observation,
+      level,
+      existing?.last_event_delivery_key ?? null
+    );
     return { outcome: 'ignored', reason: 'ok' };
   }
 
@@ -186,11 +190,7 @@ export async function recordCredentialLimitObservation(
     };
   }
 
-  const terminalState = captured.admission.dispatch_state;
-  const dispatchOutcome =
-    terminalState === 'pending' || terminalState === 'failed'
-      ? await dispatchCredentialLimitAdmission(env, captured.admission, config)
-      : captured.admission.dispatch_outcome ?? 'duplicate_replay';
+  const dispatchOutcome = await dispatchCredentialLimitAdmission(env, captured.admission);
 
   return {
     outcome: 'event_admitted',
@@ -210,17 +210,12 @@ export async function recordCredentialLimitObservations(
   const config = resolveCredentialLimitConfig(env);
   const limited = observations.slice(0, config.maxObservationsPerReport);
   const results: CredentialLimitObservationResult[] = [];
-  const affectedProjects = new Set<string>();
   for (const observation of limited) {
     const result = await recordCredentialLimitObservation(env, observation);
     results.push(result);
-    if (observation.projectId) affectedProjects.add(observation.projectId);
   }
   for (let index = limited.length; index < observations.length; index += 1) {
     results.push({ outcome: 'ignored', reason: 'capacity' });
-  }
-  for (const projectId of affectedProjects) {
-    await retryPendingCredentialLimitEventAdmissions(env, config, { projectId });
   }
   return results;
 }

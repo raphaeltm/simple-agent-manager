@@ -91,6 +91,9 @@ const PROJECT_EVENT_TABLE_SCHEMAS: readonly MigrationTableSchema[] = [
       payload_fingerprint: 'TEXT NOT NULL',
       metadata_json: 'TEXT NOT NULL',
       metadata_bytes: 'INTEGER NOT NULL',
+      audience_scope: "TEXT NOT NULL DEFAULT 'project' CHECK (audience_scope IN ('project', 'user'))",
+      audience_project_id: 'TEXT',
+      audience_user_id: 'TEXT',
       display_json: 'TEXT NOT NULL',
       display_bytes: 'INTEGER NOT NULL',
       raw_payload_ref_json: 'TEXT',
@@ -1966,6 +1969,33 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_project_event_wake_scheduler_retention
         ON project_event_wake_scheduler_state(next_retention_at, project_id)
+      `);
+    },
+  },
+  {
+    name: '047-project-event-server-derived-audience',
+    run: (sql) => {
+      const additiveColumns = [
+        [
+          'audience_scope',
+          "ALTER TABLE project_events ADD COLUMN audience_scope TEXT NOT NULL DEFAULT 'project' CHECK (audience_scope IN ('project', 'user'))",
+        ],
+        ['audience_project_id', 'ALTER TABLE project_events ADD COLUMN audience_project_id TEXT'],
+        ['audience_user_id', 'ALTER TABLE project_events ADD COLUMN audience_user_id TEXT'],
+      ] as const;
+      for (const [column, statement] of additiveColumns) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
+        }
+        sql.exec(`SELECT ${column} FROM project_events LIMIT 0`);
+      }
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_events_audience
+        ON project_events(project_id, audience_scope, audience_user_id, received_at DESC, id)
       `);
     },
   },

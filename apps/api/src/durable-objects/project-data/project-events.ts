@@ -191,9 +191,10 @@ export function admitProjectEvent(
   sql.exec(
     `INSERT INTO project_events
      (id, project_id, contract_version, source, event_type, subject_type, subject_id, severity,
-      delivery_key, payload_fingerprint, metadata_json, metadata_bytes, display_json, display_bytes,
+      delivery_key, payload_fingerprint, metadata_json, metadata_bytes,
+      audience_scope, audience_project_id, audience_user_id, display_json, display_bytes,
       raw_payload_ref_json, raw_payload_ref_bytes, occurred_at, received_at, updated_at, state)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     eventId,
     eventInput.projectId,
     eventInput.contractVersion,
@@ -206,6 +207,9 @@ export function admitProjectEvent(
     eventInput.payloadFingerprint,
     eventInput.metadataJson,
     eventInput.metadataBytes,
+    eventInput.audience.scope,
+    eventInput.audience.projectId,
+    eventInput.audience.userId,
     eventInput.displayJson,
     eventInput.displayBytes,
     eventInput.rawPayloadRefJson,

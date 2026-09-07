@@ -11,7 +11,11 @@ import * as projectDataService from '../../src/services/project-data';
 import { createSqliteD1 } from '../helpers/sqlite-d1';
 
 vi.mock('../../src/services/project-data', () => ({
-  admitProjectEvent: vi.fn(async () => ({ outcome: 'created' })),
+  admitProjectEvent: vi.fn(async () => ({
+    outcome: 'created',
+    event: { id: 'event-1' },
+    matches: [],
+  })),
   getAcpSession: vi.fn(),
 }));
 
@@ -61,6 +65,7 @@ function createCredentialD1() {
       updated_at TEXT
     );
   `);
+  sqlite.exec(readFileSync(migrationPath('0144_project_event_source_outbox.sql'), 'utf8'));
   sqlite.exec(readFileSync(migrationPath('0145_credential_limit_windows.sql'), 'utf8'));
   sqlite.exec(readFileSync(migrationPath('0146_credential_limit_event_admissions.sql'), 'utf8'));
   sqlite.prepare('INSERT INTO users (id) VALUES (?)').run('user-1');
@@ -108,7 +113,8 @@ function makeContext(env: TestEnv, token: string) {
   return {
     env,
     req: {
-      header: (name: string) => (name.toLowerCase() === 'authorization' ? `Bearer ${token}` : undefined),
+      header: (name: string) =>
+        name.toLowerCase() === 'authorization' ? `Bearer ${token}` : undefined,
     },
     body: (body: BodyInit | null, status?: number) => new Response(body, { status }),
   } as never;
@@ -132,7 +138,11 @@ describe('ACP usage callback real JWT authorization', () => {
     vi.setSystemTime(new Date('2026-09-07T00:00:00Z'));
     vi.mocked(projectDataService.getAcpSession).mockReset();
     vi.mocked(projectDataService.admitProjectEvent).mockReset();
-    vi.mocked(projectDataService.admitProjectEvent).mockResolvedValue({ outcome: 'created' } as never);
+    vi.mocked(projectDataService.admitProjectEvent).mockResolvedValue({
+      outcome: 'created',
+      event: { id: 'event-1' },
+      matches: [],
+    } as never);
   });
 
   afterEach(() => {

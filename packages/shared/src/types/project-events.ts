@@ -59,6 +59,15 @@ export type ProjectEventMetadata = { [key: string]: ProjectEventJsonValue };
 
 export type ProjectEventRecordState = 'recorded' | 'conflicted';
 
+export const PROJECT_EVENT_AUDIENCE_SCOPES = ['project', 'user'] as const;
+export type ProjectEventAudienceScope = (typeof PROJECT_EVENT_AUDIENCE_SCOPES)[number];
+
+export type ProjectEventAudience = {
+  scope: ProjectEventAudienceScope;
+  projectId: string | null;
+  userId: string | null;
+};
+
 export type ProjectEventRecord = {
   id: string;
   projectId: string;
@@ -70,6 +79,7 @@ export type ProjectEventRecord = {
   deliveryKey: string;
   payloadFingerprint: string;
   metadata: ProjectEventMetadata;
+  audience: ProjectEventAudience;
   display: ProjectEventDisplayData;
   rawPayloadRef: ProjectEventRawPayloadRef | null;
   occurredAt: number;

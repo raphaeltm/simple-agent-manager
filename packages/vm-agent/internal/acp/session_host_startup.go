@@ -565,7 +565,13 @@ func (h *SessionHost) attachACPConnection(process agentProcess, agentType string
 	// resolved agent type instead of re-entering AgentType's RWMutex.
 	h.resetHarnessWorkForAgent(agentType)
 	processedCh := make(chan struct{}, 1)
-	client := &sessionHostClient{host: h, processedCh: processedCh}
+	attr, hasAttr := h.credentialAttributionSnapshot()
+	client := &sessionHostClient{
+		host:                h,
+		processedCh:         processedCh,
+		usageAttribution:    attr,
+		hasUsageAttribution: hasAttr,
+	}
 
 	serializeTimeout := h.config.NotifSerializeTimeout
 	if serializeTimeout <= 0 {

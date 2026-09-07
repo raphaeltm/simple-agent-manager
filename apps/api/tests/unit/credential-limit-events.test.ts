@@ -17,16 +17,19 @@ import {
   extractCredentialLimitObservationsFromHeaders,
   parseOpenAIDurationMs,
   recordCredentialLimitObservation,
-  retryPendingCredentialLimitEventAdmissions,
 } from '../../src/services/credential-limit-events';
-import { resolveCredentialLimitConfig } from '../../src/services/credential-limit-events/config';
 import * as jwtService from '../../src/services/jwt';
+import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
 import * as projectDataService from '../../src/services/project-data';
 import { createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
 vi.mock('../../src/services/project-data', () => ({
-  admitProjectEvent: vi.fn(async () => ({ outcome: 'created' })),
+  admitProjectEvent: vi.fn(async () => ({
+    outcome: 'created',
+    event: { id: 'event-1' },
+    matches: [],
+  })),
   getAcpSession: vi.fn(),
 }));
 
@@ -51,6 +54,10 @@ type TestEnv = {
   CREDENTIAL_LIMIT_ADMISSION_MAX_ATTEMPTS?: string;
   CREDENTIAL_LIMIT_ADMISSION_RETRY_DELAY_MS?: string;
   CREDENTIAL_LIMIT_ADMISSION_RETENTION_DAYS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS?: string;
 };
 
 type WindowRow = {
@@ -65,11 +72,12 @@ type WindowRow = {
 type AdmissionRow = {
   id: string;
   delivery_key: string;
-  dispatch_state: string;
-  dispatch_outcome: string | null;
-  dispatch_attempts: number;
+  state: string;
+  admission_outcome: string | null;
+  attempt_count: number;
   event_type: string;
   event_payload_json: string;
+  last_error: string | null;
 };
 
 function migrationPath(name: string): string {
@@ -99,6 +107,7 @@ function createCredentialD1(overrides: Partial<TestEnv> = {}) {
       updated_at TEXT
     );
   `);
+  sqlite.exec(readFileSync(migrationPath('0144_project_event_source_outbox.sql'), 'utf8'));
   sqlite.exec(readFileSync(migrationPath('0145_credential_limit_windows.sql'), 'utf8'));
   sqlite.exec(readFileSync(migrationPath('0146_credential_limit_event_admissions.sql'), 'utf8'));
   sqlite.prepare('INSERT INTO users (id) VALUES (?)').run('user-1');
@@ -136,12 +145,16 @@ function createCredentialD1(overrides: Partial<TestEnv> = {}) {
     CREDENTIAL_LIMIT_WARNING_PERCENT: '75',
     CREDENTIAL_LIMIT_CRITICAL_PERCENT: '90',
     CREDENTIAL_LIMIT_ADMISSION_RETRY_DELAY_MS: '1',
+    PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS: '1',
+    PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS: '1',
     ...overrides,
   } as TestEnv;
   return { sqlite, env };
 }
 
-function baseObservation(overrides: Partial<CredentialLimitObservation> = {}): CredentialLimitObservation {
+function baseObservation(
+  overrides: Partial<CredentialLimitObservation> = {}
+): CredentialLimitObservation {
   return {
     projectId: 'project-1',
     userId: 'user-1',
@@ -179,12 +192,71 @@ function window(sqlite: Database.Database): WindowRow | undefined {
 function admissions(sqlite: Database.Database): AdmissionRow[] {
   return sqlite
     .prepare(
-      `SELECT id, delivery_key, dispatch_state, dispatch_outcome, dispatch_attempts,
-              event_type, event_payload_json
-       FROM credential_limit_event_admissions
+      `SELECT id, delivery_key, state, admission_outcome, attempt_count,
+              event_type, event_payload_json, last_error
+       FROM project_event_source_outbox
        ORDER BY created_at ASC, id ASC`
     )
     .all() as AdmissionRow[];
+}
+
+function seedActiveSourceOutboxCapacity(sqlite: Database.Database) {
+  sqlite
+    .prepare(
+      `INSERT INTO project_event_source_outbox (
+        id, project_id, source, event_type, subject_type, subject_id, delivery_key,
+        payload_fingerprint, event_payload_json, state, attempt_count, max_attempts,
+        next_attempt_at, expires_at, created_at, updated_at,
+        credential_limit_window_type, credential_limit_observed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      'capacity-intent',
+      'project-1',
+      'sam.credential_limit',
+      CREDENTIAL_LIMIT_EVENT_TYPES.warning,
+      'credential',
+      'cc_credentials:other',
+      'capacity-key',
+      'sha256:capacity',
+      '{}',
+      'pending',
+      0,
+      8,
+      '2026-09-07T00:00:00.000Z',
+      '2026-09-08T00:00:00.000Z',
+      '2026-09-07T00:00:00.000Z',
+      '2026-09-07T00:00:00.000Z',
+      'claude.five_hour',
+      100_000
+    );
+}
+
+function failFirstAdmissionResultPersistence(database: D1Database): D1Database {
+  let failed = false;
+  return {
+    ...database,
+    prepare(sql: string) {
+      const statement = database.prepare(sql);
+      if (!sql.includes("SET state = 'admitted'")) return statement;
+      return {
+        ...statement,
+        bind(...params: unknown[]) {
+          const bound = statement.bind(...params);
+          return {
+            ...bound,
+            async run() {
+              if (!failed) {
+                failed = true;
+                throw new Error('injected D1 admission-result persistence failure');
+              }
+              return bound.run();
+            },
+          };
+        },
+      } as D1PreparedStatement;
+    },
+  } as D1Database;
 }
 
 function createProjectEventStore() {
@@ -210,7 +282,11 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(100_000);
   vi.mocked(projectDataService.admitProjectEvent).mockReset();
-  vi.mocked(projectDataService.admitProjectEvent).mockResolvedValue({ outcome: 'created' } as never);
+  vi.mocked(projectDataService.admitProjectEvent).mockResolvedValue({
+    outcome: 'created',
+    event: { id: 'event-1' },
+    matches: [],
+  } as never);
   vi.mocked(projectDataService.getAcpSession).mockReset();
   vi.mocked(jwtService.verifyCallbackToken).mockReset();
 });
@@ -224,30 +300,41 @@ describe('credential limit producer', () => {
     const { env } = createCredentialD1();
     const eventStore = createProjectEventStore();
     try {
-      const subscription = createProjectEventSubscription(eventStore.sql, eventStore.env, 'project-1', {
-        projectId: 'project-1',
-        owner: { type: 'agent', id: 'session-1', name: 'session-1' },
-        idempotencyKey: 'credential-subscription',
-        filter: { version: 1, source: 'sam.credential_limit' },
-        deliveryPreference: {
-          requested: 'existing_session_prompt',
-          resolved: 'recorded_not_injected',
-          target: { sessionId: 'chat-1', taskId: null, runtimeId: null, agentId: 'session-1' },
-        },
-        expiresAt: 200_000,
-      }).subscription;
-      vi.mocked(projectDataService.admitProjectEvent).mockImplementation(async (_env, projectId, input) =>
-        admitProjectDataEvent(eventStore.sql, eventStore.env, projectId, { projectId, ...input })
+      const subscription = createProjectEventSubscription(
+        eventStore.sql,
+        eventStore.env,
+        'project-1',
+        {
+          projectId: 'project-1',
+          owner: { type: 'agent', id: 'session-1', name: 'session-1' },
+          idempotencyKey: 'credential-subscription',
+          filter: { version: 1, source: 'sam.credential_limit' },
+          deliveryPreference: {
+            requested: 'existing_session_prompt',
+            resolved: 'recorded_not_injected',
+            target: { sessionId: 'chat-1', taskId: null, runtimeId: null, agentId: 'session-1' },
+          },
+          expiresAt: 200_000,
+        }
+      ).subscription;
+      vi.mocked(projectDataService.admitProjectEvent).mockImplementation(
+        async (_env, projectId, input) =>
+          admitProjectDataEvent(eventStore.sql, eventStore.env, projectId, { projectId, ...input })
       );
 
-      await expect(recordCredentialLimitObservation(env as never, baseObservation())).resolves.toMatchObject({
+      await expect(
+        recordCredentialLimitObservation(env as never, baseObservation())
+      ).resolves.toMatchObject({
         outcome: 'event_admitted',
         transition: 'warning',
         admissionOutcome: 'created',
         dispatchOutcome: 'created',
       });
 
-      const storedEvent = eventStore.sqlite.prepare('SELECT * FROM project_events').get() as Record<string, unknown>;
+      const storedEvent = eventStore.sqlite.prepare('SELECT * FROM project_events').get() as Record<
+        string,
+        unknown
+      >;
       expect(storedEvent).toMatchObject({
         project_id: 'project-1',
         source: 'sam.credential_limit',
@@ -261,11 +348,62 @@ describe('credential limit producer', () => {
     }
   });
 
+  it('recovers a persisted source intent after ProjectData accepts but D1 result recording fails', async () => {
+    const { sqlite, env } = createCredentialD1();
+    const failingEnv = {
+      ...env,
+      DATABASE: failFirstAdmissionResultPersistence(env.DATABASE),
+    };
+    vi.mocked(projectDataService.admitProjectEvent)
+      .mockResolvedValueOnce({
+        outcome: 'created',
+        event: { id: 'event-accepted' },
+        matches: [],
+      } as never)
+      .mockResolvedValueOnce({
+        outcome: 'duplicate_replay',
+        event: { id: 'event-accepted' },
+        matches: [],
+      } as never);
+
+    await expect(
+      recordCredentialLimitObservation(failingEnv as never, baseObservation())
+    ).resolves.toMatchObject({
+      outcome: 'event_admitted',
+      transition: 'warning',
+      dispatchOutcome: 'deferred',
+    });
+    expect(admissions(sqlite)).toEqual([
+      expect.objectContaining({
+        event_type: CREDENTIAL_LIMIT_EVENT_TYPES.warning,
+        state: 'retryable_failed',
+        attempt_count: 1,
+      }),
+    ]);
+
+    await expect(
+      reconcileProjectEventSourceOutbox(failingEnv as never, { now: new Date(102_000) })
+    ).resolves.toMatchObject({ attempted: 1, admitted: 1 });
+
+    const firstPayload = vi.mocked(projectDataService.admitProjectEvent).mock.calls[0]![2];
+    const retryPayload = vi.mocked(projectDataService.admitProjectEvent).mock.calls[1]![2];
+    expect(retryPayload.deliveryKey).toBe(firstPayload.deliveryKey);
+    expect(retryPayload.payloadFingerprint).toBe(firstPayload.payloadFingerprint);
+    expect(admissions(sqlite)).toEqual([
+      expect.objectContaining({
+        event_type: CREDENTIAL_LIMIT_EVENT_TYPES.warning,
+        state: 'admitted',
+        admission_outcome: 'duplicate_replay',
+        attempt_count: 2,
+      }),
+    ]);
+  });
+
   it('captures D1 admission before ProjectData and suppresses superseded stale retry', async () => {
     const { sqlite, env } = createCredentialD1();
     vi.mocked(projectDataService.admitProjectEvent)
       .mockRejectedValueOnce(new Error('ProjectData unavailable'))
-      .mockResolvedValue({ outcome: 'created' } as never);
+      .mockResolvedValue({ outcome: 'created', event: { id: 'event-1' }, matches: [] } as never);
 
     const critical = await recordCredentialLimitObservation(
       env as never,
@@ -274,10 +412,15 @@ describe('credential limit producer', () => {
     expect(critical).toMatchObject({
       outcome: 'event_admitted',
       transition: 'critical',
-      dispatchOutcome: 'failed',
+      dispatchOutcome: 'deferred',
     });
     expect(window(sqlite)).toMatchObject({ last_event_level: 'critical', observed_at: 100_000 });
-    expect(admissions(sqlite).find((row) => row.event_type === CREDENTIAL_LIMIT_EVENT_TYPES.critical)).toMatchObject({ dispatch_state: 'failed' });
+    expect(
+      admissions(sqlite).find((row) => row.event_type === CREDENTIAL_LIMIT_EVENT_TYPES.critical)
+    ).toMatchObject({
+      state: 'retryable_failed',
+      attempt_count: 1,
+    });
 
     const reset = await recordCredentialLimitObservation(
       env as never,
@@ -290,16 +433,18 @@ describe('credential limit producer', () => {
     });
 
     vi.mocked(projectDataService.admitProjectEvent).mockClear();
-    vi.setSystemTime(102_000);
     await expect(
-      retryPendingCredentialLimitEventAdmissions(env as never, resolveCredentialLimitConfig(env as never), {
-        projectId: 'project-1',
-      })
-    ).resolves.toEqual(['superseded']);
+      reconcileProjectEventSourceOutbox(env as never, { now: new Date(102_000) })
+    ).resolves.toMatchObject({
+      attempted: 0,
+      permanentFailed: 0,
+    });
     expect(projectDataService.admitProjectEvent).not.toHaveBeenCalled();
-    expect(admissions(sqlite).find((row) => row.event_type === CREDENTIAL_LIMIT_EVENT_TYPES.critical)).toMatchObject({
-      dispatch_state: 'superseded',
-      dispatch_outcome: 'superseded',
+    expect(
+      admissions(sqlite).find((row) => row.event_type === CREDENTIAL_LIMIT_EVENT_TYPES.critical)
+    ).toMatchObject({
+      state: 'permanent_failed',
+      last_error: expect.stringContaining('Superseded by newer credential limit window'),
     });
   });
 
@@ -310,15 +455,21 @@ describe('credential limit producer', () => {
       baseObservation({ observedAt: 100_000, utilizationPercent: 80 })
     );
 
-    vi.mocked(projectDataService.admitProjectEvent).mockRejectedValueOnce(new Error('ProjectData unavailable'));
+    vi.mocked(projectDataService.admitProjectEvent).mockRejectedValueOnce(
+      new Error('ProjectData unavailable')
+    );
     await expect(
       recordCredentialLimitObservation(
         env as never,
         baseObservation({ observedAt: 101_000, utilizationPercent: 10, status: 'allowed' })
       )
-    ).resolves.toMatchObject({ transition: 'reset', dispatchOutcome: 'failed' });
+    ).resolves.toMatchObject({ transition: 'reset', dispatchOutcome: 'deferred' });
 
-    vi.mocked(projectDataService.admitProjectEvent).mockResolvedValue({ outcome: 'created' } as never);
+    vi.mocked(projectDataService.admitProjectEvent).mockResolvedValue({
+      outcome: 'created',
+      event: { id: 'event-1' },
+      matches: [],
+    } as never);
     await expect(
       recordCredentialLimitObservation(
         env as never,
@@ -327,42 +478,105 @@ describe('credential limit producer', () => {
     ).resolves.toMatchObject({ transition: 'critical', dispatchOutcome: 'created' });
 
     vi.mocked(projectDataService.admitProjectEvent).mockClear();
-    vi.setSystemTime(103_000);
     await expect(
-      retryPendingCredentialLimitEventAdmissions(env as never, resolveCredentialLimitConfig(env as never), {
-        projectId: 'project-1',
-      })
-    ).resolves.toEqual(['superseded']);
+      reconcileProjectEventSourceOutbox(env as never, { now: new Date(103_000) })
+    ).resolves.toMatchObject({
+      attempted: 0,
+      skipped: 0,
+    });
     expect(projectDataService.admitProjectEvent).not.toHaveBeenCalled();
     expect(window(sqlite)).toMatchObject({ last_event_level: 'critical', observed_at: 102_000 });
+    expect(
+      admissions(sqlite).find((row) => row.event_type === CREDENTIAL_LIMIT_EVENT_TYPES.reset)
+    ).toMatchObject({
+      state: 'permanent_failed',
+    });
   });
 
-  it('records duplicate, stale, unknown, timestamp, and capacity outcomes through real SQL', async () => {
-    const { sqlite, env } = createCredentialD1({ CREDENTIAL_LIMIT_ADMISSION_MAX_ACTIVE_PER_PROJECT: '1' });
+  it('does not consume a credential edge when source-outbox capacity is full, and admits after release', async () => {
+    const { sqlite, env } = createCredentialD1({
+      CREDENTIAL_LIMIT_ADMISSION_MAX_ACTIVE_PER_PROJECT: '1',
+    });
 
-    await expect(recordCredentialLimitObservation(env as never, baseObservation())).resolves.toMatchObject({
+    await expect(
+      recordCredentialLimitObservation(env as never, baseObservation())
+    ).resolves.toMatchObject({
       outcome: 'event_admitted',
       transition: 'warning',
     });
-    await expect(recordCredentialLimitObservation(env as never, baseObservation())).resolves.toEqual({
+    const warningDeliveryKey = window(sqlite)?.last_event_delivery_key;
+    seedActiveSourceOutboxCapacity(sqlite);
+
+    await expect(
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({ observedAt: 102_000, utilizationPercent: 95 })
+      )
+    ).resolves.toEqual({ outcome: 'ignored', reason: 'capacity' });
+    expect(window(sqlite)).toMatchObject({
+      last_event_level: 'warning',
+      observed_at: 100_000,
+      last_event_delivery_key: warningDeliveryKey,
+    });
+    expect(
+      admissions(sqlite).filter((row) => row.event_type === CREDENTIAL_LIMIT_EVENT_TYPES.critical)
+    ).toEqual([]);
+
+    sqlite
+      .prepare("UPDATE project_event_source_outbox SET state = 'admitted' WHERE id = ?")
+      .run('capacity-intent');
+
+    await expect(
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({ observedAt: 102_000, utilizationPercent: 95 })
+      )
+    ).resolves.toMatchObject({
+      outcome: 'event_admitted',
+      transition: 'critical',
+      dispatchOutcome: 'created',
+    });
+    expect(window(sqlite)).toMatchObject({ last_event_level: 'critical', observed_at: 102_000 });
+  });
+
+  it('records duplicate, stale, unknown, and timestamp outcomes through real SQL', async () => {
+    const { sqlite, env } = createCredentialD1();
+
+    await expect(
+      recordCredentialLimitObservation(env as never, baseObservation())
+    ).resolves.toMatchObject({
+      outcome: 'event_admitted',
+      transition: 'warning',
+    });
+    await expect(
+      recordCredentialLimitObservation(env as never, baseObservation())
+    ).resolves.toEqual({
       outcome: 'ignored',
       reason: 'duplicate',
     });
     await expect(
-      recordCredentialLimitObservation(env as never, baseObservation({ observedAt: 99_000, utilizationPercent: 95 }))
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({ observedAt: 99_000, utilizationPercent: 95 })
+      )
     ).resolves.toEqual({ outcome: 'ignored', reason: 'stale' });
     await expect(
-      recordCredentialLimitObservation(env as never, baseObservation({ observedAt: 101_000, status: 'unknown', utilizationPercent: null }))
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({ observedAt: 101_000, status: 'unknown', utilizationPercent: null })
+      )
     ).resolves.toEqual({ outcome: 'ignored', reason: 'ok' });
     expect(window(sqlite)).toMatchObject({ last_event_level: 'warning', observed_at: 101_000 });
     await expect(
-      recordCredentialLimitObservation(env as never, baseObservation({ observedAt: 102_000, utilizationPercent: 95 }))
-    ).resolves.toEqual({ outcome: 'ignored', reason: 'capacity' });
-    await expect(
-      recordCredentialLimitObservation(env as never, baseObservation({ observedAt: 200_000 + 301_000 }))
+      recordCredentialLimitObservation(
+        env as never,
+        baseObservation({ observedAt: 200_000 + 301_000 })
+      )
     ).resolves.toEqual({ outcome: 'ignored', reason: 'future' });
     vi.setSystemTime(200_000 + 86_400_001);
-    await expect(recordCredentialLimitObservation(env as never, baseObservation())).resolves.toEqual({
+    await expect(
+      recordCredentialLimitObservation(env as never, baseObservation())
+    ).resolves.toEqual({
       outcome: 'ignored',
       reason: 'too_old',
     });
