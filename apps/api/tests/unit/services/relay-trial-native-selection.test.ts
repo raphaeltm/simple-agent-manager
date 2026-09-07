@@ -48,6 +48,8 @@ function fixture() {
     capacityPlacementSnapshot: null,
     placement: {
       resolvedReservation: {
+        version: 1,
+        source: 'platform',
         cpuMillis: 2000,
         memoryMb: 4096,
         diskMb: 40960,
@@ -124,6 +126,15 @@ describe('native relay and trial selection', () => {
   it('retains observed capacity admission for the matching native trial offering', async () => {
     const { sqlite, state, context, advanceToStep } = fixture();
     sqlite.exec('UPDATE nodes SET observed_provider_instance_vcpu_count = 1');
+    await handleNodeSelection(state, context);
+    expect(state.nodeId).toBeNull();
+    expect(advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
+  });
+
+  it('rejects a malformed reservation even when observed trial hardware has capacity', async () => {
+    const { state, context, advanceToStep } = fixture();
+    const plan = await allocation();
+    delete plan.placement.resolvedReservation.version;
     await handleNodeSelection(state, context);
     expect(state.nodeId).toBeNull();
     expect(advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');

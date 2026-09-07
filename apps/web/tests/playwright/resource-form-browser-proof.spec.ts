@@ -1200,7 +1200,7 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
     test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
     test('chat composer on mobile — textarea and resource toggle reachable', async ({ page }) => {
-      const { pageErrors } = await setupMocks(page);
+      const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/chat');
       await page.waitForTimeout(2000);
 
@@ -1209,6 +1209,27 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
 
       await screenshot(page, 'chat-composer-mobile');
       await assertNoOverflow(page);
+
+      await page.getByRole('button', { name: 'Resources', exact: true }).click();
+      const cpu = page.getByLabel('vCPU', { exact: true });
+      const memory = page.getByLabel('Mem GB', { exact: true });
+      await expect(cpu).toBeVisible();
+      await expect(memory).toBeVisible();
+      await cpu.fill('2.5');
+      await memory.fill('6');
+      await expect(cpu).toHaveValue('2.5');
+      await expect(memory).toHaveValue('6');
+      await textarea.fill('Build the feature with mobile resource overrides');
+      await screenshot(page, 'chat-resource-override-filled-mobile');
+      await assertNoOverflow(page);
+
+      await page.getByRole('button', { name: 'Send', exact: true }).click();
+      await expect.poll(() => capturedRequests.find(
+        (request) => request.method === 'POST' && request.path.includes('/tasks/submit')
+      )?.body).toMatchObject({
+        message: 'Build the feature with mobile resource overrides',
+        resourceRequirements: { minVcpu: 2.5, minMemoryGb: 6 },
+      });
       assertNoPageErrors(pageErrors);
     });
   });

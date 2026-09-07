@@ -20,7 +20,7 @@ describe('resource requirements request schemas', () => {
     ).toBe(true);
   });
 
-  it('keeps null semantics on profile, skill, and trigger adapters but rejects task nulls', () => {
+  it('accepts null as an explicit inheritance reset across profile, skill, trigger, and task adapters', () => {
     expect(
       v.safeParse(CreateAgentProfileSchema, { name: 'profile', resourceRequirements: null }).success
     ).toBe(true);
@@ -37,7 +37,7 @@ describe('resource requirements request schemas', () => {
     ).toBe(true);
     expect(
       v.safeParse(SubmitTaskSchema, { message: 'ship', resourceRequirements: null }).success
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('rejects zero CPU, zero memory, malformed booleans, and invalid co-tenant counts', () => {

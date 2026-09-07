@@ -516,7 +516,7 @@ describe('Env interface — new configurable limit env vars', () => {
 // =============================================================================
 
 describe('workspace create — count limit removed', () => {
-  const crudSource = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8');
+  const crudSource = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/workspace-create.ts'), 'utf8');
 
   it('still counts active workspaces per node (for telemetry)', () => {
     expect(crudSource).toContain('nodeWorkspaceCount');

@@ -12,7 +12,18 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../src/db/schema';
+import { log } from '../../src/lib/logger';
+import { startComputeTrackingForNode } from '../../src/routes/workspaces/workspace-create-helpers';
+import {
+  calculateVcpuHoursForPeriod,
+  startComputeTracking,
+} from '../../src/services/compute-usage';
+import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 describe('compute usage metering pipeline', () => {
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
@@ -21,7 +32,10 @@ describe('compute usage metering pipeline', () => {
     resolve(process.cwd(), 'src/services/node-usage.ts'),
     'utf8'
   );
-  const crudFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8');
+  const workspaceCreateFile = readFileSync(
+    resolve(process.cwd(), 'src/routes/workspaces/workspace-create.ts'),
+    'utf8'
+  );
   const lifecycleFile = readFileSync(
     resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'),
     'utf8'
@@ -118,9 +132,36 @@ describe('compute usage metering pipeline', () => {
       expect(serviceFile).toContain('sessionEnd > periodEnd');
     });
 
-    it('calculateVcpuHoursForPeriod delegates to node-based aggregation', () => {
-      expect(serviceFile).toContain('calculateNodeVcpuHours(');
-      expect(serviceFile).toContain('providerInstanceVcpuCount ?? row.vcpuCount');
+    it('aggregates overlapping workspaces once using the CPU count booked from observed hardware', async () => {
+      const sqlite = new Database(':memory:');
+      try {
+        createSchemaTables(sqlite, [schema.computeUsage]);
+        const db = drizzle(createSqliteD1(sqlite), { schema });
+        for (const workspaceId of ['workspace-1', 'workspace-2']) {
+          await startComputeTracking(db, {
+            userId: 'user-1',
+            workspaceId,
+            nodeId: 'node-1',
+            vmSize: 'small',
+            providerInstanceVcpuCount: 4,
+            observedProviderInstanceVcpuCount: 8,
+          });
+        }
+        // Later plan/observation changes cannot rewrite already-booked usage.
+        sqlite.exec(`UPDATE compute_usage SET
+          started_at = '2026-09-01T00:00:00.000Z', ended_at = '2026-09-01T01:00:00.000Z',
+          provider_instance_vcpu_count = 16, observed_provider_instance_vcpu_count = 32`);
+        expect(
+          await calculateVcpuHoursForPeriod(
+            db,
+            'user-1',
+            new Date('2026-09-01T00:00:00Z'),
+            new Date('2026-09-01T01:00:00Z')
+          )
+        ).toBe(8);
+      } finally {
+        sqlite.close();
+      }
     });
 
     it('calculateNodeVcpuHours groups rows by node before weighting duration', () => {
@@ -146,22 +187,25 @@ describe('compute usage metering pipeline', () => {
   // Metering Hooks: Start Tracking
   // ===========================================================================
   describe('start compute tracking hooks', () => {
-    it('workspace creation (crud.ts) calls startComputeTracking', () => {
-      expect(crudFile).toContain('startComputeTracking');
+    it('workspace creation handler calls startComputeTracking', () => {
+      expect(workspaceCreateFile).toContain('startComputeTracking');
     });
 
     it('workspace creation passes credentialSource to tracking', () => {
-      expect(crudFile).toContain('credentialSource');
+      expect(workspaceCreateFile).toContain('credentialSource');
     });
 
     it('fresh-node provisioning starts metering after provider metadata is persisted', () => {
-      const provisioningBlockStart = crudFile.indexOf('if (mustProvisionNode) {');
-      const provisionCall = crudFile.indexOf(
-        'await provisionNode(targetNodeId, c.env)',
+      const provisioningBlockStart = workspaceCreateFile.indexOf('if (mustProvisionNode) {');
+      const provisionCall = workspaceCreateFile.indexOf(
+        'await provisionNode(',
         provisioningBlockStart
       );
-      const runningCheck = crudFile.indexOf("provisionedNode.status !== 'running'", provisionCall);
-      const trackingCall = crudFile.indexOf(
+      const runningCheck = workspaceCreateFile.indexOf(
+        "provisionedNode.status !== 'running'",
+        provisionCall
+      );
+      const trackingCall = workspaceCreateFile.indexOf(
         'await startComputeTrackingForNode(innerDb, {',
         runningCheck
       );
@@ -172,9 +216,37 @@ describe('compute usage metering pipeline', () => {
       expect(trackingCall).toBeGreaterThan(runningCheck);
     });
 
-    it('workspace creation wraps metering in try/catch (best-effort)', () => {
-      // Metering should not block workspace creation
-      expect(crudFile).toContain('compute-usage');
+    it('workspace creation can continue when metering persistence fails', async () => {
+      const sqlite = new Database(':memory:');
+      const errorLog = vi.spyOn(log, 'error').mockImplementation(() => undefined);
+      try {
+        createSchemaTables(sqlite, [schema.nodes, schema.computeUsage]);
+        sqlite.exec(`INSERT INTO nodes (id, provider_instance_vcpu_count) VALUES ('node-1', 8);
+          CREATE TRIGGER reject_metering BEFORE INSERT ON compute_usage
+          BEGIN SELECT RAISE(ABORT, 'metering write unavailable'); END;`);
+        const db = drizzle(createSqliteD1(sqlite), { schema });
+        await expect(
+          startComputeTrackingForNode(db, {
+            userId: 'user-1',
+            workspaceId: 'workspace-1',
+            nodeId: 'node-1',
+            vmSize: 'small',
+          })
+        ).resolves.toBeUndefined();
+        expect(errorLog).toHaveBeenCalledWith(
+          'workspace.compute_tracking_start_failed',
+          expect.objectContaining({
+            workspaceId: 'workspace-1',
+            error: expect.any(String),
+          })
+        );
+        expect(sqlite.prepare('SELECT COUNT(*) AS count FROM compute_usage').get()).toEqual({
+          count: 0,
+        });
+      } finally {
+        errorLog.mockRestore();
+        sqlite.close();
+      }
     });
 
     it('task-runner workspace creation calls startComputeTracking', () => {

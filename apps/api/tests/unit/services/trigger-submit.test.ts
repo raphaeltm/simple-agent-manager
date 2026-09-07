@@ -144,9 +144,10 @@ function triggerProjectRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function queueTriggerSubmitLookups(project = triggerProjectRow()) {
+function queueTriggerSubmitLookups(project = triggerProjectRow(), executionUserId = 'user-1') {
   mockSelectResult.push(
     [project],
+    [{ projectId: 'project-1', userId: executionUserId, role: 'maintainer', status: 'active' }],
     [{ githubId: '123', name: 'User', email: 'user@test.com' }] // user
   );
 }
@@ -190,7 +191,7 @@ describe('submitTriggeredTask', () => {
   });
 
   it('creates a task with trigger metadata fields', async () => {
-    // Setup mock DB responses: project, user
+    // Setup mock DB responses: project, execution membership, user
     queueTriggerSubmitLookups();
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
@@ -224,7 +225,7 @@ describe('submitTriggeredTask', () => {
         credentialAttributionSource: 'project',
       })
     );
-    queueTriggerSubmitLookups(triggerProjectRow({ userId: 'member-b' }));
+    queueTriggerSubmitLookups(triggerProjectRow({ userId: 'member-b' }), 'member-a');
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
     await submitTriggeredTask({} as any, {
@@ -354,10 +355,9 @@ describe('submitTriggeredTask', () => {
       workspaceProfile: null,
       devcontainerConfigName: null,
       taskMode: 'task',
-      resourceRequirementsJson: '{"cpu":4}',
+      resourceRequirementsJson: '{"minVcpu":4}',
       defaultProfileId: 'profile-1',
     });
-    skillMocks.parseSkillResourceRequirementsJson.mockReturnValueOnce({ cpu: 4 });
     queueTriggerSubmitLookups();
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
@@ -375,7 +375,11 @@ describe('submitTriggeredTask', () => {
     expect(insertCall.agentProfileHint).toBe('profile-1');
     expect(insertCall.skillId).toBe('skill-1');
     expect(insertCall.skillHint).toBe('triage');
-    expect(insertCall.resourceRequirementsJson).toBe('{"cpu":4}');
+    expect(insertCall.resourceRequirementsJson).toBe('{"minVcpu":4}');
+    expect(taskRunnerDo.startTaskRunnerDO).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ resourceRequirements: { minVcpu: 4 } })
+    );
   });
 
   it('passes trigger resource requirements through persisted task and TaskRunner input', async () => {
@@ -402,8 +406,45 @@ describe('submitTriggeredTask', () => {
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
     await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
-      'Project project-1 not found'
+      'Trigger execution principal is not a current project member with task execution access'
     );
+    expect(mockInsertValues).not.toHaveBeenCalled();
+    expect(projectData.createSession).not.toHaveBeenCalled();
+    expect(taskRunnerDo.startTaskRunnerDO).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'missing', membership: [] },
+    {
+      name: 'removed',
+      membership: [
+        { projectId: 'project-1', userId: 'user-1', role: 'owner', status: 'removed' },
+      ],
+    },
+    {
+      name: 'viewer',
+      membership: [
+        { projectId: 'project-1', userId: 'user-1', role: 'viewer', status: 'active' },
+      ],
+    },
+    {
+      name: 'different principal',
+      membership: [
+        { projectId: 'project-1', userId: 'other-user', role: 'owner', status: 'active' },
+      ],
+    },
+  ])('rejects a $name execution principal before task effects', async ({ membership }) => {
+    mockSelectResult.push([triggerProjectRow()], membership);
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
+      'Trigger execution principal is not a current project member with task execution access'
+    );
+    expect(mockInsertValues).not.toHaveBeenCalled();
+    expect(projectData.createSession).not.toHaveBeenCalled();
+    expect(taskRunnerDo.startTaskRunnerDO).not.toHaveBeenCalled();
+    expect(
+      placementMocks.resolveTaskStartPlacementCredentialAttributionFromPlacement
+    ).not.toHaveBeenCalled();
   });
 
   it('throws when user has no cloud provider credentials', async () => {
@@ -413,7 +454,7 @@ describe('submitTriggeredTask', () => {
         errorKind: 'credentials',
       }
     );
-    mockSelectResult.push([triggerProjectRow({ installationId: 'i1' })]);
+    queueTriggerSubmitLookups(triggerProjectRow({ installationId: 'i1' }));
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
     await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(

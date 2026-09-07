@@ -90,6 +90,18 @@ function admission(
   };
 }
 
+async function grantWorkspaceMembership(userId: string): Promise<void> {
+  // Node ownership does not grant project execution. These packing fixtures
+  // need the same active workspace-capable membership as a real task submitter.
+  await env.DATABASE.prepare(
+    `INSERT INTO project_members
+       (project_id, user_id, role, status, invited_by, created_at, updated_at)
+     VALUES (?, ?, 'maintainer', 'active', ?, datetime('now'), datetime('now'))`
+  )
+    .bind(PROJECT_ID, userId, USER_ID)
+    .run();
+}
+
 async function seedQueuedTask(taskId: string, userId = USER_ID): Promise<void> {
   await seedTask(taskId, PROJECT_ID, userId, {
     status: 'queued',
@@ -696,6 +708,27 @@ describe('VM admission control D1 races', () => {
     )
       .bind(nodeId)
       .run();
+    // A valid native host and lease still do not authorize a non-member.
+    expect(
+      await findNodeWithCapacity(
+        taskState(userId, 'small', {
+          resolvedReservation: requests[0]!.reservation,
+          projectScaling: { maxWorkspacesPerNode: 4 },
+        }),
+        selectorContext()
+      )
+    ).toBeNull();
+    expect(
+      await reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('mixed-request-workspace-nonmember', nodeId, {
+          userId,
+          resolvedReservation: requests[0]!.reservation,
+        }),
+        admissionPolicy()
+      )
+    ).toBe(false);
+    await grantWorkspaceMembership(userId);
     for (const [index, request] of requests.entries()) {
       const state = taskState(userId, request.vmSize, {
         resolvedReservation: request.reservation,
@@ -859,9 +892,18 @@ describe('VM admission control D1 races', () => {
 
     const rc = selectorContext();
     expect((await findNodeWithCapacity(taskState(USER_ID, 'large'), rc))?.nodeId).toBe(largeNode);
+    expect(await findNodeWithCapacity(taskState(OTHER_USER_ID, 'large'), rc)).toBeNull();
+    await grantWorkspaceMembership(OTHER_USER_ID);
     expect((await findNodeWithCapacity(taskState(OTHER_USER_ID, 'large'), rc))?.nodeId).toBe(
       otherUserNode
     );
+    expect(
+      await reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-wrong-node-owner', otherUserNode),
+        admissionPolicy()
+      )
+    ).toBe(false);
 
     // Explicit policy with no host memory reserve: this case is about packing,
     // same-user isolation and size compatibility. The 512 MB default reserve is

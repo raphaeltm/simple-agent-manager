@@ -59,7 +59,7 @@ function hetznerServerType(name: string) {
 describe('provider catalog completeness at the provider boundary', () => {
   it('treats a successful EMPTY Hetzner server_types response as a complete API inventory', async () => {
     mockHetznerServerTypes([]);
-    const provider = new HetznerProvider({ provider: 'hetzner', apiToken: 'token' });
+    const provider = new HetznerProvider('token');
 
     const resolved = await listProviderCatalogOfferings('hetzner', provider);
 
@@ -71,7 +71,7 @@ describe('provider catalog completeness at the provider boundary', () => {
 
   it('still reports a populated Hetzner response as a complete API inventory', async () => {
     mockHetznerServerTypes([hetznerServerType('cx23')]);
-    const provider = new HetznerProvider({ provider: 'hetzner', apiToken: 'token' });
+    const provider = new HetznerProvider('token');
 
     const resolved = await listProviderCatalogOfferings('hetzner', provider);
 
@@ -80,24 +80,23 @@ describe('provider catalog completeness at the provider boundary', () => {
     expect(resolved.refreshStatus).toEqual({ succeeded: true, origin: 'api', complete: true });
   });
 
-  it('surfaces a Hetzner catalog failure instead of silently returning static rows', async () => {
+  it('preserves static offerings with failed, incomplete provenance after a live catalog failure', async () => {
     globalThis.fetch = vi.fn(
       async () => new Response('nope', { status: 500 })
     ) as unknown as typeof fetch;
-    const provider = new HetznerProvider({ provider: 'hetzner', apiToken: 'token' });
+    const provider = new HetznerProvider('token');
 
-    await expect(listProviderCatalogOfferings('hetzner', provider)).rejects.toThrow();
+    const resolved = await listProviderCatalogOfferings('hetzner', provider);
+    expect(resolved.offerings.length).toBeGreaterThan(0);
+    expect(resolved.offerings.every((offering) => offering.catalogSource === 'static')).toBe(true);
+    expect(resolved.refreshStatus).toEqual({ succeeded: false, origin: 'static', complete: false });
   });
 
   it('keeps a provider without a live catalog API classified as incomplete/static', async () => {
     // Scaleway returns SAM's curated static offering table regardless of the options, so its
     // result must never be mistaken for an authoritative provider inventory — including the
     // degenerate empty case, which is the discriminator for the empty-success rule above.
-    const provider = new ScalewayProvider({
-      provider: 'scaleway',
-      apiToken: 'token',
-      projectId: 'project',
-    });
+    const provider = new ScalewayProvider('token', 'project');
 
     const resolved = await listProviderCatalogOfferings('scaleway', provider);
 

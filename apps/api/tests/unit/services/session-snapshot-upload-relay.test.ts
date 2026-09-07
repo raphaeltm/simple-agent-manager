@@ -438,7 +438,6 @@ describe('session snapshot upload relay', () => {
           'Session snapshot relay abcdef123456',
           'hetzner',
           'fsn1',
-          'large',
           'cx42',
           120,
           'ubuntu-24.04',

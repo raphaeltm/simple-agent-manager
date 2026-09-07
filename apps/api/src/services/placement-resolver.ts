@@ -307,6 +307,8 @@ export async function resolveTaskStartCapacityPoolSelection(
       projectId: placement.projectId,
       ensure: options.ensure ?? true,
       env: options.env,
+      // Allocation filters by the requested role; editor summaries hide deployment mirrors.
+      workloadRoles: 'all',
     });
     if (!summary) return null;
 

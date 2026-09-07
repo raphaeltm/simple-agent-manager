@@ -14,7 +14,7 @@ describe('skill submit path source contracts', () => {
     expect(submit).toContain('resolveSkillProfile');
     expect(submit).toContain('body.skillId');
     expect(submit).toContain('resolveTaskStartPlacement');
-    expect(submit).toContain('skill: skillResourceRequirements');
+    expect(submit).toContain('skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null');
     expect(placementResolver).toContain('skillId: profile?.skillId ?? undefined');
     expect(submit).toContain('skillId: resolvedProfile?.skillId ?? null');
     expect(submit).toContain('skillHint: body.skillId ?? null');
@@ -26,7 +26,7 @@ describe('skill submit path source contracts', () => {
     expect(triggerSubmit).toContain('resolveSkillProfile');
     expect(triggerSubmit).toContain('input.skillId');
     expect(triggerSubmit).toContain('resolveTaskStartPlacement');
-    expect(triggerSubmit).toContain('skill: skillResourceRequirements');
+    expect(triggerSubmit).toContain('skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null');
     expect(placementResolver).toContain('skillId: profile?.skillId ?? undefined');
     expect(triggerSubmit).toContain('skillId: resolvedProfile?.skillId ?? null');
     expect(triggerSubmit).toContain('skillHint: input.skillId');

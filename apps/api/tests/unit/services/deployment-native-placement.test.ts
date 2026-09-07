@@ -124,7 +124,7 @@ describe('deployment native placement SQL', () => {
     const { sqlite, env, placement, link } = fixture();
     expect(await findDeploymentNodeWithCapacity(env, 'user', placement, false)).toBe('node');
     sqlite.exec(
-      "INSERT INTO capacity_pools (id, scope, project_id, is_default, status) VALUES ('new-default', 'project', 'project', 1, 'disabled')"
+      "INSERT INTO capacity_pools (id, scope, owner_project_id, is_default, status) VALUES ('new-default', 'project', 'project', 1, 'disabled')"
     );
     expect(await link()).toBe(false);
   });

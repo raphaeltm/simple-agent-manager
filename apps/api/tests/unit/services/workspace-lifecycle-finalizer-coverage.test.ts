@@ -20,6 +20,7 @@ import { collectSourceFiles, SRC_ROOT } from '../../helpers/source-tree';
 
 interface TerminalWriterEvidence {
   kind: string;
+  matchedText: string;
   excerpt: string;
 }
 
@@ -58,12 +59,14 @@ const SHARED_FINALIZER_ROUTE_SYMBOLS = [
  * decision that future deletion writers must not copy blindly.
  */
 const ALLOWLIST: Record<string, string> = {
-  'durable-objects/task-runner/node-steps.ts':
+  'durable-objects/task-runner/node-provisioning-step.ts':
     'Deletes a freshly-created D1 node row only after provider capacity failure, before any workspace or agent_session exists.',
   'scheduled/d1-retention.ts':
     'Destroys expired cf-container snapshot runtime state after the ProjectData session is stopped; it does not mark workspace/node rows deleted, and the container DO routes D1 runtime termination through persistRuntimeEnded().',
   'services/deployment-provisioning.ts':
     'Abandons a fresh deployment node record after environment-link race loss before any workspace can reference the node.',
+  'services/node-provisioning.ts':
+    'Compensates failed in-flight VM allocation: capacity failures remove only the creating row matching provider/runtime identity, and strict teardown destroys the newly allocated runtime after lifecycle/authority races. It does not close an admitted workspace; normal node/workspace deletion remains owned by node-resource-lifecycle.ts and node-resource-deletion.ts.',
   'services/provisioning-authority.ts':
     'Post-allocation compensation for a node this request just created. It refuses any node that already has an attached workspace or deployment environment, so no lifecycle a finalizer owns can exist yet: the DELETE only removes a placeholder row that never reached the provider, and the strict-deletion call is the same external teardown primitive strict-node-deletion.ts is allowlisted for.',
   'services/strict-node-deletion.ts':
@@ -71,6 +74,33 @@ const ALLOWLIST: Record<string, string> = {
   'services/vm-agent-container.ts':
     'Transport wrapper around the VM_AGENT_CONTAINER Durable Object. Runtime-ended D1 writes happen inside the DO via persistRuntimeEnded().',
 };
+
+// Extraction must not turn provisioning compensation into a blanket exemption
+// for future terminal workspace writes in either module.
+const PROVISIONING_COMPENSATION_KINDS: Record<string, ReadonlySet<string>> = {
+  'durable-objects/task-runner/node-provisioning-step.ts': new Set([
+    'workspace_or_node_sql_delete',
+  ]),
+  'services/node-provisioning.ts': new Set([
+    'workspace_or_node_drizzle_delete',
+    'strict_node_delete_helper',
+  ]),
+};
+
+function isAllowlistedWriter(relative: string, evidence: TerminalWriterEvidence[]): boolean {
+  if (!(relative in ALLOWLIST)) return false;
+  const allowedKinds = PROVISIONING_COMPENSATION_KINDS[relative];
+  return !allowedKinds || evidence.every((item) => {
+    if (!allowedKinds.has(item.kind)) return false;
+    if (item.kind === 'workspace_or_node_sql_delete') {
+      return /^DELETE\s+FROM\s+nodes$/i.test(item.matchedText);
+    }
+    if (item.kind === 'workspace_or_node_drizzle_delete') {
+      return item.matchedText === 'delete(schema.nodes)';
+    }
+    return true;
+  });
+}
 
 function relativeToSrc(file: string): string {
   return path.relative(SRC_ROOT, file).split(path.sep).join('/');
@@ -87,6 +117,7 @@ function findTerminalWriterEvidence(source: string): TerminalWriterEvidence[] {
     for (const match of source.matchAll(pattern)) {
       evidence.push({
         kind,
+        matchedText: match[0],
         excerpt: excerptAround(source, match.index ?? 0)
           .replaceAll(/\s+/g, ' ')
           .trim(),
@@ -132,7 +163,9 @@ describe('workspace/node terminal writers route through shared lifecycle finaliz
         'routes/nodes.ts',
         'scheduled/trial-expire.ts',
         'services/instant-session.ts',
-        'services/nodes.ts',
+        'services/node-provisioning.ts',
+        'services/node-resource-deletion.ts',
+        'services/node-resource-lifecycle.ts',
         'services/task-runner.ts',
         'services/workspace-cleanup.ts',
         'services/workspace-deletion.ts',
@@ -161,9 +194,23 @@ describe('workspace/node terminal writers route through shared lifecycle finaliz
     expect(routesThroughSharedFinalizer(source)).toBe(true);
   });
 
+  it('does not exempt terminal workspace writes in provisioning compensation modules', () => {
+    for (const source of [
+      `await db.update(schema.workspaces).set({ status: 'deleted' });`,
+      `await db.delete(schema.workspaces);`,
+      `await env.DATABASE.prepare('DELETE FROM workspaces WHERE id = ?').bind(id).run();`,
+    ]) {
+      const evidence = findTerminalWriterEvidence(source);
+      expect(evidence).toHaveLength(1);
+      for (const relative of Object.keys(PROVISIONING_COMPENSATION_KINDS)) {
+        expect(isAllowlistedWriter(relative, evidence)).toBe(false);
+      }
+    }
+  });
+
   it('every terminal writer routes through the finalizer or is explicitly allowlisted', () => {
     const unguarded = terminalWriterFiles
-      .filter((file) => !(file.relative in ALLOWLIST))
+      .filter((file) => !isAllowlistedWriter(file.relative, file.evidence))
       .filter((file) => !routesThroughSharedFinalizer(file.source))
       .map((file) => ({
         file: file.relative,

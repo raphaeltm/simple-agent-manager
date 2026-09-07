@@ -141,7 +141,9 @@ describe('WorkspaceSidebar', () => {
     render(<WorkspaceSidebar {...defaultProps} />);
     expect(screen.getByText('owner/repo')).toBeInTheDocument();
     expect(screen.getByText('main')).toBeInTheDocument();
-    expect(screen.getByText(/Small.*2-3 vCPUs/)).toBeInTheDocument();
+    expect(screen.getByText('Compatibility estimate')).toBeInTheDocument();
+    expect(screen.getByText('small')).toBeInTheDocument();
+    expect(screen.getByText('Unknown — no hardware report')).toBeInTheDocument();
     expect(screen.getByText(/Nuremberg, DE/)).toBeInTheDocument();
   });
 

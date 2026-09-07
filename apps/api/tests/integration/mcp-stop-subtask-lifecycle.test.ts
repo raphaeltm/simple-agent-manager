@@ -42,6 +42,7 @@ describe('MCP parent-stop lifecycle boundary', () => {
     vi.clearAllMocks();
     sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
+      schema.projectMembers,
       schema.tasks,
       schema.taskStatusEvents,
       schema.workspaces,
@@ -49,6 +50,12 @@ describe('MCP parent-stop lifecycle boundary', () => {
       schema.agentSessions,
       schema.triggerExecutions,
     ]);
+    sqlite
+      .prepare(
+        `INSERT INTO project_members (project_id, user_id, role, status)
+         VALUES ('project-1', 'user-1', 'owner', 'active')`
+      )
+      .run();
     sqlite.prepare(`INSERT INTO nodes (id, status) VALUES ('node-1', 'running')`).run();
     sqlite
       .prepare(
@@ -91,6 +98,28 @@ describe('MCP parent-stop lifecycle boundary', () => {
 
   afterEach(() => {
     sqlite.close();
+  });
+
+  it.each([
+    { role: 'owner', status: 'removed' },
+    { role: 'viewer', status: 'active' },
+  ])('denies parent stop with $status $role membership before runtime effects', async (membership) => {
+    sqlite
+      .prepare('UPDATE project_members SET role = ?, status = ?')
+      .run(membership.role, membership.status);
+    const { handleStopSubtask } = await import('../../src/routes/mcp/orchestration-comms');
+    const result = await handleStopSubtask(1, { taskId: 'child-task' }, tokenData, env);
+    expect(result.error?.message).toContain("no longer has 'task:write' access");
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(mocks.stopAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'child-task'").get()).toEqual({
+      status: 'in_progress',
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM task_status_events').get()).toEqual({
+      count: 0,
+    });
   });
 
   it('hard-stops first, then persists cancellation, event, trigger sync, and cleanup', async () => {
