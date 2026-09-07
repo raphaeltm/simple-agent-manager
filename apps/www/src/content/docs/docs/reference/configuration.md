@@ -1162,7 +1162,7 @@ lifecycle bookkeeping.
 | ---------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
 | `VM_AGENT_PROTOCOL`                            | `https` | Protocol for VM agent communication                                              |
 | `VM_AGENT_PORT`                                | `8443`  | VM agent listening port                                                          |
-| `VM_AGENT_MEMORY_RESERVE_MB`                   | `0`     | Optional Docker service cgroup memory reserve for VM-agent reachability headroom |
+| `VM_AGENT_MEMORY_RESERVE_MB`                   | `512`   | Optional Docker workload-slice memory reserve for VM-agent reachability headroom |
 | `SAM_INFRA_SLICE_MEMORY_MIN_MB`                | `256`   | systemd `MemoryMin` for the VM-agent/system-services slice                       |
 | `DOCKER_MEMORY_MIN_MB`                         | `512`   | Minimum Docker `MemoryMax` retained when `VM_AGENT_MEMORY_RESERVE_MB` is enabled |
 | `HEARTBEAT_DOCKER_STATS_TIMEOUT`               | `2s`    | VM-agent timeout for heartbeat Docker stats used by workspace memory telemetry   |
