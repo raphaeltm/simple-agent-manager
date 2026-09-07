@@ -194,8 +194,10 @@ describe('persisted reservation roundtrip preserves full semantic provenance', (
     });
     expect(withEmpty.resolvedReservation?.diagnostics).toEqual([]);
 
-    const base = resolveResourceReservation({ task: { minVcpu: 2 } }, BASE);
-    const { diagnostics: _dropped, ...withoutDiagnostics } = base;
+    const withoutDiagnostics: Record<string, unknown> = {
+      ...resolveResourceReservation({ task: { minVcpu: 2 } }, BASE),
+    };
+    delete withoutDiagnostics.diagnostics;
     const absent = readPersistedTaskResourcePlan({
       ...BASE,
       resolvedReservationJson: JSON.stringify(withoutDiagnostics),
