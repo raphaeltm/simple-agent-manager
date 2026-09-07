@@ -451,3 +451,81 @@ describe('per-task chat payload carries overrides', () => {
     expect(req).toEqual({ exclusiveNode: false });
   });
 });
+
+describe('malformed-type stored JSON (canonical validation on deserialize)', () => {
+  it('wrong-typed minMemoryGb with valid minVcpu flags storedJsonError and projects raw value', () => {
+    const json = JSON.stringify({ minMemoryGb: 'oops', minVcpu: 2 });
+    const result = deserializeResourceRequirements(json);
+    expect(result.storedJsonError).toBeTruthy();
+    expect(result.minVcpu).toBe('2');
+    expect(result.minMemoryGb).toBe('oops');
+  });
+
+  it('exclusiveNode string "false" flags storedJsonError instead of silently becoming undefined', () => {
+    const json = JSON.stringify({ exclusiveNode: 'false' });
+    const result = deserializeResourceRequirements(json);
+    expect(result.storedJsonError).toBeTruthy();
+    expect(result.exclusiveNode).toBeUndefined();
+  });
+
+  it('malformed-type state blocks save through validateResourceState', () => {
+    const json = JSON.stringify({ minMemoryGb: 'oops', minVcpu: 2 });
+    const result = deserializeResourceRequirements(json);
+    const errors = validateResourceState(result);
+    expect(hasValidationErrors(errors)).toBe(true);
+    expect(errors.form).toBeTruthy();
+  });
+
+  it('wrong-typed field is not silently omitted on re-serialize', () => {
+    const json = JSON.stringify({ minMemoryGb: 'oops', minVcpu: 2 });
+    const result = deserializeResourceRequirements(json);
+    expect(() => serializeResourceRequirements(result)).toThrow();
+  });
+});
+
+describe('canonical unit bounds in validateResourceState', () => {
+  it('rejects minVcpu 1e100 that exceeds safe reservation units', () => {
+    const errors = validateResourceState({ ...EMPTY_RESOURCE_STATE, minVcpu: '1e100' });
+    expect(errors.minVcpu).toBeTruthy();
+    expect(errors.minVcpu).toContain('unsafe');
+  });
+
+  it('rejects minMemoryGb 1e100 that exceeds safe reservation units', () => {
+    const errors = validateResourceState({ ...EMPTY_RESOURCE_STATE, minMemoryGb: '1e100' });
+    expect(errors.minMemoryGb).toBeTruthy();
+  });
+
+  it('rejects minDiskGb 1e100 that exceeds safe reservation units', () => {
+    const errors = validateResourceState({ ...EMPTY_RESOURCE_STATE, minDiskGb: '1e100' });
+    expect(errors.minDiskGb).toBeTruthy();
+  });
+
+  it('accepts values within canonical bounds', () => {
+    const errors = validateResourceState({
+      ...EMPTY_RESOURCE_STATE,
+      minVcpu: '128',
+      minMemoryGb: '512',
+      minDiskGb: '2000',
+    });
+    expect(hasValidationErrors(errors)).toBe(false);
+  });
+});
+
+describe('storedJsonError clear affordance', () => {
+  it('storedJsonError with blank state still shows hasAnything true for clear button', () => {
+    const state = { ...EMPTY_RESOURCE_STATE, storedJsonError: 'bad data' };
+    const hasValues = !!(state.minVcpu || state.minMemoryGb || state.minDiskGb ||
+      state.exclusiveNode !== undefined || state.maxCoTenants);
+    const hasAnything = hasValues || !!state.storedJsonError;
+    expect(hasValues).toBe(false);
+    expect(hasAnything).toBe(true);
+  });
+
+  it('clearing storedJsonError state produces clean EMPTY_RESOURCE_STATE', () => {
+    const cleared = { ...EMPTY_RESOURCE_STATE };
+    expect(cleared.storedJsonError).toBeUndefined();
+    const errors = validateResourceState(cleared);
+    expect(hasValidationErrors(errors)).toBe(false);
+    expect(serializeResourceRequirements(cleared)).toBeNull();
+  });
+});

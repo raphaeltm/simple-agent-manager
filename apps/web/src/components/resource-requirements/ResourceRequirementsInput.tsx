@@ -41,7 +41,7 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
 }) => {
   const legacyLabel = formatLegacyVmSize(legacyVmSize);
   const hasValues = hasAnyResourceValue(value);
-  const hasAnything = hasValues || !!legacyLabel;
+  const hasAnything = hasValues || !!legacyLabel || !!value.storedJsonError;
 
   const handleInherit = () => {
     onChange({ ...EMPTY_RESOURCE_STATE });
@@ -49,52 +49,97 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
   };
 
   const update = (patch: Partial<ResourceRequirementsFormState>) => {
-    onChange({ ...value, ...patch });
+    onChange({ ...value, ...patch, storedJsonError: undefined });
   };
 
   if (compact) {
     return (
-      <fieldset className="flex flex-wrap items-end gap-2">
-        <label className="grid gap-0.5 min-w-[72px]">
-          <span className="text-[11px] text-fg-muted">vCPU</span>
-          <input
-            type="number"
-            min={0}
-            step="any"
-            value={value.minVcpu}
-            onChange={(e) => update({ minVcpu: e.target.value })}
-            placeholder="—"
-            disabled={disabled}
-            className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minVcpu)} w-[72px]`}
-            aria-invalid={!!errors?.minVcpu}
-          />
-          {errors?.minVcpu && <span className="text-[10px] text-danger">{errors.minVcpu}</span>}
-        </label>
-        <label className="grid gap-0.5 min-w-[72px]">
-          <span className="text-[11px] text-fg-muted">Mem GB</span>
-          <input
-            type="number"
-            min={0}
-            step="any"
-            value={value.minMemoryGb}
-            onChange={(e) => update({ minMemoryGb: e.target.value })}
-            placeholder="—"
-            disabled={disabled}
-            className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minMemoryGb)} w-[72px]`}
-            aria-invalid={!!errors?.minMemoryGb}
-          />
-          {errors?.minMemoryGb && <span className="text-[10px] text-danger">{errors.minMemoryGb}</span>}
-        </label>
-        {hasAnything && !hideInherit && (
-          <button
-            type="button"
-            onClick={handleInherit}
-            disabled={disabled}
-            className="text-[11px] text-accent hover:underline disabled:opacity-50 pb-1"
-          >
-            Clear
-          </button>
+      <fieldset className="grid gap-1.5">
+        {value.storedJsonError && (
+          <div role="alert" className="rounded-sm bg-danger-tint px-2 py-1 text-[10px] text-danger">
+            {value.storedJsonError}
+          </div>
         )}
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="grid gap-0.5 min-w-[68px]">
+            <span className="text-[11px] text-fg-muted">vCPU</span>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              value={value.minVcpu}
+              onChange={(e) => update({ minVcpu: e.target.value })}
+              placeholder="—"
+              disabled={disabled}
+              className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minVcpu)} w-[68px]`}
+              aria-invalid={!!errors?.minVcpu}
+            />
+            {errors?.minVcpu && <span className="text-[10px] text-danger">{errors.minVcpu}</span>}
+          </label>
+          <label className="grid gap-0.5 min-w-[68px]">
+            <span className="text-[11px] text-fg-muted">Mem GB</span>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              value={value.minMemoryGb}
+              onChange={(e) => update({ minMemoryGb: e.target.value })}
+              placeholder="—"
+              disabled={disabled}
+              className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minMemoryGb)} w-[68px]`}
+              aria-invalid={!!errors?.minMemoryGb}
+            />
+            {errors?.minMemoryGb && <span className="text-[10px] text-danger">{errors.minMemoryGb}</span>}
+          </label>
+          {!hideDisk && (
+            <label className="grid gap-0.5 min-w-[68px]">
+              <span className="text-[11px] text-fg-muted">Disk GB</span>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={value.minDiskGb}
+                onChange={(e) => update({ minDiskGb: e.target.value })}
+                placeholder="—"
+                disabled={disabled}
+                className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minDiskGb)} w-[68px]`}
+                aria-invalid={!!errors?.minDiskGb}
+              />
+              {errors?.minDiskGb && <span className="text-[10px] text-danger">{errors.minDiskGb}</span>}
+            </label>
+          )}
+          <label className="flex items-center gap-1.5 pb-1">
+            <input
+              type="checkbox"
+              checked={value.exclusiveNode === true}
+              ref={(el) => {
+                if (el) el.indeterminate = value.exclusiveNode === undefined;
+              }}
+              onChange={() => {
+                if (value.exclusiveNode === undefined) {
+                  update({ exclusiveNode: true });
+                } else if (value.exclusiveNode === true) {
+                  update({ exclusiveNode: false, maxCoTenants: '' });
+                } else {
+                  update({ exclusiveNode: undefined });
+                }
+              }}
+              disabled={disabled}
+              className="h-3 w-3 rounded border-border-default accent-[var(--sam-color-focus-ring)]"
+            />
+            <span className="text-[11px] text-fg-muted">Exclusive</span>
+          </label>
+          {hasAnything && !hideInherit && (
+            <button
+              type="button"
+              onClick={handleInherit}
+              disabled={disabled}
+              className="text-[11px] text-accent hover:underline disabled:opacity-50 pb-1"
+            >
+              Clear
+            </button>
+          )}
+        </div>
       </fieldset>
     );
   }
