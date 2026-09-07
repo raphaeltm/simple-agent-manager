@@ -86,7 +86,7 @@ CREATE INDEX idx_project_event_source_outbox_active_capacity
   ON project_event_source_outbox(project_id, source, state, expires_at, id);
 CREATE INDEX idx_project_event_source_outbox_credential_limit_active
   ON project_event_source_outbox(project_id, source, subject_id, credential_limit_window_type, state, credential_limit_observed_at, id)
-  WHERE state IN ('pending', 'processing', 'retryable_failed');
+  WHERE credential_limit_window_type IS NOT NULL AND credential_limit_observed_at IS NOT NULL;
 CREATE INDEX idx_project_event_source_outbox_active_attempts
   ON project_event_source_outbox(state, attempt_count, id);
 CREATE INDEX idx_project_event_source_outbox_exhausted_ready

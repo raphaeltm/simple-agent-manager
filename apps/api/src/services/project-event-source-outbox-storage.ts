@@ -6,6 +6,8 @@ import type {
   ProjectEventSourceOutboxReadByIdInput,
 } from './project-event-source-outbox-contract';
 
+// Internal storage helpers for project-event-source-outbox.ts. Cross-source callers
+// should use the scoped service exports in project-event-source-outbox.ts.
 const INTENT_SELECT_COLUMNS = `id, project_id AS projectId, source, event_type AS eventType,
        subject_type AS subjectType, subject_id AS subjectId,
        delivery_key AS deliveryKey, payload_fingerprint AS payloadFingerprint,
@@ -43,7 +45,7 @@ export async function loadProjectEventSourceIntentByDelivery(
   );
 }
 
-export async function loadProjectEventSourceIntentById(
+export async function loadProjectEventSourceIntentByInternalId(
   env: Env,
   id: string
 ): Promise<ProjectEventSourceOutboxIntent | null> {

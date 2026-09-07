@@ -31,7 +31,7 @@ import {
 import {
   loadProjectEventSourceIntentByClaim,
   loadProjectEventSourceIntentByDelivery,
-  loadProjectEventSourceIntentById,
+  loadProjectEventSourceIntentByInternalId,
   loadProjectEventSourceIntentByIdentity,
 } from './project-event-source-outbox-storage';
 
@@ -211,7 +211,9 @@ export async function enqueueProjectEventSourceIntent(
   options: ProjectEventSourceOutboxInsertOptions = {}
 ): Promise<ProjectEventSourceOutboxIntent> {
   await projectEventSourceOutboxInsertStatement(env, input, options).run();
-  const intentById = options.id ? await loadProjectEventSourceIntentById(env, options.id) : null;
+  const intentById = options.id
+    ? await loadProjectEventSourceIntentByInternalId(env, options.id)
+    : null;
   const intent =
     intentById && projectEventSourceOutboxReplayConflict(intentById, input) === null
       ? intentById
@@ -315,7 +317,7 @@ async function updateClaimedIntent(
   )
     .bind(...values, intent.id, intent.claimToken)
     .run();
-  const current = await loadProjectEventSourceIntentById(env, intent.id);
+  const current = await loadProjectEventSourceIntentByInternalId(env, intent.id);
   const outboxMutations = Number(result.meta.changes ?? 0);
   if (outboxMutations === 0 && current) return resultFromIntent(current, 0);
   return current
@@ -409,7 +411,7 @@ async function admitClaimedIntent(
       intent.claimToken ?? ''
     );
     if (!currentClaim) {
-      const current = await loadProjectEventSourceIntentById(env, intent.id);
+      const current = await loadProjectEventSourceIntentByInternalId(env, intent.id);
       return current ? resultFromIntent(current) : resultFromIntent(intent);
     }
     const timeoutMs = projectEventSourceAdmissionTimeoutMs(config, admissionTimeoutMs, deadlineMs);
@@ -461,7 +463,7 @@ export async function admitProjectEventSourceIntentById(
   const clock = projectEventSourceOutboxClockFrom(timing);
   const claim = await claimIntent(env, id, clock());
   if (!claim.intent) {
-    const existing = await loadProjectEventSourceIntentById(env, id);
+    const existing = await loadProjectEventSourceIntentByInternalId(env, id);
     return existing ? resultFromIntent(existing, claim.outboxMutations) : null;
   }
   const admissionTimeoutMs = timing instanceof Date ? undefined : timing?.admissionTimeoutMs;
@@ -732,7 +734,7 @@ export async function reconcileProjectEventSourceOutbox(
     });
     spend(result?.outboxMutations ?? 0);
     if (result?.state === 'retryable_failed') {
-      const current = await loadProjectEventSourceIntentById(env, id);
+      const current = await loadProjectEventSourceIntentByInternalId(env, id);
       if (current?.claimToken === null && current.lastError?.includes('timed out'))
         stats.timedOut += 1;
     }
