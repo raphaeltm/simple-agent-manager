@@ -10,6 +10,7 @@ import {
   markProjectEventSourceIntentSuperseded,
   projectEventSourceOutboxInsertStatement,
   readProjectEventSourceIntentByDelivery,
+  readProjectEventSourceIntentById,
   reconcileProjectEventSourceOutbox,
 } from '../../../src/services/project-event-source-outbox';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -829,6 +830,15 @@ describe('project event source outbox', () => {
       deliveryKey: 'task:task-1:status:other',
       payloadFingerprint: 'sha256:other',
     });
+    await enqueueProjectEventSourceIntent(env, {
+      ...sourceEvent(),
+      projectId: 'project-2',
+      deliveryKey: 'task:foreign:status:completed',
+      payloadFingerprint: 'sha256:foreign',
+    }, {
+      id: 'foreign-intent',
+      now: NOW,
+    });
 
     const byDelivery = await readProjectEventSourceIntentByDelivery(env, {
       projectId: 'project-1',
@@ -836,6 +846,29 @@ describe('project event source outbox', () => {
       deliveryKey: 'task:task-1:status:completed',
     });
     expect(byDelivery?.id).toBe('supersede-intent');
+    await expect(
+      readProjectEventSourceIntentById(env, {
+        id: 'foreign-intent',
+        projectId: 'project-1',
+        source: 'sam.lifecycle',
+        deliveryKey: 'task:foreign:status:completed',
+      })
+    ).resolves.toBeNull();
+    await expect(
+      markProjectEventSourceIntentSuperseded(env, {
+        id: 'foreign-intent',
+        projectId: 'project-1',
+        source: 'sam.lifecycle',
+        deliveryKey: 'task:foreign:status:completed',
+        now: NOW,
+        reason: 'wrong project should not leak',
+      })
+    ).resolves.toBeNull();
+    expect(
+      sqlite
+        .prepare(`SELECT project_id, state, last_error FROM project_event_source_outbox WHERE id = ?`)
+        .get('foreign-intent')
+    ).toEqual({ project_id: 'project-2', state: 'pending', last_error: null });
 
     sqlite
       .prepare(
@@ -883,7 +916,7 @@ describe('project event source outbox', () => {
     ).toEqual({ state: 'pending' });
   });
 
-  it('uses the sweep limit as a finite work-item ceiling for candidate claim and settle', async () => {
+  it('accounts claim and settle mutations under a finite sweep mutation budget', async () => {
     admitProjectEvent
       .mockResolvedValueOnce({
         outcome: 'created',
@@ -910,9 +943,16 @@ describe('project event source outbox', () => {
       now: NOW,
     });
 
+    const before = sqlite.prepare(`SELECT total_changes() AS changes`).get() as {
+      changes: number;
+    };
     const stats = await reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
+    const after = sqlite.prepare(`SELECT total_changes() AS changes`).get() as {
+      changes: number;
+    };
 
-    expect(stats).toMatchObject({ attempted: 1, admitted: 1, hasMore: true });
+    expect(after.changes - before.changes).toBe(2);
+    expect(stats).toMatchObject({ attempted: 1, admitted: 1, outboxMutations: 2, hasMore: true });
     expect(admitProjectEvent).toHaveBeenCalledTimes(1);
     expect(
       sqlite
@@ -955,7 +995,12 @@ describe('project event source outbox', () => {
     await vi.advanceTimersByTimeAsync(5);
     const stats = await statsPromise;
 
-    expect(stats).toMatchObject({ attempted: 1, retryableFailed: 1, timedOut: 1 });
+    expect(stats).toMatchObject({
+      attempted: 1,
+      retryableFailed: 1,
+      timedOut: 1,
+      outboxMutations: 2,
+    });
     expect(rowById('intent-wall-budget')).toMatchObject({
       state: 'retryable_failed',
       attempt_count: 1,
@@ -965,6 +1010,65 @@ describe('project event source outbox', () => {
       outcome: 'created',
       event: { id: 'event-after-wall-timeout', state: 'recorded' },
       matches: [],
+    });
+  });
+
+  it('does not start external admission after claim reads consume the sweep wall', async () => {
+    env.PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS = '20';
+    env.PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS = '40';
+    admitProjectEvent.mockResolvedValue({
+      outcome: 'created',
+      event: { id: 'event-after-deadline', state: 'recorded' },
+      matches: [],
+    });
+    await enqueueProjectEventSourceIntent(env, sourceEvent(), {
+      id: 'intent-deadline-before-admission',
+      now: NOW,
+    });
+
+    const database = env.DATABASE;
+    let delayed = false;
+    env.DATABASE = {
+      ...database,
+      prepare: (sql: string) => {
+        const statement = database.prepare(sql);
+        if (
+          delayed ||
+          !sql.includes("WHERE id = ? AND state = 'processing' AND claim_token = ?")
+        ) {
+          return statement;
+        }
+        return {
+          ...statement,
+          bind: (...params: unknown[]) => {
+            const bound = statement.bind(...params);
+            return {
+              ...bound,
+              first: async (column?: string) => {
+                delayed = true;
+                await vi.advanceTimersByTimeAsync(35);
+                return bound.first(column);
+              },
+            };
+          },
+        } as D1PreparedStatement;
+      },
+    } as D1Database;
+
+    const stats = await reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
+
+    expect(admitProjectEvent).not.toHaveBeenCalled();
+    expect(stats).toMatchObject({
+      attempted: 1,
+      retryableFailed: 1,
+      timedOut: 1,
+      outboxMutations: 2,
+    });
+    expect(rowById('intent-deadline-before-admission')).toMatchObject({
+      state: 'retryable_failed',
+      attempt_count: 1,
+      claim_token: null,
+      last_error: 'ProjectEventSourceAdmissionTimeoutError: ProjectData admission timed out after 0ms',
     });
   });
 
