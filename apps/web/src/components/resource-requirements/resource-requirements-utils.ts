@@ -9,7 +9,7 @@ export interface ResourceRequirementsFormState {
   minDiskGb: string;
   exclusiveNode: boolean | undefined;
   maxCoTenants: string;
-  /** Set when stored JSON could not be parsed; prevents accidental overwrite on save. */
+  /** Set when stored JSON could not be parsed or validated; prevents accidental overwrite on save. */
   storedJsonError?: string;
 }
 
@@ -29,39 +29,39 @@ export interface ResourceValidationErrors {
   form?: string;
 }
 
+const NUMERIC_FIELDS = ['minVcpu', 'minMemoryGb', 'minDiskGb', 'maxCoTenants'] as const;
+
+function cleanFieldError(msg: string): string {
+  return msg.replace(/^resourceRequirements\./, '');
+}
+
+/**
+ * Validate form state through the canonical normalizeResourceRequirements
+ * contract, one field at a time so all errors are reported together.
+ */
 export function validateResourceState(state: ResourceRequirementsFormState): ResourceValidationErrors {
   const errors: ResourceValidationErrors = {};
 
-  if (state.minVcpu !== '') {
-    const n = Number(state.minVcpu);
-    if (!Number.isFinite(n) || n <= 0) {
-      errors.minVcpu = 'Must be a positive number';
-    }
-  }
-
-  if (state.minMemoryGb !== '') {
-    const n = Number(state.minMemoryGb);
-    if (!Number.isFinite(n) || n <= 0) {
-      errors.minMemoryGb = 'Must be a positive number';
-    }
-  }
-
-  if (state.minDiskGb !== '') {
-    const n = Number(state.minDiskGb);
-    if (!Number.isFinite(n) || n < 0) {
-      errors.minDiskGb = 'Must be zero or a positive number';
-    }
-  }
-
-  if (state.maxCoTenants !== '') {
-    const n = Number(state.maxCoTenants);
-    if (!Number.isSafeInteger(n) || n <= 0) {
-      errors.maxCoTenants = 'Must be a positive whole number';
-    }
-  }
-
   if (state.storedJsonError) {
     errors.form = state.storedJsonError;
+  }
+
+  for (const field of NUMERIC_FIELDS) {
+    const val = state[field];
+    if (val === '') continue;
+    try {
+      normalizeResourceRequirements({ [field]: Number(val) });
+    } catch (err) {
+      errors[field] = cleanFieldError(err instanceof Error ? err.message : 'Invalid value');
+    }
+  }
+
+  if (state.exclusiveNode !== undefined) {
+    try {
+      normalizeResourceRequirements({ exclusiveNode: state.exclusiveNode });
+    } catch (err) {
+      errors.form = cleanFieldError(err instanceof Error ? err.message : 'Invalid exclusiveNode');
+    }
   }
 
   return errors;
@@ -71,25 +71,47 @@ export function hasValidationErrors(errors: ResourceValidationErrors): boolean {
   return Object.keys(errors).length > 0;
 }
 
+function projectRawField(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (typeof value === 'string') return value;
+  return String(value);
+}
+
 export function deserializeResourceRequirements(
   json: string | null | undefined
 ): ResourceRequirementsFormState {
   if (!json) return { ...EMPTY_RESOURCE_STATE };
+  let req: Record<string, unknown>;
   try {
-    const req = expectJsonRecord(JSON.parse(json) as unknown, 'resourceRequirements');
-    return {
-      minVcpu: typeof req.minVcpu === 'number' && Number.isFinite(req.minVcpu) ? String(req.minVcpu) : '',
-      minMemoryGb: typeof req.minMemoryGb === 'number' && Number.isFinite(req.minMemoryGb) ? String(req.minMemoryGb) : '',
-      minDiskGb: typeof req.minDiskGb === 'number' && Number.isFinite(req.minDiskGb) ? String(req.minDiskGb) : '',
-      exclusiveNode: typeof req.exclusiveNode === 'boolean' ? req.exclusiveNode : undefined,
-      maxCoTenants: typeof req.maxCoTenants === 'number' && Number.isFinite(req.maxCoTenants) ? String(req.maxCoTenants) : '',
-    };
+    req = expectJsonRecord(JSON.parse(json) as unknown, 'resourceRequirements');
   } catch (err) {
     return {
       ...EMPTY_RESOURCE_STATE,
       storedJsonError: `Stored resource data is malformed: ${err instanceof Error ? err.message : 'invalid JSON'}`,
     };
   }
+
+  try {
+    normalizeResourceRequirements(req);
+  } catch (err) {
+    return {
+      minVcpu: projectRawField(req.minVcpu),
+      minMemoryGb: projectRawField(req.minMemoryGb),
+      minDiskGb: projectRawField(req.minDiskGb),
+      exclusiveNode: typeof req.exclusiveNode === 'boolean' ? req.exclusiveNode : undefined,
+      maxCoTenants: projectRawField(req.maxCoTenants),
+      storedJsonError: `Stored values are invalid: ${cleanFieldError(err instanceof Error ? err.message : 'unknown error')}`,
+    };
+  }
+
+  return {
+    minVcpu: typeof req.minVcpu === 'number' && Number.isFinite(req.minVcpu) ? String(req.minVcpu) : '',
+    minMemoryGb: typeof req.minMemoryGb === 'number' && Number.isFinite(req.minMemoryGb) ? String(req.minMemoryGb) : '',
+    minDiskGb: typeof req.minDiskGb === 'number' && Number.isFinite(req.minDiskGb) ? String(req.minDiskGb) : '',
+    exclusiveNode: typeof req.exclusiveNode === 'boolean' ? req.exclusiveNode : undefined,
+    maxCoTenants: typeof req.maxCoTenants === 'number' && Number.isFinite(req.maxCoTenants) ? String(req.maxCoTenants) : '',
+  };
 }
 
 export function serializeResourceRequirements(

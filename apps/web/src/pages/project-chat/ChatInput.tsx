@@ -500,7 +500,6 @@ export function ChatInput({
             onChange={(next) => { onTaskResourceReqsChange(next); setResourceErrors({}); }}
             disabled={submitting}
             inheritLabel="profile/project default"
-            hideDisk
             errors={resourceErrors}
             compact={isMobile}
           />
