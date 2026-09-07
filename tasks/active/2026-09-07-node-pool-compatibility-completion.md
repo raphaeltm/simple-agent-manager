@@ -259,3 +259,24 @@ positives, and incomplete allocation inventory evidence. A dedicated correction
 assignment owns those scanner defects. Its initial count of 76 findings is not a
 verified count of forbidden authority paths. Runtime, display, rollout, and final
 validation requirements remain unchanged.
+
+### Active recovery ownership
+
+The three original backend continuations terminated on provider usage limits.
+Their published checkpoints are preserved; unpublished filesystem recovery has
+not been verified. Replacement assignments use those checkpoints and reconstruct
+only missing changes, with independent review still required.
+
+| Scope | Current SAM task | Checkpoint or dependency |
+| --- | --- | --- |
+| Allocation authority and direct adapters | `01M1XFH3SHTKP79YDJ0DMC4CQ2` | Starts from `4e1d67565`; current-default and relay compensation findings remain required |
+| Pool reconciliation and settings | `01M1XFJSHZV180T9WTWDQZJGQC` | Merge `18054bfc3` reviewed; reserves additive migration `0153` |
+| Request persistence and execution authority | `01M1XH4423TCTD979QVXH4G4WH` | Starts from root `fba14b605`; four independent review findings remain required |
+| Actual resource-form browser proof | `01M1XDFEQT2VD51Z5XC5CTHH0C` | Completing real component interactions and screenshots |
+| Boundary scanner and allocation inventory | `01M1XG087A28G664J0YWDVT4A6` | WIP `830f8132d`; scanner review corrections remain required |
+
+The pool-reconciliation child's initial baseline typecheck claim was withdrawn:
+its command wrapper masked a nonzero exit status. It must rerun after installing
+dependencies. This correction does not invalidate the independently executed
+root checks on `eb89a8370` described above. No replacement checkpoint is accepted
+merely because it is pushed or its task is marked complete.
