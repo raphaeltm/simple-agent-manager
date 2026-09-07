@@ -15,6 +15,7 @@
  * from, or returned to, tenant workspaces.
  */
 import {
+  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
   type Dialect,
@@ -29,7 +30,8 @@ import { type Context, Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { readRequestJsonRecord } from '../lib/runtime-validation';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { RequestBodyTooLargeError, readRequestJsonRecord } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
@@ -153,6 +155,7 @@ interface PrepareProxyOptions {
   invalidTokenResponse: () => Response;
   rateLimitResponse: (c: ProxyContext, resetAt: number) => Response;
   invalidJsonResponse: () => Response;
+  requestTooLargeResponse: (maxBytes: number) => Response;
   invalidBodyResponse?: (body: Record<string, unknown>) => Response | null;
   missingModelResponse: () => Response;
   usageGateResponse: (reason: 'daily-token-budget' | 'monthly-cost-cap') => Response;
@@ -388,6 +391,7 @@ function anthropicProxyOptions(
     invalidTokenResponse: () => anthropicError('Invalid or expired workspace token', 'authentication_error', 401),
     rateLimitResponse,
     invalidJsonResponse: () => anthropicError('Invalid JSON in request body', 'invalid_request_error', 400),
+    requestTooLargeResponse: (maxBytes) => anthropicError(`Request body exceeds ${maxBytes} bytes`, 'invalid_request_error', 413),
     missingModelResponse: () => anthropicError('model is required', 'invalid_request_error', 400),
     usageGateResponse: anthropicUsageGateError,
     missingUpstreamResponse: () => anthropicError('No compatible upstream credential configured.', 'authentication_error', 401),
@@ -406,6 +410,7 @@ function openaiProxyOptions(jsonContext: string): PrepareProxyOptions {
       return openaiError('Rate limit exceeded. Please try again later.', 'rate_limit_error', 429);
     },
     invalidJsonResponse: () => openaiError('Invalid JSON body', 'invalid_request_error', 400),
+    requestTooLargeResponse: (maxBytes) => openaiError(`Request body exceeds ${maxBytes} bytes`, 'invalid_request_error', 413),
     invalidBodyResponse: (body) => (
       !Array.isArray(body.messages) || body.messages.length === 0
         ? openaiError('messages array is required', 'invalid_request_error', 400)
@@ -450,8 +455,15 @@ async function prepareProxyRequest(
 
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, options.jsonContext);
-  } catch {
+    const maxBodyBytes = parsePositiveInt(
+      c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
+      DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
+    );
+    body = await readRequestJsonRecord(c.req.raw, options.jsonContext, maxBodyBytes);
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return { ok: false, response: options.requestTooLargeResponse(error.maxBytes) };
+    }
     return { ok: false, response: options.invalidJsonResponse() };
   }
 

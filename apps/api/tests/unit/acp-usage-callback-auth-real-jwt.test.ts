@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleAcpUsageCallback } from '../../src/services/acp-usage-callback-handler';
 import { signCallbackToken } from '../../src/services/jwt';
 import * as projectDataService from '../../src/services/project-data';
-import { createSqliteD1 } from '../helpers/sqlite-d1';
+import { createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
 vi.mock('../../src/services/project-data', () => ({
   admitProjectEvent: vi.fn(async () => ({
@@ -31,6 +31,7 @@ const [testPrivateKey, testPublicKey] = await Promise.all([
 
 type TestEnv = {
   DATABASE: D1Database;
+  KV: KVNamespace;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   BASE_DOMAIN: string;
@@ -107,6 +108,7 @@ function createCredentialD1() {
     );
   const env = {
     DATABASE: createSqliteD1(sqlite),
+    KV: createMemoryKv(),
     JWT_PRIVATE_KEY: testPrivateKey,
     JWT_PUBLIC_KEY: testPublicKey,
     BASE_DOMAIN: 'example.com',

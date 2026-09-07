@@ -1,7 +1,12 @@
 import { Hono } from 'hono';
+import {
+  DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
-import { AcpSessionUsageReportSchema, jsonValidator } from '../../schemas';
+import { RequestBodyTooLargeError, readRequestJsonWithSchema } from '../../lib/runtime-validation';
+import { parsePositiveInt } from '../../lib/route-helpers';
+import { AcpSessionUsageReportSchema } from '../../schemas';
 import {
   type AcpUsageCallbackReport,
   handleAcpUsageCallback,
@@ -17,15 +22,39 @@ import {
  */
 const agentUsageCallbackRoute = new Hono<{ Bindings: Env }>();
 
-agentUsageCallbackRoute.post(
-  '/:id/acp-sessions/:sessionId/usage',
-  jsonValidator(AcpSessionUsageReportSchema),
-  (c) =>
-    handleAcpUsageCallback(c, {
+agentUsageCallbackRoute.post('/:id/acp-sessions/:sessionId/usage', async (c) => {
+  const maxBodyBytes = parsePositiveInt(
+    c.env.CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES,
+    DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES
+  );
+  let body: AcpUsageCallbackReport;
+  try {
+    body = (await readRequestJsonWithSchema(
+      AcpSessionUsageReportSchema,
+      c.req.raw,
+      'acp_usage.callback',
+      maxBodyBytes
+    )) as AcpUsageCallbackReport;
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return c.json(
+        {
+          error: 'PAYLOAD_TOO_LARGE',
+          message: `Usage callback request body exceeds ${error.maxBytes} bytes`,
+        },
+        413
+      );
+    }
+    return c.json(
+      { error: 'BAD_REQUEST', message: 'Invalid usage callback request body' },
+      400
+    );
+  }
+  return handleAcpUsageCallback(c, {
       projectId: c.req.param('id'),
       sessionId: c.req.param('sessionId'),
-      body: c.req.valid('json') as AcpUsageCallbackReport,
-    })
-);
+    body,
+  });
+});
 
 export { agentUsageCallbackRoute };

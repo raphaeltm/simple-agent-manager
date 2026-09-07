@@ -1,9 +1,15 @@
 import type { Context } from 'hono';
+import {
+  DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM,
+  DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
+import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import { type AcpActivityBinding, buildAcpActivityBinding } from './acp-activity-admission';
 import { assertAcpActivityCallbackResourcesActive } from './acp-activity-callback-flush';
 import {
@@ -85,6 +91,51 @@ function assertCallbackTokenBoundToUsageBinding(
     });
     throw errors.forbidden('Node identity verification failed');
   }
+}
+
+async function enforceAcpUsageCallbackRateLimit(
+  c: Context<{ Bindings: Env }>,
+  input: {
+    payload: CallbackTokenPayload;
+    projectId: string;
+    sessionId: string;
+    nodeId: string;
+  }
+): Promise<Response | null> {
+  const limit = parsePositiveInt(
+    c.env.CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM,
+    DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM
+  );
+  const windowSeconds = parsePositiveInt(
+    c.env.CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS,
+    DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS
+  );
+  const windowStart = getCurrentWindowStart(windowSeconds);
+  const key = createRateLimitKey(
+    'acp-usage-callback',
+    `${input.payload.scope}:${input.payload.workspace}:${input.projectId}:${input.sessionId}:${input.nodeId}`,
+    windowStart
+  );
+  const { allowed, remaining, resetAt } = await checkRateLimit(
+    c.env.KV,
+    key,
+    limit,
+    windowSeconds
+  );
+  c.header('X-RateLimit-Limit', limit.toString());
+  c.header('X-RateLimit-Remaining', remaining.toString());
+  c.header('X-RateLimit-Reset', resetAt.toString());
+  if (allowed) return null;
+
+  const retryAfter = resetAt - Math.floor(Date.now() / 1000);
+  c.header('Retry-After', Math.max(1, retryAfter).toString());
+  return c.json(
+    {
+      error: 'RATE_LIMITED',
+      message: 'Usage callback rate limit exceeded. Please try again later.',
+    },
+    429
+  );
 }
 
 function requireAcpUsageBinding(input: {
@@ -272,6 +323,14 @@ export async function handleAcpUsageCallback(
   }
 
   const { projectId, sessionId, body } = input;
+  const rateLimitResponse = await enforceAcpUsageCallbackRateLimit(c, {
+    payload,
+    projectId,
+    sessionId,
+    nodeId: body.nodeId,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
+
   const existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
   if (!existing) throw errors.notFound('ACP session not found');
 

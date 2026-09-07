@@ -21,7 +21,7 @@ import {
 import * as jwtService from '../../src/services/jwt';
 import * as projectDataService from '../../src/services/project-data';
 import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
-import { createSqliteD1 } from '../helpers/sqlite-d1';
+import { createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
 vi.mock('../../src/services/project-data', () => ({
@@ -43,16 +43,18 @@ vi.mock('../../src/services/acp-activity-callback-flush', () => ({
 
 type TestEnv = {
   DATABASE: D1Database;
+  KV: KVNamespace;
   CREDENTIAL_LIMIT_WARNING_PERCENT?: string;
   CREDENTIAL_LIMIT_CRITICAL_PERCENT?: string;
   CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT?: string;
   CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS?: string;
   CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS?: string;
   CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS?: string;
+  CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES?: string;
+  CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM?: string;
+  CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS?: string;
   CREDENTIAL_LIMIT_ADMISSION_MAX_ACTIVE_PER_PROJECT?: string;
   CREDENTIAL_LIMIT_ADMISSION_RETRY_BATCH_SIZE?: string;
-  CREDENTIAL_LIMIT_ADMISSION_MAX_ATTEMPTS?: string;
-  CREDENTIAL_LIMIT_ADMISSION_RETRY_DELAY_MS?: string;
   CREDENTIAL_LIMIT_ADMISSION_RETENTION_DAYS?: string;
   PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS?: string;
   PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS?: string;
@@ -149,9 +151,9 @@ function createCredentialD1(overrides: Partial<TestEnv> = {}) {
     );
   const env = {
     DATABASE: createSqliteD1(sqlite),
+    KV: createMemoryKv(),
     CREDENTIAL_LIMIT_WARNING_PERCENT: '75',
     CREDENTIAL_LIMIT_CRITICAL_PERCENT: '90',
-    CREDENTIAL_LIMIT_ADMISSION_RETRY_DELAY_MS: '1',
     PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS: '1',
     PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS: '1',
     ...overrides,
@@ -701,6 +703,47 @@ describe('ACP usage callback credential verification', () => {
         serverReceivedAt: 100_000,
       },
     });
+  });
+
+  it('rate limits authenticated callbacks before repeated session lookup work', async () => {
+    const { env } = createCredentialD1({
+      CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM: '1',
+      CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS: '60',
+    });
+    seedCallback();
+
+    const body = {
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      credentialReference: 'cc_credentials:cred-1',
+      credentialSource: 'user',
+      observedAt: 100_000,
+      source: 'claude-acp.usage_update',
+      rateLimits: [
+        {
+          windowType: 'claude.five_hour',
+          provider: 'anthropic',
+          source: 'claude-acp.rate_limit',
+          status: 'allowed_warning',
+          utilizationPercent: 82,
+          resetsAt: 120_000,
+        },
+      ],
+    } as const;
+
+    const first = await handleAcpUsageCallback(makeContext(env), {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      body,
+    });
+    expect(first.status).toBe(204);
+    const second = await handleAcpUsageCallback(makeContext(env), {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      body,
+    });
+    expect(second.status).toBe(429);
+    expect(projectDataService.getAcpSession).toHaveBeenCalledTimes(1);
   });
 
   it('rejects forged credential attribution from the callback body', async () => {

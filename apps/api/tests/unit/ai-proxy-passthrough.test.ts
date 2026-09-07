@@ -94,6 +94,7 @@ type TestEnv = {
   AI_PROXY_ENABLED: string;
   AI_GATEWAY_ID: string;
   CF_ACCOUNT_ID: string;
+  AI_PROXY_REQUEST_BODY_MAX_BYTES?: string;
 };
 
 const app = new Hono<{ Bindings: TestEnv }>();
@@ -209,6 +210,38 @@ beforeEach(() => {
 });
 
 describe('AI Proxy Passthrough Routes', () => {
+  it('rejects oversized Anthropic passthrough bodies before credential resolution', async () => {
+    mockWorkspaceAuth('claude-code');
+    mockAllowedRateLimit();
+
+    const res = await postJson(
+      ANTHROPIC_MESSAGES_PATH,
+      { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'x'.repeat(256) }] },
+      {},
+      { AI_PROXY_REQUEST_BODY_MAX_BYTES: '128' },
+    );
+
+    expect(res.status).toBe(413);
+    expect(mockResolveForConsumer).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized OpenAI passthrough bodies before credential resolution', async () => {
+    mockWorkspaceAuth('openai-codex');
+    mockAllowedRateLimit();
+
+    const res = await postJson(
+      OPENAI_CHAT_COMPLETIONS_PATH,
+      { model: 'gpt-4o', messages: [{ role: 'user', content: 'x'.repeat(256) }] },
+      {},
+      { AI_PROXY_REQUEST_BODY_MAX_BYTES: '128' },
+    );
+
+    expect(res.status).toBe(413);
+    expect(mockResolveForConsumer).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   describe('Anthropic passthrough', () => {
     it('returns 401 when wstoken is invalid', async () => {
       mockVerifyAIProxyAuth.mockRejectedValueOnce(new Error('invalid'));

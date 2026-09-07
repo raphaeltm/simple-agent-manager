@@ -15,6 +15,7 @@
  * Mount point: app.route('/ai/anthropic/v1', aiProxyAnthropicRoutes) in index.ts.
  */
 import {
+  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
 } from '@simple-agent-manager/shared';
@@ -24,7 +25,8 @@ import { type Context, Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { readRequestJsonRecord } from '../lib/runtime-validation';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { RequestBodyTooLargeError, readRequestJsonRecord } from '../lib/runtime-validation';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import {
@@ -83,6 +85,24 @@ function anthropicUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-ca
   }
 
   return anthropicError('Monthly cost cap exceeded. Adjust your cap in Settings > Usage.', 'rate_limit_error', 429);
+}
+
+function anthropicBodyMaxBytes(c: AnthropicProxyContext): number {
+  return parsePositiveInt(
+    c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
+    DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
+  );
+}
+
+function anthropicBodyParseError(error: unknown): Response {
+  if (error instanceof RequestBodyTooLargeError) {
+    return anthropicError(
+      `Request body exceeds ${error.maxBytes} bytes`,
+      'invalid_request_error',
+      413
+    );
+  }
+  return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
 }
 
 async function recordAnthropicPlatformLimitHeaders(input: {
@@ -200,9 +220,13 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   // --- Parse request body ---
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy-anthropic.messages');
-  } catch {
-    return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
+    body = await readRequestJsonRecord(
+      c.req.raw,
+      'ai-proxy-anthropic.messages',
+      anthropicBodyMaxBytes(c)
+    );
+  } catch (error) {
+    return anthropicBodyParseError(error);
   }
 
   // --- Validate model (must be an Anthropic model) ---
@@ -420,9 +444,13 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
   // --- Parse and validate request body ---
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy-anthropic.count_tokens');
-  } catch {
-    return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
+    body = await readRequestJsonRecord(
+      c.req.raw,
+      'ai-proxy-anthropic.count_tokens',
+      anthropicBodyMaxBytes(c)
+    );
+  } catch (error) {
+    return anthropicBodyParseError(error);
   }
 
   const modelId = typeof body.model === 'string' ? body.model : undefined;

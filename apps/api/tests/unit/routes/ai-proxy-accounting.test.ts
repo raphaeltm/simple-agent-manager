@@ -74,13 +74,14 @@ type TestEnv = {
   AI_PROXY_ALLOWED_MODELS: string;
   CF_ACCOUNT_ID: string;
   CF_API_TOKEN: string;
+  AI_PROXY_REQUEST_BODY_MAX_BYTES?: string;
 };
 
 const app = new Hono<{ Bindings: TestEnv }>();
 app.route('/ai/anthropic/v1', aiProxyAnthropicRoutes);
 app.route('/ai/v1', aiProxyRoutes);
 
-function makeEnv(): TestEnv {
+function makeEnv(overrides: Partial<TestEnv> = {}): TestEnv {
   return {
     DATABASE: {},
     KV: { get: vi.fn().mockResolvedValue(null) },
@@ -88,31 +89,32 @@ function makeEnv(): TestEnv {
     AI_PROXY_ALLOWED_MODELS: '@cf/test/model',
     CF_ACCOUNT_ID: 'acct',
     CF_API_TOKEN: 'cf-token',
+    ...overrides,
   };
 }
 
-function postChat(body: Record<string, unknown>) {
+function postChat(body: Record<string, unknown>, env: Partial<TestEnv> = {}) {
   return app.request('/ai/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ws-token', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }, makeEnv());
+  }, makeEnv(env));
 }
 
-function postResponses(body: Record<string, unknown>) {
+function postResponses(body: Record<string, unknown>, env: Partial<TestEnv> = {}) {
   return app.request('/ai/v1/responses', {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ws-token', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }, { ...makeEnv(), AI_PROXY_ALLOWED_MODELS: 'gpt-4.1' });
+  }, makeEnv({ AI_PROXY_ALLOWED_MODELS: 'gpt-4.1', ...env }));
 }
 
-function postAnthropic(path: string, body: Record<string, unknown>) {
+function postAnthropic(path: string, body: Record<string, unknown>, env: Partial<TestEnv> = {}) {
   return app.request(`/ai/anthropic/v1${path}`, {
     method: 'POST',
     headers: { 'x-api-key': 'ws-token', 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  }, makeEnv());
+  }, makeEnv({ AI_PROXY_ALLOWED_MODELS: 'claude-sonnet-5', ...env }));
 }
 
 function streamFromText(text: string): ReadableStream<Uint8Array> {
@@ -167,6 +169,38 @@ beforeEach(() => {
 });
 
 describe('OpenAI-compatible AI proxy token accounting', () => {
+  it('rejects oversized chat completion bodies before usage gate or upstream fetch', async () => {
+    allowProxyRequest();
+
+    const res = await postChat(
+      {
+        model: '@cf/test/model',
+        messages: [{ role: 'user', content: 'x'.repeat(256) }],
+      },
+      { AI_PROXY_REQUEST_BODY_MAX_BYTES: '128' }
+    );
+
+    expect(res.status).toBe(413);
+    expect(mockCheckAiUsageGate).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized responses bodies before usage gate or upstream fetch', async () => {
+    allowProxyRequest();
+
+    const res = await postResponses(
+      {
+        model: 'gpt-4.1',
+        input: 'x'.repeat(256),
+      },
+      { AI_PROXY_REQUEST_BODY_MAX_BYTES: '128' }
+    );
+
+    expect(res.status).toBe(413);
+    expect(mockCheckAiUsageGate).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('increments token usage after a successful Workers AI response', async () => {
     allowProxyRequest();
     mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 10, outputTokens: 4 });
@@ -268,6 +302,42 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
 });
 
 describe('native Anthropic AI proxy token accounting', () => {
+  it('rejects oversized messages bodies before usage gate or upstream auth', async () => {
+    allowProxyRequest();
+
+    const res = await postAnthropic(
+      '/messages',
+      {
+        model: 'claude-sonnet-5',
+        messages: [{ role: 'user', content: 'x'.repeat(256) }],
+      },
+      { AI_PROXY_REQUEST_BODY_MAX_BYTES: '128' }
+    );
+
+    expect(res.status).toBe(413);
+    expect(mockCheckAiUsageGate).not.toHaveBeenCalled();
+    expect(mockResolveUpstreamAuth).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized count_tokens bodies before usage gate or upstream auth', async () => {
+    allowProxyRequest();
+
+    const res = await postAnthropic(
+      '/messages/count_tokens',
+      {
+        model: 'claude-sonnet-5',
+        messages: [{ role: 'user', content: 'x'.repeat(256) }],
+      },
+      { AI_PROXY_REQUEST_BODY_MAX_BYTES: '128' }
+    );
+
+    expect(res.status).toBe(413);
+    expect(mockCheckAiUsageGate).not.toHaveBeenCalled();
+    expect(mockResolveUpstreamAuth).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('increments token usage after a successful message response', async () => {
     allowProxyRequest();
     allowAnthropicPlatformAuth();

@@ -96,8 +96,6 @@ export type CredentialLimitRuntimeConfig = CredentialLimitThresholds & {
   supportedWindowTypes: ReadonlySet<string>;
   admissionMaxActivePerProject: number;
   admissionRetryBatchSize: number;
-  admissionMaxAttempts: number;
-  admissionRetryDelayMs: number;
   admissionRetentionDays: number;
 };
 

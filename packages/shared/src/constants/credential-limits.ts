@@ -51,6 +51,15 @@ export const DEFAULT_CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES = [
 /** Maximum credential-limit observations accepted from one usage callback/report. */
 export const DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT = 16;
 
+/** Maximum raw JSON request body accepted for one VM usage callback. */
+export const DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES = 32 * 1024;
+
+/** Default authenticated VM usage callback limit per session per minute. */
+export const DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM = 120;
+
+/** Default authenticated VM usage callback rate limit window in seconds. */
+export const DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS = 60;
+
 /** Maximum accepted sample age for credential-limit observations. */
 export const DEFAULT_CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS = 24 * 60 * 60_000;
 
@@ -66,12 +75,5 @@ export const DEFAULT_CREDENTIAL_LIMIT_ADMISSION_MAX_ACTIVE_PER_PROJECT = 1_000;
 /** Maximum pending credential-limit admission envelopes retried opportunistically. */
 export const DEFAULT_CREDENTIAL_LIMIT_ADMISSION_RETRY_BATCH_SIZE = 25;
 
-/** Maximum dispatch attempts for one credential-limit admission envelope. */
-export const DEFAULT_CREDENTIAL_LIMIT_ADMISSION_MAX_ATTEMPTS = 6;
-
-/** Retry delay for failed credential-limit admission dispatch attempts. */
-export const DEFAULT_CREDENTIAL_LIMIT_ADMISSION_RETRY_DELAY_MS = 60_000;
-
 /** Retention for credential-limit admission/outbox rows. */
 export const DEFAULT_CREDENTIAL_LIMIT_ADMISSION_RETENTION_DAYS = 30;
-
