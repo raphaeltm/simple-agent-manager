@@ -178,7 +178,8 @@ export async function ensureCandidatesForSource(
 
   const cursorKey = candidatePublicationCursorKey(poolId, sourceId);
   const digest = candidateSetDigest(candidateIds);
-  const alreadyPublished = await readPublicationProgress(options.cursorStore, cursorKey, digest);
+  const progress = await readPublicationProgress(options.cursorStore, cursorKey, digest);
+  const alreadyPublished = progress.published;
   const batchSize = Math.max(
     1,
     options.publishBatchSize ?? DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE
@@ -191,11 +192,16 @@ export async function ensureCandidatesForSource(
 
   const publishedTotal = publishTo;
   const publicationComplete = publishedTotal >= candidateValues.length;
-  await writePublicationProgress(
-    options.cursorStore,
-    cursorKey,
-    publicationComplete ? null : { digest, published: publishedTotal }
-  );
+  // The common case is a small catalog that completes in one pass with no cursor to clear.
+  // Writing (then deleting) a cursor row for every source on every reconciliation pass would
+  // add two platform_settings writes per source per pass for no benefit.
+  if (!publicationComplete || progress.cursorPresent) {
+    await writePublicationProgress(
+      options.cursorStore,
+      cursorKey,
+      publicationComplete ? null : { digest, published: publishedTotal }
+    );
+  }
 
   // Missing-offering cleanup needs BOTH a complete catalog (the provider actually enumerated
   // its inventory) and a complete publication (every surviving row is already re-published).
@@ -377,12 +383,14 @@ async function readPublicationProgress(
   store: CapacityCandidatePublicationCursorStore | undefined,
   key: string,
   digest: string
-): Promise<number> {
-  if (!store) return 0;
+): Promise<{ published: number; cursorPresent: boolean }> {
+  if (!store) return { published: 0, cursorPresent: false };
   const raw = await store.read(key);
   const cursor = parsePublicationCursor(raw);
-  if (!cursor || cursor.digest !== digest) return 0;
-  return cursor.published;
+  // A cursor for a DIFFERENT catalog is still present and must be cleared/overwritten, but it
+  // contributes no progress: publication restarts from the beginning.
+  if (!cursor || cursor.digest !== digest) return { published: 0, cursorPresent: raw !== null };
+  return { published: cursor.published, cursorPresent: true };
 }
 
 async function writePublicationProgress(

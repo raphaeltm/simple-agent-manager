@@ -14,6 +14,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/capacity-pool-reconciliation';
+import {
+  capacityCandidateBaseId,
+  capacityCandidateIdForRole,
+  capacityCandidateRoleFromId,
+  capacityCandidateSatisfiesWorkloadRole,
+} from '../../../src/services/capacity-pool-workload-roles';
 import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
 import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
 import {
@@ -29,7 +35,12 @@ import {
   requestDefaultCapacityPoolBackfillRetry,
   resolveEffectiveDefaultCapacityPoolSummary,
 } from '../../../src/services/default-capacity-pools';
+import {
+  clearCapacityCatalogCache,
+  scrubCapacitySourceCredentialSecrets,
+} from '../../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../../src/services/encryption';
+import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
 import {
   capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
@@ -724,6 +735,9 @@ function manyLiveOfferings(count: number): ProviderInstanceOffering[] {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  // The provider catalog cache is per-isolate module state; leaking it across cases would
+  // let one test's inventory answer another test's refresh.
+  clearCapacityCatalogCache();
   vi.restoreAllMocks();
   sqlite?.close();
   sqlite = null;
@@ -881,7 +895,9 @@ describe('default capacity pool creation', () => {
     expect(getCount('capacity_pools', "scope = 'project'")).toBe(2);
   });
 
-  it('continues credential lifecycle work for more than 25 project attachments through scheduled backfill', async () => {
+  // 26 projects x composable credential decryption x 5 reconciliation passes. This fixture is
+  // deliberately heavy (it proves the scope batching bound), so it needs more than the 5s default.
+  it('continues credential lifecycle work for more than 25 project attachments through scheduled backfill', { timeout: 60_000 }, async () => {
     createDb();
     const encrypted = await encrypt('vultr-token-for-scheduled-backfill', TEST_ENCRYPTION_KEY);
     const insertProject = sqlite!.prepare(
@@ -4521,5 +4537,833 @@ describe('default capacity pool creation', () => {
       firstSnapshot?.capacityAuthorityGeneration
     );
     expect(rotatedSnapshot?.sourceGeneration).toBe(rotatedSnapshot?.capacityAuthorityGeneration);
+  });
+});
+
+/**
+ * Regression coverage for the six findings raised against 4a21532a5, plus the deployment
+ * workload-role regression. Each block names the defect it reproduces so a future reader can
+ * tell what would break if the guard were removed.
+ */
+describe('capacity pool review findings', () => {
+  const DEPLOYMENT_ROLE_SUFFIX = '#role=deployment';
+
+  function poolRevision(): number {
+    return (
+      sqlite?.prepare("SELECT revision FROM capacity_pools WHERE scope = 'user'").get() as {
+        revision: number;
+      }
+    ).revision;
+  }
+
+  function candidateRow(id: string) {
+    return sqlite?.prepare('SELECT * FROM capacity_pool_candidates WHERE id = ?').get(id) as
+      | Record<string, unknown>
+      | undefined;
+  }
+
+  function workspaceCandidateIds(): string[] {
+    return getRows<{ id: string }>(`
+      SELECT id FROM capacity_pool_candidates
+      WHERE workload_role = 'workspace'
+      ORDER BY id
+    `).map((row) => row.id);
+  }
+
+  async function ensureUserPool(
+    db: unknown,
+    offerings: ProviderInstanceOffering[],
+    overrides: Record<string, unknown> = {}
+  ) {
+    return ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      candidatePublishBatchSize: 1000,
+      offeringResolver: async () => offerings,
+      ...overrides,
+    });
+  }
+
+  const twoComparableOfferings = (cheapest: 'a' | 'b') => [
+    liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: 'cmp-a',
+      displayName: 'Comparable A',
+      priceMonthly: cheapest === 'a' ? 4 : 9,
+      priceHourly: cheapest === 'a' ? 0.004 : 0.009,
+    }),
+    liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: 'cmp-b',
+      displayName: 'Comparable B',
+      priceMonthly: cheapest === 'b' ? 4 : 9,
+      priceHourly: cheapest === 'b' ? 0.004 : 0.009,
+    }),
+  ];
+
+  // ---------------------------------------------------------------------------------------
+  // Finding 1 (P1): membership + policy + revision were three separate writes.
+  // ---------------------------------------------------------------------------------------
+  describe('finding 1: atomic pool edit', () => {
+    async function seedTwoEditableCandidates() {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const db = poolDb();
+      await ensureUserPool(db, [
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx33', displayName: 'CX33' }),
+      ]);
+      return db;
+    }
+
+    it('rolls the whole edit back when a candidate write fails mid-batch', async () => {
+      await seedTwoEditableCandidates();
+      const ids = workspaceCandidateIds();
+      expect(ids.length).toBeGreaterThanOrEqual(2);
+      const before = {
+        revision: poolRevision(),
+        strategy: (
+          sqlite?.prepare("SELECT strategy FROM capacity_pools WHERE scope = 'user'").get() as {
+            strategy: string;
+          }
+        ).strategy,
+        statuses: ids.map((id) => candidateRow(id)?.status),
+      };
+
+      // Fail the SECOND statement inside the batch, after the first has already run.
+      let statementIndex = 0;
+      const failingDb = drizzleD1(
+        {
+          ...createSqliteD1WithBindLimit(sqlite!, 100),
+          batch: async (statements: { runSync(): unknown }[]) =>
+            sqlite!.transaction((items: { runSync(): unknown }[]) =>
+              items.map((item) => {
+                statementIndex += 1;
+                if (statementIndex === 2) throw new Error('simulated mid-batch D1 failure');
+                return item.runSync();
+              })
+            )(statements),
+        } as unknown as D1Database,
+        { schema }
+      );
+
+      await expect(
+        updateDefaultCapacityPool(failingDb as never, {
+          scope: 'user',
+          ownerUserId: 'user-1',
+          ownerProjectId: null,
+          policy: { strategy: 'smallest-fit' },
+          candidates: [
+            { id: ids[0], status: 'deleted' },
+            { id: ids[1], status: 'deleted' },
+          ],
+        })
+      ).rejects.toThrow('simulated mid-batch D1 failure');
+
+      // Nothing partially published: a reader sees the COMPLETE old policy + membership.
+      expect(poolRevision()).toBe(before.revision);
+      expect(
+        (
+          sqlite?.prepare("SELECT strategy FROM capacity_pools WHERE scope = 'user'").get() as {
+            strategy: string;
+          }
+        ).strategy
+      ).toBe(before.strategy);
+      expect(ids.map((id) => candidateRow(id)?.status)).toEqual(before.statuses);
+    });
+
+    it('publishes membership, policy and revision together on success', async () => {
+      const db = await seedTwoEditableCandidates();
+      const ids = workspaceCandidateIds();
+      const revisionBefore = poolRevision();
+
+      const result = await updateDefaultCapacityPool(db as never, {
+        scope: 'user',
+        ownerUserId: 'user-1',
+        ownerProjectId: null,
+        policy: { strategy: 'smallest-fit', exhaustionPolicy: 'fail' },
+        candidates: [{ id: ids[0], status: 'disabled' }],
+      });
+
+      expect(result.conflict).toBe(false);
+      expect(result.summary?.pool).toMatchObject({
+        strategy: 'smallest-fit',
+        exhaustionPolicy: 'fail',
+        revision: revisionBefore + 1,
+      });
+      expect(candidateRow(ids[0])?.status).toBe('disabled');
+    });
+
+    it('rejects a stale concurrent edit instead of overwriting the winner', async () => {
+      await seedTwoEditableCandidates();
+      const ids = workspaceCandidateIds();
+      const revisionBefore = poolRevision();
+
+      // Model the race deterministically: another editor commits between our read and our
+      // fenced write.
+      let raced = false;
+      const racingDb = drizzleD1(
+        {
+          ...createSqliteD1WithBindLimit(sqlite!, 100),
+          batch: async (statements: { runSync(): unknown }[]) => {
+            if (!raced) {
+              raced = true;
+              sqlite!
+                .prepare(
+                  "UPDATE capacity_pools SET revision = revision + 1, strategy = 'pack' WHERE scope = 'user'"
+                )
+                .run();
+            }
+            return sqlite!.transaction((items: { runSync(): unknown }[]) =>
+              items.map((item) => item.runSync())
+            )(statements);
+          },
+        } as unknown as D1Database,
+        { schema }
+      );
+
+      const result = await updateDefaultCapacityPool(racingDb as never, {
+        scope: 'user',
+        ownerUserId: 'user-1',
+        ownerProjectId: null,
+        policy: { strategy: 'smallest-fit' },
+        candidates: [{ id: ids[0], status: 'deleted' }],
+      });
+
+      expect(result.conflict).toBe(true);
+      expect(result.summary).toBeNull();
+      // The concurrent editor's intent survives untouched.
+      expect(
+        (
+          sqlite?.prepare("SELECT strategy, revision FROM capacity_pools WHERE scope = 'user'").get() as {
+            strategy: string;
+            revision: number;
+          }
+        )
+      ).toEqual({ strategy: 'pack', revision: revisionBefore + 1 });
+      expect(candidateRow(ids[0])?.status).not.toBe('deleted');
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Finding 2 (P2): a successful, complete, EMPTY API inventory was read as static/incomplete.
+  // ---------------------------------------------------------------------------------------
+  describe('finding 2: empty successful catalog completeness', () => {
+    it('marks every prior offering unavailable while preserving explicit membership', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const db = poolDb();
+      const offerings = [
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cpx62', displayName: 'CPX62' }),
+      ];
+      await ensureUserPool(db, offerings);
+      const selectedId = workspaceCandidateIds().find((id) => id.includes('cx23'));
+      expect(selectedId).toBeDefined();
+      const statusBefore = candidateRow(selectedId!)?.status;
+
+      await ensureUserPool(db, [], {
+        offeringResolver: async () => ({
+          offerings: [],
+          refreshSucceeded: true,
+          catalogComplete: true,
+        }),
+      });
+
+      expect(
+        getRows<{ catalog_availability: string; count: number }>(`
+          SELECT catalog_availability, COUNT(*) AS count
+          FROM capacity_pool_candidates
+          GROUP BY catalog_availability
+        `)
+      ).toEqual([{ catalog_availability: 'last-known-unavailable', count: 4 }]);
+      // Membership status is user intent and survives an authoritative empty inventory.
+      expect(candidateRow(selectedId!)?.status).toBe(statusBefore);
+    });
+
+    it('retains last-known-good when the refresh failed or was incomplete', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const db = poolDb();
+      await ensureUserPool(db, [
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+      ]);
+
+      await ensureUserPool(db, [], {
+        offeringResolver: async () => ({ offerings: [], refreshSucceeded: false }),
+      });
+      expect(getCount('capacity_pool_candidates', "catalog_availability = 'available'")).toBe(2);
+
+      await ensureUserPool(db, [], {
+        offeringResolver: async () => ({
+          offerings: [],
+          refreshSucceeded: true,
+          catalogComplete: false,
+        }),
+      });
+      expect(getCount('capacity_pool_candidates', "catalog_availability = 'available'")).toBe(2);
+    });
+
+    it('restores a previously selected offering that reappears and keeps removals removed', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const db = poolDb();
+      const both = [
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx33', displayName: 'CX33' }),
+      ];
+      await ensureUserPool(db, both);
+      const removedId = workspaceCandidateIds().find((id) => id.includes('cx33'))!;
+      sqlite
+        ?.prepare("UPDATE capacity_pool_candidates SET status = 'deleted' WHERE id = ?")
+        .run(removedId);
+
+      await ensureUserPool(db, [], {
+        offeringResolver: async () => ({
+          offerings: [],
+          refreshSucceeded: true,
+          catalogComplete: true,
+        }),
+      });
+      await ensureUserPool(db, both);
+
+      const keptId = workspaceCandidateIds().find((id) => id.includes('cx23'))!;
+      expect(candidateRow(keptId)?.catalog_availability).toBe('available');
+      expect(candidateRow(keptId)?.status).toBe('active');
+      // A deliberate removal is never resurrected by the offering returning.
+      expect(candidateRow(removedId)?.status).toBe('deleted');
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Finding 3 (P2): a price-only change reordered ranking without invalidating plan authority.
+  // ---------------------------------------------------------------------------------------
+  describe('finding 3: selection-affecting changes bump pool revision', () => {
+    it('keeps the revision stable across an identical refresh', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const db = poolDb();
+      await ensureUserPool(db, twoComparableOfferings('a'));
+      await ensureUserPool(db, twoComparableOfferings('a'));
+      const stable = poolRevision();
+      await ensureUserPool(db, twoComparableOfferings('a'));
+      expect(poolRevision()).toBe(stable);
+    });
+
+    it('bumps the revision when two comparable offerings swap the cheapest position', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const db = poolDb();
+      await ensureUserPool(db, twoComparableOfferings('a'));
+      await ensureUserPool(db, twoComparableOfferings('a'));
+      const before = poolRevision();
+
+      await ensureUserPool(db, twoComparableOfferings('b'));
+
+      expect(poolRevision()).toBe(before + 1);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Finding 4 (P2): refresh published NULL over persisted native configuration.
+  // ---------------------------------------------------------------------------------------
+  describe('finding 4: persisted native configuration survives refresh', () => {
+    it('preserves boot disk, image and architecture across an unchanged inventory refresh', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const db = poolDb();
+      const offerings = [
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+      ];
+      await ensureUserPool(db, offerings);
+      const id = workspaceCandidateIds()[0];
+      sqlite
+        ?.prepare(
+          `UPDATE capacity_pool_candidates
+             SET provider_instance_boot_disk_size_gb = 120,
+                 provider_instance_image = 'ubuntu-24.04',
+                 provider_instance_architecture = 'arm64'
+           WHERE id = ?`
+        )
+        .run(id);
+      // Re-run once so the authority generation already reflects the configured fields.
+      await ensureUserPool(db, offerings);
+      const configured = candidateRow(id)!;
+
+      await ensureUserPool(db, offerings);
+      const after = candidateRow(id)!;
+
+      expect(after.provider_instance_boot_disk_size_gb).toBe(120);
+      expect(after.provider_instance_image).toBe('ubuntu-24.04');
+      expect(after.provider_instance_architecture).toBe('arm64');
+      // Identical refresh must not churn placement authority either.
+      expect(after.authority_generation).toBe(configured.authority_generation);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Finding 5: the source bridge copied encrypted credential material into legacy rows.
+  // ---------------------------------------------------------------------------------------
+  describe('finding 5: no credential copies', () => {
+    it('binds a composable source by exact reference and stores no secret in the anchor', async () => {
+      createDb();
+      seedComposableCloudCredential({
+        credentialId: 'cc-cred-1',
+        configurationId: 'cc-cfg-1',
+        attachmentId: 'cc-att-1',
+        encryptedToken: 'REAL-CIPHERTEXT-CANARY',
+        iv: 'REAL-IV-CANARY',
+      });
+      const db = poolDb();
+      await ensureUserPool(db, [
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+      ]);
+
+      const source = getRows<{
+        credential_source: string;
+        credential_reference: string;
+        external_source_ref: string;
+        credential_id: string;
+      }>(`SELECT credential_source, credential_reference, external_source_ref, credential_id
+          FROM capacity_sources WHERE scope = 'user'`)[0];
+      expect(source.credential_source).toBe('user');
+      expect(source.credential_reference).toBe('cc_credentials:cc-cred-1');
+      expect(source.external_source_ref).toBe('cc_attachments:cc-att-1');
+
+      const anchors = getRows<{ id: string; encrypted_token: string; iv: string }>(
+        `SELECT id, encrypted_token, iv FROM credentials
+         WHERE credential_type = 'capacity-source-external-ref'`
+      );
+      expect(anchors).toHaveLength(1);
+      expect(anchors[0].encrypted_token).toBe('');
+      expect(anchors[0].iv).toBe('');
+      // The canary never appears anywhere in the legacy credentials table.
+      expect(
+        getCount('credentials', "encrypted_token = 'REAL-CIPHERTEXT-CANARY'")
+      ).toBe(0);
+    });
+
+    it('scrubs a pre-existing copied secret without cascading the capacity source away', async () => {
+      createDb();
+      seedComposableCloudCredential({
+        credentialId: 'cc-cred-1',
+        configurationId: 'cc-cfg-1',
+        attachmentId: 'cc-att-1',
+        encryptedToken: 'REAL-CIPHERTEXT-CANARY',
+        iv: 'REAL-IV-CANARY',
+      });
+      const db = poolDb();
+      await ensureUserPool(db, [
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+      ]);
+      const anchorId = getRows<{ id: string }>(
+        "SELECT id FROM credentials WHERE credential_type = 'capacity-source-external-ref'"
+      )[0].id;
+      // Re-introduce the old bridge's copied ciphertext, as an upgraded installation has it.
+      sqlite
+        ?.prepare('UPDATE credentials SET encrypted_token = ?, iv = ? WHERE id = ?')
+        .run('REAL-CIPHERTEXT-CANARY', 'REAL-IV-CANARY', anchorId);
+      const sourcesBefore = getCount('capacity_sources');
+
+      await backfillDefaultCapacityPoolsForExistingCredentials(db as never, {
+        includeInstallation: false,
+        offeringResolver: async () => [],
+      });
+
+      expect(getCount('credentials', `id = '${anchorId}' AND encrypted_token = ''`)).toBe(1);
+      expect(getCount('credentials', "encrypted_token = 'REAL-CIPHERTEXT-CANARY'")).toBe(0);
+      // The FK is ON DELETE CASCADE: a referenced anchor must never be deleted.
+      expect(getCount('credentials', `id = '${anchorId}'`)).toBe(1);
+      expect(getCount('capacity_sources')).toBe(sourcesBefore);
+    });
+
+    it('scrubs referenced anchors and prunes only unreferenced ones', async () => {
+      createDb();
+      seedComposableCloudCredential({
+        credentialId: 'cc-cred-1',
+        configurationId: 'cc-cfg-1',
+        attachmentId: 'cc-att-1',
+      });
+      const db = poolDb();
+      await ensureUserPool(db, [
+        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+      ]);
+      const anchorId = getRows<{ id: string }>(
+        "SELECT id FROM credentials WHERE credential_type = 'capacity-source-external-ref'"
+      )[0].id;
+      sqlite
+        ?.prepare('UPDATE credentials SET encrypted_token = ?, iv = ? WHERE id = ?')
+        .run('LEAKED-CIPHERTEXT', 'LEAKED-IV', anchorId);
+      // An orphan left behind by a credential rotation: no capacity source references it.
+      sqlite
+        ?.prepare(
+          `INSERT INTO credentials (id, user_id, project_id, provider, credential_type,
+             credential_kind, is_active, encrypted_token, iv, created_at, updated_at)
+           VALUES ('anchor-orphan', 'user-1', NULL, 'hetzner', 'capacity-source-external-ref',
+             'api-key', 1, 'ORPHAN-CIPHERTEXT', 'ORPHAN-IV', '2026-01-01T00:00:00.000Z',
+             '2026-01-01T00:00:00.000Z')`
+        )
+        .run();
+      const sourcesBefore = getCount('capacity_sources');
+
+      const result = await scrubCapacitySourceCredentialSecrets(db as never);
+
+      expect(result.scrubbedAnchors).toBe(2);
+      expect(result.deletedUnreferencedAnchors).toBe(1);
+      expect(getCount('credentials', "encrypted_token LIKE '%CIPHERTEXT%'")).toBe(0);
+      expect(getCount('credentials', `id = '${anchorId}' AND encrypted_token = ''`)).toBe(1);
+      expect(getCount('credentials', "id = 'anchor-orphan'")).toBe(0);
+      // Discriminating control: pruning the orphan must not cascade a real source away.
+      expect(getCount('capacity_sources')).toBe(sourcesBefore);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Finding 6: publication was unbounded per source and could not resume.
+  // ---------------------------------------------------------------------------------------
+  describe('finding 6: bounded, resumable candidate publication', () => {
+    const LARGE = 40; // 40 offerings x 2 roles = 80 rows
+
+    it('publishes in bounded passes, resumes across a restart, and only then marks missing', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const offerings = manyLiveOfferings(LARGE);
+      // Pre-existing row that disappears from the catalog; it must keep last-known-good
+      // availability until the ENTIRE catalog has been published.
+      await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        candidatePublishBatchSize: 1000,
+        offeringResolver: async () => [
+          liveHetznerOffering({
+            location: 'fsn1',
+            providerInstanceType: 'going-away',
+            displayName: 'Going away',
+          }),
+        ],
+      });
+      expect(getCount('capacity_pool_candidates', "catalog_availability = 'available'")).toBe(2);
+
+      let passes = 0;
+      let published = 0;
+      while (published < LARGE * 2 && passes < 20) {
+        // A NEW db handle each pass: resumption must come from the durable cursor, not memory.
+        await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+          userId: 'user-1',
+          includeInstallation: false,
+          candidatePublishBatchSize: 25,
+          offeringResolver: async () => offerings,
+        });
+        passes += 1;
+        published = getCount(
+          'capacity_pool_candidates',
+          "provider_instance_type LIKE 'provider-native-%'"
+        );
+        if (published < LARGE * 2) {
+          // Incomplete publication must NOT mark the disappeared offering unavailable.
+          expect(
+            getCount(
+              'capacity_pool_candidates',
+              "provider_instance_type = 'going-away' AND catalog_availability = 'last-known-unavailable'"
+            )
+          ).toBe(0);
+        }
+      }
+
+      expect(passes).toBeGreaterThan(1);
+      expect(published).toBe(LARGE * 2);
+      // Only once the whole catalog is published does missing-offering cleanup run.
+      expect(
+        getCount(
+          'capacity_pool_candidates',
+          "provider_instance_type = 'going-away' AND catalog_availability = 'last-known-unavailable'"
+        )
+      ).toBe(2);
+    });
+
+    it('never marks missing when the refresh itself failed mid-publication', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        candidatePublishBatchSize: 1000,
+        offeringResolver: async () => [
+          liveHetznerOffering({
+            location: 'fsn1',
+            providerInstanceType: 'keep-me',
+            displayName: 'Keep me',
+          }),
+        ],
+      });
+
+      await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        candidatePublishBatchSize: 5,
+        offeringResolver: async () => ({ offerings: [], refreshSucceeded: false }),
+      });
+
+      expect(getCount('capacity_pool_candidates', "catalog_availability = 'available'")).toBe(2);
+    });
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // Deployment workload-role regression (7bab): reconciliation only produced 'workspace' rows.
+  // ---------------------------------------------------------------------------------------
+  describe('deployment workload-role materialization', () => {
+    async function seedRolePool() {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const db = poolDb();
+      await ensureUserPool(db, [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+          vcpu: 4,
+          memoryMb: 8192,
+          memoryGb: 8,
+          ramGb: 8,
+          diskGb: 80,
+          storageGb: 80,
+        }),
+      ]);
+      return db;
+    }
+
+    it('materializes a coupled deployment candidate for every editor-visible offering', async () => {
+      await seedRolePool();
+      const workspaceIds = workspaceCandidateIds();
+      expect(workspaceIds).toHaveLength(1);
+      const deploymentRow = candidateRow(`${workspaceIds[0]}${DEPLOYMENT_ROLE_SUFFIX}`);
+      expect(deploymentRow).toBeDefined();
+      expect(deploymentRow?.workload_role).toBe('deployment');
+      expect(deploymentRow?.status).toBe(candidateRow(workspaceIds[0])?.status);
+      expect(deploymentRow?.provider_instance_type).toBe('cx23');
+    });
+
+    it('hides the placement-only deployment row from the pool editor surface', async () => {
+      const db = await seedRolePool();
+      const summaries = await readDefaultCapacityPoolSummaries(db as never, {
+        userId: 'user-1',
+        includeInstallation: false,
+        includeDisabled: true,
+      });
+      const candidates = summaries.user?.candidates ?? [];
+      expect(candidates).toHaveLength(1);
+      expect(candidates.every((candidate) => candidate.workloadRole === 'workspace')).toBe(true);
+    });
+
+    it('propagates an editor status change to the coupled deployment row', async () => {
+      const db = await seedRolePool();
+      const workspaceId = workspaceCandidateIds()[0];
+
+      const result = await updateDefaultCapacityPool(db as never, {
+        scope: 'user',
+        ownerUserId: 'user-1',
+        ownerProjectId: null,
+        candidates: [{ id: workspaceId, status: 'deleted' }],
+      });
+
+      expect(result.conflict).toBe(false);
+      expect(candidateRow(workspaceId)?.status).toBe('deleted');
+      expect(candidateRow(`${workspaceId}${DEPLOYMENT_ROLE_SUFFIX}`)?.status).toBe('deleted');
+    });
+
+    it('never couples a legacy row that has no provider-native identity', async () => {
+      const db = await seedRolePool();
+      const workspaceId = workspaceCandidateIds()[0];
+      const legacyId = `${workspaceId}-legacy`;
+      // A pre-native legacy row: NULL provider_instance_type. It is addressable by exact id
+      // only, and must never be matched to another row's offering identity.
+      sqlite
+        ?.prepare(
+          `INSERT INTO capacity_pool_candidates (
+             id, pool_id, capacity_source_id, provider, location, workload_role, runtime,
+             machine_class, machine_size, provider_instance_type, catalog_availability,
+             catalog_generation, authority_generation, priority, candidate_order, status,
+             created_at, updated_at
+           )
+           SELECT ?, pool_id, capacity_source_id, provider, location, 'workspace', runtime,
+                  machine_class, machine_size, NULL, catalog_availability,
+                  catalog_generation, authority_generation, priority, candidate_order, 'active',
+                  created_at, updated_at
+           FROM capacity_pool_candidates WHERE id = ?`
+        )
+        .run(legacyId, workspaceId);
+      sqlite
+        ?.prepare(
+          `INSERT INTO capacity_pool_candidates (
+             id, pool_id, capacity_source_id, provider, location, workload_role, runtime,
+             machine_class, machine_size, provider_instance_type, catalog_availability,
+             catalog_generation, authority_generation, priority, candidate_order, status,
+             created_at, updated_at
+           )
+           SELECT ?, pool_id, capacity_source_id, provider, location, 'deployment', runtime,
+                  machine_class, machine_size, NULL, catalog_availability,
+                  catalog_generation, authority_generation, priority, candidate_order, 'active',
+                  created_at, updated_at
+           FROM capacity_pool_candidates WHERE id = ?`
+        )
+        .run(`${legacyId}${DEPLOYMENT_ROLE_SUFFIX}`, workspaceId);
+
+      const result = await updateDefaultCapacityPool(db as never, {
+        scope: 'user',
+        ownerUserId: 'user-1',
+        ownerProjectId: null,
+        candidates: [{ id: legacyId, status: 'disabled' }],
+      });
+
+      expect(result.conflict).toBe(false);
+      expect(candidateRow(legacyId)?.status).toBe('disabled');
+      // Null-typed rows are never fuzzy-coupled: the sibling keeps its own status.
+      expect(candidateRow(`${legacyId}${DEPLOYMENT_ROLE_SUFFIX}`)?.status).toBe('active');
+    });
+  });
+});
+
+/**
+ * The shared workload-role eligibility contract A4 publishes and C3a's final admission fence
+ * consumes. These prove the SOURCE half end-to-end: default ensure produces a canonical
+ * deployment candidate that a deployment-role selection accepts, and a wrong-role request is
+ * rejected rather than silently matched.
+ */
+describe('workload-role eligibility contract', () => {
+  async function seedRoleCapablePool() {
+    createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const db = poolDb();
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      candidatePublishBatchSize: 1000,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: getDefaultLocationForProvider('hetzner'),
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+          machineSize: 'small',
+        }),
+      ],
+    });
+    return db;
+  }
+
+  function hetznerTaskStartPlacement() {
+    return resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'role-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'hetzner',
+        defaultLocation: getDefaultLocationForProvider('hetzner'),
+        defaultVmSize: 'small',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+  }
+
+  it('selects the coupled deployment candidate for a deployment-role placement', async () => {
+    const db = await seedRoleCapablePool();
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+      workloadRoles: 'all',
+    });
+    expect(summary).not.toBeNull();
+
+    const deployment = buildCapacityPoolSelection(summary!, hetznerTaskStartPlacement(), 'deployment');
+
+    expect(deployment?.candidates.length).toBeGreaterThan(0);
+    expect(deployment?.candidates.every((candidate) => candidate.workloadRole === 'deployment')).toBe(
+      true
+    );
+    expect(deployment?.candidates[0]?.providerInstanceType).toBe('cx23');
+  });
+
+  it('still selects the workspace candidate for a workspace-role placement', async () => {
+    const db = await seedRoleCapablePool();
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+      workloadRoles: 'all',
+    });
+
+    const workspace = buildCapacityPoolSelection(summary!, hetznerTaskStartPlacement(), 'workspace');
+
+    expect(workspace?.candidates.length).toBeGreaterThan(0);
+    expect(workspace?.candidates.every((candidate) => candidate.workloadRole === 'workspace')).toBe(
+      true
+    );
+  });
+
+  it('rejects candidates whose role does not match the requested role', async () => {
+    const db = await seedRoleCapablePool();
+    // Remove the coupled deployment rows: a deployment placement must then find NOTHING
+    // rather than falling back to a workspace-role candidate.
+    sqlite?.prepare("DELETE FROM capacity_pool_candidates WHERE workload_role = 'deployment'").run();
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+      workloadRoles: 'all',
+    });
+
+    const deployment = buildCapacityPoolSelection(summary!, hetznerTaskStartPlacement(), 'deployment');
+
+    expect(deployment?.candidates).toEqual([]);
+    // Discriminating control: the workspace role still resolves, so "empty" is not just a
+    // broken fixture.
+    expect(
+      buildCapacityPoolSelection(summary!, hetznerTaskStartPlacement(), 'workspace')?.candidates
+        .length
+    ).toBeGreaterThan(0);
+  });
+
+  it('keeps editor-visible summaries and their counts free of role expansion', async () => {
+    const db = await seedRoleCapablePool();
+
+    const editorSummary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+    });
+    const placementSummary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+      workloadRoles: 'all',
+    });
+
+    expect(editorSummary?.candidates).toHaveLength(1);
+    expect(placementSummary?.candidates).toHaveLength(2);
+    // Counts describe offerings, not role-expanded rows, in BOTH shapes.
+    expect(placementSummary?.activeCandidateCount).toBe(editorSummary?.activeCandidateCount);
+    expect(placementSummary?.availableCandidateCount).toBe(editorSummary?.availableCandidateCount);
+  });
+
+  it('exposes one shared role predicate for the reconciler and the admission fence', () => {
+    expect(capacityCandidateSatisfiesWorkloadRole('deployment', 'deployment')).toBe(true);
+    expect(capacityCandidateSatisfiesWorkloadRole('workspace', 'deployment')).toBe(false);
+    expect(capacityCandidateSatisfiesWorkloadRole(null, 'workspace')).toBe(false);
+    expect(capacityCandidateIdForRole('cand-1', 'workspace')).toBe('cand-1');
+    expect(capacityCandidateIdForRole('cand-1', 'deployment')).toBe('cand-1#role=deployment');
+    expect(capacityCandidateBaseId('cand-1#role=deployment')).toBe('cand-1');
+    expect(capacityCandidateRoleFromId('cand-1#role=deployment')).toBe('deployment');
+    expect(capacityCandidateRoleFromId('cand-1')).toBe('workspace');
+    // A malformed suffix must not silently resolve to the primary role.
+    expect(capacityCandidateRoleFromId('cand-1#role=bogus')).toBeNull();
   });
 });

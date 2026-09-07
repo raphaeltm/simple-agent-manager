@@ -20,7 +20,10 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { capacitySourceAuthorityGeneration } from './capacity-pool-authority';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
-import { PRIMARY_CAPACITY_WORKLOAD_ROLE } from './capacity-pool-workload-roles';
+import {
+  isEditorVisibleCapacityCandidateRole,
+  PRIMARY_CAPACITY_WORKLOAD_ROLE,
+} from './capacity-pool-workload-roles';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
@@ -72,7 +75,19 @@ const ACTIVE_STATUS = 'active';
 const DISABLED_STATUS = 'disabled';
 type ScopeIdentity = DefaultPoolScopeIdentity;
 
+/**
+ * Which materialized workload roles a summary should carry.
+ *
+ * `editor-visible` (default) returns only the primary role, so the pool editor and the safe
+ * effective DTO show one row per offering. `all` additionally returns the placement-only
+ * coupled rows, which is what a deployment placement needs to find an eligible candidate.
+ * Counts are ALWAYS computed over editor-visible rows so a caller asking for `all` can never
+ * double the user-visible candidate counts.
+ */
+export type CapacityPoolSummaryWorkloadRoles = 'editor-visible' | 'all';
+
 interface ReadDefaultPoolSummaryOptions {
+  workloadRoles?: CapacityPoolSummaryWorkloadRoles;
   /**
    * Default placement reads must remain active-only. UI/editor reads opt into
    * disabled default pools so users can add back offerings after removing the
@@ -256,6 +271,8 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
     includeInstallation?: boolean;
     env?: Env;
     offeringResolver?: DefaultCapacityPoolOfferingResolver;
+    /** Placement callers pass 'all' to see the coupled non-primary workload-role rows. */
+    workloadRoles?: CapacityPoolSummaryWorkloadRoles;
   }
 ): Promise<CapacityPoolSummary | null> {
   if (input.ensure === true) {
@@ -275,7 +292,10 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
       ownerProjectId: input.projectId,
     } satisfies ScopeIdentity;
     if (await findDefaultPool(db, projectScope)) {
-      return readDefaultPoolSummary(db, projectScope, { includeDisabled: true });
+      return readDefaultPoolSummary(db, projectScope, {
+        includeDisabled: true,
+        workloadRoles: input.workloadRoles,
+      });
     }
   }
 
@@ -285,7 +305,10 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
     ownerProjectId: null,
   } satisfies ScopeIdentity;
   if (await findDefaultPool(db, userScope)) {
-    return readDefaultPoolSummary(db, userScope, { includeDisabled: true });
+    return readDefaultPoolSummary(db, userScope, {
+      includeDisabled: true,
+      workloadRoles: input.workloadRoles,
+    });
   }
 
   if (input.includeInstallation === false) return null;
@@ -296,7 +319,10 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
     ownerProjectId: null,
   } satisfies ScopeIdentity;
   if (await findDefaultPool(db, installationScope)) {
-    return readDefaultPoolSummary(db, installationScope, { includeDisabled: true });
+    return readDefaultPoolSummary(db, installationScope, {
+      includeDisabled: true,
+      workloadRoles: input.workloadRoles,
+    });
   }
   return null;
 }
@@ -1655,9 +1681,10 @@ export async function readDefaultPoolSummary(
       and(
         eq(schema.capacityPoolCandidates.poolId, pool.id),
         // Placement-only mirrors for non-primary workload roles are hidden from the editor
-        // and from the counts, so a user curates one row per offering rather than one per
-        // role. Their status is coupled to the visible row, so counts stay faithful.
-        eq(schema.capacityPoolCandidates.workloadRole, PRIMARY_CAPACITY_WORKLOAD_ROLE),
+        // by default, so a user curates one row per offering rather than one per role.
+        options.workloadRoles === 'all'
+          ? undefined
+          : eq(schema.capacityPoolCandidates.workloadRole, PRIMARY_CAPACITY_WORKLOAD_ROLE),
         options.includeDisabled === true
           ? undefined
           : eq(schema.capacitySources.status, ACTIVE_STATUS)
@@ -1676,7 +1703,12 @@ export async function readDefaultPoolSummary(
   for (const row of rows) {
     sourcesById.set(row.source.id, toCapacitySourceIdentity(row.source));
     const candidate = toCapacityPoolCandidate(row.candidate);
-    if (row.source.status === ACTIVE_STATUS && candidate.status === ACTIVE_STATUS) {
+    // Counts describe the user-visible offering set, never the role-expanded row set.
+    if (
+      isEditorVisibleCapacityCandidateRole(candidate.workloadRole) &&
+      row.source.status === ACTIVE_STATUS &&
+      candidate.status === ACTIVE_STATUS
+    ) {
       activeCandidateCount += 1;
       if (
         candidate.catalogAvailability === 'available' &&
@@ -1689,7 +1721,9 @@ export async function readDefaultPoolSummary(
   }
   const effectiveState = defaultPoolEffectiveState(pool, {
     sourceCount: sourcesById.size,
-    candidateCount: candidates.length,
+    candidateCount: candidates.filter((candidate) =>
+      isEditorVisibleCapacityCandidateRole(candidate.workloadRole)
+    ).length,
     activeCandidateCount,
     availableCandidateCount,
   });
