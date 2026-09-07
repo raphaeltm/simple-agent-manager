@@ -474,6 +474,8 @@ export function ProjectChat() {
               selectedSkillId={state.selectedSkillId}
               onSkillChange={state.setSelectedSkillId}
               onUpdateProfile={state.handleUpdateProfile}
+              taskResourceReqs={state.taskResourceReqs}
+              onTaskResourceReqsChange={state.setTaskResourceReqs}
               profileWizard={state.profileWizard}
               onOpenProfileWizard={state.openProfileWizard}
               onCloseProfileWizard={state.closeProfileWizard}
