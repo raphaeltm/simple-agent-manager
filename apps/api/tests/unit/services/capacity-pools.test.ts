@@ -184,6 +184,8 @@ describe('capacity pool mappers', () => {
       capacityPoolScope: null,
       capacityPoolRevision: null,
       capacitySourceId: null,
+      capacitySourceGeneration: null,
+      capacitySourceExternalRef: null,
       capacityPoolCandidateId: null,
       placementCredentialSource: null,
       placementCredentialReference: null,

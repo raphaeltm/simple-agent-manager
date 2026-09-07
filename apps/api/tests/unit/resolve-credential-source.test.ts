@@ -293,6 +293,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     'utf8'
   );
   const nodesSource = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
+  const canonicalAllocationSource = readFileSync(
+    resolve(process.cwd(), 'src/services/canonical-vm-allocation.ts'),
+    'utf8'
+  );
   const dispatchSource = readFileSync(
     resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
     'utf8'
@@ -342,8 +346,15 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(nodeStepsSource).toContain('resolveCredentialSource');
     });
 
-    it('nodes.ts (manual creation) uses resolveCredentialSource', () => {
-      expect(nodesSource).toContain('resolveCredentialSource');
+    it('nodes.ts (manual creation) resolves credentials through the canonical allocation plan', () => {
+      // Manual node creation no longer calls resolveCredentialSource directly:
+      // every VM writer goes through the one canonical allocation entrypoint,
+      // which resolves the credential source (and the capacity-aware quota
+      // source) centrally. The invariant is "no local credential resolution",
+      // not "this specific call site".
+      expect(nodesSource).toContain('resolveCanonicalVmAllocationPlan');
+      expect(nodesSource).not.toContain('resolveCredentialSource(');
+      expect(canonicalAllocationSource).toContain('resolveCredentialSource');
     });
 
     it('dispatch-tool.ts (MCP dispatch) uses the task-start placement credential resolver', () => {
@@ -372,8 +383,9 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(nodeStepsSource).toContain("quotaCredentialSource === 'platform'");
     });
 
-    it('nodes.ts checks credentialSource === platform', () => {
-      expect(nodesSource).toContain("credResult.credentialSource === 'platform'");
+    it('nodes.ts checks the canonical plan quota credential source === platform', () => {
+      expect(canonicalAllocationSource).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(nodesSource).toContain("allocation.quotaCredentialSource === 'platform'");
     });
 
     it('dispatch-tool.ts checks capacity-aware quota source === platform', () => {
@@ -401,8 +413,10 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(nodeStepsSource).toContain('state.config.cloudProvider');
     });
 
-    it('nodes.ts passes provider from request body for user-scoped manual creation', () => {
-      expect(nodesSource).toContain('resolveCredentialSource(db, userId, provider ?? undefined)');
+    it('nodes.ts passes the requested provider into the canonical allocation plan', () => {
+      const section = nodesSource.slice(nodesSource.indexOf('resolveCanonicalVmAllocationPlan('));
+      expect(section).toContain('provider');
+      expect(canonicalAllocationSource).toContain('credentialLookup.provider');
     });
 
     it('dispatch-tool.ts passes inherited root attribution scope', () => {
@@ -488,7 +502,7 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     });
 
     it('nodes.ts checks quota before createNodeRecord', () => {
-      const quotaIdx = nodesSource.indexOf('resolveCredentialSource');
+      const quotaIdx = nodesSource.indexOf('checkQuotaForUser(db, userId)');
       const createIdx = nodesSource.indexOf('createNodeRecord(c.env');
       expect(quotaIdx).toBeGreaterThan(0);
       expect(createIdx).toBeGreaterThan(0);

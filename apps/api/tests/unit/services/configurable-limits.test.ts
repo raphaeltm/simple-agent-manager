@@ -10,8 +10,14 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_MAX_WORKSPACES_PER_NODE } from '@simple-agent-manager/shared';
+
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
 import { getRuntimeLimits } from '../../../src/services/limits';
+import {
+  evaluateWorkspaceReservationCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '../../../src/services/workspace-resource-capacity';
 
 // =============================================================================
 // getRuntimeLimits — behavioral tests for all 15 configurable limits
@@ -534,35 +540,63 @@ describe('workspace create — count limit removed', () => {
 // Source contract: task-runner DO enforces workspace count limit
 // =============================================================================
 
-describe('task-runner DO — workspace count limit', () => {
-  const doSource = [
-    'index.ts',
-    'types.ts',
-    'node-steps.ts',
-    'node-selection.ts',
-    'workspace-steps.ts',
-    'agent-session-step.ts',
-    'state-machine.ts',
-    'helpers.ts',
-  ]
-    .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
-    .join('\n');
-
-  it('references MAX_WORKSPACES_PER_NODE env var', () => {
-    expect(doSource).toContain('MAX_WORKSPACES_PER_NODE');
-  });
-
-  it('references DEFAULT_MAX_WORKSPACES_PER_NODE constant', () => {
-    expect(doSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
+describe('task-runner workspace count limit is configurable', () => {
+  // The per-node cap and node pressure thresholds moved out of the TaskRunner DO
+  // into the shared admission policy, so both advisory selection and the final
+  // admission SQL read one configuration. These assertions exercise that resolver
+  // rather than grepping the DO's source.
+  it('reads MAX_WORKSPACES_PER_NODE from env with the shared default', () => {
+    expect(resolveWorkspaceAdmissionPolicy({} as never).maxWorkspaces).toBe(
+      DEFAULT_MAX_WORKSPACES_PER_NODE
+    );
+    expect(
+      resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '9' } as never).maxWorkspaces
+    ).toBe(9);
   });
 
   it('still reads CPU and memory thresholds from env', () => {
-    expect(doSource).toContain('TASK_RUN_NODE_CPU_THRESHOLD_PERCENT');
-    expect(doSource).toContain('TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
+    const policy = resolveWorkspaceAdmissionPolicy({
+      TASK_RUN_NODE_CPU_THRESHOLD_PERCENT: '61',
+      TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT: '62',
+    } as never);
+    expect(policy.cpuThresholdPercent).toBe(61);
+    expect(policy.memoryThresholdPercent).toBe(62);
   });
 
-  it('queries workspace count per node for limit enforcement', () => {
-    const section = doSource.slice(doSource.indexOf('findNodeWithCapacity'));
-    expect(section).toContain('>= maxWorkspaces');
+  it('enforces the workspace count limit at the shared capacity evaluator', () => {
+    const policy = resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '1' } as never);
+    const node = {
+      id: 'node-1',
+      nodeClass: 'managed',
+      providerInstanceId: 'server-1',
+      observedProviderInstanceVcpuCount: 8,
+      observedProviderInstanceMemoryMb: 16_384,
+      observedProviderInstanceDiskGb: 160,
+      observedHardwareSource: 'observed',
+      lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+      lastHeartbeatAt: new Date().toISOString(),
+    };
+    const request = {
+      cpuMillis: 1000,
+      memoryMb: 1024,
+      diskMb: 1024,
+      exclusiveNode: false,
+      maxCoTenants: 4,
+      source: 'platform' as const,
+      sourceId: 'platform',
+      version: 1,
+    };
+    const usage = {
+      activeCount: 1,
+      invalidCount: 0,
+      exclusiveCount: 0,
+      minMaxCoTenants: null,
+      cpuMillis: 0,
+      memoryMb: 0,
+      diskMb: 0,
+    };
+    const result = evaluateWorkspaceReservationCapacity(node, usage, request, policy);
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('workspace count cap reached');
   });
 });
