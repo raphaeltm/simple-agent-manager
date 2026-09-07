@@ -66,6 +66,7 @@ interface MockTaskRow {
   started_at?: string | null;
   completed_at?: string | null;
   execution_step?: string | null;
+  terminal_transition_id?: string | null;
 }
 
 interface MockWorkspaceRow {
@@ -131,11 +132,11 @@ function createMockD1(
   async function runStatement(query: string, args: unknown[]) {
     runCalls.push({ query, args });
     if (query.includes('UPDATE tasks') && query.includes('execution_step = NULL')) {
-      const taskId = args[6] as string;
-      const projectId = args[7] as string;
-      const fromStatus = args[8] as string;
-      const workspaceId = args[9] as string | null;
-      const chatSessionId = args[11] as string | null;
+      const taskId = args[7] as string;
+      const projectId = args[8] as string;
+      const fromStatus = args[9] as string;
+      const workspaceId = args[10] as string | null;
+      const chatSessionId = args[12] as string | null;
       const row = richTaskRow(taskId);
       if (
         row &&
@@ -150,6 +151,7 @@ function createMockD1(
           error_message: args[1] as string | null,
           started_at: (row.started_at ?? args[3]) as string | null,
           completed_at: args[4] as string,
+          terminal_transition_id: args[5] as string,
           execution_step: null,
         };
         return { success: true, meta: { changes: 1 } };
@@ -159,7 +161,11 @@ function createMockD1(
     if (query.includes('INSERT INTO task_status_events')) {
       const taskId = args[7] as string;
       const row = richTaskRow(taskId);
-      if (row?.status === args[9] && row.completed_at === args[10]) {
+      if (
+        row?.status === args[9] &&
+        row.completed_at === args[10] &&
+        row.terminal_transition_id === args[11]
+      ) {
         statusEvents.push({
           task_id: taskId,
           from_status: args[1],
@@ -171,6 +177,17 @@ function createMockD1(
         return { success: true, meta: { changes: 1 } };
       }
       return { success: true, meta: { changes: 0 } };
+    }
+    if (query.includes('INSERT OR IGNORE INTO project_event_source_outbox')) {
+      const [taskId, projectId, transitionId] = args.slice(-3);
+      const row = richTaskRow(String(taskId));
+      return {
+        success: true,
+        meta: {
+          changes:
+            row?.project_id === projectId && row.terminal_transition_id === transitionId ? 1 : 0,
+        },
+      };
     }
     if (query.includes('UPDATE workspaces')) {
       const workspaceId = args[1] as string;

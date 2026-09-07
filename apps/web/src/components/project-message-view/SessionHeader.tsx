@@ -233,6 +233,12 @@ export function SessionHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+          <Link
+            to={`/projects/${projectId}/events?sessionId=${encodeURIComponent(session.id)}`}
+            className="inline-flex min-h-9 items-center text-xs text-accent underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus-ring"
+          >
+            Events &amp; schedules
+          </Link>
           <span
             className="inline-flex items-center gap-1 text-xs font-medium shrink-0"
             style={{

@@ -163,6 +163,10 @@ describe('MCP ProjectData event retrieval tools', () => {
       id: 'event-1',
       rawPayloadRef: { uri: 'r2://full-payload-secret' },
     });
+    expect(body.eventReadFence).toMatchObject({
+      eventFields: 'untrusted_external_evidence',
+      guidance: expect.stringContaining('untrusted'),
+    });
     expect(adapter.getProjectEventForCaller).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -204,6 +208,10 @@ describe('MCP ProjectData event retrieval tools', () => {
       subscriptionId: 'sub-1',
       nextCursor: 'opaque-cursor',
       hasMore: true,
+      eventReadFence: {
+        eventFields: 'untrusted_external_evidence',
+        guidance: expect.stringContaining('untrusted'),
+      },
     });
     expect(JSON.stringify(body)).not.toContain('full-payload-secret');
     expect(JSON.stringify(body)).not.toContain('rawPayloadRef');

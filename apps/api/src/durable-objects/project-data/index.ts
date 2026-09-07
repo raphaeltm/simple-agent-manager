@@ -23,6 +23,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-recovery-authority';
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
@@ -47,7 +48,25 @@ import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
 import * as projectCommentInbox from './project-comment-inbox';
+import * as eventChannels from './project-event-channels';
+import {
+  requireChannelActorAuthority,
+  requireChannelActorChat,
+} from './project-event-channels-authority';
+import { requireScheduleAction, requireScheduleMember } from './project-event-schedules-authority';
+import { scheduleLimits } from './project-event-schedules-config';
+import {
+  reconcileSchedule,
+  withScheduleExecution,
+  withSingleScheduleExecution,
+} from './project-event-schedules-recovery';
+import { runScheduleAlarm } from './project-event-schedules-runner';
+import * as eventSchedules from './project-event-schedules-storage';
+import { normalizeScheduledAction } from './project-event-schedules-validation';
 import * as projectEvents from './project-events';
+import { resolveProjectEventLimits } from './project-events-limits';
+import { runStandingWatchAlarm } from './project-standing-watches-runner';
+import * as standingWatches from './project-standing-watches-storage';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
@@ -74,6 +93,12 @@ import * as toolPayloadManualCleanup from './tool-payload-manual-cleanup';
 import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');
+
+function isFailSessionIdentityGuardDenial(err: unknown, sessionId: string): boolean {
+  return (
+    err instanceof Error && err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
+  );
+}
 
 export type { Env } from './types';
 
@@ -103,6 +128,45 @@ export class ProjectData extends DurableObject<Env> {
     const row = this.sql.exec('SELECT value FROM do_meta WHERE key = ?', 'projectId').toArray()[0];
     if (row) this.cachedProjectId = parseMetaValue(row, 'project_data.project_id');
     return this.cachedProjectId;
+  }
+
+  private runSessionCreatedHooks(input: {
+    id: string;
+    workspaceId: string | null;
+    taskId: string | null;
+    createdByUserId: string | null;
+    topic: string | null;
+    now: number;
+  }): void {
+    if (input.workspaceId) {
+      this.recalculateAlarm().catch((err) =>
+        log.warn('schedule_workspace_idle_alarm_failed', {
+          workspaceId: input.workspaceId,
+          ...serializeError(err),
+        })
+      );
+    }
+    activity.recordActivityEventInternal(
+      this.sql,
+      'session.started',
+      input.createdByUserId ? 'user' : 'system',
+      input.createdByUserId,
+      input.workspaceId,
+      input.id,
+      input.taskId,
+      null
+    );
+    this.scheduleSummarySync();
+    this.broadcastEvent('session.created', {
+      id: input.id,
+      workspaceId: input.workspaceId,
+      taskId: input.taskId,
+      createdByUserId: input.createdByUserId,
+      topic: input.topic,
+      status: 'active',
+      messageCount: 0,
+      createdAt: input.now,
+    });
   }
 
   /**
@@ -163,33 +227,78 @@ export class ProjectData extends DurableObject<Env> {
       taskId,
       createdByUserId
     );
-    if (workspaceId) {
-      this.recalculateAlarm().catch((err) =>
-        log.warn('schedule_workspace_idle_alarm_failed', { workspaceId, ...serializeError(err) })
+    this.runSessionCreatedHooks({ id, workspaceId, taskId, createdByUserId, topic, now });
+    return id;
+  }
+
+  async createReservedTaskSessionWithInitialMessage(
+    input: sessions.CreateReservedTaskSessionWithInitialMessageInput
+  ): Promise<sessions.CreateReservedTaskSessionWithInitialMessageResult> {
+    let created: {
+      session: sessions.CreateReservedTaskSessionResult;
+      message: ReturnType<typeof messages.persistMessage>;
+    } | null = null;
+    try {
+      created = this.ctx.storage.transactionSync(() => {
+        const session = sessions.createReservedTaskSession(this.sql, this.env, input);
+        const message = messages.persistMessage(
+          this.sql,
+          this.env,
+          input.sessionId,
+          input.initialMessageRole,
+          input.initialMessageContent,
+          input.initialMessageToolMetadata,
+          input.initialMessageId
+        );
+        return { session, message };
+      });
+    } catch (error) {
+      if (error instanceof sessions.ReservedTaskSessionConflictError) {
+        return {
+          outcome: 'conflict',
+          reason: error.reason,
+          message: error.message,
+        };
+      }
+      if (error instanceof Error && error.message.includes('already belongs to a different')) {
+        return {
+          outcome: 'conflict',
+          reason: 'initial_message_conflict',
+          message: error.message,
+        };
+      }
+      throw error;
+    }
+
+    if (created.session.inserted) {
+      this.runSessionCreatedHooks({
+        id: input.sessionId,
+        workspaceId: input.workspaceId,
+        taskId: input.taskId,
+        createdByUserId: input.createdByUserId,
+        topic: input.topic,
+        now: created.session.now,
+      });
+    }
+    if (created.message.inserted) {
+      await messagePersistence.runPersistedMessageSideEffects(
+        this.sql,
+        this.env,
+        this.messagePersistenceHooks(),
+        input.sessionId,
+        input.initialMessageRole,
+        input.initialMessageContent,
+        created.message
       );
     }
-    activity.recordActivityEventInternal(
-      this.sql,
-      'session.started',
-      createdByUserId ? 'user' : 'system',
-      createdByUserId,
-      workspaceId,
-      id,
-      taskId,
-      null
-    );
-    this.scheduleSummarySync();
-    this.broadcastEvent('session.created', {
-      id,
-      workspaceId,
-      taskId,
-      createdByUserId,
-      topic,
-      status: 'active',
-      messageCount: 0,
-      createdAt: now,
-    });
-    return id;
+
+    return {
+      outcome: 'created',
+      sessionId: input.sessionId,
+      initialMessageId: input.initialMessageId,
+      sessionInserted: created.session.inserted,
+      initialMessageInserted: created.message.inserted,
+    };
   }
   async linkSessionToTask(sessionId: string, taskId: string): Promise<boolean> {
     const updated = sessions.linkSessionToTask(this.sql, sessionId, taskId);
@@ -280,8 +389,26 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async failSession(sessionId: string, errorMessage: string | null = null): Promise<boolean> {
-    const result = sessions.failSession(this.sql, sessionId);
+  async failSession(
+    sessionId: string,
+    errorMessage: string | null = null,
+    guard?: sessions.SessionIdentityGuard | null
+  ): Promise<boolean> {
+    let result: { workspaceId: string | null; messageCount: number } | null;
+    try {
+      result = sessions.failSession(this.sql, sessionId, guard);
+    } catch (err) {
+      if (guard && isFailSessionIdentityGuardDenial(err, sessionId)) {
+        log.info('fail_session_identity_guard_denied', {
+          sessionId,
+          taskId: guard.taskId ?? null,
+          createdByUserId: guard.createdByUserId ?? null,
+          workspaceId: guard.workspaceId ?? null,
+        });
+        return false;
+      }
+      throw err;
+    }
     if (result) {
       activity.recordActivityEventInternal(
         this.sql,
@@ -327,7 +454,8 @@ export class ProjectData extends DurableObject<Env> {
     role: string,
     content: string,
     toolMetadata: string | null,
-    messageId?: string
+    messageId?: string,
+    guard?: sessions.SessionIdentityGuard | null
   ): Promise<string> {
     return this.withArchiveTranscriptLock(() =>
       messagePersistence.persistMessageWithSideEffects(
@@ -338,7 +466,8 @@ export class ProjectData extends DurableObject<Env> {
         role,
         content,
         toolMetadata,
-        messageId
+        messageId,
+        guard
       )
     );
   }
@@ -465,8 +594,12 @@ export class ProjectData extends DurableObject<Env> {
     return run;
   }
 
-  async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
-    sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId);
+  async linkSessionToWorkspace(
+    sessionId: string,
+    workspaceId: string,
+    guard?: sessions.SessionIdentityGuard | null
+  ): Promise<void> {
+    sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId, guard);
     this.recalculateAlarm().catch((err) =>
       log.warn('schedule_workspace_idle_alarm_after_link_failed', {
         workspaceId,
@@ -930,18 +1063,317 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.AdmitProjectEventInput
   ): projectEvents.ProjectEventAdmissionResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       projectEvents.admitProjectEvent(this.sql, this.env, this.getProjectId(), input)
     );
+    this.recalculateAlarm().catch((err) =>
+      log.warn('schedule_project_event_alarm_failed', {
+        projectId: input.projectId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+    return result;
+  }
+
+  async createProjectSchedule(input: {
+    projectId: string;
+    userId: string;
+    creatorChatSessionId: string | null;
+    request: unknown;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    const request = expectJsonRecord(input.request, 'schedule request');
+    const action = normalizeScheduledAction(
+      request.action,
+      scheduleLimits(this.env),
+      resolveProjectEventLimits(this.env)
+    );
+    const replay =
+      typeof request.idempotencyKey === 'string' &&
+      this.sql
+        .exec(
+          `SELECT id FROM project_schedules WHERE project_id = ? AND creator_user_id = ? AND idempotency_key = ?`,
+          input.projectId,
+          input.userId,
+          request.idempotencyKey.trim()
+        )
+        .toArray()[0];
+    if (replay) await requireScheduleMember(this.env, input.projectId, input.userId);
+    else await requireScheduleAction(this.sql, this.env, input.projectId, input.userId, action);
+    const result = this.ctx.storage.transactionSync(() =>
+      eventSchedules.createSchedule(
+        this.sql,
+        this.env,
+        input.projectId,
+        { userId: input.userId, chatSessionId: input.creatorChatSessionId },
+        input.request,
+        Date.now()
+      )
+    );
+    await this.recalculateAlarm();
+    return {
+      ...result,
+      schedule: await withSingleScheduleExecution(this.sql, this.env, result.schedule),
+    };
+  }
+
+  async getProjectSchedule(input: { projectId: string; userId: string; id: string }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId, true);
+    const schedule = eventSchedules.getSchedule(this.sql, input.projectId, input.id);
+    return schedule ? await withSingleScheduleExecution(this.sql, this.env, schedule) : null;
+  }
+
+  async listProjectSchedules(input: {
+    projectId: string;
+    userId: string;
+    cursor?: string;
+    sessionId?: string;
+    limit?: number;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId, true);
+    const result = eventSchedules.listSchedules(this.sql, this.env, input.projectId, input);
+    return {
+      ...result,
+      schedules: await withScheduleExecution(this.sql, this.env, result.schedules),
+    };
+  }
+
+  async mutateProjectSchedule(input: {
+    projectId: string;
+    userId: string;
+    id: string;
+    operation: 'reschedule' | 'cancel';
+    request: unknown;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    if (input.operation !== 'reschedule' && input.operation !== 'cancel')
+      throw new projectEvents.ProjectEventValidationError('Invalid schedule mutation');
+    await requireScheduleMember(this.env, input.projectId, input.userId);
+    const result = this.ctx.storage.transactionSync(() =>
+      input.operation === 'reschedule'
+        ? eventSchedules.rescheduleSchedule(
+            this.sql,
+            this.env,
+            input.projectId,
+            input.id,
+            input.request,
+            Date.now()
+          )
+        : eventSchedules.cancelSchedule(
+            this.sql,
+            this.env,
+            input.projectId,
+            input.id,
+            input.request,
+            Date.now()
+          )
+    );
+    await this.recalculateAlarm();
+    return {
+      ...result,
+      schedule: await withSingleScheduleExecution(this.sql, this.env, result.schedule),
+    };
+  }
+
+  async reconcileProjectSchedule(input: {
+    projectId: string;
+    userId: string;
+    id: string;
+    request: unknown;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId);
+    const result = await reconcileSchedule(
+      this.sql,
+      this.env,
+      input.projectId,
+      input.id,
+      input.request
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async createProjectStandingWatch(input: { projectId: string; userId: string; request: unknown }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    const request = expectJsonRecord(input.request, 'standing watch request');
+    const action = normalizeScheduledAction(
+      request.action,
+      scheduleLimits(this.env),
+      resolveProjectEventLimits(this.env)
+    );
+    await requireScheduleAction(this.sql, this.env, input.projectId, input.userId, action);
+    const result = this.ctx.storage.transactionSync(() =>
+      standingWatches.createWatch(
+        this.sql,
+        this.env,
+        input.projectId,
+        input.userId,
+        input.request,
+        Date.now()
+      )
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async getProjectStandingWatch(input: { projectId: string; userId: string; id: string }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId, true);
+    return standingWatches.getWatch(this.sql, input.projectId, input.id);
+  }
+
+  async listProjectStandingWatches(input: {
+    projectId: string;
+    userId: string;
+    cursor?: string;
+    sessionId?: string;
+    limit?: number;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId, true);
+    return standingWatches.listWatches(this.sql, this.env, input.projectId, input);
+  }
+
+  async mutateProjectStandingWatch(input: {
+    projectId: string;
+    userId: string;
+    id: string;
+    operation: 'update' | 'pause' | 'revoke';
+    request: unknown;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    if (!['update', 'pause', 'revoke'].includes(input.operation))
+      throw new projectEvents.ProjectEventValidationError('Invalid standing watch mutation');
+    await requireScheduleMember(this.env, input.projectId, input.userId);
+    const result = this.ctx.storage.transactionSync(() =>
+      input.operation === 'update'
+        ? standingWatches.updateWatch(
+            this.sql,
+            this.env,
+            input.projectId,
+            input.id,
+            input.request,
+            Date.now()
+          )
+        : input.operation === 'pause'
+          ? standingWatches.pauseWatch(
+              this.sql,
+              this.env,
+              input.projectId,
+              input.id,
+              input.request,
+              Date.now()
+            )
+          : standingWatches.revokeWatch(
+              this.sql,
+              this.env,
+              input.projectId,
+              input.id,
+              input.request,
+              Date.now()
+            )
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async publishProjectEventChannel(
+    input: eventChannels.PublishProjectEventChannelInput
+  ): Promise<eventChannels.PublishProjectEventChannelResult> {
+    this.ensureProjectId(input.projectId);
+    const prepared = await eventChannels.prepareChannelPublish(this.env, input);
+    await requireChannelActorAuthority(this.env, prepared.projectId, prepared.actor);
+    // Commit bounded maintenance progress independently; a capacity rejection in
+    // the following admission transaction must not rewind the catalog walk.
+    this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, prepared.actor);
+      eventChannels.cleanupEmptyChannels(this.sql, this.env, prepared.projectId, Date.now());
+    });
+    const result = this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, prepared.actor);
+      return eventChannels.publishChannel(this.sql, this.env, this.getProjectId(), prepared);
+    });
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  listProjectEventChannels(
+    input: eventChannels.ListProjectEventChannelsInput
+  ): eventChannels.ProjectEventChannelList {
+    this.ensureProjectId(input.projectId);
+    return eventChannels.listChannels(this.sql, this.env, this.getProjectId(), input);
+  }
+
+  getProjectEventChannelHistory(
+    input: eventChannels.ProjectEventChannelHistoryInput
+  ): eventChannels.ProjectEventChannelHistory {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      eventChannels.channelHistory(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  async followProjectEventChannel(
+    input: eventChannels.FollowProjectEventChannelInput
+  ): Promise<eventChannels.FollowProjectEventChannelResult> {
+    this.ensureProjectId(input.projectId);
+    await requireChannelActorAuthority(this.env, input.projectId, input.actor);
+    const result = this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, input.actor);
+      return eventChannels.followChannel(this.sql, this.env, this.getProjectId(), input);
+    });
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async catchUpProjectEventChannel(
+    input: eventChannels.CatchUpProjectEventChannelInput
+  ): Promise<eventChannels.FollowProjectEventChannelResult> {
+    this.ensureProjectId(input.projectId);
+    await requireChannelActorAuthority(this.env, input.projectId, input.actor);
+    const result = this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, input.actor);
+      return eventChannels.catchUpChannel(this.sql, this.env, this.getProjectId(), input);
+    });
+    await this.recalculateAlarm();
+    return result;
   }
 
   createProjectEventSubscription(
     input: projectEvents.CreateProjectEventSubscriptionInput
   ): projectEvents.ProjectEventSubscriptionMutationResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       projectEvents.createProjectEventSubscription(this.sql, this.env, this.getProjectId(), input)
     );
+    this.recalculateAlarm().catch((err) =>
+      log.warn('schedule_project_event_subscription_alarm_failed', {
+        projectId: input.projectId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+    return result;
   }
 
   listProjectEventSubscriptions(
@@ -1059,6 +1491,20 @@ export class ProjectData extends DurableObject<Env> {
     this.ensureProjectId(input.projectId);
     return this.ctx.storage.transactionSync(() =>
       projectEvents.getProjectEventRecentStatus(this.sql, this.env, this.getProjectId(), input)
+    );
+  }
+
+  validateProjectEventWakeRecoveryAuthority(
+    input: projectEvents.ValidateProjectEventWakeRecoveryAuthorityInput
+  ): boolean {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.validateProjectEventWakeRecoveryAuthority(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input
+      )
     );
   }
 
@@ -1626,138 +2072,257 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  private async runProjectEventWakeMaterializationAlarm(): Promise<void> {
+    const projectId = this.getProjectId();
+    if (!projectId) return;
+    const now = Date.now();
+    const candidates = this.ctx.storage.transactionSync(() =>
+      projectEvents.selectProjectEventWakeMaterializationCandidates(
+        this.sql,
+        this.env,
+        projectId,
+        now
+      )
+    );
+    if (candidates.length === 0) {
+      this.ctx.storage.transactionSync(() =>
+        projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, projectId, now)
+      );
+      return;
+    }
+    let deferredUntil: number | null = null;
+    for (const candidate of candidates) {
+      const sourceAuthorized = await isSessionRecoverySourceTaskGuardValid(
+        this.env.DATABASE,
+        candidate.sourceTaskGuard
+      );
+      if (!sourceAuthorized) {
+        this.ctx.storage.transactionSync(() =>
+          projectEvents.cancelProjectEventWakeForRevokedSourceTask(
+            this.sql,
+            projectId,
+            candidate.subscriptionId
+          )
+        );
+        continue;
+      }
+      const result = this.ctx.storage.transactionSync(() =>
+        projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, projectId, now, {
+          subscriptionId: candidate.subscriptionId,
+          ignoreSchedulerCheckpoint: true,
+          recordGlobalCapacityDeferral: false,
+        })
+      );
+      if (result.deferredUntil !== undefined && result.deferredUntil !== null) {
+        deferredUntil =
+          deferredUntil === null
+            ? result.deferredUntil
+            : Math.min(deferredUntil, result.deferredUntil);
+      }
+      for (const item of result.accepted) {
+        await durability.finalizeAcceptedPromptDelivery(
+          this.sql,
+          this.env,
+          this.durabilityHooks(),
+          item.input,
+          item.accepted
+        );
+      }
+      if (result.status === 'materialized' || result.status === 'disabled') return;
+    }
+    this.ctx.storage.transactionSync(() =>
+      projectEvents.markSchedulerSuccess(this.sql, projectId, now, 'materialization', deferredUntil)
+    );
+  }
+
+  private runProjectEventRetentionAlarm(): void {
+    const projectId = this.getProjectId();
+    if (!projectId) return;
+    if (!projectEvents.isProjectEventRetentionDue(this.sql, this.env, projectId)) return;
+    this.ctx.storage.transactionSync(() =>
+      projectEvents.runProjectEventRetention(this.sql, this.env, this.getProjectId(), {
+        projectId,
+        refreshAccounting: false,
+      })
+    );
+  }
+
+  private recordProjectEventSchedulerFailure(
+    phase: 'materialization' | 'retention',
+    err: unknown
+  ): void {
+    try {
+      this.ctx.storage.transactionSync(() =>
+        projectEvents.recordSchedulerFailure(this.sql, this.env, this.getProjectId(), phase, err)
+      );
+    } catch (checkpointErr) {
+      log.error('alarm.project_event_scheduler_failure_checkpoint_failed', {
+        phase,
+        originalError: err instanceof Error ? err.message : String(err),
+        checkpointError:
+          checkpointErr instanceof Error ? checkpointErr.message : String(checkpointErr),
+      });
+    }
+  }
+
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectData')) return;
-
-    const timedOut = await checkRuntimeHeartbeatTimeouts(
-      this.sql,
-      this.env,
-      this.transitionAcpSession.bind(this),
-      this.getProjectId()
-    );
-
-    await stopTimedOutConversationWorkspaces(this.env, timedOut);
-
-    // Storage safety is the DO quota firebreak. Run it before the heavier
-    // lifecycle maintenance sections so a large project can still reclaim bytes
-    // even when idle/reconciliation work has accumulated.
     try {
-      await this.runStorageSafetyAlarmLocked();
-    } catch (err) {
-      log.error('alarm.storage_safety_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    await idleCleanup.checkWorkspaceIdleTimeouts(
-      this.sql,
-      this.env,
-      this.getProjectId(),
-      (workspaceId, projectId) =>
-        idleCleanup.deleteWorkspaceInD1(this.env.DATABASE, workspaceId, projectId),
-      (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-      () => this.scheduleSummarySync()
-    );
-    await idleCleanup.processExpiredCleanups(
-      this.sql,
-      this.env,
-      this.getProjectId(),
-      async (workspaceId, projectId) => {
-        await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId, projectId);
-        // Schedule automatic deletion after TTL (best-effort)
-        try {
-          const workerEnv = this.env as unknown as import('../../env').Env;
-          const wsRow = await workerEnv.DATABASE.prepare(
-            'SELECT node_id, user_id FROM workspaces WHERE id = ? AND project_id = ?'
-          )
-            .bind(workspaceId, projectId)
-            .first<{ node_id: string | null; user_id: string }>();
-          if (wsRow?.node_id) {
-            const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
-            const stub = workerEnv.NODE_LIFECYCLE.get(doId);
-            await (
-              stub as unknown as import('../node-lifecycle').NodeLifecycle
-            ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
-          }
-        } catch {
-          // Best-effort — cron safety-net will catch it
-        }
-      },
-      (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-      () => this.scheduleSummarySync()
-    );
-
-    // Task-mode reconciliation: check-in on idle task agents
-    try {
-      await reconciliation.processReconciliationCandidates(
+      const timedOut = await checkRuntimeHeartbeatTimeouts(
         this.sql,
         this.env,
+        this.transitionAcpSession.bind(this),
+        this.getProjectId()
+      );
+
+      await stopTimedOutConversationWorkspaces(this.env, timedOut);
+
+      // Storage safety is the DO quota firebreak. Run it before the heavier
+      // lifecycle maintenance sections so a large project can still reclaim bytes
+      // even when idle/reconciliation work has accumulated.
+      try {
+        await this.runStorageSafetyAlarmLocked();
+      } catch (err) {
+        log.error('alarm.storage_safety_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      await idleCleanup.checkWorkspaceIdleTimeouts(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        (workspaceId, projectId) =>
+          idleCleanup.deleteWorkspaceInD1(this.env.DATABASE, workspaceId, projectId),
         (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+        () => this.scheduleSummarySync()
+      );
+      await idleCleanup.processExpiredCleanups(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        async (workspaceId, projectId) => {
+          await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId, projectId);
+          // Schedule automatic deletion after TTL (best-effort)
+          try {
+            const workerEnv = this.env as unknown as import('../../env').Env;
+            const wsRow = await workerEnv.DATABASE.prepare(
+              'SELECT node_id, user_id FROM workspaces WHERE id = ? AND project_id = ?'
+            )
+              .bind(workspaceId, projectId)
+              .first<{ node_id: string | null; user_id: string }>();
+            if (wsRow?.node_id) {
+              const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
+              const stub = workerEnv.NODE_LIFECYCLE.get(doId);
+              await (
+                stub as unknown as import('../node-lifecycle').NodeLifecycle
+              ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
+            }
+          } catch {
+            // Best-effort — cron safety-net will catch it
+          }
+        },
+        (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+        () => this.scheduleSummarySync()
+      );
+
+      // Task-mode reconciliation: check-in on idle task agents
+      try {
+        await reconciliation.processReconciliationCandidates(
+          this.sql,
+          this.env,
+          (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+          {
+            waitUntil: (promise) => this.ctx.waitUntil(promise),
+            projectId: this.getProjectId(),
+            scheduleSummarySync: () => this.scheduleSummarySync(),
+          }
+        );
+      } catch (err) {
+        log.error('alarm.reconciliation_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      await attentionExpiry.processExpiredAttentionMarkers(
+        this.sql,
+        this.env,
+        async (sessionId, errorMessage) => {
+          await this.failSession(sessionId, errorMessage);
+        },
         {
-          waitUntil: (promise) => this.ctx.waitUntil(promise),
           projectId: this.getProjectId(),
           scheduleSummarySync: () => this.scheduleSummarySync(),
         }
       );
-    } catch (err) {
-      log.error('alarm.reconciliation_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
 
-    await attentionExpiry.processExpiredAttentionMarkers(
-      this.sql,
-      this.env,
-      async (sessionId, errorMessage) => {
-        await this.failSession(sessionId, errorMessage);
-      },
-      {
-        projectId: this.getProjectId(),
-        scheduleSummarySync: () => this.scheduleSummarySync(),
+      // Session state staleness is reconciled only against the authoritative
+      // SessionHost inventory. Local SQL mirrors and VM heartbeats cannot prove a
+      // turn ended.
+      const staleThresholdMs = sessionState.parseActivityStaleThreshold(
+        this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
+      );
+      // Network I/O stays OFF the alarm's critical path — rule 47.
+      this.ctx.waitUntil(
+        sessionActivityReconciliation
+          .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {
+            thresholdMs: staleThresholdMs,
+            projectId: this.getProjectId(),
+          })
+          .catch((err) => {
+            log.error('alarm.session_activity_probe_failed', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          })
+      );
+
+      // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
+      const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
+      const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
+      mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+
+      try {
+        await this.runProjectEventWakeMaterializationAlarm();
+      } catch (err) {
+        log.error('alarm.project_event_wake_materialization_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.recordProjectEventSchedulerFailure('materialization', err);
       }
-    );
 
-    // Session state staleness is reconciled only against the authoritative
-    // SessionHost inventory. Local SQL mirrors and VM heartbeats cannot prove a
-    // turn ended.
-    const staleThresholdMs = sessionState.parseActivityStaleThreshold(
-      this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
-    );
-    // Network I/O stays OFF the alarm's critical path — rule 47.
-    this.ctx.waitUntil(
-      sessionActivityReconciliation
-        .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {
-          thresholdMs: staleThresholdMs,
-          projectId: this.getProjectId(),
-        })
-        .catch((err) => {
-          log.error('alarm.session_activity_probe_failed', {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        })
-    );
+      this.ctx.waitUntil(
+        runStandingWatchAlarm(this.sql, this.env, this.durabilityHooks())
+          .then(() => runScheduleAlarm(this.sql, this.env, this.durabilityHooks()))
+          .catch((err) => log.error('alarm.scheduled_action_failed', { error: String(err) }))
+          .finally(() => this.recalculateAlarm())
+      );
 
-    // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
-    const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
-    const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
-    mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+      // Resolve due waits before claiming prompt deliveries so a newly enqueued
+      // parent wake can be dispatched in this same alarm turn.
+      try {
+        await this.reconcileTaskWaits();
+      } catch (err) {
+        log.error('alarm.task_wait_reconciliation_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
 
-    // Resolve due waits before claiming prompt deliveries so a newly enqueued
-    // parent wake can be dispatched in this same alarm turn.
-    try {
-      await this.reconcileTaskWaits();
-    } catch (err) {
-      log.error('alarm.task_wait_reconciliation_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      // Claims persist before bounded adapter I/O continues through waitUntil.
+      durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());
+
+      try {
+        this.runProjectEventRetentionAlarm();
+      } catch (err) {
+        log.error('alarm.project_event_retention_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.recordProjectEventSchedulerFailure('retention', err);
+      }
+    } finally {
+      await this.recalculateAlarm();
     }
-
-    // Claims persist before bounded adapter I/O continues through waitUntil.
-    durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());
-
-    await this.recalculateAlarm();
   }
 
   // --- Hibernatable WebSocket Support ---

@@ -1,4 +1,5 @@
 import {
+  PROJECT_EVENT_AUDIENCE_SCOPES,
   PROJECT_EVENT_DELIVERY_ATTEMPT_STATES,
   PROJECT_EVENT_DELIVERY_BATCH_STATES,
   PROJECT_EVENT_REQUESTED_DELIVERY_MODES,
@@ -23,6 +24,9 @@ export const ProjectEventRowSchema = v.object({
   delivery_key: v.string(),
   payload_fingerprint: v.string(),
   metadata_json: v.string(),
+  audience_scope: v.optional(v.picklist(PROJECT_EVENT_AUDIENCE_SCOPES), 'project'),
+  audience_project_id: v.optional(v.nullable(v.string()), null),
+  audience_user_id: v.optional(v.nullable(v.string()), null),
   display_json: v.string(),
   raw_payload_ref_json: v.nullable(v.string()),
   occurred_at: v.number(),
@@ -42,6 +46,12 @@ export const ProjectEventSubscriptionRowSchema = v.object({
   owner_type: v.picklist(PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES),
   owner_id: v.string(),
   owner_name: v.nullable(v.string()),
+  owner_version: v.optional(v.number(), 1),
+  owner_project_id: v.optional(v.nullable(v.string()), null),
+  owner_chat_session_id: v.optional(v.nullable(v.string()), null),
+  owner_task_id: v.optional(v.nullable(v.string()), null),
+  owner_runtime_id: v.optional(v.nullable(v.string()), null),
+  recovery_lineage_json: v.optional(v.nullable(v.string()), null),
   idempotency_key: v.string(),
   idempotency_fingerprint: v.string(),
   filter_version: v.number(),
@@ -65,6 +75,10 @@ export const ProjectEventSubscriptionRowSchema = v.object({
   cancelled_by_name: v.nullable(v.string()),
   cancel_reason: v.nullable(v.string()),
   last_matched_at: v.nullable(v.number()),
+  prompt_delivery_count: v.optional(v.number(), 0),
+  prompt_delivery_last_at: v.optional(v.nullable(v.number()), null),
+  delivery_cooldown_until: v.optional(v.nullable(v.number()), null),
+  delivery_lifetime_expires_at: v.optional(v.nullable(v.number()), null),
 });
 
 export const ProjectEventMatchRowSchema = v.object({
@@ -92,6 +106,10 @@ export const ProjectEventDeliveryBatchRowSchema = v.object({
   idempotency_key: v.string(),
   ack_required: v.number(),
   state: v.picklist(PROJECT_EVENT_DELIVERY_BATCH_STATES),
+  delivery_channel: v.optional(v.picklist(['pull', 'prompt_queue'] as const), 'pull'),
+  delivered_via: v.optional(v.nullable(v.picklist(['pull', 'prompt_queue'] as const)), null),
+  delivery_expires_at: v.optional(v.nullable(v.number()), null),
+  readable_until: v.optional(v.nullable(v.number()), null),
   requested_delivery: v.picklist(PROJECT_EVENT_REQUESTED_DELIVERY_MODES),
   resolved_delivery: v.picklist(PROJECT_EVENT_RESOLVED_DELIVERY_MODES),
   adapter_decision_json: v.nullable(v.string()),
@@ -119,6 +137,10 @@ export const ProjectEventDeliveryAttemptRowSchema = v.object({
   idempotency_key: v.string(),
   attempt_number: v.number(),
   state: v.picklist(PROJECT_EVENT_DELIVERY_ATTEMPT_STATES),
+  transport_state: v.optional(
+    v.nullable(v.picklist(['queued', 'delivering', 'expired', 'cancelled'] as const)),
+    null
+  ),
   adapter: v.nullable(v.string()),
   protocol_version: v.nullable(v.string()),
   runtime_id: v.nullable(v.string()),

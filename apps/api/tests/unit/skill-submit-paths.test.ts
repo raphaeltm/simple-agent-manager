@@ -20,17 +20,7 @@ describe('skill submit path source contracts', () => {
     expect(submit).toContain('skillHint: body.skillId ?? null');
   });
 
-  it('trigger submit resolves stored skill id and persists skill metadata', () => {
-    const triggerSubmit = apiSrc('services/trigger-submit.ts');
-    const placementResolver = apiSrc('services/placement-resolver.ts');
-    expect(triggerSubmit).toContain('resolveSkillProfile');
-    expect(triggerSubmit).toContain('input.skillId');
-    expect(triggerSubmit).toContain('resolveTaskStartPlacement');
-    expect(triggerSubmit).toContain('skill: skillResourceRequirements');
-    expect(placementResolver).toContain('skillId: profile?.skillId ?? undefined');
-    expect(triggerSubmit).toContain('skillId: resolvedProfile?.skillId ?? null');
-    expect(triggerSubmit).toContain('skillHint: input.skillId');
-  });
+  // Trigger skill propagation is exercised through real D1 in trigger-submit-capacity-pools.test.ts.
 
   it('SAM dispatch_task accepts skillId, resolves it, and stores skill metadata', () => {
     const dispatchTask = apiSrc('durable-objects/sam-session/tools/dispatch-task.ts');
@@ -39,7 +29,9 @@ describe('skill submit path source contracts', () => {
     expect(dispatchTask).toContain('resolveSkillProfile');
     expect(dispatchTask).toContain('input.skillId');
     expect(dispatchTask).toContain('skill_id, skill_hint');
-    expect(dispatchTask).toMatch(/resolvedProfile\?\.skillId \?\? null,\s+input\.skillId \?\? null/);
+    expect(dispatchTask).toMatch(
+      /resolvedProfile\?\.skillId \?\? null,\s+input\.skillId \?\? null/
+    );
   });
 
   it('retry_subtask preserves original skill id and hint when creating the retry task', () => {

@@ -76,7 +76,7 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 	if err != nil {
 		return nil, err
 	}
-	h.trackCredentialInjection(info, cred)
+	h.trackCredentialInjection(agentType, info, cred)
 
 	envVars, settings, err = h.injectAgentCredential(ctx, containerID, agentType, cred, settings, info, envVars)
 	if err != nil {
@@ -152,10 +152,11 @@ func removeEnvVar(envVars []string, key string) []string {
 	return filtered
 }
 
-func (h *SessionHost) trackCredentialInjection(info agentCommandInfo, cred *agentCredential) {
+func (h *SessionHost) trackCredentialInjection(agentType string, info agentCommandInfo, cred *agentCredential) {
 	h.credInjectionMode = info.injectionMode
 	h.credAuthFilePath = info.authFilePath
 	h.credKind = cred.credentialKind
+	h.storeCredentialAttribution(agentType, cred)
 }
 
 func (h *SessionHost) injectAgentCredential(
@@ -564,7 +565,13 @@ func (h *SessionHost) attachACPConnection(process agentProcess, agentType string
 	// resolved agent type instead of re-entering AgentType's RWMutex.
 	h.resetHarnessWorkForAgent(agentType)
 	processedCh := make(chan struct{}, 1)
-	client := &sessionHostClient{host: h, processedCh: processedCh}
+	attr, hasAttr := h.credentialAttributionSnapshot()
+	client := &sessionHostClient{
+		host:                h,
+		processedCh:         processedCh,
+		usageAttribution:    attr,
+		hasUsageAttribution: hasAttr,
+	}
 
 	serializeTimeout := h.config.NotifSerializeTimeout
 	if serializeTimeout <= 0 {

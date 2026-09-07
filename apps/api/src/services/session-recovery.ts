@@ -8,9 +8,8 @@ import {
   type VMSize,
   type WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, exists, notInArray, or } from 'drizzle-orm';
+import { desc, eq, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -31,7 +30,10 @@ import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from './replacement-deletion-fence';
-import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
+import {
+  failAndRestoreSessionRecoveryHandoff,
+  isSessionRecoverySourceTaskGuardValid,
+} from './session-recovery-authority';
 import {
   claimSessionSnapshotRecovery,
   failSessionSnapshotRecovery,
@@ -61,65 +63,6 @@ class SourceTaskNotWakeableError extends Error {
     super('source task is no longer wakeable');
     this.name = 'SourceTaskNotWakeableError';
   }
-}
-
-async function sourceTaskGuardIsWakeable(
-  db: Db,
-  guard: SessionRecoverySourceTaskGuard | undefined
-): Promise<boolean> {
-  if (!guard) return true;
-  const recoveryOwner = alias(schema.tasks, 'recovery_owner');
-  const markedSuccessor = alias(schema.tasks, 'recovery_marked_successor');
-  const terminalStatuses = ['completed', 'failed', 'cancelled'];
-  const sourceIsWakeable = or(
-    notInArray(schema.tasks.status, terminalStatuses),
-    and(
-      eq(schema.tasks.status, 'cancelled'),
-      exists(
-        db
-          .select({ id: markedSuccessor.id })
-          .from(markedSuccessor)
-          .where(
-            and(
-              eq(markedSuccessor.id, schema.tasks.supersededByTaskId),
-              eq(markedSuccessor.projectId, guard.projectId),
-              eq(markedSuccessor.chatSessionId, guard.chatSessionId),
-              eq(markedSuccessor.triggeredBy, 'session-recovery'),
-              notInArray(markedSuccessor.status, terminalStatuses)
-            )
-          )
-      )
-    )
-  );
-  const task = await db
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, guard.taskId),
-        eq(schema.tasks.projectId, guard.projectId),
-        sourceIsWakeable,
-        or(
-          eq(schema.tasks.chatSessionId, guard.chatSessionId),
-          exists(
-            db
-              .select({ id: recoveryOwner.id })
-              .from(recoveryOwner)
-              .where(
-                and(
-                  eq(recoveryOwner.recoverySourceTaskId, guard.taskId),
-                  eq(recoveryOwner.projectId, guard.projectId),
-                  eq(recoveryOwner.chatSessionId, guard.chatSessionId),
-                  eq(recoveryOwner.triggeredBy, 'session-recovery'),
-                  notInArray(recoveryOwner.status, ['completed', 'failed', 'cancelled'])
-                )
-              )
-          )
-        )
-      )
-    )
-    .get();
-  return Boolean(task);
 }
 
 export const SESSION_RECOVERY_INITIAL_PROMPT =
@@ -314,16 +257,40 @@ async function createRecoveryTask(
               SET chat_session_id = NULL,
                   superseded_by_task_id = ?,
                   updated_at = ?
-            WHERE chat_session_id = ?
-              AND (id = ? OR recovery_source_task_id = ?)
-              AND EXISTS (
+            WHERE EXISTS (
                 SELECT 1 FROM tasks recovery
                  WHERE recovery.id = ?
                    AND recovery.recovery_source_task_id = ?
                    AND recovery.chat_session_id IS NULL
+              )
+              AND (
+                (chat_session_id = ? AND (id = ? OR recovery_source_task_id = ?))
+                OR (
+                  id = ?
+                  AND project_id = ?
+                  AND EXISTS (
+                    SELECT 1 FROM tasks owner
+                     WHERE owner.recovery_source_task_id = tasks.id
+                       AND owner.project_id = tasks.project_id
+                       AND owner.chat_session_id = ?
+                       AND owner.triggered_by = 'session-recovery'
+                       AND owner.status NOT IN ('completed', 'failed', 'cancelled')
+                  )
+                )
               )`
         )
-        .bind(taskId, now, chatSessionId, sourceTaskId, sourceTaskId, taskId, sourceTaskId),
+        .bind(
+          taskId,
+          now,
+          taskId,
+          sourceTaskId,
+          chatSessionId,
+          sourceTaskId,
+          sourceTaskId,
+          sourceTaskId,
+          context.project.id,
+          chatSessionId
+        ),
       database
         .prepare(
           `UPDATE workspaces
@@ -353,14 +320,19 @@ async function createRecoveryTask(
                      OR source.status NOT IN ('completed', 'failed', 'cancelled')
                      OR (
                        source.status = 'cancelled'
-                       AND source.superseded_by_task_id IS NOT NULL
-                       AND EXISTS (
-                         SELECT 1 FROM tasks marked_successor
-                          WHERE marked_successor.id = source.superseded_by_task_id
-                            AND marked_successor.project_id = source.project_id
-                            AND marked_successor.chat_session_id = ?
-                            AND marked_successor.triggered_by = 'session-recovery'
-                            AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
+                       AND (
+                         source.superseded_by_task_id = ?
+                         OR (
+                           source.superseded_by_task_id IS NOT NULL
+                           AND EXISTS (
+                             SELECT 1 FROM tasks marked_successor
+                              WHERE marked_successor.id = source.superseded_by_task_id
+                                AND marked_successor.project_id = source.project_id
+                                AND marked_successor.chat_session_id = ?
+                                AND marked_successor.triggered_by = 'session-recovery'
+                                AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
+                           )
+                         )
                        )
                      )
                    )
@@ -374,6 +346,7 @@ async function createRecoveryTask(
           sourceTaskId,
           context.project.id,
           requiresLiveSource,
+          taskId,
           chatSessionId
         ),
       database
@@ -494,12 +467,18 @@ async function startRecoveryTask(
   if (['completed', 'failed', 'cancelled'].includes(task.status)) {
     throw new Error(`Recovery task is already ${task.status}`);
   }
-  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+  if (
+    sourceTaskGuard &&
+    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
+  ) {
     throw new SourceTaskNotWakeableError();
   }
   if (task.status === 'in_progress') return;
   const alreadyStarted = await ensureTaskRunnerStarted(env, task.id);
-  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+  if (
+    sourceTaskGuard &&
+    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
+  ) {
     throw new SourceTaskNotWakeableError();
   }
   if (alreadyStarted) return;
@@ -512,7 +491,10 @@ async function startRecoveryTask(
         .get()
     : null;
 
-  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+  if (
+    sourceTaskGuard &&
+    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
+  ) {
     throw new SourceTaskNotWakeableError();
   }
 
@@ -577,6 +559,8 @@ async function startRecoveryTask(
     // still revalidate that the old runtime is gone before allocating a node.
     recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
     retrySourceTaskId: task.recoverySourceTaskId ?? null,
+    projectEventWakeGuard: sourceTaskGuard?.projectEventWake ?? null,
+    recoveryRequiredProjectMemberId: sourceTaskGuard?.requiredProjectMemberId ?? null,
   });
 }
 

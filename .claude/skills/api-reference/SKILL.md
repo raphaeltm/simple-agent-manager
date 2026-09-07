@@ -87,6 +87,13 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 - `POST /api/projects/:projectId/tasks/:taskId/delegate` — Delegate ready+unblocked task to owned running workspace
 - `GET /api/projects/:projectId/tasks/:taskId/events` — List append-only task status events
 
+## Member event subscriptions
+
+- `GET /api/projects/:projectId/event-subscriptions` — Requires project `task:read`. Returns `{ subscriptions, hasMore }`, accepting `state=active|cancelled|expired|any`, bounded `limit`, and optional `sessionId`. Session filtering happens before the result limit.
+- `GET /api/projects/:projectId/event-subscriptions/:subscriptionId` — Requires project `task:read`; returns `{ subscription }` within the authorized project.
+- `GET /api/projects/:projectId/event-subscriptions/:subscriptionId/deliveries` — Requires project `task:read`; returns bounded `{ deliveries, hasMore }` with actual transport state/method, timestamps and terminal reason. Accepts only optional positive `limit`, capped by event limits. Does not expose event payloads or match identities. Transport receipt and explicit acknowledgment remain distinct from agent action.
+- `POST /api/projects/:projectId/event-subscriptions/:subscriptionId/cancel` — Requires project `task:write`; accepts only optional `{ reason }`. Cancels human/agent subscriptions through canonical cancellation, derives `cancelledBy` from the authenticated human, and returns `{ subscription, idempotent, changed }`. System, policy and standing-watch subscriptions must be managed through their owning controls. Cancellation requests use the configured event metadata byte cap and reason limit. No platform caller identity is granted to members.
+
 ## MCP Orchestration
 
 - `wait_for_subtasks` — Task-agent-only tool that registers one durable wait for unique same-project task IDs. `waitKey` is a required stable workflow-step idempotency key and must be reused after a lost response. `condition` is `all` (default) or `any`; optional `wakeAfterSeconds` is positive and server-capped. Persist workflow state before calling, then end the turn. ProjectData wakes the caller through exact-once durable prompt delivery when the condition or finite deadline resolves.
@@ -275,3 +282,48 @@ All API errors follow this format:
   message: "Human-readable description"
 }
 ```
+
+## Agent event channels
+
+Follow defaults to `record_only`. Follow/catch-up return canonical `wakeInstructions`
+for resolved same-chat prompt delivery; record-only responses return null.
+
+`GET /api/projects/:projectId/event-channels` lists bounded lifetime catalog summaries (`cursor`, `limit`; response `channels`, `nextCursor`). `GET /api/projects/:projectId/event-channels/:channel/history` returns a bounded snapshot (`events`, `cursor`, `watermark`, `hasMore`, `retentionGap`). Both use active project `task:read` membership. Catalog counts are lifetime counts within a generation, never retained-event counts.
+
+MCP names: `publish_channel_event(channel,message,idempotencyKey)`, `list_event_channels(cursor?,limit?)`, `get_channel_history(channel,cursor?,limit?)`, `follow_event_channel(channel,idempotencyKey,cursor?,requestedDelivery?,reason?,expiresAt?)`, `catch_up_event_channel(subscriptionId,limit?)`. Source/type/actor/project/target identity are verified/server-derived; publishing/follow/catch-up require task:write and active agent authority. Channel source is sam.agent_channel, type agent.channel.published, subject type agent_channel with stable channel name. Read text is untrusted evidence. Canonical list/read/ack performs delivery after catch-up.
+
+Follow captures the current canonical sequence watermark and live subscription atomically. Catch-up pages insert unique canonical matches and advance only a contiguous page; capacity or retention gaps roll back without skipping events. Cursor generation/scope/expiry are validated; follow replay preserves immutable start and deadline. Catalog reclamation never changes name-based live routing. Retained event key replays bypass admission quota; changed message conflicts; idempotency ends with canonical retention. Rate limiting is a shared fixed project window, so boundary bursts can consume two windows. Configuration is documented in the public configuration reference.
+
+## Schedules and standing watches
+
+Authenticated project members can inspect `/api/projects/:projectId/schedules` and
+`/standing-watches` with GET, and `/:id` for a single record. Project writers can
+POST to create. Schedule POST `/:id/reschedule`, `/:id/cancel`, and `/:id/reconcile` require
+`expectedVersion`; watch POST `/:id/update`, `/:id/pause` (with `paused` boolean),
+and `/:id/revoke` also require a version. A stale version returns conflict.
+Schedule list cursors are scoped to project and optional `sessionId`, including
+creator and message-target sessions. Watch contextual lists include message targets.
+
+Task-scoped MCP exposes `create_project_schedule`, `list_project_schedules`,
+`get_project_schedule`, `reschedule_project_schedule`, `cancel_project_schedule`, and
+`reconcile_project_schedule`.
+Creator/project identity comes from the verified caller. Human-owned standing-watch
+mutations are deliberately absent from agent tools. Schedule actions are
+`message_session` (sessionId, prompt) or `start_session` (prompt, optional
+agentProfileId/skillId). `dueAt` and optional `expiresAt` are UTC epoch milliseconds;
+`displayTimezone` is IANA. Creation requires a reusable `idempotencyKey`.
+
+Admission is the cancellation boundary. Cancelling after admission reports
+`actionAlreadyAdmitted`; it does not retract a queued prompt or task. Reads report
+resulting event/delivery/task/session IDs, attempts and errors. Busy targets queue;
+expired authority, archive, finite grace or uncertain receipts are visible outcomes.
+
+Schedule GET/list/create/mutation responses include `schedule.execution`, a bounded read-only
+observation of canonical task/inbox status, separately from schedule admission `state`.
+Reconcile accepts `{ expectedVersion, retrySubmission?: boolean }`; the default reads receipts
+without compute wake or prompt replay. Known running receipts restore monitoring; only terminal
+receipts release watch concurrency. Explicit task retry requires a matching queued reserved
+checkpoint, current creator authority, and the original unexpired submission deadline. It reuses
+all reserved identities and immutable intent. Missing/ambiguous receipts are never proof of
+completion or permission to replay. The response includes `recovery.outcome` and
+`execution.retrySubmissionAllowed`; original deadlines cannot be extended by recovery.

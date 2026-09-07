@@ -8,6 +8,7 @@ import {
   DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,
   MAX_NOTIFICATION_BODY_LENGTH,
   parseCompletionEvidenceJson,
+  type TaskTerminalTransitionEvent,
   validateCompletionEvidence,
 } from '@simple-agent-manager/shared';
 import type { SQL } from 'drizzle-orm';
@@ -17,6 +18,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { ulid } from '../../lib/ulid';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import * as orchestratorService from '../../services/project-orchestrator';
@@ -438,6 +440,22 @@ export async function handleCompleteTask(
     );
   }
 
+  const completedEvent: TaskTerminalTransitionEvent = {
+    transitionId: ulid(),
+    taskId: tokenData.taskId,
+    projectId: tokenData.projectId,
+    parentTaskId: taskRow?.parent_task_id ?? null,
+    status: 'completed',
+    reason: summary,
+    occurredAt: now,
+    source: 'mcp.complete_task',
+  };
+  // Capture before cleanup or other downstream work can fail after the winning CAS.
+  // This remains hook-bound capture, not an atomic task/outbox write.
+  await runTaskTerminalTransitionHooks(completedEvent, [
+    createProjectEventTaskTerminalTransitionHook(env, { captureAtHook: true }),
+  ]);
+
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
   await syncTriggerExecutionStatus(env.DATABASE, tokenData.taskId, 'completed');
@@ -545,18 +563,7 @@ export async function handleCompleteTask(
     throw err;
   }
 
-  await runTaskTerminalTransitionHooks(
-    {
-      taskId: tokenData.taskId,
-      projectId: tokenData.projectId,
-      parentTaskId: taskRow?.parent_task_id ?? null,
-      status: 'completed',
-      reason: summary,
-      occurredAt: now,
-      source: 'mcp.complete_task',
-    },
-    [createTaskWaitTerminalTransitionHook(env), createProjectEventTaskTerminalTransitionHook(env)]
-  );
+  await runTaskTerminalTransitionHooks(completedEvent, [createTaskWaitTerminalTransitionHook(env)]);
 
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,

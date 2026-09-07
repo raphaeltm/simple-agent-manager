@@ -19,6 +19,7 @@ import {
 import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUnifiedBillingToken } from '../services/ai-billing';
 import { buildAnthropicGatewayUrl, buildWorkersAIGatewayUrl } from '../services/ai-proxy-shared';
+import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
 
 const anthropicContentBlockSchema = v.variant('type', [
   v.object({ type: v.literal('text'), text: v.string() }),
@@ -91,6 +92,8 @@ export async function forwardToWorkersAI(
       status: response.status,
       body: errorText.slice(0, 500),
     });
+    const errorHeaders = new Headers({ 'Content-Type': 'application/json' });
+    copyCredentialLimitHeaders(response.headers, errorHeaders);
     return new Response(
       JSON.stringify({
         error: {
@@ -98,7 +101,7 @@ export async function forwardToWorkersAI(
           type: 'server_error',
         },
       }),
-      { status: response.status, headers: { 'Content-Type': 'application/json' } }
+      { status: response.status, headers: errorHeaders }
     );
   }
 
@@ -144,6 +147,8 @@ export async function forwardToAnthropic(
       status: response.status,
       body: errorText.slice(0, 500),
     });
+    const errorHeaders = new Headers({ 'Content-Type': 'application/json' });
+    copyCredentialLimitHeaders(response.headers, errorHeaders);
     return new Response(
       JSON.stringify({
         error: {
@@ -151,7 +156,7 @@ export async function forwardToAnthropic(
           type: 'server_error',
         },
       }),
-      { status: response.status, headers: { 'Content-Type': 'application/json' } }
+      { status: response.status, headers: errorHeaders }
     );
   }
 
@@ -163,9 +168,11 @@ export async function forwardToAnthropic(
       'ai-proxy.anthropic_response'
     );
     const openAIResponse = translateResponseToOpenAI(anthropicResponse);
+    const responseHeaders = new Headers({ 'Content-Type': 'application/json' });
+    copyCredentialLimitHeaders(response.headers, responseHeaders);
     return new Response(JSON.stringify(openAIResponse), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: responseHeaders,
     });
   }
 
@@ -182,15 +189,14 @@ export async function forwardToAnthropic(
   const transformStream = createAnthropicToOpenAIStream(modelId);
   const translatedBody = response.body.pipeThrough(transformStream);
 
-  return new Response(translatedBody, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    },
+  const responseHeaders = new Headers({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
   });
+  copyCredentialLimitHeaders(response.headers, responseHeaders);
+  return new Response(translatedBody, { status: 200, headers: responseHeaders });
 }
 
 /** Forward request to OpenAI via AI Gateway (OpenAI-native format, no translation needed). */
@@ -229,6 +235,8 @@ export async function forwardToOpenAI(
       status: response.status,
       body: errorText.slice(0, 500),
     });
+    const errorHeaders = new Headers({ 'Content-Type': 'application/json' });
+    copyCredentialLimitHeaders(response.headers, errorHeaders);
     return new Response(
       JSON.stringify({
         error: {
@@ -236,7 +244,7 @@ export async function forwardToOpenAI(
           type: 'server_error',
         },
       }),
-      { status: response.status, headers: { 'Content-Type': 'application/json' } }
+      { status: response.status, headers: errorHeaders }
     );
   }
 
@@ -244,6 +252,7 @@ export async function forwardToOpenAI(
   const responseHeaders = new Headers();
   const contentType = response.headers.get('content-type');
   if (contentType) responseHeaders.set('Content-Type', contentType);
+  copyCredentialLimitHeaders(response.headers, responseHeaders);
   if (body.stream) {
     responseHeaders.set('Cache-Control', 'no-cache');
     responseHeaders.set('Connection', 'keep-alive');
@@ -287,6 +296,8 @@ export async function forwardToOpenAIResponses(
       status: response.status,
       body: errorText.slice(0, 500),
     });
+    const errorHeaders = new Headers({ 'Content-Type': 'application/json' });
+    copyCredentialLimitHeaders(response.headers, errorHeaders);
     return new Response(
       JSON.stringify({
         error: {
@@ -294,13 +305,14 @@ export async function forwardToOpenAIResponses(
           type: 'server_error',
         },
       }),
-      { status: response.status, headers: { 'Content-Type': 'application/json' } }
+      { status: response.status, headers: errorHeaders }
     );
   }
 
   const responseHeaders = new Headers();
   const contentType = response.headers.get('content-type');
   if (contentType) responseHeaders.set('Content-Type', contentType);
+  copyCredentialLimitHeaders(response.headers, responseHeaders);
   if (body.stream) {
     responseHeaders.set('Cache-Control', 'no-cache');
     responseHeaders.set('Connection', 'keep-alive');

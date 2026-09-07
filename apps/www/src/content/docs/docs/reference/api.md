@@ -19,6 +19,55 @@ Project eventing uses a pull loop over the canonical ProjectData `project_event_
 
 After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. V1 records matches, delivery decisions, and pull acknowledgements only. It does not inject prompts, steer runtimes, interrupt sessions, spawn tasks, or expose human/UI controls.
 
+## Event subscriptions
+
+Project members with read access can inspect subscriptions. Members with task write access can cancel human or agent subscriptions. System, policy and standing-watch subscriptions must be managed through their owning controls.
+
+| Method | Endpoint                                                                  | Purpose                                                       |
+| ------ | ------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| GET    | `/api/projects/:projectId/event-subscriptions`                            | List subscriptions; optional `sessionId`, `state` and `limit` |
+| GET    | `/api/projects/:projectId/event-subscriptions/:subscriptionId`            | Inspect one subscription                                      |
+| GET    | `/api/projects/:projectId/event-subscriptions/:subscriptionId/deliveries` | Inspect bounded recent transport outcomes; optional `limit`   |
+| POST   | `/api/projects/:projectId/event-subscriptions/:subscriptionId/cancel`     | Cancel with optional `{ "reason": "No longer needed" }`       |
+
+The list defaults to active subscriptions and returns `{ subscriptions, hasMore }`. `state` accepts `active`, `cancelled`, `expired` or `any`. Results include ownership, target, requested and resolved delivery, expiry and cancellation details. Cancelling again is safe and reports `idempotent: true`; cancellation does not undo work an agent has already performed. The server derives the cancelling user's identity from the authenticated session.
+
+Implementation: [`projectEventSubscriptionRoutes`](https://github.com/raphaeltm/simple-agent-manager/blob/main/apps/api/src/routes/project-event-subscriptions.ts) uses the existing project capability checks and canonical subscription cancellation.
+
+## Agent event channels
+
+Project members can browse channel activity with `GET /api/projects/:projectId/event-channels`
+and read a channel with `GET /api/projects/:projectId/event-channels/:channel/history`.
+Both require active membership with `task:read`. Each accepts `limit` and an optional
+`cursor`; catalog responses return `nextCursor`, while history returns `cursor`,
+`hasMore`, `watermark`, and `retentionGap`. Counts describe lifetime publications in
+the current catalog generation, including events that retention has removed.
+
+Agents use `publish_channel_event`, `list_event_channels`, `get_channel_history`,
+`follow_event_channel`, and `catch_up_event_channel` through MCP. Publishing and
+following require `task:write`; SAM verifies the calling task and derives its
+project, user, chat and workspace identity. Messages are untrusted evidence.
+They cannot override the reserved `sam.agent_channel` source or its event type.
+
+To switch from history to live events, pass the consumed history cursor to
+`follow_event_channel`, then call `catch_up_event_channel` until `hasMore` is false.
+Read and acknowledge the resulting events with the ordinary subscription tools.
+Concurrent publications are included through either catch-up or live matching.
+Replaying a follow key retains the original watermark and deadline; a retention
+gap or expired checkpoint requires a new explicit history/follow decision.
+Omit the history cursor when only future events are wanted.
+Following defaults to recording events. With `requestedDelivery: existing_session_prompt`,
+follow and catch-up responses include the ordinary subscription checkpoint/end-turn
+instructions and explain that a no-match expiry delivers no wake prompt.
+
+Publishing the same message with the same key in the same chat/channel replays its
+retained event. Reusing that key with different content reports a conflict.
+Idempotency ends when event retention removes the record. Publication has a shared
+per-project fixed-window rate limit; a boundary burst can span two windows.
+Payload, fanout, channel cardinality and history page limits are configurable.
+Empty idle catalog generations may be reclaimed, while live subscriptions continue
+to follow the stable channel name.
+
 ## Authentication
 
 ### `POST /api/auth/sign-in/social`

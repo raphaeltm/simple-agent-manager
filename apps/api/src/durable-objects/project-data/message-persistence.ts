@@ -4,6 +4,7 @@ import * as attention from './attention';
 import * as idleCleanup from './idle-cleanup';
 import * as messages from './messages';
 import * as sessionState from './session-state';
+import type { SessionIdentityGuard } from './sessions';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.messages');
@@ -40,7 +41,8 @@ export async function persistMessageWithSideEffects(
   role: string,
   content: string,
   toolMetadata: string | null,
-  messageId?: string
+  messageId?: string,
+  guard?: SessionIdentityGuard | null
 ): Promise<string> {
   const result = messages.persistMessage(
     sql,
@@ -49,10 +51,30 @@ export async function persistMessageWithSideEffects(
     role,
     content,
     toolMetadata,
-    messageId
+    messageId,
+    guard
   );
   if (!result.inserted) return result.id;
 
+  await runPersistedMessageSideEffects(sql, env, hooks, sessionId, role, content, result);
+  return result.id;
+}
+
+export async function runPersistedMessageSideEffects(
+  sql: SqlStorage,
+  env: Env,
+  hooks: MessagePersistenceHooks,
+  sessionId: string,
+  role: string,
+  content: string,
+  result: {
+    id: string;
+    now: number;
+    sequence: number;
+    workspaceId: string | null;
+    toolMetadata: string | null;
+  }
+): Promise<void> {
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
 
@@ -88,7 +110,6 @@ export async function persistMessageWithSideEffects(
     },
     sessionId
   );
-  return result.id;
 }
 
 export async function persistMessageBatchWithSideEffects(

@@ -15,7 +15,14 @@ export function getRecoverySourceTaskGuard(
   const taskId = state.config.recoverySourceTaskId;
   const chatSessionId = state.config.resumeSnapshotChatSessionId;
   return taskId && chatSessionId
-    ? { taskId, projectId: state.projectId, chatSessionId }
+    ? {
+        taskId,
+        projectId: state.projectId,
+        chatSessionId,
+        ...(state.config.projectEventWakeGuard
+          ? { projectEventWake: state.config.projectEventWakeGuard }
+          : {}),
+      }
     : undefined;
 }
 

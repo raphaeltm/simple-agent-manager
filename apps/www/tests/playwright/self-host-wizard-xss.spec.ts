@@ -1,4 +1,5 @@
-import { expect, test, type Page } from './fixtures';
+import { expect, type Page, test } from './fixtures';
+import { expectNoHorizontalOverflow } from './self-host-overflow-helpers';
 
 async function openWizard(page: Page) {
   await page.goto('/self-host/');
@@ -60,12 +61,6 @@ async function expectNoXssExecution(page: Page) {
     () => (window as unknown as Record<string, unknown>).__xss_fired__
   );
   expect(xssFired).toBeFalsy();
-}
-
-async function expectNoHorizontalOverflow(page: Page) {
-  await expect
-    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
-    .toBe(true);
 }
 
 const XSS_PAYLOADS = [
@@ -316,7 +311,7 @@ test.describe('self-host wizard XSS — visual audit', () => {
 
     await expectNoHorizontalOverflow(page);
     await page.screenshot({
-      path: `.codex/tmp/playwright-screenshots/self-host-xss-github-app-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
+      path: `../../.codex/tmp/playwright-screenshots/self-host-xss-github-app-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
       fullPage: true,
     });
 
@@ -331,7 +326,7 @@ test.describe('self-host wizard XSS — visual audit', () => {
     await expectNoHorizontalOverflow(page);
     await expectNoXssExecution(page);
     await page.screenshot({
-      path: `.codex/tmp/playwright-screenshots/self-host-xss-env-output-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
+      path: `../../.codex/tmp/playwright-screenshots/self-host-xss-env-output-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
       fullPage: true,
     });
 

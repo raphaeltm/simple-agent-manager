@@ -17,15 +17,21 @@
 import {
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
+  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { readRequestJsonRecord } from '../lib/runtime-validation';
-import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  getCurrentWindowStart,
+} from '../middleware/rate-limit';
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import {
   AIProxyAuthError,
@@ -34,6 +40,7 @@ import {
   buildAnthropicGatewayUrl,
   extractCallbackToken,
   isAnthropicModel,
+  updateAIProxyAgentCredentialAttribution,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
@@ -42,8 +49,14 @@ import {
   estimateInputTokensFromMessages,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
+import {
+  copyCredentialLimitHeaders,
+  recordProxyCredentialLimitObservationsFromHeaders,
+} from '../services/credential-limit-events';
 
 const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
+type AnthropicProxyContext = Context<{ Bindings: Env }>;
+type AnthropicProxyAuth = Awaited<ReturnType<typeof verifyAIProxyAuth>>;
 
 // =============================================================================
 // Anthropic Error Format
@@ -54,19 +67,106 @@ function anthropicError(
   message: string,
   type: string,
   status: number,
+  headers?: HeadersInit
 ): Response {
-  return new Response(
-    JSON.stringify({ type: 'error', error: { type, message } }),
-    { status, headers: { 'Content-Type': 'application/json' } },
-  );
+  const responseHeaders = new Headers(headers);
+  if (!responseHeaders.has('Content-Type')) responseHeaders.set('Content-Type', 'application/json');
+  return new Response(JSON.stringify({ type: 'error', error: { type, message } }), {
+    status,
+    headers: responseHeaders,
+  });
+}
+
+function anthropicProviderErrorHeaders(upstreamHeaders: Headers): Headers {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  copyCredentialLimitHeaders(upstreamHeaders, headers);
+  return headers;
 }
 
 function anthropicUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-cap'): Response {
   if (reason === 'daily-token-budget') {
-    return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
+    return anthropicError(
+      'Daily token budget exceeded. Resets at midnight UTC.',
+      'rate_limit_error',
+      429
+    );
   }
 
-  return anthropicError('Monthly cost cap exceeded. Adjust your cap in Settings > Usage.', 'rate_limit_error', 429);
+  return anthropicError(
+    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
+    'rate_limit_error',
+    429
+  );
+}
+
+function anthropicBodyMaxBytes(c: AnthropicProxyContext): number {
+  return parsePositiveInt(
+    c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
+    DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
+  );
+}
+
+function anthropicBodyParseError(error: unknown): Response {
+  if (error instanceof RequestBodyTooLargeError) {
+    return anthropicError(
+      `Request body exceeds ${error.maxBytes} bytes`,
+      'invalid_request_error',
+      413
+    );
+  }
+  return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
+}
+
+async function recordAnthropicPlatformLimitHeaders(input: {
+  env: Env;
+  response: Response;
+  auth: AnthropicProxyAuth;
+  upstreamAuth: Awaited<ReturnType<typeof resolveUpstreamAuth>>;
+  source: string;
+}): Promise<void> {
+  try {
+    await updateAIProxyAgentCredentialAttribution(input.env, input.auth, input.upstreamAuth);
+  } catch (error) {
+    log.warn('ai_proxy_anthropic.credential_attribution_update_failed', {
+      userId: input.auth.userId,
+      workspaceId: input.auth.workspaceId,
+      agentSessionId: input.auth.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.response.headers, {
+    projectId: input.auth.projectId,
+    userId: input.auth.userId,
+    workspaceId: input.auth.workspaceId,
+    chatSessionId: input.auth.chatSessionId,
+    agentSessionId: input.auth.agentSessionId,
+    agentType: input.auth.agentType,
+    credentialReference: input.upstreamAuth.credentialReference,
+    credentialSource: input.upstreamAuth.credentialSource,
+    provider: 'anthropic',
+    providerMode: input.upstreamAuth.providerMode,
+    source: input.source,
+    responseStatus: input.response.status,
+  });
+}
+
+function scheduleAnthropicPlatformLimitHeaders(
+  c: AnthropicProxyContext,
+  input: Parameters<typeof recordAnthropicPlatformLimitHeaders>[0]
+): void {
+  const telemetry = recordAnthropicPlatformLimitHeaders(input).catch((error) => {
+    log.warn('ai_proxy_anthropic.credential_limit_telemetry_failed', {
+      userId: input.auth.userId,
+      workspaceId: input.auth.workspaceId,
+      agentSessionId: input.auth.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  optionalExecutionContext(() => c.executionCtx)?.waitUntil(telemetry);
+  void telemetry;
 }
 
 // =============================================================================
@@ -80,15 +180,12 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   }
 
   // --- Auth: extract token from x-api-key or Authorization: Bearer ---
-  const token = extractCallbackToken(
-    c.req.header('Authorization'),
-    c.req.header('x-api-key'),
-  );
+  const token = extractCallbackToken(c.req.header('Authorization'), c.req.header('x-api-key'));
   if (!token) {
     return anthropicError(
       'Missing authentication. Provide x-api-key or Authorization: Bearer header.',
       'authentication_error',
-      401,
+      401
     );
   }
 
@@ -107,17 +204,19 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   const { userId, workspaceId, projectId, chatSessionId, trialId } = auth;
 
   // --- Rate limit: per-user RPM (shared key with OpenAI proxy) ---
-  const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds = parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
+  const rpmLimit =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
+  const windowSeconds =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
+    DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
 
-  const { allowed: rpmAllowed, remaining, resetAt } = await checkRateLimit(
-    c.env.KV,
-    rateLimitKey,
-    rpmLimit,
-    windowSeconds,
-  );
+  const {
+    allowed: rpmAllowed,
+    remaining,
+    resetAt,
+  } = await checkRateLimit(c.env.KV, rateLimitKey, rpmLimit, windowSeconds);
 
   c.header('X-RateLimit-Limit', rpmLimit.toString());
   c.header('X-RateLimit-Remaining', remaining.toString());
@@ -132,9 +231,13 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   // --- Parse request body ---
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy-anthropic.messages');
-  } catch {
-    return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
+    body = await readRequestJsonRecord(
+      c.req.raw,
+      'ai-proxy-anthropic.messages',
+      anthropicBodyMaxBytes(c)
+    );
+  } catch (error) {
+    return anthropicBodyParseError(error);
   }
 
   // --- Validate model (must be an Anthropic model) ---
@@ -146,7 +249,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     return anthropicError(
       `Model '${modelId}' is not supported on this endpoint. Only Anthropic models (claude-*) are accepted.`,
       'invalid_request_error',
-      400,
+      400
     );
   }
 
@@ -168,7 +271,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     return anthropicError(
       'AI proxy is not configured. Contact an administrator.',
       'api_error',
-      503,
+      503
     );
   }
 
@@ -238,10 +341,18 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
         status: upstreamResponse.status,
         body: errorText.slice(0, 500),
       });
+      scheduleAnthropicPlatformLimitHeaders(c, {
+        env: c.env,
+        response: upstreamResponse,
+        auth,
+        upstreamAuth,
+        source: 'ai-proxy-anthropic.messages',
+      });
       return anthropicError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
         'api_error',
         upstreamResponse.status,
+        anthropicProviderErrorHeaders(upstreamResponse.headers)
       );
     }
 
@@ -249,10 +360,18 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     const responseHeaders = new Headers();
     const contentType = upstreamResponse.headers.get('content-type');
     if (contentType) responseHeaders.set('Content-Type', contentType);
+    copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
 
     if (isStreaming) {
       responseHeaders.set('Cache-Control', 'no-cache');
     }
+    scheduleAnthropicPlatformLimitHeaders(c, {
+      env: c.env,
+      response: upstreamResponse,
+      auth,
+      upstreamAuth,
+      source: 'ai-proxy-anthropic.messages',
+    });
 
     return attachUpstreamTokenUsageAccounting(upstreamResponse, {
       env: c.env,
@@ -284,15 +403,12 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
   }
 
   // --- Auth ---
-  const token = extractCallbackToken(
-    c.req.header('Authorization'),
-    c.req.header('x-api-key'),
-  );
+  const token = extractCallbackToken(c.req.header('Authorization'), c.req.header('x-api-key'));
   if (!token) {
     return anthropicError(
       'Missing authentication. Provide x-api-key or Authorization: Bearer header.',
       'authentication_error',
-      401,
+      401
     );
   }
 
@@ -311,17 +427,19 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
   const { userId, workspaceId, projectId, chatSessionId, trialId } = auth;
 
   // --- Rate limit: per-user RPM (shared key with messages endpoint) ---
-  const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds = parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
+  const rpmLimit =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
+  const windowSeconds =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
+    DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
 
-  const { allowed: rpmAllowed, remaining, resetAt } = await checkRateLimit(
-    c.env.KV,
-    rateLimitKey,
-    rpmLimit,
-    windowSeconds,
-  );
+  const {
+    allowed: rpmAllowed,
+    remaining,
+    resetAt,
+  } = await checkRateLimit(c.env.KV, rateLimitKey, rpmLimit, windowSeconds);
 
   c.header('X-RateLimit-Limit', rpmLimit.toString());
   c.header('X-RateLimit-Remaining', remaining.toString());
@@ -336,9 +454,13 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
   // --- Parse and validate request body ---
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy-anthropic.count_tokens');
-  } catch {
-    return anthropicError('Invalid JSON in request body', 'invalid_request_error', 400);
+    body = await readRequestJsonRecord(
+      c.req.raw,
+      'ai-proxy-anthropic.count_tokens',
+      anthropicBodyMaxBytes(c)
+    );
+  } catch (error) {
+    return anthropicBodyParseError(error);
   }
 
   const modelId = typeof body.model === 'string' ? body.model : undefined;
@@ -349,7 +471,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     return anthropicError(
       `Model '${modelId}' is not supported. Only Anthropic models (claude-*) are accepted.`,
       'invalid_request_error',
-      400,
+      400
     );
   }
 
@@ -370,7 +492,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     return anthropicError(
       'AI proxy is not configured. Contact an administrator.',
       'api_error',
-      503,
+      503
     );
   }
 
@@ -417,17 +539,36 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
         status: upstreamResponse.status,
         body: errorText.slice(0, 500),
       });
+      scheduleAnthropicPlatformLimitHeaders(c, {
+        env: c.env,
+        response: upstreamResponse,
+        auth,
+        upstreamAuth,
+        source: 'ai-proxy-anthropic.count_tokens',
+      });
       return anthropicError(
         `Token counting failed (${upstreamResponse.status}). Please try again.`,
         'api_error',
         upstreamResponse.status,
+        anthropicProviderErrorHeaders(upstreamResponse.headers)
       );
     }
 
     const responseText = await upstreamResponse.text();
+    const responseHeaders = new Headers({
+      'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json',
+    });
+    copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
+    scheduleAnthropicPlatformLimitHeaders(c, {
+      env: c.env,
+      response: upstreamResponse,
+      auth,
+      upstreamAuth,
+      source: 'ai-proxy-anthropic.count_tokens',
+    });
     return new Response(responseText, {
       status: 200,
-      headers: { 'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json' },
+      headers: responseHeaders,
     });
   } catch (err) {
     log.error('ai_proxy_anthropic.count_tokens_error', {

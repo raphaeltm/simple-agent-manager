@@ -1,6 +1,6 @@
-import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
+import { defineConfig } from 'astro/config';
 export default defineConfig({
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
   server: {
@@ -48,6 +48,7 @@ export default defineConfig({
             { slug: 'docs/guides/recent-product-changes' },
             { slug: 'docs/guides/notifications' },
             { slug: 'docs/guides/webhook-triggers' },
+            { slug: 'docs/guides/scheduled-actions' },
             { slug: 'docs/guides/mcp-servers' },
             { slug: 'docs/guides/app-deployments' },
             { slug: 'docs/guides/self-hosting' },

@@ -876,6 +876,7 @@ export const tasks = sqliteTable(
     skillHint: text('skill_hint'),
     startedAt: text('started_at'),
     completedAt: text('completed_at'),
+    terminalTransitionId: text('terminal_transition_id'),
     errorMessage: text('error_message'),
     outputSummary: text('output_summary'),
     outputBranch: text('output_branch'),
@@ -1172,6 +1173,88 @@ export const taskStatusEvents = sqliteTable(
   })
 );
 
+export const taskSubmissionCheckpoints = sqliteTable(
+  'task_submission_checkpoints',
+  {
+    taskId: text('task_id')
+      .primaryKey()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    chatSessionId: text('chat_session_id').notNull(),
+    initialMessageId: text('initial_message_id').notNull(),
+    initialStatusEventId: text('initial_status_event_id')
+      .notNull()
+      .references(() => taskStatusEvents.id, { onDelete: 'cascade' }),
+    sourceKind: text('source_kind').notNull(),
+    sourceId: text('source_id').notNull(),
+    sourceExecutionId: text('source_execution_id').notNull(),
+    triggeredBy: text('triggered_by').notNull(),
+    intentFingerprint: text('intent_fingerprint').notNull(),
+    acceptedSnapshotJson: text('accepted_snapshot_json').notNull(),
+    branchName: text('branch_name').notNull(),
+    taskTitle: text('task_title').notNull(),
+    checkpointState: text('checkpoint_state').notNull().default('d1_committed'),
+    projectDataCommittedAt: text('project_data_committed_at'),
+    runnerStartAttemptedAt: text('runner_start_attempted_at'),
+    runnerStartedAt: text('runner_started_at'),
+    terminalObservedAt: text('terminal_observed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    chatSessionIdUnique: uniqueIndex('idx_task_submission_checkpoints_chat_session').on(
+      table.chatSessionId
+    ),
+    initialMessageIdUnique: uniqueIndex('idx_task_submission_checkpoints_initial_message').on(
+      table.initialMessageId
+    ),
+    initialStatusEventIdUnique: uniqueIndex(
+      'idx_task_submission_checkpoints_initial_status_event'
+    ).on(table.initialStatusEventId),
+    sourceUnique: uniqueIndex('idx_task_submission_checkpoints_source').on(
+      table.projectId,
+      table.sourceKind,
+      table.sourceId,
+      table.sourceExecutionId
+    ),
+    stateIdx: index('idx_task_submission_checkpoints_state').on(
+      table.checkpointState,
+      table.updatedAt
+    ),
+  })
+);
+
+export const reservedTaskSessionRevocations = sqliteTable(
+  'reserved_task_session_revocations',
+  {
+    projectId: text('project_id').notNull(),
+    chatSessionId: text('chat_session_id').notNull(),
+    taskId: text('task_id').notNull(),
+    reason: text('reason').notNull(),
+    source: text('source').notNull(),
+    revokedAt: text('revoked_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.chatSessionId] }),
+    taskIdx: index('idx_reserved_task_session_revocations_task').on(table.taskId),
+  })
+);
+
 // =============================================================================
 // Nodes
 // =============================================================================
@@ -1412,6 +1495,13 @@ export const agentSessions = sqliteTable(
     agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
       onDelete: 'set null',
     }),
+    agentCredentialSource: text('agent_credential_source', {
+      enum: ['user', 'project', 'platform'],
+    }).default('user'),
+    agentCredentialReference: text('agent_credential_reference'),
+    agentCredentialProvider: text('agent_credential_provider'),
+    agentProviderMode: text('agent_provider_mode'),
+    agentCredentialGeneration: integer('agent_credential_generation').notNull().default(0),
     skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     worktreePath: text('worktree_path'),
     stoppedAt: text('stopped_at'),
@@ -1429,6 +1519,9 @@ export const agentSessions = sqliteTable(
     workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
     userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
     agentProfileIdIdx: index('idx_agent_sessions_agent_profile_id').on(table.agentProfileId),
+    credentialReferenceIdx: index('idx_agent_sessions_credential_reference')
+      .on(table.agentCredentialReference)
+      .where(sql`agent_credential_reference IS NOT NULL`),
     skillIdIdx: index('idx_agent_sessions_skill_id').on(table.skillId),
     // Compound index for filtered session queries (P2 fix).
     workspaceUserStatusIdx: index('idx_agent_sessions_ws_user_status').on(
@@ -1436,6 +1529,79 @@ export const agentSessions = sqliteTable(
       table.userId,
       table.status
     ),
+  })
+);
+
+// =============================================================================
+// Credential Limit Observation Windows
+// =============================================================================
+export const credentialLimitWindows = sqliteTable(
+  'credential_limit_windows',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    credentialReference: text('credential_reference').notNull(),
+    windowType: text('window_type').notNull(),
+    credentialSource: text('credential_source', {
+      enum: ['user', 'project', 'platform'],
+    }).notNull(),
+    provider: text('provider').notNull(),
+    providerMode: text('provider_mode').notNull(),
+    agentType: text('agent_type'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    agentSessionId: text('agent_session_id').references(() => agentSessions.id, {
+      onDelete: 'set null',
+    }),
+    chatSessionId: text('chat_session_id'),
+    source: text('source').notNull(),
+    status: text('status', {
+      enum: ['allowed', 'allowed_warning', 'rejected', 'unknown'],
+    }).notNull(),
+    lastEventLevel: text('last_event_level', {
+      enum: ['ok', 'warning', 'critical', 'rejected'],
+    })
+      .notNull()
+      .default('ok'),
+    utilizationPercent: real('utilization_percent'),
+    limitAmount: integer('limit_amount'),
+    remainingAmount: integer('remaining_amount'),
+    windowMinutes: integer('window_minutes'),
+    resetsAt: integer('resets_at'),
+    observedAt: integer('observed_at').notNull(),
+    freshnessMs: integer('freshness_ms').notNull().default(0),
+    lastEventDeliveryKey: text('last_event_delivery_key'),
+    duplicateSampleCount: integer('duplicate_sample_count').notNull().default(0),
+    staleSampleCount: integer('stale_sample_count').notNull().default(0),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.credentialReference, table.windowType] }),
+    projectSessionIdx: index('idx_credential_limit_windows_project_session').on(
+      table.projectId,
+      table.workspaceId,
+      table.agentSessionId
+    ),
+    observedAtIdx: index('idx_credential_limit_windows_observed_at').on(table.observedAt),
+    projectUpdatedIdx: index('idx_credential_limit_windows_project_updated').on(
+      table.projectId,
+      table.updatedAt,
+      table.credentialReference,
+      table.windowType
+    ),
+    updatedGlobalIdx: index('idx_credential_limit_windows_updated_global').on(
+      table.updatedAt,
+      table.projectId,
+      table.credentialReference,
+      table.windowType
+    ),
+    projectDeliveryIdx: index('idx_credential_limit_windows_project_delivery')
+      .on(table.projectId, table.lastEventDeliveryKey)
+      .where(sql`last_event_delivery_key IS NOT NULL`),
   })
 );
 
@@ -2085,6 +2251,8 @@ export type Workspace = typeof workspaces.$inferSelect;
 export type NewWorkspace = typeof workspaces.$inferInsert;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
+export type CredentialLimitWindow = typeof credentialLimitWindows.$inferSelect;
+export type NewCredentialLimitWindow = typeof credentialLimitWindows.$inferInsert;
 export type SessionSnapshot = typeof sessionSnapshots.$inferSelect;
 export type NewSessionSnapshot = typeof sessionSnapshots.$inferInsert;
 export type UIStandard = typeof uiStandards.$inferSelect;
@@ -2434,6 +2602,113 @@ export const webhookDeliveries = sqliteTable(
 
 export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;
 export type NewWebhookDeliveryRow = typeof webhookDeliveries.$inferInsert;
+
+// =============================================================================
+// Project Event Source Outbox (producer-side admission retry ledger)
+// =============================================================================
+export const projectEventSourceOutbox = sqliteTable(
+  'project_event_source_outbox',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    eventType: text('event_type').notNull(),
+    subjectType: text('subject_type').notNull(),
+    subjectId: text('subject_id').notNull(),
+    deliveryKey: text('delivery_key').notNull(),
+    payloadFingerprint: text('payload_fingerprint').notNull(),
+    eventPayloadJson: text('event_payload_json').notNull(),
+    state: text('state').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull(),
+    nextAttemptAt: text('next_attempt_at').notNull(),
+    processingLeaseExpiresAt: text('processing_lease_expires_at'),
+    claimToken: text('claim_token'),
+    claimedAt: text('claimed_at'),
+    expiresAt: text('expires_at').notNull(),
+    admittedEventId: text('admitted_event_id'),
+    admissionOutcome: text('admission_outcome'),
+    lastError: text('last_error'),
+    credentialLimitWindowType: text('credential_limit_window_type'),
+    credentialLimitObservedAt: integer('credential_limit_observed_at'),
+    terminalizedAt: text('terminalized_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    deliveryUnique: uniqueIndex('idx_project_event_source_outbox_delivery').on(
+      table.projectId,
+      table.source,
+      table.deliveryKey
+    ),
+    dueIdx: index('idx_project_event_source_outbox_due').on(
+      table.state,
+      table.nextAttemptAt,
+      table.id
+    ),
+    processingLeaseIdx: index('idx_project_event_source_outbox_processing_lease').on(
+      table.state,
+      table.processingLeaseExpiresAt,
+      table.id
+    ),
+    activeExpiryIdx: index('idx_project_event_source_outbox_active_expiry').on(
+      table.state,
+      table.expiresAt,
+      table.id
+    ),
+    activeCapacityIdx: index('idx_project_event_source_outbox_active_capacity').on(
+      table.projectId,
+      table.source,
+      table.state,
+      table.expiresAt,
+      table.id
+    ),
+    activeAttemptsIdx: index('idx_project_event_source_outbox_active_attempts').on(
+      table.state,
+      table.attemptCount,
+      table.id
+    ),
+    exhaustedReadyIdx: index('idx_project_event_source_outbox_exhausted_ready').on(
+      table.state,
+      sql`(attempt_count >= max_attempts)`,
+      table.processingLeaseExpiresAt,
+      table.id
+    ),
+    terminalRetentionIdx: index('idx_project_event_source_outbox_terminal_retention').on(
+      table.state,
+      table.terminalizedAt,
+      table.id
+    ),
+    projectSubjectIdx: index('idx_project_event_source_outbox_project_subject').on(
+      table.projectId,
+      table.subjectType,
+      table.subjectId,
+      table.state
+    ),
+    credentialLimitActiveIdx: index('idx_project_event_source_outbox_credential_limit_active')
+      .on(
+        table.projectId,
+        table.source,
+        table.subjectId,
+        table.credentialLimitWindowType,
+        table.state,
+        table.credentialLimitObservedAt,
+        table.id
+      )
+      .where(
+        sql`credential_limit_window_type IS NOT NULL AND credential_limit_observed_at IS NOT NULL`
+      ),
+  })
+);
+
+export type ProjectEventSourceOutboxRow = typeof projectEventSourceOutbox.$inferSelect;
+export type NewProjectEventSourceOutboxRow = typeof projectEventSourceOutbox.$inferInsert;
 
 // =============================================================================
 // Platform Credentials (admin-managed fallback keys)

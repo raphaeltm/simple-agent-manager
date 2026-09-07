@@ -10,8 +10,11 @@
  * - Claude/Codex explicit SAM provider or OpenCode explicit platform provider
  *   with no user credential → platform proxy
  */
+import type Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createAgentCredentialAttributionFixture } from '../helpers/agent-credential-attribution-fixture';
 
 // --- Mock dependencies ---
 
@@ -295,12 +298,21 @@ async function readAgentKey(agentType: string) {
 
 // Track query count across DB calls
 let queryCount = 0;
+let attributionSqlite: Database.Database;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
+  mockGetDecryptedAgentKey.mockReset();
+  mockDbLimit.mockReset();
+  mockKvGet.mockReset();
   queryCount = 0;
   mockKvGet.mockResolvedValue(null);
+  const attribution = await createAgentCredentialAttributionFixture('test-workspace', 'user1');
+  attributionSqlite = attribution.sqlite;
+  mockEnv.DATABASE = attribution.database;
 });
+
+afterEach(() => attributionSqlite?.close());
 
 describe('runtime.ts always-proxy', () => {
   it('authenticates message persistence before reading or validating the JSON body', async () => {
@@ -578,6 +590,19 @@ describe('runtime.ts always-proxy', () => {
     expect(json.inferenceConfig.provider).toBe('anthropic-passthrough');
     expect(json.inferenceConfig.apiKeySource).toBe('callback-token');
     expect(json.inferenceConfig.baseURL).toContain('/ai/proxy/{wstoken}/anthropic');
+    expect(json).toMatchObject({ credentialGeneration: 8 });
+    expect(
+      attributionSqlite
+        .prepare(
+          `SELECT id, agent_credential_generation AS generation
+      FROM agent_sessions ORDER BY id`
+        )
+        .all()
+    ).toEqual([
+      { id: 'foreign-user', generation: 17 },
+      { id: 'foreign-workspace', generation: 13 },
+      { id: 'owned-agent', generation: 8 },
+    ]);
   });
 
   it('returns direct credential when user has claude-code OAuth token and proxy enabled', async () => {

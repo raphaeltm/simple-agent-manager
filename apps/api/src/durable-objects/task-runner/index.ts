@@ -47,9 +47,10 @@ import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { capacityPlacementSnapshotForTaskStart } from '../../services/placement-resolver';
 import { assertReplacementDeletionConfirmed } from '../../services/replacement-deletion-fence';
 import {
-  isSessionRecoveryTaskAuthorized,
+  isSessionRecoveryTaskAndEventAuthorized,
   SessionRecoveryAuthorityRevokedError,
 } from '../../services/session-recovery-authority';
+import { assertTaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
@@ -90,7 +91,7 @@ export class TaskRunner extends DurableObject<Env> {
       return;
     }
 
-    await this.assertRecoveryAuthority(input);
+    await this.assertRecoveryAuthority(input, { requireStartGuardQueued: true });
 
     const now = Date.now();
     const state: TaskRunnerState = {
@@ -134,12 +135,32 @@ export class TaskRunner extends DurableObject<Env> {
       completed: false,
     };
 
-    // Commit the state and first alarm together. A readable state must prove
-    // that the orchestration wake-up was durably scheduled as well.
+    let initialized = false;
+    let concurrentState: TaskRunnerState | null = null;
+    // Commit the state and first alarm together. Re-read inside the transaction:
+    // concurrent first-start RPCs can both pass the preflight guard before one
+    // commits, and the loser must not overwrite progressed state from the
+    // winner or its first alarm.
     await this.ctx.storage.transaction(async (transaction) => {
+      concurrentState = (await transaction.get<TaskRunnerState>('state')) ?? null;
+      if (concurrentState) return;
       await transaction.put('state', state);
       await transaction.setAlarm(now);
+      initialized = true;
     });
+
+    if (!initialized) {
+      const existingState = (await this.getState()) ?? concurrentState;
+      if (existingState) {
+        await this.assertRecoveryAuthority(existingState);
+        await this.ensureAlarm(existingState);
+        log.warn('task_runner_do.start.already_initialized', {
+          taskId: input.taskId,
+          currentStep: existingState.currentStep,
+        });
+      }
+      return;
+    }
 
     log.info('task_runner_do.started', {
       taskId: input.taskId,
@@ -270,10 +291,7 @@ export class TaskRunner extends DurableObject<Env> {
     const stepStartMs = Date.now();
 
     try {
-      if (!(await this.hasRecoveryAuthority(state))) {
-        await failTask(state, new SessionRecoveryAuthorityRevokedError().message, rc);
-        return;
-      }
+      await this.assertRecoveryAuthority(state);
       switch (state.currentStep) {
         case 'node_selection':
           await handleNodeSelection(state, rc);
@@ -437,6 +455,9 @@ export class TaskRunner extends DurableObject<Env> {
     raw.config.resumeSnapshotChatSessionId ??= null;
     raw.config.recoverySourceTaskId ??= null;
     raw.config.retrySourceTaskId ??= null;
+    raw.config.startGuard ??= null;
+    raw.config.projectEventWakeGuard ??= null;
+    raw.config.recoveryRequiredProjectMemberId ??= null;
     raw.stepResults.claimedWarmNodeId ??= null;
     raw.stepResults.capacityPlacementSnapshot ??= null;
     raw.lastD1Step ??= null;
@@ -451,15 +472,38 @@ export class TaskRunner extends DurableObject<Env> {
     // recoverySourceTaskId and require revocable authorization.
     if (!sourceTaskId) return true;
     if (!chatSessionId) return false;
-    return isSessionRecoveryTaskAuthorized(this.env.DATABASE, {
-      recoveryTaskId: input.taskId,
-      sourceTaskId,
-      projectId: input.projectId,
-      chatSessionId,
-    });
+    const eventGuard = input.config.projectEventWakeGuard ?? null;
+    const projectDataService = eventGuard ? await import('../../services/project-data') : null;
+    return isSessionRecoveryTaskAndEventAuthorized(
+      this.env.DATABASE,
+      {
+        recoveryTaskId: input.taskId,
+        sourceTaskId,
+        projectId: input.projectId,
+        chatSessionId,
+        projectEventWake: eventGuard,
+        requiredProjectMemberId: input.config.recoveryRequiredProjectMemberId ?? null,
+      },
+      projectDataService
+        ? (eventInput) =>
+            projectDataService.validateProjectEventWakeRecoveryAuthority(
+              this.env as unknown as Env,
+              eventInput.projectId,
+              {
+                chatSessionId: eventInput.chatSessionId,
+                sourceTaskId: eventInput.sourceTaskId,
+                batchId: eventInput.batchId,
+                subscriptionId: eventInput.subscriptionId,
+              }
+            )
+        : undefined
+    );
   }
 
-  private async assertRecoveryAuthority(input: StartTaskInput | TaskRunnerState): Promise<void> {
+  private async assertRecoveryAuthority(
+    input: StartTaskInput | TaskRunnerState,
+    options: { requireStartGuardQueued?: boolean } = {}
+  ): Promise<void> {
     const deletionSourceTaskId =
       input.config.retrySourceTaskId ?? input.config.recoverySourceTaskId ?? null;
     if (deletionSourceTaskId) {
@@ -472,6 +516,18 @@ export class TaskRunner extends DurableObject<Env> {
     if (!(await this.hasRecoveryAuthority(input))) {
       throw new SessionRecoveryAuthorityRevokedError();
     }
+    await assertTaskRunnerStartGuard(this.env, input.config.startGuard, {
+      requireQueuedTask: options.requireStartGuardQueued === true,
+      expectedRunner: {
+        taskId: input.taskId,
+        projectId: input.projectId,
+        userId: input.userId,
+        chatSessionId:
+          'stepResults' in input
+            ? (input.stepResults.chatSessionId ?? input.config.chatSessionId)
+            : input.config.chatSessionId,
+      },
+    });
   }
 
   // =========================================================================

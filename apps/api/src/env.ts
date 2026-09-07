@@ -265,6 +265,22 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ACP_ACTIVITY_COALESCE_MAX_PENDING?: string; // Max pending coalesced activity reports per Worker isolate (default: 512)
   ACP_ACTIVITY_BINDING_CACHE_TTL_MS?: string; // Short-lived authorized ACP binding cache TTL (default: 30000)
   ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES?: string; // Max cached ACP activity bindings per Worker isolate (default: 2048)
+  CREDENTIAL_LIMIT_WARNING_PERCENT?: string; // Advisory credential quota warning threshold (default: 75)
+  CREDENTIAL_LIMIT_CRITICAL_PERCENT?: string; // Advisory credential quota critical threshold (default: 90)
+  CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT?: string; // Max credential limit observations accepted from one report (default: 16)
+  CREDENTIAL_LIMIT_TRANSITION_RECOMPUTE_ATTEMPTS?: string; // Max predecessor-CAS recomputes for one observation (default: 4)
+  CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES?: string; // Max raw VM usage callback JSON body bytes (default: 32768)
+  CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM?: string; // Authenticated VM usage callbacks per session per minute (default: 120)
+  CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS?: string; // Usage callback rate limit window seconds (default: 60)
+  CREDENTIAL_LIMIT_OBSERVATION_MAX_AGE_MS?: string; // Oldest accepted credential limit observation age (default: 86400000)
+  CREDENTIAL_LIMIT_OBSERVATION_FUTURE_SKEW_MS?: string; // Accepted future clock skew for credential limit samples (default: 300000)
+  CREDENTIAL_LIMIT_RESET_MAX_FUTURE_MS?: string; // Max future provider reset timestamp accepted (default: 691200000)
+  CREDENTIAL_LIMIT_SUPPORTED_PROVIDERS?: string; // Comma-separated credential telemetry provider allowlist (default: anthropic,openai)
+  CREDENTIAL_LIMIT_SUPPORTED_SOURCES?: string; // Comma-separated credential telemetry source allowlist
+  CREDENTIAL_LIMIT_SUPPORTED_WINDOW_TYPES?: string; // Comma-separated credential telemetry window allowlist
+  CREDENTIAL_LIMIT_ADMISSION_MAX_ACTIVE_PER_PROJECT?: string; // Max retained credential event admissions per project (default: 1000)
+  CREDENTIAL_LIMIT_ADMISSION_RETRY_BATCH_SIZE?: string; // Max pending credential admissions retried per opportunistic sweep (default: 25)
+  CREDENTIAL_LIMIT_ADMISSION_RETENTION_DAYS?: string; // Retention for credential admission/outbox rows (default: 30)
   ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS?: string; // Durable parent-wait D1 reconciliation interval (default: 30000)
   ORCHESTRATOR_WAIT_MAX_CHILDREN?: string; // Max same-project task IDs in one wait_for_subtasks call (default: 20)
   ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT?: string; // Max active parent waits per project (default: 100)
@@ -682,10 +698,54 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH?: string;
   PROJECT_EVENT_LIST_LIMIT?: string;
   PROJECT_EVENT_LIST_MAX?: string;
+  PROJECT_EVENT_SCHEDULE_MAX_SCHEDULES?: string;
+  PROJECT_EVENT_SCHEDULE_MAX_WATCHES?: string;
+  PROJECT_EVENT_SCHEDULE_MAX_RETAINED_SCHEDULES?: string;
+  PROJECT_EVENT_SCHEDULE_MAX_RETAINED_WATCHES?: string;
+  PROJECT_EVENT_SCHEDULE_PROMPT_MAX_BYTES?: string;
+  PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS?: string;
+  PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS?: string;
+  PROJECT_EVENT_SCHEDULE_DELIVERY_TTL_MS?: string;
+  PROJECT_EVENT_SCHEDULE_SWEEP_BATCH_SIZE?: string;
+  PROJECT_EVENT_SCHEDULE_CLAIM_LEASE_MS?: string;
+  PROJECT_EVENT_SCHEDULE_RETRY_BASE_MS?: string;
+  PROJECT_EVENT_SCHEDULE_MAX_ATTEMPTS?: string;
+  PROJECT_EVENT_SCHEDULE_MAX_DEFERRAL_MS?: string;
+  PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS?: string;
+  PROJECT_EVENT_WATCH_MAX_EXECUTIONS?: string;
+  PROJECT_EVENT_WATCH_MAX_CONCURRENT?: string;
+  PROJECT_EVENT_CHANNEL_MAX_CHANNELS?: string;
+  PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES?: string;
+  PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES?: string;
+  PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS?: string;
+  PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW?: string;
+  PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS?: string;
+  PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS?: string;
   PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH?: string;
   PROJECT_EVENT_RECENT_STATUS_LIMIT?: string;
   PROJECT_EVENT_RETENTION_DAYS?: string;
   PROJECT_EVENT_RETENTION_BATCH_ROWS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS?: string;
+  PROJECT_EVENT_RETENTION_INTERVAL_MS?: string;
+  PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS?: string;
+  PROJECT_EVENT_WAKE_ENABLED?: string;
+  PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS?: string;
+  PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS?: string;
+  PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS?: string;
+  PROJECT_EVENT_WAKE_PROMPT_TTL_MS?: string;
+  PROJECT_EVENT_WAKE_READ_GRACE_MS?: string;
+  PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS?: string;
+  PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS?: string;
+  PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS?: string;
+  PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS?: string;
   MESSAGE_SIZE_THRESHOLD?: string;
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;
@@ -845,6 +905,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MCP_DEPLOYMENT_LOG_MAX_LIMIT?: string; // Max deployment log rows for read_deployment_logs (default: 1000)
   // Configurable content limits
   MAX_TASK_MESSAGE_LENGTH?: string;
+  RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH?: string;
+  RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH?: string;
+  RESERVED_TASK_REPOSITORY_ACCESS_FLOW_MAX_LENGTH?: string;
+  RESERVED_TASK_INITIAL_STATUS_REASON_MAX_LENGTH?: string;
   MAX_ACTIVITY_MESSAGE_LENGTH?: string;
   MAX_LOG_MESSAGE_LENGTH?: string;
   MAX_OUTPUT_SUMMARY_LENGTH?: string;
@@ -1150,6 +1214,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   AI_PROXY_DAILY_INPUT_TOKEN_LIMIT?: string; // Per-user daily input token cap (default: 500000)
   AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT?: string; // Per-user daily output token cap (default: 200000)
   AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST?: string; // Max input tokens per request (default: 32000)
+  AI_PROXY_REQUEST_BODY_MAX_BYTES?: string; // Max raw AI proxy JSON request body bytes (default: 1048576)
   AI_PROXY_RATE_LIMIT_RPM?: string; // Requests per minute per user (default: 30)
   AI_PROXY_STREAM_TIMEOUT_MS?: string; // Max streaming duration in ms (default: 120000)
   AI_PROXY_RATE_LIMIT_WINDOW_SECONDS?: string; // Rate limit window in seconds (default: 60)

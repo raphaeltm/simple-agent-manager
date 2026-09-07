@@ -64,7 +64,14 @@ function recoverySourceTaskGuard(
   const taskId = state.config.recoverySourceTaskId ?? null;
   const chatSessionId = state.config.resumeSnapshotChatSessionId ?? null;
   return taskId && chatSessionId
-    ? { taskId, projectId: state.projectId, chatSessionId }
+    ? {
+        taskId,
+        projectId: state.projectId,
+        chatSessionId,
+        ...(state.config.projectEventWakeGuard
+          ? { projectEventWake: state.config.projectEventWakeGuard }
+          : {}),
+      }
     : undefined;
 }
 
@@ -214,7 +221,9 @@ export async function tryClaimWarmNode(
     // node is no longer a reusable selection, or claiming it failed. Release
     // the NodeLifecycle claim first (NodeLifecycle.alarm() does not expire
     // active claims), then clear the D1 pointer so the node becomes reusable.
-    await releaseClaimedWarmNode(state, rc, persistedClaim.claimedWarmNodeId).catch(() => undefined);
+    await releaseClaimedWarmNode(state, rc, persistedClaim.claimedWarmNodeId).catch(
+      () => undefined
+    );
     await rc.env.DATABASE.prepare(
       `UPDATE tasks SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
         WHERE id = ? AND claimed_warm_node_id = ?`

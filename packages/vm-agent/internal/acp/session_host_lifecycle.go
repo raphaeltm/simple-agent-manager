@@ -102,6 +102,7 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 		h.mu.Unlock()
 		return "", ""
 	}
+	h.closeUsageReportIngress()
 
 	// Capture the session state we need to preserve before stopping.
 	acpSessionID = string(h.sessionID)
@@ -126,7 +127,14 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 	h.syncCredentialOnStop(snap)
 
 	// Report idle to the control plane so the browser status bar clears.
+	h.stopPromptActivityRereport()
 	h.clearHarnessWork()
+	if err := h.waitForUsageReportCallbacks(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: suspend callback drain failed", "error", err)
+	}
+	if err := h.flushUsageReports(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: suspend flush failed", "error", err)
+	}
 	h.reportActivity("idle")
 
 	h.cancel()

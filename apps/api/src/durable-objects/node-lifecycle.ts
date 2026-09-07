@@ -40,6 +40,7 @@ import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
 import {
   isSessionRecoveryTaskAuthorized,
   type SessionRecoverySourceTaskGuard,
+  sourceProjectMemberAuthoritySql,
 } from '../services/session-recovery-authority';
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
 import {
@@ -106,7 +107,26 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
                 SELECT 1 FROM tasks source
                  WHERE source.id = ?
                    AND source.project_id = recovery.project_id
-                   AND source.status NOT IN ('completed', 'failed', 'cancelled')
+                   ${sourceTaskGuard?.projectEventWake ? sourceProjectMemberAuthoritySql() : ''}
+                   ${
+                     sourceTaskGuard?.requiredProjectMemberId
+                       ? `AND EXISTS (
+                     SELECT 1 FROM project_members scheduled_member
+                       JOIN users scheduled_user ON scheduled_user.id = scheduled_member.user_id
+                     WHERE scheduled_member.project_id = recovery.project_id
+                       AND scheduled_member.user_id = ?
+                       AND scheduled_member.status = 'active' AND scheduled_user.status = 'active'
+                       AND scheduled_member.role IN ('owner','admin','maintainer')
+                   )`
+                       : ''
+                   }
+                   AND (
+                     source.status NOT IN ('completed', 'failed', 'cancelled')
+                     OR (
+                       source.status = 'cancelled'
+                       AND source.superseded_by_task_id = recovery.id
+                     )
+                   )
               )
               AND EXISTS (
                 SELECT 1 FROM session_snapshots snapshot
@@ -129,7 +149,10 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         sourceTaskGuard?.taskId ?? '',
         sourceTaskGuard?.projectId ?? '',
         sourceTaskGuard?.chatSessionId ?? '',
-        sourceTaskGuard?.taskId ?? ''
+        sourceTaskGuard?.taskId ?? '',
+        ...(sourceTaskGuard?.requiredProjectMemberId
+          ? [sourceTaskGuard.requiredProjectMemberId]
+          : [])
       )
       .run();
     if ((result.meta.changes ?? 0) > 0) return 'claimed';
@@ -139,6 +162,8 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       sourceTaskId: sourceTaskGuard.taskId,
       projectId: sourceTaskGuard.projectId,
       chatSessionId: sourceTaskGuard.chatSessionId,
+      projectEventWake: sourceTaskGuard.projectEventWake,
+      requiredProjectMemberId: sourceTaskGuard.requiredProjectMemberId,
     });
     return authorized ? 'unavailable' : 'source_task_revoked';
   }

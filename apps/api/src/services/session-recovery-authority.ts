@@ -1,12 +1,32 @@
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 
 const TERMINAL_TASK_STATUSES_SQL = "'completed', 'failed', 'cancelled'";
 const LIVE_TASK_STATUSES_SQL = "'queued', 'delegated', 'in_progress', 'awaiting_followup'";
 
+export interface ProjectEventWakeRecoveryGuard {
+  batchId: string;
+  subscriptionId: string;
+}
+
 export interface SessionRecoverySourceTaskGuard {
   taskId: string;
   projectId: string;
   chatSessionId: string;
+  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+  /** Pre-materialization event guard; after admission projectEventWake supplies this requirement. */
+  requireSourceProjectMember?: boolean;
+  requiredProjectMemberId?: string | null;
+}
+
+/** Event subscriptions retain source task identity, never a caller-supplied user identity. */
+export function sourceProjectMemberAuthoritySql(): string {
+  return `AND EXISTS (
+    SELECT 1 FROM project_members event_member JOIN users event_user ON event_user.id = event_member.user_id
+    WHERE event_member.project_id = source.project_id AND event_member.user_id = source.user_id
+      AND event_member.status = 'active' AND event_user.status = 'active'
+      AND event_member.role IN ('owner','admin','maintainer')
+  )`;
 }
 
 export class SessionRecoveryAuthorityRevokedError extends Error {
@@ -61,6 +81,21 @@ export async function isSessionRecoverySourceTaskGuardValid(
                  AND owner.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
             )
           )
+          ${
+            guard.requireSourceProjectMember || guard.projectEventWake
+              ? sourceProjectMemberAuthoritySql()
+              : ''
+          }
+          ${
+            guard.requiredProjectMemberId
+              ? `AND EXISTS (
+            SELECT 1 FROM project_members m JOIN users u ON u.id = m.user_id
+            WHERE m.project_id = source.project_id AND m.user_id = ?
+              AND m.status = 'active' AND u.status = 'active'
+              AND m.role IN ('owner','admin','maintainer')
+          )`
+              : ''
+          }
         LIMIT 1`
     )
     .bind(
@@ -68,7 +103,8 @@ export async function isSessionRecoverySourceTaskGuardValid(
       guard.projectId,
       guard.chatSessionId,
       guard.chatSessionId,
-      guard.chatSessionId
+      guard.chatSessionId,
+      ...(guard.requiredProjectMemberId ? [guard.requiredProjectMemberId] : [])
     )
     .first<{ id: string }>();
   return Boolean(row);
@@ -87,6 +123,8 @@ export async function isSessionRecoveryTaskAuthorized(
     sourceTaskId: string;
     projectId: string;
     chatSessionId: string;
+    requiredProjectMemberId?: string | null;
+    projectEventWake?: ProjectEventWakeRecoveryGuard | null;
   }
 ): Promise<boolean> {
   const row = await database
@@ -109,15 +147,99 @@ export async function isSessionRecoveryTaskAuthorized(
           AND (
             (recovery.status = 'in_progress' AND snapshot.recovery_status = 'restored')
             OR (
-              source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
-              AND snapshot.recovery_status IN ('waking', 'restored')
+              snapshot.recovery_status IN ('waking', 'restored')
+              AND (
+                source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+                OR (
+                  source.status = 'cancelled'
+                  AND source.superseded_by_task_id = recovery.id
+                )
+              )
             )
           )
+          ${input.projectEventWake ? sourceProjectMemberAuthoritySql() : ''}
+          ${
+            input.requiredProjectMemberId
+              ? `AND EXISTS (
+            SELECT 1 FROM project_members m JOIN users u ON u.id = m.user_id
+            WHERE m.project_id = recovery.project_id AND m.user_id = ?
+              AND m.status = 'active' AND u.status = 'active'
+              AND m.role IN ('owner','admin','maintainer')
+          )`
+              : ''
+          }
         LIMIT 1`
     )
-    .bind(input.recoveryTaskId, input.sourceTaskId, input.projectId, input.chatSessionId)
+    .bind(
+      input.recoveryTaskId,
+      input.sourceTaskId,
+      input.projectId,
+      input.chatSessionId,
+      ...(input.requiredProjectMemberId ? [input.requiredProjectMemberId] : [])
+    )
     .first<{ id: string }>();
   return Boolean(row);
+}
+
+export interface SessionRecoveryTaskAuthorityInput {
+  requiredProjectMemberId?: string | null;
+  recoveryTaskId: string;
+  sourceTaskId: string;
+  projectId: string;
+  chatSessionId: string;
+  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+}
+
+export interface ProjectEventWakeAuthorityInput extends ProjectEventWakeRecoveryGuard {
+  projectId: string;
+  chatSessionId: string;
+  sourceTaskId: string;
+}
+
+type ValidateProjectEventWakeAuthority = (
+  input: ProjectEventWakeAuthorityInput
+) => Promise<boolean>;
+
+/** A successful event RPC cannot preserve a D1 claim revoked while it awaited. */
+export async function isSessionRecoveryTaskAndEventAuthorized(
+  database: D1Database,
+  input: SessionRecoveryTaskAuthorityInput,
+  validateEvent?: ValidateProjectEventWakeAuthority
+): Promise<boolean> {
+  if (!(await isSessionRecoveryTaskAuthorized(database, input))) return false;
+  if (!input.projectEventWake) return true;
+  if (!validateEvent) return false;
+  const eventAuthorized = await validateEvent({
+    projectId: input.projectId,
+    chatSessionId: input.chatSessionId,
+    sourceTaskId: input.sourceTaskId,
+    batchId: input.projectEventWake.batchId,
+    subscriptionId: input.projectEventWake.subscriptionId,
+  });
+  if (!eventAuthorized) return false;
+  return isSessionRecoveryTaskAuthorized(database, input);
+}
+
+/** Check both durable authorities inside the container before starting or submitting. */
+export async function isSessionRecoverySourceTaskGuardFullyValidForEnv(
+  env: Env,
+  guard: SessionRecoverySourceTaskGuard
+): Promise<boolean> {
+  if (!(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, guard))) return false;
+  if (!guard.projectEventWake) return true;
+  const projectData = await import('./project-data');
+  const eventAuthorized = await projectData.validateProjectEventWakeRecoveryAuthority(
+    env,
+    guard.projectId,
+    {
+      chatSessionId: guard.chatSessionId,
+      sourceTaskId: guard.taskId,
+      batchId: guard.projectEventWake.batchId,
+      subscriptionId: guard.projectEventWake.subscriptionId,
+    }
+  );
+  if (!eventAuthorized) return false;
+  return isSessionRecoverySourceTaskGuardValid(env.DATABASE, guard);
 }
 
 /**

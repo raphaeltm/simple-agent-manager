@@ -8,10 +8,10 @@
  *
  * See: specs/018-project-first-architecture/research.md (Decision 6)
  */
-
 import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
+import { migrateProjectSchedules } from './project-data/project-event-schedules-schema';
 import { parseMigrationName } from './project-data/row-schemas';
 
 export interface Migration {
@@ -1833,6 +1833,349 @@ export const MIGRATIONS: Migration[] = [
         FROM tool_payload_archives
         LIMIT 0
       `);
+    },
+  },
+  {
+    name: '045-project-event-wake-delivery',
+    run: (sql) => {
+      const additiveColumns = [
+        [
+          'project_event_subscriptions',
+          'owner_version',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_version INTEGER NOT NULL DEFAULT 1',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_project_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_project_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_chat_session_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_chat_session_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_task_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_task_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_runtime_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_runtime_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'recovery_lineage_json',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN recovery_lineage_json TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'prompt_delivery_count',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN prompt_delivery_count INTEGER NOT NULL DEFAULT 0',
+        ],
+        [
+          'project_event_subscriptions',
+          'prompt_delivery_last_at',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN prompt_delivery_last_at INTEGER',
+        ],
+        [
+          'project_event_subscriptions',
+          'delivery_cooldown_until',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN delivery_cooldown_until INTEGER',
+        ],
+        [
+          'project_event_subscriptions',
+          'delivery_lifetime_expires_at',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN delivery_lifetime_expires_at INTEGER',
+        ],
+        [
+          'project_event_delivery_batches',
+          'delivery_channel',
+          "ALTER TABLE project_event_delivery_batches ADD COLUMN delivery_channel TEXT NOT NULL DEFAULT 'pull'",
+        ],
+        [
+          'project_event_delivery_batches',
+          'delivered_via',
+          'ALTER TABLE project_event_delivery_batches ADD COLUMN delivered_via TEXT',
+        ],
+        [
+          'project_event_delivery_batches',
+          'delivery_expires_at',
+          'ALTER TABLE project_event_delivery_batches ADD COLUMN delivery_expires_at INTEGER',
+        ],
+        [
+          'project_event_delivery_batches',
+          'readable_until',
+          'ALTER TABLE project_event_delivery_batches ADD COLUMN readable_until INTEGER',
+        ],
+        [
+          'project_event_delivery_attempts',
+          'transport_state',
+          'ALTER TABLE project_event_delivery_attempts ADD COLUMN transport_state TEXT',
+        ],
+      ] as const;
+
+      for (const [table, column, statement] of additiveColumns) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
+        }
+        sql.exec(`SELECT ${column} FROM ${table} LIMIT 0`);
+      }
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_event_wake_scheduler_state (
+          project_id TEXT PRIMARY KEY,
+          next_attempt_at INTEGER,
+          next_retention_at INTEGER,
+          materialization_failures INTEGER NOT NULL DEFAULT 0,
+          retention_failures INTEGER NOT NULL DEFAULT 0,
+          last_materialization_error_code TEXT,
+          last_retention_error_code TEXT,
+          last_materialization_failed_at INTEGER,
+          last_retention_failed_at INTEGER,
+          last_materialization_succeeded_at INTEGER,
+          last_retention_succeeded_at INTEGER,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_project_batch
+        ON project_event_matches(project_id, batch_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_materialization
+        ON project_event_matches(project_id, state, matched_at, subscription_id, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_batches_prompt_target
+        ON project_event_delivery_batches(project_id, delivery_channel, target_session_id, state, updated_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_batches_readable
+        ON project_event_delivery_batches(project_id, id, readable_until)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_transport
+        ON project_event_delivery_attempts(project_id, batch_id, transport_state, attempt_number)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_wake_scheduler_retention
+        ON project_event_wake_scheduler_state(next_retention_at, project_id)
+      `);
+    },
+  },
+  {
+    name: '046-project-event-wake-retention-indexes',
+    run: (sql) => {
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_candidates
+        ON project_event_subscriptions(
+          project_id,
+          lifecycle_state,
+          requested_delivery,
+          resolved_delivery,
+          target_session_id,
+          last_matched_at,
+          id
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_expiry
+        ON project_event_subscriptions(project_id, lifecycle_state, expires_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_subscription_due
+        ON project_event_matches(project_id, subscription_id, state, batch_id, matched_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_event_retention
+        ON project_event_matches(project_id, event_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_orphan_retention
+        ON project_event_matches(project_id, state, batch_id, matched_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_retention
+        ON project_event_delivery_attempts(project_id, state, created_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_synthetic_retention
+        ON project_event_delivery_attempts(project_id, attempt_number, state, transport_state, created_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_batches_retention
+        ON project_event_delivery_batches(project_id, state, updated_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_scheduler_attempt
+        ON project_event_wake_scheduler_state(next_attempt_at, project_id)
+      `);
+    },
+  },
+  {
+    name: '047-project-event-server-derived-audience',
+    run: (sql) => {
+      const additiveColumns = [
+        [
+          'audience_scope',
+          "ALTER TABLE project_events ADD COLUMN audience_scope TEXT NOT NULL DEFAULT 'project' CHECK (audience_scope IN ('project', 'user'))",
+        ],
+        ['audience_project_id', 'ALTER TABLE project_events ADD COLUMN audience_project_id TEXT'],
+        ['audience_user_id', 'ALTER TABLE project_events ADD COLUMN audience_user_id TEXT'],
+      ] as const;
+      for (const [column, statement] of additiveColumns) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
+        }
+        sql.exec(`SELECT ${column} FROM project_events LIMIT 0`);
+      }
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_events_audience
+        ON project_events(project_id, audience_scope, audience_user_id, received_at DESC, id)
+      `);
+    },
+  },
+  {
+    name: '048-project-event-channel-member-surfaces',
+    run: (sql) => {
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_event_channels (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        lifetime_count INTEGER NOT NULL DEFAULT 0,
+        last_published_at INTEGER NOT NULL,
+        UNIQUE(project_id, name)
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_channels_empty
+        ON project_event_channels(project_id, last_published_at, id)`);
+      sql.exec(`ALTER TABLE project_events ADD COLUMN channel_id TEXT`);
+      sql.exec(`ALTER TABLE project_events ADD COLUMN channel_sequence INTEGER`);
+      sql.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_events_channel_sequence
+        ON project_events(channel_id, channel_sequence) WHERE channel_id IS NOT NULL`);
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_event_channel_publish_rate (
+        project_id TEXT PRIMARY KEY,
+        window_started_at INTEGER NOT NULL,
+        publish_count INTEGER NOT NULL,
+        catalog_after_time INTEGER NOT NULL DEFAULT 0,
+        catalog_after_id TEXT NOT NULL DEFAULT ''
+      )`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_id TEXT`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_after_sequence INTEGER`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_watermark INTEGER`);
+      sql.exec(
+        `ALTER TABLE project_event_subscriptions ADD COLUMN channel_catchup_expires_at INTEGER`
+      );
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_start_fingerprint TEXT`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_channel_catchup_live
+        ON project_event_subscriptions(channel_id, channel_catchup_expires_at)
+        WHERE lifecycle_state = 'active' AND channel_after_sequence < channel_watermark`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_session_state
+        ON project_event_subscriptions(project_id, target_session_id, lifecycle_state, updated_at DESC, id)`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_session
+        ON project_event_subscriptions(project_id, target_session_id, updated_at DESC, id)`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_recent
+        ON project_event_subscriptions(project_id, updated_at DESC, id)`);
+    },
+  },
+  { name: '049-project-schedules-standing-watches', run: migrateProjectSchedules },
+  {
+    name: '050-project-event-wake-due-index',
+    run: (sql) => {
+      try {
+        sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN wake_due_at INTEGER`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/duplicate column name:\s*wake_due_at/i.test(message)) throw error;
+      }
+      sql.exec(`SELECT wake_due_at FROM project_event_subscriptions LIMIT 0`);
+      sql.exec(`
+        UPDATE project_event_subscriptions
+           SET wake_due_at = (
+             SELECT MIN(m.matched_at)
+               FROM project_event_matches m
+              WHERE m.project_id = project_event_subscriptions.project_id
+                AND m.subscription_id = project_event_subscriptions.id
+                AND m.state = 'matched'
+                AND m.batch_id IS NULL
+           )
+         WHERE contract_version >= 2
+           AND owner_version >= 2
+           AND lifecycle_state = 'active'
+           AND requested_delivery = 'existing_session_prompt'
+           AND resolved_delivery = 'queued_for_prompt_delivery'
+           AND wake_due_at IS NULL
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_due
+        ON project_event_subscriptions(
+          project_id,
+          lifecycle_state,
+          requested_delivery,
+          resolved_delivery,
+          wake_due_at,
+          delivery_cooldown_until,
+          id
+        )
+      `);
+    },
+  },
+  {
+    name: '051-project-event-retention-lifecycle-index',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_due_order
+        ON project_event_subscriptions(project_id, lifecycle_state, requested_delivery,
+          resolved_delivery, wake_due_at, id)`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_matches_orphan_lifecycle
+        ON project_event_matches(project_id, state, lifecycle_checked_at, id)
+        WHERE batch_id IS NOT NULL`);
+    },
+  },
+  {
+    name: '052-project-event-credential-window-index',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_events_credential_window
+        ON project_events(project_id, source, subject_type, subject_id,
+          json_extract(metadata_json, '$.windowType'),
+          json_extract(metadata_json, '$.observedAt') DESC, id DESC)
+        WHERE state = 'recorded'`);
+    },
+  },
+  {
+    name: '053-mailbox-active-capacity-index',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_session_inbox_active_capacity
+        ON session_inbox(id)
+        WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`);
+    },
+  },
+  {
+    name: '054-project-event-orphan-retention-cursor',
+    run: (sql) => {
+      for (const [column, type] of [
+        ['orphan_scan_lifecycle_at', 'INTEGER'],
+        ['orphan_scan_match_id', 'TEXT'],
+      ] as const) {
+        try {
+          sql.exec(`ALTER TABLE project_event_wake_scheduler_state ADD COLUMN ${column} ${type}`);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+        sql.exec(`SELECT ${column} FROM project_event_wake_scheduler_state LIMIT 0`);
+      }
     },
   },
 ];

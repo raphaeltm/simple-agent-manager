@@ -16,6 +16,7 @@ import {
   DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
+  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
@@ -23,7 +24,8 @@ import { type Context, Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { readRequestJsonRecord } from '../lib/runtime-validation';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import {
   checkRateLimit,
@@ -34,13 +36,16 @@ import type { UpstreamAuth } from '../services/ai-billing';
 import { resolveUnifiedBillingToken, resolveUpstreamAuth } from '../services/ai-billing';
 import {
   AIProxyAuthError,
+  type AIProxyCredentialAttribution,
   buildAIGatewayMetadata,
   extractCallbackToken,
   isAnthropicModel,
+  updateAIProxyAgentCredentialAttribution,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
 import { attachTokenUsageAccounting } from '../services/ai-token-usage-accounting';
+import { recordProxyCredentialLimitObservationsFromHeaders } from '../services/credential-limit-events';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 import {
   estimateInputTokens,
@@ -62,7 +67,11 @@ const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 type AIProxyContext = Context<{ Bindings: Env }>;
 type AIProxyDb = Parameters<typeof verifyAIProxyAuth>[2];
 type AIProxyRequestContext = Awaited<ReturnType<typeof verifyAIProxyAuth>> & { db: AIProxyDb };
-type ProxyErrorStatus = 400 | 401 | 403 | 404 | 429 | 502 | 503;
+type ProxyErrorStatus = 400 | 401 | 403 | 404 | 413 | 429 | 502 | 503;
+type OpenAIProxyCredential = AIProxyCredentialAttribution & {
+  apiKey: string;
+  credentialProvider: 'openai';
+};
 
 function proxyJsonError(
   c: AIProxyContext,
@@ -72,6 +81,25 @@ function proxyJsonError(
   extra?: Record<string, unknown>
 ): Response {
   return c.json({ error: { message, type, ...(extra ?? {}) } }, status);
+}
+
+function aiProxyRequestBodyMaxBytes(c: AIProxyContext): number {
+  return parsePositiveInt(
+    c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
+    DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
+  );
+}
+
+function aiProxyBodyParseError(c: AIProxyContext, error: unknown): Response {
+  if (error instanceof RequestBodyTooLargeError) {
+    return proxyJsonError(
+      c,
+      `Request body exceeds ${error.maxBytes} bytes`,
+      'invalid_request_error',
+      413
+    );
+  }
+  return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
 }
 
 async function prepareAIProxyRequest(c: AIProxyContext): Promise<Response | AIProxyRequestContext> {
@@ -212,12 +240,31 @@ function buildProxyMetadata(
   });
 }
 
-async function resolveOpenAIProxyKey(c: AIProxyContext, db: AIProxyDb): Promise<string | Response> {
-  if (resolveUnifiedBillingToken(c.env)) return '';
+async function resolveOpenAIProxyCredential(
+  c: AIProxyContext,
+  db: AIProxyDb
+): Promise<OpenAIProxyCredential | Response> {
+  if (resolveUnifiedBillingToken(c.env)) {
+    return {
+      apiKey: '',
+      credentialReference: 'platform_proxy:cloudflare-ai-gateway',
+      credentialSource: 'platform',
+      credentialProvider: 'openai',
+      providerMode: 'unified-billing',
+    };
+  }
 
   const encryptionKey = getCredentialEncryptionKey(c.env);
   const platformCred = await getPlatformAgentCredential(db, 'codex', encryptionKey);
-  if (platformCred?.credential) return platformCred.credential;
+  if (platformCred?.credential) {
+    return {
+      apiKey: platformCred.credential,
+      credentialReference: `platform_credentials:${platformCred.credentialId}`,
+      credentialSource: 'platform',
+      credentialProvider: 'openai',
+      providerMode: 'platform-key',
+    };
+  }
 
   return proxyJsonError(
     c,
@@ -225,6 +272,63 @@ async function resolveOpenAIProxyKey(c: AIProxyContext, db: AIProxyDb): Promise<
     'server_error',
     503
   );
+}
+
+async function recordPlatformProxyLimitHeaders(input: {
+  env: Env;
+  response: Response;
+  prepared: AIProxyRequestContext;
+  provider: 'anthropic' | 'openai';
+  attribution: AIProxyCredentialAttribution;
+  source: string;
+}): Promise<void> {
+  try {
+    await updateAIProxyAgentCredentialAttribution(input.env, input.prepared, input.attribution);
+  } catch (error) {
+    log.warn('ai_proxy.credential_attribution_update_failed', {
+      userId: input.prepared.userId,
+      workspaceId: input.prepared.workspaceId,
+      agentSessionId: input.prepared.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.response.headers, {
+    projectId: input.prepared.projectId,
+    userId: input.prepared.userId,
+    workspaceId: input.prepared.workspaceId,
+    chatSessionId: input.prepared.chatSessionId,
+    agentSessionId: input.prepared.agentSessionId,
+    agentType: input.prepared.agentType,
+    credentialReference: input.attribution.credentialReference,
+    credentialSource: input.attribution.credentialSource,
+    provider: input.provider,
+    providerMode: input.attribution.providerMode ?? 'sam-proxy',
+    source: input.source,
+    responseStatus: input.response.status,
+  });
+}
+
+function schedulePlatformProxyLimitHeaders(
+  c: AIProxyContext,
+  input: Parameters<typeof recordPlatformProxyLimitHeaders>[0]
+): void {
+  const telemetry = recordPlatformProxyLimitHeaders(input).catch((error) => {
+    log.warn('ai_proxy.credential_limit_telemetry_failed', {
+      userId: input.prepared.userId,
+      workspaceId: input.prepared.workspaceId,
+      agentSessionId: input.prepared.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  try {
+    c.executionCtx.waitUntil(telemetry);
+  } catch {
+    /* no execution context in tests */
+  }
+  void telemetry;
 }
 
 function accountingResponse(
@@ -267,9 +371,13 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   // --- Parse request body ---
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy.chat_completions');
-  } catch {
-    return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
+    body = await readRequestJsonRecord(
+      c.req.raw,
+      'ai-proxy.chat_completions',
+      aiProxyRequestBodyMaxBytes(c)
+    );
+  } catch (error) {
+    return aiProxyBodyParseError(c, error);
   }
 
   // Minimal validation: messages must be present
@@ -325,8 +433,9 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   }
 
   // For OpenAI models, resolve the API key from platform credentials or Unified Billing.
-  const openaiApiKey = provider === 'openai' ? await resolveOpenAIProxyKey(c, prepared.db) : '';
-  if (openaiApiKey instanceof Response) return openaiApiKey;
+  const openaiCredential =
+    provider === 'openai' ? await resolveOpenAIProxyCredential(c, prepared.db) : undefined;
+  if (openaiCredential instanceof Response) return openaiCredential;
 
   log.info('ai_proxy.forward', {
     userId: prepared.userId,
@@ -349,7 +458,10 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       }
       response = await forwardToAnthropic(c.env, body, modelId, aigMetadata, anthropicAuth);
     } else if (provider === 'openai') {
-      response = await forwardToOpenAI(c.env, body, modelId, aigMetadata, openaiApiKey);
+      if (!openaiCredential) {
+        throw new Error('Internal error: missing OpenAI upstream auth for openai provider');
+      }
+      response = await forwardToOpenAI(c.env, body, modelId, aigMetadata, openaiCredential.apiKey);
     } else {
       response = await forwardToWorkersAI(c.env, body, modelId, aigMetadata);
     }
@@ -361,6 +473,26 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       provider,
       status: response.status,
     });
+
+    if (provider === 'anthropic' && anthropicAuth) {
+      schedulePlatformProxyLimitHeaders(c, {
+        env: c.env,
+        response,
+        prepared,
+        provider: 'anthropic',
+        attribution: anthropicAuth,
+        source: 'ai-proxy.anthropic.chat_completions',
+      });
+    } else if (provider === 'openai' && openaiCredential) {
+      schedulePlatformProxyLimitHeaders(c, {
+        env: c.env,
+        response,
+        prepared,
+        provider: 'openai',
+        attribution: openaiCredential,
+        source: 'ai-proxy.openai.chat_completions',
+      });
+    }
 
     return accountingResponse(c, response, prepared.userId, estimatedInputTokens);
   } catch (err) {
@@ -395,9 +527,13 @@ aiProxyRoutes.post('/responses', async (c) => {
 
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy.responses');
-  } catch {
-    return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
+    body = await readRequestJsonRecord(
+      c.req.raw,
+      'ai-proxy.responses',
+      aiProxyRequestBodyMaxBytes(c)
+    );
+  } catch (error) {
+    return aiProxyBodyParseError(c, error);
   }
 
   if (!body.input && !body.instructions) {
@@ -434,8 +570,8 @@ aiProxyRoutes.post('/responses', async (c) => {
   if (inputLimitError) return inputLimitError;
 
   const aigMetadata = buildProxyMetadata(prepared, body, modelId);
-  const openaiApiKey = await resolveOpenAIProxyKey(c, prepared.db);
-  if (openaiApiKey instanceof Response) return openaiApiKey;
+  const openaiCredential = await resolveOpenAIProxyCredential(c, prepared.db);
+  if (openaiCredential instanceof Response) return openaiCredential;
 
   log.info('ai_proxy.responses.forward', {
     userId: prepared.userId,
@@ -451,7 +587,7 @@ aiProxyRoutes.post('/responses', async (c) => {
       body,
       modelId,
       aigMetadata,
-      openaiApiKey
+      openaiCredential.apiKey
     );
 
     log.info('ai_proxy.responses.response', {
@@ -459,6 +595,15 @@ aiProxyRoutes.post('/responses', async (c) => {
       workspaceId: prepared.workspaceId,
       modelId,
       status: response.status,
+    });
+
+    schedulePlatformProxyLimitHeaders(c, {
+      env: c.env,
+      response,
+      prepared,
+      provider: 'openai',
+      attribution: openaiCredential,
+      source: 'ai-proxy.openai.responses',
     });
 
     return accountingResponse(c, response, prepared.userId, estimatedInputTokens);

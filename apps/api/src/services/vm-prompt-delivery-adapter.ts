@@ -17,6 +17,7 @@ import { createModuleLogger } from '../lib/logger';
 import { NodeAgentHttpError, nodeAgentRequest, sendPromptToAgentOnNode } from './node-agent';
 import * as projectDataService from './project-data';
 import { ensureSessionRecovery } from './session-recovery';
+import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import { markSessionSnapshotAwakeInPlace } from './session-snapshots';
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
@@ -76,6 +77,8 @@ export interface VmPromptDeliverySourceTaskGuard {
   taskId: string;
   projectId: string;
   chatSessionId: string;
+  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+  requiredProjectMemberId?: string | null;
 }
 
 export interface VmPromptDeliveryAdapterInput {

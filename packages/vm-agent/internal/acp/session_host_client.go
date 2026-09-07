@@ -19,8 +19,10 @@ import (
 // sessionHostClient implements the acp-go-sdk Client interface.
 // Instead of writing to a single WebSocket, it broadcasts to all viewers.
 type sessionHostClient struct {
-	host        *SessionHost
-	processedCh chan struct{} // Signaled only after session/update completes (used by orderedPipe).
+	host                *SessionHost
+	processedCh         chan struct{} // Signaled only after session/update completes (used by orderedPipe).
+	usageAttribution    credentialAttribution
+	hasUsageAttribution bool
 }
 
 // signalProcessed signals that a session/update handler completed, allowing
@@ -54,6 +56,7 @@ func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.Sessi
 	if c.host.applyACPToolCallLifecycle(params) {
 		c.host.nudgeHarnessActivityReport()
 	}
+	c.host.captureSessionUsageUpdate(params, c.usageAttribution, c.hasUsageAttribution)
 
 	data, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",

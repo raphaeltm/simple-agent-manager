@@ -1103,6 +1103,23 @@ func TestRedactAgentDiagnosticText(t *testing.T) {
 	}
 }
 
+func TestMonitorStderrStoresRedactedDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	proc, _, _ := newFakeAgentProcess(time.Now(), true)
+	proc.stderr = strings.NewReader("fatal diagnostic\n" + syntheticOpenAIKeyEnvLine())
+
+	host.monitorStderr(proc)
+	got := host.peekStderr()
+	if strings.Contains(got, syntheticSecretForRedactionTest()) {
+		t.Fatalf("stderr buffer leaked secret: %s", got)
+	}
+	if !strings.Contains(got, "fatal diagnostic") {
+		t.Fatalf("stderr buffer removed safe diagnostic: %s", got)
+	}
+}
+
 func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 	t.Parallel()
 

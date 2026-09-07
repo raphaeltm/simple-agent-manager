@@ -8,10 +8,11 @@
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { workspacesRoutes } from '../../../src/routes/workspaces';
+import { createAgentCredentialAttributionFixture } from '../../helpers/agent-credential-attribution-fixture';
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
@@ -44,6 +45,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
   let app: Hono<{ Bindings: Env }>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockDB: any;
+  let attribution: Awaited<ReturnType<typeof createAgentCredentialAttributionFixture>>;
 
   const mockEnv = {
     DATABASE: {} as D1Database,
@@ -76,8 +78,11 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     mockDB.limit.mockImplementation(() => queued.shift() ?? []);
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    mockDecrypt.mockReset();
+    attribution = await createAgentCredentialAttributionFixture('ws-123', 'user-1');
+    mockEnv.DATABASE = attribution.database;
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
@@ -105,6 +110,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     };
     vi.mocked(drizzle).mockReturnValue(mockDB as ReturnType<typeof drizzle>);
   });
+  afterEach(() => attribution?.sqlite.close());
 
   it('returns 404 for default OpenCode Zen when no dedicated OpenCode key exists', async () => {
     queueLimitResponses(
@@ -130,6 +136,8 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
           isActive: true,
         },
       ],
+      // Attribution persistence and response delivery each revalidate ownership.
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
       [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }]
     );
 
@@ -142,6 +150,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     expect(json.apiKey).toBe('dedicated-opencode-key');
     expect(json.credentialKind).toBe('api-key');
     expect(json.inferenceConfig).toBeUndefined();
+    expect(json.credentialGeneration).toBe(8);
   });
 
   it('does not return a decrypted key when deletion starts before delivery', async () => {
@@ -208,6 +217,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
             isActive: true,
           },
         ],
+        [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
         [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }]
       );
       mockDecrypt.mockResolvedValueOnce(decryptedKey);

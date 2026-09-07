@@ -35,10 +35,11 @@ function seedRecoveryFixture(sqlite: Database.Database): void {
     schema.capacitySources,
     schema.capacityPoolCandidates,
     schema.projectDataSessionLocations,
+    schema.projectMembers,
   ]);
   sqlite.exec(`
-    INSERT INTO users (id, name, email, github_id)
-    VALUES ('user-1', 'Test User', 'test@example.com', 'gh-1');
+    INSERT INTO users (id, name, email, github_id, status)
+    VALUES ('user-1', 'Test User', 'test@example.com', 'gh-1', 'active');
 
     INSERT INTO credentials
       (id, user_id, provider, credential_type, credential_kind, is_active,
@@ -101,7 +102,7 @@ function guard() {
 
 async function expectWakingRecovery(
   database: D1Database,
-  sourceTaskGuard = guard()
+  sourceTaskGuard: ReturnType<typeof guard> & { requiredProjectMemberId?: string } = guard()
 ): Promise<{ taskId: string }> {
   const wake = await ensureSessionRecovery(
     { DATABASE: database } as Env,
@@ -201,6 +202,24 @@ describe('session recovery handoff', () => {
         superseded_by_task_id: wake.taskId,
       });
       expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('carries scheduled creator authority through actual VM recovery submission', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      sqlite.exec(`INSERT INTO project_members (project_id, user_id, role, status)
+        VALUES ('project-1', 'user-1', 'maintainer', 'active')`);
+      await expectWakingRecovery(createSqliteD1(sqlite), {
+        ...guard(),
+        requiredProjectMemberId: 'user-1',
+      });
+      expect(startTaskRunnerDOMock.mock.calls[0]?.[1]).toMatchObject({
+        recoveryRequiredProjectMemberId: 'user-1',
+      });
     } finally {
       sqlite.close();
     }
@@ -330,7 +349,9 @@ describe('session recovery handoff', () => {
         superseded_by_task_id: thirdWake.taskId,
       });
       expect(
-        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = ?`).get(thirdWake.taskId)
+        sqlite
+          .prepare(`SELECT status, chat_session_id FROM tasks WHERE id = ?`)
+          .get(thirdWake.taskId)
       ).toMatchObject({ status: 'queued', chat_session_id: 'chat-1' });
 
       markWorkspaceDeleted(sqlite);
@@ -408,6 +429,52 @@ describe('session recovery handoff', () => {
     }
   });
 
+  it('binds a second-generation recovery when the original guarded source is cancelled', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+
+      const firstWake = await expectWakingRecovery(database);
+      markRecoveryTaskRunning(sqlite, firstWake.taskId);
+      sqlite.prepare(`UPDATE tasks SET status = 'cancelled' WHERE id = 'parent-1'`).run();
+      makeSnapshotClaimable(sqlite, '2026-08-15T00:02:00.000Z');
+
+      const secondWake = await expectWakingRecovery(database, guard());
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT chat_session_id, recovery_source_task_id, triggered_by
+               FROM tasks WHERE id = ?`
+          )
+          .get(secondWake.taskId)
+      ).toMatchObject({
+        chat_session_id: 'chat-1',
+        recovery_source_task_id: 'parent-1',
+        triggered_by: 'session-recovery',
+      });
+      expectTaskOwnership(sqlite, 'parent-1', {
+        status: 'cancelled',
+        chat_session_id: null,
+        superseded_by_task_id: secondWake.taskId,
+      });
+      expectTaskOwnership(sqlite, firstWake.taskId, {
+        chat_session_id: null,
+        superseded_by_task_id: secondWake.taskId,
+      });
+      await expect(isSessionRecoverySourceTaskGuardValid(database, guard())).resolves.toBe(true);
+      const runnerInput = startTaskRunnerDOMock.mock.calls.at(-1)?.[1];
+      expect(runnerInput).toMatchObject({
+        taskId: secondWake.taskId,
+        recoverySourceTaskId: 'parent-1',
+        retrySourceTaskId: 'parent-1',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('marks the exact root-family owner during a guarded owner-path handoff', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -423,7 +490,7 @@ describe('session recovery handoff', () => {
 
       expectTaskOwnership(sqlite, 'parent-1', {
         chat_session_id: null,
-        superseded_by_task_id: firstWake.taskId,
+        superseded_by_task_id: secondWake.taskId,
       });
       expectTaskOwnership(sqlite, firstWake.taskId, {
         chat_session_id: null,

@@ -35,8 +35,7 @@ const ROLE_CAPABILITIES: Record<ProjectMemberRole, ReadonlySet<ProjectCapability
   owner: new Set(PROJECT_CAPABILITIES),
   admin: new Set(
     PROJECT_CAPABILITIES.filter(
-      (capability) =>
-        capability !== 'project:delete' && capability !== 'project:transfer_ownership'
+      (capability) => capability !== 'project:delete' && capability !== 'project:transfer_ownership'
     )
   ),
   maintainer: new Set([
@@ -89,12 +88,7 @@ function assertActiveMembership(
   projectId: string,
   userId: string
 ): schema.ProjectMember {
-  if (
-    !row ||
-    row.projectId !== projectId ||
-    row.userId !== userId ||
-    row.status !== 'active'
-  ) {
+  if (!row || row.projectId !== projectId || row.userId !== userId || row.status !== 'active') {
     throw errors.notFound('Project');
   }
   return row;
@@ -106,7 +100,7 @@ function parseProjectMemberRole(role: string): ProjectMemberRole | null {
     : null;
 }
 
-function roleHasCapability(role: string, capability: ProjectCapability): boolean {
+export function roleHasCapability(role: string, capability: ProjectCapability): boolean {
   const parsedRole = parseProjectMemberRole(role);
   if (!parsedRole) return false;
   return ROLE_CAPABILITIES[parsedRole].has(capability);

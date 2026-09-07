@@ -59,6 +59,15 @@ export type ProjectEventMetadata = { [key: string]: ProjectEventJsonValue };
 
 export type ProjectEventRecordState = 'recorded' | 'conflicted';
 
+export const PROJECT_EVENT_AUDIENCE_SCOPES = ['project', 'user'] as const;
+export type ProjectEventAudienceScope = (typeof PROJECT_EVENT_AUDIENCE_SCOPES)[number];
+
+export type ProjectEventAudience = {
+  scope: ProjectEventAudienceScope;
+  projectId: string | null;
+  userId: string | null;
+};
+
 export type ProjectEventRecord = {
   id: string;
   projectId: string;
@@ -70,6 +79,7 @@ export type ProjectEventRecord = {
   deliveryKey: string;
   payloadFingerprint: string;
   metadata: ProjectEventMetadata;
+  audience: ProjectEventAudience;
   display: ProjectEventDisplayData;
   rawPayloadRef: ProjectEventRawPayloadRef | null;
   occurredAt: number;
@@ -299,7 +309,7 @@ export type ProjectEventSubscriptionState = (typeof PROJECT_EVENT_SUBSCRIPTION_S
 export type ProjectEventSubscriptionRecord = {
   id: string;
   projectId: string;
-  contractVersion: typeof PROJECT_EVENT_CONTRACT_VERSION;
+  contractVersion: number;
   owner: ProjectEventSubscriptionOwner;
   idempotencyKey: string;
   filter: ProjectEventFilterV1;
@@ -329,14 +339,19 @@ export type CreateProjectEventSubscriptionInput = {
   idempotencyKey: string;
   filter: ProjectEventFilterV1;
   deliveryPreference: ProjectEventDeliveryPreference;
+  /** Stable source-task authority for versioned agent-owned wake subscriptions. */
+  ownerTaskId?: string | null;
   reason?: string | null;
   expiresAt?: number | null;
 };
 
 export type ListProjectEventSubscriptionsInput = {
   projectId: string;
+  /** Contextual member surfaces filter before applying the result limit. */
+  targetSessionId?: string | null;
   state?: ProjectEventSubscriptionState | 'any' | null;
   owner?: ProjectEventSubscriptionOwner | null;
+  legacyOwners?: ProjectEventSubscriptionOwner[] | null;
   limit?: number | null;
 };
 
@@ -405,6 +420,10 @@ export type ProjectEventDeliveryBatchRecord = {
   subscriptionId: string;
   idempotencyKey: string;
   state: ProjectEventDeliveryBatchState;
+  deliveryChannel: 'pull' | 'prompt_queue';
+  deliveredVia: 'pull' | 'prompt_queue' | null;
+  deliveryExpiresAt: number | null;
+  readableUntil: number | null;
   ackRequired: boolean;
   requestedDelivery: ProjectEventRequestedDeliveryMode;
   resolvedDelivery: ProjectEventResolvedDeliveryMode;
@@ -419,6 +438,27 @@ export type ProjectEventDeliveryBatchRecord = {
   ackedBy: ProjectEventSubscriptionOwner | null;
   terminalAt: number | null;
   terminalReason: string | null;
+};
+
+/** Member-visible transport outcomes; deliberately excludes event payloads and match identities. */
+export type ProjectEventDeliveryOutcome = Pick<
+  ProjectEventDeliveryBatchRecord,
+  | 'id'
+  | 'state'
+  | 'deliveryChannel'
+  | 'deliveredVia'
+  | 'requestedDelivery'
+  | 'resolvedDelivery'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'deliveredAt'
+  | 'ackedAt'
+  | 'terminalAt'
+  | 'terminalReason'
+>;
+export type ProjectEventDeliveryOutcomeList = {
+  deliveries: ProjectEventDeliveryOutcome[];
+  hasMore: boolean;
 };
 
 export type ProjectEventDeliveryBatchMutationResult = {
@@ -456,13 +496,18 @@ export type ProjectEventDeliveryBatchListResult = {
 
 export type ProjectEventAgentVisibility = {
   owner: ProjectEventSubscriptionOwner;
+  legacyOwners?: ProjectEventSubscriptionOwner[] | null;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
+  userId?: string | null;
 };
 
 export type ProjectEventPullDeliveryInfo = {
   id: string;
   subscriptionId: string;
   state: ProjectEventDeliveryBatchState;
+  deliveryChannel: ProjectEventDeliveryBatchRecord['deliveryChannel'];
+  deliveredVia: ProjectEventDeliveryBatchRecord['deliveredVia'];
+  readableUntil: number | null;
   ackRequired: boolean;
   requestedDelivery: ProjectEventRequestedDeliveryMode;
   resolvedDelivery: ProjectEventResolvedDeliveryMode;
@@ -562,6 +607,7 @@ export type ProjectEventDeliveryAttemptRecord = {
   idempotencyKey: string;
   attemptNumber: number;
   state: ProjectEventDeliveryAttemptState;
+  transportState: 'queued' | 'delivering' | 'expired' | 'cancelled' | null;
   adapter: string | null;
   protocolVersion: string | null;
   runtimeId: string | null;
@@ -623,6 +669,10 @@ export type ProjectEventRetentionResult = {
   deletedBatches: number;
   deletedAttempts: number;
   expiredSubscriptions: number;
+  repairedOrphanMatches: number;
+  /** Observed eligible backlog. A bounded orphan scan may have an uninspected suffix;
+   * its durable cursor continues at normal maintenance cadence without a hot loop. */
+  hasMore: boolean;
   accounting: ProjectEventStorageAccountingRecord[];
 };
 
@@ -630,6 +680,7 @@ export type RunProjectEventRetentionInput = {
   projectId: string;
   now?: number;
   limit?: number | null;
+  refreshAccounting?: boolean | null;
 };
 
 export type GetProjectEventRecentStatusInput = {
@@ -669,4 +720,15 @@ export type ProjectEventLimits = {
   recentStatusLimit: number;
   retentionDays: number;
   retentionBatchRows: number;
+  retentionIntervalMs: number;
+  retentionMinAlarmDelayMs: number;
+  wakeMaterializationMinAlarmDelayMs: number;
+  wakeMaterializationBackoffBaseMs: number;
+  wakeMaterializationBackoffMaxMs: number;
+  wakePromptTtlMs: number;
+  wakeReadGraceMs: number;
+  wakeTargetCooldownMs: number;
+  wakeSubscriptionCooldownMs: number;
+  wakeSubscriptionLifetimeMs: number;
+  wakeMaxPerSubscription: number;
 };

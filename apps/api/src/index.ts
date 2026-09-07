@@ -1,3 +1,5 @@
+import { projectScheduleRoutes } from './routes/project-schedules';
+import { projectStandingWatchRoutes } from './routes/project-standing-watches';
 // Re-export Durable Object classes for Cloudflare Workers runtime
 export { AdminLogs } from './durable-objects/admin-logs';
 export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter';
@@ -121,8 +123,11 @@ import {
   gcpDeployCallbackRoute,
   projectDeploymentRoutes,
 } from './routes/project-deployment';
+import { projectEventChannelRoutes } from './routes/project-event-channels';
+import { projectEventSubscriptionRoutes } from './routes/project-event-subscriptions';
 import { projectsRoutes } from './routes/projects';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
+import { agentUsageCallbackRoute } from './routes/projects/agent-usage-callback';
 import { buildStartedCallbackRoute } from './routes/projects/build-started-callback';
 import { composeImageArtifactsCallbackRoute } from './routes/projects/compose-image-artifacts-callback';
 import { composePublishReleaseCallbackRoute } from './routes/projects/compose-publish-release-callback';
@@ -806,6 +811,7 @@ app.route('/api/webhooks', triggerWebhookRoutes);
 app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', nodeAcpHeartbeatRoute);
 app.route('/api/projects', agentActivityCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', agentUsageCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', buildStartedCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', taskCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', registryPushCredentialsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
@@ -817,6 +823,10 @@ app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/sessions', chatStartRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/comments', projectCommentRoutes);
+app.route('/api/projects/:projectId/event-subscriptions', projectEventSubscriptionRoutes);
+app.route('/api/projects/:projectId/schedules', projectScheduleRoutes);
+app.route('/api/projects/:projectId/standing-watches', projectStandingWatchRoutes);
+app.route('/api/projects/:projectId/event-channels', projectEventChannelRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
 app.route('/api/projects/:projectId/library', libraryRoutes);

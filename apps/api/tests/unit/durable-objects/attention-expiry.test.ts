@@ -38,7 +38,12 @@ describe('delivery-aware attention expiry', () => {
     sql = createSqlStorage(doDb);
     runMigrations(sql);
     d1Db = new Database(':memory:');
-    createSchemaTables(d1Db, [schema.tasks, schema.taskStatusEvents, schema.workspaces]);
+    createSchemaTables(d1Db, [
+      schema.tasks,
+      schema.taskStatusEvents,
+      schema.workspaces,
+      schema.projectEventSourceOutbox,
+    ]);
     sql.exec(
       `INSERT INTO chat_sessions
          (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)

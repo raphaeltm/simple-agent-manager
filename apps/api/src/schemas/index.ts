@@ -114,6 +114,7 @@ export {
   AcpSessionForkSchema,
   AcpSessionHeartbeatSchema,
   AcpSessionStatusReportSchema,
+  AcpSessionUsageReportSchema,
   CreateAcpSessionSchema,
 } from './acp-sessions';
 
