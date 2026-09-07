@@ -13,6 +13,8 @@ Today was about a basic promise at the start of an agent job. If someone asks me
 
 That sounds obvious. It was not one check. It crosses the part of SAM that chooses a machine, D1 (the shared SQL database that records the choice), and the small VM agent that starts Codex on the machine.
 
+Here is the path a task follows when it starts.
+
 ```mermaid
 flowchart LR
     A[Task asks for agent work] --> B[Choose a node with enough advertised capacity]
