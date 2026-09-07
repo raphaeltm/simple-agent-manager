@@ -259,3 +259,37 @@ positives, and incomplete allocation inventory evidence. A dedicated correction
 assignment owns those scanner defects. Its initial count of 76 findings is not a
 verified count of forbidden authority paths. Runtime, display, rollout, and final
 validation requirements remain unchanged.
+
+### Request-authority correction — 2026-09-07 (branch `sam/resume-failed-request-persistence-h4g4wh`)
+
+Four independently reviewed request-authority defects found on `5900bfd0c` were
+reimplemented on top of pushed root `fba14b605`. No predecessor commit was
+cherry-picked and no parent branch was mutated. These are corrections inside the
+request plan/intent and Run/retry/trigger-offboarding authorization slice; they do
+not close section B or C.
+
+| # | Defect | Fix | Discriminating regression |
+| --- | --- | --- | --- |
+| 1 HIGH | `retry_subtask` authorized on a valid KV MCP token plus stored parent lineage, neither of which observes current membership | `routes/mcp/orchestration-authority.ts` re-derives current relational membership (`hasProjectCapability`, `task:write`) before any effect; applied to `retry_subtask` and `stop_subtask` (rule 61) | `tests/unit/routes/mcp-orchestration-current-authority.test.ts` — 7 attack tests red with both guards removed, 5 owner/maintainer/parent-boundary controls green |
+| 2 MED | An explicit Run `resourceRequirements` object/null discarded the stored legacy row whatever its source, erasing inherited skill/trigger/profile/project/user requirements | Suppression scoped to the layer the task override actually replaces; inherited rows parsed strictly and preserved | `tests/unit/services/resource-plan-inherited-layers-and-provenance.test.ts` (6 red) + `tests/unit/routes/task-run-inherited-resource-layers.test.ts` (3 red) with the blanket suppression restored |
+| 3 MED | Stored-reservation normalizer dropped `diagnostics` and per-field `compatibility`, so a no-op retry erased the legacy vm-size translation audit trail | Both preserved with strict validation of untrusted stored values | Same unit file (5 red for diagnostics, 3 for compatibility) + `tests/unit/routes/mcp-retry-provenance-roundtrip.test.ts` |
+| 4 MED | Offboarding inventoried triggers by creator while keep-active transfers move only `execution_user_id`; and `reattach_to_project` installed the acting user unconditionally | Inventory by effective executor (`execution_user_id ?? user_id`); principal resolved from current membership with a deterministic authorized-remaining fallback and fail-closed when none; preview withholds reattach in that case | `tests/unit/services/offboarding-trigger-execution-principal.test.ts` — 3 red on creator-only inventory, 1 on actor-as-principal, 1 on ungated preview reattach |
+
+Shared-contract changes: `resolveTriggerExecutionUserId` moved to
+`services/trigger-execution-principal.ts` so `trigger-admission` and offboarding
+share one definition of the executing principal, and `middleware/project-auth`
+exports `projectRoleHasCapability` so principal ranking reuses the request-time
+role table rather than duplicating it. No migration was added; `0151` already
+persists the request plan and the trigger execution principal.
+
+Reader contract for downstream consumers (C3b2 TaskRunner strategy/exhaustion):
+`readPersistedTaskResourcePlan(input, options)` remains the single reader.
+`options.ignoreLegacyResourceRequirementsJson` now means "an explicit replacement
+for the TASK layer was supplied" and suppresses only that layer plus legacy rows
+whose source cannot be attributed to any layer. `PersistedTaskResourcePlanReadResult`
+is unchanged in shape; `resolvedReservation` now round-trips `diagnostics` and
+per-field `compatibility` losslessly, so deep equality across a no-op retry holds.
+
+Still open in this slice: sections B and C acceptance, runtime consumption of the
+reader, and the integrated release validation. No PR, staging deploy, or merge was
+performed under this assignment.
