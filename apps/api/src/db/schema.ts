@@ -2563,6 +2563,67 @@ export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;
 export type NewWebhookDeliveryRow = typeof webhookDeliveries.$inferInsert;
 
 // =============================================================================
+// Project Event Source Outbox (producer-side admission retry ledger)
+// =============================================================================
+export const projectEventSourceOutbox = sqliteTable(
+  'project_event_source_outbox',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    eventType: text('event_type').notNull(),
+    subjectType: text('subject_type').notNull(),
+    subjectId: text('subject_id').notNull(),
+    deliveryKey: text('delivery_key').notNull(),
+    payloadFingerprint: text('payload_fingerprint').notNull(),
+    eventPayloadJson: text('event_payload_json').notNull(),
+    state: text('state').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull(),
+    nextAttemptAt: text('next_attempt_at').notNull(),
+    processingLeaseExpiresAt: text('processing_lease_expires_at'),
+    expiresAt: text('expires_at').notNull(),
+    admittedEventId: text('admitted_event_id'),
+    admissionOutcome: text('admission_outcome'),
+    lastError: text('last_error'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    deliveryUnique: uniqueIndex('idx_project_event_source_outbox_delivery').on(
+      table.projectId,
+      table.source,
+      table.deliveryKey
+    ),
+    dueIdx: index('idx_project_event_source_outbox_due').on(
+      table.state,
+      table.nextAttemptAt,
+      table.id
+    ),
+    processingLeaseIdx: index('idx_project_event_source_outbox_processing_lease').on(
+      table.state,
+      table.processingLeaseExpiresAt,
+      table.id
+    ),
+    projectSubjectIdx: index('idx_project_event_source_outbox_project_subject').on(
+      table.projectId,
+      table.subjectType,
+      table.subjectId,
+      table.state
+    ),
+  })
+);
+
+export type ProjectEventSourceOutboxRow = typeof projectEventSourceOutbox.$inferSelect;
+export type NewProjectEventSourceOutboxRow = typeof projectEventSourceOutbox.$inferInsert;
+
+// =============================================================================
 // Platform Credentials (admin-managed fallback keys)
 //
 // Unlike user `credentials`, these are shared across all users and managed by

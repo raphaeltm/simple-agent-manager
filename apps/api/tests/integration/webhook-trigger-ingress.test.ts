@@ -62,6 +62,22 @@ CREATE TABLE webhook_deliveries (
 CREATE UNIQUE INDEX idx_webhook_deliveries_trigger_idempotency
   ON webhook_deliveries(trigger_id, idempotency_key_hash)
   WHERE idempotency_key_hash IS NOT NULL;
+CREATE TABLE project_event_source_outbox (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL, source TEXT NOT NULL,
+  event_type TEXT NOT NULL, subject_type TEXT NOT NULL, subject_id TEXT NOT NULL,
+  delivery_key TEXT NOT NULL, payload_fingerprint TEXT NOT NULL,
+  event_payload_json TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
+  attempt_count INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL,
+  next_attempt_at TEXT NOT NULL, processing_lease_expires_at TEXT,
+  expires_at TEXT NOT NULL, admitted_event_id TEXT, admission_outcome TEXT,
+  last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_project_event_source_outbox_delivery
+  ON project_event_source_outbox(project_id, source, delivery_key);
+CREATE INDEX idx_project_event_source_outbox_due
+  ON project_event_source_outbox(state, next_attempt_at, id);
+CREATE INDEX idx_project_event_source_outbox_processing_lease
+  ON project_event_source_outbox(state, processing_lease_expires_at, id);
 `;
 
 const ENCRYPTION_KEY = 'integration-test-webhook-hmac-key';
@@ -152,6 +168,17 @@ describe('generic webhook ingress vertical slice', () => {
       DATABASE: createSqliteD1(sqlite),
       KV: createMemoryKv(),
       ENCRYPTION_KEY,
+      PROJECT_DATA: {
+        idFromName: (projectId: string) => projectId,
+        get: () => ({
+          ensureProjectId: async () => undefined,
+          admitProjectEvent: async (input: { deliveryKey: string }) => ({
+            outcome: 'created',
+            event: { id: `event-${input.deliveryKey}`, state: 'recorded' },
+            matches: [],
+          }),
+        }),
+      },
       WEBHOOK_TRIGGERS_ENABLED: 'true',
       WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE: '100',
       WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE: '100',
@@ -180,13 +207,24 @@ describe('generic webhook ingress vertical slice', () => {
       branchName: 'sam/deployment-failure',
     }));
     const response = await appWith(submitter).request(
-      deliveryRequest(token, { deployment: { id: 'dep-42', status: 'failed' } }, 'delivery-42'),
+      deliveryRequest(
+        token,
+        {
+          deployment: { id: 'dep-42', status: 'failed' },
+          token: 'SECURITY_CANARY_DO_NOT_PERSIST',
+        },
+        'delivery-42'
+      ),
       undefined,
       env
     );
 
     expect(response.status).toBe(202);
-    const body = await response.json<{ accepted: boolean; executionId: string }>();
+    const body = await response.json<{
+      accepted: boolean;
+      deliveryId: string;
+      executionId: string;
+    }>();
     expect(body.accepted).toBe(true);
     expect(submitter).toHaveBeenCalledOnce();
     expect(submitter.mock.calls[0]?.[1]).toMatchObject({
@@ -218,6 +256,33 @@ describe('generic webhook ingress vertical slice', () => {
       trigger_count: 1,
       next_execution_sequence: 2,
     });
+    const outbox = rows<{
+      source: string;
+      event_type: string;
+      subject_type: string;
+      subject_id: string;
+      delivery_key: string;
+      state: string;
+      admission_outcome: string;
+      event_payload_json: string;
+    }>(
+      sqlite,
+      `SELECT source, event_type, subject_type, subject_id, delivery_key, state,
+              admission_outcome, event_payload_json
+         FROM project_event_source_outbox`
+    );
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]).toMatchObject({
+      source: 'webhook',
+      event_type: 'webhook.accepted',
+      subject_type: 'webhook_trigger',
+      subject_id: TRIGGER_ID,
+      delivery_key: `delivery:${body.deliveryId}`,
+      state: 'admitted',
+      admission_outcome: 'created',
+    });
+    expect(outbox[0]?.event_payload_json).toContain('"token":"[redacted]"');
+    expect(outbox[0]?.event_payload_json).not.toContain('SECURITY_CANARY_DO_NOT_PERSIST');
   });
 
   it('preserves JSON and blank source labels in the reported webhook prompt', async () => {

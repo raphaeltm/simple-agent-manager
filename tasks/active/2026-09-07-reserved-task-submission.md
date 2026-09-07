@@ -26,3 +26,13 @@ The current placement resolver is already canonical. `messages.persistMessage` a
 ## Delivery
 
 Return commits, the exact adapter input/result types, recovery semantics, any D1 migration/config, and test evidence. Parent will review and integrate this foundation, then wire it into the actual schedule/watch actions after slice A arrives. This slice alone does not complete scheduling or the parent task.
+
+## Early checkpoint review
+
+Independent bounded Cloudflare review of WIP `58a202f4a` found the following by code inspection. The checkpoint is saved but not yet integrated; these are required verification cases for the final implementation, not claims of workerd reproduction.
+
+- [ ] **Cancellation before physical allocation:** The retry path checks the initially loaded task status, then awaits ProjectData creation and authorization. `revalidateBeforePhysicalStart` does not reread task/session lifecycle. The real TaskRunner's ordinary-start authorization guard returns true without a recovery source task; node/workspace allocation precedes its later queued-to-delegated CAS. Pause after ProjectData commit or authorization, cancel/archive the task/session, then resume through the real TaskRunner boundary. No runner/resource allocation may proceed after effective revocation. Revalidate and fence lifecycle at the authoritative admission and allocation boundaries, not only with another unguarded early read.
+- [ ] **Ambiguous start and truthful loser outcomes:** A failed start plus one negative `ensureStarted` probe reaches queued-task failure. That probe does not prove an in-flight start cannot commit afterward. Also `failUnstartedTask` returns terminal/failed even if the queued-only failure update loses. Delay the original start commitment, lose its response, observe no state once, then allow the original start to advance before failure handling. Return pending/confirmed recovery or the actual persisted terminal outcome; a negative probe needs a fenced no-later-start guarantee before destructive failure.
+- [ ] **Real concurrent first start:** Overlapping adapter calls reach the same TaskRunner identity; its state read occurs outside the initialization transaction. Duplicate allocation was not demonstrated in this review. Verify simultaneous first start with the real TaskRunner, stubbing only external provisioning, before claiming convergence. Mocked start/status methods cannot establish this boundary.
+
+The reserved ProjectData session and first-message writes share a synchronous transaction with insertion-gated hooks and existing message identity checks; no separate local atomicity defect was found in this bounded inspection. Complete the full final independent review after implementation and tests.

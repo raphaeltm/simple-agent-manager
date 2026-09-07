@@ -36,6 +36,7 @@ import { generateId } from './types';
 const log = createModuleLogger('project_data.project_events.storage');
 const OWNER_TYPE_SET = new Set<string>(PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES);
 const ATTEMPT_STATE_SET = new Set<string>(PROJECT_EVENT_DELIVERY_ATTEMPT_STATES);
+export const SQLITE_MAX_BIND_PARAMETERS = 100;
 
 type ProjectEventTable =
   | 'project_events'
@@ -284,27 +285,32 @@ export function expireDueSubscriptions(
     .toArray();
   const ids = rows.filter(isIdRow).map((row) => row.id);
   if (ids.length === 0) return 0;
-  const placeholders = ids.map(() => '?').join(', ');
-  sql.exec(
-    `UPDATE project_event_subscriptions
-     SET lifecycle_state = 'expired', updated_at = ?
-     WHERE project_id = ? AND id IN (${placeholders})`,
-    now,
-    projectId,
-    ...ids
-  );
-  sql.exec(
-    `UPDATE project_event_matches
-     SET state = 'expired', lifecycle_checked_at = ?, reason = ?
-     WHERE project_id = ?
-       AND subscription_id IN (${placeholders})
-       AND batch_id IS NULL
-       AND state = 'matched'`,
-    now,
-    'subscription expired',
-    projectId,
-    ...ids
-  );
+  for (const chunk of chunkIdsForBindBudget(ids, 2)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE project_event_subscriptions
+       SET lifecycle_state = 'expired', updated_at = ?
+       WHERE project_id = ? AND id IN (${placeholders})`,
+      now,
+      projectId,
+      ...chunk
+    );
+  }
+  for (const chunk of chunkIdsForBindBudget(ids, 3)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE project_event_matches
+       SET state = 'expired', lifecycle_checked_at = ?, reason = ?
+       WHERE project_id = ?
+         AND subscription_id IN (${placeholders})
+         AND batch_id IS NULL
+         AND state = 'matched'`,
+      now,
+      'subscription expired',
+      projectId,
+      ...chunk
+    );
+  }
   return ids.length;
 }
 
@@ -516,12 +522,31 @@ export function readAttemptFingerprint(sql: SqlStorage, attemptId: string): stri
 export function countAttemptsForBatch(sql: SqlStorage, projectId: string, batchId: string): number {
   const row = sql
     .exec(
-      'SELECT COUNT(*) AS cnt FROM project_event_delivery_attempts WHERE project_id = ? AND batch_id = ?',
+      `SELECT COUNT(*) AS cnt
+       FROM project_event_delivery_attempts
+       WHERE project_id = ? AND batch_id = ? AND attempt_number > 0`,
       projectId,
       batchId
     )
     .toArray()[0];
   return isCountRow(row) ? row.cnt : 0;
+}
+
+export function nextPhysicalAttemptNumber(
+  sql: SqlStorage,
+  projectId: string,
+  batchId: string
+): number {
+  const row = sql
+    .exec(
+      `SELECT COALESCE(MAX(attempt_number), 0) AS cnt
+       FROM project_event_delivery_attempts
+       WHERE project_id = ? AND batch_id = ? AND attempt_number > 0`,
+      projectId,
+      batchId
+    )
+    .toArray()[0];
+  return (isCountRow(row) ? row.cnt : 0) + 1;
 }
 
 export function updateBatchForAttempt(
@@ -666,17 +691,72 @@ export function deleteOldEventsWithoutMatches(
   return deleteRowsByIds(sql, 'project_events', projectId, ids);
 }
 
-function deleteRowsByIds(
+export function deleteRowsByIds(
   sql: SqlStorage,
   table: ProjectEventTable,
   projectId: string,
   ids: string[]
 ): number {
   if (ids.length === 0) return 0;
-  const placeholders = ids.map(() => '?').join(', ');
-  const deleteSql = deleteRowsByIdsSql(table, placeholders);
-  sql.exec(deleteSql, projectId, ...ids);
+  for (const chunk of chunkIdsForBindBudget(ids, 1)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    const deleteSql = deleteRowsByIdsSql(table, placeholders);
+    sql.exec(deleteSql, projectId, ...chunk);
+  }
   return ids.length;
+}
+
+export function claimProjectEventMatchesForBatch(
+  sql: SqlStorage,
+  projectId: string,
+  matchIds: readonly string[],
+  batchId: string,
+  now: number,
+  reason: string
+): number {
+  if (matchIds.length === 0) return 0;
+  let claimed = 0;
+  for (const chunk of chunkIdsForBindBudget(matchIds, 4)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE project_event_matches
+       SET batch_id = ?, state = 'batch_created', lifecycle_checked_at = ?, reason = ?
+       WHERE project_id = ?
+         AND id IN (${placeholders})
+         AND state = 'matched'
+         AND batch_id IS NULL`,
+      batchId,
+      now,
+      reason,
+      projectId,
+      ...chunk
+    );
+    const row = sql
+      .exec(
+        `SELECT COUNT(*) AS cnt
+         FROM project_event_matches
+         WHERE project_id = ?
+           AND id IN (${placeholders})
+           AND state = 'batch_created'
+           AND batch_id = ?`,
+        projectId,
+        ...chunk,
+        batchId
+      )
+      .toArray()[0];
+    claimed += typeof row?.cnt === 'number' ? row.cnt : 0;
+  }
+  return claimed;
+}
+
+export function chunkIdsForBindBudget(ids: readonly string[], reservedBinds: number): string[][] {
+  const size = SQLITE_MAX_BIND_PARAMETERS - reservedBinds;
+  if (size <= 0) throw new ProjectEventValidationError('SQL bind budget is exhausted');
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
 }
 
 export function accountingFor(

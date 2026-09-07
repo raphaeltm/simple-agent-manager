@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const { reconcileTaskWaits, recordTaskLifecycleEventBestEffort } = vi.hoisted(() => ({
+const { reconcileTaskWaits, recordTaskLifecycleEventViaSourceOutbox } = vi.hoisted(() => ({
   reconcileTaskWaits: vi.fn(async () => ({ checked: 1 })),
-  recordTaskLifecycleEventBestEffort: vi.fn(async () => undefined),
+  recordTaskLifecycleEventViaSourceOutbox: vi.fn(async () => undefined),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits }));
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
-  recordTaskLifecycleEventBestEffort,
+  recordTaskLifecycleEventViaSourceOutbox,
 }));
 
 import {
@@ -65,7 +65,7 @@ describe('task terminal transition hooks', () => {
 
     await createProjectEventTaskTerminalTransitionHook(env as never).handle(event);
 
-    expect(recordTaskLifecycleEventBestEffort).toHaveBeenCalledWith(env, {
+    expect(recordTaskLifecycleEventViaSourceOutbox).toHaveBeenCalledWith(env, {
       projectId: 'project-1',
       taskId: 'child-1',
       status: 'completed',

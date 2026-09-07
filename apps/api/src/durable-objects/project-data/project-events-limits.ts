@@ -128,5 +128,60 @@ export function resolveProjectEventLimits(env: Env): ProjectEventLimits {
       DEFAULT_PROJECT_EVENT_LIMITS.retentionBatchRows,
       'PROJECT_EVENT_RETENTION_BATCH_ROWS'
     ),
+    retentionIntervalMs: parsePositiveInteger(
+      env.PROJECT_EVENT_RETENTION_INTERVAL_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.retentionIntervalMs,
+      'PROJECT_EVENT_RETENTION_INTERVAL_MS'
+    ),
+    retentionMinAlarmDelayMs: parsePositiveInteger(
+      env.PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.retentionMinAlarmDelayMs,
+      'PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS'
+    ),
+    wakeMaterializationMinAlarmDelayMs: parsePositiveInteger(
+      env.PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.wakeMaterializationMinAlarmDelayMs,
+      'PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS'
+    ),
+    wakeMaterializationBackoffBaseMs: parsePositiveInteger(
+      env.PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.wakeMaterializationBackoffBaseMs,
+      'PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS'
+    ),
+    wakeMaterializationBackoffMaxMs: parsePositiveInteger(
+      env.PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.wakeMaterializationBackoffMaxMs,
+      'PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS'
+    ),
+    wakePromptTtlMs: parsePositiveInteger(
+      env.PROJECT_EVENT_WAKE_PROMPT_TTL_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.wakePromptTtlMs,
+      'PROJECT_EVENT_WAKE_PROMPT_TTL_MS'
+    ),
+    wakeReadGraceMs: parsePositiveInteger(
+      env.PROJECT_EVENT_WAKE_READ_GRACE_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.wakeReadGraceMs,
+      'PROJECT_EVENT_WAKE_READ_GRACE_MS'
+    ),
+    wakeTargetCooldownMs: parsePositiveInteger(
+      env.PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.wakeTargetCooldownMs,
+      'PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS'
+    ),
+    wakeSubscriptionCooldownMs: parsePositiveInteger(
+      env.PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.wakeSubscriptionCooldownMs,
+      'PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS'
+    ),
+    wakeSubscriptionLifetimeMs: parsePositiveInteger(
+      env.PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS,
+      DEFAULT_PROJECT_EVENT_LIMITS.wakeSubscriptionLifetimeMs,
+      'PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS'
+    ),
+    wakeMaxPerSubscription: parsePositiveInteger(
+      env.PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION,
+      DEFAULT_PROJECT_EVENT_LIMITS.wakeMaxPerSubscription,
+      'PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION'
+    ),
   };
 }

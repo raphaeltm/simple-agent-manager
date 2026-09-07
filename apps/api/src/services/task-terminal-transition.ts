@@ -3,6 +3,8 @@ import type { TaskActorType, TaskTerminalStatus } from '@simple-agent-manager/sh
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { projectEventSourceOutboxInsertStatement } from './project-event-source-outbox';
+import { buildTaskLifecycleEventInput } from './project-lifecycle-event-inputs';
 import { loadTaskSupersession } from './task-runtime-liveness';
 import {
   createProjectEventTaskTerminalTransitionHook,
@@ -158,6 +160,20 @@ export async function transitionTaskToTerminal(
   if (!ACTIVE_TERMINALIZABLE_TASK_STATUSES.has(task.status)) return 'not_terminalizable';
 
   const now = new Date().toISOString();
+  const lifecycleEventIntent = await buildTaskLifecycleEventInput({
+    projectId: options.projectId,
+    taskId: options.taskId,
+    status: options.status,
+    fromStatus: task.status,
+    parentTaskId: task.parent_task_id,
+    workspaceId: task.workspace_id,
+    sessionId: task.chat_session_id,
+    actorType: options.actorType ?? 'system',
+    actorId: options.actorId ?? null,
+    reason: options.reason,
+    source: options.source,
+    occurredAt: now,
+  });
   const errorMessage = terminalErrorMessage(options.status, options.reason);
   const updateTask = env.DATABASE.prepare(
     `UPDATE tasks
@@ -241,7 +257,17 @@ export async function transitionTaskToTerminal(
     errorMessage
   );
 
-  const [updateResult, eventResult] = await env.DATABASE.batch([updateTask, insertEvent]);
+  const insertLifecycleEventIntent = projectEventSourceOutboxInsertStatement(
+    env,
+    lifecycleEventIntent,
+    { now: new Date(now) }
+  );
+
+  const [updateResult, eventResult] = await env.DATABASE.batch([
+    updateTask,
+    insertEvent,
+    insertLifecycleEventIntent,
+  ]);
   if (changed(updateResult) === 0) {
     try {
       const supersession = await loadTaskSupersession(

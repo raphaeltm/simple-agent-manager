@@ -3,6 +3,7 @@ import * as v from 'valibot';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { parseRowOrNull } from '../row-validation';
+import { readProjectEventWakeLeaseUntil } from './project-events-materialization';
 import {
   CANDIDATE_GATE_META_PREFIX,
   claimReconciliationCandidate,
@@ -278,6 +279,12 @@ async function buildCandidate(input: CandidateBuildInput): Promise<CandidateBuil
   const workspaceId = row.workspace_id;
   const taskId = row.task_id;
   const lastActivityAt = row.last_activity_at;
+
+  const eventWakeLeaseUntil = readProjectEventWakeLeaseUntil(sql, sessionId, now);
+  if (eventWakeLeaseUntil !== null) {
+    deferReconciliationCandidateUntil(sql, sessionId, eventWakeLeaseUntil);
+    return { candidate: null };
+  }
 
   let projectId: string | null = null;
   try {

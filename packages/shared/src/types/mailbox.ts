@@ -66,6 +66,7 @@ export const PROMPT_DELIVERY_SOURCES = [
   'orchestration_handoff',
   'checkpoint_continuation',
   'parent_wakeup',
+  'project_event_wake',
 ] as const;
 
 export type PromptDeliverySource = (typeof PROMPT_DELIVERY_SOURCES)[number];
