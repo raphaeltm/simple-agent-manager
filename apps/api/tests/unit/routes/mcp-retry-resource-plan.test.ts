@@ -1,13 +1,13 @@
+import { resolveResourceReservation } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveResourceReservation } from '@simple-agent-manager/shared';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
-import { createPersistedTaskResourcePlanJson } from '../../../src/services/resource-requirements-input';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
+import { createPersistedTaskResourcePlanJson } from '../../../src/services/resource-requirements-input';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import {
   seedCloudCredential,

@@ -19,16 +19,16 @@ import {
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import {
+  assertReplacementDeletionConfirmed,
+  WorkspaceDeletionUnconfirmedError,
+} from '../../services/replacement-deletion-fence';
+import {
   createPersistedTaskResourcePlanJson,
   firstResourceRequirementLayer,
   firstResourceRequirementLayerJson,
   readPersistedTaskResourcePlan,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
-import {
-  assertReplacementDeletionConfirmed,
-  WorkspaceDeletionUnconfirmedError,
-} from '../../services/replacement-deletion-fence';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';

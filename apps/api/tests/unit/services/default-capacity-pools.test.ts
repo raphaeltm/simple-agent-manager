@@ -13,13 +13,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
 import {
   ensureCandidatesForSource,
   initialStatusForProviderOffering,
 } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
-import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
 import {
   backfillDefaultCapacityPoolsForExistingCredentials,
   ensureDefaultCapacityPoolsForExistingCredentials,
