@@ -277,6 +277,17 @@
     params.set('metadata', 'read');
     params.set('email_addresses', 'read');
     params.set('pull_requests', 'read');
+    params.set('checks', 'read');
+    params.set('actions', 'read');
+    params.set('issues', 'read');
+    params.append('events[]', 'check_run');
+    params.append('events[]', 'check_suite');
+    params.append('events[]', 'issues');
+    params.append('events[]', 'issue_comment');
+    params.append('events[]', 'pull_request_review');
+    params.append('events[]', 'pull_request_review_comment');
+    params.append('events[]', 'repository');
+    params.append('events[]', 'workflow_run');
     params.append('events[]', 'push');
     params.append('events[]', 'pull_request');
 
@@ -321,9 +332,13 @@
       addPreviewRow(
         preview,
         'Permissions',
-        'Contents: write · Metadata: read · Emails: read · Pull requests: read'
+        'Contents: write · Metadata: read · Emails: read · Issues: read · Pull requests: read · Checks: read · Actions: read'
       );
-      addPreviewRow(preview, 'Events', 'push, pull_request');
+      addPreviewRow(
+        preview,
+        'Events',
+        'check_run, check_suite, issues, issue_comment, pull_request, pull_request_review, pull_request_review_comment, push, repository, workflow_run'
+      );
     }
 
     var result = document.getElementById('sh-app-result');

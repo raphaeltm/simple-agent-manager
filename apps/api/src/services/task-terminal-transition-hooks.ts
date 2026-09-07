@@ -3,7 +3,7 @@ import type { TaskTerminalTransitionEvent } from '@simple-agent-manager/shared';
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import * as projectDataService from './project-data';
-import { recordTaskLifecycleEventViaSourceOutbox } from './project-lifecycle-events';
+import { admitProjectEventSourceIntentById } from './project-event-source-outbox';
 
 const log = createModuleLogger('task_terminal_transition_hooks');
 
@@ -34,23 +34,23 @@ export function createTaskWaitTerminalTransitionHook(env: Env): TaskTerminalTran
 
 /**
  * ProjectData lifecycle event producer for terminal task status changes. The
- * producer writes through the D1 source outbox, so failed ProjectData admission
- * leaves a bounded retry intent under the same stable lifecycle delivery key.
- * Callback and runtime payloads remain outside ProjectData event storage.
+ * producer intent is captured in the winning D1 transition batch. The hook only
+ * nudges that immutable intent toward ProjectData so hook execution cannot
+ * rebuild a poorer or conflicting envelope.
  */
 export function createProjectEventTaskTerminalTransitionHook(env: Env): TaskTerminalTransitionHook {
   return {
     name: 'project-lifecycle-task-terminal',
     async handle(event) {
-      await recordTaskLifecycleEventViaSourceOutbox(env, {
-        projectId: event.projectId,
-        taskId: event.taskId,
-        status: event.status,
-        parentTaskId: event.parentTaskId,
-        reason: event.reason,
-        source: event.source,
-        occurredAt: event.occurredAt,
-      });
+      if (!event.projectEventSourceIntentId) {
+        log.warn('project_lifecycle_task_terminal.intent_missing', {
+          taskId: event.taskId,
+          projectId: event.projectId,
+          status: event.status,
+        });
+        return;
+      }
+      await admitProjectEventSourceIntentById(env, event.projectEventSourceIntentId);
     },
   };
 }
