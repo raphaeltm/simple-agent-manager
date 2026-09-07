@@ -15,6 +15,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
+import { effectiveDefaultCapacityPoolScopeChain } from './capacity-pool-precedence';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
@@ -194,35 +195,19 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
     });
   }
 
-  if (input.projectId) {
-    const projectScope = {
-      scope: 'project',
-      ownerUserId: null,
-      ownerProjectId: input.projectId,
-    } satisfies ScopeIdentity;
-    if (await findDefaultPool(db, projectScope)) {
-      return readDefaultPoolSummary(db, projectScope, { includeDisabled: true });
+  // One ordering, shared with the final-admission SQL predicate. The first scope
+  // that HAS a default pool row wins outright: an existing but unusable pool
+  // (configured-empty, source-disabled, disabled) is still authoritative and must
+  // never fall through to a lower scope.
+  const scopes = effectiveDefaultCapacityPoolScopeChain({
+    userId: input.userId,
+    projectId: input.projectId ?? null,
+    includeInstallation: input.includeInstallation,
+  });
+  for (const scope of scopes) {
+    if (await findDefaultPool(db, scope)) {
+      return readDefaultPoolSummary(db, scope, { includeDisabled: true });
     }
-  }
-
-  const userScope = {
-    scope: 'user',
-    ownerUserId: input.userId,
-    ownerProjectId: null,
-  } satisfies ScopeIdentity;
-  if (await findDefaultPool(db, userScope)) {
-    return readDefaultPoolSummary(db, userScope, { includeDisabled: true });
-  }
-
-  if (input.includeInstallation === false) return null;
-
-  const installationScope = {
-    scope: 'installation',
-    ownerUserId: null,
-    ownerProjectId: null,
-  } satisfies ScopeIdentity;
-  if (await findDefaultPool(db, installationScope)) {
-    return readDefaultPoolSummary(db, installationScope, { includeDisabled: true });
   }
   return null;
 }

@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
-import { log } from '../lib/logger';
+import { log, serializeError } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import {
@@ -18,9 +18,12 @@ import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
   assertRelayProvisioningAuthority,
   cleanupFreshProvisioningNode,
+  type FreshProvisioningNodeCleanupResult,
 } from './provisioning-authority';
 
 const RELAY_NODE_NAME_PREFIX = 'Session snapshot relay';
+const RELAY_CLEANUP_FAILURE_DIAGNOSTIC_PREFIX = 'Session snapshot relay cleanup failed';
+const DEFAULT_RELAY_CLEANUP_DIAGNOSTIC_MAX_LENGTH = 500;
 
 type RelayNode = {
   id: string;
@@ -143,7 +146,10 @@ function allocationMatchesRelaySource(
   if (!source) return true;
   if (source.cloud_provider && allocation.effectiveProvider !== source.cloud_provider) return false;
   if (allocation.vmLocation !== source.vm_location) return false;
-  if (source.provider_instance_type && allocation.providerInstanceType !== source.provider_instance_type) {
+  if (
+    source.provider_instance_type &&
+    allocation.providerInstanceType !== source.provider_instance_type
+  ) {
     return false;
   }
   if (
@@ -152,7 +158,10 @@ function allocationMatchesRelaySource(
   ) {
     return false;
   }
-  if (source.provider_instance_image && allocation.providerInstanceImage !== source.provider_instance_image) {
+  if (
+    source.provider_instance_image &&
+    allocation.providerInstanceImage !== source.provider_instance_image
+  ) {
     return false;
   }
   if (
@@ -523,35 +532,139 @@ export async function ensureSessionSnapshotUploadRelay(
     relayNodeId: created.id,
     requiredVersion,
   });
-  await provisionNode(created.id, env, undefined, {
-    authorityProjectId: input.projectId,
-    assertExternalMutationAuthority,
-  });
 
-  const provisioned = await env.DATABASE.prepare(`SELECT status FROM nodes WHERE id = ? LIMIT 1`)
-    .bind(created.id)
-    .first<{ status: string }>();
-  if (provisioned?.status !== 'running') {
-    await cleanupFreshProvisioningNode(env, {
-      nodeId: created.id,
+  // Everything from here on can fail AFTER the provider has already been paid
+  // for a VM: provisioning itself, the post-provision authority recheck (source
+  // stopped, agent upgraded, membership revoked while DNS settled), reading the
+  // project's warm timeout, or the warm-pool enrolment RPC. Any of those leaves a
+  // running node that is not enrolled in warm cleanup and therefore never reaped.
+  // Compensate the whole fresh sequence, exactly like deployment provisioning
+  // does, and never touch a reused relay or the source node — cleanup is scoped
+  // to the id this call created.
+  try {
+    await provisionNode(created.id, env, undefined, {
+      authorityProjectId: input.projectId,
+      assertExternalMutationAuthority,
+    });
+
+    const provisioned = await env.DATABASE.prepare(`SELECT status FROM nodes WHERE id = ? LIMIT 1`)
+      .bind(created.id)
+      .first<{ status: string }>();
+    if (provisioned?.status !== 'running') {
+      await compensateFreshRelayNode(env, {
+        relayNodeId: created.id,
+        userId: input.userId,
+        sourceNodeId: input.sourceNodeId,
+        reason: 'session_snapshot_relay_not_running',
+      });
+      return;
+    }
+    await assertExternalMutationAuthority();
+
+    const lifecycleId = env.NODE_LIFECYCLE.idFromName(created.id);
+    const lifecycle = env.NODE_LIFECYCLE.get(lifecycleId) as DurableObjectStub<
+      import('../durable-objects/node-lifecycle').NodeLifecycle
+    >;
+    const project = input.projectId
+      ? await env.DATABASE.prepare(
+          `SELECT warm_node_timeout_ms FROM projects WHERE id = ? AND user_id = ? LIMIT 1`
+        )
+          .bind(input.projectId, input.userId)
+          .first<{ warm_node_timeout_ms: number | null }>()
+      : null;
+    await lifecycle.markIdle(created.id, input.userId, project?.warm_node_timeout_ms ?? null);
+  } catch (error) {
+    await compensateFreshRelayNode(env, {
+      relayNodeId: created.id,
+      userId: input.userId,
+      sourceNodeId: input.sourceNodeId,
+      reason: 'session_snapshot_relay_provisioning_failed',
+      error,
+    });
+    // The original failure stays the primary error; cleanup outcome is reported
+    // through the structured diagnostic above.
+    throw error;
+  }
+}
+
+/**
+ * Strictly delete the exact VM this call created, or leave durable evidence that
+ * it could not be deleted. Never widens beyond `relayNodeId`, so a reused relay,
+ * the legacy source node, and any node carrying live work are untouched
+ * (`cleanupFreshProvisioningNode` additionally refuses nodes with attached
+ * workspaces or deployment environments).
+ */
+async function compensateFreshRelayNode(
+  env: Env,
+  input: {
+    relayNodeId: string;
+    userId: string;
+    sourceNodeId: string;
+    reason: string;
+    error?: unknown;
+  }
+): Promise<void> {
+  let outcome: FreshProvisioningNodeCleanupResult;
+  try {
+    outcome = await cleanupFreshProvisioningNode(env, {
+      nodeId: input.relayNodeId,
       userId: input.userId,
       nodeRole: 'workspace',
-      reason: 'session_snapshot_relay_not_running',
+      reason: input.reason,
     });
-    return;
+  } catch (cleanupError) {
+    outcome = 'failed';
+    log.error('session_snapshot.relay_cleanup_threw', {
+      userId: input.userId,
+      sourceNodeId: input.sourceNodeId,
+      relayNodeId: input.relayNodeId,
+      reason: input.reason,
+      ...serializeError(cleanupError),
+    });
   }
-  await assertExternalMutationAuthority();
 
-  const lifecycleId = env.NODE_LIFECYCLE.idFromName(created.id);
-  const lifecycle = env.NODE_LIFECYCLE.get(lifecycleId) as DurableObjectStub<
-    import('../durable-objects/node-lifecycle').NodeLifecycle
-  >;
-  const project = input.projectId
-    ? await env.DATABASE.prepare(
-        `SELECT warm_node_timeout_ms FROM projects WHERE id = ? AND user_id = ? LIMIT 1`
-      )
-        .bind(input.projectId, input.userId)
-        .first<{ warm_node_timeout_ms: number | null }>()
-    : null;
-  await lifecycle.markIdle(created.id, input.userId, project?.warm_node_timeout_ms ?? null);
+  log.warn('session_snapshot.relay_provision_compensated', {
+    userId: input.userId,
+    sourceNodeId: input.sourceNodeId,
+    relayNodeId: input.relayNodeId,
+    reason: input.reason,
+    cleanupOutcome: outcome,
+    ...(input.error === undefined ? {} : serializeError(input.error)),
+  });
+
+  if (outcome !== 'failed') return;
+
+  // Durable, operator-visible evidence that a paid VM survived compensation.
+  // Only `error_message` is written: the node's lifecycle status is left exactly
+  // as the deletion path left it so this can never resurrect a terminal node.
+  const diagnostic = relayCleanupFailureDiagnostic(env, input.reason);
+  try {
+    await env.DATABASE.prepare(
+      `UPDATE nodes
+          SET error_message = ?, updated_at = ?
+        WHERE id = ?
+          AND user_id = ?
+          AND runtime = 'vm'
+          AND node_class = 'managed'
+          AND node_role = 'workspace'`
+    )
+      .bind(diagnostic, new Date().toISOString(), input.relayNodeId, input.userId)
+      .run();
+  } catch (evidenceError) {
+    log.error('session_snapshot.relay_cleanup_evidence_failed', {
+      userId: input.userId,
+      relayNodeId: input.relayNodeId,
+      reason: input.reason,
+      ...serializeError(evidenceError),
+    });
+  }
+}
+
+function relayCleanupFailureDiagnostic(env: Env, reason: string): string {
+  const configured = Number.parseInt(env.WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH ?? '', 10);
+  const maxLength =
+    Number.isInteger(configured) && configured > 0
+      ? configured
+      : DEFAULT_RELAY_CLEANUP_DIAGNOSTIC_MAX_LENGTH;
+  return `${RELAY_CLEANUP_FAILURE_DIAGNOSTIC_PREFIX}: ${reason}`.slice(0, maxLength);
 }
