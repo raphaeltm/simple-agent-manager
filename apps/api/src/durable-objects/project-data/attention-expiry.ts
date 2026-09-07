@@ -4,6 +4,7 @@ import { transitionTaskToTerminal } from '../../services/task-terminal-transitio
 import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
+import { readProjectEventWakeLeaseUntil } from './project-events-materialization';
 import {
   activeWorkHardStallMs,
   reconciliationDeadlineMs,
@@ -36,11 +37,13 @@ export async function processExpiredAttentionMarkers(
         await processExpiredNeedsInputMarker(sql, env, marker, failSession, hooks);
         continue;
       }
-      if (
-        marker.kind === 'reconciliation_checkin' &&
-        deferActiveReconciliationCheckin(sql, env, marker)
-      ) {
-        continue;
+      if (marker.kind === 'reconciliation_checkin') {
+        if (deferEventWakeReconciliationCheckin(sql, env, marker)) {
+          continue;
+        }
+        if (deferActiveReconciliationCheckin(sql, env, marker)) {
+          continue;
+        }
       }
       attention.resolveAttentionMarkerById(sql, marker.id, 'system', 'expired');
       await failExpiredTaskMarker(sql, env, marker, failSession, hooks);
@@ -54,6 +57,44 @@ export async function processExpiredAttentionMarkers(
   }
 
   await processDueNeedsInputEscalations(sql, env);
+}
+
+function deferEventWakeReconciliationCheckin(
+  sql: SqlStorage,
+  env: Env,
+  marker: ExpiredAttentionMarker
+): boolean {
+  const now = Date.now();
+  const leaseUntil = readProjectEventWakeLeaseUntil(sql, marker.sessionId, now);
+  if (leaseUntil === null) return false;
+  const extendedExpiry = Math.min(leaseUntil, now + reconciliationDeadlineMs(env));
+  if (extendedExpiry <= now) return false;
+  attention.extendAttentionExpiry(sql, marker.id, extendedExpiry);
+  activity.recordActivityEventInternal(
+    sql,
+    'attention.expiry_deferred',
+    'system',
+    null,
+    marker.workspaceId,
+    marker.sessionId,
+    marker.taskId,
+    JSON.stringify({
+      markerId: marker.id,
+      kind: marker.kind,
+      reason: 'project_event_wake_lease',
+      leaseUntil,
+      extendedExpiry,
+    })
+  );
+  log.info('attention_marker.reconciliation_checkin_deferred_for_project_event_wake', {
+    markerId: marker.id,
+    sessionId: marker.sessionId,
+    taskId: marker.taskId,
+    workspaceId: marker.workspaceId,
+    leaseUntil,
+    extendedExpiry,
+  });
+  return true;
 }
 
 async function processDueNeedsInputEscalations(sql: SqlStorage, env: Env): Promise<void> {

@@ -2,6 +2,15 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { AdmitProjectEventInput } from '../../src/durable-objects/project-data/project-events';
+import {
+  advanceProjectEventPromptAttemptCheckpoint,
+  hasProjectEventWakeLease,
+  invalidProjectEventWakeDeliveryTargetResult,
+  readProjectEventWakeLeaseUntil,
+  runProjectEventWakeMaterializationBatch,
+} from '../../src/durable-objects/project-data/project-events-materialization';
+import type { PromptDeliveryResult } from '../../src/durable-objects/project-data/prompt-delivery';
+import { parseMailboxMessageRow } from '../../src/durable-objects/project-data/row-schemas';
 import type { Env } from '../../src/env';
 import * as svc from '../../src/services/project-data';
 import {
@@ -54,6 +63,17 @@ function subscriptionInput(idempotencyKey: string) {
   };
 }
 
+function subscriptionInputForSession(idempotencyKey: string, sessionId: string) {
+  return {
+    ...subscriptionInput(idempotencyKey),
+    deliveryPreference: {
+      requested: 'existing_session_prompt' as const,
+      resolved: 'queued_for_prompt_delivery' as const,
+      target: { sessionId, taskId: 'task-1', agentId: 'agent-1' },
+    },
+  };
+}
+
 function durableQueueCapability() {
   return {
     adapterId: 'projectdata-prompt-queue',
@@ -87,6 +107,16 @@ async function withEventEnv<T>(
   }
 }
 
+function setEventEnvForTest(key: string, value: string): () => void {
+  const mutableEnv = testEnv as Env & Record<string, string | undefined>;
+  const previous = mutableEnv[key];
+  mutableEnv[key] = value;
+  return () => {
+    if (previous === undefined) delete mutableEnv[key];
+    else mutableEnv[key] = previous;
+  };
+}
+
 async function sessionInboxCount(projectId: string): Promise<number> {
   const stub = getStub(projectId);
   await stub.ensureProjectId(projectId);
@@ -95,6 +125,32 @@ async function sessionInboxCount(projectId: string): Promise<number> {
       | { cnt?: unknown }
       | undefined;
     return typeof row?.cnt === 'number' ? row.cnt : 0;
+  });
+}
+
+async function materializeEventWakeForTest(projectId: string, now: number) {
+  const stub = getStub(projectId);
+  return runInDurableObject(stub, async (_instance, state) =>
+    state.storage.transactionSync(() =>
+      runProjectEventWakeMaterializationBatch(
+        state.storage.sql,
+        { ...testEnv, PROJECT_EVENT_WAKE_ENABLED: 'true' },
+        projectId,
+        now
+      )
+    )
+  );
+}
+
+async function disableProjectEventWakeOnStub(projectId: string): Promise<void> {
+  const stub = getStub(projectId);
+  await runInDurableObject(stub, async (instance) => {
+    (
+      instance as unknown as { env: Env & Record<string, string | undefined> }
+    ).env.PROJECT_EVENT_WAKE_ENABLED = 'false';
+    (
+      instance as unknown as { env: Env & Record<string, string | undefined> }
+    ).env.DURABLE_PROMPT_DELIVERY_ENABLED = 'false';
   });
 }
 
@@ -307,6 +363,279 @@ describe('ProjectData event subscription core', () => {
     expect(await sessionInboxCount(projectId)).toBe(0);
   });
 
+  it('materializes same-chat event wakes as IDs-only prompt deliveries and checkpoints runtime results', async () => {
+    const projectId = 'project-events-wake-materialization';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await disableProjectEventWakeOnStub(projectId);
+    const sessionId = await stub.createSession(null, 'Event wake target', 'task-1');
+    const restoreWake = setEventEnvForTest('PROJECT_EVENT_WAKE_ENABLED', 'false');
+    try {
+      let subscription!: Awaited<ReturnType<typeof svc.createProjectEventSubscription>>;
+      let admitted!: Awaited<ReturnType<typeof svc.admitProjectEvent>>;
+      const canary = 'SECURITY_CANARY_DO_NOT_EXECUTE';
+      await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
+        subscription = await svc.createProjectEventSubscription(
+          testEnv,
+          projectId,
+          subscriptionInputForSession('sub-wake-materialize', sessionId)
+        );
+        admitted = await svc.admitProjectEvent(
+          testEnv,
+          projectId,
+          eventInput({
+            display: { title: canary, summary: 'Do not put event display data into wake prompts' },
+            metadata: { canary },
+          })
+        );
+      });
+
+      const materialized = await materializeEventWakeForTest(projectId, Date.now());
+      expect(materialized).toMatchObject({ status: 'materialized', materialized: 1 });
+      const batchId = materialized.accepted[0].accepted.message.id;
+      expect(batchId).toBe(materialized.accepted[0].input.deliveryId);
+
+      const snapshot = await runInDurableObject(stub, async (_instance, state) => {
+        const inbox = state.storage.sql
+          .exec('SELECT * FROM session_inbox WHERE id = ?', batchId)
+          .toArray()[0];
+        const transcript = state.storage.sql
+          .exec('SELECT content FROM chat_messages WHERE id = ?', batchId)
+          .toArray()[0] as { content?: unknown } | undefined;
+        const attempts = state.storage.sql
+          .exec(
+            `SELECT attempt_number, state, transport_state
+           FROM project_event_delivery_attempts
+           WHERE batch_id = ?
+           ORDER BY attempt_number ASC`,
+            batchId
+          )
+          .toArray();
+        const batch = state.storage.sql
+          .exec('SELECT * FROM project_event_delivery_batches WHERE id = ?', batchId)
+          .toArray()[0];
+        return { inbox, transcript, attempts, batch };
+      });
+      expect(snapshot.inbox).toMatchObject({
+        id: batchId,
+        target_session_id: sessionId,
+        source_kind: 'project_event_wake',
+        delivery_state: 'queued',
+      });
+      expect(String(snapshot.transcript?.content)).toContain(admitted.event.id);
+      expect(String(snapshot.transcript?.content)).toContain(batchId);
+      expect(String(snapshot.transcript?.content)).not.toContain(canary);
+      expect(snapshot.batch).toMatchObject({
+        id: batchId,
+        subscription_id: subscription.subscription.id,
+        delivery_channel: 'prompt_queue',
+        state: 'pending',
+      });
+      expect(snapshot.attempts).toEqual([
+        { attempt_number: 0, state: 'retry', transport_state: 'queued' },
+      ]);
+
+      const acceptedResult: PromptDeliveryResult = {
+        kind: 'accepted',
+        acpSessionId: sessionId,
+        promptEpoch: 123,
+        runtimeIdentity: 'runtime:event-wake',
+        capabilities: {
+          protocolVersion: 1,
+          runtimeIdentity: 'runtime:event-wake',
+          promptReceipts: { supported: true, lookup: true, states: ['accepted'] },
+          checkpointRollover: {
+            supported: false,
+            automatic: false,
+            states: [],
+            defaultGraceMs: 0,
+            maxGraceMs: 0,
+            operationTimeoutMs: 0,
+          },
+        },
+        receipt: {
+          deliveryId: 'receipt:event-wake',
+          state: 'accepted',
+          runtimeIdentity: 'runtime:event-wake',
+          acceptedAt: Date.now(),
+          completedAt: null,
+        },
+      };
+      await runInDurableObject(stub, async (_instance, state) => {
+        const message = parseMailboxMessageRow(
+          state.storage.sql.exec('SELECT * FROM session_inbox WHERE id = ?', batchId).toArray()[0]
+        );
+        advanceProjectEventPromptAttemptCheckpoint(
+          state.storage.sql,
+          projectId,
+          { message, attemptId: 'runtime-attempt-1', mode: 'submit' },
+          acceptedResult
+        );
+      });
+      const delivered = await svc.listProjectEventDeliveryBatches(testEnv, projectId, {
+        subscriptionId: subscription.subscription.id,
+      });
+      expect(delivered.batches.find((item) => item.id === batchId)).toMatchObject({
+        state: 'delivered',
+        deliveryChannel: 'prompt_queue',
+        deliveredVia: 'prompt_queue',
+      });
+      const attempts = await svc.listProjectEventDeliveryAttempts(testEnv, projectId, {
+        batchId,
+      });
+      expect(attempts.attempts.map((item) => item.attemptNumber)).toEqual([1, 0]);
+      expect(attempts.attempts.find((item) => item.attemptNumber === 1)).toMatchObject({
+        state: 'accepted',
+        receiptId: 'receipt:event-wake',
+      });
+    } finally {
+      restoreWake();
+    }
+  });
+
+  it('uses finite event-wake leases and rejects physical delivery after cancellation', async () => {
+    const projectId = 'project-events-wake-lease-fence';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await disableProjectEventWakeOnStub(projectId);
+    const sessionId = await stub.createSession(null, 'Event wake lease target', 'task-1');
+    let subscription!: Awaited<ReturnType<typeof svc.createProjectEventSubscription>>;
+    await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
+      subscription = await svc.createProjectEventSubscription(
+        testEnv,
+        projectId,
+        subscriptionInputForSession('sub-wake-lease', sessionId)
+      );
+      await svc.admitProjectEvent(
+        testEnv,
+        projectId,
+        eventInput({ deliveryKey: 'delivery-wake-lease' })
+      );
+    });
+
+    const materialized = await materializeEventWakeForTest(projectId, Date.now());
+    const batchId = materialized.accepted[0].accepted.message.id;
+    const beforeCancel = await runInDurableObject(stub, async (_instance, state) => {
+      const now = Date.now();
+      const message = parseMailboxMessageRow(
+        state.storage.sql.exec('SELECT * FROM session_inbox WHERE id = ?', batchId).toArray()[0]
+      );
+      return {
+        leaseUntil: readProjectEventWakeLeaseUntil(state.storage.sql, sessionId, now),
+        hasLease: hasProjectEventWakeLease(state.storage.sql, sessionId, now),
+        invalid: invalidProjectEventWakeDeliveryTargetResult(
+          state.storage.sql,
+          { ...testEnv, PROJECT_EVENT_WAKE_ENABLED: 'true' },
+          projectId,
+          { message, attemptId: 'attempt-before-cancel', mode: 'submit' },
+          now
+        ),
+      };
+    });
+    expect(beforeCancel.hasLease).toBe(true);
+    expect(beforeCancel.leaseUntil).toBeGreaterThan(Date.now());
+    expect(beforeCancel.invalid).toBeNull();
+
+    await svc.cancelProjectEventSubscription(testEnv, projectId, {
+      subscriptionId: subscription.subscription.id,
+      cancelledBy: { type: 'human', id: 'human-1' },
+      reason: 'cancel before physical wake',
+    });
+    const afterCancel = await runInDurableObject(stub, async (_instance, state) => {
+      const now = Date.now();
+      const message = parseMailboxMessageRow(
+        state.storage.sql.exec('SELECT * FROM session_inbox WHERE id = ?', batchId).toArray()[0]
+      );
+      return {
+        hasLease: hasProjectEventWakeLease(state.storage.sql, sessionId, now),
+        invalid: invalidProjectEventWakeDeliveryTargetResult(
+          state.storage.sql,
+          { ...testEnv, PROJECT_EVENT_WAKE_ENABLED: 'true' },
+          projectId,
+          { message, attemptId: 'attempt-after-cancel', mode: 'submit' },
+          now
+        ),
+      };
+    });
+    expect(afterCancel.hasLease).toBe(false);
+    expect(afterCancel.invalid).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+  });
+
+  it('keeps accepted event-wake batches readable through natural expiry grace and revokes them on cancellation', async () => {
+    const projectId = 'project-events-wake-read-grace';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await disableProjectEventWakeOnStub(projectId);
+    const sessionId = await stub.createSession(null, 'Event wake grace target', 'task-1');
+    const restoreWake = setEventEnvForTest('PROJECT_EVENT_WAKE_ENABLED', 'false');
+    try {
+      let subscription!: Awaited<ReturnType<typeof svc.createProjectEventSubscription>>;
+      let admitted!: Awaited<ReturnType<typeof svc.admitProjectEvent>>;
+      await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
+        subscription = await svc.createProjectEventSubscription(
+          testEnv,
+          projectId,
+          subscriptionInputForSession('sub-wake-grace', sessionId)
+        );
+        admitted = await svc.admitProjectEvent(testEnv, projectId, eventInput());
+      });
+      const materialized = await materializeEventWakeForTest(projectId, Date.now());
+      const batchId = materialized.accepted[0].accepted.message.id;
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE project_event_delivery_batches
+         SET state = 'delivered', delivered_via = 'prompt_queue', delivered_at = ?, terminal_at = ?
+         WHERE id = ?`,
+          Date.now(),
+          Date.now(),
+          batchId
+        );
+        state.storage.sql.exec(
+          `UPDATE project_event_subscriptions
+         SET expires_at = ?, updated_at = ?
+         WHERE id = ?`,
+          Date.now() - 1,
+          Date.now() - 1,
+          subscription.subscription.id
+        );
+      });
+      await svc.expireProjectEventSubscriptions(testEnv, projectId, { now: Date.now() });
+
+      const visibility = {
+        owner: { type: 'agent' as const, id: 'agent-1' },
+        target: { sessionId, taskId: 'task-1', agentId: 'agent-1' },
+      };
+      const pulledAfterExpiry = await svc.getProjectEvent(testEnv, projectId, {
+        eventId: admitted.event.id,
+        visibility,
+      });
+      expect(pulledAfterExpiry).toMatchObject({
+        id: admitted.event.id,
+        delivery: { id: batchId, deliveryChannel: 'prompt_queue', state: 'delivered' },
+      });
+      const ackedAfterExpiry = await svc.ackProjectEventDelivery(testEnv, projectId, {
+        deliveryId: batchId,
+        visibility,
+        acknowledgedBy: { type: 'agent', id: 'agent-1' },
+      });
+      expect(ackedAfterExpiry).toMatchObject({
+        acknowledged: true,
+        delivery: { id: batchId, state: 'acked' },
+      });
+
+      await svc.cancelProjectEventSubscription(testEnv, projectId, {
+        subscriptionId: subscription.subscription.id,
+        cancelledBy: { type: 'human', id: 'human-1' },
+        reason: 'revoke grace',
+      });
+      await expect(
+        svc.getProjectEvent(testEnv, projectId, { eventId: admitted.event.id, visibility })
+      ).resolves.toBeNull();
+    } finally {
+      restoreWake();
+    }
+  });
+
   it('fails wrong-project calls at the ProjectData boundary', async () => {
     const stub = getStub('project-events-binding-a');
     await stub.ensureProjectId('project-events-binding-a');
@@ -380,7 +709,7 @@ describe('ProjectData event subscription core', () => {
     });
 
     await withEventEnv(
-      { PROJECT_EVENT_RETENTION_DAYS: '1', PROJECT_EVENT_RETENTION_BATCH_ROWS: '1' },
+      { PROJECT_EVENT_RETENTION_DAYS: '1', PROJECT_EVENT_RETENTION_BATCH_ROWS: '10' },
       async () => {
         const retentionProject = 'project-events-retention-cap';
         await svc.admitProjectEvent(
@@ -510,10 +839,11 @@ describe('ProjectData event subscription core', () => {
         await runInDurableObject(getStub(terminalProject), async (_instance, state) => {
           state.storage.sql.exec(
             `UPDATE project_event_delivery_batches
-             SET state = 'delivered',
+             SET state = 'acked',
                  updated_at = 1000,
+                 acked_at = 1000,
                  terminal_at = 1000,
-                 terminal_reason = 'delivered'
+                 terminal_reason = 'acknowledged'
              WHERE id = ?`,
             terminalBatch.batch.id
           );
@@ -543,6 +873,103 @@ describe('ProjectData event subscription core', () => {
         expect(terminalStatus.attempts).toHaveLength(0);
       }
     );
+  });
+
+  it.each([97, 98, 99, 100, 500])(
+    'expires %i subscriptions and matches inside the real SQLite bind budget',
+    async (count) => {
+      const projectId = `project-events-bind-budget-${count}`;
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec(
+          `INSERT INTO project_events
+           (id, project_id, contract_version, source, event_type, subject_type, subject_id,
+            severity, delivery_key, payload_fingerprint, metadata_json, metadata_bytes,
+            display_json, display_bytes, raw_payload_ref_json, raw_payload_ref_bytes,
+            occurred_at, received_at, updated_at, state)
+           VALUES (?, ?, 1, 'github', 'check_suite.completed', 'pull_request', '42',
+            'warning', 'bind-proof-event', 'sha256:bind-proof', '{}', 2,
+            '{"untrusted":true}', 18, NULL, 0, 1000, 1000, 1000, 'recorded')`,
+          'event-bind-proof',
+          projectId
+        );
+        for (let index = 0; index < count; index += 1) {
+          const subscriptionId = `sub-bind-proof-${index}`;
+          state.storage.sql.exec(
+            `INSERT INTO project_event_subscriptions
+             (id, project_id, contract_version, owner_type, owner_id, owner_name,
+              idempotency_key, idempotency_fingerprint, filter_version, filter_json,
+              filter_fingerprint, match_key_count, requested_delivery, resolved_delivery,
+              target_session_id, target_task_id, target_runtime_id, target_agent_id,
+              lifecycle_state, reason, created_at, updated_at, expires_at)
+             VALUES (?, ?, 1, 'agent', ?, NULL, ?, ?, 1, '{"version":1}',
+              ?, 0, 'record_only', 'record_only', NULL, NULL, NULL, NULL,
+              'active', NULL, 1000, 1000, 1000)`,
+            subscriptionId,
+            projectId,
+            `agent-${index}`,
+            `idem-${index}`,
+            `fp-${index}`,
+            `filter-${index}`
+          );
+          state.storage.sql.exec(
+            `INSERT INTO project_event_matches
+             (id, project_id, event_id, subscription_id, state, matched_at,
+              lifecycle_checked_at, batch_id, reason)
+             VALUES (?, ?, 'event-bind-proof', ?, 'matched', 1000, 1000, NULL, NULL)`,
+            `match-bind-proof-${index}`,
+            projectId,
+            subscriptionId
+          );
+        }
+      });
+
+      const retention = await svc.runProjectEventRetention(testEnv, projectId, {
+        now: 2000,
+        limit: count,
+        refreshAccounting: false,
+      });
+      expect(retention).toMatchObject({
+        expiredSubscriptions: count,
+        deletedEvents: 0,
+        deletedMatches: 0,
+        deletedBatches: 0,
+        deletedAttempts: 0,
+        hasMore: false,
+      });
+      const counts = await runInDurableObject(stub, async (_instance, state) => {
+        const subscriptions = state.storage.sql
+          .exec(
+            `SELECT lifecycle_state, COUNT(*) AS cnt
+             FROM project_event_subscriptions
+             GROUP BY lifecycle_state`
+          )
+          .toArray();
+        const matches = state.storage.sql
+          .exec(
+            `SELECT state, COUNT(*) AS cnt
+             FROM project_event_matches
+             GROUP BY state`
+          )
+          .toArray();
+        return { subscriptions, matches };
+      });
+      expect(counts.subscriptions).toEqual([{ lifecycle_state: 'expired', cnt: count }]);
+      expect(counts.matches).toEqual([{ state: 'expired', cnt: count }]);
+    }
+  );
+
+  it('clamps receivedAt to local receipt time while preserving occurredAt evidence', async () => {
+    const projectId = 'project-events-received-at-clamp';
+    const future = Date.now() + 60_000;
+    const admitted = await svc.admitProjectEvent(testEnv, projectId, {
+      ...eventInput({ occurredAt: undefined, receivedAt: future }),
+      deliveryKey: 'future-received-at',
+      payloadFingerprint: 'sha256:future-received-at',
+    });
+    expect(admitted.event.receivedAt).toBeLessThanOrEqual(Date.now());
+    expect(admitted.event.occurredAt).toBe(future);
   });
 
   it('rechecks cancel and expiry before matching or delivery-batch recording', async () => {

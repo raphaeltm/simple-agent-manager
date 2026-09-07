@@ -34,6 +34,7 @@ import {
   getRequiredBatch,
   getRequiredSubscription,
   mapRows,
+  nextPhysicalAttemptNumber,
   normalizeAttemptState,
   readAttemptById,
   readAttemptByIdempotencyKey,
@@ -316,7 +317,7 @@ export function recordProjectEventDeliveryAttempt(
     }
   }
 
-  const attemptNumber = existingAttemptCount + 1;
+  const attemptNumber = nextPhysicalAttemptNumber(sql, projectId, batchId);
   const attemptId = generateId();
   sql.exec(
     `INSERT INTO project_event_delivery_attempts
