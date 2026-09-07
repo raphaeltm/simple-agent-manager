@@ -7,7 +7,9 @@ import * as projectDataService from '../../src/services/project-data';
 import {
   admitProjectEventSourceIntentById,
   enqueueProjectEventSourceIntent,
+  markProjectEventSourceIntentSuperseded,
   projectEventSourceOutboxInsertStatement,
+  readProjectEventSourceIntentById,
   reconcileProjectEventSourceOutbox,
 } from '../../src/services/project-event-source-outbox';
 import { transitionTaskToTerminal } from '../../src/services/task-terminal-transition';
@@ -84,6 +86,9 @@ async function outboxRow(id: string) {
 describe('Project event source outbox durability on migrated D1', () => {
   beforeEach(async () => {
     await env.DATABASE.prepare(`DELETE FROM project_event_source_outbox WHERE id LIKE ?`)
+      .bind(`${TEST_PREFIX}-%`)
+      .run();
+    await env.DATABASE.prepare(`DELETE FROM credential_limit_windows WHERE project_id LIKE ?`)
       .bind(`${TEST_PREFIX}-%`)
       .run();
   });
@@ -290,6 +295,157 @@ describe('Project event source outbox durability on migrated D1', () => {
       state: 'pending',
       admission_outcome: null,
     });
+  });
+
+  it('does not return or mutate a foreign row when scoped supersession misses on migrated D1', async () => {
+    const first = await seedProjectGraph('supersede-a');
+    const second = await seedProjectGraph('supersede-b');
+    const sharedIntentId = `${TEST_PREFIX}-foreign-supersede-intent`;
+    await enqueueProjectEventSourceIntent(
+      testEnv,
+      eventInput(first.projectId, 'foreign-supersede'),
+      {
+        id: sharedIntentId,
+        now: NOW,
+      }
+    );
+
+    await expect(
+      readProjectEventSourceIntentById(testEnv, {
+        id: sharedIntentId,
+        projectId: second.projectId,
+        source: 'sam.lifecycle',
+        deliveryKey: 'task:foreign-supersede:status:completed',
+      })
+    ).resolves.toBeNull();
+    await expect(
+      markProjectEventSourceIntentSuperseded(testEnv, {
+        id: sharedIntentId,
+        projectId: second.projectId,
+        source: 'sam.lifecycle',
+        deliveryKey: 'task:foreign-supersede:status:completed',
+        now: NOW,
+        reason: 'wrong project should not leak',
+      })
+    ).resolves.toBeNull();
+
+    expect(await outboxRow(sharedIntentId)).toMatchObject({
+      state: 'pending',
+      attempt_count: 0,
+      claim_token: null,
+    });
+  });
+
+  it('requires the two-mutation candidate minimum on migrated D1', async () => {
+    const { projectId } = await seedProjectGraph('mutation-budget');
+    await enqueueProjectEventSourceIntent(testEnv, eventInput(projectId, 'budget-a'), {
+      id: `${projectId}-budget-a-intent`,
+      now: NOW,
+    });
+    await enqueueProjectEventSourceIntent(testEnv, eventInput(projectId, 'budget-b'), {
+      id: `${projectId}-budget-b-intent`,
+      now: NOW,
+    });
+
+    const tooSmall = await reconcileProjectEventSourceOutbox(testEnv, { limit: 1, now: NOW });
+
+    expect(tooSmall).toMatchObject({
+      attempted: 0,
+      admitted: 0,
+      outboxMutations: 0,
+      hasMore: true,
+    });
+    expect(await projectDataService.getProjectEventRecentStatus(testEnv, projectId)).toMatchObject({
+      events: [],
+    });
+
+    const minimum = await reconcileProjectEventSourceOutbox(testEnv, { limit: 2, now: NOW });
+
+    expect(minimum).toMatchObject({
+      attempted: 1,
+      admitted: 1,
+      outboxMutations: 2,
+      hasMore: true,
+    });
+    expect(await outboxRow(`${projectId}-budget-a-intent`)).toMatchObject({
+      state: 'admitted',
+      attempt_count: 1,
+      admission_outcome: 'created',
+    });
+    expect(await outboxRow(`${projectId}-budget-b-intent`)).toMatchObject({
+      state: 'pending',
+      attempt_count: 0,
+    });
+  });
+
+  it('captures credential limit intents only for matching 0146 identity on migrated D1', async () => {
+    const { projectId } = await seedProjectGraph('credential-capture');
+    const observedAt = NOW.getTime();
+    const credentialEvent = eventInput(projectId, 'credential-capture', {
+      source: 'sam.credential_limit',
+      eventType: 'credential.limit.warning',
+      subject: { type: 'credential', id: 'cc_credentials:worker-credential' },
+      deliveryKey: 'credential-limit:worker-capture',
+      payloadFingerprint: 'sha256:worker-credential-window',
+      metadata: { level: 'warning', windowType: 'openai.tokens', observedAt },
+    });
+    const capture = {
+      kind: 'credential_limit_window_transition' as const,
+      projectId,
+      credentialReference: 'cc_credentials:worker-credential',
+      windowType: 'openai.tokens',
+      observedAt,
+      maxActiveIntentsPerProject: 5,
+    };
+
+    const inserted = await projectEventSourceOutboxInsertStatement(testEnv, credentialEvent, {
+      id: `${projectId}-credential-capture-intent`,
+      now: NOW,
+      capture,
+    }).run();
+
+    expect(inserted.meta.changes).toBe(1);
+    await expect(
+      env.DATABASE.prepare(
+        `SELECT credential_limit_window_type, credential_limit_observed_at
+           FROM project_event_source_outbox
+          WHERE id = ?`
+      )
+        .bind(`${projectId}-credential-capture-intent`)
+        .first()
+    ).resolves.toEqual({
+      credential_limit_window_type: 'openai.tokens',
+      credential_limit_observed_at: observedAt,
+    });
+    const mismatchInputs = [
+      { ...credentialEvent, source: 'sam.lifecycle' },
+      { ...credentialEvent, subject: { type: 'task', id: 'cc_credentials:worker-credential' } },
+      { ...credentialEvent, eventType: 'task.completed' },
+      {
+        ...credentialEvent,
+        metadata: { ...credentialEvent.metadata, windowType: 'openai.requests' },
+      },
+      {
+        ...credentialEvent,
+        metadata: { ...credentialEvent.metadata, observedAt: observedAt + 1 },
+      },
+    ];
+    for (const input of mismatchInputs) {
+      expect(() =>
+        projectEventSourceOutboxInsertStatement(testEnv, input, {
+          id: `${projectId}-credential-capture-mismatch`,
+          now: NOW,
+          capture,
+        })
+      ).toThrow();
+    }
+    expect(() =>
+      projectEventSourceOutboxInsertStatement(testEnv, credentialEvent, {
+        id: `${projectId}-credential-capture-unsupported`,
+        now: NOW,
+        capture: { kind: 'unsupported', projectId } as never,
+      })
+    ).toThrow('Unsupported project event source outbox capture kind');
   });
 
   it('does not enter ProjectData after ownership is lost before admission on migrated D1', async () => {

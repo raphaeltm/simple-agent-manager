@@ -10,6 +10,7 @@ import {
   markProjectEventSourceIntentSuperseded,
   projectEventSourceOutboxInsertStatement,
   readProjectEventSourceIntentByDelivery,
+  readProjectEventSourceIntentById,
   reconcileProjectEventSourceOutbox,
 } from '../../../src/services/project-event-source-outbox';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -74,6 +75,9 @@ describe('project event source outbox', () => {
         ON project_event_source_outbox(state, expires_at, id);
       CREATE INDEX idx_project_event_source_outbox_active_capacity
         ON project_event_source_outbox(project_id, source, state, expires_at, id);
+      CREATE INDEX idx_project_event_source_outbox_credential_limit_active
+        ON project_event_source_outbox(project_id, source, subject_id, credential_limit_window_type, state, credential_limit_observed_at, id)
+        WHERE credential_limit_window_type IS NOT NULL AND credential_limit_observed_at IS NOT NULL;
       CREATE INDEX idx_project_event_source_outbox_active_attempts
         ON project_event_source_outbox(state, attempt_count, id);
       CREATE INDEX idx_project_event_source_outbox_exhausted_ready
@@ -87,11 +91,6 @@ describe('project event source outbox', () => {
 
   function addCredentialLimitOutboxColumns() {
     sqlite.exec(`
-      ALTER TABLE project_event_source_outbox ADD COLUMN credential_limit_window_type TEXT;
-      ALTER TABLE project_event_source_outbox ADD COLUMN credential_limit_observed_at INTEGER;
-      CREATE INDEX idx_project_event_source_outbox_credential_limit_active
-        ON project_event_source_outbox(project_id, source, subject_id, credential_limit_window_type, state, credential_limit_observed_at, id)
-        WHERE credential_limit_window_type IS NOT NULL AND credential_limit_observed_at IS NOT NULL;
       CREATE INDEX idx_credential_limit_windows_project_updated
         ON credential_limit_windows(project_id, updated_at, credential_reference, window_type);
       CREATE INDEX idx_credential_limit_windows_project_delivery
@@ -449,7 +448,7 @@ describe('project event source outbox', () => {
 
     const result = await admitProjectEventSourceIntentById(env, 'intent-replaced-before-read', NOW);
 
-    expect(result).toMatchObject({ state: 'processing', attemptCount: 2 });
+    expect(result).toMatchObject({ state: 'processing', attemptCount: 2, outboxMutations: 1 });
     expect(admitProjectEvent).not.toHaveBeenCalled();
     expect(rowById('intent-replaced-before-read')).toMatchObject({
       state: 'processing',
@@ -500,7 +499,7 @@ describe('project event source outbox', () => {
       NOW
     );
 
-    expect(result).toMatchObject({ state: 'processing', attemptCount: 2 });
+    expect(result).toMatchObject({ state: 'processing', attemptCount: 2, outboxMutations: 1 });
     expect(admitProjectEvent).not.toHaveBeenCalled();
     expect(rowById('intent-loses-before-admission')).toMatchObject({
       state: 'processing',
@@ -717,7 +716,7 @@ describe('project event source outbox', () => {
       subject: { type: 'credential', id: 'cc_credentials:cred-1' },
       deliveryKey: 'credential-limit:winning',
       payloadFingerprint: 'sha256:credential-window',
-      metadata: { level: 'warning', windowType: 'openai.tokens' },
+      metadata: { level: 'warning', windowType: 'openai.tokens', observedAt },
     };
 
     const inserted = await projectEventSourceOutboxInsertStatement(env, event, {
@@ -822,6 +821,69 @@ describe('project event source outbox', () => {
     ]);
   });
 
+  it('rejects credential capture identity mismatches and unsupported capture kinds', () => {
+    const observedAt = NOW.getTime();
+    const event = {
+      ...sourceEvent(),
+      source: 'sam.credential_limit',
+      eventType: 'credential.limit.warning',
+      subject: { type: 'credential', id: 'cc_credentials:cred-1' },
+      deliveryKey: 'credential-limit:identity',
+      payloadFingerprint: 'sha256:credential-window-identity',
+      metadata: { level: 'warning', windowType: 'openai.tokens', observedAt },
+    };
+    const capture = {
+      kind: 'credential_limit_window_transition' as const,
+      projectId: 'project-1',
+      credentialReference: 'cc_credentials:cred-1',
+      windowType: 'openai.tokens',
+      observedAt,
+      maxActiveIntentsPerProject: 2,
+    };
+    const cases = [
+      [
+        { ...event, source: 'sam.lifecycle' },
+        'Credential limit capture source does not match intent source',
+      ],
+      [
+        { ...event, subject: { type: 'task', id: 'cc_credentials:cred-1' } },
+        'Credential limit capture subject type does not match intent subject',
+      ],
+      [
+        { ...event, eventType: 'task.completed' },
+        'Credential limit capture event type is not supported',
+      ],
+      [
+        { ...event, metadata: { ...event.metadata, windowType: 'openai.requests' } },
+        'Credential limit capture window type does not match intent metadata',
+      ],
+      [
+        { ...event, metadata: { ...event.metadata, observedAt: observedAt + 1 } },
+        'Credential limit capture observedAt does not match intent metadata',
+      ],
+    ] as const;
+
+    for (const [input, error] of cases) {
+      expect(() =>
+        projectEventSourceOutboxInsertStatement(env, input, {
+          id: 'credential-window-mismatch',
+          now: NOW,
+          capture,
+        })
+      ).toThrow(error);
+    }
+    expect(() =>
+      projectEventSourceOutboxInsertStatement(env, event, {
+        id: 'credential-window-unsupported-kind',
+        now: NOW,
+        capture: { kind: 'unknown_capture_kind', projectId: 'project-1' } as never,
+      })
+    ).toThrow('Unsupported project event source outbox capture kind');
+    expect(
+      sqlite.prepare(`SELECT COUNT(*) AS count FROM project_event_source_outbox`).get()
+    ).toEqual({ count: 0 });
+  });
+
   it('reads by delivery and supersedes only scoped non-live source intents', async () => {
     await enqueueProjectEventSourceIntent(env, sourceEvent(), { id: 'supersede-intent', now: NOW });
     await enqueueProjectEventSourceIntent(env, {
@@ -829,6 +891,19 @@ describe('project event source outbox', () => {
       deliveryKey: 'task:task-1:status:other',
       payloadFingerprint: 'sha256:other',
     });
+    await enqueueProjectEventSourceIntent(
+      env,
+      {
+        ...sourceEvent(),
+        projectId: 'project-2',
+        deliveryKey: 'task:foreign:status:completed',
+        payloadFingerprint: 'sha256:foreign',
+      },
+      {
+        id: 'foreign-intent',
+        now: NOW,
+      }
+    );
 
     const byDelivery = await readProjectEventSourceIntentByDelivery(env, {
       projectId: 'project-1',
@@ -836,6 +911,31 @@ describe('project event source outbox', () => {
       deliveryKey: 'task:task-1:status:completed',
     });
     expect(byDelivery?.id).toBe('supersede-intent');
+    await expect(
+      readProjectEventSourceIntentById(env, {
+        id: 'foreign-intent',
+        projectId: 'project-1',
+        source: 'sam.lifecycle',
+        deliveryKey: 'task:foreign:status:completed',
+      })
+    ).resolves.toBeNull();
+    await expect(
+      markProjectEventSourceIntentSuperseded(env, {
+        id: 'foreign-intent',
+        projectId: 'project-1',
+        source: 'sam.lifecycle',
+        deliveryKey: 'task:foreign:status:completed',
+        now: NOW,
+        reason: 'wrong project should not leak',
+      })
+    ).resolves.toBeNull();
+    expect(
+      sqlite
+        .prepare(
+          `SELECT project_id, state, last_error FROM project_event_source_outbox WHERE id = ?`
+        )
+        .get('foreign-intent')
+    ).toEqual({ project_id: 'project-2', state: 'pending', last_error: null });
 
     sqlite
       .prepare(
@@ -883,7 +983,7 @@ describe('project event source outbox', () => {
     ).toEqual({ state: 'pending' });
   });
 
-  it('uses the sweep limit as a finite work-item ceiling for candidate claim and settle', async () => {
+  it('requires two available mutations before claiming and settling a candidate', async () => {
     admitProjectEvent
       .mockResolvedValueOnce({
         outcome: 'created',
@@ -899,20 +999,56 @@ describe('project event source outbox', () => {
       id: 'intent-limit-one',
       now: NOW,
     });
-    await enqueueProjectEventSourceIntent(env, {
-      ...sourceEvent(),
-      subject: { type: 'task', id: 'task-2' },
-      deliveryKey: 'task:task-2:status:completed',
-      payloadFingerprint: 'sha256:stable-2',
-      metadata: { taskId: 'task-2', status: 'completed' },
-    }, {
-      id: 'intent-limit-two',
-      now: NOW,
+    await enqueueProjectEventSourceIntent(
+      env,
+      {
+        ...sourceEvent(),
+        subject: { type: 'task', id: 'task-2' },
+        deliveryKey: 'task:task-2:status:completed',
+        payloadFingerprint: 'sha256:stable-2',
+        metadata: { taskId: 'task-2', status: 'completed' },
+      },
+      {
+        id: 'intent-limit-two',
+        now: NOW,
+      }
+    );
+
+    const tooSmall = await reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
+
+    expect(tooSmall).toMatchObject({
+      attempted: 0,
+      admitted: 0,
+      outboxMutations: 0,
+      hasMore: true,
     });
+    expect(admitProjectEvent).not.toHaveBeenCalled();
+    expect(
+      sqlite
+        .prepare(
+          `SELECT state, COUNT(*) AS count
+             FROM project_event_source_outbox
+            GROUP BY state
+            ORDER BY state`
+        )
+        .all()
+    ).toEqual([{ state: 'pending', count: 2 }]);
 
-    const stats = await reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
+    const before = sqlite.prepare(`SELECT total_changes() AS changes`).get() as {
+      changes: number;
+    };
+    const minimum = await reconcileProjectEventSourceOutbox(env, { limit: 2, now: NOW });
+    const after = sqlite.prepare(`SELECT total_changes() AS changes`).get() as {
+      changes: number;
+    };
 
-    expect(stats).toMatchObject({ attempted: 1, admitted: 1, hasMore: true });
+    expect(after.changes - before.changes).toBe(2);
+    expect(minimum).toMatchObject({
+      attempted: 1,
+      admitted: 1,
+      outboxMutations: 2,
+      hasMore: true,
+    });
     expect(admitProjectEvent).toHaveBeenCalledTimes(1);
     expect(
       sqlite
@@ -950,21 +1086,84 @@ describe('project event source outbox', () => {
       now: NOW,
     });
 
-    const statsPromise = reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
+    const statsPromise = reconcileProjectEventSourceOutbox(env, { limit: 2, now: NOW });
     await waitForProjectDataAdmissions(1);
     await vi.advanceTimersByTimeAsync(5);
     const stats = await statsPromise;
 
-    expect(stats).toMatchObject({ attempted: 1, retryableFailed: 1, timedOut: 1 });
+    expect(stats).toMatchObject({
+      attempted: 1,
+      retryableFailed: 1,
+      timedOut: 1,
+      outboxMutations: 2,
+    });
     expect(rowById('intent-wall-budget')).toMatchObject({
       state: 'retryable_failed',
       attempt_count: 1,
-      last_error: 'ProjectEventSourceAdmissionTimeoutError: ProjectData admission timed out after 5ms',
+      last_error:
+        'ProjectEventSourceAdmissionTimeoutError: ProjectData admission timed out after 5ms',
     });
     resolveRemote?.({
       outcome: 'created',
       event: { id: 'event-after-wall-timeout', state: 'recorded' },
       matches: [],
+    });
+  });
+
+  it('does not start external admission after claim reads consume the sweep wall', async () => {
+    env.PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS = '20';
+    env.PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS = '40';
+    admitProjectEvent.mockResolvedValue({
+      outcome: 'created',
+      event: { id: 'event-after-deadline', state: 'recorded' },
+      matches: [],
+    });
+    await enqueueProjectEventSourceIntent(env, sourceEvent(), {
+      id: 'intent-deadline-before-admission',
+      now: NOW,
+    });
+
+    const database = env.DATABASE;
+    let delayed = false;
+    env.DATABASE = {
+      ...database,
+      prepare: (sql: string) => {
+        const statement = database.prepare(sql);
+        if (delayed || !sql.includes("WHERE id = ? AND state = 'processing' AND claim_token = ?")) {
+          return statement;
+        }
+        return {
+          ...statement,
+          bind: (...params: unknown[]) => {
+            const bound = statement.bind(...params);
+            return {
+              ...bound,
+              first: async (column?: string) => {
+                delayed = true;
+                await vi.advanceTimersByTimeAsync(35);
+                return bound.first(column);
+              },
+            };
+          },
+        } as D1PreparedStatement;
+      },
+    } as D1Database;
+
+    const stats = await reconcileProjectEventSourceOutbox(env, { limit: 2, now: NOW });
+
+    expect(admitProjectEvent).not.toHaveBeenCalled();
+    expect(stats).toMatchObject({
+      attempted: 1,
+      retryableFailed: 1,
+      timedOut: 1,
+      outboxMutations: 2,
+    });
+    expect(rowById('intent-deadline-before-admission')).toMatchObject({
+      state: 'retryable_failed',
+      attempt_count: 1,
+      claim_token: null,
+      last_error:
+        'ProjectEventSourceAdmissionTimeoutError: ProjectData admission timed out after 0ms',
     });
   });
 
