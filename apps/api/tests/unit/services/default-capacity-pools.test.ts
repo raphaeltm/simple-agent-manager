@@ -2883,6 +2883,63 @@ describe('default capacity pool creation', () => {
     ).toEqual({ configuration_state: 'configured-ready' });
   });
 
+  it('does not let stale catalog publication insert inventory omitted by a newer complete refresh', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+
+    let releaseOlderRefresh: (() => void) | null = null;
+    const olderRefresh = ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => {
+        await new Promise<void>((resolve) => {
+          releaseOlderRefresh = resolve;
+        });
+        return [
+          liveHetznerOffering({
+            location: 'fsn1',
+            providerInstanceType: 'stale-catalog-only',
+            displayName: 'Stale Catalog Only',
+          }),
+        ];
+      },
+    });
+    await vi.waitFor(() => expect(releaseOlderRefresh).toBeTypeOf('function'));
+
+    const newerDb = drizzle(sqlite!, { schema });
+    await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => ({
+        offerings: [],
+        refreshSucceeded: true,
+        catalogComplete: true,
+      }),
+    });
+    releaseOlderRefresh?.();
+    await olderRefresh;
+
+    expect(
+      getRows<{ provider_instance_type: string }>(`
+        SELECT provider_instance_type
+        FROM capacity_pool_candidates
+        WHERE provider_instance_type = 'stale-catalog-only'
+      `)
+    ).toEqual([]);
+    expect(
+      getRows<{ value: string }>(`
+        SELECT value
+        FROM platform_settings
+        WHERE key LIKE 'capacityPools.catalogGeneration.v1:%'
+      `)[0]
+    ).toEqual({ value: '3' });
+    expect(
+      getRows<{ configuration_state: string }>(
+        "SELECT configuration_state FROM capacity_pools WHERE scope = 'user'"
+      )[0]
+    ).toEqual({ configuration_state: 'configured-empty' });
+  });
+
   it('does not let a stale refresh reactivate a source disabled by a concurrent credential edit', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-hetzner' });
@@ -3893,6 +3950,111 @@ describe('default capacity pool creation', () => {
     );
   });
 
+  it('keeps placement authority generation stable across unchanged catalog refreshes', async () => {
+    const db = createDb();
+    seedUserCredential({
+      id: 'user-hetzner',
+      updatedAt: '2026-08-28T10:00:00.000Z',
+    });
+    const offering = liveHetznerOffering({
+      location: 'fsn1',
+      providerInstanceType: 'cx23',
+      displayName: 'CX23',
+    });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [offering],
+    });
+
+    const initialSource = getRows<{ source_generation: number }>(`
+      SELECT source_generation
+      FROM capacity_sources
+      WHERE credential_id = 'user-hetzner'
+    `)[0];
+    const initialCandidate = getRows<{ catalog_generation: number }>(`
+      SELECT catalog_generation
+      FROM capacity_pool_candidates
+      WHERE provider_instance_type = 'cx23'
+    `)[0];
+    const initialSelection = await resolveTaskStartCapacityPoolSelection(
+      db as never,
+      defaultTaskPlacement('unchanged-refresh-initial'),
+      { ensure: false }
+    );
+    const initialSnapshot = capacityPlacementSnapshotForTaskStart(initialSelection);
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [offering],
+    });
+
+    const refreshedSource = getRows<{ source_generation: number }>(`
+      SELECT source_generation
+      FROM capacity_sources
+      WHERE credential_id = 'user-hetzner'
+    `)[0];
+    const refreshedCandidate = getRows<{ catalog_generation: number }>(`
+      SELECT catalog_generation
+      FROM capacity_pool_candidates
+      WHERE provider_instance_type = 'cx23'
+    `)[0];
+    const refreshedSelection = await resolveTaskStartCapacityPoolSelection(
+      db as never,
+      defaultTaskPlacement('unchanged-refresh-second'),
+      { ensure: false }
+    );
+    const refreshedSnapshot = capacityPlacementSnapshotForTaskStart(refreshedSelection);
+
+    expect(refreshedSource.source_generation).toBe(initialSource.source_generation);
+    expect(refreshedCandidate.catalog_generation).toBeGreaterThan(
+      initialCandidate.catalog_generation
+    );
+    expect(refreshedSnapshot?.capacityPoolCandidateId).toBe(
+      initialSnapshot?.capacityPoolCandidateId
+    );
+    expect(refreshedSnapshot?.placementCredentialVersion).toBe(
+      initialSnapshot?.placementCredentialVersion
+    );
+    expect(refreshedSnapshot?.sourceGeneration).toBe(initialSnapshot?.sourceGeneration);
+
+    const catalogRemoved = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => ({
+        offerings: [],
+        refreshSucceeded: true,
+        catalogComplete: true,
+      }),
+    });
+    const removedSource = getRows<{ source_generation: number }>(`
+      SELECT source_generation
+      FROM capacity_sources
+      WHERE credential_id = 'user-hetzner'
+    `)[0];
+    const removedCandidate = getRows<{
+      catalog_generation: number;
+      catalog_availability: string;
+      provider_instance_catalog_source: string | null;
+    }>(`
+      SELECT catalog_generation, catalog_availability, provider_instance_catalog_source
+      FROM capacity_pool_candidates
+      WHERE provider_instance_type = 'cx23'
+    `)[0];
+
+    expect(removedSource.source_generation).toBe(initialSource.source_generation);
+    expect(removedCandidate.catalog_generation).toBeGreaterThan(
+      refreshedCandidate.catalog_generation
+    );
+    expect(removedCandidate).toMatchObject({
+      catalog_availability: 'last-known-unavailable',
+      provider_instance_catalog_source: null,
+    });
+    expect(catalogRemoved.user?.effectiveState).toBe('catalog-unavailable');
+  });
+
   it('changes placement snapshot generations when effective settings or credential source changes', async () => {
     const db = createDb();
     seedUserCredential({
@@ -3926,6 +4088,11 @@ describe('default capacity pool creation', () => {
 
     const firstSettingsGeneration = firstSnapshot?.selectionSettingsVersion;
     const firstSourceGeneration = firstSnapshot?.sourceGeneration;
+    const firstAuthorityGeneration = getRows<{ source_generation: number }>(`
+      SELECT source_generation
+      FROM capacity_sources
+      WHERE credential_id = 'user-hetzner'
+    `)[0];
 
     sqlite
       ?.prepare(
@@ -3948,9 +4115,17 @@ describe('default capacity pool creation', () => {
       { ensure: false, env: { CAPACITY_POOL_SELECTION_SETTINGS_JSON: '' } as Env }
     );
     const secondSnapshot = capacityPlacementSnapshotForTaskStart(second);
+    const secondAuthorityGeneration = getRows<{ source_generation: number }>(`
+      SELECT source_generation
+      FROM capacity_sources
+      WHERE credential_id = 'user-hetzner'
+    `)[0];
 
     expect(firstSettingsGeneration).toEqual(expect.any(Number));
     expect(secondSnapshot?.selectionSettingsVersion).toBe(firstSettingsGeneration);
+    expect(secondAuthorityGeneration.source_generation).toBeGreaterThan(
+      firstAuthorityGeneration.source_generation
+    );
     expect(secondSnapshot?.placementCredentialVersion).toBe(Date.parse('2026-08-28T13:00:00.000Z'));
     expect(secondSnapshot?.sourceGeneration).not.toBe(firstSourceGeneration);
 

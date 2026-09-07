@@ -57,6 +57,7 @@ const MAX_BACKFILL_SCOPE_BATCH_SIZE = 200;
 const BACKFILL_USER_CURSOR_KEY = 'capacityPools.backfill.userCursor.v1';
 const BACKFILL_PROJECT_CURSOR_KEY = 'capacityPools.backfill.projectCursor.v1';
 const BACKFILL_DIRTY_PROJECT_KEY_PREFIX = 'capacityPools.backfill.dirtyProject.v1:';
+const CATALOG_GENERATION_SETTING_KEY_PREFIX = 'capacityPools.catalogGeneration.v1';
 const SOURCE_GENERATION_SETTING_KEY_PREFIX = 'capacityPools.sourceGeneration.v1';
 const SOURCE_KIND_CLOUD_PROVIDER = 'cloud-provider-credential';
 const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
@@ -616,6 +617,66 @@ async function nextCapacityPoolScopeGeneration(db: Db, scope: ScopeIdentity): Pr
   return parseGeneration(row?.value);
 }
 
+async function nextCapacitySourceCatalogGeneration(
+  db: Db,
+  sourceId: string,
+  sourceGeneration: number
+): Promise<number> {
+  const key = catalogGenerationSettingKey(sourceId);
+  const now = nextCapacityPoolTimestamp();
+  const baselineGeneration = await readCapacitySourceCatalogGenerationFloor(
+    db,
+    sourceId,
+    sourceGeneration
+  );
+  await db
+    .insert(schema.platformSettings)
+    .values({ key, value: String(baselineGeneration), updatedAt: now, updatedBy: null })
+    .onConflictDoUpdate({
+      target: schema.platformSettings.key,
+      set: {
+        value: sql`CASE
+          WHEN CAST(${schema.platformSettings.value} AS INTEGER) < ${baselineGeneration}
+          THEN ${String(baselineGeneration)}
+          ELSE ${schema.platformSettings.value}
+        END`,
+        updatedAt: now,
+        updatedBy: sql`NULL`,
+      },
+    });
+  const [row] = await db
+    .update(schema.platformSettings)
+    .set({
+      value: sql`CAST(${schema.platformSettings.value} AS INTEGER) + 1`,
+      updatedAt: now,
+      updatedBy: sql`NULL`,
+    })
+    .where(eq(schema.platformSettings.key, key))
+    .returning({ value: schema.platformSettings.value });
+  return parseGeneration(row?.value);
+}
+
+async function readCapacitySourceCatalogGenerationFloor(
+  db: Db,
+  sourceId: string,
+  sourceGeneration: number
+): Promise<number> {
+  const [row] = await db
+    .select({
+      catalogGeneration: sql<
+        number | null
+      >`COALESCE(MAX(${schema.capacityPoolCandidates.catalogGeneration}), 0)`,
+    })
+    .from(schema.capacityPoolCandidates)
+    .where(eq(schema.capacityPoolCandidates.capacitySourceId, sourceId))
+    .limit(1);
+  return Math.max(sourceGeneration, parseGeneration(row?.catalogGeneration));
+}
+
+function catalogGenerationSettingKey(sourceId: string): string {
+  return `${CATALOG_GENERATION_SETTING_KEY_PREFIX}:${sourceId}`;
+}
+
 function sourceGenerationSettingKey(scope: ScopeIdentity): string {
   switch (scope.scope) {
     case 'installation':
@@ -790,6 +851,11 @@ async function ensureDefaultPoolForCredentialSeeds(
       continue;
     }
 
+    const catalogGeneration = await nextCapacitySourceCatalogGeneration(
+      db,
+      publication.source.id,
+      publication.generation
+    );
     const resolvedOfferings = await resolveOfferingsForSeed(materializedSeed, options);
     const sourceStillCurrent = await isCapacitySourceRefreshCurrent(db, publication);
     if (!sourceStillCurrent || !(await isCapacitySeedStillCurrent(db, seed))) continue;
@@ -802,6 +868,8 @@ async function ensureDefaultPoolForCredentialSeeds(
         resolvedOfferings.offerings,
         {
           sourceGeneration: publication.generation,
+          catalogGeneration,
+          catalogGenerationSettingKey: catalogGenerationSettingKey(publication.source.id),
           catalogComplete: resolvedOfferings.catalogComplete !== false,
         }
       );
@@ -972,6 +1040,17 @@ async function updateCapacitySourceForSeed(
     };
   }
 
+  if (
+    isCapacitySourceAuthorityUnchanged(existingSource, seed) &&
+    existingSource.status === ACTIVE_STATUS
+  ) {
+    return {
+      source: existingSource,
+      generation: existingSource.sourceGeneration,
+      published: true,
+    };
+  }
+
   const generation = await nextCapacityPoolScopeGeneration(db, scope);
   const now = nextCapacityPoolTimestamp();
   await db
@@ -1006,6 +1085,25 @@ async function updateCapacitySourceForSeed(
     generation: source.sourceGeneration,
     published: source.sourceGeneration === generation && source.status === ACTIVE_STATUS,
   };
+}
+
+function isCapacitySourceAuthorityUnchanged(
+  source: schema.CapacitySource,
+  seed: CredentialCapacitySeed
+): boolean {
+  return (
+    source.scope === seed.scope &&
+    source.ownerUserId === seed.ownerUserId &&
+    source.ownerProjectId === seed.ownerProjectId &&
+    source.sourceKind === SOURCE_KIND_CLOUD_PROVIDER &&
+    source.provider === seed.provider &&
+    source.credentialSource === seed.credentialSource &&
+    source.credentialId === seed.credentialId &&
+    source.platformCredentialId === seed.platformCredentialId &&
+    source.credentialReference === seed.credentialReference &&
+    source.credentialVersion === seed.credentialVersion &&
+    source.externalSourceRef === seed.externalSourceRef
+  );
 }
 
 async function isCapacitySourceRefreshCurrent(

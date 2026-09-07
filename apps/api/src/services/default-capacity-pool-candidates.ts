@@ -32,7 +32,7 @@ const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
     (D1_MAX_BOUND_PARAMETERS - CANDIDATE_UPSERT_UPDATE_BIND_COUNT) / CANDIDATE_INSERT_BIND_COUNT
   )
 );
-const MISSING_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 16;
+const MISSING_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 32;
 
 export async function ensureCandidatesForSource(
   db: Db,
@@ -40,7 +40,12 @@ export async function ensureCandidatesForSource(
   sourceId: string,
   provider: CredentialProvider,
   offerings: ProviderInstanceOffering[],
-  options: { sourceGeneration?: number; catalogComplete?: boolean } = {}
+  options: {
+    sourceGeneration?: number;
+    catalogGeneration?: number;
+    catalogGenerationSettingKey?: string;
+    catalogComplete?: boolean;
+  } = {}
 ): Promise<void> {
   const now = nextCapacityPoolTimestamp();
   const existingStatuses = await readExistingCandidateStatuses(db, poolId, sourceId);
@@ -87,7 +92,7 @@ export async function ensureCandidatesForSource(
       catalogAvailability: 'available',
       catalogUnavailableAt: null,
       catalogReturnedAt: now,
-      catalogGeneration: options.sourceGeneration ?? 0,
+      catalogGeneration: options.catalogGeneration ?? options.sourceGeneration ?? 0,
       priority: candidateOrder,
       candidateOrder,
       status: initialStatus,
@@ -99,7 +104,11 @@ export async function ensureCandidatesForSource(
 
   if (typeof options.sourceGeneration === 'number') {
     for (const candidateValue of candidateValues) {
-      await upsertCandidateIfSourceGenerationCurrent(db, candidateValue, options.sourceGeneration);
+      await upsertCandidateIfSourceGenerationCurrent(db, candidateValue, {
+        sourceGeneration: options.sourceGeneration,
+        catalogGeneration: options.catalogGeneration,
+        catalogGenerationSettingKey: options.catalogGenerationSettingKey,
+      });
     }
   } else {
     for (let offset = 0; offset < candidateValues.length; offset += CANDIDATE_UPSERT_CHUNK_SIZE) {
@@ -155,8 +164,22 @@ export async function ensureCandidatesForSource(
 async function upsertCandidateIfSourceGenerationCurrent(
   db: Db,
   value: schema.NewCapacityPoolCandidate,
-  sourceGeneration: number
+  guard: {
+    sourceGeneration: number;
+    catalogGeneration?: number;
+    catalogGenerationSettingKey?: string;
+  }
 ): Promise<void> {
+  const catalogGenerationGuard =
+    typeof guard.catalogGeneration === 'number' && guard.catalogGenerationSettingKey
+      ? sql`
+        AND EXISTS (
+          SELECT 1
+          FROM platform_settings
+          WHERE key = ${guard.catalogGenerationSettingKey}
+            AND CAST(platform_settings.value AS INTEGER) = ${guard.catalogGeneration}
+        )`
+      : sql``;
   await (db as RunnableDb).run(sql`
     INSERT INTO capacity_pool_candidates (
       id,
@@ -221,7 +244,7 @@ async function upsertCandidateIfSourceGenerationCurrent(
       ${value.catalogAvailability},
       ${value.catalogUnavailableAt},
       ${value.catalogReturnedAt},
-      ${sourceGeneration},
+      ${value.catalogGeneration ?? 0},
       ${value.priority},
       ${value.candidateOrder},
       ${value.status},
@@ -231,9 +254,10 @@ async function upsertCandidateIfSourceGenerationCurrent(
       SELECT 1
       FROM capacity_sources
       WHERE id = ${value.capacitySourceId}
-        AND source_generation = ${sourceGeneration}
+        AND source_generation = ${guard.sourceGeneration}
         AND status = ${ACTIVE_STATUS}
     )
+    ${catalogGenerationGuard}
     ON CONFLICT(id) DO UPDATE SET
       provider = excluded.provider,
       location = excluded.location,
@@ -264,9 +288,10 @@ async function upsertCandidateIfSourceGenerationCurrent(
       SELECT 1
       FROM capacity_sources
       WHERE id = excluded.capacity_source_id
-        AND source_generation = excluded.catalog_generation
+        AND source_generation = ${guard.sourceGeneration}
         AND status = ${ACTIVE_STATUS}
     )
+      ${catalogGenerationGuard}
       AND capacity_pool_candidates.catalog_generation <= excluded.catalog_generation
   `);
 }
@@ -362,7 +387,11 @@ async function markMissingCandidatesForSource(
   sourceId: string,
   existingStatuses: ReadonlyMap<string, string>,
   activeCandidateIds: string[],
-  options: { sourceGeneration?: number } = {}
+  options: {
+    sourceGeneration?: number;
+    catalogGeneration?: number;
+    catalogGenerationSettingKey?: string;
+  } = {}
 ): Promise<void> {
   const now = nextCapacityPoolTimestamp();
   const nextCandidateIds = new Set(activeCandidateIds);
@@ -384,21 +413,29 @@ async function markMissingCandidatesForSource(
         catalogAvailability: 'last-known-unavailable',
         catalogUnavailableAt: now,
         catalogGeneration:
-          options.sourceGeneration ?? sql`${schema.capacityPoolCandidates.catalogGeneration}`,
+          options.catalogGeneration ?? sql`${schema.capacityPoolCandidates.catalogGeneration}`,
         updatedAt: now,
       })
       .where(
         and(
           eq(schema.capacityPoolCandidates.poolId, poolId),
           eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
-          typeof options.sourceGeneration === 'number'
-            ? sql`${schema.capacityPoolCandidates.catalogGeneration} < ${options.sourceGeneration}
+          typeof options.sourceGeneration === 'number' &&
+            typeof options.catalogGeneration === 'number' &&
+            options.catalogGenerationSettingKey
+            ? sql`${schema.capacityPoolCandidates.catalogGeneration} < ${options.catalogGeneration}
                 AND EXISTS (
                   SELECT 1
                   FROM capacity_sources
                   WHERE id = ${sourceId}
                     AND source_generation = ${options.sourceGeneration}
                     AND status = ${ACTIVE_STATUS}
+                )
+                AND EXISTS (
+                  SELECT 1
+                  FROM platform_settings
+                  WHERE key = ${options.catalogGenerationSettingKey}
+                    AND CAST(platform_settings.value AS INTEGER) = ${options.catalogGeneration}
                 )`
             : undefined,
           inArray(schema.capacityPoolCandidates.id, chunk)
