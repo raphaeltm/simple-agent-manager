@@ -21,8 +21,16 @@ import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const PROJECT_ID = 'credential-visibility-project';
-const AFFECTED_OWNER = { type: 'agent' as const, id: 'agent-session-1', name: 'agent-session-1' };
-const OTHER_OWNER = { type: 'agent' as const, id: 'agent-session-2', name: 'agent-session-2' };
+const AFFECTED_OWNER = {
+  type: 'agent' as const,
+  id: `${PROJECT_ID}:chat-1`,
+  name: 'agent-session-1',
+};
+const OTHER_OWNER = {
+  type: 'agent' as const,
+  id: `${PROJECT_ID}:chat-2`,
+  name: 'agent-session-2',
+};
 const AFFECTED_TARGET = {
   sessionId: 'chat-1',
   taskId: 'task-1',
@@ -237,8 +245,21 @@ describe('ProjectData credential event visibility', () => {
       chatSessionId: 'chat-1',
       agentSessionId: 'agent-session-1',
     });
-    const attackerMatch = admitted.matches.find((match) => match.subscriptionId === attacker.id);
-    expect(attackerMatch).toBeDefined();
+    expect(admitted.matches.map((match) => match.subscriptionId)).toEqual([affected.id]);
+    expect(admitted.matches.map((match) => match.subscriptionId)).not.toContain(attacker.id);
+
+    sql.exec(
+      `INSERT INTO project_event_matches (
+        id, project_id, event_id, subscription_id, state, matched_at, lifecycle_checked_at,
+        batch_id, reason
+      ) VALUES (?, ?, ?, ?, 'matched', ?, ?, NULL, NULL)`,
+      'historical-bad-pull-match',
+      PROJECT_ID,
+      admitted.event.id,
+      attacker.id,
+      2_000,
+      2_000
+    );
 
     const attackerVisibility = { owner: OTHER_OWNER, target: AFFECTED_TARGET, userId: 'user-2' };
     expect(
@@ -258,13 +279,49 @@ describe('ProjectData credential event visibility', () => {
       })?.events
     ).toEqual([]);
 
-    const batch = createProjectEventDeliveryBatch(sql, env, PROJECT_ID, {
-      projectId: PROJECT_ID,
-      subscriptionId: attacker.id,
-      matchIds: [attackerMatch!.id],
-      idempotencyKey: 'attacker-batch',
-      requestedDelivery: 'existing_session_prompt',
-    });
+    expect(() =>
+      createProjectEventDeliveryBatch(sql, env, PROJECT_ID, {
+        projectId: PROJECT_ID,
+        subscriptionId: attacker.id,
+        matchIds: ['historical-bad-pull-match'],
+        idempotencyKey: 'attacker-batch-rejected',
+        requestedDelivery: 'existing_session_prompt',
+      })
+    ).toThrow('Event match is not authorized for this subscription');
+
+    sql.exec(
+      `INSERT INTO project_event_delivery_batches (
+        id, project_id, subscription_id, idempotency_key, idempotency_fingerprint, state,
+        requested_delivery, resolved_delivery, target_session_id, target_task_id,
+        target_runtime_id, target_agent_id, match_ids_json, event_count, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      'historical-bad-batch',
+      PROJECT_ID,
+      attacker.id,
+      'attacker-batch',
+      'attacker-batch-fingerprint',
+      'existing_session_prompt',
+      'queued_for_prompt_delivery',
+      'chat-1',
+      'task-1',
+      null,
+      'agent-session-1',
+      '["historical-bad-pull-match"]',
+      1,
+      2_000,
+      2_000
+    );
+    sql.exec(
+      `UPDATE project_event_matches
+          SET batch_id = ?, state = 'batch_created'
+        WHERE id = ?`,
+      'historical-bad-batch',
+      'historical-bad-pull-match'
+    );
+
+    const batch = {
+      batch: { id: 'historical-bad-batch' },
+    };
     expect(
       ackProjectEventDelivery(sql, env, PROJECT_ID, {
         projectId: PROJECT_ID,
@@ -282,6 +339,51 @@ describe('ProjectData credential event visibility', () => {
       })?.id
     ).toBe(admitted.event.id);
     expect(affected.id).toBeDefined();
+  });
+
+  it('denies malformed credential audience rows before matching and history reads', () => {
+    const affected = createCredentialSubscription(sql, env, {
+      owner: AFFECTED_OWNER,
+      target: AFFECTED_TARGET,
+      key: 'affected-malformed',
+    });
+
+    const missingUser = admitCredentialEvent(sql, env, {
+      credentialSource: 'user',
+      deliveryKey: 'personal-warning-missing-user',
+      chatSessionId: 'chat-1',
+      agentSessionId: 'agent-session-1',
+    });
+    expect(missingUser.matches).toEqual([]);
+    expect(
+      getProjectEvent(sql, env, PROJECT_ID, {
+        projectId: PROJECT_ID,
+        eventId: missingUser.event.id,
+        visibility: AFFECTED_VISIBILITY,
+      })
+    ).toBeNull();
+
+    const shared = admitCredentialEvent(sql, env, {
+      credentialSource: 'project',
+      deliveryKey: 'project-warning-malformed-user',
+    });
+    expect(shared.matches.map((match) => match.subscriptionId)).toContain(affected.id);
+    sql.exec(
+      `UPDATE project_events
+          SET audience_user_id = ?
+        WHERE id = ?`,
+      'user-1',
+      shared.event.id
+    );
+
+    expect(
+      listProjectEventSubscriptionEvents(sql, env, PROJECT_ID, {
+        projectId: PROJECT_ID,
+        subscriptionId: affected.id,
+        visibility: AFFECTED_VISIBILITY,
+        limit: 10,
+      })?.events
+    ).toEqual([]);
   });
 
   it('terminalizes unauthorized historical personal matches before automatic wake materialization', () => {

@@ -165,7 +165,7 @@ function makeSubscription(
 ): ProjectEventSubscriptionRecord {
   const owner: ProjectEventSubscriptionOwner = {
     type: 'agent',
-    id: 'agent-session-1',
+    id: 'project-1:session-1',
     name: 'agent-session-1',
   };
   return {
@@ -269,12 +269,12 @@ describe('internal ProjectData event subscription surface', () => {
       env,
       'project-1',
       {
-        owner: { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
+        owner: { type: 'agent', id: 'project-1:session-1', name: 'agent-session-1' },
         idempotencyKey: 'idem-1',
         filter,
         deliveryPreference: {
           requested: 'existing_session_prompt',
-          resolved: 'recorded_not_injected',
+          resolved: 'queued_for_prompt_delivery',
           target: {
             sessionId: 'session-1',
             taskId: 'task-1',
@@ -430,7 +430,7 @@ describe('internal ProjectData event subscription surface', () => {
         owner: { type: 'standing_watch', id: 'watch-1', name: 'PR CI watch' },
         deliveryPreference: expect.objectContaining({
           requested: 'existing_session_prompt',
-          resolved: 'recorded_not_injected',
+          resolved: 'queued_for_prompt_delivery',
         }),
       })
     );
@@ -546,7 +546,7 @@ describe('internal ProjectData event subscription surface', () => {
       'project-1',
       {
         state: 'active',
-        owner: { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
+        owner: { type: 'agent', id: 'project-1:session-1', name: 'agent-session-1' },
         limit: null,
       }
     );
@@ -567,7 +567,7 @@ describe('internal ProjectData event subscription surface', () => {
     ).resolves.toEqual({ subscription: null, required: false });
 
     projectDataMocks.getProjectEventSubscription.mockResolvedValueOnce(
-      makeSubscription({ owner: { type: 'agent', id: 'task-2' } })
+      makeSubscription({ owner: { type: 'agent', id: 'project-1:session-2' } })
     );
     await expect(
       getProjectEventSubscriptionForCaller(makeEnv(), makeAgentCaller(), {
@@ -599,7 +599,7 @@ describe('internal ProjectData event subscription surface', () => {
       'project-1',
       {
         subscriptionId: 'subscription-1',
-        cancelledBy: { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
+        cancelledBy: { type: 'agent', id: 'project-1:session-1', name: 'agent-session-1' },
         reason: 'done',
       }
     );

@@ -63,7 +63,13 @@ function subscriptionOwnerMatchesCredentialAudience(
   if (audience.scope === 'project') return true;
   if (!audience.userId) return false;
   if (subscription.owner.type === 'human') return subscription.owner.id === audience.userId;
-  return true;
+  if (subscription.owner.type === 'agent') {
+    const targetSessionId = subscription.deliveryPreference.target?.sessionId;
+    return Boolean(
+      targetSessionId && subscription.owner.id === `${subscription.projectId}:${targetSessionId}`
+    );
+  }
+  return false;
 }
 
 export function subscriptionCanMatchProjectEvent(

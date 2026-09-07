@@ -380,12 +380,12 @@ describe('credential limit producer', () => {
         'project-1',
         {
           projectId: 'project-1',
-          owner: { type: 'agent', id: 'session-1', name: 'session-1' },
+          owner: { type: 'agent', id: 'project-1:chat-1', name: 'session-1' },
           idempotencyKey: 'credential-subscription',
           filter: { version: 1, source: 'sam.credential_limit' },
           deliveryPreference: {
             requested: 'existing_session_prompt',
-            resolved: 'recorded_not_injected',
+            resolved: 'queued_for_prompt_delivery',
             target: { sessionId: 'chat-1', taskId: null, runtimeId: null, agentId: 'session-1' },
           },
           expiresAt: 200_000,
