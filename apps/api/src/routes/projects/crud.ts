@@ -65,6 +65,10 @@ import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
 import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../../services/resource-requirements-input';
+import {
   assertRepositoryAccess,
   buildProjectRuntimeConfigResponse,
   byteLength,
@@ -839,6 +843,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     'description',
     'defaultBranch',
     'defaultVmSize',
+    'resourceRequirementsJson',
     'defaultAgentType',
     'defaultWorkspaceProfile',
     'defaultDevcontainerConfigName',
@@ -1004,6 +1009,23 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     }
   }
 
+  let resourceRequirementsJsonColumn: string | null | undefined;
+  try {
+    if (body.resourceRequirementsJson === undefined) {
+      resourceRequirementsJsonColumn = undefined;
+    } else {
+      resourceRequirementsJsonColumn = serializeResourceRequirementsInput(
+        body.resourceRequirementsJson,
+        'resourceRequirementsJson'
+      );
+    }
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.badRequest(err.message);
+    }
+    throw err;
+  }
+
   // Only verify GitHub repository access for GitHub-backed projects.
   // Artifacts projects carry a sentinel installationId but must not be routed
   // through GitHub access verification (it would 404 on the sentinel).
@@ -1059,6 +1081,10 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
       defaultBranch: nextDefaultBranch,
       defaultVmSize:
         body.defaultVmSize === undefined ? existing.defaultVmSize : (body.defaultVmSize ?? null),
+      resourceRequirementsJson:
+        resourceRequirementsJsonColumn === undefined
+          ? existing.resourceRequirementsJson
+          : resourceRequirementsJsonColumn,
       defaultAgentType:
         body.defaultAgentType === undefined
           ? existing.defaultAgentType

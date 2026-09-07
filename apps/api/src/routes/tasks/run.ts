@@ -34,6 +34,8 @@ import {
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import {
+  collectStoredResourceRequirementLayers,
+  firstResourceRequirementLayer,
   normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
@@ -115,11 +117,44 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
 
   // Parse request body (optional — empty body means use defaults)
   const body = await parseOptionalBody(c.req.raw, RunTaskSchema, {} as Record<string, never>);
-  const taskResourceRequirements = (() => {
+  const resourceRequirementsProvided = Object.prototype.hasOwnProperty.call(
+    body,
+    'resourceRequirements'
+  );
+  const {
+    resourceRequirementLayers,
+    persistedResourceRequirementsJson,
+    taskRunnerResourceRequirements,
+  } = (() => {
     try {
-      return body.resourceRequirements === undefined
-        ? undefined
-        : normalizeResourceRequirementsInput(body.resourceRequirements);
+      const layers = collectStoredResourceRequirementLayers({
+        task: task.resourceRequirementsJson,
+        project: project.resourceRequirementsJson,
+      });
+      let nextTaskResourceRequirements = undefined as
+        | ReturnType<typeof normalizeResourceRequirementsInput>
+        | null
+        | undefined;
+      if (resourceRequirementsProvided) {
+        nextTaskResourceRequirements =
+          body.resourceRequirements === null
+            ? null
+            : normalizeResourceRequirementsInput(body.resourceRequirements);
+        if (nextTaskResourceRequirements === null) {
+          delete layers.task;
+        } else {
+          layers.task = nextTaskResourceRequirements;
+        }
+      }
+      return {
+        resourceRequirementLayers: layers,
+        persistedResourceRequirementsJson: resourceRequirementsProvided
+          ? nextTaskResourceRequirements === null
+            ? null
+            : JSON.stringify(nextTaskResourceRequirements)
+          : task.resourceRequirementsJson,
+        taskRunnerResourceRequirements: firstResourceRequirementLayer(layers),
+      };
     } catch (err) {
       if (err instanceof ResourceRequirementsValidationError) {
         throw errors.badRequest(err.message);
@@ -156,9 +191,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
         },
         credentialProjectPolicy: 'current-project',
         taskModeDefault: 'task',
-        resourceRequirements: {
-          task: taskResourceRequirements,
-        },
+        resourceRequirements: resourceRequirementLayers,
       });
     } catch (err) {
       if (err instanceof PlacementResolutionError) {
@@ -247,7 +280,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     .bind(
       vmSize,
       vmSizeSource,
-      taskResourceRequirements ? JSON.stringify(taskResourceRequirements) : null,
+      persistedResourceRequirementsJson,
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -348,7 +381,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       credentialAttributionSource,
       taskMode,
       agentProfileHint: task.agentProfileHint ?? null,
-      resourceRequirements: taskResourceRequirements ?? null,
+      resourceRequirements: taskRunnerResourceRequirements,
       // Full profile resolution is not supported on the kanban Run path, but the
       // persisted profile hint must still reach TaskRunner so workspace
       // GitHub-token minting can enforce profile SAM platform policy.

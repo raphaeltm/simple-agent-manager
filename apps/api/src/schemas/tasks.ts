@@ -84,7 +84,7 @@ export const SubmitTaskSchema = v.object({
   agentProfileId: v.optional(v.string()),
   skillId: v.optional(v.string()),
   attachments: v.optional(v.array(TaskAttachmentSchema)),
-  resourceRequirements: v.optional(ResourceRequirementsSchema),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
 });
 
 export const CreateTaskSchema = v.object({
@@ -128,7 +128,7 @@ export const RunTaskSchema = v.object({
   devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
   nodeId: v.optional(v.string()),
   branch: v.optional(v.string()),
-  resourceRequirements: v.optional(ResourceRequirementsSchema),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
 });
 
 export const RequestAttachmentUploadSchema = v.object({

@@ -52,6 +52,11 @@ import type {
   TaskStartPlacementWithCredential,
 } from './placement-resolver-types';
 import { resolveCredentialSource } from './provider-credentials';
+import {
+  collectStoredResourceRequirementLayers,
+  mergeResourceRequirementLayers,
+  ResourceRequirementsValidationError,
+} from './resource-requirements-input';
 import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
 export {
@@ -134,7 +139,15 @@ function resolvePlacementReservation(
   if (explicit.vmSize) {
     legacyVmSizes[explicit.vmSizeSource ?? 'task'] = explicit.vmSize;
   }
-  if (profile?.vmSizeOverride) {
+  const skillVmSizeOverride = profile?.skillVmSizeOverride ?? null;
+  const agentProfileVmSizeOverride =
+    profile?.agentProfileVmSizeOverride ?? profile?.vmSizeOverride ?? null;
+  if (skillVmSizeOverride) {
+    legacyVmSizes.skill = skillVmSizeOverride as VMSize;
+  }
+  if (agentProfileVmSizeOverride) {
+    legacyVmSizes['agent-profile'] = agentProfileVmSizeOverride as VMSize;
+  } else if (profile?.vmSizeOverride) {
     legacyVmSizes[input.profileVmSizeSource ?? 'agent-profile'] = profile.vmSizeOverride as VMSize;
   }
   if (input.project.defaultVmSize) {
@@ -145,8 +158,15 @@ function resolvePlacementReservation(
   }
 
   try {
+    const storedResourceLayers = collectStoredResourceRequirementLayers({
+      project: input.project.resourceRequirementsJson,
+    });
+    const resourceRequirements = mergeResourceRequirementLayers(
+      storedResourceLayers,
+      input.resourceRequirements ?? {}
+    );
     return resolveResourceReservation(
-      input.resourceRequirements ?? {},
+      resourceRequirements,
       {
         taskId: input.taskId,
         triggerId: input.triggerId,
@@ -164,6 +184,9 @@ function resolvePlacementReservation(
       }
     );
   } catch (error) {
+    if (error instanceof ResourceRequirementsValidationError) {
+      throw new PlacementResolutionError('invalid-resource-requirements', error.message, []);
+    }
     throw new PlacementResolutionError(
       'invalid-resource-requirements',
       error instanceof Error ? error.message : 'Invalid resource requirements',
@@ -195,7 +218,9 @@ export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskS
   }
 
   const inheritedCredentialAttribution = normalizeCredentialAttribution(
-    input.inheritedCredentialAttribution
+    input.inheritedCredentialAttribution,
+    input.userId,
+    input.projectId
   );
   const vmSize = resolveVmSize(explicit.vmSize, profile, input.project);
   const vmSizeSource = resolveVmSizeSource(
@@ -573,12 +598,53 @@ function resolveTaskMode(
 }
 
 function normalizeCredentialAttribution(
-  input: PlacementCredentialAttributionInput | null | undefined
+  input: PlacementCredentialAttributionInput | null | undefined,
+  currentUserId: string,
+  currentProjectId: string
 ): Required<PlacementCredentialAttributionInput> {
+  if (!input?.source) {
+    return {
+      userId: null,
+      projectId: null,
+      source: null,
+    };
+  }
+
+  if (input.source === 'project') {
+    const projectId = input.projectId ?? currentProjectId;
+    if (projectId !== currentProjectId) {
+      throw new PlacementResolutionError(
+        'invalid-credential-attribution',
+        'Inherited project credential attribution belongs to a different project',
+        []
+      );
+    }
+    return {
+      userId: currentUserId,
+      projectId,
+      source: 'project',
+    };
+  }
+
+  if (input.source === 'user' || input.source === 'platform') {
+    if (input.userId && input.userId !== currentUserId) {
+      return {
+        userId: null,
+        projectId: null,
+        source: null,
+      };
+    }
+    return {
+      userId: currentUserId,
+      projectId: null,
+      source: input.source,
+    };
+  }
+
   return {
-    userId: input?.userId ?? null,
-    projectId: input?.source === 'project' ? (input.projectId ?? null) : null,
-    source: input?.source ?? null,
+    userId: null,
+    projectId: null,
+    source: null,
   };
 }
 
