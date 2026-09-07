@@ -79,10 +79,17 @@ CREATE INDEX idx_project_event_source_outbox_due
   ON project_event_source_outbox(state, next_attempt_at, id);
 CREATE INDEX idx_project_event_source_outbox_processing_lease
   ON project_event_source_outbox(state, processing_lease_expires_at, id);
+CREATE INDEX idx_project_event_source_outbox_active_expiry
+  ON project_event_source_outbox(state, expires_at, id);
+CREATE INDEX idx_project_event_source_outbox_exhausted_ready
+  ON project_event_source_outbox(state, (attempt_count >= max_attempts), processing_lease_expires_at, id);
+CREATE INDEX idx_project_event_source_outbox_terminal_retention
+  ON project_event_source_outbox(state, terminalized_at, id);
 `;
 
 const ENCRYPTION_KEY = 'integration-test-webhook-hmac-key';
 const TRIGGER_ID = 'trigger-webhook-1';
+const SECRET_KEY_NAME = `${['sk', 'ant', 'api03'].join('-')}-${'A'.repeat(80)}`;
 
 function rows<T>(sqlite: Database.Database, sql: string): T[] {
   return sqlite.prepare(sql).all() as T[];
@@ -213,6 +220,9 @@ describe('generic webhook ingress vertical slice', () => {
         {
           deployment: { id: 'dep-42', status: 'failed' },
           token: 'SECURITY_CANARY_DO_NOT_PERSIST',
+          [SECRET_KEY_NAME]: 'SECURITY_CANARY_DO_NOT_PERSIST',
+          session: 'SECURITY_CANARY_DO_NOT_PERSIST',
+          passphrase: 'SECURITY_CANARY_DO_NOT_PERSIST',
         },
         'delivery-42'
       ),
@@ -282,9 +292,17 @@ describe('generic webhook ingress vertical slice', () => {
       state: 'admitted',
       admission_outcome: 'created',
     });
-    expect(outbox[0]?.event_payload_json).toContain('redactedSensitiveKeyCount');
-    expect(outbox[0]?.event_payload_json).not.toContain('"token"');
-    expect(outbox[0]?.event_payload_json).not.toContain('SECURITY_CANARY_DO_NOT_PERSIST');
+    const eventPayload = outbox[0]?.event_payload_json ?? '';
+    expect(eventPayload).toContain('redactedSensitiveKeyCount');
+    expect(eventPayload).toContain('bodyTopLevelKeyCount');
+    expect(eventPayload).toContain('includedHeaderCount');
+    expect(eventPayload).not.toContain('"token"');
+    expect(eventPayload).not.toContain(SECRET_KEY_NAME);
+    expect(eventPayload).not.toContain('"session"');
+    expect(eventPayload).not.toContain('"passphrase"');
+    expect(eventPayload).not.toContain('bodyTopLevelKeys');
+    expect(eventPayload).not.toContain('includedHeaderNames');
+    expect(eventPayload).not.toContain('SECURITY_CANARY_DO_NOT_PERSIST');
   });
 
   it('preserves JSON and blank source labels in the reported webhook prompt', async () => {
