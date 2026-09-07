@@ -1,3 +1,8 @@
+import {
+  normalizeResourceRequirements,
+  RESOURCE_REQUIREMENT_FIELDS,
+  resourceRequirementToReservationUnit,
+} from '../resource-requirements';
 import type {
   LegacyVmSizeResolutionInput,
   ResolvedResourceReservation,
@@ -161,16 +166,6 @@ interface ResolutionLayer {
   legacyVmSize?: VMSize;
 }
 
-const RESOURCE_REQUIREMENT_FIELDS = [
-  'minVcpu',
-  'minMemoryGb',
-  'minDiskGb',
-  'exclusiveNode',
-  'maxCoTenants',
-] as const satisfies readonly ResourceRequirementField[];
-
-const MAX_RESERVATION_UNIT = Number.MAX_SAFE_INTEGER;
-
 export interface ResourceReservationResolutionOptions {
   platformDefaults?: Required<ResourceRequirements>;
   legacyVmSizes?: LegacyVmSizeResolutionInput;
@@ -302,9 +297,9 @@ export function resolveResourceReservation(
   const minVcpu = resolved['minVcpu'] as number;
   const minMemoryGb = resolved['minMemoryGb'] as number;
   const minDiskGb = resolved['minDiskGb'] as number;
-  const cpuMillis = toPositiveReservationUnit('minVcpu', minVcpu, 1000);
-  const memoryMb = toPositiveReservationUnit('minMemoryGb', minMemoryGb, 1024);
-  const diskMb = toNonNegativeReservationUnit('minDiskGb', minDiskGb, 1024);
+  const cpuMillis = resourceRequirementToReservationUnit('minVcpu', minVcpu);
+  const memoryMb = resourceRequirementToReservationUnit('minMemoryGb', minMemoryGb);
+  const diskMb = resourceRequirementToReservationUnit('minDiskGb', minDiskGb);
 
   return {
     cpuMillis,
@@ -357,7 +352,7 @@ function validatedLegacyLayer(
   const legacyDefaults = options.mapping[layer.legacyVmSize];
   for (const field of RESOURCE_REQUIREMENT_FIELDS) {
     const legacyValue = legacyDefaults[field];
-    setResourceRequirementField(merged, field, legacyValue);
+    setNormalizedResourceRequirementField(merged, field, legacyValue);
     provenance[field] = legacyFieldProvenance(layer, legacyValue, options.adapterVersion);
   }
   options.diagnostics.push(
@@ -365,6 +360,18 @@ function validatedLegacyLayer(
   );
 
   return { requirements: merged, provenance };
+}
+
+function setNormalizedResourceRequirementField(
+  target: ResourceRequirements,
+  field: ResourceRequirementField,
+  value: number | boolean
+): void {
+  if (field === 'exclusiveNode') {
+    target.exclusiveNode = value as boolean;
+    return;
+  }
+  target[field] = value as number;
 }
 
 function legacyFieldProvenance(
@@ -407,115 +414,12 @@ function validateResourceRequirementsLayer(
   options: { requireAllFields?: boolean } = {}
 ): ResourceRequirements | undefined {
   if (!requirements) return undefined;
-  const validated: ResourceRequirements = {};
-  for (const field of RESOURCE_REQUIREMENT_FIELDS) {
-    const value = requirements[field];
-    if (value === undefined) {
-      if (options.requireAllFields === true) {
-        throw new Error(`Missing ${field} in ${source} resource requirements ${sourceId}`);
-      }
-      continue;
+  try {
+    return normalizeResourceRequirements(requirements, options);
+  } catch (err) {
+    if (err instanceof Error) {
+      throw new Error(`Invalid ${source} resource requirements ${sourceId}: ${err.message}`);
     }
-    setResourceRequirementField(
-      validated,
-      field,
-      validateResourceRequirementField(field, value, source, sourceId)
-    );
+    throw err;
   }
-  return validated;
-}
-
-function setResourceRequirementField(
-  target: ResourceRequirements,
-  field: ResourceRequirementField,
-  value: number | boolean
-): void {
-  switch (field) {
-    case 'minVcpu':
-    case 'minMemoryGb':
-    case 'minDiskGb':
-    case 'maxCoTenants':
-      if (typeof value !== 'number') {
-        throw new Error(`Invalid ${field} resource requirement type`);
-      }
-      target[field] = value;
-      return;
-    case 'exclusiveNode':
-      if (typeof value !== 'boolean') {
-        throw new Error(`Invalid ${field} resource requirement type`);
-      }
-      target[field] = value;
-      return;
-  }
-}
-
-function validateResourceRequirementField(
-  field: ResourceRequirementField,
-  value: unknown,
-  source: ResourceRequirementsSource,
-  sourceId: string
-): number | boolean {
-  if (field === 'exclusiveNode') {
-    if (typeof value === 'boolean') return value;
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
-  }
-
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
-  }
-
-  if (field === 'maxCoTenants') {
-    if (Number.isInteger(value) && value > 0) return value;
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
-  }
-
-  if ((field === 'minVcpu' || field === 'minMemoryGb') && value <= 0) {
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
-  }
-
-  if (value < 0) {
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
-  }
-
-  assertBoundedReservationValue(field, value);
-
-  return value;
-}
-
-function assertBoundedReservationValue(field: ResourceRequirementField, value: number): void {
-  if (field === 'minVcpu') {
-    toPositiveReservationUnit(field, value, 1000);
-    return;
-  }
-  if (field === 'minMemoryGb') {
-    toPositiveReservationUnit(field, value, 1024);
-    return;
-  }
-  if (field === 'minDiskGb') {
-    toNonNegativeReservationUnit(field, value, 1024);
-  }
-}
-
-function toPositiveReservationUnit(
-  field: ResourceRequirementField,
-  value: number,
-  multiplier: number
-): number {
-  const units = Math.ceil(value * multiplier);
-  if (!Number.isSafeInteger(units) || units <= 0 || units > MAX_RESERVATION_UNIT) {
-    throw new Error(`Invalid ${field} resource requirement units`);
-  }
-  return units;
-}
-
-function toNonNegativeReservationUnit(
-  field: ResourceRequirementField,
-  value: number,
-  multiplier: number
-): number {
-  const units = Math.ceil(value * multiplier);
-  if (!Number.isSafeInteger(units) || units < 0 || units > MAX_RESERVATION_UNIT) {
-    throw new Error(`Invalid ${field} resource requirement units`);
-  }
-  return units;
 }

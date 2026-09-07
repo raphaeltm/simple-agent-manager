@@ -1,4 +1,7 @@
-import type { ResourceRequirements } from '@simple-agent-manager/shared';
+import {
+  normalizeResourceRequirements,
+  type ResourceRequirements,
+} from '@simple-agent-manager/shared';
 
 export class ResourceRequirementsValidationError extends Error {
   constructor(message: string) {
@@ -7,41 +10,20 @@ export class ResourceRequirementsValidationError extends Error {
   }
 }
 
-type CompatResourceRequirements = ResourceRequirements & Record<string, unknown>;
-
-const NUMBER_FIELDS = ['minVcpu', 'minMemoryGb', 'minDiskGb', 'maxCoTenants'] as const;
-
-function assertResourceRequirementsObject(
-  value: unknown,
-  fieldName: string
-): asserts value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new ResourceRequirementsValidationError(`${fieldName} must be a JSON object`);
-  }
-}
-
 export function normalizeResourceRequirementsInput(
   value: unknown,
   fieldName = 'resourceRequirements'
-): CompatResourceRequirements {
-  assertResourceRequirementsObject(value, fieldName);
-  const normalized: CompatResourceRequirements = { ...value };
-
-  for (const field of NUMBER_FIELDS) {
-    const fieldValue = normalized[field];
-    if (fieldValue === undefined) continue;
-    if (typeof fieldValue !== 'number' || !Number.isFinite(fieldValue) || fieldValue < 0) {
+): ResourceRequirements {
+  try {
+    return normalizeResourceRequirements(value);
+  } catch (err) {
+    if (err instanceof Error) {
       throw new ResourceRequirementsValidationError(
-        `${fieldName}.${field} must be a finite non-negative number`
+        err.message.replace(/^resourceRequirements(?=\.| |$)/, fieldName)
       );
     }
+    throw err;
   }
-
-  if (normalized.exclusiveNode !== undefined && typeof normalized.exclusiveNode !== 'boolean') {
-    throw new ResourceRequirementsValidationError(`${fieldName}.exclusiveNode must be a boolean`);
-  }
-
-  return normalized;
 }
 
 export function serializeResourceRequirementsInput(
@@ -63,12 +45,16 @@ export function serializeResourceRequirementsInput(
 }
 
 export function parseStoredResourceRequirementsJson(
-  value: string | null | undefined
-): CompatResourceRequirements | undefined {
+  value: string | null | undefined,
+  fieldName = 'resourceRequirementsJson'
+): ResourceRequirements | undefined {
   if (!value) return undefined;
   try {
-    return normalizeResourceRequirementsInput(JSON.parse(value), 'resourceRequirementsJson');
-  } catch {
-    return undefined;
+    return normalizeResourceRequirementsInput(JSON.parse(value), fieldName);
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw new ResourceRequirementsValidationError(`${fieldName} is malformed: ${err.message}`);
+    }
+    throw new ResourceRequirementsValidationError(`${fieldName} is malformed`);
   }
 }

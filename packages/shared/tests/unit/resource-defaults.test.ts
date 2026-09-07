@@ -154,7 +154,7 @@ describe('resolveResourceReservation', () => {
         task: { maxCoTenants: 0 },
         project: { maxCoTenants: 4 },
       })
-    ).toThrow('Invalid maxCoTenants');
+    ).toThrow('resourceRequirements.maxCoTenants must be a positive safe integer');
   });
 
   it('maps legacy sizes to distinct workload slices with per-field provenance', () => {
@@ -297,7 +297,7 @@ describe('resolveResourceReservation', () => {
       resolveResourceReservation({
         task: { minVcpu: Number.MAX_SAFE_INTEGER },
       })
-    ).toThrow('Invalid minVcpu resource requirement units');
+    ).toThrow('resourceRequirements.minVcpu converts to unsafe reservation units');
     expect(() =>
       resolveResourceReservation(
         {},
@@ -312,7 +312,7 @@ describe('resolveResourceReservation', () => {
           },
         }
       )
-    ).toThrow('Invalid minMemoryGb');
+    ).toThrow('resourceRequirements.minMemoryGb must be a finite number');
   });
 
   it('applies field precedence across task, skill, profile, project, user, and platform layers', () => {
