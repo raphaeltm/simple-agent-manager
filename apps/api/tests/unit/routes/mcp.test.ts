@@ -1,6 +1,8 @@
+import { getTableColumns } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
@@ -97,6 +99,47 @@ function isCapacityPoolSql(sql: string): boolean {
     normalized.includes('capacity_pool_candidates') ||
     normalized.includes('capacity_sources')
   );
+}
+
+// Dispatch checks current project membership before reading the parent task.
+// Keep those rows independent of the task/count result queues below, and map
+// full Drizzle rows in schema order rather than object insertion order.
+function mockDispatchProjectAccess(
+  options: { projectExists?: boolean; memberRole?: string | null } = {}
+) {
+  const prepare = mockD1.prepare.getMockImplementation()!;
+  mockD1.prepare.mockImplementation((sql: string) => {
+    const projectQuery = sql.includes('from "projects"');
+    const memberQuery = sql.includes('from "project_members"');
+    if (!projectQuery && !memberQuery) return prepare(sql);
+
+    const read = async () => {
+      if (projectQuery && options.projectExists === false) return [];
+      if (memberQuery && options.memberRole === null) return [];
+      const configured = (await mockD1._stmt.all()).results.find(
+        (row: Record<string, unknown>) => row.id === 'proj-456'
+      );
+      const row: Record<string, unknown> = memberQuery
+        ? {
+            projectId: 'proj-456',
+            userId: 'user-789',
+            role: options.memberRole ?? 'owner',
+            status: 'active',
+          }
+        : {
+            id: 'proj-456',
+            userId: 'user-789',
+            name: 'Test Project',
+            repository: 'user/repo',
+            defaultBranch: 'main',
+            installationId: 'inst-1',
+            ...configured,
+          };
+      const table = memberQuery ? schema.projectMembers : schema.projects;
+      return [Object.keys(getTableColumns(table)).map((key) => row[key] ?? null)];
+    };
+    return { ...mockD1._stmt, bind: vi.fn().mockReturnThis(), raw: vi.fn(read) };
+  });
 }
 
 /**
@@ -1970,6 +2013,25 @@ describe('MCP Routes', () => {
   describe('dispatch_task', () => {
     beforeEach(() => {
       mockKV.get.mockResolvedValue(validTokenData);
+      mockDispatchProjectAccess();
+    });
+
+    it.each([
+      { memberRole: null, error: 'Project not found' },
+      { memberRole: 'viewer', error: 'Project capability is required' },
+    ])('rejects dispatch without current task-write membership ($memberRole)', async (input) => {
+      mockDispatchProjectAccess({ memberRole: input.memberRole });
+      mockDoStub.createSession = vi.fn();
+      const response = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'dispatch_task',
+        arguments: { description: 'Build feature X' },
+      }));
+      const body = await response.json();
+      expect(body.error.message).toContain(input.error);
+      expect(mockD1.prepare.mock.calls.some(([sql]) => sql.includes('from "tasks"'))).toBe(false);
+      expect(mockDoStub.createSession).not.toHaveBeenCalled();
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
     });
 
     it('should reject empty description', async () => {
@@ -2849,7 +2911,8 @@ describe('MCP Routes', () => {
     });
 
     it('should return error when project is not found', async () => {
-      // Promise.all: child count, active dispatched, project (no credential in parallel anymore)
+      mockDispatchProjectAccess({ projectExists: false });
+      // Missing project is rejected before reading the parent or admission counts.
       mockD1._stmt.all.mockResolvedValue({ results: [] }); // no project
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
@@ -3672,6 +3735,7 @@ describe('MCP Routes', () => {
   describe('Atomic dispatch rate limiting', () => {
     beforeEach(() => {
       mockKV.get.mockResolvedValue(validTokenData);
+      mockDispatchProjectAccess();
     });
 
     it('should use conditional INSERT for atomic rate-limit enforcement', async () => {

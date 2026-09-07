@@ -3,14 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { provisionNode } from '../../../src/services/nodes';
 
-const { logError, persistError, deleteNodeResourcesStrict } = vi.hoisted(() => ({
+const { logError, logInfo, persistError, deleteNodeResourcesStrict } = vi.hoisted(() => ({
   logError: vi.fn(),
+  logInfo: vi.fn(),
   persistError: vi.fn(),
   deleteNodeResourcesStrict: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
-  log: { error: logError, info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+  log: { error: logError, info: logInfo, warn: vi.fn(), debug: vi.fn() },
   serializeError: (error: unknown) => ({
     error: error instanceof Error ? error.message : String(error),
   }),
@@ -215,6 +216,11 @@ function nodeRowForAuthorityGuard(row: unknown) {
     placement_credential_source: value.placementCredentialSource ?? null,
     placement_credential_reference: value.placementCredentialReference ?? null,
     placement_credential_version: value.placementCredentialVersion ?? null,
+    selection_settings_version: value.selectionSettingsVersion ?? null,
+    capacity_authority_generation: value.capacityAuthorityGeneration ?? null,
+    pool_revision: value.capacityPoolRevision ?? null,
+    source_authority_generation: value.capacitySourceGeneration ?? null,
+    candidate_authority_generation: value.candidateAuthorityGeneration ?? null,
     provider_instance_type: value.providerInstanceType ?? null,
     provider_instance_vcpu_count: value.providerInstanceVcpuCount ?? null,
     provider_instance_memory_mb: value.providerInstanceMemoryMb ?? null,
@@ -267,6 +273,95 @@ beforeEach(() => {
 });
 
 describe('provisionNode backend DNS records', () => {
+  it.each([null, ''])(
+    'retains provider identity and waits for IP backfill without creating DNS (%s)',
+    async (ip) => {
+      createVM.mockResolvedValueOnce(vmResult(ip));
+
+      await expect(provisionNode('node-1', ENV)).resolves.toBeUndefined();
+
+      expect(createVM).toHaveBeenCalledOnce();
+      expect(createNodeBackendDNSRecord).not.toHaveBeenCalled();
+      expect(ops.at(-1)).toEqual({
+        kind: 'update',
+        set: expect.objectContaining({
+          providerInstanceId: 'provider-vm-1',
+          cloudProvider: 'hetzner',
+          status: 'creating',
+          errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
+        }),
+      });
+      expect(ops.some((op) => op.set?.status === 'running')).toBe(false);
+      expect(logInfo).toHaveBeenCalledWith(
+        'node_provisioning.awaiting_ip_backfill',
+        expect.objectContaining({
+          nodeId: 'node-1',
+          providerInstanceId: 'provider-vm-1',
+        })
+      );
+    }
+  );
+
+  it('forwards task context into cloud-init and sends that generated payload to the provider', async () => {
+    const taskContext = {
+      projectId: 'project-context',
+      chatSessionId: 'chat-context',
+      taskId: 'task-context',
+      taskMode: 'task' as const,
+    };
+    await provisionNode('node-1', ENV, taskContext);
+
+    expect(generateCloudInit).toHaveBeenCalledWith(expect.objectContaining(taskContext));
+    expect(createVM).toHaveBeenCalledWith(expect.objectContaining({ userData: 'cloud-init-yaml' }));
+  });
+
+  it.each([false, true])(
+    'passes the deploy signing key only for deployment context (%s)',
+    async (deployment) => {
+      const env = { ...ENV, DEPLOY_SIGNING_PUBLIC_KEY: 'test-public-deployment-key' };
+      await provisionNode(
+        'node-1',
+        env,
+        undefined,
+        undefined,
+        deployment ? { environmentId: 'environment-1' } : undefined
+      );
+
+      expect(generateCloudInit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          deploySigningPubKey: deployment ? 'test-public-deployment-key' : undefined,
+          role: deployment ? 'deployment' : undefined,
+          environmentId: deployment ? 'environment-1' : undefined,
+        })
+      );
+    }
+  );
+
+  it('clears stale termination proof and records provider ownership before paid allocation', async () => {
+    Object.assign(nodeRows[0] as Record<string, unknown>, {
+      runtimeTerminationConfirmedAt: '2026-08-01T00:00:00.000Z',
+    });
+    let writesAtAllocation: RecordedOp[] = [];
+    createVM.mockImplementationOnce(async () => {
+      writesAtAllocation = structuredClone(ops);
+      return vmResult();
+    });
+
+    await provisionNode('node-1', ENV);
+
+    expect(writesAtAllocation).toContainEqual({
+      kind: 'update',
+      set: expect.objectContaining({
+        cloudProvider: 'hetzner',
+        credentialSource: 'user',
+        runtimeTerminationConfirmedAt: null,
+        runtimeIncarnationId: expect.any(String),
+      }),
+    });
+    const claim = writesAtAllocation.find((op) => op.set?.runtimeTerminationConfirmedAt === null);
+    expect(claim?.set?.runtimeIncarnationId).not.toBe('runtime-1');
+  });
+
   it('propagates exact installation ownership to the provider create boundary', async () => {
     await provisionNode('node-1', ENV);
 
@@ -734,7 +829,37 @@ describe('provisionNode rethrowProviderError', () => {
 
     // Non-capacity failures keep the row, marked error, for surfacing to the user.
     expect(ops.some((o) => o.kind === 'delete')).toBe(false);
-    expect(ops.some((o) => o.kind === 'update' && o.set?.status === 'error')).toBe(true);
+    expect(ops).toContainEqual({
+      kind: 'update',
+      set: expect.objectContaining({
+        status: 'error',
+        errorMessage: '[hetzner] Bad VM config',
+      }),
+    });
+    expect(logError).toHaveBeenCalledWith(
+      'node_provisioning.failed',
+      expect.objectContaining({
+        nodeId: 'node-1',
+        provider: 'hetzner',
+        statusCode: 400,
+        error: 'Bad VM config',
+      })
+    );
+    expect(persistError).toHaveBeenCalledWith(
+      ENV.OBSERVABILITY_DATABASE,
+      expect.objectContaining({
+        source: 'api',
+        level: 'error',
+        message: 'Node provisioning failed: Bad VM config',
+        context: expect.objectContaining({
+          component: 'node-provisioning',
+          nodeId: 'node-1',
+          provider: 'hetzner',
+          statusCode: 400,
+        }),
+      }),
+      ENV
+    );
   });
 
   it('legacy mode swallows the error and records status:error without throwing', async () => {

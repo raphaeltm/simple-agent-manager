@@ -99,9 +99,9 @@ export type {
   PlacementDecisionDiagnostics,
   PlacementHostDiagnostic,
   PlacementQueueDiagnostic,
-  PlacementRolloutDiagnostic,
   PlacementResourceEvidence,
   PlacementResourceFacts,
+  PlacementRolloutDiagnostic,
 } from './placement-diagnostics';
 export {
   assertPlacementDiagnosticsAreUserSafe,

@@ -705,8 +705,8 @@ export function CreateWorkspace() {
 
           {!selectedNodeId && (
             <div>
-              <label style={{ ...labelStyle, marginBottom: '0.5rem' }}>
-                VM Size
+              <div style={{ ...labelStyle, marginBottom: '0.5rem' }}>
+                Workload requirements
                 {activeCatalog && catalogs.length === 1 && (
                   <span className="text-fg-muted font-normal ml-1">
                     ({PROVIDER_LABELS[activeCatalog.provider] ?? activeCatalog.provider})
@@ -718,10 +718,10 @@ export function CreateWorkspace() {
                     style={{ fontSize: 'var(--sam-type-caption-size)' }}
                   >
                     <Spinner size="sm" className="inline-block align-middle" />
-                    <span className="ml-1 align-middle">Loading pricing...</span>
+                    <span className="ml-1 align-middle">Loading provider options...</span>
                   </span>
                 )}
-              </label>
+              </div>
               <ResourceRequirementsInput
                 value={resourceReqs}
                 onChange={setResourceReqs}

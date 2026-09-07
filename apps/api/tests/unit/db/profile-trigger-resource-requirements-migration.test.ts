@@ -41,10 +41,12 @@ function openDb(): Database.Database {
   return sqlite;
 }
 
-function migrationSql(): string {
-  return readFileSync(
-    join(process.cwd(), 'src/db/migrations/0147_profile_trigger_resource_requirements.sql'),
-    'utf8'
+function applyMigration(db: Database.Database): void {
+  db.exec(
+    readFileSync(
+      join(process.cwd(), 'src/db/migrations/0147_profile_trigger_resource_requirements.sql'),
+      'utf8'
+    )
   );
 }
 
@@ -70,7 +72,7 @@ describe('0147_profile_trigger_resource_requirements migration', () => {
   it('adds nullable resource columns on a fresh pre-migration schema', () => {
     const db = openDb();
 
-    db.exec(migrationSql());
+    applyMigration(db);
 
     expect(columns('agent_profiles')).toContain('resource_requirements_json');
     expect(columns('triggers')).toContain('resource_requirements_json');
@@ -88,7 +90,7 @@ describe('0147_profile_trigger_resource_requirements migration', () => {
       VALUES ('trigger-1', 'project-1', 'user-1', 'profile-1', 'Nightly', 'Run tests');
     `);
 
-    db.exec(migrationSql());
+    applyMigration(db);
 
     expect(
       db.prepare('SELECT COUNT(*) AS count FROM agent_profiles').get() as { count: number }
