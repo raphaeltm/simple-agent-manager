@@ -12,7 +12,7 @@ import type {
   SafeEffectiveCapacityPoolReason,
   SafeEffectiveCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
-import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -25,6 +25,7 @@ import {
 } from './capacity-pools';
 import { ensureCandidatesForSource } from './default-capacity-pool-candidates';
 import {
+  composableCredentialReference,
   defaultCapacitySourceId,
   defaultPoolId,
   type DefaultPoolScopeIdentity,
@@ -55,6 +56,7 @@ const DEFAULT_BACKFILL_SCOPE_BATCH_SIZE = 25;
 const MAX_BACKFILL_SCOPE_BATCH_SIZE = 200;
 const BACKFILL_USER_CURSOR_KEY = 'capacityPools.backfill.userCursor.v1';
 const BACKFILL_PROJECT_CURSOR_KEY = 'capacityPools.backfill.projectCursor.v1';
+const BACKFILL_DIRTY_PROJECT_KEY_PREFIX = 'capacityPools.backfill.dirtyProject.v1:';
 const SOURCE_GENERATION_SETTING_KEY_PREFIX = 'capacityPools.sourceGeneration.v1';
 const SOURCE_KIND_CLOUD_PROVIDER = 'cloud-provider-credential';
 const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
@@ -182,9 +184,9 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
   const userIds = options.userId
     ? [options.userId]
     : await listCredentialUserIdsForBackfill(db, scopeBatchSize);
-  const projectIds = options.projectId
-    ? [options.projectId]
-    : await listCredentialProjectIdsForBackfill(db, scopeBatchSize);
+  const projectTargets = options.projectId
+    ? [{ projectId: options.projectId, advanceCredentialCursor: false }]
+    : await listProjectBackfillTargets(db, scopeBatchSize);
 
   let usersEnsured = 0;
   for (const userId of userIds) {
@@ -194,10 +196,13 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
   }
 
   let projectsEnsured = 0;
-  for (const projectId of projectIds) {
+  for (const { projectId, advanceCredentialCursor } of projectTargets) {
     await ensureProjectDefaultPool(db, projectId, options);
     projectsEnsured += 1;
-    if (!options.projectId) await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, projectId);
+    await clearBackfillDirtyProject(db, projectId);
+    if (!options.projectId && advanceCredentialCursor) {
+      await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, projectId);
+    }
   }
 
   return { installation, usersEnsured, projectsEnsured };
@@ -205,13 +210,16 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
 
 export async function requestDefaultCapacityPoolBackfillRetry(
   db: Db,
-  input: { users?: boolean; projects?: boolean } = {}
+  input: { users?: boolean; projects?: boolean; projectIds?: string[] } = {}
 ): Promise<void> {
   if (input.users !== false) {
     await writeBackfillCursor(db, BACKFILL_USER_CURSOR_KEY, null);
   }
   if (input.projects !== false) {
     await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, null);
+    for (const projectId of uniqueNonEmptyIds(input.projectIds ?? [])) {
+      await writeBackfillDirtyProject(db, projectId);
+    }
   }
 }
 
@@ -433,6 +441,30 @@ async function listCredentialProjectIdsForBackfill(db: Db, limit: number): Promi
   return ids;
 }
 
+interface ProjectBackfillTarget {
+  projectId: string;
+  advanceCredentialCursor: boolean;
+}
+
+async function listProjectBackfillTargets(db: Db, limit: number): Promise<ProjectBackfillTarget[]> {
+  const dirtyProjectIds = await listBackfillDirtyProjectIds(db, limit);
+  const targets: ProjectBackfillTarget[] = dirtyProjectIds.map((projectId) => ({
+    projectId,
+    advanceCredentialCursor: false,
+  }));
+  const seen = new Set(dirtyProjectIds);
+  const remainingLimit = limit - targets.length;
+  if (remainingLimit <= 0) return targets;
+
+  const credentialProjectIds = await listCredentialProjectIdsForBackfill(db, remainingLimit);
+  for (const projectId of credentialProjectIds) {
+    if (seen.has(projectId)) continue;
+    seen.add(projectId);
+    targets.push({ projectId, advanceCredentialCursor: true });
+  }
+  return targets.slice(0, limit);
+}
+
 async function listCredentialProjectIdsPage(
   db: Db,
   cursor: string | null,
@@ -470,6 +502,28 @@ async function listCredentialProjectIdsPage(
   ].slice(0, limit);
 }
 
+async function listBackfillDirtyProjectIds(db: Db, limit: number): Promise<string[]> {
+  const keyEnd = `${BACKFILL_DIRTY_PROJECT_KEY_PREFIX}\uffff`;
+  const rows = await db
+    .select({
+      key: schema.platformSettings.key,
+      value: schema.platformSettings.value,
+    })
+    .from(schema.platformSettings)
+    .where(
+      and(
+        gte(schema.platformSettings.key, BACKFILL_DIRTY_PROJECT_KEY_PREFIX),
+        lt(schema.platformSettings.key, keyEnd)
+      )
+    )
+    .orderBy(asc(schema.platformSettings.key))
+    .limit(limit);
+
+  return uniqueNonEmptyIds(
+    rows.map((row) => row.value || row.key.slice(BACKFILL_DIRTY_PROJECT_KEY_PREFIX.length))
+  );
+}
+
 async function readBackfillCursor(db: Db, key: string): Promise<string | null> {
   const [row] = await db
     .select({ value: schema.platformSettings.value })
@@ -496,6 +550,42 @@ async function writeBackfillCursor(db: Db, key: string, cursor: string | null): 
         updatedBy: sql`NULL`,
       },
     });
+}
+
+async function writeBackfillDirtyProject(db: Db, projectId: string): Promise<void> {
+  const normalizedProjectId = projectId.trim();
+  if (!normalizedProjectId) return;
+  const now = nextCapacityPoolTimestamp();
+  await db
+    .insert(schema.platformSettings)
+    .values({
+      key: backfillDirtyProjectKey(normalizedProjectId),
+      value: normalizedProjectId,
+      updatedAt: now,
+      updatedBy: null,
+    })
+    .onConflictDoUpdate({
+      target: schema.platformSettings.key,
+      set: {
+        value: normalizedProjectId,
+        updatedAt: now,
+        updatedBy: sql`NULL`,
+      },
+    });
+}
+
+async function clearBackfillDirtyProject(db: Db, projectId: string): Promise<void> {
+  await db
+    .delete(schema.platformSettings)
+    .where(eq(schema.platformSettings.key, backfillDirtyProjectKey(projectId)));
+}
+
+function backfillDirtyProjectKey(projectId: string): string {
+  return `${BACKFILL_DIRTY_PROJECT_KEY_PREFIX}${projectId}`;
+}
+
+function uniqueNonEmptyIds(ids: string[]): string[] {
+  return [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
 }
 
 async function readCapacityPoolScopeGeneration(db: Db, scope: ScopeIdentity): Promise<number> {
@@ -1125,6 +1215,7 @@ async function disableCapacitySourcesMissingFromSeeds(
     const key = sourceIdentityKeyForRow(source);
     if (!key || activeSeedKeys.has(key)) continue;
     if (source.sourceGeneration > seedSnapshotGeneration) continue;
+    if (await isCapacitySourceBackingAuthorityActive(db, source)) continue;
     sourceIdsToDisable.add(source.id);
   }
 
@@ -1148,6 +1239,128 @@ function sourceIdentityKeyForRow(source: schema.CapacitySource): string | null {
   if (source.credentialId) return `credential:${source.credentialId}`;
   if (source.credentialReference) return `reference:${source.credentialReference}`;
   return null;
+}
+
+async function isCapacitySourceBackingAuthorityActive(
+  db: Db,
+  source: schema.CapacitySource
+): Promise<boolean> {
+  if (source.platformCredentialId) {
+    return isPlatformCapacitySourceAuthorityActive(db, source);
+  }
+  if (source.externalSourceRef) {
+    return isComposableCapacitySourceAuthorityActive(db, source);
+  }
+  if (source.credentialId) {
+    return isLegacyCapacitySourceAuthorityActive(db, source);
+  }
+  return false;
+}
+
+async function isLegacyCapacitySourceAuthorityActive(
+  db: Db,
+  source: schema.CapacitySource
+): Promise<boolean> {
+  if (!source.credentialId) return false;
+  const [row] = await db
+    .select({
+      userId: schema.credentials.userId,
+      projectId: schema.credentials.projectId,
+      provider: schema.credentials.provider,
+      credentialType: schema.credentials.credentialType,
+      isActive: schema.credentials.isActive,
+    })
+    .from(schema.credentials)
+    .where(eq(schema.credentials.id, source.credentialId))
+    .limit(1);
+  if (!row) return false;
+
+  const scopeMatches =
+    source.scope === 'project'
+      ? row.projectId === source.ownerProjectId
+      : row.projectId === null && row.userId === source.ownerUserId;
+  return (
+    scopeMatches &&
+    row.credentialType === CREDENTIAL_TYPE_CLOUD_PROVIDER &&
+    row.isActive === true &&
+    row.provider === source.provider
+  );
+}
+
+async function isPlatformCapacitySourceAuthorityActive(
+  db: Db,
+  source: schema.CapacitySource
+): Promise<boolean> {
+  if (!source.platformCredentialId || source.scope !== 'installation') return false;
+  const [row] = await db
+    .select({
+      provider: schema.platformCredentials.provider,
+      credentialType: schema.platformCredentials.credentialType,
+      isEnabled: schema.platformCredentials.isEnabled,
+    })
+    .from(schema.platformCredentials)
+    .where(eq(schema.platformCredentials.id, source.platformCredentialId))
+    .limit(1);
+  return (
+    row?.credentialType === CREDENTIAL_TYPE_CLOUD_PROVIDER &&
+    row.isEnabled === true &&
+    row.provider === source.provider
+  );
+}
+
+async function isComposableCapacitySourceAuthorityActive(
+  db: Db,
+  source: schema.CapacitySource
+): Promise<boolean> {
+  const attachmentId = attachmentIdFromExternalSourceRef(source.externalSourceRef);
+  if (!attachmentId) return false;
+  const [row] = await db
+    .select({
+      userId: schema.ccAttachments.userId,
+      projectId: schema.ccAttachments.projectId,
+      attachmentActive: schema.ccAttachments.isActive,
+      attachmentConsumerKind: schema.ccAttachments.consumerKind,
+      attachmentConsumerTarget: schema.ccAttachments.consumerTarget,
+      configurationActive: schema.ccConfigurations.isActive,
+      configurationOwnerId: schema.ccConfigurations.ownerId,
+      configurationConsumerKind: schema.ccConfigurations.consumerKind,
+      configurationConsumerTarget: schema.ccConfigurations.consumerTarget,
+      configurationCredentialId: schema.ccConfigurations.credentialId,
+      credentialOwnerId: schema.ccCredentials.ownerId,
+      credentialKind: schema.ccCredentials.kind,
+      credentialActive: schema.ccCredentials.isActive,
+    })
+    .from(schema.ccAttachments)
+    .innerJoin(
+      schema.ccConfigurations,
+      eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id)
+    )
+    .innerJoin(
+      schema.ccCredentials,
+      eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id)
+    )
+    .where(eq(schema.ccAttachments.id, attachmentId))
+    .limit(1);
+  if (!row || !row.configurationCredentialId) return false;
+
+  const scopeMatches =
+    source.scope === 'project'
+      ? row.projectId === source.ownerProjectId
+      : row.projectId === null && row.userId === source.ownerUserId;
+  return (
+    scopeMatches &&
+    row.userId === row.configurationOwnerId &&
+    row.credentialOwnerId === row.configurationOwnerId &&
+    row.attachmentActive === true &&
+    row.configurationActive === true &&
+    row.credentialActive === true &&
+    row.attachmentConsumerKind === 'compute' &&
+    row.configurationConsumerKind === 'compute' &&
+    row.attachmentConsumerTarget === source.provider &&
+    row.configurationConsumerTarget === source.provider &&
+    row.credentialKind === CREDENTIAL_TYPE_CLOUD_PROVIDER &&
+    source.credentialReference === composableCredentialReference(row.configurationCredentialId)
+  );
 }
 
 async function disableDefaultPoolAvailability(

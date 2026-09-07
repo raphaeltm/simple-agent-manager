@@ -16,16 +16,14 @@ import type { Env } from '../../../src/env';
 import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/capacity-pool-reconciliation';
 import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
 import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
-import {
-  ensureCandidatesForSource,
-  initialStatusForProviderOffering,
-} from '../../../src/services/default-capacity-pool-candidates';
+import { initialStatusForProviderOffering } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import {
   backfillDefaultCapacityPoolsForExistingCredentials,
   ensureDefaultCapacityPoolsForExistingCredentials,
   readDefaultCapacityPoolSummaries,
+  requestDefaultCapacityPoolBackfillRetry,
   resolveEffectiveDefaultCapacityPoolSummary,
 } from '../../../src/services/default-capacity-pools';
 import { encrypt } from '../../../src/services/encryption';
@@ -910,6 +908,63 @@ describe('default capacity pool creation', () => {
         GROUP BY status
       `)
     ).toEqual([{ status: 'active', count: 26 }]);
+  });
+
+  it('retries a dirty project after the last composable project credential disappears', async () => {
+    const db = createDb();
+    const encrypted = await encrypt(
+      'hetzner-token-for-deleted-project-attachment',
+      TEST_ENCRYPTION_KEY
+    );
+    seedComposableCloudCredential({
+      credentialId: 'cc-project-cred-deleted',
+      configurationId: 'cc-project-cfg-deleted',
+      attachmentId: 'cc-project-att-deleted',
+      projectId: 'project-1',
+      encryptedToken: encrypted.ciphertext,
+      iv: encrypted.iv,
+    });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+      ],
+    });
+
+    expect(
+      getRows<{ status: string }>(
+        "SELECT status FROM capacity_sources WHERE owner_project_id = 'project-1'"
+      )[0]
+    ).toEqual({ status: 'active' });
+
+    sqlite?.prepare("DELETE FROM cc_attachments WHERE id = 'cc-project-att-deleted'").run();
+    await requestDefaultCapacityPoolBackfillRetry(db as never, {
+      users: false,
+      projects: true,
+      projectIds: ['project-1'],
+    });
+
+    const scheduled = await runScheduledCapacityPoolReconciliation({
+      ...catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+      CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE: '8',
+    } as Env);
+
+    expect(scheduled.projectsEnsured).toBe(1);
+    expect(
+      getRows<{ status: string }>(
+        "SELECT status FROM capacity_sources WHERE owner_project_id = 'project-1'"
+      )[0]
+    ).toEqual({ status: 'disabled' });
+    expect(
+      getCount('platform_settings', "key = 'capacityPools.backfill.dirtyProject.v1:project-1'")
+    ).toBe(0);
   });
 
   it('keeps project backfill cursor scans bounded by covering indexes', () => {
@@ -2997,6 +3052,76 @@ describe('default capacity pool creation', () => {
     });
   });
 
+  it('does not disable an active credential source omitted by a stale seed read', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner-a' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+      ],
+    });
+
+    let insertedStaleOmittedSource = false;
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      afterCredentialSeedSelection: async ({ scope, seedSnapshotGeneration, seedCount }) => {
+        if (scope.scope !== 'user' || insertedStaleOmittedSource) return;
+        insertedStaleOmittedSource = true;
+        expect(seedCount).toBe(1);
+        seedUserCredential({ id: 'user-hetzner-b' });
+        sqlite
+          ?.prepare(
+            `
+              INSERT INTO capacity_sources (
+                id, scope, owner_user_id, source_kind, provider, credential_source,
+                credential_id, credential_reference, source_generation, status, created_by
+              )
+              VALUES (
+                'cap-source-default:user:user-hetzner-b',
+                'user',
+                'user-1',
+                'cloud-provider-credential',
+                'hetzner',
+                'user',
+                'user-hetzner-b',
+                'credentials:user-hetzner-b',
+                ?,
+                'active',
+                'user-1'
+              )
+            `
+          )
+          .run(seedSnapshotGeneration);
+      },
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+      ],
+    });
+
+    expect(
+      getRows<{ credential_id: string; status: string }>(`
+        SELECT credential_id, status
+        FROM capacity_sources
+        WHERE credential_id IN ('user-hetzner-a', 'user-hetzner-b')
+        ORDER BY credential_id
+      `)
+    ).toEqual([
+      { credential_id: 'user-hetzner-a', status: 'active' },
+      { credential_id: 'user-hetzner-b', status: 'active' },
+    ]);
+  });
+
   it('uses source-generation CAS across service contexts at the publication boundary', async () => {
     const db = createDb();
     seedUserCredential({
@@ -3077,35 +3202,43 @@ describe('default capacity pool creation', () => {
     ).toEqual([]);
   });
 
-  it('chunks missing-candidate reconciliation below the D1 bind limit', async () => {
+  it('chunks guarded complete-empty refresh reconciliation below the D1 bind limit', async () => {
     createDb();
     seedUserCredential({ id: 'user-hetzner' });
     const db = drizzleD1(createSqliteD1WithBindLimit(sqlite!, 100), { schema });
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
-      offeringResolver: async () =>
-        Array.from({ length: 101 }, (_, index) =>
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+        ...Array.from({ length: 100 }, (_, index) =>
           liveHetznerOffering({
             location: 'fsn1',
             providerInstanceType: `disappearing-${index}`,
             displayName: `Disappearing ${index}`,
           })
         ),
+      ],
     });
 
-    await ensureCandidatesForSource(
-      db as never,
-      'cap-pool-default:user:user-1',
-      'cap-source-default:user:user-hetzner',
-      'hetzner',
-      [],
-      { refreshStartedAt: new Date().toISOString() }
-    );
+    const refreshed = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => ({
+        offerings: [],
+        refreshSucceeded: true,
+        catalogComplete: true,
+      }),
+    });
 
     expect(
       getCount('capacity_pool_candidates', "catalog_availability = 'last-known-unavailable'")
     ).toBe(101);
+    expect(refreshed.user?.effectiveState).toBe('catalog-unavailable');
   });
 
   it('keeps deliberately removed catalog entries removed when they disappear and return', async () => {

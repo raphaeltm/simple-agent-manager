@@ -32,6 +32,7 @@ const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
     (D1_MAX_BOUND_PARAMETERS - CANDIDATE_UPSERT_UPDATE_BIND_COUNT) / CANDIDATE_INSERT_BIND_COUNT
   )
 );
+const MISSING_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 16;
 
 export async function ensureCandidatesForSource(
   db: Db,
@@ -368,8 +369,10 @@ async function markMissingCandidatesForSource(
   const missingCandidateIds = [...existingStatuses.keys()].filter(
     (id) => !nextCandidateIds.has(id)
   );
-  const fixedBindCount = 8;
-  const chunkSize = Math.max(1, D1_MAX_BOUND_PARAMETERS - fixedBindCount);
+  const chunkSize = Math.max(
+    1,
+    D1_MAX_BOUND_PARAMETERS - MISSING_CANDIDATE_UPDATE_FIXED_BIND_COUNT
+  );
 
   for (let offset = 0; offset < missingCandidateIds.length; offset += chunkSize) {
     const chunk = missingCandidateIds.slice(offset, offset + chunkSize);

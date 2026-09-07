@@ -58,6 +58,12 @@ export async function reconcileCapacityPoolsForCredentialMutation(
     await requestDefaultCapacityPoolBackfillRetry(db, {
       users: input.scope !== 'project',
       projects: true,
+      projectIds:
+        input.scope === 'project'
+          ? [input.projectId]
+          : input.scope === 'user'
+            ? input.projectIds
+            : undefined,
     }).catch((retryError) => {
       log.warn('capacity_pools.credential_lifecycle_retry_marker_failed', {
         scope: input.scope,
