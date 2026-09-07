@@ -213,4 +213,5 @@ export interface SaveAgentCredentialRequest {
 export interface AgentKeyResponse {
   apiKey: string; // Decrypted credential (API key or OAuth token)
   credentialKind: CredentialKind; // Type for proper env var injection
+  credentialGeneration?: number; // Server-side attribution generation for usage callbacks
 }

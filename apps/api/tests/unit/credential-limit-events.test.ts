@@ -853,6 +853,7 @@ describe('ACP usage callback credential verification', () => {
         agentType: 'claude-code',
         credentialReference: 'cc_credentials:cred-1',
         credentialSource: 'user',
+        credentialGeneration: 1,
         observedAt: 100_000,
         source: 'claude-acp.usage_update',
         rateLimits: [
@@ -895,6 +896,7 @@ describe('ACP usage callback credential verification', () => {
       agentType: 'claude-code',
       credentialReference: 'cc_credentials:cred-1',
       credentialSource: 'user',
+      credentialGeneration: 1,
       observedAt: 100_000,
       source: 'claude-acp.usage_update',
       rateLimits: [
@@ -940,5 +942,73 @@ describe('ACP usage callback credential verification', () => {
       })
     ).rejects.toMatchObject({ statusCode: 403 });
     expect(projectDataService.admitProjectEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing or stale credential generations at the callback boundary', async () => {
+    const { env } = createCredentialD1();
+    seedCallback();
+
+    await expect(
+      handleAcpUsageCallback(makeContext(env), {
+        projectId: 'project-1',
+        sessionId: 'session-1',
+        body: {
+          nodeId: 'node-1',
+          credentialReference: 'cc_credentials:cred-1',
+          credentialSource: 'user',
+          rateLimits: [baseObservation({ windowType: 'claude.five_hour' })],
+        } as never,
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+
+    await expect(
+      handleAcpUsageCallback(makeContext(env), {
+        projectId: 'project-1',
+        sessionId: 'session-1',
+        body: {
+          nodeId: 'node-1',
+          credentialReference: 'cc_credentials:cred-1',
+          credentialSource: 'user',
+          credentialGeneration: 0,
+          rateLimits: [baseObservation({ windowType: 'claude.five_hour' })],
+        },
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(projectDataService.admitProjectEvent).not.toHaveBeenCalled();
+  });
+
+  it('rate limits callbacks by verified token identity instead of body node identity', async () => {
+    const { env } = createCredentialD1({
+      CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM: '1',
+      CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS: '60',
+    });
+    seedCallback();
+
+    const first = await handleAcpUsageCallback(makeContext(env), {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      body: {
+        nodeId: 'node-1',
+        credentialReference: 'cc_credentials:cred-1',
+        credentialSource: 'user',
+        credentialGeneration: 1,
+        rateLimits: [baseObservation({ windowType: 'claude.five_hour' })],
+      },
+    });
+    expect(first.status).toBe(204);
+
+    const second = await handleAcpUsageCallback(makeContext(env), {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      body: {
+        nodeId: 'node-attacker-controlled',
+        credentialReference: 'cc_credentials:cred-1',
+        credentialSource: 'user',
+        credentialGeneration: 1,
+        rateLimits: [baseObservation({ windowType: 'claude.five_hour' })],
+      },
+    });
+    expect(second.status).toBe(429);
+    expect(projectDataService.getAcpSession).toHaveBeenCalledTimes(1);
   });
 });

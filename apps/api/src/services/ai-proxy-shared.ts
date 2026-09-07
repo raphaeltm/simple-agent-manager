@@ -185,6 +185,40 @@ export async function updateAIProxyAgentCredentialAttribution(
     });
     return;
   }
+  const existing = await env.DATABASE.prepare(
+    `SELECT agent_credential_source, agent_credential_reference, agent_credential_provider,
+            agent_provider_mode, agent_credential_generation
+       FROM agent_sessions
+      WHERE id = ?
+        AND workspace_id = ?
+        AND user_id = ?
+        AND (agent_type IS NULL OR ? IS NULL OR agent_type = ?)
+      LIMIT 1`
+  )
+    .bind(
+      auth.agentSessionId,
+      auth.workspaceId,
+      auth.userId,
+      auth.agentType ?? null,
+      auth.agentType ?? null
+    )
+    .first<{
+      agent_credential_source: string | null;
+      agent_credential_reference: string | null;
+      agent_credential_provider: string | null;
+      agent_provider_mode: string | null;
+      agent_credential_generation: number;
+    }>();
+  if (
+    existing &&
+    existing.agent_credential_generation === auth.agentCredentialGeneration &&
+    existing.agent_credential_source === attribution.credentialSource &&
+    existing.agent_credential_reference === attribution.credentialReference &&
+    existing.agent_credential_provider === (attribution.credentialProvider ?? null) &&
+    existing.agent_provider_mode === (attribution.providerMode ?? null)
+  ) {
+    return;
+  }
   const update = await env.DATABASE.prepare(
     `UPDATE agent_sessions
         SET agent_credential_source = ?,

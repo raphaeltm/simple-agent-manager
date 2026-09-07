@@ -37,6 +37,7 @@ func TestFetchAgentKeyPropagatesAgentSessionAndCredentialAttribution(t *testing.
 			"credentialKind":"api-key",
 			"credentialSource":"user",
 			"credentialReference":"cc_credentials:cred-1",
+			"credentialGeneration":7,
 			"credentialProvider":"anthropic",
 			"providerMode":"direct"
 		}`))
@@ -65,6 +66,9 @@ func TestFetchAgentKeyPropagatesAgentSessionAndCredentialAttribution(t *testing.
 	}
 	if cred.credentialReference != "cc_credentials:cred-1" {
 		t.Fatalf("credentialReference = %q", cred.credentialReference)
+	}
+	if cred.credentialGeneration != 7 {
+		t.Fatalf("credentialGeneration = %d, want 7", cred.credentialGeneration)
 	}
 	if cred.credentialSource != "user" {
 		t.Fatalf("credentialSource = %q", cred.credentialSource)
@@ -114,10 +118,11 @@ func TestUsageReportFromClaudeRateLimitUsesStoredCredentialAttribution(t *testin
 		},
 	})
 	host.storeCredentialAttribution("claude-code", &agentCredential{
-		credentialSource:    "user",
-		credentialReference: "cc_credentials:cred-1",
-		credentialProvider:  "anthropic",
-		providerMode:        "direct",
+		credentialSource:     "user",
+		credentialReference:  "cc_credentials:cred-1",
+		credentialGeneration: 7,
+		credentialProvider:   "anthropic",
+		providerMode:         "direct",
 	})
 
 	request, ok := host.prepareUsageReport(acpsdk.SessionNotification{
@@ -152,6 +157,9 @@ func TestUsageReportFromClaudeRateLimitUsesStoredCredentialAttribution(t *testin
 	}
 	if received.CredentialReference != "cc_credentials:cred-1" {
 		t.Fatalf("credentialReference = %q", received.CredentialReference)
+	}
+	if received.CredentialGeneration != 7 {
+		t.Fatalf("credentialGeneration = %d, want 7", received.CredentialGeneration)
 	}
 	if received.CredentialSource != "user" {
 		t.Fatalf("credentialSource = %q", received.CredentialSource)

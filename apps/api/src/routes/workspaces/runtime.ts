@@ -169,6 +169,11 @@ type AgentCredentialAttribution = {
   providerMode?: string | null;
 };
 
+type PersistedAgentCredentialAttribution = {
+  agentSessionId: string;
+  credentialGeneration: number;
+};
+
 async function persistAgentCredentialAttribution(
   env: Env,
   workspace: WorkspaceCallbackIdentitySnapshot,
@@ -178,7 +183,7 @@ async function persistAgentCredentialAttribution(
     agentType: string;
     attribution: AgentCredentialAttribution;
   }
-): Promise<string | null> {
+): Promise<PersistedAgentCredentialAttribution | null> {
   await assertWorkspaceCallbackIdentityCurrent(env, workspace, 'agent_key');
 
   const now = new Date().toISOString();
@@ -194,7 +199,8 @@ async function persistAgentCredentialAttribution(
         WHERE id = ?
           AND workspace_id = ?
           AND user_id = ?
-          AND (agent_type IS NULL OR agent_type = ?)`
+          AND (agent_type IS NULL OR agent_type = ?)
+      RETURNING id, agent_credential_generation AS credentialGeneration`
     )
       .bind(
         input.attribution.credentialSource,
@@ -207,12 +213,12 @@ async function persistAgentCredentialAttribution(
         workspace.userId,
         input.agentType
       )
-      .run();
+      .first<PersistedAgentCredentialAttribution>();
 
-    if ((update.meta.changes ?? 0) !== 1) {
+    if (!update) {
       throw errors.forbidden('Agent session does not match workspace callback identity');
     }
-    return input.agentSessionId;
+    return update;
   }
 
   const target = await env.DATABASE.prepare(
@@ -237,7 +243,7 @@ async function persistAgentCredentialAttribution(
     return null;
   }
 
-  await env.DATABASE.prepare(
+  const update = await env.DATABASE.prepare(
     `UPDATE agent_sessions
         SET agent_credential_source = ?,
             agent_credential_reference = ?,
@@ -245,7 +251,8 @@ async function persistAgentCredentialAttribution(
             agent_provider_mode = ?,
             agent_credential_generation = agent_credential_generation + 1,
             updated_at = ?
-      WHERE id = ?`
+      WHERE id = ?
+      RETURNING id, agent_credential_generation AS credentialGeneration`
   )
     .bind(
       input.attribution.credentialSource,
@@ -255,8 +262,8 @@ async function persistAgentCredentialAttribution(
       now,
       target.id
     )
-    .run();
-  return target.id;
+    .first<PersistedAgentCredentialAttribution>();
+  return update;
 }
 
 function credentialAttributionFromData(
@@ -915,7 +922,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   }
 
   if (credentialData && opencodeRequiresDedicatedCredential) {
-    await persistAgentCredentialAttribution(c.env, workspace, {
+    const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
       workspaceId,
       agentSessionId: body.agentSessionId,
       agentType: body.agentType,
@@ -932,6 +939,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       credentialReference: credentialData.credentialReference,
       credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
       providerMode: credentialProviderMode,
+      credentialGeneration: persistedAttribution?.credentialGeneration,
     });
   }
 
@@ -1039,7 +1047,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
           .where(eq(schema.tasks.id, task.id));
       }
 
-      await persistAgentCredentialAttribution(c.env, workspace, {
+      const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
         workspaceId,
         agentSessionId: body.agentSessionId,
         agentType: body.agentType,
@@ -1053,6 +1061,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         credentialReference: credentialData.credentialReference,
         credentialProvider: credentialData.credentialProvider ?? credentialData.providerDialect ?? agentCredentialProviderFallback(body.agentType),
         providerMode: 'proxy-passthrough',
+        credentialGeneration: persistedAttribution?.credentialGeneration,
         inferenceConfig,
       });
     }
@@ -1068,7 +1077,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
 
     if (credentialData) {
-      await persistAgentCredentialAttribution(c.env, workspace, {
+      const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
         workspaceId,
         agentSessionId: body.agentSessionId,
         agentType: body.agentType,
@@ -1085,6 +1094,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         credentialReference: credentialData.credentialReference,
         credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
         providerMode: credentialProviderMode,
+        credentialGeneration: persistedAttribution?.credentialGeneration,
       });
     }
 
@@ -1139,7 +1149,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
 
     const platformAttribution = platformProxyAttribution(body.agentType);
-    await persistAgentCredentialAttribution(c.env, workspace, {
+    const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
       workspaceId,
       agentSessionId: body.agentSessionId,
       agentType: body.agentType,
@@ -1153,6 +1163,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       credentialReference: platformAttribution.credentialReference,
       credentialProvider: platformAttribution.credentialProvider,
       providerMode: platformAttribution.providerMode,
+      credentialGeneration: persistedAttribution?.credentialGeneration,
       inferenceConfig,
     });
   }
@@ -1178,7 +1189,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
-  await persistAgentCredentialAttribution(c.env, workspace, {
+  const persistedAttribution = await persistAgentCredentialAttribution(c.env, workspace, {
     workspaceId,
     agentSessionId: body.agentSessionId,
     agentType: body.agentType,
@@ -1192,6 +1203,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     credentialReference: credentialData.credentialReference,
     credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
     providerMode: credentialProviderMode,
+    credentialGeneration: persistedAttribution?.credentialGeneration,
   });
 });
 

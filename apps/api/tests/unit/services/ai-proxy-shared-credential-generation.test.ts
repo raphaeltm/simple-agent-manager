@@ -94,4 +94,27 @@ describe('AI proxy credential attribution generation fence', () => {
       agent_credential_generation: 3,
     });
   });
+
+  it('does not advance the generation when proxy attribution is unchanged', async () => {
+    const { sqlite, env } = createEnv();
+
+    await updateAIProxyAgentCredentialAttribution(env, {
+      agentSessionId: 'session-1',
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      agentType: 'claude-code',
+      agentCredentialGeneration: 1,
+    }, {
+      credentialSource: 'project',
+      credentialReference: 'cc_credentials:initial',
+      credentialProvider: 'anthropic',
+      providerMode: 'boot',
+    });
+
+    expect(readCredentialRow(sqlite)).toMatchObject({
+      agent_credential_reference: 'cc_credentials:initial',
+      agent_provider_mode: 'boot',
+      agent_credential_generation: 1,
+    });
+  });
 });

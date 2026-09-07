@@ -69,6 +69,7 @@ export const AcpSessionUsageReportSchema = v.object({
   agentType: v.optional(UsageIdentifierSchema),
   credentialReference: v.optional(UsageIdentifierSchema),
   credentialSource: v.optional(v.picklist(['user', 'project', 'platform'])),
+  credentialGeneration: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
   observedAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
   source: v.optional(UsageSourceSchema),
   rateLimits: v.pipe(

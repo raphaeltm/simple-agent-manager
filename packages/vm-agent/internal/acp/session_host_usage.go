@@ -17,11 +17,12 @@ import (
 const claudeRateLimitMetaKey = "_claude/rateLimit"
 
 type credentialAttribution struct {
-	AgentType           string
-	CredentialSource    string
-	CredentialReference string
-	CredentialProvider  string
-	ProviderMode        string
+	AgentType            string
+	CredentialSource     string
+	CredentialReference  string
+	CredentialGeneration int64
+	CredentialProvider   string
+	ProviderMode         string
 }
 
 type usageLimitPayload struct {
@@ -39,13 +40,14 @@ type usageLimitPayload struct {
 }
 
 type usageReportPayload struct {
-	NodeID              string              `json:"nodeId"`
-	AgentType           string              `json:"agentType,omitempty"`
-	CredentialReference string              `json:"credentialReference,omitempty"`
-	CredentialSource    string              `json:"credentialSource,omitempty"`
-	ObservedAt          int64               `json:"observedAt,omitempty"`
-	Source              string              `json:"source,omitempty"`
-	RateLimits          []usageLimitPayload `json:"rateLimits"`
+	NodeID               string              `json:"nodeId"`
+	AgentType            string              `json:"agentType,omitempty"`
+	CredentialReference  string              `json:"credentialReference,omitempty"`
+	CredentialSource     string              `json:"credentialSource,omitempty"`
+	CredentialGeneration int64               `json:"credentialGeneration"`
+	ObservedAt           int64               `json:"observedAt,omitempty"`
+	Source               string              `json:"source,omitempty"`
+	RateLimits           []usageLimitPayload `json:"rateLimits"`
 }
 
 type usageReportRequest struct {
@@ -64,11 +66,12 @@ func (h *SessionHost) storeCredentialAttribution(agentType string, cred *agentCr
 		return
 	}
 	h.credentialAttribution.Store(credentialAttribution{
-		AgentType:           agentType,
-		CredentialSource:    cred.credentialSource,
-		CredentialReference: cred.credentialReference,
-		CredentialProvider:  cred.credentialProvider,
-		ProviderMode:        cred.providerMode,
+		AgentType:            agentType,
+		CredentialSource:     cred.credentialSource,
+		CredentialReference:  cred.credentialReference,
+		CredentialGeneration: cred.credentialGeneration,
+		CredentialProvider:   cred.credentialProvider,
+		ProviderMode:         cred.providerMode,
 	})
 }
 
@@ -125,13 +128,14 @@ func (h *SessionHost) prepareUsageReportWithAttribution(params acpsdk.SessionNot
 	}
 
 	payload := usageReportPayload{
-		NodeID:              nodeID,
-		AgentType:           attr.AgentType,
-		CredentialReference: attr.CredentialReference,
-		CredentialSource:    attr.CredentialSource,
-		ObservedAt:          observedAt,
-		Source:              "claude-acp.usage_update",
-		RateLimits:          []usageLimitPayload{limit},
+		NodeID:               nodeID,
+		AgentType:            attr.AgentType,
+		CredentialReference:  attr.CredentialReference,
+		CredentialSource:     attr.CredentialSource,
+		CredentialGeneration: attr.CredentialGeneration,
+		ObservedAt:           observedAt,
+		Source:               "claude-acp.usage_update",
+		RateLimits:           []usageLimitPayload{limit},
 	}
 	return usageReportRequest{
 		url: strings.TrimRight(controlPlaneURL, "/") +

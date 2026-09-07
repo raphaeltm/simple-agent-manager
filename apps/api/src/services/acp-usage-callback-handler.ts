@@ -39,6 +39,7 @@ export interface AcpUsageCallbackReport {
   agentType?: string;
   credentialReference?: string;
   credentialSource?: 'user' | 'project' | 'platform';
+  credentialGeneration?: number;
   observedAt?: number;
   source?: string;
   rateLimits: AcpUsageLimitObservationReport[];
@@ -54,6 +55,7 @@ type AgentSessionCredentialAttributionRow = {
   agent_credential_source: string | null;
   agent_credential_provider: string | null;
   agent_provider_mode: string | null;
+  agent_credential_generation: number;
   workspace_id: string;
   workspace_project_id: string | null;
   workspace_chat_session_id: string | null;
@@ -99,7 +101,6 @@ async function enforceAcpUsageCallbackRateLimit(
     payload: CallbackTokenPayload;
     projectId: string;
     sessionId: string;
-    nodeId: string;
   }
 ): Promise<Response | null> {
   const limit = parsePositiveInt(
@@ -113,7 +114,7 @@ async function enforceAcpUsageCallbackRateLimit(
   const windowStart = getCurrentWindowStart(windowSeconds);
   const key = createRateLimitKey(
     'acp-usage-callback',
-    `${input.payload.scope}:${input.payload.workspace}:${input.projectId}:${input.sessionId}:${input.nodeId}`,
+    `${input.payload.scope}:${input.payload.workspace}:${input.projectId}:${input.sessionId}`,
     windowStart
   );
   const { allowed, remaining, resetAt } = await checkRateLimit(
@@ -197,6 +198,7 @@ async function loadServerCredentialAttribution(
         s.agent_credential_source,
         s.agent_credential_provider,
         s.agent_provider_mode,
+        s.agent_credential_generation,
         w.id AS workspace_id,
         w.project_id AS workspace_project_id,
         w.chat_session_id AS workspace_chat_session_id,
@@ -258,6 +260,40 @@ function assertServerAttributionMatchesCallback(
       action: 'rejected',
     });
     throw errors.forbidden('Agent type mismatch');
+  }
+  if (!Number.isSafeInteger(row.agent_credential_generation) || row.agent_credential_generation < 0) {
+    log.warn('acp_usage.invalid_server_credential_generation', {
+      sessionId: row.id,
+      workspaceId: row.workspace_id,
+      credentialReference: row.agent_credential_reference,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Credential attribution generation is not server verified');
+  }
+  const callbackCredentialGeneration = body.credentialGeneration;
+  if (
+    !Number.isSafeInteger(callbackCredentialGeneration) ||
+    callbackCredentialGeneration === undefined ||
+    callbackCredentialGeneration < 0
+  ) {
+    log.warn('acp_usage.missing_credential_generation', {
+      sessionId: row.id,
+      workspaceId: row.workspace_id,
+      credentialReference: row.agent_credential_reference,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Credential attribution generation is required');
+  }
+  if (callbackCredentialGeneration !== row.agent_credential_generation) {
+    log.warn('acp_usage.credential_generation_mismatch', {
+      sessionId: row.id,
+      workspaceId: row.workspace_id,
+      credentialReference: row.agent_credential_reference,
+      expectedCredentialGeneration: row.agent_credential_generation,
+      receivedCredentialGeneration: callbackCredentialGeneration,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Credential attribution generation mismatch');
   }
   return {
     credentialReference: row.agent_credential_reference,
@@ -327,7 +363,6 @@ export async function handleAcpUsageCallback(
     payload,
     projectId,
     sessionId,
-    nodeId: body.nodeId,
   });
   if (rateLimitResponse) return rateLimitResponse;
 
