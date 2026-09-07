@@ -31,6 +31,10 @@ import type {
   TaskStartCapacityPoolSelection,
   TaskStartPlacement,
 } from './placement-resolver-types';
+import {
+  comparePlacementLocationsByStrategy,
+  type PlacementLocationInventory,
+} from './placement-strategy';
 
 const CAPACITY_PLACEMENT_PLAN_VERSION = 1;
 const MAX_SCORE_WEIGHT = 1_000_000_000;
@@ -470,6 +474,46 @@ function capacityCandidateMatchesNode(
     nodeVmSize: node.vmSize,
     requestedVmSize,
     candidateMachineSize: null,
+  });
+}
+
+export interface RankCapacityCandidatesInput {
+  strategy: CapacityPoolStrategy;
+  reservation: ResolvedResourceReservation;
+  settings?: CapacityPoolPlacementSettings;
+  /**
+   * Live host distribution for the caller. Only `pack` and `spread` consult it,
+   * and only at provisioning time — resolve-time ordering has no host inventory
+   * and must stay byte-identical, so an absent inventory is a strict no-op.
+   */
+  locationInventory?: PlacementLocationInventory;
+}
+
+/**
+ * Re-rank an already-resolved candidate list at provisioning time.
+ *
+ * `pack` and `spread` are meaningless for a brand-new offering considered in
+ * isolation: neither utilization nor co-tenancy exists yet. They become
+ * observable only against the caller's live host distribution, which the
+ * resolver does not have. This applies that distribution as the leading key for
+ * those two strategies and otherwise preserves the resolver's exact ordering.
+ *
+ * Returns a new array; the input is not mutated.
+ */
+export function rankCapacityCandidatesForRuntime(
+  candidates: readonly TaskStartCapacityCandidate[],
+  input: RankCapacityCandidatesInput
+): TaskStartCapacityCandidate[] {
+  const settings = input.settings ?? defaultPlacementSettings();
+  return [...candidates].sort((a, b) => {
+    const byLocation = comparePlacementLocationsByStrategy(
+      { provider: a.provider, location: a.location },
+      { provider: b.provider, location: b.location },
+      input.strategy,
+      input.locationInventory
+    );
+    if (byLocation !== 0) return byLocation;
+    return compareCapacityCandidates(a, b, input.strategy, input.reservation, settings);
   });
 }
 

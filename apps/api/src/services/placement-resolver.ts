@@ -67,8 +67,10 @@ export {
   capacityPoolNoCandidatesMessage,
   capacityPoolSnapshotForPool,
   hasNoCapacityPoolCandidates,
+  rankCapacityCandidatesForRuntime,
   resolveReusableNodeCapacitySnapshot,
 } from './placement-resolver-capacity';
+export type { RankCapacityCandidatesInput } from './placement-resolver-capacity';
 export type {
   CapacityAwareNodePlacementRow,
   PlacementCredentialAttribution,
