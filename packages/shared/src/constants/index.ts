@@ -632,7 +632,7 @@ export {
 } from './sam';
 
 // Resource Defaults & Resolver
-export type { VmCapacity } from './resource-defaults';
+export type { NormalizeResourceRequirementsOptions, VmCapacity } from './resource-defaults';
 export {
   DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
   DEFAULT_VM_CAPACITY,
@@ -640,7 +640,9 @@ export {
   LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
   PLATFORM_RESOURCE_DEFAULTS,
   PROVIDER_VM_CAPACITY,
+  normalizeResourceRequirements,
   resolveResourceReservation,
+  ResourceRequirementsValidationError,
   RESOURCE_RESERVATION_VERSION,
   selectVmSizeForRequirements,
 } from './resource-defaults';

@@ -1021,7 +1021,7 @@ function resolveBackfillScopeBatchSize(options: DefaultCapacityPoolsBackfillOpti
     options.scopeBatchSize ??
     numberFromString(options.env?.CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE);
   if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
-    return Math.min(Math.floor(configured), MAX_BACKFILL_SCOPE_BATCH_SIZE);
+    return Math.min(Math.max(1, Math.floor(configured)), MAX_BACKFILL_SCOPE_BATCH_SIZE);
   }
   return DEFAULT_BACKFILL_SCOPE_BATCH_SIZE;
 }

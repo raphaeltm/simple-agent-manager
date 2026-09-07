@@ -171,6 +171,31 @@ const RESOURCE_REQUIREMENT_FIELDS = [
 
 const MAX_RESERVATION_UNIT = Number.MAX_SAFE_INTEGER;
 
+export class ResourceRequirementsValidationError extends Error {
+  readonly field: ResourceRequirementField;
+  readonly source: ResourceRequirementsSource;
+  readonly sourceId: string;
+
+  constructor(input: {
+    field: ResourceRequirementField;
+    source: ResourceRequirementsSource;
+    sourceId: string;
+    reason: string;
+  }) {
+    super(
+      `Invalid ${input.field} in ${input.source} resource requirements ${input.sourceId}: ${input.reason}`
+    );
+    this.name = 'ResourceRequirementsValidationError';
+    this.field = input.field;
+    this.source = input.source;
+    this.sourceId = input.sourceId;
+  }
+}
+
+export interface NormalizeResourceRequirementsOptions {
+  requireAllFields?: boolean;
+}
+
 export interface ResourceReservationResolutionOptions {
   platformDefaults?: Required<ResourceRequirements>;
   legacyVmSizes?: LegacyVmSizeResolutionInput;
@@ -198,7 +223,7 @@ export function resolveResourceReservation(
   } = {},
   options: ResourceReservationResolutionOptions = {}
 ): ResolvedResourceReservation {
-  const platformDefaults = validateResourceRequirementsLayer(
+  const platformDefaults = normalizeResourceRequirements(
     'platform',
     'platform',
     options.platformDefaults ?? PLATFORM_RESOURCE_DEFAULTS
@@ -323,11 +348,7 @@ export function resolveResourceReservation(
 function validatedExplicitLayer(
   layer: ResolutionLayer
 ): { requirements: ResourceRequirements; provenance: ResourceRequirementProvenance } | null {
-  const explicit = validateResourceRequirementsLayer(
-    layer.source,
-    layer.sourceId,
-    layer.requirements
-  );
+  const explicit = normalizeResourceRequirements(layer.source, layer.sourceId, layer.requirements);
   if (!explicit) return null;
   const provenance: ResourceRequirementProvenance = {};
   let hasValue = false;
@@ -388,23 +409,23 @@ function validateLegacyWorkloadMapping(
   mapping: Record<VMSize, Required<ResourceRequirements>>
 ): Record<VMSize, Required<ResourceRequirements>> {
   return {
-    small: validateResourceRequirementsLayer('platform', 'legacy:small', mapping.small, {
+    small: normalizeResourceRequirements('platform', 'legacy:small', mapping.small, {
       requireAllFields: true,
     }) as Required<ResourceRequirements>,
-    medium: validateResourceRequirementsLayer('platform', 'legacy:medium', mapping.medium, {
+    medium: normalizeResourceRequirements('platform', 'legacy:medium', mapping.medium, {
       requireAllFields: true,
     }) as Required<ResourceRequirements>,
-    large: validateResourceRequirementsLayer('platform', 'legacy:large', mapping.large, {
+    large: normalizeResourceRequirements('platform', 'legacy:large', mapping.large, {
       requireAllFields: true,
     }) as Required<ResourceRequirements>,
   };
 }
 
-function validateResourceRequirementsLayer(
+export function normalizeResourceRequirements(
   source: ResourceRequirementsSource,
   sourceId: string,
   requirements: ResourceRequirements | undefined,
-  options: { requireAllFields?: boolean } = {}
+  options: NormalizeResourceRequirementsOptions = {}
 ): ResourceRequirements | undefined {
   if (!requirements) return undefined;
   const validated: ResourceRequirements = {};
@@ -412,7 +433,7 @@ function validateResourceRequirementsLayer(
     const value = requirements[field];
     if (value === undefined) {
       if (options.requireAllFields === true) {
-        throw new Error(`Missing ${field} in ${source} resource requirements ${sourceId}`);
+        throw resourceRequirementsValidationError(field, source, sourceId, 'missing');
       }
       continue;
     }
@@ -457,52 +478,71 @@ function validateResourceRequirementField(
 ): number | boolean {
   if (field === 'exclusiveNode') {
     if (typeof value === 'boolean') return value;
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
+    throw resourceRequirementsValidationError(field, source, sourceId, 'expected boolean');
   }
 
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
+    throw resourceRequirementsValidationError(field, source, sourceId, 'expected finite number');
   }
 
   if (field === 'maxCoTenants') {
     if (Number.isInteger(value) && value > 0) return value;
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
+    throw resourceRequirementsValidationError(field, source, sourceId, 'expected positive integer');
   }
 
   if ((field === 'minVcpu' || field === 'minMemoryGb') && value <= 0) {
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
+    throw resourceRequirementsValidationError(field, source, sourceId, 'expected positive number');
   }
 
   if (value < 0) {
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
+    throw resourceRequirementsValidationError(
+      field,
+      source,
+      sourceId,
+      'expected nonnegative number'
+    );
   }
 
-  assertBoundedReservationValue(field, value);
+  assertBoundedReservationValue(field, value, source, sourceId);
 
   return value;
 }
 
-function assertBoundedReservationValue(field: ResourceRequirementField, value: number): void {
+function assertBoundedReservationValue(
+  field: ResourceRequirementField,
+  value: number,
+  source: ResourceRequirementsSource,
+  sourceId: string
+): void {
   if (field === 'minVcpu') {
-    toPositiveReservationUnit(field, value, 1000);
+    toPositiveReservationUnit(field, value, 1000, { source, sourceId });
     return;
   }
   if (field === 'minMemoryGb') {
-    toPositiveReservationUnit(field, value, 1024);
+    toPositiveReservationUnit(field, value, 1024, { source, sourceId });
     return;
   }
   if (field === 'minDiskGb') {
-    toNonNegativeReservationUnit(field, value, 1024);
+    toNonNegativeReservationUnit(field, value, 1024, { source, sourceId });
   }
 }
 
 function toPositiveReservationUnit(
   field: ResourceRequirementField,
   value: number,
-  multiplier: number
+  multiplier: number,
+  context?: { source: ResourceRequirementsSource; sourceId: string }
 ): number {
   const units = Math.ceil(value * multiplier);
   if (!Number.isSafeInteger(units) || units <= 0 || units > MAX_RESERVATION_UNIT) {
+    if (context) {
+      throw resourceRequirementsValidationError(
+        field,
+        context.source,
+        context.sourceId,
+        'unsafe units'
+      );
+    }
     throw new Error(`Invalid ${field} resource requirement units`);
   }
   return units;
@@ -511,11 +551,29 @@ function toPositiveReservationUnit(
 function toNonNegativeReservationUnit(
   field: ResourceRequirementField,
   value: number,
-  multiplier: number
+  multiplier: number,
+  context?: { source: ResourceRequirementsSource; sourceId: string }
 ): number {
   const units = Math.ceil(value * multiplier);
   if (!Number.isSafeInteger(units) || units < 0 || units > MAX_RESERVATION_UNIT) {
+    if (context) {
+      throw resourceRequirementsValidationError(
+        field,
+        context.source,
+        context.sourceId,
+        'unsafe units'
+      );
+    }
     throw new Error(`Invalid ${field} resource requirement units`);
   }
   return units;
+}
+
+function resourceRequirementsValidationError(
+  field: ResourceRequirementField,
+  source: ResourceRequirementsSource,
+  sourceId: string,
+  reason: string
+): ResourceRequirementsValidationError {
+  return new ResourceRequirementsValidationError({ field, source, sourceId, reason });
 }

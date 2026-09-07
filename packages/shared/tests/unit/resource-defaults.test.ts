@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
+  normalizeResourceRequirements,
   PLATFORM_RESOURCE_DEFAULTS,
   resolveResourceReservation,
+  ResourceRequirementsValidationError,
   RESOURCE_RESERVATION_VERSION,
   selectVmSizeForRequirements,
 } from '../../src/constants/resource-defaults';
@@ -157,6 +159,46 @@ describe('resolveResourceReservation', () => {
     ).toThrow('Invalid maxCoTenants');
   });
 
+  it('exports the same normalizer contract for client wrappers', () => {
+    const normalized = normalizeResourceRequirements('task', 'task-client', {
+      minVcpu: 0.0001,
+      minMemoryGb: 0.1,
+      minDiskGb: 0,
+      exclusiveNode: false,
+      maxCoTenants: 1,
+      compatibilityMode: 'v2',
+    } as never);
+
+    expect(normalized).toEqual({
+      minVcpu: 0.0001,
+      minMemoryGb: 0.1,
+      minDiskGb: 0,
+      exclusiveNode: false,
+      maxCoTenants: 1,
+    });
+  });
+
+  it('rejects client-invalid zero cpu, zero memory, and zero or fractional tenant limits with field context', () => {
+    for (const [field, value] of [
+      ['minVcpu', 0],
+      ['minMemoryGb', 0],
+      ['maxCoTenants', 0],
+      ['maxCoTenants', 1.5],
+    ] as const) {
+      expect(() =>
+        normalizeResourceRequirements('task', 'task-client', { [field]: value } as never)
+      ).toThrow(ResourceRequirementsValidationError);
+      try {
+        normalizeResourceRequirements('task', 'task-client', { [field]: value } as never);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ResourceRequirementsValidationError);
+        expect((error as ResourceRequirementsValidationError).field).toBe(field);
+        expect((error as ResourceRequirementsValidationError).source).toBe('task');
+        expect((error as ResourceRequirementsValidationError).sourceId).toBe('task-client');
+      }
+    }
+  });
+
   it('maps legacy sizes to distinct workload slices with per-field provenance', () => {
     const small = resolveResourceReservation({}, {}, { legacyVmSizes: { task: 'small' } });
     const medium = resolveResourceReservation({}, {}, { legacyVmSizes: { task: 'medium' } });
@@ -297,7 +339,14 @@ describe('resolveResourceReservation', () => {
       resolveResourceReservation({
         task: { minVcpu: Number.MAX_SAFE_INTEGER },
       })
-    ).toThrow('Invalid minVcpu resource requirement units');
+    ).toThrow(ResourceRequirementsValidationError);
+    try {
+      resolveResourceReservation({
+        task: { minVcpu: Number.MAX_SAFE_INTEGER },
+      });
+    } catch (error) {
+      expect((error as ResourceRequirementsValidationError).field).toBe('minVcpu');
+    }
     expect(() =>
       resolveResourceReservation(
         {},
