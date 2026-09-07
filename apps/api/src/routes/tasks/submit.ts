@@ -43,6 +43,7 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import {
   collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
   firstResourceRequirementLayer,
   firstResourceRequirementLayerJson,
   mergeResourceRequirementLayers,
@@ -420,6 +421,12 @@ submitRoutes.post(
       resolvedReservation,
       agentType,
     } = placement;
+    const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+      layers: resourceRequirementLayers,
+      resolvedReservation,
+      requestedVmSize: vmSize,
+      requestedVmSizeSource: vmSizeSource,
+    });
     const projectAgentDefaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
 
     // Start new task work on its generated output branch so VM-agent completion
@@ -461,6 +468,7 @@ submitRoutes.post(
       requestedVmSize: vmSize,
       requestedVmSizeSource: vmSizeSource,
       resourceRequirementsJson: persistedResourceRequirementsJson,
+      resourceRequirementPlanJson: persistedResourceRequirementPlanJson,
       resourceRequirementsSource: resolvedReservation.source,
       resolvedReservationJson: JSON.stringify(resolvedReservation),
       credentialAttributionUserId,

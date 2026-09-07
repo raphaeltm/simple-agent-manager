@@ -132,6 +132,10 @@ function resolvePlacementReservation(
   vmSize: VMSize,
   vmSizeSource: ResourceRequirementsSource
 ) {
+  if (input.resolvedReservationOverride) {
+    return input.resolvedReservationOverride;
+  }
+
   const explicit = input.explicit ?? {};
   const profile = input.profile ?? null;
   const legacyVmSizes: Partial<Record<ResourceRequirementsSource, VMSize>> = {};
@@ -140,17 +144,16 @@ function resolvePlacementReservation(
     legacyVmSizes[explicit.vmSizeSource ?? 'task'] = explicit.vmSize;
   }
   const skillVmSizeOverride = profile?.skillVmSizeOverride ?? null;
-  const agentProfileVmSizeOverride =
-    profile?.agentProfileVmSizeOverride ?? profile?.vmSizeOverride ?? null;
   if (skillVmSizeOverride) {
     legacyVmSizes.skill = skillVmSizeOverride as VMSize;
   }
-  if (agentProfileVmSizeOverride) {
+  if (profile?.agentProfileVmSizeOverride) {
+    const agentProfileVmSizeOverride = profile.agentProfileVmSizeOverride;
     legacyVmSizes['agent-profile'] = agentProfileVmSizeOverride as VMSize;
-  } else if (profile?.vmSizeOverride) {
+  } else if (!skillVmSizeOverride && profile?.vmSizeOverride) {
     legacyVmSizes[input.profileVmSizeSource ?? 'agent-profile'] = profile.vmSizeOverride as VMSize;
   }
-  if (input.project.defaultVmSize) {
+  if (input.project.defaultVmSize && legacyVmSizes.project === undefined) {
     legacyVmSizes.project = input.project.defaultVmSize as VMSize;
   }
   if (Object.keys(legacyVmSizes).length === 0) {
@@ -511,6 +514,8 @@ function resolveVmSize(
 ): VMSize {
   return (
     explicitVmSize ??
+    (profile?.skillVmSizeOverride as VMSize | null) ??
+    (profile?.agentProfileVmSizeOverride as VMSize | null) ??
     (profile?.vmSizeOverride as VMSize | null) ??
     (project.defaultVmSize as VMSize | null) ??
     DEFAULT_VM_SIZE
@@ -524,6 +529,8 @@ function resolveVmSizeSource(
   profileVmSizeSource: PlacementProfileVmSizeSource
 ): ResourceRequirementsSource {
   if (explicit.vmSize) return explicit.vmSizeSource ?? 'task';
+  if (profile?.skillVmSizeOverride) return 'skill';
+  if (profile?.agentProfileVmSizeOverride) return 'agent-profile';
   if (profile?.vmSizeOverride) return profileVmSizeSource;
   if (project.defaultVmSize) return 'project';
   return 'platform';

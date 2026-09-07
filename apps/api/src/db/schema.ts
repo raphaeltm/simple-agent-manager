@@ -934,6 +934,8 @@ export const tasks = sqliteTable(
     provisionedVmSize: text('provisioned_vm_size'),
     /** JSON snapshot of ResourceRequirements as resolved from the precedence chain. */
     resourceRequirementsJson: text('resource_requirements_json'),
+    /** Versioned persisted resource intent and resolved reservation plan. */
+    resourceRequirementPlanJson: text('resource_requirement_plan_json'),
     /** Which level of the precedence chain provided the resource requirements. */
     resourceRequirementsSource: text('resource_requirements_source'),
     /** JSON snapshot of ResolvedResourceReservation (scheduler-facing units). */
@@ -2240,6 +2242,14 @@ export const triggers = sqliteTable(
     cronTimezone: text('cron_timezone').default('UTC'),
     skipIfRunning: integer('skip_if_running', { mode: 'boolean' }).notNull().default(true),
     promptTemplate: text('prompt_template').notNull(),
+    /** Current authorized execution principal. Null means legacy owner-based execution. */
+    executionUserId: text('execution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Audit timestamp for execution principal assignment/transfer. */
+    executionUserAuthorizedAt: text('execution_user_authorized_at'),
+    /** Actor who authorized execution principal assignment/transfer. */
+    executionUserAuthorizedBy: text('execution_user_authorized_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     /** Optional agent profile for triggered tasks. set null on profile delete — trigger continues with defaults. */
     agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
       onDelete: 'set null',
