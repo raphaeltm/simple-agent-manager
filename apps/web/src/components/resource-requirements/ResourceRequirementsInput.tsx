@@ -13,6 +13,7 @@ const INPUT_CLASSES =
 interface ResourceRequirementsInputProps {
   value: ResourceRequirementsFormState;
   onChange: (next: ResourceRequirementsFormState) => void;
+  onClearLegacy?: () => void;
   disabled?: boolean;
   legacyVmSize?: string | null;
   inheritLabel?: string;
@@ -23,6 +24,7 @@ interface ResourceRequirementsInputProps {
 export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
   value,
   onChange,
+  onClearLegacy,
   disabled = false,
   legacyVmSize,
   inheritLabel = 'default',
@@ -31,9 +33,11 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
 }) => {
   const legacyLabel = formatLegacyVmSize(legacyVmSize);
   const hasValues = hasAnyResourceValue(value);
+  const hasAnything = hasValues || !!legacyLabel;
 
   const handleInherit = () => {
     onChange({ ...EMPTY_RESOURCE_STATE });
+    onClearLegacy?.();
   };
 
   const update = (patch: Partial<ResourceRequirementsFormState>) => {
@@ -44,7 +48,7 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
     <fieldset className="grid gap-1.5">
       <div className="flex items-baseline justify-between gap-2">
         <legend className="text-sm text-fg-muted">Resources</legend>
-        {!hideInherit && hasValues && (
+        {!hideInherit && hasAnything && (
           <button
             type="button"
             onClick={handleInherit}

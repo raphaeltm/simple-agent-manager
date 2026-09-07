@@ -1,5 +1,5 @@
-import type { CredentialProvider, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, PROVIDER_LABELS } from '@simple-agent-manager/shared';
+import type { CredentialProvider, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, PROVIDER_LABELS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import {
   Alert,
   Button,
@@ -15,11 +15,6 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { NodeCard } from '../components/node/NodeCard';
-import {
-  EMPTY_RESOURCE_STATE,
-  type ResourceRequirementsFormState,
-  ResourceRequirementsInput,
-} from '../components/resource-requirements';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { createNode, deleteNode, stopNode } from '../lib/api';
 import { NODE_LIST_POLL_MS, WORKSPACE_LIST_POLL_MS } from '../lib/poll-intervals';
@@ -37,10 +32,8 @@ export function Nodes() {
 
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [nodeResourceReqs, setNodeResourceReqs] = useState<ResourceRequirementsFormState>({
-    ...EMPTY_RESOURCE_STATE,
-  });
   const [newNodeLocation, setNewNodeLocation] = useState(DEFAULT_VM_LOCATION);
+  const [newNodeVmSize, setNewNodeVmSize] = useState<VMSize>('medium');
   const [selectedProvider, setSelectedProvider] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -107,7 +100,7 @@ export function Nodes() {
       const provider = effectiveProvider;
       const created = await createNode({
         name: `node-${timestamp}`,
-        vmSize: 'medium',
+        vmSize: newNodeVmSize,
         vmLocation: newNodeLocation,
         ...(provider ? { provider: provider as CredentialProvider } : {}),
       });
@@ -197,13 +190,33 @@ export function Nodes() {
               </Select>
             </div>
           )}
-          <div>
-            <ResourceRequirementsInput
-              value={nodeResourceReqs}
-              onChange={setNodeResourceReqs}
-              inheritLabel="platform default"
-            />
-          </div>
+          {activeCatalog && (
+            <div>
+              <label
+                htmlFor="node-size"
+                className="block text-fg-muted font-medium mb-1"
+                style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+              >
+                Size
+              </label>
+              <Select
+                id="node-size"
+                value={newNodeVmSize}
+                onChange={(e) => setNewNodeVmSize(e.target.value as VMSize)}
+              >
+                {(Object.keys(activeCatalog.sizes) as VMSize[]).map((size) => {
+                  const info = activeCatalog.sizes[size];
+                  const label = VM_SIZE_LABELS[size];
+                  return (
+                    <option key={size} value={size}>
+                      {label?.label ?? size} — {info?.vcpu ?? '?'} vCPU, {info?.ram ?? '?'} GB
+                      {info?.price ? ` · ${info.price}` : ''}
+                    </option>
+                  );
+                })}
+              </Select>
+            </div>
+          )}
           {activeCatalog && (
             <div>
               <label

@@ -633,6 +633,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
                 <ResourceRequirementsInput
                   value={resourceReqs}
                   onChange={handleResourceReqsChange}
+                  onClearLegacy={() => setVmSizeOverride('')}
                   disabled={saving}
                   legacyVmSize={vmSizeOverride}
                   inheritLabel="default"

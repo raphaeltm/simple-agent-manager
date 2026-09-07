@@ -18,6 +18,13 @@ export const EMPTY_RESOURCE_STATE: ResourceRequirementsFormState = {
   maxCoTenants: '',
 };
 
+function parseFinitePositive(value: string): number | undefined {
+  if (value === '') return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return n;
+}
+
 export function deserializeResourceRequirements(
   json: string | null | undefined
 ): ResourceRequirementsFormState {
@@ -25,11 +32,11 @@ export function deserializeResourceRequirements(
   try {
     const req = expectJsonRecord(JSON.parse(json) as unknown, 'resourceRequirements');
     return {
-      minVcpu: typeof req.minVcpu === 'number' ? String(req.minVcpu) : '',
-      minMemoryGb: typeof req.minMemoryGb === 'number' ? String(req.minMemoryGb) : '',
-      minDiskGb: typeof req.minDiskGb === 'number' ? String(req.minDiskGb) : '',
+      minVcpu: typeof req.minVcpu === 'number' && Number.isFinite(req.minVcpu) ? String(req.minVcpu) : '',
+      minMemoryGb: typeof req.minMemoryGb === 'number' && Number.isFinite(req.minMemoryGb) ? String(req.minMemoryGb) : '',
+      minDiskGb: typeof req.minDiskGb === 'number' && Number.isFinite(req.minDiskGb) ? String(req.minDiskGb) : '',
       exclusiveNode: typeof req.exclusiveNode === 'boolean' ? req.exclusiveNode : undefined,
-      maxCoTenants: typeof req.maxCoTenants === 'number' ? String(req.maxCoTenants) : '',
+      maxCoTenants: typeof req.maxCoTenants === 'number' && Number.isFinite(req.maxCoTenants) ? String(req.maxCoTenants) : '',
     };
   } catch {
     return { ...EMPTY_RESOURCE_STATE };
@@ -40,13 +47,15 @@ export function serializeResourceRequirements(
   state: ResourceRequirementsFormState
 ): string | null {
   const req: Record<string, unknown> = {};
-  if (state.minVcpu) req.minVcpu = Number(state.minVcpu);
-  if (state.minMemoryGb) req.minMemoryGb = Number(state.minMemoryGb);
-  if (state.minDiskGb) req.minDiskGb = Number(state.minDiskGb);
+  const vcpu = parseFinitePositive(state.minVcpu);
+  if (vcpu !== undefined) req.minVcpu = vcpu;
+  const mem = parseFinitePositive(state.minMemoryGb);
+  if (mem !== undefined) req.minMemoryGb = mem;
+  const disk = parseFinitePositive(state.minDiskGb);
+  if (disk !== undefined) req.minDiskGb = disk;
   if (state.exclusiveNode !== undefined) req.exclusiveNode = state.exclusiveNode;
-  if (state.maxCoTenants && state.exclusiveNode !== true) {
-    req.maxCoTenants = Number(state.maxCoTenants);
-  }
+  const coTenants = parseFinitePositive(state.maxCoTenants);
+  if (coTenants !== undefined) req.maxCoTenants = coTenants;
   return Object.keys(req).length > 0 ? JSON.stringify(req) : null;
 }
 
@@ -54,13 +63,15 @@ export function toResourceRequirements(
   state: ResourceRequirementsFormState
 ): ResourceRequirements | undefined {
   const req: ResourceRequirements = {};
-  if (state.minVcpu) req.minVcpu = Number(state.minVcpu);
-  if (state.minMemoryGb) req.minMemoryGb = Number(state.minMemoryGb);
-  if (state.minDiskGb) req.minDiskGb = Number(state.minDiskGb);
+  const vcpu = parseFinitePositive(state.minVcpu);
+  if (vcpu !== undefined) req.minVcpu = vcpu;
+  const mem = parseFinitePositive(state.minMemoryGb);
+  if (mem !== undefined) req.minMemoryGb = mem;
+  const disk = parseFinitePositive(state.minDiskGb);
+  if (disk !== undefined) req.minDiskGb = disk;
   if (state.exclusiveNode !== undefined) req.exclusiveNode = state.exclusiveNode;
-  if (state.maxCoTenants && state.exclusiveNode !== true) {
-    req.maxCoTenants = Number(state.maxCoTenants);
-  }
+  const coTenants = parseFinitePositive(state.maxCoTenants);
+  if (coTenants !== undefined) req.maxCoTenants = coTenants;
   return Object.keys(req).length > 0 ? req : undefined;
 }
 

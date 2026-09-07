@@ -526,6 +526,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
             onSkipIfRunningChange={setSkipIfRunning}
             onTaskModeChange={setTaskMode}
             onResourceReqsChange={setResourceReqs}
+            onClearLegacy={() => setVmSizeOverride('')}
             open={advancedOpen}
             profiles={profiles}
             resourceReqs={resourceReqs}

@@ -324,9 +324,7 @@ export function ProjectSettingsInfrastructure() {
   useEffect(() => {
     if (project) {
       setResourceReqs(
-        deserializeResourceRequirements(
-          (project as unknown as { resourceRequirementsJson?: string | null }).resourceRequirementsJson
-        )
+        deserializeResourceRequirements(project.resourceRequirementsJson)
       );
       setWorkspaceIdleTimeoutMs(
         project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
@@ -340,8 +338,8 @@ export function ProjectSettingsInfrastructure() {
       const json = serializeResourceRequirements(resourceReqs);
       await updateProject(projectId, {
         defaultVmSize: hasAnyResourceValue(resourceReqs) ? null : (legacyVmSize ?? undefined),
-        ...(json !== undefined ? { resourceRequirementsJson: json } : {}),
-      } as Parameters<typeof updateProject>[1]);
+        ...(json != null ? { resourceRequirementsJson: json } : {}),
+      });
       await reload();
       toast.success('Default resource requirements saved');
     } catch (err) {

@@ -183,6 +183,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
           <ResourceRequirementsInput
             value={resourceReqs}
             onChange={setResourceReqs}
+            onClearLegacy={() => setVmSizeOverride('')}
             disabled={saving}
             legacyVmSize={vmSizeOverride}
             inheritLabel="profile default"
