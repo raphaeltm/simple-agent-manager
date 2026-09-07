@@ -84,7 +84,10 @@ export async function handleWorkspaceCreation(
     .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
-    // Task was already failed by cron recovery — abort gracefully
+    if (await convergeLostDelegationTransition(state, rc)) {
+      return;
+    }
+    // Task was already failed/cancelled by recovery — abort gracefully
     log.warn('task_runner_do.aborted_by_recovery', {
       taskId: state.taskId,
       step: 'delegated_transition',
@@ -179,6 +182,31 @@ async function isTaskDelegated(state: TaskRunnerState, rc: TaskRunnerContext): P
   return task?.status === 'delegated';
 }
 
+async function convergeLostDelegationTransition(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<boolean> {
+  const task = await rc.env.DATABASE.prepare(
+    `SELECT status, workspace_id AS workspaceId FROM tasks WHERE id = ?`
+  )
+    .bind(state.taskId)
+    .first<{ status: string; workspaceId: string | null }>();
+  if (task?.status !== 'delegated' || !task.workspaceId) {
+    return false;
+  }
+
+  state.stepResults.workspaceId = task.workspaceId;
+  await rc.ctx.storage.put('state', state);
+  await ensureWorkspaceBookkeeping(state, rc, task.workspaceId);
+  await finalizeVmAdmissionPlacement(state, rc);
+  await rc.advanceToStep(state, 'workspace_dispatch');
+  log.warn('task_runner_do.delegated_transition_lost_to_winner', {
+    taskId: state.taskId,
+    workspaceId: task.workspaceId,
+  });
+  return true;
+}
+
 async function createAndProvisionWorkspace(
   state: TaskRunnerState,
   rc: TaskRunnerContext
@@ -224,6 +252,17 @@ async function createAndProvisionWorkspace(
       devcontainerConfigName: state.config.devcontainerConfigName ?? null,
       agentProfileHint: state.config.agentProfileHint ?? null,
       capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
+      taskLifecycleGuard: {
+        taskId: state.taskId,
+        projectId: state.projectId,
+        userId: state.userId,
+        chatSessionId: state.stepResults.chatSessionId ?? state.config.chatSessionId ?? null,
+        requireChatSessionMatch: state.config.startGuard?.kind === 'reserved_submission',
+        reservedIntentFingerprint:
+          state.config.startGuard?.kind === 'reserved_submission'
+            ? state.config.startGuard.intentFingerprint
+            : null,
+      },
       createdAt: now,
     },
     maxWorkspaces

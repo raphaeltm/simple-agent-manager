@@ -28,7 +28,17 @@ export interface WorkspacePlacementInput {
   devcontainerConfigName: string | null;
   agentProfileHint: string | null;
   capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
+  taskLifecycleGuard?: WorkspacePlacementTaskLifecycleGuard | null;
   createdAt: string;
+}
+
+export interface WorkspacePlacementTaskLifecycleGuard {
+  taskId: string;
+  projectId: string;
+  userId: string;
+  chatSessionId: string | null;
+  requireChatSessionMatch?: boolean;
+  reservedIntentFingerprint?: string | null;
 }
 
 /**
@@ -46,6 +56,7 @@ export async function reserveWorkspacePlacement(
   maxWorkspaces: number
 ): Promise<boolean> {
   const capacityPredicate = buildCapacityPlacementPredicate(input);
+  const taskLifecyclePredicate = buildTaskLifecyclePlacementPredicate(input.taskLifecycleGuard);
   const result = await database
     .prepare(
       `INSERT INTO workspaces
@@ -63,6 +74,7 @@ export async function reserveWorkspacePlacement(
          AND n.status = 'running'
          AND n.node_role = 'workspace'
          ${capacityPredicate.sql}
+         ${taskLifecyclePredicate.sql}
          AND (
            SELECT COUNT(*)
            FROM workspaces active
@@ -92,11 +104,57 @@ export async function reserveWorkspacePlacement(
       input.nodeId,
       input.userId,
       ...capacityPredicate.binds,
+      ...taskLifecyclePredicate.binds,
       maxWorkspaces
     )
     .run();
 
   return (result.meta.changes ?? 0) > 0;
+}
+
+function buildTaskLifecyclePlacementPredicate(
+  guard: WorkspacePlacementTaskLifecycleGuard | null | undefined
+): {
+  sql: string;
+  binds: Array<string | number | null>;
+} {
+  if (!guard) return { sql: '', binds: [] };
+
+  const requireChatSessionMatch = guard.requireChatSessionMatch === true ? 1 : 0;
+  const reservedIntentFingerprint = guard.reservedIntentFingerprint ?? null;
+  return {
+    sql: `AND EXISTS (
+           SELECT 1
+             FROM tasks guarded_task
+            WHERE guarded_task.id = ?
+              AND guarded_task.project_id = ?
+              AND guarded_task.user_id = ?
+              AND guarded_task.status = 'queued'
+              AND guarded_task.workspace_id IS NULL
+              AND (? IS NULL OR ? = 0 OR guarded_task.chat_session_id = ?)
+              AND (
+                ? IS NULL
+                OR EXISTS (
+                  SELECT 1
+                    FROM task_submission_checkpoints guarded_checkpoint
+                   WHERE guarded_checkpoint.task_id = guarded_task.id
+                     AND guarded_checkpoint.intent_fingerprint = ?
+                     AND guarded_checkpoint.chat_session_id = ?
+                )
+              )
+         )`,
+    binds: [
+      guard.taskId,
+      guard.projectId,
+      guard.userId,
+      guard.chatSessionId,
+      requireChatSessionMatch,
+      guard.chatSessionId,
+      reservedIntentFingerprint,
+      reservedIntentFingerprint,
+      guard.chatSessionId,
+    ],
+  };
 }
 
 function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
@@ -144,7 +202,11 @@ function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
       AND n.capacity_pool_id = ?
       AND n.capacity_source_id = ?
       ${concretePredicate?.sql ?? ''}`,
-    binds: [snapshot.capacityPoolId, snapshot.capacitySourceId, ...(concretePredicate?.binds ?? [])],
+    binds: [
+      snapshot.capacityPoolId,
+      snapshot.capacitySourceId,
+      ...(concretePredicate?.binds ?? []),
+    ],
   };
 }
 

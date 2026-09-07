@@ -104,6 +104,18 @@ const projectDataBoundary = vi.hoisted(() => {
       session.status = 'stopped';
       return true;
     }),
+    getSession: vi.fn(async (_env, projectId, sessionId) => {
+      const session = sessions.get(sessionId);
+      if (!session || session.projectId !== projectId) return null;
+      return {
+        id: session.id,
+        taskId: session.taskId,
+        createdByUserId: session.createdByUserId,
+        topic: session.topic,
+        status: session.status,
+        messageCount: session.messages.size,
+      };
+    }),
   };
 });
 
@@ -111,10 +123,14 @@ vi.mock('../../../src/services/project-data', () => ({
   createReservedTaskSessionWithInitialMessage:
     projectDataBoundary.createReservedTaskSessionWithInitialMessage,
   stopSession: projectDataBoundary.stopSession,
+  getSession: projectDataBoundary.getSession,
 }));
 
 const { reservedIdentitiesForTriggerExecution, submitReservedTask } =
   await import('../../../src/services/reserved-task-submission');
+const { buildCronContext, renderTemplate } = await import('../../../src/services/trigger-template');
+const { validateReservedTaskSubmissionInput } =
+  await import('../../../src/services/reserved-task-submission-intent');
 
 type ReservedTaskSubmissionDependencies = NonNullable<Parameters<typeof submitReservedTask>[2]>;
 type ReservedTaskSubmissionInput = Parameters<typeof submitReservedTask>[1];
@@ -422,6 +438,162 @@ describe('submitReservedTask', () => {
     expectOneSubmission(fixture);
   });
 
+  it('accepts real rendered multiline cron and webhook prompts above the identity limit', async () => {
+    const cronPrompt = renderTemplate(
+      `Scheduled trigger fired.
+
+Project: {{project.name}}
+Trigger: {{trigger.name}}
+Execution: {{execution.id}}
+When: {{schedule.time}} ({{schedule.timezone}})
+
+Please inspect the current repository state, review today's activity, and write a concise implementation note with any follow-up risks you find.`,
+      buildCronContext(
+        {
+          id: 'trigger-rendered-cron',
+          name: 'Daily implementation note',
+          description: 'Create a daily note from project state',
+          triggerCount: 41,
+          cronTimezone: 'UTC',
+          projectId: 'project-rendered-cron',
+        },
+        new Date('2026-09-07T09:30:00.000Z'),
+        'Rendered Cron Project',
+        'execution-rendered-cron',
+        42
+      )
+    ).rendered;
+    const webhookPrompt = renderTemplate(
+      `Take a look at the following information, received from a webhook:
+
+---
+
+Received At: {{webhook.receivedAt}}
+
+Source: {{webhook.sourceLabel}}
+
+Payload:
+\`\`\`
+{{webhook.payload}}
+\`\`\`
+
+Headers: {{webhook.headers}}
+
+---
+
+From that information, derive the repository change request and append a short note to the project README.`,
+      {
+        webhook: {
+          receivedAt: '2026-09-07T10:15:30.000Z',
+          sourceLabel: '',
+          payload: { action: 'created', issue: { number: 42, title: 'Ship a longer prompt' } },
+          headers: {},
+        },
+      }
+    ).rendered;
+
+    for (const [label, prompt] of [
+      ['cron', cronPrompt],
+      ['webhook', webhookPrompt],
+    ] as const) {
+      expect(prompt.length).toBeGreaterThan(160);
+      const fixture = seedReservedFixture(`rendered-${label}`);
+      const input = { ...fixture.input, prompt };
+      const { deps } = createSubmissionDependencies();
+
+      await expect(submitReservedTask(fixture.env, input, deps)).resolves.toMatchObject({
+        outcome: 'admitted',
+      });
+      expectOneSubmission(fixture, input);
+      expect(taskRow(fixture.sqlite, input.identities.taskId)).toMatchObject({
+        description: prompt,
+      });
+    }
+  });
+
+  it('separates identity caps from the configured prompt message limit', async () => {
+    const fixture = seedReservedFixture('prompt-limit');
+    const multibytePrompt = 'é'.repeat(161);
+    const encodedBytes = new TextEncoder().encode(multibytePrompt).length;
+    fixture.env.MAX_TASK_MESSAGE_LENGTH = '161';
+
+    expect(encodedBytes).toBeGreaterThan(multibytePrompt.length);
+    await expect(
+      submitReservedTask(
+        fixture.env,
+        { ...fixture.input, prompt: multibytePrompt },
+        createSubmissionDependencies().deps
+      )
+    ).resolves.toMatchObject({ outcome: 'admitted' });
+
+    const overLimitFixture = seedReservedFixture('prompt-over-limit');
+    overLimitFixture.env.MAX_TASK_MESSAGE_LENGTH = '160';
+    const rejected = await submitReservedTask(
+      overLimitFixture.env,
+      { ...overLimitFixture.input, prompt: multibytePrompt },
+      createSubmissionDependencies().deps
+    );
+    expect(rejected).toMatchObject({
+      outcome: 'conflict',
+      reason: 'invalid_input',
+      message: 'prompt must be 160 characters or fewer',
+    });
+    expectNoSubmission(overLimitFixture);
+  });
+
+  it('validates identity, display and reason fields with separate boundaries', () => {
+    const fixture = seedReservedFixture('identity-validation');
+    const validIdentity = 'x'.repeat(160);
+    const oversizedIdentity = 'x'.repeat(161);
+    const base: ReservedTaskSubmissionInput = {
+      ...fixture.input,
+      identities: {
+        taskId: validIdentity,
+        chatSessionId: 'c'.repeat(160),
+        initialMessageId: 'm'.repeat(160),
+        initialStatusEventId: 's'.repeat(160),
+      },
+      source: {
+        ...fixture.input.source,
+        sourceId: validIdentity,
+        sourceExecutionId: validIdentity,
+        triggerId: validIdentity,
+        triggerExecutionId: validIdentity,
+        displayName: 'd'.repeat(512),
+        initialStatusReason: 'r'.repeat(1_024),
+      },
+    };
+
+    expect(validateReservedTaskSubmissionInput(base, fixture.env)).toBeNull();
+    expect(
+      validateReservedTaskSubmissionInput(
+        {
+          ...base,
+          identities: { ...base.identities, taskId: oversizedIdentity },
+        },
+        fixture.env
+      )
+    ).toBe('identities.taskId must be 160 characters or fewer');
+    expect(
+      validateReservedTaskSubmissionInput(
+        {
+          ...base,
+          source: { ...base.source, displayName: 'd'.repeat(513) },
+        },
+        fixture.env
+      )
+    ).toBe('source.displayName must be 512 characters or fewer');
+    expect(
+      validateReservedTaskSubmissionInput(
+        {
+          ...base,
+          source: { ...base.source, initialStatusReason: 'r'.repeat(1_025) },
+        },
+        fixture.env
+      )
+    ).toBe('source.initialStatusReason must be 1024 characters or fewer');
+  });
+
   it('rejects a missing source reservation before creating any task effects', async () => {
     const fixture = seedReservedFixture('missing-source');
     fixture.sqlite
@@ -532,6 +704,75 @@ describe('submitReservedTask', () => {
     });
     expect(startInputs).toHaveLength(1);
     expectOneSubmission(fixture);
+  });
+
+  it('keeps an ambiguous negative start probe pending until a delayed original start is visible', async () => {
+    const fixture = seedReservedFixture('delayed-original-start');
+    const startedTaskIds = new Set<string>();
+    let commitDelayedOriginalStart: (() => void) | null = null;
+    let tick = 0;
+    const deps: ReservedTaskSubmissionDependencies = {
+      now: () => `2026-09-07T00:03:${String(++tick).padStart(2, '0')}.000Z`,
+      generateTitle: vi.fn(async () => 'Reserved task title'),
+      requireRepositoryAccess: vi.fn(async () => undefined) as NonNullable<
+        ReservedTaskSubmissionDependencies['requireRepositoryAccess']
+      >,
+      startTaskRunner: vi.fn(async (_env: Env, startInput: TaskRunnerStartInput) => {
+        commitDelayedOriginalStart = () => startedTaskIds.add(startInput.taskId);
+        throw new Error('lost acknowledgement before durable state was observable');
+      }) as typeof startTaskRunnerDO,
+      ensureTaskRunnerStarted: vi.fn(async (_env: Env, taskId: string) =>
+        startedTaskIds.has(taskId)
+      ),
+    };
+
+    const first = await submitReservedTask(fixture.env, fixture.input, deps);
+    expect(first).toMatchObject({ outcome: 'pending', pendingAt: 'task_runner_start' });
+    expect(taskRow(fixture.sqlite, fixture.input.identities.taskId)).toMatchObject({
+      status: 'queued',
+    });
+    expect(projectDataBoundary.stopSession).not.toHaveBeenCalled();
+
+    commitDelayedOriginalStart?.();
+    const retry = await submitReservedTask(fixture.env, fixture.input, deps);
+
+    expect(retry).toMatchObject({
+      outcome: 'admitted',
+      startState: 'confirmed_after_lost_ack',
+    });
+    expect(deps.startTaskRunner).toHaveBeenCalledTimes(1);
+    expectOneSubmission(fixture);
+  });
+
+  it('returns admitted when a lost start acknowledgement races with a delegated D1 winner', async () => {
+    const fixture = seedReservedFixture('delegated-winner');
+    let tick = 0;
+    const deps: ReservedTaskSubmissionDependencies = {
+      now: () => `2026-09-07T00:04:${String(++tick).padStart(2, '0')}.000Z`,
+      generateTitle: vi.fn(async () => 'Reserved task title'),
+      requireRepositoryAccess: vi.fn(async () => undefined) as NonNullable<
+        ReservedTaskSubmissionDependencies['requireRepositoryAccess']
+      >,
+      startTaskRunner: vi.fn(async () => {
+        throw new Error('lost acknowledgement');
+      }) as typeof startTaskRunnerDO,
+      ensureTaskRunnerStarted: vi.fn(async () => {
+        fixture.sqlite
+          .prepare(`UPDATE tasks SET status = 'delegated' WHERE id = ?`)
+          .run(fixture.input.identities.taskId);
+        return false;
+      }),
+    };
+
+    const result = await submitReservedTask(fixture.env, fixture.input, deps);
+
+    expect(result).toMatchObject({ outcome: 'admitted', startState: 'already_started' });
+    expect(projectDataBoundary.stopSession).not.toHaveBeenCalled();
+    expect(
+      fixture.sqlite
+        .prepare('SELECT terminal_observed_at FROM task_submission_checkpoints WHERE task_id = ?')
+        .get(fixture.input.identities.taskId)
+    ).toEqual({ terminal_observed_at: null });
   });
 
   it('does not fail, stop, or restart a terminal task on a late retry', async () => {

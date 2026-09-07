@@ -21,6 +21,7 @@ import type {
 
 import type { Env } from '../../env';
 import type { TaskStartCapacityPoolSelection } from '../../services/placement-resolver';
+import type { TaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 
 // TaskRunner uses the full Env type because it delegates to service functions
 // (createNodeRecord, provisionNode, createWorkspaceOnNode, etc.) that expect
@@ -119,6 +120,8 @@ export interface TaskRunConfig {
   recoverySourceTaskId?: string | null;
   /** Failed/stopped predecessor whose workspace deletion must be confirmed before replacement. */
   retrySourceTaskId?: string | null;
+  /** Optional durable lifecycle guard for reserved first-start submissions. */
+  startGuard?: TaskRunnerStartGuard | null;
 }
 
 export interface TaskRunnerState {
