@@ -2,8 +2,8 @@ import type {
   AgentEffort,
   AgentSkill,
   CreateSkillRequest,
-  ResourceRequirements,
   ResolvedSkillProfile,
+  ResourceRequirements,
   UpdateSkillRequest,
 } from '@simple-agent-manager/shared';
 import {

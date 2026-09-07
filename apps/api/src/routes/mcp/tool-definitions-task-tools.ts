@@ -2,6 +2,8 @@
  * MCP tool definitions — task lifecycle, dispatch, and notification tools.
  */
 
+import { resourceRequirementsMcpProperty } from './tool-definitions-shared-fields';
+
 export const TASK_LIFECYCLE_TOOLS = [
   {
     name: 'get_instructions',
@@ -103,19 +105,11 @@ export const TASK_LIFECYCLE_TOOLS = [
             'Deprecated legacy VM size for the dispatched task (small, medium, large). Prefer resourceRequirements; the canonical compatibility adapter translates legacy tiers. Defaults to project default.',
           enum: ['small', 'medium', 'large'],
         },
-        resourceRequirements: {
-          type: 'object',
+        resourceRequirements: resourceRequirementsMcpProperty({
+          nullable: false,
           description:
-            'Modern workload requirements for the dispatched task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. Omitted fields inherit; explicit false is preserved.',
-          properties: {
-            minVcpu: { type: 'number', minimum: 0 },
-            minMemoryGb: { type: 'number', minimum: 0 },
-            minDiskGb: { type: 'number', minimum: 0 },
-            exclusiveNode: { type: 'boolean' },
-            maxCoTenants: { type: 'number', minimum: 0 },
-          },
-          additionalProperties: true,
-        },
+            'Modern workload requirements for the dispatched task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved.',
+        }),
         runtime: {
           type: 'string',
           enum: ['vm', 'cf-container'],

@@ -1,17 +1,11 @@
 import * as v from 'valibot';
 
+import { ResourceRequirementsSchema } from './resource-requirements';
+
 const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github', 'incident']);
 const TriggerStatusSchema = v.picklist(['active', 'paused', 'disabled']);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
-
-const ResourceRequirementsSchema = v.object({
-  minVcpu: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minMemoryGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minDiskGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  exclusiveNode: v.optional(v.boolean()),
-  maxCoTenants: v.optional(v.pipe(v.number(), v.minValue(0))),
-});
 
 const GitHubEventTypeSchema = v.picklist(['issues', 'issue_comment', 'pull_request', 'push']);
 

@@ -5,6 +5,8 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { ResourceRequirementsSchema } from './resource-requirements';
+
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const VMLocationSchema = v.string();
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
@@ -59,15 +61,6 @@ const DevcontainerConfigNameSchema = v.pipe(
     `Config name must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`
   )
 );
-
-/** Resource requirements — all optional, unset fields inherit from precedence chain. */
-const ResourceRequirementsSchema = v.object({
-  minVcpu: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minMemoryGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minDiskGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  exclusiveNode: v.optional(v.boolean()),
-  maxCoTenants: v.optional(v.pipe(v.number(), v.minValue(0))),
-});
 
 export const SubmitTaskSchema = v.object({
   message: v.string(),

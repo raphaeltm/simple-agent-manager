@@ -309,7 +309,7 @@ describe('MCP create_trigger tool', () => {
         agentProfileId: 'profile-1',
         taskMode: 'conversation',
         vmSizeOverride: 'large',
-        resourceRequirements: { minVcpu: 4, exclusiveNode: false, maxCoTenants: 0 },
+        resourceRequirements: { minVcpu: 4, exclusiveNode: false, maxCoTenants: 2 },
       },
       tokenData,
       env as Env
@@ -321,7 +321,7 @@ describe('MCP create_trigger tool', () => {
     expect(parsed.taskMode).toBe('conversation');
     expect(parsed.vmSizeOverride).toBe('large');
     expect(parsed.resourceRequirementsJson).toBe(
-      '{"minVcpu":4,"exclusiveNode":false,"maxCoTenants":0}'
+      '{"minVcpu":4,"exclusiveNode":false,"maxCoTenants":2}'
     );
   });
 
@@ -360,6 +360,6 @@ describe('MCP create_trigger tool', () => {
     );
 
     expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('finite non-negative number');
+    expect(result.error?.message).toContain('finite positive number');
   });
 });

@@ -422,14 +422,22 @@ func submitTask(ctx context.Context, runtime Runtime, parsed parsedArgs, project
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
-	if options.VMSize != "" {
-		fmt.Fprintln(runtime.Stderr, "warning: --vm-size is deprecated; prefer --min-vcpu, --min-memory-gb, --min-disk-gb, --exclusive-node, and --max-co-tenants. Legacy tiers are translated by SAM compatibility policy.")
-	}
+	return submitTaskWithClient(ctx, runtime, parsed, client, projectID, message, options)
+}
+
+func submitTaskWithClient(ctx context.Context, runtime Runtime, parsed parsedArgs, client APIClient, projectID string, message string, options TaskSubmitOptions) int {
+	warnDeprecatedVMSize(runtime.Stderr, options)
 	response, err := client.SubmitTask(ctx, projectID, message, options)
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
 	return writeOrFail(runtime, parsed.Globals.JSON, formatSubmitResponse(response), response)
+}
+
+func warnDeprecatedVMSize(stderr io.Writer, options TaskSubmitOptions) {
+	if options.VMSize != "" {
+		fmt.Fprintln(stderr, "warning: --vm-size is deprecated; prefer --min-vcpu, --min-memory-gb, --min-disk-gb, --exclusive-node, and --max-co-tenants. Legacy tiers are translated by SAM compatibility policy.")
+	}
 }
 
 func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
@@ -460,19 +468,19 @@ func parseResourceRequirementFlags(parsed parsedArgs) (*ResourceRequirements, er
 	resource := ResourceRequirements{}
 	set := false
 
-	if value, present, err := parseOptionalNonNegativeFloat(parsed, "min-vcpu"); err != nil {
+	if value, present, err := parseOptionalPositiveFloat(parsed, "min-vcpu", 1000); err != nil {
 		return nil, err
 	} else if present {
 		resource.MinVCPU = &value
 		set = true
 	}
-	if value, present, err := parseOptionalNonNegativeFloat(parsed, "min-memory-gb"); err != nil {
+	if value, present, err := parseOptionalPositiveFloat(parsed, "min-memory-gb", 1024); err != nil {
 		return nil, err
 	} else if present {
 		resource.MinMemoryGB = &value
 		set = true
 	}
-	if value, present, err := parseOptionalNonNegativeFloat(parsed, "min-disk-gb"); err != nil {
+	if value, present, err := parseOptionalNonNegativeFloat(parsed, "min-disk-gb", 1024); err != nil {
 		return nil, err
 	} else if present {
 		resource.MinDiskGB = &value
@@ -484,7 +492,7 @@ func parseResourceRequirementFlags(parsed parsedArgs) (*ResourceRequirements, er
 		resource.ExclusiveNode = &value
 		set = true
 	}
-	if value, present, err := parseOptionalNonNegativeFloat(parsed, "max-co-tenants"); err != nil {
+	if value, present, err := parseOptionalPositiveInteger(parsed, "max-co-tenants"); err != nil {
 		return nil, err
 	} else if present {
 		resource.MaxCoTenants = &value
@@ -497,30 +505,112 @@ func parseResourceRequirementFlags(parsed parsedArgs) (*ResourceRequirements, er
 	return &resource, nil
 }
 
-func parseOptionalNonNegativeFloat(parsed parsedArgs, name string) (float64, bool, error) {
-	raw, present := parsed.Flags[name]
-	if !present {
-		return 0, false, nil
+const maxSafeInteger = 1<<53 - 1
+
+func parseOptionalPositiveFloat(parsed parsedArgs, name string, unitScale float64) (float64, bool, error) {
+	raw, present, err := resourceFlagValue(parsed, name)
+	if err != nil || !present {
+		return 0, present, err
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 {
+		return 0, true, fmt.Errorf("--%s must be a finite positive number", name)
+	}
+	if err := validateRoundedUnitBound(name, value, unitScale); err != nil {
+		return 0, true, err
+	}
+	return value, true, nil
+}
+
+func parseOptionalNonNegativeFloat(parsed parsedArgs, name string, unitScale float64) (float64, bool, error) {
+	raw, present, err := resourceFlagValue(parsed, name)
+	if err != nil || !present {
+		return 0, present, err
 	}
 	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
 		return 0, true, fmt.Errorf("--%s must be a finite non-negative number", name)
 	}
+	if err := validateRoundedUnitBound(name, value, unitScale); err != nil {
+		return 0, true, err
+	}
 	return value, true, nil
 }
 
-func parseOptionalBoolFlag(parsed parsedArgs, name string) (bool, bool, error) {
-	if raw, present := parsed.Flags[name]; present {
-		value, err := strconv.ParseBool(strings.TrimSpace(raw))
-		if err != nil {
-			return false, true, fmt.Errorf("--%s must be true or false", name)
-		}
-		return value, true, nil
+func parseOptionalPositiveInteger(parsed parsedArgs, name string) (float64, bool, error) {
+	raw, present, err := resourceFlagValue(parsed, name)
+	if err != nil || !present {
+		return 0, present, err
 	}
-	if parsed.Bools[name] {
-		return true, true, nil
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value <= 0 || math.Trunc(value) != value || value > float64(maxSafeInteger) {
+		return 0, true, fmt.Errorf("--%s must be a positive safe integer", name)
+	}
+	return value, true, nil
+}
+
+func resourceFlagValue(parsed parsedArgs, name string) (string, bool, error) {
+	if hasValuelessFlagOccurrence(parsed, name) {
+		return "", true, fmt.Errorf("--%s requires a numeric value", name)
+	}
+	raw, present := parsed.Flags[name]
+	if !present {
+		return "", false, nil
+	}
+	return raw, true, nil
+}
+
+func validateRoundedUnitBound(name string, value float64, unitScale float64) error {
+	if value > float64(maxSafeInteger)/unitScale {
+		return fmt.Errorf("--%s is too large", name)
+	}
+	units := math.Ceil(value * unitScale)
+	if math.IsInf(units, 0) || units > float64(maxSafeInteger) {
+		return fmt.Errorf("--%s is too large", name)
+	}
+	return nil
+}
+
+func parseOptionalBoolFlag(parsed parsedArgs, name string) (bool, bool, error) {
+	value, present, err := booleanFlagOccurrenceValue(parsed, name)
+	if err != nil || present {
+		return value, present, err
 	}
 	return false, false, nil
+}
+
+func hasValuelessFlagOccurrence(parsed parsedArgs, name string) bool {
+	for _, occurrence := range parsed.FlagOccurrences {
+		if occurrence.Name == name && !occurrence.HasValue {
+			return true
+		}
+	}
+	return false
+}
+
+func booleanFlagOccurrenceValue(parsed parsedArgs, name string) (bool, bool, error) {
+	var matched *flagOccurrence
+	for i := range parsed.FlagOccurrences {
+		occurrence := &parsed.FlagOccurrences[i]
+		if occurrence.Name != name {
+			continue
+		}
+		if matched != nil {
+			return false, true, fmt.Errorf("--%s may only be specified once", name)
+		}
+		matched = occurrence
+	}
+	if matched == nil {
+		return false, false, nil
+	}
+	if !matched.HasValue {
+		return true, true, nil
+	}
+	value, err := strconv.ParseBool(strings.TrimSpace(matched.Value))
+	if err != nil {
+		return false, true, fmt.Errorf("--%s must be true or false", name)
+	}
+	return value, true, nil
 }
 
 func authenticatedClient(ctx context.Context, runtime Runtime) (APIClient, error) {
@@ -615,7 +705,8 @@ Task resource flags:
   --min-memory-gb <number>  Minimum memory in GB
   --min-disk-gb <number>    Minimum disk in GB
   --exclusive-node[=bool]   Request no co-tenants; explicit false is preserved
-  --max-co-tenants <number> Compatibility co-tenant safety cap
+  --max-co-tenants <integer>
+                         Compatibility co-tenant safety cap
   --vm-size <small|medium|large>
                             Deprecated legacy tier; prefer resource flags
 `

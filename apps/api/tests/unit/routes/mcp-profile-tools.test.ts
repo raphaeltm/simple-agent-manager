@@ -259,6 +259,7 @@ describe('MCP Profile Tools', () => {
           provider: 'hetzner',
           vmLocation: 'fsn1',
           workspaceProfile: 'full',
+          runtime: 'vm',
           devcontainerConfigName: 'python-dev',
           taskMode: 'task',
           resourceRequirements: { minVcpu: 4, exclusiveNode: false },
@@ -330,6 +331,19 @@ describe('MCP Profile Tools', () => {
       const result = await handleCreateAgentProfile(1, { name: 'default' }, tokenData, mockEnv);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('already exists');
+    });
+
+    it('rejects malformed supplied resourceRequirements before service call', async () => {
+      const result = await handleCreateAgentProfile(
+        1,
+        { name: 'bad-resources', resourceRequirements: [] },
+        tokenData,
+        mockEnv
+      );
+
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('resourceRequirements must be an object or null');
+      expect(agentProfileService.createProfile).not.toHaveBeenCalled();
     });
   });
 
@@ -450,6 +464,19 @@ describe('MCP Profile Tools', () => {
       );
       expect(result.error!.code).toBe(-32603);
       expect(result.error!.message).toContain('Failed to update profile');
+    });
+
+    it('rejects unsupported runtime before service call', async () => {
+      const result = await handleUpdateAgentProfile(
+        1,
+        { profileId: 'prof-1', runtime: 'worker-thread' },
+        tokenData,
+        mockEnv
+      );
+
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('runtime must be one of');
+      expect(agentProfileService.updateProfile).not.toHaveBeenCalled();
     });
   });
 
@@ -654,6 +681,7 @@ describe('MCP Profile Tools', () => {
         provider: 'hetzner',
         vmLocation: 'fsn1',
         workspaceProfile: 'full',
+        runtime: 'cf-container',
         devcontainerConfigName: 'python-dev',
         taskMode: 'task',
         resourceRequirements: { minVcpu: 4, exclusiveNode: false },
@@ -668,10 +696,27 @@ describe('MCP Profile Tools', () => {
         description: 123, // wrong type
         maxTurns: 'not-a-number', // wrong type
         model: null, // wrong type
-        resourceRequirements: 'bad', // wrong type
-        resourceRequirementsJson: 42, // wrong type
       });
       expect(fields).toEqual({});
+    });
+
+    it('rejects wrong-typed supplied resource requirement fields', () => {
+      expect(() => extractProfileFields({ resourceRequirements: 'bad' })).toThrow(
+        /resourceRequirements must be an object or null/
+      );
+      expect(() => extractProfileFields({ resourceRequirements: [] })).toThrow(
+        /resourceRequirements must be an object or null/
+      );
+      expect(() => extractProfileFields({ resourceRequirementsJson: 42 })).toThrow(
+        /resourceRequirementsJson must be a JSON string or null/
+      );
+    });
+
+    it('rejects runtime values outside the REST enum', () => {
+      expect(() => extractProfileFields({ runtime: 'worker-thread' })).toThrow(
+        /runtime must be one of/
+      );
+      expect(extractProfileFields({ runtime: null })).toEqual({ runtime: null });
     });
 
     it('ignores unknown fields', () => {

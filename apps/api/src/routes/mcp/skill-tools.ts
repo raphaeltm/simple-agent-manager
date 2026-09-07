@@ -20,21 +20,11 @@ import {
   mapServiceError,
   type McpTokenData,
 } from './_helpers';
-import { extractProfileFields } from './profile-tools';
+import { extractProfileFields, McpProfileFieldValidationError } from './profile-tools';
 
 /** Extract skill-specific fields that go beyond the shared profile fields. */
 function extractSkillExtraFields(params: Record<string, unknown>): Partial<UpdateSkillRequest> {
   const fields: Partial<UpdateSkillRequest> = {};
-  if (
-    params.resourceRequirements === null ||
-    (typeof params.resourceRequirements === 'object' && !Array.isArray(params.resourceRequirements))
-  ) {
-    fields.resourceRequirements =
-      params.resourceRequirements as UpdateSkillRequest['resourceRequirements'];
-  }
-  if (typeof params.resourceRequirementsJson === 'string')
-    fields.resourceRequirementsJson = params.resourceRequirementsJson;
-  if (params.resourceRequirementsJson === null) fields.resourceRequirementsJson = null;
   if (typeof params.defaultProfileId === 'string')
     fields.defaultProfileId = params.defaultProfileId;
   if (params.defaultProfileId === null) fields.defaultProfileId = null;
@@ -164,9 +154,8 @@ export async function handleCreateSkill(
     );
   }
 
-  const body: CreateSkillRequest = { name, ...extractSkillFields(params) };
-
   try {
+    const body: CreateSkillRequest = { name, ...extractSkillFields(params) };
     const db = drizzle(env.DATABASE, { schema });
     const skill = await skillService.createSkill(
       db,
@@ -205,6 +194,9 @@ export async function handleCreateSkill(
       ],
     });
   } catch (err) {
+    if (err instanceof McpProfileFieldValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
     return mapServiceError(requestId, err, {
       fallbackPrefix: 'Failed to create skill',
       logTag: 'mcp.create_skill_failed',
@@ -225,19 +217,19 @@ export async function handleUpdateSkill(
     return jsonRpcError(requestId, INVALID_PARAMS, 'skillId is required');
   }
 
-  const body: UpdateSkillRequest = {};
-  if (typeof params.name === 'string') body.name = params.name;
-  Object.assign(body, extractSkillFields(params));
-
-  if (Object.keys(body).length === 0) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'No fields to update. Provide at least one field to change.'
-    );
-  }
-
   try {
+    const body: UpdateSkillRequest = {};
+    if (typeof params.name === 'string') body.name = params.name;
+    Object.assign(body, extractSkillFields(params));
+
+    if (Object.keys(body).length === 0) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'No fields to update. Provide at least one field to change.'
+      );
+    }
+
     const db = drizzle(env.DATABASE, { schema });
     const skill = await skillService.updateSkill(
       db,
@@ -272,6 +264,9 @@ export async function handleUpdateSkill(
       ],
     });
   } catch (err) {
+    if (err instanceof McpProfileFieldValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
     return mapServiceError(requestId, err, {
       notFoundMessage: `Skill not found: ${skillId}`,
       fallbackPrefix: 'Failed to update skill',

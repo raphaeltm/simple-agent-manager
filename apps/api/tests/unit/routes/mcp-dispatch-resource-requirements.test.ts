@@ -32,12 +32,29 @@ describe('MCP dispatch_task resource requirements input', () => {
     });
   });
 
+  it('allows omitted resourceRequirements and rejects null task constraints', () => {
+    const omitted = parseDispatchTaskParams(1, { description: 'Run default hardware' }, limits);
+    expect('parsed' in omitted).toBe(true);
+    if ('parsed' in omitted) expect(omitted.parsed.resourceRequirements).toBeUndefined();
+
+    const nulled = parseDispatchTaskParams(
+      1,
+      { description: 'Run explicit hardware', resourceRequirements: null },
+      limits
+    );
+    expect('error' in nulled).toBe(true);
+    if ('error' in nulled) expect(nulled.error.error?.code).toBe(-32602);
+  });
+
   it('rejects negative, non-finite, and malformed known fields', () => {
     for (const resourceRequirements of [
       { minVcpu: -1 },
+      { minVcpu: 0 },
       { minMemoryGb: Number.NaN },
       { minDiskGb: Number.POSITIVE_INFINITY },
       { exclusiveNode: 'false' },
+      { maxCoTenants: 0 },
+      { maxCoTenants: 1.5 },
       [],
     ]) {
       const result = parseDispatchTaskParams(

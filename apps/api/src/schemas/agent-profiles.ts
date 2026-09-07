@@ -1,18 +1,12 @@
 import { AGENT_EFFORT_LEVELS, AGENT_PROFILE_RUNTIMES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { ResourceRequirementsSchema } from './resource-requirements';
+
 const GitHubCliPermissionLevelSchema = v.picklist(['none', 'read', 'write']);
 const GitHubCliContentsPermissionLevelSchema = v.picklist(['read', 'write']);
 const AgentEffortSchema = v.picklist([...AGENT_EFFORT_LEVELS]);
 const AgentProfileRuntimeSchema = v.picklist([...AGENT_PROFILE_RUNTIMES]);
-
-const ResourceRequirementsSchema = v.object({
-  minVcpu: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minMemoryGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minDiskGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  exclusiveNode: v.optional(v.boolean()),
-  maxCoTenants: v.optional(v.pipe(v.number(), v.minValue(0))),
-});
 
 const GitHubCliPolicySchema = v.object({
   mode: v.picklist(['inherit', 'custom']),
