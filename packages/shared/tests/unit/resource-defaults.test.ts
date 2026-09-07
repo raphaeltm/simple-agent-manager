@@ -197,6 +197,128 @@ describe('resolveResourceReservation', () => {
     expect(result.fieldProvenance?.minMemoryGb?.compatibility).toBeUndefined();
   });
 
+  it('applies each layer legacy defaults before moving to lower-priority modern defaults', () => {
+    const result = resolveResourceReservation(
+      {
+        project: { minVcpu: 1, minMemoryGb: 2 },
+      },
+      { taskId: 'task-legacy', projectId: 'project-modern' },
+      { legacyVmSizes: { task: 'large' } },
+    );
+
+    expect(result.cpuMillis).toBe(4000);
+    expect(result.memoryMb).toBe(8 * 1024);
+    expect(result.fieldProvenance?.minVcpu).toMatchObject({
+      source: 'task',
+      sourceId: 'task-legacy',
+      compatibility: { legacyVmSize: 'large' },
+    });
+    expect(result.fieldProvenance?.minMemoryGb?.source).toBe('task');
+  });
+
+  it('lets same-layer modern fields win while same-layer legacy fills the rest before project defaults', () => {
+    const result = resolveResourceReservation(
+      {
+        task: { minMemoryGb: 12 },
+        project: { minVcpu: 1 },
+      },
+      { taskId: 'task-modern-legacy', projectId: 'project-modern' },
+      { legacyVmSizes: { task: 'large' } },
+    );
+
+    expect(result.cpuMillis).toBe(4000);
+    expect(result.memoryMb).toBe(12 * 1024);
+    expect(result.fieldProvenance?.minVcpu).toMatchObject({
+      source: 'task',
+      compatibility: { legacyVmSize: 'large' },
+    });
+    expect(result.fieldProvenance?.minMemoryGb).toMatchObject({
+      source: 'task',
+      value: 12,
+    });
+    expect(result.fieldProvenance?.minMemoryGb?.compatibility).toBeUndefined();
+  });
+
+  it('preserves precedence and provenance across task, trigger, skill, profile, project, user, and platform legacy layers', () => {
+    const result = resolveResourceReservation(
+      {
+        task: { exclusiveNode: false },
+        trigger: { minDiskGb: 33 },
+        skill: { minMemoryGb: 9 },
+        agentProfile: { maxCoTenants: 2 },
+        project: { minVcpu: 1 },
+        user: { minMemoryGb: 2 },
+      },
+      {
+        taskId: 'task-id',
+        triggerId: 'trigger-id',
+        skillId: 'skill-id',
+        agentProfileId: 'profile-id',
+        projectId: 'project-id',
+        userId: 'user-id',
+      },
+      {
+        legacyVmSizes: {
+          task: 'small',
+          trigger: 'medium',
+          skill: 'large',
+          'agent-profile': 'medium',
+          project: 'large',
+          user: 'large',
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      cpuMillis: 1000,
+      memoryMb: 2 * 1024,
+      diskMb: 20 * 1024,
+      exclusiveNode: false,
+      maxCoTenants: 4,
+      source: 'task',
+      sourceId: 'task-id',
+    });
+    expect(result.fieldProvenance?.minVcpu?.source).toBe('task');
+    expect(result.fieldProvenance?.minMemoryGb?.source).toBe('task');
+    expect(result.fieldProvenance?.minDiskGb?.source).toBe('task');
+    expect(result.fieldProvenance?.exclusiveNode?.source).toBe('task');
+    expect(result.fieldProvenance?.maxCoTenants?.source).toBe('task');
+  });
+
+  it('emits bounded integer reservation units with conservative rounding', () => {
+    const result = resolveResourceReservation({
+      task: { minVcpu: 0.0001, minMemoryGb: 0.1, minDiskGb: 0, maxCoTenants: 1 },
+    });
+
+    expect(result.cpuMillis).toBe(1);
+    expect(result.memoryMb).toBe(103);
+    expect(result.diskMb).toBe(0);
+    expect(result.maxCoTenants).toBe(1);
+  });
+
+  it('rejects reservation values that cannot be represented as safe integer units', () => {
+    expect(() =>
+      resolveResourceReservation({
+        task: { minVcpu: Number.MAX_SAFE_INTEGER },
+      }),
+    ).toThrow('Invalid minVcpu resource requirement units');
+    expect(() =>
+      resolveResourceReservation(
+        {},
+        {},
+        {
+          legacyWorkloadMapping: {
+            ...DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
+            small: {
+              ...DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small,
+              minMemoryGb: Number.POSITIVE_INFINITY,
+            },
+          },
+        },
+      ),
+    ).toThrow('Invalid minMemoryGb');
+  });
+
   it('applies field precedence across task, skill, profile, project, user, and platform layers', () => {
     const result = resolveResourceReservation(
       {

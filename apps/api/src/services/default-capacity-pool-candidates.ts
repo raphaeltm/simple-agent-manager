@@ -36,7 +36,8 @@ export async function ensureCandidatesForSource(
   poolId: string,
   sourceId: string,
   provider: CredentialProvider,
-  offerings: ProviderInstanceOffering[]
+  offerings: ProviderInstanceOffering[],
+  options: { refreshStartedAt?: string } = {}
 ): Promise<void> {
   const now = new Date().toISOString();
   const existingStatuses = await readExistingCandidateStatuses(db, poolId, sourceId);
@@ -125,7 +126,7 @@ export async function ensureCandidatesForSource(
       });
   }
 
-  await markMissingCandidatesForSource(db, poolId, sourceId, existingStatuses, candidateIds);
+  await markMissingCandidatesForSource(db, poolId, sourceId, existingStatuses, candidateIds, options);
 }
 
 function isCurrentlySelectableOffering(offering: ProviderInstanceOffering): boolean {
@@ -218,14 +219,15 @@ async function markMissingCandidatesForSource(
   poolId: string,
   sourceId: string,
   existingStatuses: ReadonlyMap<string, string>,
-  activeCandidateIds: string[]
+  activeCandidateIds: string[],
+  options: { refreshStartedAt?: string } = {}
 ): Promise<void> {
   const now = new Date().toISOString();
   const nextCandidateIds = new Set(activeCandidateIds);
   const missingCandidateIds = [...existingStatuses.keys()].filter(
     (id) => !nextCandidateIds.has(id)
   );
-  const fixedBindCount = 4; // update metadata plus pool/source predicates
+  const fixedBindCount = 8;
   const chunkSize = Math.max(1, D1_MAX_BOUND_PARAMETERS - fixedBindCount);
 
   for (let offset = 0; offset < missingCandidateIds.length; offset += chunkSize) {
@@ -243,6 +245,9 @@ async function markMissingCandidatesForSource(
         and(
           eq(schema.capacityPoolCandidates.poolId, poolId),
           eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
+          options.refreshStartedAt
+            ? sql`${schema.capacityPoolCandidates.updatedAt} <= ${options.refreshStartedAt}`
+            : undefined,
           inArray(schema.capacityPoolCandidates.id, chunk)
         )
       );

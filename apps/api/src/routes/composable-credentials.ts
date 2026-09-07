@@ -21,6 +21,7 @@ import { ulid } from '../lib/ulid';
 import { requireApproved, requireAuth } from '../middleware/auth';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { encrypt } from '../services/encryption';
 
 const ccRoutes = new Hono<{ Bindings: Env }>();
@@ -168,6 +169,7 @@ ccRoutes.patch('/credentials/:id', async (c) => {
     .returning({ id: schema.ccCredentials.id });
 
   if (result.length === 0) throw errors.notFound('Credential');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
   return c.json({ success: true });
 });
 
@@ -183,6 +185,7 @@ ccRoutes.delete('/credentials/:id', async (c) => {
     .returning({ id: schema.ccCredentials.id });
 
   if (result.length === 0) throw errors.notFound('Credential');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
   return c.json({ success: true });
 });
 
@@ -308,6 +311,7 @@ ccRoutes.patch('/configurations/:id', async (c) => {
     .returning({ id: schema.ccConfigurations.id });
 
   if (result.length === 0) throw errors.notFound('Configuration');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
   return c.json({ success: true });
 });
 
@@ -323,6 +327,7 @@ ccRoutes.delete('/configurations/:id', async (c) => {
     .returning({ id: schema.ccConfigurations.id });
 
   if (result.length === 0) throw errors.notFound('Configuration');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
   return c.json({ success: true });
 });
 
@@ -393,6 +398,10 @@ ccRoutes.post('/attachments', async (c) => {
     projectId: projectId ?? null,
     isActive: true,
   });
+  await reconcileCapacityPoolsForCredentialMutation(
+    c.env,
+    projectId ? { scope: 'project', userId, projectId } : { scope: 'user', userId }
+  );
 
   return c.json({ id, configurationId, projectId: projectId ?? null }, 201);
 });
@@ -419,6 +428,7 @@ ccRoutes.patch('/attachments/:id', async (c) => {
     .returning({ id: schema.ccAttachments.id });
 
   if (result.length === 0) throw errors.notFound('Attachment');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
   return c.json({ success: true });
 });
 
@@ -434,6 +444,7 @@ ccRoutes.delete('/attachments/:id', async (c) => {
     .returning({ id: schema.ccAttachments.id });
 
   if (result.length === 0) throw errors.notFound('Attachment');
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
   return c.json({ success: true });
 });
 

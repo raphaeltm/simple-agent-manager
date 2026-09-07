@@ -23,6 +23,7 @@ import {
   UpdatePlatformCredentialSchema,
 } from '../schemas';
 import { decrypt, encrypt } from '../services/encryption';
+import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { buildProviderConfig } from '../services/provider-credentials';
 import { CredentialValidator } from '../services/validation';
 
@@ -130,6 +131,9 @@ adminPlatformCredentialRoutes.post(
       createdAt: now,
       updatedAt: now,
     });
+    if (body.credentialType === 'cloud-provider') {
+      await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'installation' });
+    }
 
     const response: PlatformCredentialResponse = {
       id,
@@ -180,6 +184,9 @@ adminPlatformCredentialRoutes.patch(
       .update(schema.platformCredentials)
       .set(updates)
       .where(eq(schema.platformCredentials.id, credentialId));
+    if (existing[0].credentialType === 'cloud-provider') {
+      await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'installation' });
+    }
 
     const updated = await db
       .select()
@@ -221,6 +228,9 @@ adminPlatformCredentialRoutes.delete('/:id', async (c) => {
 
   if (result.length === 0) {
     throw errors.notFound('Platform credential');
+  }
+  if (result[0].credentialType === 'cloud-provider') {
+    await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'installation' });
   }
 
   return c.json({ success: true });

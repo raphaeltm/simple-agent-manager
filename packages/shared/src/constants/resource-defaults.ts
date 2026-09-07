@@ -169,6 +169,8 @@ const RESOURCE_REQUIREMENT_FIELDS = [
   'maxCoTenants',
 ] as const satisfies readonly ResourceRequirementField[];
 
+const MAX_RESERVATION_UNIT = Number.MAX_SAFE_INTEGER;
+
 export interface ResourceReservationResolutionOptions {
   platformDefaults?: Required<ResourceRequirements>;
   legacyVmSizes?: LegacyVmSizeResolutionInput;
@@ -276,9 +278,7 @@ export function resolveResourceReservation(
   for (const layer of layers) {
     const explicit = validatedExplicitLayer(layer);
     if (explicit) recordLayerContribution(layer, explicit);
-  }
 
-  for (const layer of layers) {
     const legacy = validatedLegacyLayer(layer, {
       mapping: legacyWorkloadMapping,
       adapterVersion: compatibilityAdapterVersion,
@@ -302,11 +302,14 @@ export function resolveResourceReservation(
   const minVcpu = resolved['minVcpu'] as number;
   const minMemoryGb = resolved['minMemoryGb'] as number;
   const minDiskGb = resolved['minDiskGb'] as number;
+  const cpuMillis = toPositiveReservationUnit('minVcpu', minVcpu, 1000);
+  const memoryMb = toPositiveReservationUnit('minMemoryGb', minMemoryGb, 1024);
+  const diskMb = toNonNegativeReservationUnit('minDiskGb', minDiskGb, 1024);
 
   return {
-    cpuMillis: minVcpu * 1000,
-    memoryMb: minMemoryGb * 1024,
-    diskMb: minDiskGb * 1024,
+    cpuMillis,
+    memoryMb,
+    diskMb,
     exclusiveNode: resolved['exclusiveNode'] as boolean,
     maxCoTenants: resolved['maxCoTenants'] as number,
     source: winningSource,
@@ -462,13 +465,53 @@ function validateResourceRequirementField(
     throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
   }
 
+  if ((field === 'minVcpu' || field === 'minMemoryGb') && value <= 0) {
+    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
+  }
+
   if (value < 0) {
     throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
   }
 
-  if ((field === 'minVcpu' || field === 'minMemoryGb') && value === 0) {
-    throw new Error(`Invalid ${field} in ${source} resource requirements ${sourceId}`);
-  }
+  assertBoundedReservationValue(field, value);
 
   return value;
+}
+
+function assertBoundedReservationValue(field: ResourceRequirementField, value: number): void {
+  if (field === 'minVcpu') {
+    toPositiveReservationUnit(field, value, 1000);
+    return;
+  }
+  if (field === 'minMemoryGb') {
+    toPositiveReservationUnit(field, value, 1024);
+    return;
+  }
+  if (field === 'minDiskGb') {
+    toNonNegativeReservationUnit(field, value, 1024);
+  }
+}
+
+function toPositiveReservationUnit(
+  field: ResourceRequirementField,
+  value: number,
+  multiplier: number
+): number {
+  const units = Math.ceil(value * multiplier);
+  if (!Number.isSafeInteger(units) || units <= 0 || units > MAX_RESERVATION_UNIT) {
+    throw new Error(`Invalid ${field} resource requirement units`);
+  }
+  return units;
+}
+
+function toNonNegativeReservationUnit(
+  field: ResourceRequirementField,
+  value: number,
+  multiplier: number
+): number {
+  const units = Math.ceil(value * multiplier);
+  if (!Number.isSafeInteger(units) || units < 0 || units > MAX_RESERVATION_UNIT) {
+    throw new Error(`Invalid ${field} resource requirement units`);
+  }
+  return units;
 }
