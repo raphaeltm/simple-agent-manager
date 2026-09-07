@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -810,6 +811,33 @@ func TestDockerCommandOutputReturnsWhenDescendantRetainsPipes(t *testing.T) {
 	}
 }
 
+func TestDockerCommandOutputCleansRetainedPipeChildrenAfterExitError(t *testing.T) {
+	for _, mode := range []string{"fail-retain-stdout", "fail-retain-stderr"} {
+		t.Run(mode, func(t *testing.T) {
+			logPath := installFakeDockerCLI(t, mode)
+			childPIDPath := filepath.Join(filepath.Dir(logPath), "child.pid")
+
+			start := time.Now()
+			_, err := dockerCommandOutput(context.Background(), 4096, "ps")
+			if time.Since(start) > 1500*time.Millisecond {
+				t.Fatalf("failed retained-pipe command took %s, want under 1.5s", time.Since(start))
+			}
+			if err == nil || !strings.Contains(err.Error(), "exit status 17") {
+				t.Fatalf("error = %v, want exit status 17", err)
+			}
+			if !strings.Contains(err.Error(), "wrapper failed after spawning retained child") {
+				t.Fatalf("error = %v, want retained stderr diagnostic", err)
+			}
+
+			childPID := readRetainedChildPID(t, childPIDPath)
+			defer killProcessIfAlive(childPID)
+			if !waitForProcessExit(childPID, 2*time.Second) {
+				t.Fatalf("retained child pid %d still exists after failed parent returned", childPID)
+			}
+		})
+	}
+}
+
 func TestDockerCommandOutputCancelsProcessGroupWithRetainedPipes(t *testing.T) {
 	installFakeDockerCLI(t, "sleep-retain")
 
@@ -836,8 +864,9 @@ func installFakeDockerCLI(t *testing.T, mode string) string {
 	t.Helper()
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "args.log")
+	childPIDPath := filepath.Join(dir, "child.pid")
 	path := filepath.Join(dir, "docker")
-	script := fmt.Sprintf("#!/bin/sh\nexec %s -test.run '^TestFakeDockerCLI$' -- \"$@\"\n", shellQuote(os.Args[0]))
+	script := fmt.Sprintf("#!/bin/sh\nGORACE=\"${GORACE:+$GORACE }atexit_sleep_ms=0\" exec %s -test.run '^TestFakeDockerCLI$' -- \"$@\"\n", shellQuote(os.Args[0]))
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker cli: %v", err)
 	}
@@ -845,6 +874,7 @@ func installFakeDockerCLI(t *testing.T, mode string) string {
 	t.Setenv("SAM_DOCKER_CLI_PATH", path)
 	t.Setenv("FAKE_DOCKER_MODE", mode)
 	t.Setenv("FAKE_DOCKER_ARGS_LOG", logPath)
+	t.Setenv("FAKE_DOCKER_CHILD_PID_LOG", childPIDPath)
 	return logPath
 }
 
@@ -911,6 +941,10 @@ func runFakeDockerPS(args []string, mode string) int {
 		return startRetainedFakeDockerChild(false, true, false)
 	case "sleep-retain":
 		return startRetainedFakeDockerChild(true, true, true)
+	case "fail-retain-stdout":
+		return startRetainedFakeDockerChildWithExit(true, false, false, 17)
+	case "fail-retain-stderr":
+		return startRetainedFakeDockerChildWithExit(false, true, false, 17)
 	}
 
 	format := dockerFormatArg(args)
@@ -1039,7 +1073,11 @@ func dockerFormatArgIndex(args []string) int {
 }
 
 func startRetainedFakeDockerChild(stdout, stderr, sleepParent bool) int {
-	cmd := exec.Command("/bin/sh", "-c", "sleep 5")
+	return startRetainedFakeDockerChildWithExit(stdout, stderr, sleepParent, 0)
+}
+
+func startRetainedFakeDockerChildWithExit(stdout, stderr, sleepParent bool, exitCode int) int {
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30")
 	if stdout {
 		cmd.Stdout = os.Stdout
 	}
@@ -1050,11 +1088,61 @@ func startRetainedFakeDockerChild(stdout, stderr, sleepParent bool) int {
 		fmt.Fprintf(os.Stderr, "start retained child: %v\n", err)
 		return 19
 	}
+	if pidPath := os.Getenv("FAKE_DOCKER_CHILD_PID_LOG"); pidPath != "" {
+		_ = os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", cmd.Process.Pid)), 0o600)
+	}
 	if sleepParent {
 		time.Sleep(2 * time.Second)
 	}
+	if exitCode != 0 {
+		fmt.Fprintln(os.Stderr, "wrapper failed after spawning retained child")
+		return exitCode
+	}
 	fmt.Fprintln(os.Stdout, "ok")
+	return exitCode
+}
+
+func readRetainedChildPID(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+			if err != nil {
+				t.Fatalf("parse retained child pid: %v", err)
+			}
+			return pid
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("retained child pid was not written to %s", path)
 	return 0
+}
+
+func waitForProcessExit(pid int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !processExists(pid) {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return !processExists(pid)
+}
+
+func killProcessIfAlive(pid int) {
+	if processExists(pid) {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+func processExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func shellQuote(value string) string {
