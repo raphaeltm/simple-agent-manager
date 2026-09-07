@@ -6,6 +6,8 @@ import type { Env } from '../../../src/env';
 import {
   admitProjectEventSourceIntentById,
   enqueueAndAdmitProjectEventSourceIntent,
+  enqueueProjectEventSourceIntent,
+  projectEventSourceOutboxInsertStatement,
   reconcileProjectEventSourceOutbox,
 } from '../../../src/services/project-event-source-outbox';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -21,15 +23,12 @@ describe('project event source outbox', () => {
   let env: Env;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [schema.projectEventSourceOutbox]);
-    sqlite.exec(
-      `CREATE UNIQUE INDEX idx_project_event_source_outbox_delivery
-         ON project_event_source_outbox(project_id, source, delivery_key)`
-    );
+    createSchemaTables(sqlite, [schema.projectEventSourceOutbox, schema.credentialLimitWindows]);
+    createOutboxIndexes();
     env = {
       DATABASE: createSqliteD1(sqlite),
       PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS: '1000',
@@ -59,6 +58,55 @@ describe('project event source outbox', () => {
       occurredAt: NOW.getTime(),
       receivedAt: NOW.getTime(),
     };
+  }
+
+  function createOutboxIndexes() {
+    sqlite.exec(`
+      CREATE UNIQUE INDEX idx_project_event_source_outbox_delivery
+        ON project_event_source_outbox(project_id, source, delivery_key);
+      CREATE INDEX idx_project_event_source_outbox_due
+        ON project_event_source_outbox(state, next_attempt_at, id);
+      CREATE INDEX idx_project_event_source_outbox_processing_lease
+        ON project_event_source_outbox(state, processing_lease_expires_at, id);
+      CREATE INDEX idx_project_event_source_outbox_active_expiry
+        ON project_event_source_outbox(state, expires_at, id);
+      CREATE INDEX idx_project_event_source_outbox_active_attempts
+        ON project_event_source_outbox(state, attempt_count, id);
+      CREATE INDEX idx_project_event_source_outbox_exhausted_ready
+        ON project_event_source_outbox(state, (attempt_count >= max_attempts), processing_lease_expires_at, id);
+      CREATE INDEX idx_project_event_source_outbox_terminal_retention
+        ON project_event_source_outbox(state, terminalized_at, id);
+      CREATE INDEX idx_project_event_source_outbox_project_subject
+        ON project_event_source_outbox(project_id, subject_type, subject_id, state);
+    `);
+  }
+
+  async function waitForProjectDataAdmissions(count: number) {
+    for (let i = 0; i < 100 && admitProjectEvent.mock.calls.length < count; i += 1) {
+      await Promise.resolve();
+    }
+    expect(admitProjectEvent).toHaveBeenCalledTimes(count);
+  }
+
+  function rowById(id: string) {
+    return sqlite
+      .prepare(
+        `SELECT state, attempt_count, claim_token, admitted_event_id,
+                admission_outcome, terminalized_at, last_error
+           FROM project_event_source_outbox
+          WHERE id = ?`
+      )
+      .get(id) as
+      | {
+          state: string;
+          attempt_count: number;
+          claim_token: string | null;
+          admitted_event_id: string | null;
+          admission_outcome: string | null;
+          terminalized_at: string | null;
+          last_error: string | null;
+        }
+      | undefined;
   }
 
   it('retries a failed first admission and admits once under the stable delivery key', async () => {
@@ -189,9 +237,7 @@ describe('project event source outbox', () => {
       });
 
     const firstPromise = enqueueAndAdmitProjectEventSourceIntent(env, sourceEvent());
-    for (let i = 0; i < 5 && admitProjectEvent.mock.calls.length === 0; i += 1) {
-      await Promise.resolve();
-    }
+    await waitForProjectDataAdmissions(1);
     const claimed = sqlite
       .prepare(
         `SELECT id, claim_token, attempt_count
@@ -331,6 +377,120 @@ describe('project event source outbox', () => {
     });
   });
 
+  it('does not adopt a replacement token before the initial claim read', async () => {
+    admitProjectEvent.mockResolvedValue({
+      outcome: 'created',
+      event: { id: 'event-must-not-admit', state: 'recorded' },
+      matches: [],
+    });
+    const { projectId: _projectId, ...payload } = sourceEvent();
+    void _projectId;
+    sqlite
+      .prepare(
+        `INSERT INTO project_event_source_outbox
+          (id, project_id, source, event_type, subject_type, subject_id, delivery_key,
+           payload_fingerprint, event_payload_json, state, attempt_count, max_attempts,
+           next_attempt_at, expires_at, created_at, updated_at)
+         VALUES ('intent-replaced-before-read', 'project-1', 'sam.lifecycle', 'task.completed',
+          'task', 'task-1', 'delivery-replaced-before-read', 'sha256:stable', ?,
+          'pending', 0, 3, ?, ?, ?, ?)`
+      )
+      .run(
+        JSON.stringify(payload),
+        NOW.toISOString(),
+        new Date(NOW.getTime() + 60_000).toISOString(),
+        NOW.toISOString(),
+        NOW.toISOString()
+      );
+
+    const database = env.DATABASE;
+    let replaced = false;
+    env.DATABASE = {
+      ...database,
+      prepare: (sql: string) => {
+        if (
+          !replaced &&
+          sql.includes("WHERE id = ? AND state = 'processing' AND claim_token = ?")
+        ) {
+          replaced = true;
+          sqlite
+            .prepare(
+              `UPDATE project_event_source_outbox
+                  SET claim_token = 'replacement-token',
+                      attempt_count = 2,
+                      claimed_at = ?,
+                      processing_lease_expires_at = ?
+                WHERE id = 'intent-replaced-before-read'`
+            )
+            .run(NOW.toISOString(), new Date(NOW.getTime() + 60_000).toISOString());
+        }
+        return database.prepare(sql);
+      },
+    } as D1Database;
+
+    const result = await admitProjectEventSourceIntentById(env, 'intent-replaced-before-read', NOW);
+
+    expect(result).toMatchObject({ state: 'processing', attemptCount: 2 });
+    expect(admitProjectEvent).not.toHaveBeenCalled();
+    expect(rowById('intent-replaced-before-read')).toMatchObject({
+      state: 'processing',
+      attempt_count: 2,
+      claim_token: 'replacement-token',
+      admitted_event_id: null,
+    });
+  });
+
+  it('does not cross into ProjectData after losing the claim before admission', async () => {
+    admitProjectEvent.mockResolvedValue({
+      outcome: 'created',
+      event: { id: 'event-must-not-admit', state: 'recorded' },
+      matches: [],
+    });
+    await enqueueProjectEventSourceIntent(env, sourceEvent(), {
+      id: 'intent-loses-before-admission',
+      now: NOW,
+    });
+
+    const database = env.DATABASE;
+    let claimReads = 0;
+    env.DATABASE = {
+      ...database,
+      prepare: (sql: string) => {
+        if (sql.includes("WHERE id = ? AND state = 'processing' AND claim_token = ?")) {
+          claimReads += 1;
+          if (claimReads === 2) {
+            sqlite
+              .prepare(
+                `UPDATE project_event_source_outbox
+                    SET claim_token = 'replacement-before-effect',
+                        attempt_count = 2,
+                        claimed_at = ?,
+                        processing_lease_expires_at = ?
+                  WHERE id = 'intent-loses-before-admission'`
+              )
+              .run(NOW.toISOString(), new Date(NOW.getTime() + 60_000).toISOString());
+          }
+        }
+        return database.prepare(sql);
+      },
+    } as D1Database;
+
+    const result = await admitProjectEventSourceIntentById(
+      env,
+      'intent-loses-before-admission',
+      NOW
+    );
+
+    expect(result).toMatchObject({ state: 'processing', attemptCount: 2 });
+    expect(admitProjectEvent).not.toHaveBeenCalled();
+    expect(rowById('intent-loses-before-admission')).toMatchObject({
+      state: 'processing',
+      attempt_count: 2,
+      claim_token: 'replacement-before-effect',
+      admitted_event_id: null,
+    });
+  });
+
   it('marks exhausted rows at claim time without calling ProjectData', async () => {
     admitProjectEvent.mockResolvedValue({
       outcome: 'created',
@@ -363,6 +523,322 @@ describe('project event source outbox', () => {
     ).toEqual({
       state: 'permanent_failed',
       terminalized_at: NOW.toISOString(),
+    });
+  });
+
+  it('does not exhaust a live final processing attempt during a duplicate nudge', async () => {
+    const { projectId: _projectId, ...payload } = sourceEvent();
+    void _projectId;
+    sqlite
+      .prepare(
+        `INSERT INTO project_event_source_outbox
+          (id, project_id, source, event_type, subject_type, subject_id, delivery_key,
+           payload_fingerprint, event_payload_json, state, attempt_count, max_attempts,
+           next_attempt_at, processing_lease_expires_at, expires_at, claim_token, created_at, updated_at)
+         VALUES ('intent-live-final', 'project-1', 'sam.lifecycle', 'task.completed',
+          'task', 'task-1', 'delivery-live-final', 'sha256:stable', ?,
+          'processing', 3, 3, ?, ?, ?, 'live-final-token', ?, ?)`
+      )
+      .run(
+        JSON.stringify(payload),
+        NOW.toISOString(),
+        new Date(NOW.getTime() + 60_000).toISOString(),
+        new Date(NOW.getTime() + 120_000).toISOString(),
+        NOW.toISOString(),
+        NOW.toISOString()
+      );
+
+    const result = await admitProjectEventSourceIntentById(env, 'intent-live-final', NOW);
+
+    expect(result).toMatchObject({ state: 'processing', attemptCount: 3 });
+    expect(admitProjectEvent).not.toHaveBeenCalled();
+    expect(rowById('intent-live-final')).toMatchObject({
+      state: 'processing',
+      attempt_count: 3,
+      claim_token: 'live-final-token',
+      terminalized_at: null,
+    });
+  });
+
+  it('keeps live final attempts during sweep and exhausts them after lease expiry', async () => {
+    const { projectId: _projectId, ...payload } = sourceEvent();
+    void _projectId;
+    const insert = sqlite.prepare(
+      `INSERT INTO project_event_source_outbox
+        (id, project_id, source, event_type, subject_type, subject_id, delivery_key,
+         payload_fingerprint, event_payload_json, state, attempt_count, max_attempts,
+         next_attempt_at, processing_lease_expires_at, expires_at, claim_token, created_at, updated_at)
+       VALUES (?, 'project-1', 'sam.lifecycle', 'task.completed',
+        'task', 'task-1', ?, 'sha256:stable', ?, 'processing', 3, 3, ?, ?, ?, ?, ?, ?)`
+    );
+    insert.run(
+      'intent-live-final-sweep',
+      'delivery-live-final-sweep',
+      JSON.stringify(payload),
+      NOW.toISOString(),
+      new Date(NOW.getTime() + 60_000).toISOString(),
+      new Date(NOW.getTime() + 120_000).toISOString(),
+      'live-sweep-token',
+      NOW.toISOString(),
+      NOW.toISOString()
+    );
+    insert.run(
+      'intent-abandoned-final-sweep',
+      'delivery-abandoned-final-sweep',
+      JSON.stringify(payload),
+      NOW.toISOString(),
+      new Date(NOW.getTime() - 1_000).toISOString(),
+      new Date(NOW.getTime() + 120_000).toISOString(),
+      'abandoned-sweep-token',
+      NOW.toISOString(),
+      NOW.toISOString()
+    );
+
+    const stats = await reconcileProjectEventSourceOutbox(env, { limit: 10, now: NOW });
+
+    expect(stats).toMatchObject({ permanentFailed: 1 });
+    expect(rowById('intent-live-final-sweep')).toMatchObject({
+      state: 'processing',
+      claim_token: 'live-sweep-token',
+      terminalized_at: null,
+    });
+    expect(rowById('intent-abandoned-final-sweep')).toMatchObject({
+      state: 'permanent_failed',
+      claim_token: null,
+      terminalized_at: NOW.toISOString(),
+    });
+  });
+
+  it('does not return or mutate a same-project row when an explicit ID collides with another delivery', async () => {
+    await enqueueProjectEventSourceIntent(env, sourceEvent(), {
+      id: 'shared-project-explicit-intent-id',
+      now: NOW,
+    });
+    const collidingInput = {
+      ...sourceEvent(),
+      subject: { type: 'task', id: 'task-2' },
+      deliveryKey: 'task:task-2:status:completed',
+      payloadFingerprint: 'sha256:stable-task-2',
+      metadata: { taskId: 'task-2', status: 'completed' },
+    };
+
+    await expect(
+      enqueueProjectEventSourceIntent(env, collidingInput, {
+        id: 'shared-project-explicit-intent-id',
+        now: NOW,
+      })
+    ).rejects.toThrow('Project event source outbox intent was not persisted');
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT project_id, subject_id, delivery_key, state, admission_outcome
+             FROM project_event_source_outbox
+            WHERE id = 'shared-project-explicit-intent-id'`
+        )
+        .get()
+    ).toEqual({
+      project_id: 'project-1',
+      subject_id: 'task-1',
+      delivery_key: 'task:task-1:status:completed',
+      state: 'pending',
+      admission_outcome: null,
+    });
+    expect(
+      sqlite.prepare(`SELECT COUNT(*) AS count FROM project_event_source_outbox`).get()
+    ).toEqual({ count: 1 });
+  });
+
+  it('does not return or mutate a foreign project row when explicit IDs collide', async () => {
+    await enqueueProjectEventSourceIntent(env, sourceEvent(), {
+      id: 'shared-explicit-intent-id',
+      now: NOW,
+    });
+    const foreignInput = {
+      ...sourceEvent(),
+      projectId: 'project-2',
+      subject: { type: 'task', id: 'task-2' },
+      deliveryKey: 'task:task-2:status:completed',
+      metadata: { taskId: 'task-2', status: 'completed' },
+    };
+
+    await expect(
+      enqueueProjectEventSourceIntent(env, foreignInput, {
+        id: 'shared-explicit-intent-id',
+        now: NOW,
+      })
+    ).rejects.toThrow('Project event source outbox intent was not persisted');
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT project_id, subject_id, state, admission_outcome
+             FROM project_event_source_outbox
+            WHERE id = 'shared-explicit-intent-id'`
+        )
+        .get()
+    ).toEqual({
+      project_id: 'project-1',
+      subject_id: 'task-1',
+      state: 'pending',
+      admission_outcome: null,
+    });
+    expect(
+      sqlite.prepare(`SELECT COUNT(*) AS count FROM project_event_source_outbox`).get()
+    ).toEqual({ count: 1 });
+  });
+
+  it('captures credential limit window transitions only with the winning D1 proof', async () => {
+    const observedAt = NOW.getTime();
+    sqlite
+      .prepare(
+        `INSERT INTO credential_limit_windows
+          (project_id, credential_reference, window_type, credential_source, provider,
+           provider_mode, user_id, source, status, last_event_level, observed_at,
+           freshness_ms, last_event_delivery_key, duplicate_sample_count,
+           stale_sample_count, created_at, updated_at)
+         VALUES ('project-1', 'cc_credentials:cred-1', 'openai.tokens', 'user',
+          'openai', 'user-api-key', 'user-1', 'proxy', 'allowed_warning',
+          'warning', ?, 0, 'credential-limit:winning', 0, 0, ?, ?)`
+      )
+      .run(observedAt, observedAt, observedAt);
+    const event = {
+      ...sourceEvent(),
+      source: 'sam.credential_limit',
+      eventType: 'credential.limit.warning',
+      subject: { type: 'credential', id: 'cc_credentials:cred-1' },
+      deliveryKey: 'credential-limit:winning',
+      payloadFingerprint: 'sha256:credential-window',
+      metadata: { level: 'warning', windowType: 'openai.tokens' },
+    };
+
+    const inserted = await projectEventSourceOutboxInsertStatement(env, event, {
+      id: 'credential-window-intent',
+      now: NOW,
+      capture: {
+        kind: 'credential_limit_window_transition',
+        projectId: 'project-1',
+        credentialReference: 'cc_credentials:cred-1',
+        windowType: 'openai.tokens',
+        observedAt,
+        lastEventDeliveryKey: 'credential-limit:winning',
+      },
+    }).run();
+    const blocked = await projectEventSourceOutboxInsertStatement(
+      env,
+      {
+        ...event,
+        deliveryKey: 'credential-limit:losing',
+        payloadFingerprint: 'sha256:credential-window-losing',
+      },
+      {
+        id: 'credential-window-losing-intent',
+        now: NOW,
+        capture: {
+          kind: 'credential_limit_window_transition',
+          projectId: 'project-1',
+          credentialReference: 'cc_credentials:cred-1',
+          windowType: 'openai.tokens',
+          observedAt,
+          lastEventDeliveryKey: 'credential-limit:losing',
+        },
+      }
+    ).run();
+
+    expect(inserted.meta.changes).toBe(1);
+    expect(blocked.meta.changes).toBe(0);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT id, delivery_key FROM project_event_source_outbox
+           WHERE source = 'sam.credential_limit'`
+        )
+        .all()
+    ).toEqual([{ id: 'credential-window-intent', delivery_key: 'credential-limit:winning' }]);
+  });
+
+  it('uses the sweep limit as a finite work-item ceiling for candidate claim and settle', async () => {
+    admitProjectEvent
+      .mockResolvedValueOnce({
+        outcome: 'created',
+        event: { id: 'event-limit-one', state: 'recorded' },
+        matches: [],
+      })
+      .mockResolvedValueOnce({
+        outcome: 'created',
+        event: { id: 'event-limit-two', state: 'recorded' },
+        matches: [],
+      });
+    await enqueueProjectEventSourceIntent(env, sourceEvent(), {
+      id: 'intent-limit-one',
+      now: NOW,
+    });
+    await enqueueProjectEventSourceIntent(env, {
+      ...sourceEvent(),
+      subject: { type: 'task', id: 'task-2' },
+      deliveryKey: 'task:task-2:status:completed',
+      payloadFingerprint: 'sha256:stable-2',
+      metadata: { taskId: 'task-2', status: 'completed' },
+    }, {
+      id: 'intent-limit-two',
+      now: NOW,
+    });
+
+    const stats = await reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
+
+    expect(stats).toMatchObject({ attempted: 1, admitted: 1, hasMore: true });
+    expect(admitProjectEvent).toHaveBeenCalledTimes(1);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT state, COUNT(*) AS count
+             FROM project_event_source_outbox
+            GROUP BY state
+            ORDER BY state`
+        )
+        .all()
+    ).toEqual([
+      { state: 'admitted', count: 1 },
+      { state: 'pending', count: 1 },
+    ]);
+  });
+
+  it('passes the remaining sweep wall allowance into external admission', async () => {
+    env.PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS = '5';
+    env.PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS = '40';
+    let resolveRemote:
+      | ((value: {
+          outcome: string;
+          event: { id: string; state: string };
+          matches: unknown[];
+        }) => void)
+      | undefined;
+    admitProjectEvent.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRemote = resolve;
+        })
+    );
+    await enqueueProjectEventSourceIntent(env, sourceEvent(), {
+      id: 'intent-wall-budget',
+      now: NOW,
+    });
+
+    const statsPromise = reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
+    await waitForProjectDataAdmissions(1);
+    await vi.advanceTimersByTimeAsync(5);
+    const stats = await statsPromise;
+
+    expect(stats).toMatchObject({ attempted: 1, retryableFailed: 1, timedOut: 1 });
+    expect(rowById('intent-wall-budget')).toMatchObject({
+      state: 'retryable_failed',
+      attempt_count: 1,
+      last_error: 'ProjectEventSourceAdmissionTimeoutError: ProjectData admission timed out after 5ms',
+    });
+    resolveRemote?.({
+      outcome: 'created',
+      event: { id: 'event-after-wall-timeout', state: 'recorded' },
+      matches: [],
     });
   });
 
@@ -445,6 +921,7 @@ describe('project event source outbox', () => {
       });
 
     const firstPromise = enqueueAndAdmitProjectEventSourceIntent(env, sourceEvent());
+    await waitForProjectDataAdmissions(1);
     await vi.advanceTimersByTimeAsync(10);
     const first = await firstPromise;
 
@@ -474,5 +951,65 @@ describe('project event source outbox', () => {
       admitted_event_id: 'event-created-after-timeout',
       attempt_count: 2,
     });
+  });
+
+  it('reclaims upgraded legacy terminal rows whose terminalized timestamp is null', async () => {
+    env.PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS = '0';
+    const old = new Date(NOW.getTime() - 60_000).toISOString();
+    sqlite
+      .prepare(
+        `INSERT INTO project_event_source_outbox
+          (id, project_id, source, event_type, subject_type, subject_id, delivery_key,
+           payload_fingerprint, event_payload_json, state, attempt_count, max_attempts,
+           next_attempt_at, expires_at, admitted_event_id, admission_outcome,
+           terminalized_at, created_at, updated_at)
+         VALUES ('legacy-admitted-null-terminalized', 'project-1', 'sam.lifecycle',
+          'task.completed', 'task', 'task-1', 'legacy-terminal-delivery',
+          'sha256:legacy-terminal', '{}', 'admitted', 1, 3, ?, ?, 'event-legacy',
+          'created', NULL, ?, ?)`
+      )
+      .run(old, old, old, old);
+
+    const stats = await reconcileProjectEventSourceOutbox(env, { limit: 5, now: NOW });
+
+    expect(stats).toMatchObject({ terminalDeleted: 1 });
+    expect(rowById('legacy-admitted-null-terminalized')).toBeUndefined();
+  });
+
+  it('uses the exhausted-ready index instead of scanning healthy attempt prefixes', () => {
+    sqlite.close();
+    sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [schema.projectEventSourceOutbox]);
+    createOutboxIndexes();
+    const future = new Date(NOW.getTime() + 60_000).toISOString();
+    const insert = sqlite.prepare(
+      `INSERT INTO project_event_source_outbox
+        (id, project_id, source, event_type, subject_type, subject_id, delivery_key,
+         payload_fingerprint, event_payload_json, state, attempt_count, max_attempts,
+         next_attempt_at, processing_lease_expires_at, expires_at, created_at, updated_at)
+       VALUES (?, 'project-1', 'sam.lifecycle', 'task.completed', 'task', ?,
+        ?, 'sha256:healthy', '{}', 'pending', 0, 8, ?, NULL, ?, ?, ?)`
+    );
+    const manyHealthy = sqlite.transaction(() => {
+      for (let i = 0; i < 20_000; i += 1) {
+        insert.run(`healthy-${i}`, `task-${i}`, `delivery-${i}`, future, future, future, future);
+      }
+    });
+    manyHealthy();
+
+    const plan = sqlite
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id FROM project_event_source_outbox
+          WHERE state = ? AND (attempt_count >= max_attempts) = 1
+          ORDER BY processing_lease_expires_at, id
+          LIMIT ?`
+      )
+      .all('pending', 10) as Array<{ detail: string }>;
+
+    expect(plan.map((row) => row.detail).join('\n')).toContain(
+      'idx_project_event_source_outbox_exhausted_ready'
+    );
+    expect(plan.map((row) => row.detail).join('\n')).not.toMatch(/\bSCAN\b/);
   });
 });

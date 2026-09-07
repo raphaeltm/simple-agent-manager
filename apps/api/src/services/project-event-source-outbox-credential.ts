@@ -2,7 +2,7 @@ import type { AdmitProjectEventInput } from '@simple-agent-manager/shared';
 import { CREDENTIAL_LIMIT_EVENT_SOURCE } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import type { ProjectEventSourceOutboxIntent } from './project-event-source-outbox';
+import type { ProjectEventSourceOutboxIntent } from './project-event-source-outbox-contract';
 
 function credentialLimitWindowFromIntent(
   intent: ProjectEventSourceOutboxIntent,

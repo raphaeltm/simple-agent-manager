@@ -7,8 +7,8 @@ import {
   admitProjectEventSourceIntentById,
   type ProjectEventSourceAdmissionResult,
   type ProjectEventSourceOutboxState,
-  resolveProjectEventSourceOutboxConfig,
 } from '../project-event-source-outbox';
+import { resolveProjectEventSourceOutboxConfig } from '../project-event-source-outbox-contract';
 import type {
   CredentialLimitDispatchOutcome,
   CredentialLimitLevel,
@@ -20,7 +20,7 @@ import type {
 import { nullableNumberEquals } from './values';
 
 const MILLIS_PER_DAY = 24 * 60 * 60_000;
-const ACTIVE_SOURCE_OUTBOX_STATES = "'pending', 'processing', 'retryable_failed'";
+const ACTIVE_SOURCE_OUTBOX_STATES = "'pending', 'processing', 'admitting', 'retryable_failed'";
 
 type D1RunLike = { meta?: { changes?: number } };
 

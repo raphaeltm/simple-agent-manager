@@ -17,6 +17,7 @@ import { enqueueAndAdmitProjectEventSourceIntent } from './project-event-source-
 
 const WEBHOOK_EVENT_SOURCE = 'webhook';
 const TRUNCATION_SUFFIX = '...[truncated]';
+const METADATA_VARIANTS = ['full', 'compact', 'minimal', 'empty'] as const;
 const SENSITIVE_COMPACT_KEY_PARTS = [
   'authorization',
   'authtoken',
@@ -27,16 +28,30 @@ const SENSITIVE_COMPACT_KEY_PARTS = [
   'credentials',
   'idtoken',
   'password',
+  'passphrase',
   'passwd',
   'privatekey',
   'refreshtoken',
   'secret',
   'secrets',
+  'session',
   'sessionid',
+  'skantapi',
   'setcookie',
   'token',
   'tokens',
 ];
+type WebhookMetadataVariant = (typeof METADATA_VARIANTS)[number];
+type BodyShapeFacts = {
+  bodyTopLevelKeyCount: number;
+  bodyObjectKeyCount: number;
+  bodyArrayItemCount: number;
+  bodyPrimitiveValueCount: number;
+  bodyMaxDepth: number;
+  redactedSensitiveKeyCount: number;
+  skippedBlankKeyCount: number;
+  shapeTruncated: boolean;
+};
 
 export interface GenericWebhookProjectEventInput {
   trigger: schema.TriggerRow;
@@ -91,18 +106,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Object.prototype.toString.call(value) === '[object Object]';
 }
 
-function safeNameList(values: Iterable<string>, limits: ProjectEventLimits): string[] {
-  const output = new Set<string>();
-  for (const raw of values) {
-    const trimmed = raw.trim();
-    if (!trimmed || isSensitiveKey(trimmed)) continue;
-    output.add(boundedString(trimmed, limits.maxFilterStringBytes));
-    if (output.size >= limits.maxMetadataArrayItems) break;
-  }
-  return [...output].sort((left, right) => left.localeCompare(right));
-}
-
-function summarizeBodyShape(value: unknown, limits: ProjectEventLimits): ProjectEventMetadata {
+function summarizeBodyShape(value: unknown, limits: ProjectEventLimits): BodyShapeFacts {
   const stats = {
     objectKeys: 0,
     arrayItems: 0,
@@ -112,7 +116,6 @@ function summarizeBodyShape(value: unknown, limits: ProjectEventLimits): Project
     maxDepth: 0,
     truncated: false,
   };
-  const topLevelKeys = isPlainObject(value) ? safeNameList(Object.keys(value), limits) : [];
   const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
   const visitBudget = Math.max(1, limits.maxMetadataKeys * limits.maxMetadataArrayItems);
   let visited = 0;
@@ -150,7 +153,6 @@ function summarizeBodyShape(value: unknown, limits: ProjectEventLimits): Project
   }
 
   return {
-    bodyTopLevelKeys: topLevelKeys,
     bodyTopLevelKeyCount: isPlainObject(value) ? Object.keys(value).length : 0,
     bodyObjectKeyCount: stats.objectKeys,
     bodyArrayItemCount: stats.arrayItems,
@@ -162,11 +164,53 @@ function summarizeBodyShape(value: unknown, limits: ProjectEventLimits): Project
   };
 }
 
+function summarizeHeaderShape(input: GenericWebhookProjectEventInput): ProjectEventMetadata {
+  return {
+    includedHeaderCount: Object.keys(input.headers).length,
+  };
+}
+
 function buildMetadata(
   input: GenericWebhookProjectEventInput,
   limits: ProjectEventLimits,
-  includeShape: boolean
+  variant: WebhookMetadataVariant
 ): ProjectEventMetadata {
+  if (variant === 'empty') return {};
+  const shape = summarizeBodyShape(input.body, limits);
+  if (variant === 'minimal') {
+    return {
+      provider: 'webhook',
+      outcome: input.outcome,
+      request: {
+        ...summarizeHeaderShape(input),
+        bodyTopLevelKeyCount: shape.bodyTopLevelKeyCount,
+        bodyObjectKeyCount: shape.bodyObjectKeyCount,
+        bodyArrayItemCount: shape.bodyArrayItemCount,
+        bodyPrimitiveValueCount: shape.bodyPrimitiveValueCount,
+        bodyMaxDepth: shape.bodyMaxDepth,
+        redactedSensitiveKeyCount: shape.redactedSensitiveKeyCount,
+        skippedBlankKeyCount: shape.skippedBlankKeyCount,
+        shapeTruncated: true,
+      },
+    };
+  }
+  if (variant === 'compact') {
+    return {
+      provider: 'webhook',
+      deliveryId: boundedString(input.deliveryId, limits.maxFilterStringBytes),
+      outcome: input.outcome,
+      triggerId: boundedString(input.trigger.id, limits.maxFilterStringBytes),
+      projectId: boundedString(input.trigger.projectId, limits.maxFilterStringBytes),
+      executionId: input.executionId
+        ? boundedString(input.executionId, limits.maxFilterStringBytes)
+        : null,
+      sequenceNumber: input.sequenceNumber ?? null,
+      request: {
+        ...summarizeHeaderShape(input),
+        ...shape,
+      },
+    };
+  }
   return {
     provider: 'webhook',
     deliveryId: boundedString(input.deliveryId, limits.maxFilterStringBytes),
@@ -181,13 +225,14 @@ function buildMetadata(
       name: boundedString(input.projectName, limits.maxFilterStringBytes),
     },
     execution: {
-      id: input.executionId ? boundedString(input.executionId, limits.maxFilterStringBytes) : null,
+      id: input.executionId
+        ? boundedString(input.executionId, limits.maxFilterStringBytes)
+        : null,
       sequenceNumber: input.sequenceNumber ?? null,
     },
     request: {
-      includedHeaderNames: safeNameList(Object.keys(input.headers), limits),
-      receivedHeaderCount: Object.keys(input.headers).length,
-      ...(includeShape ? summarizeBodyShape(input.body, limits) : { shapeTruncated: true }),
+      ...summarizeHeaderShape(input),
+      ...shape,
     },
   };
 }
@@ -213,12 +258,12 @@ function projectEventLimits(env: Env): ProjectEventLimits {
 async function buildValidatedEventInput(
   env: Env,
   input: GenericWebhookProjectEventInput,
-  includeShape: boolean
+  variant: WebhookMetadataVariant
 ): Promise<AdmitProjectEventInput> {
   const limits = projectEventLimits(env);
   const eventType = `webhook.${input.outcome}`;
   const subject = { type: 'webhook_trigger', id: input.trigger.id };
-  const metadata = buildMetadata(input, limits, includeShape);
+  const metadata = buildMetadata(input, limits, variant);
   const eventInput: AdmitProjectEventInput = {
     projectId: input.trigger.projectId,
     source: WEBHOOK_EVENT_SOURCE,
@@ -250,12 +295,16 @@ export async function buildGenericWebhookProjectEventInput(
   input: GenericWebhookProjectEventInput,
   env?: Env
 ): Promise<AdmitProjectEventInput> {
-  if (!env) return buildValidatedEventInput({} as Env, input, true);
-  try {
-    return await buildValidatedEventInput(env, input, true);
-  } catch {
-    return buildValidatedEventInput(env, input, false);
+  const eventEnv = env ?? ({} as Env);
+  let lastError: unknown;
+  for (const variant of METADATA_VARIANTS) {
+    try {
+      return await buildValidatedEventInput(eventEnv, input, variant);
+    } catch (error) {
+      lastError = error;
+    }
   }
+  throw lastError instanceof Error ? lastError : new Error('Webhook event metadata is invalid');
 }
 
 export async function enqueueGenericWebhookProjectEvent(

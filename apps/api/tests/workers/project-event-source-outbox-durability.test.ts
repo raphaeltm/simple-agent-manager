@@ -6,6 +6,7 @@ import type { Env } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import {
   admitProjectEventSourceIntentById,
+  enqueueProjectEventSourceIntent,
   projectEventSourceOutboxInsertStatement,
   reconcileProjectEventSourceOutbox,
 } from '../../src/services/project-event-source-outbox';
@@ -63,7 +64,7 @@ function eventInput(
 
 async function outboxRow(id: string) {
   return env.DATABASE.prepare(
-    `SELECT id, state, attempt_count, admitted_event_id, admission_outcome, terminalized_at
+    `SELECT id, state, attempt_count, claim_token, admitted_event_id, admission_outcome, terminalized_at
        FROM project_event_source_outbox
       WHERE id = ?
       LIMIT 1`
@@ -73,6 +74,7 @@ async function outboxRow(id: string) {
       id: string;
       state: string;
       attempt_count: number;
+      claim_token: string | null;
       admitted_event_id: string | null;
       admission_outcome: string | null;
       terminalized_at: string | null;
@@ -217,6 +219,222 @@ describe('Project event source outbox durability on migrated D1', () => {
       attempt_count: 2,
       admission_outcome: 'duplicate_replay',
     });
+  });
+
+  it('does not return or mutate a same-project row when an explicit ID collides on migrated D1', async () => {
+    const { projectId } = await seedProjectGraph('same-project-id-collision');
+    const sharedIntentId = `${TEST_PREFIX}-same-project-shared-intent-id`;
+    await enqueueProjectEventSourceIntent(testEnv, eventInput(projectId, 'same-project-id-a'), {
+      id: sharedIntentId,
+      now: NOW,
+    });
+
+    await expect(
+      enqueueProjectEventSourceIntent(testEnv, eventInput(projectId, 'same-project-id-b'), {
+        id: sharedIntentId,
+        now: NOW,
+      })
+    ).rejects.toThrow('Project event source outbox intent was not persisted');
+
+    const row = await env.DATABASE.prepare(
+      `SELECT project_id, delivery_key, state, admission_outcome
+         FROM project_event_source_outbox
+        WHERE id = ?`
+    )
+      .bind(sharedIntentId)
+      .first<{
+        project_id: string;
+        delivery_key: string;
+        state: string;
+        admission_outcome: string | null;
+      }>();
+    expect(row).toEqual({
+      project_id: projectId,
+      delivery_key: 'task:same-project-id-a:status:completed',
+      state: 'pending',
+      admission_outcome: null,
+    });
+  });
+
+  it('does not return or mutate a foreign project row when explicit IDs collide on migrated D1', async () => {
+    const first = await seedProjectGraph('id-collision-a');
+    const second = await seedProjectGraph('id-collision-b');
+    const sharedIntentId = `${TEST_PREFIX}-shared-intent-id`;
+    await enqueueProjectEventSourceIntent(testEnv, eventInput(first.projectId, 'id-collision-a'), {
+      id: sharedIntentId,
+      now: NOW,
+    });
+
+    await expect(
+      enqueueProjectEventSourceIntent(testEnv, eventInput(second.projectId, 'id-collision-b'), {
+        id: sharedIntentId,
+        now: NOW,
+      })
+    ).rejects.toThrow('Project event source outbox intent was not persisted');
+
+    const row = await env.DATABASE.prepare(
+      `SELECT project_id, delivery_key, state, admission_outcome
+         FROM project_event_source_outbox
+        WHERE id = ?`
+    )
+      .bind(sharedIntentId)
+      .first<{
+        project_id: string;
+        delivery_key: string;
+        state: string;
+        admission_outcome: string | null;
+      }>();
+    expect(row).toEqual({
+      project_id: first.projectId,
+      delivery_key: 'task:id-collision-a:status:completed',
+      state: 'pending',
+      admission_outcome: null,
+    });
+  });
+
+  it('does not enter ProjectData after ownership is lost before admission on migrated D1', async () => {
+    const { projectId } = await seedProjectGraph('lost-before-admission');
+    const intentId = `${projectId}-intent-lost-before-admission-worker`;
+    await enqueueProjectEventSourceIntent(testEnv, eventInput(projectId, 'lost-before-admission'), {
+      id: intentId,
+      now: NOW,
+    });
+    const database = env.DATABASE;
+    let claimReads = 0;
+    const raceEnv = {
+      ...testEnv,
+      DATABASE: {
+        prepare: (sql: string) => {
+          if (sql.includes("WHERE id = ? AND state = 'processing' AND claim_token = ?")) {
+            claimReads += 1;
+            if (claimReads === 2) {
+              void database
+                .prepare(
+                  `UPDATE project_event_source_outbox
+                      SET claim_token = 'replacement-before-projectdata',
+                          attempt_count = 2,
+                          claimed_at = ?,
+                          processing_lease_expires_at = ?,
+                          updated_at = ?
+                    WHERE id = ?`
+                )
+                .bind(
+                  NOW.toISOString(),
+                  new Date(NOW.getTime() + 60_000).toISOString(),
+                  NOW.toISOString(),
+                  intentId
+                )
+                .run();
+            }
+          }
+          return database.prepare(sql);
+        },
+        exec: database.exec.bind(database),
+        dump: database.dump.bind(database),
+        batch: database.batch.bind(database),
+      } as D1Database,
+    } as Env;
+
+    const result = await admitProjectEventSourceIntentById(raceEnv, intentId, NOW);
+
+    expect(result).toMatchObject({ state: 'processing', attemptCount: 2 });
+    expect(await outboxRow(intentId)).toMatchObject({
+      state: 'processing',
+      attempt_count: 2,
+      claim_token: 'replacement-before-projectdata',
+      admitted_event_id: null,
+    });
+    const status = await projectDataService.getProjectEventRecentStatus(testEnv, projectId);
+    expect(status.events).toEqual([]);
+  });
+
+  it('keeps live final processing attempts and exhausts abandoned ones after lease expiry on migrated D1', async () => {
+    const { projectId } = await seedProjectGraph('live-final');
+    const basePayload = JSON.stringify(withoutProjectId(eventInput(projectId, 'live-final')));
+    const insert = env.DATABASE.prepare(
+      `INSERT INTO project_event_source_outbox
+        (id, project_id, source, event_type, subject_type, subject_id, delivery_key,
+         payload_fingerprint, event_payload_json, state, attempt_count, max_attempts,
+         next_attempt_at, processing_lease_expires_at, expires_at, claim_token,
+         created_at, updated_at)
+       VALUES (?, ?, 'sam.lifecycle', 'task.completed', 'task', ?, ?, 'sha256:live-final', ?,
+        'processing', 3, 3, ?, ?, ?, ?, ?, ?)`
+    );
+    await insert
+      .bind(
+        `${projectId}-intent-live-final-worker`,
+        projectId,
+        'live-final-task-live',
+        'live-final-delivery-live',
+        basePayload,
+        NOW.toISOString(),
+        new Date(NOW.getTime() + 60_000).toISOString(),
+        new Date(NOW.getTime() + 120_000).toISOString(),
+        'live-final-worker-token',
+        NOW.toISOString(),
+        NOW.toISOString()
+      )
+      .run();
+    await insert
+      .bind(
+        `${projectId}-intent-abandoned-final-worker`,
+        projectId,
+        'live-final-task-abandoned',
+        'live-final-delivery-abandoned',
+        basePayload,
+        NOW.toISOString(),
+        new Date(NOW.getTime() - 1_000).toISOString(),
+        new Date(NOW.getTime() + 120_000).toISOString(),
+        'abandoned-final-worker-token',
+        NOW.toISOString(),
+        NOW.toISOString()
+      )
+      .run();
+
+    const stats = await reconcileProjectEventSourceOutbox(testEnv, { limit: 10, now: NOW });
+
+    expect(stats).toMatchObject({ permanentFailed: 1 });
+    expect(await outboxRow(`${projectId}-intent-live-final-worker`)).toMatchObject({
+      state: 'processing',
+      claim_token: 'live-final-worker-token',
+      terminalized_at: null,
+    });
+    expect(await outboxRow(`${projectId}-intent-abandoned-final-worker`)).toMatchObject({
+      state: 'permanent_failed',
+      claim_token: null,
+      terminalized_at: NOW.toISOString(),
+    });
+  });
+
+  it('reclaims upgraded legacy terminal rows with null terminalized timestamps on migrated D1', async () => {
+    const { projectId } = await seedProjectGraph('legacy-null-retention');
+    const old = new Date(NOW.getTime() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    await projectEventSourceOutboxInsertStatement(
+      testEnv,
+      eventInput(projectId, 'legacy-null-retention'),
+      {
+        id: `${projectId}-legacy-null-terminal-worker`,
+        now: NOW,
+      }
+    ).run();
+    await env.DATABASE.prepare(
+      `UPDATE project_event_source_outbox
+          SET state = 'admitted', admitted_event_id = 'event-legacy-null',
+              admission_outcome = 'created', terminalized_at = NULL,
+              created_at = ?, updated_at = ?
+        WHERE id = ?`
+    )
+      .bind(old, old, `${projectId}-legacy-null-terminal-worker`)
+      .run();
+    const retentionEnv = {
+      ...testEnv,
+      PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS: '0',
+    } as Env;
+
+    const stats = await reconcileProjectEventSourceOutbox(retentionEnv, { limit: 5, now: NOW });
+
+    expect(stats).toMatchObject({ terminalDeleted: 1 });
+    expect(await outboxRow(`${projectId}-legacy-null-terminal-worker`)).toBeNull();
   });
 
   it('bounds expired and exhausted history before due candidate admission', async () => {
