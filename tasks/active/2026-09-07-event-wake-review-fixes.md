@@ -51,3 +51,15 @@ Review evidence distinctions: the late-cancellation guard and legacy identity co
 
 
 Additional A3 read-grace regression (code inspection, not executed): `project-events-wake-targets.ts:38-57` takes the minimum of delivery expiry and readable-until. A delivered but unacknowledged batch whose delivery TTL has elapsed therefore stops occupying its target while its read grace is still live. The earlier helper used readable-until for this state. Preserve target occupancy through the applicable delivered/unacked read grace; add a case with delivery TTL shorter than read grace and verify the next wake remains deferred until acknowledgement or grace expiry.
+
+## Parent re-review of A3 `aaeb7a7f6`
+
+This checkpoint remains unintegrated and CHANGES REQUIRED. Independent reviewers reran the actual committed functions and migration SQL. Added tests do not establish the outstanding behavior below.
+
+- **Verified repair:** Retention now reports continuation across null/missing-batch match subphases. With limit 1, four passes delete both matches and both events, followed by a quiet fifth pass.
+- **Still reproduced:** A synthetic retry-0 attempt pins an acknowledged batch (both deletion phases mutate 0 and report no continuation); project mailbox cap 5 occupied by another session still reports target capacity available; an unacknowledged delivery with TTL 1000 and readable-until 10000 loses its occupancy lease at time 2000; wrapper order produces blocked A `capacity_deferred` then ready B `not_due`, with project checkpoint 61000. Scheduler matched-history grouping uses 17,105 SQLite instructions for 1,000 rows and 340,105 for 20,000, including a temporary GROUP BY tree.
+- **Still reproduced:** Cancellation during the final D1 authorization await returns successful authority (`null` failure), with one local check; checking local state immediately afterward returns `failed`. Event-specific authority remains absent from recovery's persisted start guard.
+- **Still reproduced:** Actual T0 → T1 → T2 handoff SQL detaches one chat binding and binds zero, leaving all three tasks unbound. Even a separately pre-bound T2 fixture has disagreeing guards: source authority accepts it, while `isSessionRecoveryTaskAuthorized` rejects queued/waking T2 because it requires the root task to remain nonterminal. The new test pre-seeds T2 instead of executing handoff.
+- **Still reproduced:** Verified caller resolution without an agent-session ID yields legacy owner `T`, and rejects the historical `T:C` identity. Preserve the exact pre-upgrade fallback for v1 access only.
+
+The new server-derived `ownerTaskId` and MCP override rejection are useful, but do not repair these paths. C2 audience checks must extend A3's current helper bodies. Two actual MCP/alarm/recovery/read-ack cycles remain required. These probes substitute external boundaries and do not allocate compute or constitute staging evidence.
