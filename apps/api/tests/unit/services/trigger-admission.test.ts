@@ -23,10 +23,14 @@ function makeTriggerRow(overrides: Partial<TriggerRow> = {}): TriggerRow {
     cronTimezone: 'UTC',
     skipIfRunning: true,
     promptTemplate: 'run',
+    executionUserId: null,
+    executionUserAuthorizedAt: null,
+    executionUserAuthorizedBy: null,
     agentProfileId: null,
     skillId: null,
     taskMode: 'task',
     vmSizeOverride: null,
+    resourceRequirementsJson: null,
     maxConcurrent: 1,
     lastTriggeredAt: null,
     triggerCount: 0,
@@ -107,6 +111,37 @@ async function admit(env: Env, trigger: TriggerRow, submitter = vi.fn()) {
 }
 
 describe('admitAndSubmitTriggerExecution', () => {
+  it('submits reattached triggers with the stored authorized execution principal', async () => {
+    const { env, trigger } = setup({
+      userId: 'departing-user',
+      executionUserId: 'owner-user',
+      executionUserAuthorizedAt: '2026-09-07T00:00:00.000Z',
+      executionUserAuthorizedBy: 'owner-user',
+    });
+    const submitter = vi.fn(async () => ({
+      taskId: 'task-new',
+      sessionId: 'session-new',
+      branchName: 'sam/new-work',
+    }));
+
+    const result = await admit(env, trigger, submitter);
+
+    expect(result).toMatchObject({
+      outcome: 'submitted',
+      taskId: 'task-new',
+      sessionId: 'session-new',
+      branchName: 'sam/new-work',
+    });
+    expect(submitter).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        triggerId: trigger.id,
+        projectId: trigger.projectId,
+        userId: 'owner-user',
+      })
+    );
+  });
+
   it('keeps a failed execution with a live linked task active for admission and auto-pause', async () => {
     const { sqlite, env, trigger } = setup();
     sqlite.prepare("INSERT INTO tasks (id, status) VALUES ('task-live', 'in_progress')").run();

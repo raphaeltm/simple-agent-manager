@@ -19,6 +19,7 @@ import {
 } from '../../services/cron-utils';
 import {
   ResourceRequirementsValidationError,
+  serializeModernResourceRequirementsInput,
   serializeResourceRequirementsInput,
 } from '../../services/resource-requirements-input';
 import {
@@ -167,7 +168,7 @@ export async function handleUpdateTrigger(
     try {
       const resourceRequirementsJson =
         params.resourceRequirements !== undefined
-          ? serializeResourceRequirementsInput(params.resourceRequirements)
+          ? serializeModernResourceRequirementsInput(params.resourceRequirements)
           : serializeResourceRequirementsInput(
               params.resourceRequirementsJson,
               'resourceRequirementsJson'

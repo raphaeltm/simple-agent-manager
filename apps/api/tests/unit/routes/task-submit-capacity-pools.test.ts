@@ -441,6 +441,103 @@ describe('task submit capacity-pool placement', () => {
     );
   });
 
+  it('persists skill, profile, and project resource layers in the versioned plan', async () => {
+    const { sqlite, env } = createEnv();
+    seedTaskSubmitRows(sqlite);
+    sqlite
+      .prepare(
+        `UPDATE projects
+         SET resource_requirements_json = ?
+         WHERE id = 'project-1'`
+      )
+      .run(JSON.stringify({ minDiskGb: 0, exclusiveNode: false }));
+    sqlite
+      .prepare(
+        `INSERT INTO agent_profiles (
+           id, project_id, user_id, name, agent_type, effort, resource_requirements_json
+         )
+         VALUES ('profile-1', 'project-1', 'user-1', 'Profile One', 'claude-code', 'auto', ?)`
+      )
+      .run(JSON.stringify({ minMemoryGb: 12 }));
+    sqlite
+      .prepare(
+        `INSERT INTO skills (
+           id, project_id, user_id, name, agent_type, resource_requirements_json
+         )
+         VALUES ('skill-1', 'project-1', 'user-1', 'Skill One', 'claude-code', ?)`
+      )
+      .run(JSON.stringify({ minVcpu: 4 }));
+    await seedProjectDefaultPool(env);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/submit',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Run layered resource plan',
+          agentProfileId: 'profile-1',
+          skillId: 'skill-1',
+        }),
+      },
+      env,
+      executionCtx
+    );
+
+    expect(res.status).toBe(202);
+    const taskRow = sqlite
+      .prepare(
+        `SELECT resource_requirements_json, resource_requirement_plan_json,
+          resource_requirements_source, resolved_reservation_json
+         FROM tasks
+         WHERE project_id = 'project-1'`
+      )
+      .get() as {
+      resource_requirements_json: string | null;
+      resource_requirement_plan_json: string;
+      resource_requirements_source: string | null;
+      resolved_reservation_json: string;
+    };
+
+    expect(JSON.parse(taskRow.resource_requirements_json ?? '{}')).toEqual({ minVcpu: 4 });
+    expect(taskRow.resource_requirements_source).toBe('skill');
+    const plan = JSON.parse(taskRow.resource_requirement_plan_json) as {
+      version: number;
+      intent: Record<string, unknown>;
+    };
+    expect(plan.version).toBe(1);
+    expect(plan.intent).toMatchObject({
+      skill: { minVcpu: 4 },
+      agentProfile: { minMemoryGb: 12 },
+      project: { minDiskGb: 0, exclusiveNode: false },
+    });
+    const reservation = JSON.parse(taskRow.resolved_reservation_json) as {
+      cpuMillis: number;
+      memoryMb: number;
+      diskMb: number;
+      exclusiveNode: boolean;
+      fieldProvenance: Record<string, { source: string; value: unknown }>;
+    };
+    expect(reservation).toMatchObject({
+      cpuMillis: 4000,
+      memoryMb: 12 * 1024,
+      diskMb: 0,
+      exclusiveNode: false,
+    });
+    expect(reservation.fieldProvenance.minVcpu).toMatchObject({
+      source: 'skill',
+      value: 4,
+    });
+    expect(reservation.fieldProvenance.minMemoryGb).toMatchObject({
+      source: 'agent-profile',
+      value: 12,
+    });
+    expect(reservation.fieldProvenance.minDiskGb).toMatchObject({
+      source: 'project',
+      value: 0,
+    });
+  });
+
   it('does not inherit another project member personal credential attribution from a parent task', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-a');

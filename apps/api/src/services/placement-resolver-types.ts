@@ -73,7 +73,7 @@ export interface PlacementProfileDefaults {
 
 export interface PlacementExplicitOverrides {
   vmSize?: VMSize | null;
-  vmSizeSource?: Extract<ResourceRequirementsSource, 'task' | 'trigger'>;
+  vmSizeSource?: ResourceRequirementsSource;
   provider?: CredentialProvider | string | null;
   vmLocation?: string | null;
   workspaceProfile?: WorkspaceProfile | null;
@@ -108,6 +108,7 @@ export interface TaskStartPlacementInput {
   taskModeDefault: PlacementTaskModeDefault;
   profileVmSizeSource?: PlacementProfileVmSizeSource;
   resourceRequirements?: ResourceResolutionInput;
+  resolvedReservationOverride?: ResolvedResourceReservation | null;
   placementSettings?: CapacityPoolPlacementSettings | null;
   legacyWorkloadMapping?: Record<VMSize, Required<ResourceRequirements>>;
   validateLocation?: boolean;

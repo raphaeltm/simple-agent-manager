@@ -188,12 +188,35 @@ async function applyTriggerAction(input: {
     });
   }
   if (input.action === 'reattach_to_project') {
+    const rows = await input.tx
+      .update(schema.triggers)
+      .set({
+        executionUserId: input.actorUserId,
+        executionUserAuthorizedAt: input.nowIso,
+        executionUserAuthorizedBy: input.actorUserId,
+        credentialBlockedReason: null,
+        credentialBlockedAt: null,
+        credentialBlockedBy: null,
+        updatedAt: input.nowIso,
+      })
+      .where(
+        and(
+          eq(schema.triggers.projectId, input.projectId),
+          eq(schema.triggers.id, input.resource.resourceId),
+          eq(schema.triggers.status, 'active')
+        )
+      )
+      .returning({ id: schema.triggers.id });
+    if (rows.length !== 1) {
+      throw conflict('stale_plan', 'Trigger state changed; preview again');
+    }
+
     return resourceResult({
       resource: input.resource,
       action: input.action,
       status: 'applied',
       blocksRemoval: false,
-      message: 'Trigger kept active using existing project credential coverage',
+      message: 'Trigger kept active using an authorized project execution principal',
     });
   }
 

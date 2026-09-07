@@ -13,13 +13,15 @@ import type {
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import { isValidAgentType } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
+import { AppError } from '../../../middleware/error';
+import { requireProjectCapability } from '../../../middleware/project-auth';
 import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
 import { generateBranchName } from '../../../services/branch-name';
 import {
@@ -32,6 +34,7 @@ import { resolveProjectAgentDefault } from '../../../services/project-agent-defa
 import * as projectDataService from '../../../services/project-data';
 import {
   collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
   firstResourceRequirementLayer,
   firstResourceRequirementLayerJson,
   mergeResourceRequirementLayers,
@@ -208,15 +211,15 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
   const priority =
     typeof input.priority === 'number' ? Math.min(Math.max(0, Math.round(input.priority)), 10) : 0;
 
-  // ── Verify ownership ──────────────────────────────────────────────────
-  const [project] = await db
-    .select()
-    .from(schema.projects)
-    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
-    .limit(1);
-
-  if (!project) {
-    return { error: 'Project not found or not owned by you.' };
+  // ── Verify current task execution authority ───────────────────────────
+  let project: typeof schema.projects.$inferSelect;
+  try {
+    project = await requireProjectCapability(db, input.projectId, ctx.userId, 'task:write');
+  } catch (err) {
+    if (err instanceof AppError) {
+      return { error: err.message };
+    }
+    throw err;
   }
 
   // ── Resolve parent task lineage ────────────────────────────────────────
@@ -357,6 +360,12 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
     agentType: resolvedAgentType,
     resolvedReservation,
   } = placement;
+  const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+    layers: resourceRequirementLayers,
+    resolvedReservation,
+    requestedVmSize: resolvedVmSize,
+    requestedVmSizeSource: vmSizeSource,
+  });
 
   // ── Generate title and branch name ────────────────────────────────────
   const titleConfig = getTaskTitleConfig(env);
@@ -380,13 +389,13 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
-     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
+     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
      credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
      created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, ?, ?, 'mcp',
-     ?, ?, ?, ?, ?,
+     ?, ?, ?, ?, ?, ?,
      ?, ?, ?,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
      ?, ?)`
@@ -410,6 +419,7 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       resolvedVmSize,
       vmSizeSource,
       persistedResourceRequirementsJson,
+      persistedResourceRequirementPlanJson,
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
