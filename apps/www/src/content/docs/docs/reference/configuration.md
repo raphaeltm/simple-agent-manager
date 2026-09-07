@@ -280,9 +280,9 @@ Configuring one family never enables or modifies the other. Users who choose ser
 | ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` | `65536`                                          | Maximum UTF-8 byte size accepted by `PUT /api/gcp/service-account`                          |
 | `GCP_DEFAULT_ZONE`                   | `us-central1-a`                                  | Default Compute zone                                                                        |
-| `GCP_IMAGE_FAMILY`                   | `ubuntu-2404-lts-amd64`                          | Compute image family                                                                        |
+| `GCP_IMAGE_FAMILY`                   | `ubuntu-2404-lts-amd64`                          | Compute image family. Native image overrides may be a family name or a Compute Engine image/family reference. |
 | `GCP_IMAGE_PROJECT`                  | `ubuntu-os-cloud`                                | Compute image project                                                                       |
-| `GCP_DISK_SIZE_GB`                   | `50`                                             | Boot disk size                                                                              |
+| `GCP_DISK_SIZE_GB`                   | `50`                                             | Default boot disk size for GCP legacy callers and native requests without `bootDiskSizeGb`. A native VM request with `bootDiskSizeGb` overrides this value before the Compute Engine insert call. |
 | `GCP_TOKEN_CACHE_TTL_SECONDS`        | `3300`                                           | Maximum derivative access-token cache TTL; actual TTL is capped by Google's returned expiry |
 | `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS`  | `600`                                            | SAM identity-token lifetime for WIF                                                         |
 | `GCP_OPERATION_POLL_TIMEOUT_MS`      | `300000`                                         | Maximum wait for GCP asynchronous operations                                                |

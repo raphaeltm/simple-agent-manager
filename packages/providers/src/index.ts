@@ -9,12 +9,24 @@ import { UpCloudProvider } from './upcloud';
 import { VultrProvider } from './vultr';
 
 // Re-export types
+export {
+  assertBootDiskSizeGb,
+  assertIncludedBootDiskCapacity,
+  legacySizeToNativeVMConfig,
+  type NativeVMResolveOptions,
+  observedHardware,
+  observedValue,
+  type ResolvedNativeVMConfig,
+  resolveVMConfigWithLegacySizeAdapter,
+  unknownValue,
+} from './native-vm-config';
 export type {
   DigitalOceanProviderConfig,
   GcpProviderConfig,
   HetznerProviderConfig,
   InfomaniakProviderConfig,
   LocationMeta,
+  NativeVMConfig,
   Provider,
   ProviderConfig,
   ProviderErrorCategory,
@@ -27,8 +39,13 @@ export type {
   ScalewayProviderConfig,
   SizeConfig,
   UpCloudProviderConfig,
+  VMArchitecture,
   VMConfig,
+  VMHardwareObservationSource,
+  VMHardwareResources,
   VMInstance,
+  VMObservedHardware,
+  VMObservedValue,
   VMStatus,
   VolumeAttachmentConfig,
   VolumeCapabilities,

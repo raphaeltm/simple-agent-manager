@@ -30,6 +30,11 @@ import {
 } from './digitalocean-volumes';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import {
+  assertIncludedBootDiskCapacity,
+  observedHardware,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
+import {
   providerDelay,
   providerFetch,
   rethrowIfProviderRequestAborted,
@@ -135,27 +140,26 @@ export class DigitalOceanProvider implements Provider {
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const sizeConfig = this.sizes[config.size];
-    if (!sizeConfig) {
-      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`, {
-        category: 'invalid_config',
-      });
-    }
-    const region = config.location || this.region;
-    const dropletSize = config.instanceType ?? sizeConfig.type;
+    const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
+      providerName: this.name,
+      defaultLocation: this.region,
+      legacySizes: this.sizes,
+      defaultImage: this.image,
+    });
+    assertIncludedBootDiskCapacity(this.name, nativeConfig);
 
     const response = await this.doFetch(
       '/droplets',
       {
         method: 'POST',
         body: JSON.stringify({
-          name: sanitizeDropletName(config.name),
-          region,
-          size: dropletSize,
-          image: resolveDigitalOceanImage(config.image || this.image),
+          name: sanitizeDropletName(nativeConfig.name),
+          region: nativeConfig.location,
+          size: nativeConfig.instanceType,
+          image: resolveDigitalOceanImage(nativeConfig.image || this.image),
           // DigitalOcean user_data is PLAIN TEXT (max 64 KiB) — no base64 needed.
-          user_data: config.userData,
-          tags: labelsToDigitalOceanTags(config.labels || {}),
+          user_data: nativeConfig.userData,
+          tags: labelsToDigitalOceanTags(nativeConfig.labels),
           backups: false,
           ipv6: false,
           monitoring: false,
@@ -409,12 +413,25 @@ export class DigitalOceanProvider implements Provider {
   }
 
   private mapDroplet(droplet: DigitalOceanDropletPayload): VMInstance {
+    const resources = droplet.size
+      ? {
+          vcpuCount: droplet.size.vcpus,
+          memoryMb: droplet.size.memory,
+          diskGb: droplet.size.disk,
+        }
+      : null;
+
     return {
       id: String(droplet.id),
       name: droplet.name || String(droplet.id),
       ip: extractPublicIp(droplet.networks_v4),
       status: mapDigitalOceanStatus(droplet.status),
       serverType: droplet.size_slug,
+      observedHardware: observedHardware({
+        serverType: droplet.size_slug,
+        resources,
+        unknownResourcesReason: 'DigitalOcean response omitted droplet.size resources',
+      }),
       createdAt: droplet.created_at,
       labels: digitalOceanTagsToLabels(droplet.tags),
     };

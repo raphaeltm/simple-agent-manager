@@ -3,6 +3,11 @@ import { DEFAULT_SCALEWAY_IMAGE_NAME, DEFAULT_SCALEWAY_ZONE } from '@simple-agen
 
 import { getProviderCatalogOfferings } from './instance-offerings';
 import {
+  assertIncludedBootDiskCapacity,
+  observedHardware,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
+import {
   providerFetch,
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
@@ -176,23 +181,29 @@ export class ScalewayProvider implements Provider {
    */
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const sizeConfig = this.sizes[config.size];
-    if (!sizeConfig) {
-      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
-    }
-    const location = config.location || this.zone;
-    const commercialType = config.instanceType ?? sizeConfig.type;
+    const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
+      providerName: this.name,
+      defaultLocation: this.zone,
+      legacySizes: this.sizes,
+      defaultImage: this.imageName,
+    });
+    assertIncludedBootDiskCapacity(this.name, nativeConfig);
 
     // Resolve image UUID by name for the target zone
-    const imageId = await this.resolveImageId(location, config.image, context);
+    const imageId = await this.resolveImageId(
+      nativeConfig.location,
+      nativeConfig.image,
+      nativeConfig.architecture,
+      context
+    );
 
     // Convert labels to tags: ["key=value", ...]
-    const tags = labelsToScalewayTags(config.labels || {});
+    const tags = labelsToScalewayTags(nativeConfig.labels);
 
     // Step 1: Create server (stopped)
     const createResponse = await providerFetch(
       this.name,
-      `${SCALEWAY_INSTANCE_API_URL}/${location}/servers`,
+      `${SCALEWAY_INSTANCE_API_URL}/${nativeConfig.location}/servers`,
       {
         method: 'POST',
         headers: {
@@ -200,8 +211,8 @@ export class ScalewayProvider implements Provider {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: config.name,
-          commercial_type: commercialType,
+          name: nativeConfig.name,
+          commercial_type: nativeConfig.instanceType,
           image: imageId,
           project: this.projectId,
           dynamic_ip_required: true,
@@ -225,14 +236,14 @@ export class ScalewayProvider implements Provider {
       // Step 2: Set cloud-init user data
       await providerFetch(
         this.name,
-        `${SCALEWAY_INSTANCE_API_URL}/${location}/servers/${serverId}/user_data/cloud-init`,
+        `${SCALEWAY_INSTANCE_API_URL}/${nativeConfig.location}/servers/${serverId}/user_data/cloud-init`,
         {
           method: 'PATCH',
           headers: {
             'X-Auth-Token': this.secretKey,
-            'Content-Type': 'text/plain',
-          },
-          body: config.userData,
+          'Content-Type': 'text/plain',
+        },
+          body: nativeConfig.userData,
         },
         undefined,
         undefined,
@@ -243,7 +254,7 @@ export class ScalewayProvider implements Provider {
       rethrowIfProviderRequestAborted(err, context);
       throw await this.withCreatedServerCleanupContext(
         err,
-        location,
+        nativeConfig.location,
         serverId,
         'cloud-init-upload',
         context
@@ -252,10 +263,16 @@ export class ScalewayProvider implements Provider {
 
     try {
       // Step 3: Power on
-      await this.performAction(location, serverId, 'poweron', context);
+      await this.performAction(nativeConfig.location, serverId, 'poweron', context);
     } catch (err) {
       rethrowIfProviderRequestAborted(err, context);
-      throw await this.withCreatedServerCleanupContext(err, location, serverId, 'poweron', context);
+      throw await this.withCreatedServerCleanupContext(
+        err,
+        nativeConfig.location,
+        serverId,
+        'poweron',
+        context
+      );
     }
 
     // Return immediately — IP will be empty at this point.
@@ -540,6 +557,7 @@ export class ScalewayProvider implements Provider {
   private async resolveImageId(
     zone: string,
     image?: string,
+    architecture?: 'x86_64' | 'arm64',
     context?: ProviderRequestContext
   ): Promise<string> {
     throwIfProviderRequestAborted(context);
@@ -549,9 +567,10 @@ export class ScalewayProvider implements Provider {
     }
 
     const imageName = image || this.imageName;
+    const imageArchitecture = architecture === 'arm64' ? 'arm64' : 'x86_64';
     const response = await providerFetch(
       this.name,
-      `${SCALEWAY_INSTANCE_API_URL}/${zone}/images?name=${encodeURIComponent(imageName)}&arch=x86_64`,
+      `${SCALEWAY_INSTANCE_API_URL}/${zone}/images?name=${encodeURIComponent(imageName)}&arch=${imageArchitecture}`,
       {
         headers: { 'X-Auth-Token': this.secretKey },
       },
@@ -659,6 +678,10 @@ export class ScalewayProvider implements Provider {
       ip,
       status: this.mapStatus(server.state),
       serverType: server.commercial_type,
+      observedHardware: observedHardware({
+        serverType: server.commercial_type,
+        unknownResourcesReason: 'Scaleway server response does not include resource fields',
+      }),
       createdAt: server.creation_date,
       labels: scalewayTagsToLabels(server.tags || []),
     };

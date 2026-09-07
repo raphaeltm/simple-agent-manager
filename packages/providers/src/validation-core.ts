@@ -96,6 +96,74 @@ export function requireNumber(
   return value;
 }
 
+export function optionalNumber(
+  root: JsonObject,
+  key: string,
+  providerName: string,
+  context: string,
+): number | undefined {
+  const value = root[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw validationError(providerName, `${context}.${key}`, 'expected finite number');
+  }
+  return value;
+}
+
+export function requirePositiveInteger(
+  root: JsonObject,
+  key: string,
+  providerName: string,
+  context: string,
+): number {
+  const value = requireNumber(root, key, providerName, context);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw validationError(providerName, `${context}.${key}`, 'expected positive integer');
+  }
+  return value;
+}
+
+export function optionalPositiveInteger(
+  root: JsonObject,
+  key: string,
+  providerName: string,
+  context: string,
+): number | undefined {
+  const value = optionalNumber(root, key, providerName, context);
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value <= 0) {
+    throw validationError(providerName, `${context}.${key}`, 'expected positive integer');
+  }
+  return value;
+}
+
+export function requireNonNegativeInteger(
+  root: JsonObject,
+  key: string,
+  providerName: string,
+  context: string,
+): number {
+  const value = requireNumber(root, key, providerName, context);
+  if (!Number.isInteger(value) || value < 0) {
+    throw validationError(providerName, `${context}.${key}`, 'expected non-negative integer');
+  }
+  return value;
+}
+
+export function optionalNonNegativeInteger(
+  root: JsonObject,
+  key: string,
+  providerName: string,
+  context: string,
+): number | undefined {
+  const value = optionalNumber(root, key, providerName, context);
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 0) {
+    throw validationError(providerName, `${context}.${key}`, 'expected non-negative integer');
+  }
+  return value;
+}
+
 export function optionalStringRecord(
   root: JsonObject,
   key: string,

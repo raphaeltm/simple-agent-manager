@@ -20,6 +20,7 @@ import {
   SIZE_MAP,
 } from './gcp-metadata';
 import { getProviderCatalogOfferings } from './instance-offerings';
+import { observedHardware, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
 import {
   providerDelay,
   providerFetch,
@@ -281,12 +282,16 @@ export class GcpProvider implements Provider {
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const zone = config.location || this.defaultLocation;
-    const sizeConfig = SIZE_MAP[config.size];
-    if (!sizeConfig) {
-      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
-    }
-    const machineType = config.instanceType ?? sizeConfig.type;
+    const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
+      providerName: this.name,
+      defaultLocation: this.defaultLocation,
+      legacySizes: this.sizes,
+      defaultImage: this.imageFamily,
+      defaultBootDiskSizeGb: this.diskSizeGb,
+      minBootDiskSizeGb: 10,
+      legacyBootDiskSizeAuthority: 'provider-default',
+    });
+    const zone = nativeConfig.location;
     const headers = await this.authHeaders(context);
 
     // Ensure firewall rules exist before creating VM
@@ -294,16 +299,16 @@ export class GcpProvider implements Provider {
     throwIfProviderRequestAborted(context);
 
     const networkTags = [SAM_NETWORK_TAG];
-    if (config.labels?.role === 'deployment') {
+    if (nativeConfig.labels.role === 'deployment') {
       networkTags.push(SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG);
     }
 
     const body = {
       name: config.name,
-      machineType: `zones/${zone}/machineTypes/${machineType}`,
+      machineType: `zones/${zone}/machineTypes/${nativeConfig.instanceType}`,
       labels: {
         'sam-managed': 'true',
-        ...(config.labels || {}),
+        ...nativeConfig.labels,
       },
       tags: {
         items: networkTags,
@@ -313,8 +318,8 @@ export class GcpProvider implements Provider {
           boot: true,
           autoDelete: true,
           initializeParams: {
-            sourceImage: `projects/${this.imageProject}/global/images/family/${this.imageFamily}`,
-            diskSizeGb: String(this.diskSizeGb),
+            sourceImage: resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
+            diskSizeGb: String(nativeConfig.bootDiskSizeGb ?? this.diskSizeGb),
           },
         },
       ],
@@ -334,7 +339,7 @@ export class GcpProvider implements Provider {
         items: [
           {
             key: 'user-data',
-            value: config.userData,
+            value: nativeConfig.userData,
           },
         ],
       },
@@ -767,12 +772,17 @@ export class GcpProvider implements Provider {
   }
 
   private toVMInstance(instance: GcpInstancePayload): VMInstance {
+    const machineType = instance.machineType.split('/').pop() || instance.machineType;
     return {
       id: instance.id || instance.name,
       name: instance.name,
       ip: extractIp(instance.networkInterfaces),
       status: mapGcpStatus(instance.status),
-      serverType: instance.machineType.split('/').pop() || instance.machineType,
+      serverType: machineType,
+      observedHardware: observedHardware({
+        serverType: machineType,
+        unknownResourcesReason: 'GCP instance response does not include machine resources',
+      }),
       createdAt: instance.creationTimestamp,
       labels: instance.labels || {},
     };
@@ -796,4 +806,34 @@ export class GcpProvider implements Provider {
     const match = machineType.match(/zones\/([^/]+)/);
     return match?.[1] || this.defaultLocation;
   }
+}
+
+function resolveGcpSourceImage(image: string, imageProject: string): string {
+  const trimmed = image.trim();
+  const projectScopedImageRef = /^projects\/[^/]+\/global\/images\/(?:family\/)?[^/]+$/;
+  const globalImageRef = /^global\/images\/(?:family\/)?[^/]+$/;
+  const shortFamilyRef = /^family\/[^/]+$/;
+  const shortImageRef = /^images\/[^/]+$/;
+  const familyName = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
+
+  if (
+    /^https:\/\/(?:(?:www|compute)\.)googleapis\.com\/compute\/v1\/projects\/[^/]+\/global\/images\/(?:family\/)?[^/]+$/.test(
+      trimmed
+    )
+  ) {
+    return trimmed;
+  }
+  if (projectScopedImageRef.test(trimmed) || globalImageRef.test(trimmed)) return trimmed;
+  if (shortFamilyRef.test(trimmed)) return `projects/${imageProject}/global/images/${trimmed}`;
+  if (shortImageRef.test(trimmed)) {
+    return `projects/${imageProject}/global/${trimmed}`;
+  }
+  if (familyName.test(trimmed)) return `projects/${imageProject}/global/images/family/${trimmed}`;
+
+  throw new ProviderError(
+    'gcp',
+    400,
+    `GCP image must be an image family name or a Compute Engine image/family reference: ${trimmed}`,
+    { category: 'invalid_config' }
+  );
 }
