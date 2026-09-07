@@ -221,6 +221,41 @@ describe('Project event source outbox durability on migrated D1', () => {
     });
   });
 
+  it('does not return or mutate a same-project row when an explicit ID collides on migrated D1', async () => {
+    const { projectId } = await seedProjectGraph('same-project-id-collision');
+    const sharedIntentId = `${TEST_PREFIX}-same-project-shared-intent-id`;
+    await enqueueProjectEventSourceIntent(testEnv, eventInput(projectId, 'same-project-id-a'), {
+      id: sharedIntentId,
+      now: NOW,
+    });
+
+    await expect(
+      enqueueProjectEventSourceIntent(testEnv, eventInput(projectId, 'same-project-id-b'), {
+        id: sharedIntentId,
+        now: NOW,
+      })
+    ).rejects.toThrow('Project event source outbox intent was not persisted');
+
+    const row = await env.DATABASE.prepare(
+      `SELECT project_id, delivery_key, state, admission_outcome
+         FROM project_event_source_outbox
+        WHERE id = ?`
+    )
+      .bind(sharedIntentId)
+      .first<{
+        project_id: string;
+        delivery_key: string;
+        state: string;
+        admission_outcome: string | null;
+      }>();
+    expect(row).toEqual({
+      project_id: projectId,
+      delivery_key: 'task:same-project-id-a:status:completed',
+      state: 'pending',
+      admission_outcome: null,
+    });
+  });
+
   it('does not return or mutate a foreign project row when explicit IDs collide on migrated D1', async () => {
     const first = await seedProjectGraph('id-collision-a');
     const second = await seedProjectGraph('id-collision-b');

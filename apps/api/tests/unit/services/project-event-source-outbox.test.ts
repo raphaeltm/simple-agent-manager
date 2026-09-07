@@ -70,10 +70,14 @@ describe('project event source outbox', () => {
         ON project_event_source_outbox(state, processing_lease_expires_at, id);
       CREATE INDEX idx_project_event_source_outbox_active_expiry
         ON project_event_source_outbox(state, expires_at, id);
+      CREATE INDEX idx_project_event_source_outbox_active_attempts
+        ON project_event_source_outbox(state, attempt_count, id);
       CREATE INDEX idx_project_event_source_outbox_exhausted_ready
         ON project_event_source_outbox(state, (attempt_count >= max_attempts), processing_lease_expires_at, id);
       CREATE INDEX idx_project_event_source_outbox_terminal_retention
         ON project_event_source_outbox(state, terminalized_at, id);
+      CREATE INDEX idx_project_event_source_outbox_project_subject
+        ON project_event_source_outbox(project_id, subject_type, subject_id, state);
     `);
   }
 
@@ -603,6 +607,46 @@ describe('project event source outbox', () => {
       claim_token: null,
       terminalized_at: NOW.toISOString(),
     });
+  });
+
+  it('does not return or mutate a same-project row when an explicit ID collides with another delivery', async () => {
+    await enqueueProjectEventSourceIntent(env, sourceEvent(), {
+      id: 'shared-project-explicit-intent-id',
+      now: NOW,
+    });
+    const collidingInput = {
+      ...sourceEvent(),
+      subject: { type: 'task', id: 'task-2' },
+      deliveryKey: 'task:task-2:status:completed',
+      payloadFingerprint: 'sha256:stable-task-2',
+      metadata: { taskId: 'task-2', status: 'completed' },
+    };
+
+    await expect(
+      enqueueProjectEventSourceIntent(env, collidingInput, {
+        id: 'shared-project-explicit-intent-id',
+        now: NOW,
+      })
+    ).rejects.toThrow('Project event source outbox intent was not persisted');
+
+    expect(
+      sqlite
+        .prepare(
+          `SELECT project_id, subject_id, delivery_key, state, admission_outcome
+             FROM project_event_source_outbox
+            WHERE id = 'shared-project-explicit-intent-id'`
+        )
+        .get()
+    ).toEqual({
+      project_id: 'project-1',
+      subject_id: 'task-1',
+      delivery_key: 'task:task-1:status:completed',
+      state: 'pending',
+      admission_outcome: null,
+    });
+    expect(
+      sqlite.prepare(`SELECT COUNT(*) AS count FROM project_event_source_outbox`).get()
+    ).toEqual({ count: 1 });
   });
 
   it('does not return or mutate a foreign project row when explicit IDs collide', async () => {
