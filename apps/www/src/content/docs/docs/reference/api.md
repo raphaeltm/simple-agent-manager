@@ -55,6 +55,9 @@ Concurrent publications are included through either catch-up or live matching.
 Replaying a follow key retains the original watermark and deadline; a retention
 gap or expired checkpoint requires a new explicit history/follow decision.
 Omit the history cursor when only future events are wanted.
+Following defaults to recording events. With `requestedDelivery: existing_session_prompt`,
+follow and catch-up responses include the ordinary subscription checkpoint/end-turn
+instructions and explain that a no-match expiry delivers no wake prompt.
 
 Publishing the same message with the same key in the same chat/channel replays its
 retained event. Reusing that key with different content reports a conflict.

@@ -284,6 +284,9 @@ All API errors follow this format:
 
 ## Agent event channels
 
+Follow defaults to `record_only`. Follow/catch-up return canonical `wakeInstructions`
+for resolved same-chat prompt delivery; record-only responses return null.
+
 `GET /api/projects/:projectId/event-channels` lists bounded lifetime catalog summaries (`cursor`, `limit`; response `channels`, `nextCursor`). `GET /api/projects/:projectId/event-channels/:channel/history` returns a bounded snapshot (`events`, `cursor`, `watermark`, `hasMore`, `retentionGap`). Both use active project `task:read` membership. Catalog counts are lifetime counts within a generation, never retained-event counts.
 
 MCP names: `publish_channel_event(channel,message,idempotencyKey)`, `list_event_channels(cursor?,limit?)`, `get_channel_history(channel,cursor?,limit?)`, `follow_event_channel(channel,idempotencyKey,cursor?,requestedDelivery?,reason?,expiresAt?)`, `catch_up_event_channel(subscriptionId,limit?)`. Source/type/actor/project/target identity are verified/server-derived; publishing/follow/catch-up require task:write and active agent authority. Channel source is sam.agent_channel, type agent.channel.published, subject type agent_channel with stable channel name. Read text is untrusted evidence. Canonical list/read/ack performs delivery after catch-up.

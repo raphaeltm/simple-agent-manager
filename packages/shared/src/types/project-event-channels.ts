@@ -1,8 +1,8 @@
 import type {
   CreateProjectEventSubscriptionInput,
   ProjectEventAdmissionResult,
-  ProjectEventRecord,
   ProjectEventAgentVisibility,
+  ProjectEventRecord,
   ProjectEventSubscriptionMutationResult,
 } from './project-events';
 

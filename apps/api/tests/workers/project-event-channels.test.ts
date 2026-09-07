@@ -11,6 +11,7 @@ import {
   cleanupEmptyChannels,
 } from '../../src/durable-objects/project-data/project-event-channels-storage';
 import type { Env } from '../../src/env';
+import { storeMcpToken } from '../../src/services/mcp-token';
 import * as service from '../../src/services/project-data';
 import { channelBrowserRequest } from './helpers/event-channel-browser';
 import { body, fixture } from './helpers/event-channels';
@@ -157,9 +158,37 @@ describe('canonical event channels', () => {
     }>(await f.tool('follow_event_channel', args));
     expect(retry).toMatchObject({
       idempotent: true,
+      wakeInstructions: null,
       watermark: first.watermark,
       subscription: { id: first.subscription.id, expiresAt: first.subscription.expiresAt },
     });
+  });
+
+  it('returns the canonical checkpoint guidance when following for same-chat prompt delivery', async () => {
+    const f = await fixture();
+    await f.publish('one');
+    const result = body<{ subscription: { id: string } }>(
+      await f.tool('follow_event_channel', {
+        channel: 'builds',
+        idempotencyKey: 'prompt-follow',
+        requestedDelivery: 'existing_session_prompt',
+      })
+    );
+    const expected = {
+      subscription: { deliveryPreference: { resolved: 'queued_for_prompt_delivery' } },
+      wakeInstructions: {
+        mode: 'durable_same_chat_event_wake',
+        wakeContentPolicy: 'ids_only',
+        checkpoint: expect.stringContaining('Persist'),
+        endTurn: expect.stringContaining('end your turn'),
+        noMatch: expect.stringContaining('no wake prompt'),
+        eventReadTrust: expect.stringContaining('untrusted'),
+      },
+    };
+    expect(result).toMatchObject(expected);
+    expect(
+      body(await f.tool('catch_up_event_channel', { subscriptionId: result.subscription.id }))
+    ).toMatchObject(expected);
   });
 
   it('records the current recovery task as publisher, separately from its source authority', async () => {

@@ -9,6 +9,7 @@ import type { Env } from '../env';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectData from './project-data';
+import { getProjectEventWakeInstructions } from './project-event-subscriptions';
 import {
   normalizeRequestedDelivery,
   resolveAgentExpiresAt,
@@ -25,7 +26,8 @@ export async function channelCallerContext(
   if (context.callerKind !== 'agent' || !context.target.sessionId) {
     throw errors.forbidden('An active task-backed session is required');
   }
-  const session = await projectData.getSession(env, context.projectId, context.target.sessionId);
+  const sessionId = context.target.sessionId;
+  const session = await projectData.getSession(env, context.projectId, sessionId);
   if (!session || session.status !== 'active' || session.taskId !== context.target.taskId) {
     throw errors.forbidden('The calling chat is not active for this task');
   }
@@ -35,7 +37,7 @@ export async function channelCallerContext(
     caller.userId,
     capability
   );
-  return { ...context, target: { ...context.target, sessionId: session.id } };
+  return { ...context, target: { ...context.target, sessionId } };
 }
 
 export async function publishChannelForCaller(
@@ -71,7 +73,7 @@ export async function followChannelForCaller(
   }
 ) {
   const context = await channelCallerContext(env, caller, 'task:write');
-  return projectData.followProjectEventChannel(env, context.projectId, {
+  const result = await projectData.followProjectEventChannel(env, context.projectId, {
     channel: request.channel,
     cursor: request.cursor,
     idempotencyKey: request.idempotencyKey,
@@ -92,6 +94,10 @@ export async function followChannelForCaller(
     defaultExpiresAt: resolveAgentExpiresAt(env, caller, request.expiresAt),
     reason: request.reason,
   });
+  return {
+    ...result,
+    wakeInstructions: getProjectEventWakeInstructions(result.subscription.deliveryPreference),
+  };
 }
 
 export async function catchUpChannelForCaller(
@@ -100,7 +106,7 @@ export async function catchUpChannelForCaller(
   request: { subscriptionId: string; limit?: number }
 ) {
   const context = await channelCallerContext(env, caller, 'task:write');
-  return projectData.catchUpProjectEventChannel(env, context.projectId, {
+  const result = await projectData.catchUpProjectEventChannel(env, context.projectId, {
     subscriptionId: request.subscriptionId,
     limit: request.limit,
     visibility: {
@@ -116,4 +122,8 @@ export async function catchUpChannelForCaller(
       agentSessionId: caller.agentSessionId ?? null,
     },
   });
+  return {
+    ...result,
+    wakeInstructions: getProjectEventWakeInstructions(result.subscription.deliveryPreference),
+  };
 }
