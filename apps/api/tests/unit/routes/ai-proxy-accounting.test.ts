@@ -275,6 +275,42 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
   });
 
+  it('preserves Anthropic 429 limit headers through the translated chat-completions path', async () => {
+    allowProxyRequest();
+    allowAnthropicPlatformAuth();
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      type: 'error',
+      error: { type: 'rate_limit_error', message: 'overloaded' },
+    }), {
+      status: 429,
+      headers: {
+        'Content-Type': 'application/json',
+        'Retry-After': '3',
+        'anthropic-ratelimit-requests-limit': '100',
+        'anthropic-ratelimit-requests-remaining': '0',
+        'anthropic-ratelimit-requests-reset': '2026-09-07T10:00:00Z',
+      },
+    }));
+
+    const res = await postChat(
+      {
+        model: 'claude-sonnet-5',
+        messages: [{ role: 'user', content: 'hi' }],
+      },
+      { AI_PROXY_ALLOWED_MODELS: 'claude-sonnet-5' }
+    );
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('3');
+    expect(res.headers.get('anthropic-ratelimit-requests-limit')).toBe('100');
+    expect(res.headers.get('anthropic-ratelimit-requests-remaining')).toBe('0');
+    expect(res.headers.get('anthropic-ratelimit-requests-reset')).toBe(
+      '2026-09-07T10:00:00Z'
+    );
+    await res.text();
+    expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
+  });
+
   it('forwards OpenAI Responses API requests through AI Gateway', async () => {
     allowProxyRequest();
     mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 8, outputTokens: 3 });
@@ -362,6 +398,37 @@ describe('native Anthropic AI proxy token accounting', () => {
 
     expect(res.status).toBe(200);
     await res.text();
+    expectUsageIncrement(18, 5);
+  });
+
+  it('returns and accounts paid message responses when limit telemetry fails', async () => {
+    allowProxyRequest();
+    allowAnthropicPlatformAuth();
+    mockUpdateAIProxyAgentCredentialAttribution.mockRejectedValueOnce(
+      new Error('injected telemetry failure')
+    );
+    mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 18, outputTokens: 5 });
+    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+      id: 'msg_1',
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hello' }],
+      model: 'claude-sonnet-5',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 18, output_tokens: 5 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    const res = await postAnthropic('/messages', {
+      model: 'claude-sonnet-5',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('msg_1');
+    expect(mockUpdateAIProxyAgentCredentialAttribution).toHaveBeenCalledOnce();
     expectUsageIncrement(18, 5);
   });
 
