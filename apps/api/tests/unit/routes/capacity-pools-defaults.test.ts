@@ -51,6 +51,7 @@ vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
 
 const { capacityPoolsRoutes } = await import('../../../src/routes/capacity-pools');
 const { adminCapacityPoolsRoutes } = await import('../../../src/routes/admin-capacity-pools');
+import { assertDefaultCapacityPoolUpdateResult } from '../../../src/routes/capacity-pool-update-request';
 const providerCatalogs = await import('../../../src/services/provider-catalogs');
 
 function createApp() {
@@ -640,5 +641,32 @@ describe('default capacity pool routes', () => {
     );
 
     expect(forbidden.status).toBe(403);
+  });
+});
+
+describe('default capacity pool update result contract', () => {
+  const emptyResult = {
+    poolFound: true,
+    summary: null,
+    missingCandidateIds: [],
+    unavailableCandidateIds: [],
+    missingCatalogAdditions: [],
+    unavailableCatalogAdditions: [],
+    conflict: false,
+  };
+
+  it('surfaces a lost concurrent edit as 409 instead of reporting success', () => {
+    try {
+      assertDefaultCapacityPoolUpdateResult({ ...emptyResult, conflict: true }, 'missing');
+      throw new Error('expected assertDefaultCapacityPoolUpdateResult to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).statusCode).toBe(409);
+      expect((error as AppError).message).toContain('changed while this edit was in flight');
+    }
+  });
+
+  it('accepts a published edit', () => {
+    expect(() => assertDefaultCapacityPoolUpdateResult(emptyResult, 'missing')).not.toThrow();
   });
 });

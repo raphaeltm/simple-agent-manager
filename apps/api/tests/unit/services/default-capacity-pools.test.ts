@@ -5367,3 +5367,124 @@ describe('workload-role eligibility contract', () => {
     expect(capacityCandidateRoleFromId('cand-1#role=bogus')).toBeNull();
   });
 });
+
+/**
+ * The full production path for finding 2: a real Hetzner credential, a real provider client,
+ * a real HTTP transport, and a genuinely EMPTY `server_types` response — through
+ * reconciliation to the resulting candidate state. This is the test that reaches the feature
+ * the way production does; the boundary unit tests in provider-catalog-completeness.test.ts
+ * pin the classification itself.
+ */
+describe('empty live Hetzner inventory through the credential-backed catalog path', () => {
+  function hetznerResponse(serverTypes: unknown[]) {
+    return new Response(
+      JSON.stringify({ server_types: serverTypes, meta: { pagination: { next_page: null } } }),
+      { status: 200 }
+    );
+  }
+
+  it('marks prior offerings unavailable when the live catalog returns zero server types', async () => {
+    const db = createDb();
+    const encrypted = await encrypt('live-hetzner-token', TEST_ENCRYPTION_KEY);
+    seedUserCredential({
+      id: 'user-hetzner',
+      encryptedToken: encrypted.ciphertext,
+      iv: encrypted.iv,
+    });
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      hetznerResponse([
+        hetznerServerType({
+          id: 1,
+          name: 'cx23',
+          description: 'CX23',
+          cores: 2,
+          memory: 4,
+          disk: 40,
+          hourlyGross: '0.0048',
+          monthlyGross: '3.99',
+        }),
+      ])
+    ) as typeof fetch;
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env: catalogEnv(),
+    });
+    expect(getCount('capacity_pool_candidates', "catalog_availability = 'available'")).toBe(2);
+    const selectedStatus = getCandidateStatusRows(['cx23'])[0]?.status;
+    // The catalog cache is credential-scoped; the credential is unchanged here, so the second
+    // refresh must be able to see the new (empty) inventory.
+    clearCapacityCatalogCache();
+
+    globalThis.fetch = vi.fn().mockResolvedValue(hetznerResponse([])) as typeof fetch;
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      env: catalogEnv(),
+    });
+
+    // Pre-fix an empty successful API response was classified static/incomplete, so this
+    // stayed 'available' forever.
+    expect(getCount('capacity_pool_candidates', "catalog_availability = 'available'")).toBe(0);
+    expect(
+      getCount('capacity_pool_candidates', "catalog_availability = 'last-known-unavailable'")
+    ).toBe(2);
+    // Membership is user intent and is preserved through an authoritative empty inventory.
+    expect(getCandidateStatusRows(['cx23'])[0]?.status).toBe(selectedStatus);
+  });
+
+  it('issues one live catalog request per credential across pool scopes', async () => {
+    const db = createDb();
+    const encrypted = await encrypt('live-hetzner-token', TEST_ENCRYPTION_KEY);
+    seedPlatformCredential({
+      id: 'platform-hetzner',
+      encryptedToken: encrypted.ciphertext,
+      iv: encrypted.iv,
+    });
+    seedUserCredential({
+      id: 'user-hetzner',
+      encryptedToken: encrypted.ciphertext,
+      iv: encrypted.iv,
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      hetznerResponse([
+        hetznerServerType({
+          id: 1,
+          name: 'cx23',
+          description: 'CX23',
+          cores: 2,
+          memory: 4,
+          disk: 40,
+          hourlyGross: '0.0048',
+          monthlyGross: '3.99',
+        }),
+      ])
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: true,
+      env: catalogEnv(),
+    });
+    const firstPassCalls = fetchMock.mock.calls.length;
+
+    // A second pass inside the cache TTL must not re-ask the provider for the same credential.
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: true,
+      env: catalogEnv(),
+    });
+
+    expect(fetchMock.mock.calls.length).toBe(firstPassCalls);
+    // Discriminating control: a cleared cache does re-ask, so "no extra calls" is not just a
+    // reconciler that stopped refreshing.
+    clearCapacityCatalogCache();
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: true,
+      env: catalogEnv(),
+    });
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(firstPassCalls);
+  });
+});
