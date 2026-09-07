@@ -38,7 +38,7 @@ export function ProjectEvents() {
     return creator?.user?.name || (id === scope ? 'You' : id);
   };
   return (
-    <div className="min-w-0 space-y-5">
+    <div className="w-full min-w-0 space-y-5">
       <header className="space-y-2">
         <h1 className="sam-type-page-title m-0">Events</h1>
         <p className="m-0 text-sm text-fg-muted">
@@ -48,11 +48,11 @@ export function ProjectEvents() {
       {sessionId && (
         <div className="glass-surface rounded-lg border border-border-default p-3 space-y-2">
           <p className="m-0 text-sm break-words">
-            Subscriptions and schedules are scoped to{' '}
+            Subscriptions, schedules, and standing watches are scoped to{' '}
             <Link className={linkClass} to={`/projects/${projectId}/chat/${sessionId}`}>
               session {sessionId.slice(0, 8)}
             </Link>
-            . Watches and channels show the whole project.
+            . Channels show the whole project.
           </p>
           <Button
             variant="secondary"

@@ -34,16 +34,18 @@ import {
 
 function WatchForm({
   projectId,
+  sessionId,
   existing,
   onClose,
   onSaved,
 }: {
   projectId: string;
+  sessionId?: string;
   existing?: ProjectStandingWatch;
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [action, setAction] = useState(existing?.action ?? initialAction());
+  const [action, setAction] = useState(existing?.action ?? initialAction(sessionId));
   const [filter, setFilter] = useState<ProjectEventFilterV1>(existing?.filter ?? { version: 1 });
   const [filterText, setFilterText] = useState(() =>
     Object.fromEntries(
@@ -266,7 +268,7 @@ function WatchCard({
   return (
     <article className={cardClass}>
       <div className="flex flex-wrap justify-between gap-2">
-        <h3 className="m-0 text-base font-semibold break-words">
+        <h3 className="m-0 min-w-0 text-base font-semibold break-words">
           {watch.reason || `Watch ${watch.id.slice(0, 8)}`}
         </h3>
         <StateBadge state={watch.state} />
@@ -412,6 +414,7 @@ export function StandingWatchesPanel({
         <WatchForm
           key={typeof form === 'string' ? 'new' : `${form.id}:${form.version}`}
           projectId={projectId}
+          sessionId={sessionId}
           existing={typeof form === 'string' ? undefined : form}
           onClose={() => setForm(null)}
           onSaved={() => {
@@ -448,7 +451,7 @@ export function StandingWatchesPanel({
           </Button>
         )}
         {query.data?.nextCursor && (
-          <Button variant="secondary" onClick={() => setCursor(query.data!.nextCursor)}>
+          <Button variant="secondary" onClick={() => setCursor(query.data?.nextCursor ?? null)}>
             Next page
           </Button>
         )}

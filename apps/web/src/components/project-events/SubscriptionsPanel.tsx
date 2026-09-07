@@ -41,7 +41,7 @@ function SubscriptionCard({
   return (
     <article className={cardClass}>
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <h3 className="m-0 text-base font-semibold break-words">
+        <h3 className="m-0 min-w-0 text-base font-semibold break-words">
           {subscription.reason || `Subscription ${subscription.id.slice(0, 8)}`}
         </h3>
         <StateBadge state={subscription.state} />

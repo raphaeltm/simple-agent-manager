@@ -232,6 +232,7 @@ async function invalidProjectEventWakeSourceTaskResult(
     };
   }
   const valid = await isSessionRecoverySourceTaskGuardValid(env.DATABASE, {
+    requireSourceProjectMember: true,
     taskId: claim.message.sourceTaskId,
     projectId,
     chatSessionId: claim.message.targetSessionId,

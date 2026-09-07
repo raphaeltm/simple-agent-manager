@@ -2151,6 +2151,14 @@ export const MIGRATIONS: Migration[] = [
         WHERE state = 'recorded'`);
     },
   },
+  {
+    name: '053-mailbox-active-capacity-index',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_session_inbox_active_capacity
+        ON session_inbox(id)
+        WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`);
+    },
+  },
 ];
 
 /**

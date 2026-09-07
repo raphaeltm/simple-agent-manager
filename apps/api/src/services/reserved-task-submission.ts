@@ -4,21 +4,16 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import {
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
-  capacityPlacementSnapshotSqlValues,
-} from './capacity-placement-snapshot';
 import type {
   AcceptedSnapshot,
   CheckpointRow,
-  PreparedSubmission,
   ReservedTaskSubmissionDependencies,
   ReservedTaskSubmissionIdentities,
   ReservedTaskSubmissionInput,
   ReservedTaskSubmissionResult,
   ResolvedReservedTaskSubmissionDependencies,
 } from './reserved-task-submission-contracts';
+import { commitD1Submission } from './reserved-task-submission-storage';
 export type {
   ReservedTaskSubmissionConflictReason,
   ReservedTaskSubmissionDependencies,
@@ -43,6 +38,7 @@ import {
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 import {
   assertTaskRunnerStartGuard,
+  TaskRunnerCreatorAuthorityRevokedError,
   TaskRunnerStartGuardRevokedError,
 } from './task-runner-start-guard';
 import { generateTaskTitle } from './task-title';
@@ -198,142 +194,6 @@ async function validateTriggerReservation(
   return null;
 }
 
-async function commitD1Submission(
-  env: Env,
-  input: ReservedTaskSubmissionInput,
-  fingerprint: string,
-  prepared: PreparedSubmission,
-  now: string
-): Promise<void> {
-  const t = prepared.snapshot.task;
-  const insertTaskColumns = `(
-       id, project_id, user_id, chat_session_id, title, description, status, execution_step,
-       priority, agent_profile_hint, skill_id, skill_hint, task_mode, output_branch,
-       triggered_by, trigger_id, trigger_execution_id, requested_vm_size, requested_vm_size_source,
-       resource_requirements_json, resource_requirements_source, resolved_reservation_json,
-       credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
-       ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
-       created_by, created_at, updated_at
-     )`;
-  const insertTaskValues = `
-       ?, ?, ?, ?, ?, ?, 'queued', 'node_selection',
-       0, ?, ?, ?, ?, ?,
-       ?, ?, ?, ?, ?,
-       ?, ?, ?,
-       ?, ?, ?,
-       ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
-       ?, ?, ?`;
-  const insertTaskBindings = [
-    t.taskId,
-    t.projectId,
-    t.userId,
-    t.chatSessionId,
-    t.title,
-    t.description,
-    t.agentProfileHint,
-    t.skillId,
-    t.skillHint,
-    t.taskMode,
-    t.outputBranch,
-    t.triggeredBy,
-    t.triggerId,
-    t.triggerExecutionId,
-    t.requestedVmSize,
-    t.requestedVmSizeSource,
-    t.resourceRequirementsJson,
-    t.resourceRequirementsSource,
-    t.resolvedReservationJson,
-    t.credentialAttributionUserId,
-    t.credentialAttributionProjectId,
-    t.credentialAttributionSource,
-    ...capacityPlacementSnapshotSqlValues(t.capacityPlacementSnapshot),
-    t.userId,
-    now,
-    now,
-  ];
-  const insertTask =
-    input.source.kind === 'trigger'
-      ? env.DATABASE.prepare(
-          `INSERT INTO tasks ${insertTaskColumns}
-           SELECT ${insertTaskValues}
-            WHERE EXISTS (
-              SELECT 1 FROM trigger_executions
-               WHERE id = ?
-                 AND trigger_id = ?
-                 AND project_id = ?
-                 AND (task_id IS NULL OR task_id = ?)
-            )`
-        ).bind(
-          ...insertTaskBindings,
-          input.source.sourceExecutionId,
-          input.source.sourceId,
-          input.projectId,
-          input.identities.taskId
-        )
-      : env.DATABASE.prepare(
-          `INSERT INTO tasks ${insertTaskColumns}
-           VALUES (${insertTaskValues})`
-        ).bind(...insertTaskBindings);
-  const insertStatus = env.DATABASE.prepare(
-    `INSERT INTO task_status_events
-       (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-     VALUES (?, ?, NULL, 'queued', ?, ?, ?, ?)`
-  ).bind(
-    input.identities.initialStatusEventId,
-    input.identities.taskId,
-    input.source.initialStatusActorType,
-    input.source.initialStatusActorId,
-    input.source.initialStatusReason,
-    now
-  );
-  const insertCheckpoint = env.DATABASE.prepare(
-    `INSERT INTO task_submission_checkpoints
-       (task_id, project_id, user_id, chat_session_id, initial_message_id,
-        initial_status_event_id, source_kind, source_id, source_execution_id, triggered_by,
-        intent_fingerprint, accepted_snapshot_json, branch_name, task_title,
-        checkpoint_state, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'd1_committed', ?, ?)`
-  ).bind(
-    input.identities.taskId,
-    input.projectId,
-    input.userId,
-    input.identities.chatSessionId,
-    input.identities.initialMessageId,
-    input.identities.initialStatusEventId,
-    input.source.kind,
-    input.source.sourceId,
-    input.source.sourceExecutionId,
-    input.source.triggeredBy,
-    fingerprint,
-    prepared.acceptedSnapshotJson,
-    prepared.snapshot.task.outputBranch,
-    prepared.snapshot.task.title,
-    now,
-    now
-  );
-
-  if (input.source.kind === 'trigger') {
-    const linkSource = env.DATABASE.prepare(
-      `UPDATE trigger_executions
-          SET task_id = ?
-        WHERE id = ?
-          AND trigger_id = ?
-          AND project_id = ?
-          AND (task_id IS NULL OR task_id = ?)`
-    ).bind(
-      input.identities.taskId,
-      input.source.sourceExecutionId,
-      input.source.sourceId,
-      input.projectId,
-      input.identities.taskId
-    );
-    await env.DATABASE.batch([insertTask, insertStatus, insertCheckpoint, linkSource]);
-    return;
-  }
-
-  await env.DATABASE.batch([insertTask, insertStatus, insertCheckpoint]);
-}
-
 async function markProjectDataCommitted(env: Env, taskId: string, now: string): Promise<void> {
   await env.DATABASE.prepare(
     `UPDATE task_submission_checkpoints
@@ -432,6 +292,23 @@ async function ensureProjectDataBoundary(
   }
 }
 
+function pendingUnconfirmedRunner(
+  input: ReservedTaskSubmissionInput,
+  snapshot: AcceptedSnapshot,
+  reason: string,
+  reused: boolean
+): ReservedTaskSubmissionResult {
+  return {
+    outcome: 'pending',
+    taskId: input.identities.taskId,
+    sessionId: input.identities.chatSessionId,
+    branchName: snapshot.task.outputBranch,
+    pendingAt: 'task_runner_start',
+    reason,
+    reused,
+  };
+}
+
 async function classifyUnconfirmedStart(
   env: Env,
   input: ReservedTaskSubmissionInput,
@@ -451,6 +328,11 @@ async function classifyUnconfirmedStart(
     if (error instanceof TaskRunnerStartGuardRevokedError) {
       const winner = await classifyPersistedTaskOutcome(env, input, snapshot, now, reused);
       if (winner) return winner;
+      // A lost response plus a negative probe does not prove a dispatched start
+      // never committed. Keep its slot until the durable runner/task reconciles.
+      if (error instanceof TaskRunnerCreatorAuthorityRevokedError) {
+        return pendingUnconfirmedRunner(input, snapshot, error.message, reused);
+      }
       return conflict(input, 'authority_unavailable', error.message, snapshot.task.outputBranch);
     }
     return {
@@ -702,6 +584,32 @@ async function reconcileCheckpoint(
     };
   }
 
+  const existingStartAttempted =
+    row.runner_start_attempted_at !== null || row.runner_started_at !== null;
+  if (existingStartAttempted) {
+    // Reconcile an existing receipt before enforcing authority for NEW work.
+    try {
+      if (await deps.ensureTaskRunnerStarted(env, input.identities.taskId)) {
+        await markRunnerStarted(env, input.identities.taskId, deps.now());
+        return {
+          outcome: 'admitted',
+          taskId: input.identities.taskId,
+          sessionId: input.identities.chatSessionId,
+          branchName: row.branch_name,
+          startState: 'confirmed_after_lost_ack',
+          reused: true,
+        };
+      }
+    } catch (error) {
+      return pendingUnconfirmedRunner(
+        input,
+        snapshot,
+        error instanceof Error ? error.message : String(error),
+        true
+      );
+    }
+  }
+
   const projectDataPending = await ensureProjectDataBoundary(env, input, snapshot, deps, true);
   if (projectDataPending) return projectDataPending;
   await deps.afterProjectDataCommit();
@@ -714,16 +622,19 @@ async function reconcileCheckpoint(
     deps,
     true
   );
-  if (revalidationConflict) return revalidationConflict;
+  if (revalidationConflict) {
+    if (
+      existingStartAttempted &&
+      input.source.kind !== 'trigger' &&
+      revalidationConflict.outcome === 'conflict' &&
+      revalidationConflict.reason === 'authority_unavailable'
+    ) {
+      return pendingUnconfirmedRunner(input, snapshot, revalidationConflict.message, true);
+    }
+    return revalidationConflict;
+  }
 
-  return runTaskRunnerBoundary(
-    env,
-    input,
-    snapshot,
-    deps,
-    true,
-    row.runner_start_attempted_at !== null || row.runner_started_at !== null
-  );
+  return runTaskRunnerBoundary(env, input, snapshot, deps, true, existingStartAttempted);
 }
 
 async function reconcileD1InsertConflict(

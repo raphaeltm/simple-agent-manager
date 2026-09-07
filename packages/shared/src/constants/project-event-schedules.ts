@@ -13,3 +13,11 @@ export const DEFAULT_PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS = 60_000;
 /** Finite execution count controls cost without promising a monetary budget. */
 export const DEFAULT_PROJECT_EVENT_WATCH_MAX_EXECUTIONS = 100;
 export const DEFAULT_PROJECT_EVENT_WATCH_MAX_CONCURRENT = 3;
+
+/** Retained metadata stays bounded even when cancelled/revoked records free active slots. */
+export const DEFAULT_PROJECT_EVENT_SCHEDULE_MAX_RETAINED_SCHEDULES = 4096;
+export const DEFAULT_PROJECT_EVENT_SCHEDULE_MAX_RETAINED_WATCHES = 256;
+/** Shared with reserved task admission so accepted schedules remain executable. */
+export const DEFAULT_RESERVED_TASK_PROMPT_MAX_LENGTH = 16_000;
+export const DEFAULT_RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH = 512;
+export const DEFAULT_RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH = 512;

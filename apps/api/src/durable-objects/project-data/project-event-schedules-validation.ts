@@ -87,6 +87,11 @@ export function normalizeScheduledAction(
     };
   }
   if (action.kind === 'start_session') {
+    if (action.prompt.length > limits.taskPromptMaxLength) {
+      throw new ProjectEventValidationError(
+        `action.prompt must be ${limits.taskPromptMaxLength} characters or fewer for start_session`
+      );
+    }
     return {
       kind: action.kind,
       prompt: action.prompt,

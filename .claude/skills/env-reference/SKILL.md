@@ -303,6 +303,8 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH` — Maximum recorded delivery attempts for one event delivery batch (default: `10`)
 - `PROJECT_EVENT_SCHEDULE_MAX_SCHEDULES` — Maximum active schedules per project (default: `128`)
 - `PROJECT_EVENT_SCHEDULE_MAX_WATCHES` — Maximum active or paused standing watches per project (default: `64`)
+- `PROJECT_EVENT_SCHEDULE_MAX_RETAINED_SCHEDULES` — Maximum retained schedule records of all states per project; cancelling does not free retained capacity (default: `4096`)
+- `PROJECT_EVENT_SCHEDULE_MAX_RETAINED_WATCHES` — Maximum retained watch records of all states per project; revoking does not free retained capacity (default: `256`)
 - `PROJECT_EVENT_SCHEDULE_PROMPT_MAX_BYTES` — Maximum scheduled action prompt size in UTF-8 bytes; task submission also enforces MAX_TASK_MESSAGE_LENGTH (default: `32768`)
 - `PROJECT_EVENT_SCHEDULE_MAX_HORIZON_MS` — Maximum future scheduling horizon (30 days) (default: `2592000000`)
 - `PROJECT_EVENT_SCHEDULE_LATE_GRACE_MS` — Maximum late admission grace after due time (default: `86400000`)

@@ -1323,3 +1323,21 @@ func TestSendUsageReportStopsRetryingWhenContextCancelled(t *testing.T) {
 		t.Fatal("sendUsageReportWithContext did not stop after cancellation")
 	}
 }
+
+func TestMissingReplacementCredentialClearsUsageAttribution(t *testing.T) {
+	for _, replacement := range []*agentCredential{nil, {}, {credentialSource: "user"}, {credentialReference: "new"}} {
+		host := NewSessionHost(SessionHostConfig{})
+		host.storeCredentialAttribution("claude-code", &agentCredential{credentialSource: "user", credentialReference: "old"})
+		old, ok := host.credentialAttributionSnapshot()
+		if !ok {
+			t.Fatal("original connection missing attribution")
+		}
+		host.storeCredentialAttribution("claude-code", replacement)
+		if _, ok := host.credentialAttributionSnapshot(); ok {
+			t.Fatal("replacement inherited previous credential")
+		}
+		if old.CredentialReference != "old" {
+			t.Fatal("originating connection attribution was mutated")
+		}
+	}
+}

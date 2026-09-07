@@ -457,6 +457,7 @@ export class TaskRunner extends DurableObject<Env> {
     raw.config.retrySourceTaskId ??= null;
     raw.config.startGuard ??= null;
     raw.config.projectEventWakeGuard ??= null;
+    raw.config.recoveryRequiredProjectMemberId ??= null;
     raw.stepResults.claimedWarmNodeId ??= null;
     raw.stepResults.capacityPlacementSnapshot ??= null;
     raw.lastD1Step ??= null;
@@ -481,6 +482,7 @@ export class TaskRunner extends DurableObject<Env> {
         projectId: input.projectId,
         chatSessionId,
         projectEventWake: eventGuard,
+        requiredProjectMemberId: input.config.recoveryRequiredProjectMemberId ?? null,
       },
       projectDataService
         ? (eventInput) =>

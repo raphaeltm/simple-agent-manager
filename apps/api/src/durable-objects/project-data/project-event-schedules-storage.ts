@@ -1,10 +1,10 @@
-import * as v from 'valibot';
-
 import type {
   ProjectSchedule,
   ProjectScheduleList,
   ProjectScheduleMutationResult,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
+
 import type { ProjectEventScheduleEnv } from './project-event-schedules-config';
 import { scheduleLimits } from './project-event-schedules-config';
 import {
@@ -209,6 +209,17 @@ export function createSchedule(
       );
     return result(mapSchedule(existing), false, true);
   }
+  // Existing project/recent covering index bounds the retained-history probe.
+  // Replays return above this guard; retention never discards idempotency identities.
+  const retained = sql
+    .exec(
+      `SELECT id FROM project_schedules WHERE project_id = ? LIMIT ?`,
+      projectId,
+      limits.maxRetainedSchedules
+    )
+    .toArray();
+  if (retained.length >= limits.maxRetainedSchedules)
+    throw new ProjectEventLimitExceededError('Retained schedule capacity reached');
   const active = sql
     .exec(
       `SELECT id FROM project_schedules INDEXED BY idx_project_schedules_active_capacity

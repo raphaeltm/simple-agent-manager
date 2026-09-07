@@ -1,6 +1,7 @@
 import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { roleHasCapability } from '../middleware/project-auth';
 import * as projectDataService from './project-data';
 
 const TASK_EXECUTION_STATUSES = new Set(['queued', 'delegated', 'in_progress']);
@@ -36,6 +37,51 @@ export class TaskRunnerStartGuardRevokedError extends Error {
     super(message);
     this.name = 'TaskRunnerStartGuardRevokedError';
   }
+}
+
+/** An attempted start can remain uncertain even after its creator loses authority. */
+export class TaskRunnerCreatorAuthorityRevokedError extends TaskRunnerStartGuardRevokedError {}
+
+interface CreatorAuthorityRow {
+  creator_status: string | null;
+  member_status: string | null;
+  member_role: string | null;
+}
+
+function assertCreatorAuthority(sourceKind: string, row: CreatorAuthorityRow | null): void {
+  // Ordinary triggers retain their existing repository-access authorization contract.
+  // Schedules and standing watches require the creator's current task:write membership.
+  if (sourceKind !== 'schedule' && sourceKind !== 'standing_watch') return;
+  if (
+    !row ||
+    row.creator_status !== 'active' ||
+    row.member_status !== 'active' ||
+    !row.member_role ||
+    !roleHasCapability(row.member_role, 'task:write')
+  ) {
+    throw new TaskRunnerCreatorAuthorityRevokedError(
+      'Scheduled task creator no longer has active project task:write authority'
+    );
+  }
+}
+
+export async function assertReservedTaskCreatorAuthority(
+  env: Env,
+  sourceKind: string,
+  projectId: string,
+  userId: string
+): Promise<void> {
+  if (sourceKind !== 'schedule' && sourceKind !== 'standing_watch') return;
+  const row = await env.DATABASE.prepare(
+    `SELECT u.status AS creator_status, m.status AS member_status, m.role AS member_role
+       FROM project_members m
+       JOIN users u ON u.id = m.user_id
+       JOIN projects p ON p.id = m.project_id
+      WHERE m.project_id = ? AND m.user_id = ? LIMIT 1`
+  )
+    .bind(projectId, userId)
+    .first<CreatorAuthorityRow>();
+  assertCreatorAuthority(sourceKind, row);
 }
 
 function revoked(message: string): never {
@@ -113,7 +159,8 @@ function assertGuardMatchesRunner(
   revoked(`Reserved task submission guard identity does not match TaskRunner ${expected.taskId}`);
 }
 
-interface ReservedSubmissionAuthorityRow {
+interface ReservedSubmissionAuthorityRow extends CreatorAuthorityRow {
+  source_kind: string;
   status: string;
   project_id: string;
   user_id: string;
@@ -177,9 +224,12 @@ async function readReservedSubmissionAuthority(
   return env.DATABASE.prepare(
     `SELECT t.status, t.project_id, t.user_id, t.chat_session_id,
             c.intent_fingerprint, c.chat_session_id AS checkpoint_chat_session_id,
-            r.reason AS revocation_reason
+            r.reason AS revocation_reason, c.source_kind,
+            u.status AS creator_status, m.status AS member_status, m.role AS member_role
        FROM tasks t
        INNER JOIN task_submission_checkpoints c ON c.task_id = t.id
+       LEFT JOIN users u ON u.id = t.user_id
+       LEFT JOIN project_members m ON m.project_id = t.project_id AND m.user_id = t.user_id
        LEFT JOIN reserved_task_session_revocations r
          ON r.project_id = t.project_id
         AND r.chat_session_id = t.chat_session_id
@@ -222,6 +272,7 @@ function assertReservedSubmissionAuthorityRow(
       `Reserved task submission authority revoked: session ${guard.chatSessionId} was revoked (${task.revocation_reason})`
     );
   }
+  assertCreatorAuthority(task.source_kind, task);
   if (options.requireQueuedTask && task.status !== 'queued') {
     revoked(
       `Reserved task submission authority revoked: task ${guard.taskId} is ${task.status}, not queued`

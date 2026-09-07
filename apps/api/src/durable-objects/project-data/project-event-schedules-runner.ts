@@ -2,21 +2,21 @@ import type { ProjectSchedule } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { ulid } from '../../lib/ulid';
-import { submitReservedTask } from '../../services/reserved-task-submission';
 import type { ReservedTaskSubmissionInput } from '../../services/reserved-task-submission';
+import { submitReservedTask } from '../../services/reserved-task-submission';
 import {
-  finalizeAcceptedPromptDelivery,
   type DurabilityFoundationHooks,
+  finalizeAcceptedPromptDelivery,
 } from './durability-foundation';
 import { requireScheduleAction, requireScheduleTarget } from './project-event-schedules-authority';
-import { scheduleLimits } from './project-event-schedules-config';
+import { boundedScheduleTaskLabel, scheduleLimits } from './project-event-schedules-config';
 import { getSchedule } from './project-event-schedules-storage';
 import { admitProjectEvent } from './project-events';
 import { ProjectEventValidationError } from './project-events-contracts';
 import { stableStringify } from './project-events-values';
 import {
-  acceptPromptDeliveryInTransaction,
   type AcceptPromptDeliveryInput,
+  acceptPromptDeliveryInTransaction,
 } from './prompt-delivery';
 import type { Env } from './types';
 
@@ -293,7 +293,7 @@ async function submitAdmittedSchedule(sql: SqlStorage, env: Env, projectId: stri
     prompt: schedule.action.prompt,
     agentProfileId: schedule.action.agentProfileId,
     skillId: schedule.action.skillId,
-    branchNameSeed: schedule.reason ?? 'Scheduled task',
+    branchNameSeed: boundedScheduleTaskLabel(env, schedule.reason ?? 'Scheduled task'),
     taskMode: 'conversation',
     vmSizeOverride: null,
     source: {
@@ -302,7 +302,7 @@ async function submitAdmittedSchedule(sql: SqlStorage, env: Env, projectId: stri
       sourceExecutionId: id,
       triggeredBy: 'cron',
       expiresAt: Math.min(schedule.expiresAt, schedule.dueAt + limits.maxDeferralMs),
-      displayName: schedule.reason ?? 'Scheduled action',
+      displayName: boundedScheduleTaskLabel(env, schedule.reason ?? 'Scheduled action'),
       repositoryAccessFlow: 'scheduled-action',
       initialStatusReason: schedule.sourceEventId
         ? `Standing watch ${schedule.watchId} matched event ${schedule.sourceEventId}`
@@ -377,19 +377,37 @@ async function reconcileAdmittedExecution(
     )
     .toArray()[0];
   if (row?.state !== 'admitted') return false;
+  if (typeof row.delivery_id !== 'string' && typeof row.submission_completed_at !== 'number')
+    return false;
+  // Persist a finite retry before crossing D1. Failure or runtime loss must not
+  // leave an overdue item at the head of every shared alarm pass.
+  sql.exec(
+    `UPDATE project_schedules SET next_attempt_at = ?
+    WHERE project_id = ? AND id = ? AND state = 'admitted'`,
+    Date.now() + scheduleLimits(env).retryBaseMs,
+    projectId,
+    id
+  );
   let terminal = false;
   let error: string | null = null;
   if (typeof row.delivery_id === 'string') {
     const delivery = sql
       .exec(`SELECT delivery_state, last_error FROM session_inbox WHERE id = ?`, row.delivery_id)
       .toArray()[0];
-    if (!delivery) {
-      terminal = true;
-      error = 'Scheduled delivery receipt is unavailable';
-    } else {
-      terminal = ['acked', 'expired', 'failed', 'ambiguous'].includes(
-        String(delivery.delivery_state)
+    if (!delivery || delivery.delivery_state === 'ambiguous') {
+      // Uncertain transport is not proof of completion. Retain the watch's
+      // concurrency slot and stop automatic retries to avoid duplicate work.
+      sql.exec(
+        `UPDATE project_schedules SET state = 'ambiguous', next_attempt_at = NULL,
+        last_error = ?, updated_at = ? WHERE project_id = ? AND id = ? AND state = 'admitted'`,
+        !delivery ? 'Scheduled delivery receipt is unavailable' : 'Scheduled delivery is ambiguous',
+        Date.now(),
+        projectId,
+        id
       );
+      return true;
+    } else {
+      terminal = ['acked', 'expired', 'failed'].includes(String(delivery.delivery_state));
       if (terminal && delivery.delivery_state !== 'acked')
         error =
           typeof delivery.last_error === 'string'
@@ -432,7 +450,13 @@ export async function runScheduleAlarm(
   if (!projectId) return;
   const limits = scheduleLimits(env);
   for (const id of dueIds(sql, projectId, Date.now(), limits.sweepBatchSize)) {
-    if (await reconcileAdmittedExecution(sql, env, projectId, id)) continue;
+    try {
+      if (await reconcileAdmittedExecution(sql, env, projectId, id)) continue;
+    } catch {
+      // This item's retry was persisted before external I/O. Continue the
+      // bounded sweep so a missing task receipt cannot starve later schedules.
+      continue;
+    }
     const claim = hooks.transactionSync(() => claimSchedule(sql, env, projectId, id, Date.now()));
     if (claim) {
       try {

@@ -20,6 +20,7 @@ import {
 
 import { createModuleLogger } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import { isMailboxAtCapacity } from './mailbox-capacity';
 import { parseMailboxMessageRow } from './row-schemas';
 
 const log = createModuleLogger('mailbox');
@@ -61,17 +62,8 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
   const expiresAt = now + ttlMs;
 
   // Enforce per-project message cap
-  if (opts.maxMessages) {
-    const [countRow] = sql
-      .exec(
-        `SELECT COUNT(*) as cnt FROM session_inbox
-         WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`
-      )
-      .toArray();
-    const count = (countRow as { cnt: number })?.cnt ?? 0;
-    if (count >= opts.maxMessages) {
-      throw new Error(`Mailbox message limit reached (${opts.maxMessages})`);
-    }
+  if (opts.maxMessages && isMailboxAtCapacity(sql, opts.maxMessages)) {
+    throw new Error(`Mailbox message limit reached (${opts.maxMessages})`);
   }
 
   sql.exec(

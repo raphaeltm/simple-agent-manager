@@ -35,10 +35,11 @@ function seedRecoveryFixture(sqlite: Database.Database): void {
     schema.capacitySources,
     schema.capacityPoolCandidates,
     schema.projectDataSessionLocations,
+    schema.projectMembers,
   ]);
   sqlite.exec(`
-    INSERT INTO users (id, name, email, github_id)
-    VALUES ('user-1', 'Test User', 'test@example.com', 'gh-1');
+    INSERT INTO users (id, name, email, github_id, status)
+    VALUES ('user-1', 'Test User', 'test@example.com', 'gh-1', 'active');
 
     INSERT INTO credentials
       (id, user_id, provider, credential_type, credential_kind, is_active,
@@ -101,7 +102,7 @@ function guard() {
 
 async function expectWakingRecovery(
   database: D1Database,
-  sourceTaskGuard = guard()
+  sourceTaskGuard: ReturnType<typeof guard> & { requiredProjectMemberId?: string } = guard()
 ): Promise<{ taskId: string }> {
   const wake = await ensureSessionRecovery(
     { DATABASE: database } as Env,
@@ -201,6 +202,24 @@ describe('session recovery handoff', () => {
         superseded_by_task_id: wake.taskId,
       });
       expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('carries scheduled creator authority through actual VM recovery submission', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      sqlite.exec(`INSERT INTO project_members (project_id, user_id, role, status)
+        VALUES ('project-1', 'user-1', 'maintainer', 'active')`);
+      await expectWakingRecovery(createSqliteD1(sqlite), {
+        ...guard(),
+        requiredProjectMemberId: 'user-1',
+      });
+      expect(startTaskRunnerDOMock.mock.calls[0]?.[1]).toMatchObject({
+        recoveryRequiredProjectMemberId: 'user-1',
+      });
     } finally {
       sqlite.close();
     }
@@ -330,7 +349,9 @@ describe('session recovery handoff', () => {
         superseded_by_task_id: thirdWake.taskId,
       });
       expect(
-        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = ?`).get(thirdWake.taskId)
+        sqlite
+          .prepare(`SELECT status, chat_session_id FROM tasks WHERE id = ?`)
+          .get(thirdWake.taskId)
       ).toMatchObject({ status: 'queued', chat_session_id: 'chat-1' });
 
       markWorkspaceDeleted(sqlite);

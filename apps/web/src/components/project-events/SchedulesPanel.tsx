@@ -381,7 +381,7 @@ export function SchedulesPanel({
           </Button>
         )}
         {query.data?.nextCursor && (
-          <Button variant="secondary" onClick={() => setCursor(query.data!.nextCursor)}>
+          <Button variant="secondary" onClick={() => setCursor(query.data?.nextCursor ?? null)}>
             Next page
           </Button>
         )}

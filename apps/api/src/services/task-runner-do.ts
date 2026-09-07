@@ -20,7 +20,6 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import type { StartTaskInput, TaskRunner } from '../durable-objects/task-runner';
-import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import type {
@@ -28,6 +27,7 @@ import type {
   TaskStartCapacityPoolSelection,
 } from './placement-resolver';
 import { assertReplacementDeletionConfirmed } from './replacement-deletion-fence';
+import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import type { TaskRunnerStartGuard } from './task-runner-start-guard';
 
 const TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES = 96 * 1024;
@@ -204,6 +204,8 @@ export async function startTaskRunnerDO(
     startGuard?: TaskRunnerStartGuard | null;
     /** Event wake batch/subscription identity that must still authorize guarded recovery. */
     projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
+    /** Member whose continued write permission authorizes a scheduled wake. */
+    recoveryRequiredProjectMemberId?: string | null;
   }
 ): Promise<void> {
   const deletionSourceTaskId = input.retrySourceTaskId ?? input.recoverySourceTaskId ?? null;
@@ -274,6 +276,7 @@ export async function startTaskRunnerDO(
       retrySourceTaskId: input.retrySourceTaskId ?? null,
       startGuard: input.startGuard ?? null,
       projectEventWakeGuard: input.projectEventWakeGuard ?? null,
+      recoveryRequiredProjectMemberId: input.recoveryRequiredProjectMemberId ?? null,
     },
   };
 

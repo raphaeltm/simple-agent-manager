@@ -61,3 +61,20 @@ webhook pass a different trigger's filters.
 Project members can inspect automation. Project writers can change it. Access is
 checked again when an action fires; schedules store creator identity, never an
 agent's bearer token.
+
+## Storage and input limits
+
+SAM preserves schedule and watch history, including idempotency keys. By default,
+a project can retain 4,096 schedules and 256 watches across all states, alongside
+the separate limits of 128 active schedules and 64 active or paused watches.
+Cancelling or revoking releases active capacity but does not erase history or
+release retained capacity. At the retained limit, new records receive a capacity
+error; identical create retries still return their original record. Automatic
+history pruning is not implemented. Operators can explicitly raise the retained
+limits using the [configuration reference](/docs/reference/configuration/) after
+reviewing project storage capacity. These limits do not delete conversation text.
+
+Prompts have a configurable UTF-8 byte limit. New-session actions also validate
+the current task prompt character limit when created or updated, so oversize
+prompts fail immediately. Task labels are shortened to the configured task label
+limits while the full schedule reason remains available in its history.

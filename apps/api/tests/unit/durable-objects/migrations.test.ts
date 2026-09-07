@@ -532,7 +532,8 @@ describe('DO Migrations', () => {
       // project event wake delivery: 6 from migration 045
       // project event wake retention repair indexes: 9 from migration 046
       // Additive audience/channel/schedule/wake-seek indexes (047–052): 18.
-      expect(indexes).toHaveLength(123);
+      // Active mailbox capacity index (053): 1.
+      expect(indexes).toHaveLength(124);
     });
   });
 });

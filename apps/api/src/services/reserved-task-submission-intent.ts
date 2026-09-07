@@ -1,5 +1,12 @@
 import type { VMSize } from '@simple-agent-manager/shared';
-import { isJsonRecord, isTaskMode, TRIGGERED_BY_VALUES } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH,
+  DEFAULT_RESERVED_TASK_PROMPT_MAX_LENGTH,
+  DEFAULT_RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH,
+  isJsonRecord,
+  isTaskMode,
+  TRIGGERED_BY_VALUES,
+} from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -29,6 +36,7 @@ import type {
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
 import { type startTaskRunnerDO } from './task-runner-do';
 import {
+  assertReservedTaskCreatorAuthority,
   assertTaskRunnerStartGuard,
   type TaskRunnerReservedSubmissionGuard,
   TaskRunnerStartGuardRevokedError,
@@ -38,9 +46,6 @@ import { getTaskTitleConfig } from './task-title';
 const FINGERPRINT_VERSION = 1;
 const SNAPSHOT_VERSION = 1;
 const MAX_RESERVED_ID_LENGTH = 160;
-const DEFAULT_RESERVED_PROMPT_MAX_LENGTH = 16_000;
-const DEFAULT_RESERVED_BRANCH_NAME_SEED_MAX_LENGTH = 512;
-const DEFAULT_RESERVED_SOURCE_DISPLAY_NAME_MAX_LENGTH = 512;
 const DEFAULT_RESERVED_REPOSITORY_ACCESS_FLOW_MAX_LENGTH = 512;
 const DEFAULT_RESERVED_INITIAL_STATUS_REASON_MAX_LENGTH = 1_024;
 const SOURCE_KINDS = new Set<string>(['trigger', 'schedule', 'standing_watch']);
@@ -101,14 +106,14 @@ export function validateReservedTaskSubmissionInput(
     nonEmptyBoundedText(
       input.prompt,
       'prompt',
-      parsePositiveInt(env.MAX_TASK_MESSAGE_LENGTH, DEFAULT_RESERVED_PROMPT_MAX_LENGTH)
+      parsePositiveInt(env.MAX_TASK_MESSAGE_LENGTH, DEFAULT_RESERVED_TASK_PROMPT_MAX_LENGTH)
     );
     nonEmptyBoundedText(
       input.branchNameSeed,
       'branchNameSeed',
       parsePositiveInt(
         env.RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH,
-        DEFAULT_RESERVED_BRANCH_NAME_SEED_MAX_LENGTH
+        DEFAULT_RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH
       )
     );
     if (
@@ -138,7 +143,7 @@ export function validateReservedTaskSubmissionInput(
       'source.displayName',
       parsePositiveInt(
         env.RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH,
-        DEFAULT_RESERVED_SOURCE_DISPLAY_NAME_MAX_LENGTH
+        DEFAULT_RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH
       )
     );
     nonEmptyBoundedText(
@@ -397,6 +402,13 @@ export async function prepareNewSubmission(
     );
   }
 
+  try {
+    await assertReservedTaskCreatorAuthority(env, input.source.kind, input.projectId, input.userId);
+  } catch (error) {
+    if (!(error instanceof TaskRunnerStartGuardRevokedError)) throw error;
+    return reservedTaskSubmissionConflict(input, 'authority_unavailable', error.message);
+  }
+
   const resolved = await resolvePlacementForInput(db, env, input, project);
   if ('reason' in resolved) {
     return reservedTaskSubmissionConflict(input, resolved.reason, resolved.message);
@@ -427,6 +439,13 @@ export async function prepareNewSubmission(
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await deps.generateTitle(env, input.prompt, titleConfig);
   const user = await loadUserStartSnapshot(db, input.userId);
+  // Title/profile/credential resolution may suspend across a membership change.
+  try {
+    await assertReservedTaskCreatorAuthority(env, input.source.kind, input.projectId, input.userId);
+  } catch (error) {
+    if (!(error instanceof TaskRunnerStartGuardRevokedError)) throw error;
+    return reservedTaskSubmissionConflict(input, 'authority_unavailable', error.message);
+  }
   const { placement, profile, resolution } = resolved;
   const task = {
     taskId: input.identities.taskId,

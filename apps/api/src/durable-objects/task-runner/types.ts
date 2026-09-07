@@ -21,8 +21,8 @@ import type {
 
 import type { Env } from '../../env';
 import type { TaskStartCapacityPoolSelection } from '../../services/placement-resolver';
-import type { TaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 import type { ProjectEventWakeRecoveryGuard } from '../../services/session-recovery-authority';
+import type { TaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 
 // TaskRunner uses the full Env type because it delegates to service functions
 // (createNodeRecord, provisionNode, createWorkspaceOnNode, etc.) that expect
@@ -125,6 +125,8 @@ export interface TaskRunConfig {
   startGuard?: TaskRunnerStartGuard | null;
   /** Event wake batch/subscription identity that must still authorize guarded recovery. */
   projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
+  /** Member whose continued write permission authorizes a scheduled wake. */
+  recoveryRequiredProjectMemberId?: string | null;
 }
 
 export interface TaskRunnerState {

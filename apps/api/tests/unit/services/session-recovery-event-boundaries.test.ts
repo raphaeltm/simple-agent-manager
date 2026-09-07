@@ -11,6 +11,7 @@ import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-containe
 import type { Env } from '../../../src/env';
 import {
   isSessionRecoverySourceTaskGuardFullyValidForEnv,
+  isSessionRecoverySourceTaskGuardValid,
   isSessionRecoveryTaskAndEventAuthorized,
   isSessionRecoveryTaskAuthorized,
   type SessionRecoverySourceTaskGuard,
@@ -39,8 +40,16 @@ const recoveryInput = {
 function fixture() {
   const sqlite = new Database(':memory:');
   databases.push(sqlite);
-  createSchemaTables(sqlite, [schema.tasks, schema.sessionSnapshots]);
+  createSchemaTables(sqlite, [
+    schema.tasks,
+    schema.sessionSnapshots,
+    schema.users,
+    schema.projectMembers,
+  ]);
   sqlite.exec(`
+    INSERT INTO users (id, status) VALUES ('user', 'active');
+    INSERT INTO project_members (project_id, user_id, role, status)
+      VALUES ('project', 'user', 'maintainer', 'active');
     INSERT INTO tasks (id, project_id, user_id, status, superseded_by_task_id)
       VALUES ('root', 'project', 'user', 'cancelled', 'T2');
     INSERT INTO tasks (id, project_id, user_id, status, recovery_source_task_id,
@@ -91,6 +100,92 @@ describe('recovery event authority at final asynchronous boundaries', () => {
       isSessionRecoveryTaskAndEventAuthorized(f.database, recoveryInput, validate)
     ).resolves.toBe(false);
     expect(validate).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['viewer', "UPDATE project_members SET role = 'viewer'"],
+    ['revoked membership', "UPDATE project_members SET status = 'suspended'"],
+    ['disabled user', "UPDATE users SET status = 'suspended'"],
+  ])('stops scheduled VM recovery when its creator becomes %s', async (_label, mutation) => {
+    const f = fixture();
+    f.sqlite
+      .exec(`INSERT INTO users (id, email, status) VALUES ('creator', 'creator@example.test', 'active');
+      INSERT INTO project_members (project_id, user_id, role, status)
+      VALUES ('project', 'creator', 'maintainer', 'active');`);
+    const runner = Object.assign(Object.create(TaskRunner.prototype), { env: f.env }) as {
+      hasRecoveryAuthority(input: StartTaskInput): Promise<boolean>;
+    };
+    const input = {
+      taskId: 'T2',
+      projectId: 'project',
+      userId: 'user',
+      config: {
+        recoverySourceTaskId: 'root',
+        resumeSnapshotChatSessionId: 'chat',
+        recoveryRequiredProjectMemberId: 'creator',
+      },
+    } as StartTaskInput;
+    await expect(runner.hasRecoveryAuthority(input)).resolves.toBe(true);
+    f.sqlite.exec(mutation);
+    await expect(runner.hasRecoveryAuthority(input)).resolves.toBe(false);
+    // A human recovery has no scheduled-creator authority requirement.
+    input.config.recoveryRequiredProjectMemberId = null;
+    await expect(runner.hasRecoveryAuthority(input)).resolves.toBe(true);
+  });
+
+  it.each([
+    ['removed member', "UPDATE project_members SET status = 'removed' WHERE user_id = 'user'"],
+    ['viewer', "UPDATE project_members SET role = 'viewer' WHERE user_id = 'user'"],
+    ['disabled user', "UPDATE users SET status = 'suspended' WHERE id = 'user'"],
+  ])(
+    'rejects event source authority for %s before batching and after admission',
+    async (_label, mutation) => {
+      const f = fixture();
+      const preBatch = {
+        taskId: 'root',
+        projectId: 'project',
+        chatSessionId: 'chat',
+        requireSourceProjectMember: true,
+      };
+      await expect(isSessionRecoverySourceTaskGuardValid(f.database, preBatch)).resolves.toBe(true);
+      f.sqlite.exec(mutation);
+      await expect(isSessionRecoverySourceTaskGuardValid(f.database, preBatch)).resolves.toBe(
+        false
+      );
+      await expect(isSessionRecoverySourceTaskGuardFullyValidForEnv(f.env, guard)).resolves.toBe(
+        false
+      );
+      await expect(
+        isSessionRecoveryTaskAndEventAuthorized(f.database, recoveryInput, f.validateEvent)
+      ).resolves.toBe(false);
+      expect(f.validateEvent).not.toHaveBeenCalled();
+      // Human follow-ups retain their existing task authority semantics.
+      await expect(
+        isSessionRecoverySourceTaskGuardValid(f.database, {
+          ...preBatch,
+          requireSourceProjectMember: false,
+        })
+      ).resolves.toBe(true);
+      await expect(
+        isSessionRecoveryTaskAuthorized(f.database, { ...recoveryInput, projectEventWake: null })
+      ).resolves.toBe(true);
+    }
+  );
+
+  it('rechecks source membership after the event RPC for both persisted runner and container guards', async () => {
+    for (const kind of ['runner', 'container']) {
+      const f = fixture();
+      f.validateEvent.mockImplementation(async () => {
+        f.sqlite.exec("DELETE FROM project_members WHERE user_id = 'user'");
+        return true;
+      });
+      const result =
+        kind === 'runner'
+          ? isSessionRecoveryTaskAndEventAuthorized(f.database, recoveryInput, f.validateEvent)
+          : isSessionRecoverySourceTaskGuardFullyValidForEnv(f.env, guard);
+      await expect(result).resolves.toBe(false);
+      expect(f.validateEvent).toHaveBeenCalledOnce();
+    }
   });
 
   it('requires an event validator and rejects its negative result', async () => {

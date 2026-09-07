@@ -8,9 +8,8 @@ import {
   type VMSize,
   type WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, exists, notInArray, or } from 'drizzle-orm';
+import { desc, eq, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -31,7 +30,10 @@ import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from './replacement-deletion-fence';
-import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
+import {
+  failAndRestoreSessionRecoveryHandoff,
+  isSessionRecoverySourceTaskGuardValid,
+} from './session-recovery-authority';
 import {
   claimSessionSnapshotRecovery,
   failSessionSnapshotRecovery,
@@ -61,65 +63,6 @@ class SourceTaskNotWakeableError extends Error {
     super('source task is no longer wakeable');
     this.name = 'SourceTaskNotWakeableError';
   }
-}
-
-async function sourceTaskGuardIsWakeable(
-  db: Db,
-  guard: SessionRecoverySourceTaskGuard | undefined
-): Promise<boolean> {
-  if (!guard) return true;
-  const recoveryOwner = alias(schema.tasks, 'recovery_owner');
-  const markedSuccessor = alias(schema.tasks, 'recovery_marked_successor');
-  const terminalStatuses = ['completed', 'failed', 'cancelled'];
-  const sourceIsWakeable = or(
-    notInArray(schema.tasks.status, terminalStatuses),
-    and(
-      eq(schema.tasks.status, 'cancelled'),
-      exists(
-        db
-          .select({ id: markedSuccessor.id })
-          .from(markedSuccessor)
-          .where(
-            and(
-              eq(markedSuccessor.id, schema.tasks.supersededByTaskId),
-              eq(markedSuccessor.projectId, guard.projectId),
-              eq(markedSuccessor.chatSessionId, guard.chatSessionId),
-              eq(markedSuccessor.triggeredBy, 'session-recovery'),
-              notInArray(markedSuccessor.status, terminalStatuses)
-            )
-          )
-      )
-    )
-  );
-  const task = await db
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, guard.taskId),
-        eq(schema.tasks.projectId, guard.projectId),
-        sourceIsWakeable,
-        or(
-          eq(schema.tasks.chatSessionId, guard.chatSessionId),
-          exists(
-            db
-              .select({ id: recoveryOwner.id })
-              .from(recoveryOwner)
-              .where(
-                and(
-                  eq(recoveryOwner.recoverySourceTaskId, guard.taskId),
-                  eq(recoveryOwner.projectId, guard.projectId),
-                  eq(recoveryOwner.chatSessionId, guard.chatSessionId),
-                  eq(recoveryOwner.triggeredBy, 'session-recovery'),
-                  notInArray(recoveryOwner.status, ['completed', 'failed', 'cancelled'])
-                )
-              )
-          )
-        )
-      )
-    )
-    .get();
-  return Boolean(task);
 }
 
 export const SESSION_RECOVERY_INITIAL_PROMPT =
@@ -337,8 +280,16 @@ async function createRecoveryTask(
               )`
         )
         .bind(
-          taskId, now, taskId, sourceTaskId, chatSessionId, sourceTaskId,
-          sourceTaskId, sourceTaskId, context.project.id, chatSessionId
+          taskId,
+          now,
+          taskId,
+          sourceTaskId,
+          chatSessionId,
+          sourceTaskId,
+          sourceTaskId,
+          sourceTaskId,
+          context.project.id,
+          chatSessionId
         ),
       database
         .prepare(
@@ -516,12 +467,18 @@ async function startRecoveryTask(
   if (['completed', 'failed', 'cancelled'].includes(task.status)) {
     throw new Error(`Recovery task is already ${task.status}`);
   }
-  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+  if (
+    sourceTaskGuard &&
+    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
+  ) {
     throw new SourceTaskNotWakeableError();
   }
   if (task.status === 'in_progress') return;
   const alreadyStarted = await ensureTaskRunnerStarted(env, task.id);
-  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+  if (
+    sourceTaskGuard &&
+    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
+  ) {
     throw new SourceTaskNotWakeableError();
   }
   if (alreadyStarted) return;
@@ -534,7 +491,10 @@ async function startRecoveryTask(
         .get()
     : null;
 
-  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+  if (
+    sourceTaskGuard &&
+    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
+  ) {
     throw new SourceTaskNotWakeableError();
   }
 
@@ -600,6 +560,7 @@ async function startRecoveryTask(
     recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
     retrySourceTaskId: task.recoverySourceTaskId ?? null,
     projectEventWakeGuard: sourceTaskGuard?.projectEventWake ?? null,
+    recoveryRequiredProjectMemberId: sourceTaskGuard?.requiredProjectMemberId ?? null,
   });
 }
 

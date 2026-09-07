@@ -14,7 +14,19 @@ export interface SessionRecoverySourceTaskGuard {
   projectId: string;
   chatSessionId: string;
   projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+  /** Pre-materialization event guard; after admission projectEventWake supplies this requirement. */
+  requireSourceProjectMember?: boolean;
   requiredProjectMemberId?: string | null;
+}
+
+/** Event subscriptions retain source task identity, never a caller-supplied user identity. */
+function sourceProjectMemberAuthoritySql(): string {
+  return `AND EXISTS (
+    SELECT 1 FROM project_members event_member JOIN users event_user ON event_user.id = event_member.user_id
+    WHERE event_member.project_id = source.project_id AND event_member.user_id = source.user_id
+      AND event_member.status = 'active' AND event_user.status = 'active'
+      AND event_member.role IN ('owner','admin','maintainer')
+  )`;
 }
 
 export class SessionRecoveryAuthorityRevokedError extends Error {
@@ -70,6 +82,11 @@ export async function isSessionRecoverySourceTaskGuardValid(
             )
           )
           ${
+            guard.requireSourceProjectMember || guard.projectEventWake
+              ? sourceProjectMemberAuthoritySql()
+              : ''
+          }
+          ${
             guard.requiredProjectMemberId
               ? `AND EXISTS (
             SELECT 1 FROM project_members m JOIN users u ON u.id = m.user_id
@@ -106,6 +123,8 @@ export async function isSessionRecoveryTaskAuthorized(
     sourceTaskId: string;
     projectId: string;
     chatSessionId: string;
+    requiredProjectMemberId?: string | null;
+    projectEventWake?: ProjectEventWakeRecoveryGuard | null;
   }
 ): Promise<boolean> {
   const row = await database
@@ -138,14 +157,32 @@ export async function isSessionRecoveryTaskAuthorized(
               )
             )
           )
+          ${input.projectEventWake ? sourceProjectMemberAuthoritySql() : ''}
+          ${
+            input.requiredProjectMemberId
+              ? `AND EXISTS (
+            SELECT 1 FROM project_members m JOIN users u ON u.id = m.user_id
+            WHERE m.project_id = recovery.project_id AND m.user_id = ?
+              AND m.status = 'active' AND u.status = 'active'
+              AND m.role IN ('owner','admin','maintainer')
+          )`
+              : ''
+          }
         LIMIT 1`
     )
-    .bind(input.recoveryTaskId, input.sourceTaskId, input.projectId, input.chatSessionId)
+    .bind(
+      input.recoveryTaskId,
+      input.sourceTaskId,
+      input.projectId,
+      input.chatSessionId,
+      ...(input.requiredProjectMemberId ? [input.requiredProjectMemberId] : [])
+    )
     .first<{ id: string }>();
   return Boolean(row);
 }
 
 export interface SessionRecoveryTaskAuthorityInput {
+  requiredProjectMemberId?: string | null;
   recoveryTaskId: string;
   sourceTaskId: string;
   projectId: string;

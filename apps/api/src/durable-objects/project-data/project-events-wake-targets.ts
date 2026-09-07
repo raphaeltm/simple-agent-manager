@@ -1,5 +1,6 @@
 import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
 
+import { isMailboxAtCapacity } from './mailbox-capacity';
 import { resolveMaxMessagesPerSession } from './messages-persist-helpers';
 import { mapProjectEvent, mapProjectEventSubscription } from './project-events-mappers';
 import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
@@ -15,16 +16,7 @@ export function isTargetAtWakeCapacity(sql: SqlStorage, env: Env, sessionId: str
       ? messageRow.message_count
       : maxTranscriptMessages;
   if (currentMessages >= maxTranscriptMessages) return true;
-  const maxMailboxMessages = resolveMailboxMaxMessages(env);
-  const row = sql
-    .exec(
-      `SELECT COUNT(*) AS cnt
-       FROM session_inbox
-       WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`
-    )
-    .toArray()[0];
-  const activeMailboxRows = typeof row?.cnt === 'number' ? row.cnt : maxMailboxMessages;
-  return activeMailboxRows >= maxMailboxMessages;
+  return isMailboxAtCapacity(sql, resolveMailboxMaxMessages(env));
 }
 
 export function readLivePromptBatchLeaseUntilForTarget(

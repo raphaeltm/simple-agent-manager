@@ -421,6 +421,150 @@ describe('submitReservedTask', () => {
     projectDataBoundary.reset();
   });
 
+  function scheduleFixture(kind: 'schedule' | 'standing_watch' = 'schedule') {
+    const fixture = seedReservedFixture(`creator-authority-${kind}`);
+    fixture.input.source = { ...fixture.input.source, kind, triggeredBy: 'cron' };
+    fixture.sqlite
+      .prepare(
+        `UPDATE project_members SET role = 'maintainer' WHERE project_id = ? AND user_id = ?`
+      )
+      .run(fixture.projectId, fixture.userId);
+    return fixture;
+  }
+
+  it.each(['schedule', 'standing_watch'] as const)(
+    'rejects %s creator demotion during title generation before creating a task',
+    async (kind) => {
+      const fixture = scheduleFixture(kind);
+      let releaseTitle!: () => void;
+      let titleStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        titleStarted = resolve;
+      });
+      const release = new Promise<void>((resolve) => {
+        releaseTitle = resolve;
+      });
+      const { deps } = createSubmissionDependencies({
+        generateTitle: vi.fn(async () => {
+          titleStarted();
+          await release;
+          return 'Scheduled title';
+        }),
+      });
+      const submission = submitReservedTask(fixture.env, fixture.input, deps);
+      await started;
+      fixture.sqlite
+        .prepare(`UPDATE project_members SET role = 'viewer' WHERE project_id = ? AND user_id = ?`)
+        .run(fixture.projectId, fixture.userId);
+      releaseTitle();
+      expect(await submission).toMatchObject({
+        outcome: 'conflict',
+        reason: 'authority_unavailable',
+      });
+      expect(deps.requireRepositoryAccess).toHaveBeenCalled();
+      expect(deps.startTaskRunner).not.toHaveBeenCalled();
+      expectNoSubmission(fixture);
+    }
+  );
+
+  it.each(['suspended-user', 'removed-member', 'viewer-member'] as const)(
+    'fences a %s after ProjectData admission while repository access remains available',
+    async (revocation) => {
+      const fixture = scheduleFixture();
+      const { deps } = createSubmissionDependencies({
+        afterProjectDataCommit: () => {
+          if (revocation === 'suspended-user') {
+            fixture.sqlite
+              .prepare(`UPDATE users SET status = 'suspended' WHERE id = ?`)
+              .run(fixture.userId);
+          } else {
+            const assignment =
+              revocation === 'removed-member' ? "status = 'removed'" : "role = 'viewer'";
+            fixture.sqlite
+              .prepare(
+                `UPDATE project_members SET ${assignment} WHERE project_id = ? AND user_id = ?`
+              )
+              .run(fixture.projectId, fixture.userId);
+          }
+        },
+      });
+      expect(await submitReservedTask(fixture.env, fixture.input, deps)).toMatchObject({
+        outcome: 'conflict',
+        reason: 'authority_unavailable',
+      });
+      expect(
+        projectDataBoundary.sessions.get(fixture.input.identities.chatSessionId)
+      ).toBeDefined();
+      expect(deps.requireRepositoryAccess).toHaveBeenCalledTimes(2);
+      expect(deps.startTaskRunner).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['owner', 'admin', 'maintainer'] as const)(
+    'allows an active %s to start a scheduled task',
+    async (role) => {
+      const fixture = scheduleFixture();
+      fixture.sqlite
+        .prepare(`UPDATE project_members SET role = ? WHERE project_id = ? AND user_id = ?`)
+        .run(role, fixture.projectId, fixture.userId);
+      const { deps } = createSubmissionDependencies();
+      expect(await submitReservedTask(fixture.env, fixture.input, deps)).toMatchObject({
+        outcome: 'admitted',
+      });
+      expect(deps.startTaskRunner).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('reconciles a lost scheduled start receipt after creator revocation without restarting', async () => {
+    const fixture = scheduleFixture();
+    let started = false;
+    const { deps } = createSubmissionDependencies({
+      startTaskRunner: vi.fn(async () => {
+        started = true;
+        throw new Error('lost start response');
+      }),
+      ensureTaskRunnerStarted: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('status unavailable'))
+        .mockImplementation(async () => started),
+    });
+    expect(await submitReservedTask(fixture.env, fixture.input, deps)).toMatchObject({
+      outcome: 'pending',
+    });
+    fixture.sqlite
+      .prepare(`UPDATE users SET status = 'suspended' WHERE id = ?`)
+      .run(fixture.userId);
+    expect(await submitReservedTask(fixture.env, fixture.input, deps)).toMatchObject({
+      outcome: 'admitted',
+      startState: 'confirmed_after_lost_ack',
+    });
+    expect(deps.startTaskRunner).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an unconfirmed scheduled start pending after creator revocation', async () => {
+    const fixture = scheduleFixture();
+    const { deps } = createSubmissionDependencies({
+      startTaskRunner: vi.fn(async () => {
+        throw new Error('lost start response');
+      }),
+      ensureTaskRunnerStarted: vi.fn(async () => false),
+    });
+    expect(await submitReservedTask(fixture.env, fixture.input, deps)).toMatchObject({
+      outcome: 'pending',
+    });
+    fixture.sqlite
+      .prepare(`UPDATE users SET status = 'suspended' WHERE id = ?`)
+      .run(fixture.userId);
+    expect(await submitReservedTask(fixture.env, fixture.input, deps)).toMatchObject({
+      outcome: 'pending',
+    });
+    expect(deps.startTaskRunner).toHaveBeenCalledTimes(1);
+    expect(taskRow(fixture.sqlite, fixture.input.identities.taskId)).toMatchObject({
+      status: 'queued',
+    });
+    expect(projectDataBoundary.stopSession).not.toHaveBeenCalled();
+  });
+
   it('converges simultaneous same-intent submissions to one task, status, chat, and prompt', async () => {
     const fixture = seedReservedFixture('same-intent');
     const { deps, startedTaskIds } = createSubmissionDependencies();
@@ -778,33 +922,33 @@ From that information, derive the repository change request and append a short n
     'returns admitted when a lost start acknowledgement races with a %s D1 winner',
     async (winnerStatus) => {
       const fixture = seedReservedFixture(`${winnerStatus}-winner`);
-    let tick = 0;
-    const deps: ReservedTaskSubmissionDependencies = {
-      now: () => `2026-09-07T00:04:${String(++tick).padStart(2, '0')}.000Z`,
-      generateTitle: vi.fn(async () => 'Reserved task title'),
-      requireRepositoryAccess: vi.fn(async () => undefined) as NonNullable<
-        ReservedTaskSubmissionDependencies['requireRepositoryAccess']
-      >,
-      startTaskRunner: vi.fn(async () => {
-        throw new Error('lost acknowledgement');
-      }) as typeof startTaskRunnerDO,
-      ensureTaskRunnerStarted: vi.fn(async () => {
+      let tick = 0;
+      const deps: ReservedTaskSubmissionDependencies = {
+        now: () => `2026-09-07T00:04:${String(++tick).padStart(2, '0')}.000Z`,
+        generateTitle: vi.fn(async () => 'Reserved task title'),
+        requireRepositoryAccess: vi.fn(async () => undefined) as NonNullable<
+          ReservedTaskSubmissionDependencies['requireRepositoryAccess']
+        >,
+        startTaskRunner: vi.fn(async () => {
+          throw new Error('lost acknowledgement');
+        }) as typeof startTaskRunnerDO,
+        ensureTaskRunnerStarted: vi.fn(async () => {
+          fixture.sqlite
+            .prepare(`UPDATE tasks SET status = ? WHERE id = ?`)
+            .run(winnerStatus, fixture.input.identities.taskId);
+          return false;
+        }),
+      };
+
+      const result = await submitReservedTask(fixture.env, fixture.input, deps);
+
+      expect(result).toMatchObject({ outcome: 'admitted', startState: 'already_started' });
+      expect(projectDataBoundary.stopSession).not.toHaveBeenCalled();
+      expect(
         fixture.sqlite
-          .prepare(`UPDATE tasks SET status = ? WHERE id = ?`)
-          .run(winnerStatus, fixture.input.identities.taskId);
-        return false;
-      }),
-    };
-
-    const result = await submitReservedTask(fixture.env, fixture.input, deps);
-
-    expect(result).toMatchObject({ outcome: 'admitted', startState: 'already_started' });
-    expect(projectDataBoundary.stopSession).not.toHaveBeenCalled();
-    expect(
-      fixture.sqlite
-        .prepare('SELECT terminal_observed_at FROM task_submission_checkpoints WHERE task_id = ?')
-        .get(fixture.input.identities.taskId)
-    ).toEqual({ terminal_observed_at: null });
+          .prepare('SELECT terminal_observed_at FROM task_submission_checkpoints WHERE task_id = ?')
+          .get(fixture.input.identities.taskId)
+      ).toEqual({ terminal_observed_at: null });
     }
   );
 

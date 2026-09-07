@@ -112,3 +112,22 @@ User direction: no further SAM dispatches; parent implements directly, local age
 Integrated pushed D2/A4/C2 checkpoints and repaired final recovery guards, credential receipt-first replay, per-window indexed supersession, and wake due-state maintenance. Recoverable commits: 409a5aa2b and b665fa6e1. Combined core/reserved Worker tests76 pass; credential/outbox focused56 pass; API typecheck passes at integrated base.
 
 Parent implemented DO049 schedules/watches, versioned member APIs, five schedule MCP tools, canonical watch matching, shared alarm/mailbox, reserved task identities/deadlines, and real project/session Events UI. Focused schedules/recovery38 pass; real REST/MCP/DO Worker4 pass. Migration safety passes. Final type/lint/build/regression checks, desktop/mobile screenshots, coordinated staging, and green unmerged PR remain outstanding. No staging or host intervention.
+
+## Local continuation after second parent runtime loss (2026-09-07)
+
+Current task `01M1XX9PRA5XMACX3QNXTZQW0K`, output branch `sam/use-sam-mcp-tools-tzqw0k`. Read the exact prior session first with project-scoped MCP `get_session_messages`, then user-only full messages and original session `fd0d6dbe-e577-48f8-9bd9-bf6a4e92fcaf`. Restored pushed `c3e6b3d11`. Original scope remains one green OPEN PR; no merge, no SAM dispatches. Existing failed workspaces/hosts remain untouched. Local helpers work in this workspace only.
+
+Local validation recovered two final handoff defects and found adjacent safety gaps:
+
+- Preserve scheduled creator membership through VM recovery config and every TaskRunner guard; reuse the shared source guard instead of a duplicate weaker recovery query.
+- Ambiguous/missing mailbox receipts retain standing-watch concurrency slots and stop automatic replay. D1 receipt lookup checkpoints retry before I/O and isolates failure so later schedules progress.
+- Reserved scheduled/watch task starts revalidate current active creator and task-write capability before D1 creation and physical startup, while existing or uncertain receipts retain conservative reconciliation.
+- Schedule inputs now obey effective reserved task prompt/label limits; retained schedule/watch record caps preserve replay identity and all conversation text. Public configuration/docs explain no automatic history pruning.
+- Event subscriber source-user membership is being propagated through materialization/delivery/recovery; final focused verification pending.
+- Mailbox capacity uses one bounded active-only indexed query in ordinary admission and event wake preflight. Additive DO migration053 installs the matching partial index; real workerd retained-history/rows-read proof pending.
+- Go replacement connections clear stale credential attribution; originating connections retain immutable snapshots.
+- UI browser audit reproduced and repairs long subscription-heading clipping, offscreen newly opened channel history, and misleading contextual watch scope/defaults. Final desktop/mobile sweep pending.
+
+Evidence at this checkpoint: first corrected recovery/schedule run96/96 pass; seven new cases fail against saved pre-fix implementation (restored afterward). Reserved creator tests29 pass, and removing guard fails five denial scenarios while three valid-role controls pass. New schedule admission-bound tests5/5 pass. D1/DO migration safety pass before additive053. After consolidating source guards, one fixture required explicitly active users; final verification pending. File-size gate required extraction of materialization batch storage and reserved D1 submission storage, plus removing duplicate recovery guard.
+
+Resource limitation: workspace4GB RAM/2GBswap. Per-agent serial jobs still overloaded it when run concurrently; one API typecheck exited137. All remaining heavyweight validation must be serialized across the WHOLE workspace. No OOM or stale pre-build test run counts as a passing result. Go1.26.6 installed in gitignored `.tmp/eventing/toolchain`; compile stopped to let browser/Worker validation finish. Full final lint/typecheck/unit/Workers/Go/build, independent acceptance review, staging decision/verification, screenshot publication, PR/CI/CodeRabbit remain required.

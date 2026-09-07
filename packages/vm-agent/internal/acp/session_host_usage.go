@@ -63,6 +63,9 @@ type usageReportPendingEntry struct {
 
 func (h *SessionHost) storeCredentialAttribution(agentType string, cred *agentCredential) {
 	if cred == nil || cred.credentialReference == "" || cred.credentialSource == "" {
+		// A replacement connection without attribution must not inherit the
+		// previous credential. Existing clients retain their own immutable snapshot.
+		h.credentialAttribution.Store(credentialAttribution{})
 		return
 	}
 	h.credentialAttribution.Store(credentialAttribution{

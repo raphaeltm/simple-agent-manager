@@ -1,23 +1,23 @@
-import * as v from 'valibot';
-
 import type {
   ProjectStandingWatch,
   ProjectStandingWatchList,
   ProjectStandingWatchMutationResult,
 } from '@simple-agent-manager/shared';
 import { PROJECT_EVENT_SEVERITIES } from '@simple-agent-manager/shared';
-import { scheduleLimits, type ProjectEventScheduleEnv } from './project-event-schedules-config';
+import * as v from 'valibot';
+
+import { type ProjectEventScheduleEnv,scheduleLimits } from './project-event-schedules-config';
 import { ScheduledActionSchema } from './project-event-schedules-storage';
 import {
   normalizeCreateProjectStandingWatch,
-  normalizeUpdateProjectStandingWatch,
   normalizeScheduleVersion,
+  normalizeUpdateProjectStandingWatch,
 } from './project-event-schedules-validation';
-import { createProjectEventSubscription, cancelProjectEventSubscription } from './project-events';
+import { cancelProjectEventSubscription,createProjectEventSubscription } from './project-events';
 import {
-  ProjectEventValidationError,
-  ProjectEventLimitExceededError,
   ProjectEventCursorError,
+  ProjectEventLimitExceededError,
+  ProjectEventValidationError,
 } from './project-events-contracts';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { normalizeListLimit } from './project-events-normalization';
@@ -227,6 +227,17 @@ export function createWatch(
       throw new ProjectEventValidationError('Standing watch idempotency conflict');
     return mutation(mapWatch(row), false, true);
   }
+  // Existing project/recent covering index bounds the retained-history probe.
+  // Replays return above this guard; retention never discards idempotency identities.
+  const retained = sql
+    .exec(
+      `SELECT id FROM project_standing_watches WHERE project_id = ? LIMIT ?`,
+      projectId,
+      limits.maxRetainedWatches
+    )
+    .toArray();
+  if (retained.length >= limits.maxRetainedWatches)
+    throw new ProjectEventLimitExceededError('Retained standing watch capacity reached');
   const active = sql
     .exec(
       `SELECT id FROM project_standing_watches

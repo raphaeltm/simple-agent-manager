@@ -97,7 +97,11 @@ function fixture(overrides: ProjectEventScheduleEnv = {}) {
   const db = new Database(':memory:');
   const d1 = new Database(':memory:');
   databases.push(db, d1);
-  const faults = { beforeExec: (_query: string) => {}, beforeAuthority: async () => {} };
+  const faults = {
+    beforeExec: (_query: string) => {},
+    beforeAuthority: async () => {},
+    beforeTaskReceipt: async () => {},
+  };
   const sql = sqliteStorage(db, (query) => faults.beforeExec(query));
   runMigrations(sql);
   createSchemaTables(d1, [schema.users, schema.projects, schema.projectMembers, schema.tasks]);
@@ -135,6 +139,8 @@ function fixture(overrides: ProjectEventScheduleEnv = {}) {
             ...bound,
             async first(column?: string) {
               if (query.includes('project_members')) await faults.beforeAuthority();
+              if (query.includes('SELECT status, error_message FROM tasks'))
+                await faults.beforeTaskReceipt();
               return bound.first(column);
             },
           };
@@ -498,6 +504,51 @@ describe('project schedules — real migrations, CRUD and canonical admission', 
         .get(id)
     ).toEqual({ execution_finished_at: NOW + 20, next_attempt_at: null });
   });
+
+  it('defers an unavailable admitted task receipt while delivering a later schedule', async () => {
+    const f = fixture();
+    submitReservedTaskMock.mockResolvedValue({ outcome: 'admitted' });
+    const first = f.create('first-task', startAction).schedule.id;
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    vi.setSystemTime(NOW + 20);
+    const later = f.create('later-message').schedule.id;
+    f.faults.beforeTaskReceipt = async () => {
+      throw new Error('D1 unavailable');
+    };
+    await runScheduleAlarm(f.sql, f.env, f.hooks);
+    expect(getSchedule(f.sql, PROJECT, first)).toMatchObject({
+      state: 'admitted',
+      nextAttemptAt: NOW + 30,
+    });
+    expect(getSchedule(f.sql, PROJECT, later)?.deliveryId).toBeTruthy();
+    expect(computeScheduleAlarmTime(f.sql, PROJECT)).toBe(NOW + 30);
+  });
+
+  it.each(['ambiguous', 'missing'] as const)(
+    'retains the watch slot for a %s receipt',
+    async (receipt) => {
+      const f = fixture();
+      const id = f.create(`receipt-${receipt}`).schedule.id;
+      await runScheduleAlarm(f.sql, f.env, f.hooks);
+      const deliveryId = getSchedule(f.sql, PROJECT, id)!.deliveryId;
+      if (receipt === 'missing') f.sql.exec('DELETE FROM session_inbox WHERE id = ?', deliveryId);
+      else
+        f.sql.exec(
+          "UPDATE session_inbox SET delivery_state = 'ambiguous' WHERE id = ?",
+          deliveryId
+        );
+      vi.setSystemTime(NOW + 10);
+      await runScheduleAlarm(f.sql, f.env, f.hooks);
+      expect(
+        f.db
+          .prepare(
+            'SELECT state, execution_finished_at, next_attempt_at FROM project_schedules WHERE id = ?'
+          )
+          .get(id)
+      ).toEqual({ state: 'ambiguous', execution_finished_at: null, next_attempt_at: null });
+      expect(computeScheduleAlarmTime(f.sql, PROJECT)).toBeNull();
+    }
+  );
 
   it.each(['viewer', 'suspended'] as const)(
     'refuses start actions for a %s creator without side effects',

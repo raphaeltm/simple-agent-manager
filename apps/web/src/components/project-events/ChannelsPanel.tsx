@@ -1,14 +1,28 @@
 import { Button } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { getEventChannelHistory, listEventChannels } from '../../lib/project-events-api';
 import { cardClass, dateLabel, QueryState } from './EventUi';
 
-function ChannelHistory({ projectId, channel }: { projectId: string; channel: string }) {
+function ChannelHistory({
+  projectId,
+  channel,
+  focusRequest,
+}: {
+  projectId: string;
+  channel: string;
+  focusRequest: number;
+}) {
   const scope = useQueryScope();
   const [cursor, setCursor] = useState<string | null>(null);
+  const historyRef = useRef<HTMLElement>(null);
+  // Opening history is a user action. Focus on explicit selection so it is visible even
+  // below a long catalog; refreshing or paginating must not steal focus again.
+  useEffect(() => {
+    historyRef.current?.focus();
+  }, [focusRequest]);
   const query = useQuery({
     queryKey: ['auth', scope, 'events', projectId, 'channel-history', channel, cursor],
     queryFn: () => getEventChannelHistory(projectId, channel, cursor),
@@ -16,7 +30,12 @@ function ChannelHistory({ projectId, channel }: { projectId: string; channel: st
     retry: false,
   });
   return (
-    <section aria-label={`History for ${channel}`} className={cardClass}>
+    <section
+      ref={historyRef}
+      tabIndex={-1}
+      aria-label={`History for ${channel}`}
+      className={cardClass}
+    >
       <div className="flex flex-wrap justify-between gap-2">
         <h3 className="m-0 text-base font-semibold break-all">#{channel}</h3>
         <Button
@@ -83,7 +102,7 @@ function ChannelHistory({ projectId, channel }: { projectId: string; channel: st
           </Button>
         )}
         {query.data?.hasMore && (
-          <Button variant="secondary" onClick={() => setCursor(query.data!.cursor)}>
+          <Button variant="secondary" onClick={() => setCursor(query.data?.cursor ?? null)}>
             Next messages
           </Button>
         )}
@@ -96,6 +115,7 @@ export function ChannelsPanel({ projectId }: { projectId: string }) {
   const scope = useQueryScope();
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [focusRequest, setFocusRequest] = useState(0);
   const query = useQuery({
     queryKey: ['auth', scope, 'events', projectId, 'channels', cursor],
     queryFn: () => listEventChannels(projectId, cursor),
@@ -136,7 +156,10 @@ export function ChannelsPanel({ projectId }: { projectId: string }) {
               <Button
                 variant={selected === channel.name ? 'primary' : 'secondary'}
                 aria-pressed={selected === channel.name}
-                onClick={() => setSelected(channel.name)}
+                onClick={() => {
+                  setSelected(channel.name);
+                  setFocusRequest((previous) => previous + 1);
+                }}
               >
                 Read history
               </Button>
@@ -151,12 +174,19 @@ export function ChannelsPanel({ projectId }: { projectId: string }) {
           </Button>
         )}
         {query.data?.nextCursor && (
-          <Button variant="secondary" onClick={() => setCursor(query.data!.nextCursor)}>
+          <Button variant="secondary" onClick={() => setCursor(query.data?.nextCursor ?? null)}>
             Next channels
           </Button>
         )}
       </div>
-      {selected && <ChannelHistory key={selected} projectId={projectId} channel={selected} />}
+      {selected && (
+        <ChannelHistory
+          key={selected}
+          projectId={projectId}
+          channel={selected}
+          focusRequest={focusRequest}
+        />
+      )}
     </section>
   );
 }

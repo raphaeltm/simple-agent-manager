@@ -258,6 +258,7 @@ describe('task-runner-do service', () => {
       resumeSnapshotChatSessionId: 'chat-event-wake',
       recoverySourceTaskId: 'source-task-event-wake',
       retrySourceTaskId: 'source-task-event-wake',
+      recoveryRequiredProjectMemberId: 'schedule-creator',
       projectEventWakeGuard: {
         batchId: 'batch-event-wake',
         subscriptionId: 'sub-event-wake',
@@ -267,6 +268,7 @@ describe('task-runner-do service', () => {
     expect(start.mock.calls[0]?.[0].config).toMatchObject({
       recoverySourceTaskId: 'source-task-event-wake',
       retrySourceTaskId: 'source-task-event-wake',
+      recoveryRequiredProjectMemberId: 'schedule-creator',
       projectEventWakeGuard: {
         batchId: 'batch-event-wake',
         subscriptionId: 'sub-event-wake',
