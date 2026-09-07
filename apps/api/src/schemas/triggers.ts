@@ -5,6 +5,14 @@ const TriggerStatusSchema = v.picklist(['active', 'paused', 'disabled']);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 
+const ResourceRequirementsSchema = v.object({
+  minVcpu: v.optional(v.pipe(v.number(), v.minValue(0))),
+  minMemoryGb: v.optional(v.pipe(v.number(), v.minValue(0))),
+  minDiskGb: v.optional(v.pipe(v.number(), v.minValue(0))),
+  exclusiveNode: v.optional(v.boolean()),
+  maxCoTenants: v.optional(v.pipe(v.number(), v.minValue(0))),
+});
+
 const GitHubEventTypeSchema = v.picklist(['issues', 'issue_comment', 'pull_request', 'push']);
 
 const GitHubFiltersSchema = v.optional(
@@ -87,6 +95,8 @@ export const CreateTriggerSchema = v.object({
   skillId: v.optional(v.string()),
   taskMode: v.optional(TaskModeSchema),
   vmSizeOverride: v.optional(VMSizeSchema),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
+  resourceRequirementsJson: v.optional(v.nullable(v.string())),
   maxConcurrent: v.optional(v.number()),
   githubConfig: GitHubConfigSchema,
   webhookConfig: WebhookConfigSchema,
@@ -104,6 +114,8 @@ export const UpdateTriggerSchema = v.object({
   skillId: v.optional(v.nullable(v.string())),
   taskMode: v.optional(TaskModeSchema),
   vmSizeOverride: v.optional(v.nullable(VMSizeSchema)),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
+  resourceRequirementsJson: v.optional(v.nullable(v.string())),
   maxConcurrent: v.optional(v.number()),
   githubConfig: GitHubConfigSchema,
   webhookConfig: WebhookConfigSchema,

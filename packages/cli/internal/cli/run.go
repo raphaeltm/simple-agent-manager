@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -420,6 +422,9 @@ func submitTask(ctx context.Context, runtime Runtime, parsed parsedArgs, project
 	if err != nil {
 		return fail(runtime.Stderr, err)
 	}
+	if options.VMSize != "" {
+		fmt.Fprintln(runtime.Stderr, "warning: --vm-size is deprecated; prefer --min-vcpu, --min-memory-gb, --min-disk-gb, --exclusive-node, and --max-co-tenants. Legacy tiers are translated by SAM compatibility policy.")
+	}
 	response, err := client.SubmitTask(ctx, projectID, message, options)
 	if err != nil {
 		return fail(runtime.Stderr, err)
@@ -431,6 +436,10 @@ func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
 	if flagValue(parsed.Flags, "model") != "" {
 		return TaskSubmitOptions{}, errors.New("--model is reserved, but the current task submit API does not accept a per-dispatch model yet; use --agent-profile for configured model selection")
 	}
+	resource, err := parseResourceRequirementFlags(parsed)
+	if err != nil {
+		return TaskSubmitOptions{}, err
+	}
 	return TaskSubmitOptions{
 		Agent:          flagValue(parsed.Flags, "agent"),
 		AgentProfile:   flagValue(parsed.Flags, "agent-profile", "agent-profile-id"),
@@ -440,10 +449,78 @@ func parseSubmitOptions(parsed parsedArgs) (TaskSubmitOptions, error) {
 		Node:           flagValue(parsed.Flags, "node", "node-id"),
 		ParentTask:     flagValue(parsed.Flags, "parent-task", "parent-task-id"),
 		Provider:       flagValue(parsed.Flags, "provider"),
+		Resource:       resource,
 		VMLocation:     flagValue(parsed.Flags, "vm-location"),
 		VMSize:         flagValue(parsed.Flags, "vm-size"),
 		Workspace:      flagValue(parsed.Flags, "workspace", "workspace-profile"),
 	}, nil
+}
+
+func parseResourceRequirementFlags(parsed parsedArgs) (*ResourceRequirements, error) {
+	resource := ResourceRequirements{}
+	set := false
+
+	if value, present, err := parseOptionalNonNegativeFloat(parsed, "min-vcpu"); err != nil {
+		return nil, err
+	} else if present {
+		resource.MinVCPU = &value
+		set = true
+	}
+	if value, present, err := parseOptionalNonNegativeFloat(parsed, "min-memory-gb"); err != nil {
+		return nil, err
+	} else if present {
+		resource.MinMemoryGB = &value
+		set = true
+	}
+	if value, present, err := parseOptionalNonNegativeFloat(parsed, "min-disk-gb"); err != nil {
+		return nil, err
+	} else if present {
+		resource.MinDiskGB = &value
+		set = true
+	}
+	if value, present, err := parseOptionalBoolFlag(parsed, "exclusive-node"); err != nil {
+		return nil, err
+	} else if present {
+		resource.ExclusiveNode = &value
+		set = true
+	}
+	if value, present, err := parseOptionalNonNegativeFloat(parsed, "max-co-tenants"); err != nil {
+		return nil, err
+	} else if present {
+		resource.MaxCoTenants = &value
+		set = true
+	}
+
+	if !set {
+		return nil, nil
+	}
+	return &resource, nil
+}
+
+func parseOptionalNonNegativeFloat(parsed parsedArgs, name string) (float64, bool, error) {
+	raw, present := parsed.Flags[name]
+	if !present {
+		return 0, false, nil
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+		return 0, true, fmt.Errorf("--%s must be a finite non-negative number", name)
+	}
+	return value, true, nil
+}
+
+func parseOptionalBoolFlag(parsed parsedArgs, name string) (bool, bool, error) {
+	if raw, present := parsed.Flags[name]; present {
+		value, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			return false, true, fmt.Errorf("--%s must be true or false", name)
+		}
+		return value, true, nil
+	}
+	if parsed.Bools[name] {
+		return true, true, nil
+	}
+	return false, false, nil
 }
 
 func authenticatedClient(ctx context.Context, runtime Runtime) (APIClient, error) {
@@ -532,5 +609,14 @@ Usage:
 Global flags:
   --project <name-or-id>  Override active project (accepts name, prefix, or full ID)
   --json                  Print machine-readable JSON output
+
+Task resource flags:
+  --min-vcpu <number>       Minimum vCPU count for task/chat dispatch
+  --min-memory-gb <number>  Minimum memory in GB
+  --min-disk-gb <number>    Minimum disk in GB
+  --exclusive-node[=bool]   Request no co-tenants; explicit false is preserved
+  --max-co-tenants <number> Compatibility co-tenant safety cap
+  --vm-size <small|medium|large>
+                            Deprecated legacy tier; prefer resource flags
 `
 }

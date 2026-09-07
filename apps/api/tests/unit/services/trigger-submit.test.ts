@@ -59,8 +59,7 @@ const placementMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/services/placement-resolver', async (importActual) => {
-  const actual =
-    await importActual<typeof import('../../../src/services/placement-resolver')>();
+  const actual = await importActual<typeof import('../../../src/services/placement-resolver')>();
   return {
     ...actual,
     resolveTaskStartPlacementCredentialAttributionFromPlacement:
@@ -152,9 +151,7 @@ function queueTriggerSubmitLookups(project = triggerProjectRow()) {
   );
 }
 
-function placementResolution(
-  overrides: Record<string, unknown> = {}
-) {
+function placementResolution(overrides: Record<string, unknown> = {}) {
   return {
     placement: expect.anything(),
     credential: {
@@ -381,6 +378,25 @@ describe('submitTriggeredTask', () => {
     expect(insertCall.resourceRequirementsJson).toBe('{"cpu":4}');
   });
 
+  it('passes trigger resource requirements through persisted task and TaskRunner input', async () => {
+    queueTriggerSubmitLookups();
+
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    await submitTriggeredTask({} as any, {
+      ...defaultInput,
+      resourceRequirementsJson: '{"minVcpu":2,"exclusiveNode":false}',
+    });
+
+    const insertCall = mockInsertValues.mock.calls[0]![0];
+    expect(insertCall.resourceRequirementsJson).toBe('{"minVcpu":2,"exclusiveNode":false}');
+    expect(taskRunnerDo.startTaskRunnerDO).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        resourceRequirements: { minVcpu: 2, exclusiveNode: false },
+      })
+    );
+  });
+
   it('throws when project is not found', async () => {
     mockSelectResult.push([]); // empty project result
 
@@ -391,10 +407,12 @@ describe('submitTriggeredTask', () => {
   });
 
   it('throws when user has no cloud provider credentials', async () => {
-    placementMocks.resolveTaskStartPlacementCredentialAttributionFromPlacement.mockResolvedValueOnce({
-      error: 'No cloud provider credentials available for trigger trigger-1',
-      errorKind: 'credentials',
-    });
+    placementMocks.resolveTaskStartPlacementCredentialAttributionFromPlacement.mockResolvedValueOnce(
+      {
+        error: 'No cloud provider credentials available for trigger trigger-1',
+        errorKind: 'credentials',
+      }
+    );
     mockSelectResult.push([triggerProjectRow({ installationId: 'i1' })]);
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');

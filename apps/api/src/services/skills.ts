@@ -5,7 +5,12 @@ import type {
   ResolvedSkillProfile,
   UpdateSkillRequest,
 } from '@simple-agent-manager/shared';
-import { isAgentEffort, isAgentEffortSupported, isAgentProfileRuntime, isValidAgentType } from '@simple-agent-manager/shared';
+import {
+  isAgentEffort,
+  isAgentEffortSupported,
+  isAgentProfileRuntime,
+  isValidAgentType,
+} from '@simple-agent-manager/shared';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -19,6 +24,11 @@ import {
   baseProfileInsertValues,
   toBaseProfileFields,
 } from './profile-fields';
+import {
+  parseStoredResourceRequirementsJson,
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from './resource-requirements-input';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -34,30 +44,33 @@ function toSkill(row: schema.SkillRow): AgentSkill {
   };
 }
 
-function validateResourceRequirementsJson(value: string | null | undefined): string | null {
-  if (value == null || value.trim() === '') return null;
+function serializeSkillResourceRequirements(body: {
+  resourceRequirements?: unknown;
+  resourceRequirementsJson?: string | null;
+}): string | null {
   try {
-    const parsed = JSON.parse(value);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      throw new Error('resourceRequirementsJson must be a JSON object');
+    if (body.resourceRequirements !== undefined) {
+      return serializeResourceRequirementsInput(body.resourceRequirements);
     }
-    return JSON.stringify(parsed);
-  } catch {
-    throw errors.badRequest('resourceRequirementsJson must be a valid JSON object');
+    if (body.resourceRequirementsJson !== undefined) {
+      return serializeResourceRequirementsInput(
+        body.resourceRequirementsJson,
+        'resourceRequirementsJson'
+      );
+    }
+    return null;
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.badRequest(err.message);
+    }
+    throw err;
   }
 }
 
-export function parseSkillResourceRequirementsJson(value: string | null | undefined): Record<string, unknown> | undefined {
-  if (!value) return undefined;
-  try {
-    const parsed = JSON.parse(value);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      return undefined;
-    }
-    return parsed as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
+export function parseSkillResourceRequirementsJson(
+  value: string | null | undefined
+): Record<string, unknown> | undefined {
+  return parseStoredResourceRequirementsJson(value);
 }
 
 async function requireProjectProfile(
@@ -142,7 +155,9 @@ export async function createSkill(
   }
   const createAgentType = body.agentType ?? env.DEFAULT_TASK_AGENT_TYPE ?? 'opencode';
   if (body.effort && !isAgentEffortSupported(createAgentType, body.effort)) {
-    throw errors.badRequest(`Effort '${body.effort}' is not supported for agent type '${createAgentType}'`);
+    throw errors.badRequest(
+      `Effort '${body.effort}' is not supported for agent type '${createAgentType}'`
+    );
   }
 
   const existing = await db
@@ -161,7 +176,7 @@ export async function createSkill(
     ...baseProfileInsertValues(body, env),
     effort: body.effort ?? null,
     taskMode: body.taskMode ?? 'task',
-    resourceRequirementsJson: validateResourceRequirementsJson(body.resourceRequirementsJson),
+    resourceRequirementsJson: serializeSkillResourceRequirements(body),
     defaultProfileId: await requireProjectProfile(db, projectId, body.defaultProfileId, userId),
     isBuiltin: 0,
   });
@@ -183,7 +198,9 @@ export async function updateSkill(
   }
   const updateAgentType = body.agentType ?? skill.agentType;
   if (body.effort && !isAgentEffortSupported(updateAgentType, body.effort)) {
-    throw errors.badRequest(`Effort '${body.effort}' is not supported for agent type '${updateAgentType}'`);
+    throw errors.badRequest(
+      `Effort '${body.effort}' is not supported for agent type '${updateAgentType}'`
+    );
   }
 
   if (body.name !== undefined) {
@@ -204,11 +221,16 @@ export async function updateSkill(
   if (body.effort !== undefined) {
     updates.effort = body.effort as AgentEffort | null;
   }
-  if (body.resourceRequirementsJson !== undefined) {
-    updates.resourceRequirementsJson = validateResourceRequirementsJson(body.resourceRequirementsJson);
+  if (body.resourceRequirements !== undefined || body.resourceRequirementsJson !== undefined) {
+    updates.resourceRequirementsJson = serializeSkillResourceRequirements(body);
   }
   if (body.defaultProfileId !== undefined) {
-    updates.defaultProfileId = await requireProjectProfile(db, projectId, body.defaultProfileId, userId);
+    updates.defaultProfileId = await requireProjectProfile(
+      db,
+      projectId,
+      body.defaultProfileId,
+      userId
+    );
   }
 
   await db
@@ -219,7 +241,12 @@ export async function updateSkill(
   return getSkill(db, projectId, skillId, userId);
 }
 
-export async function deleteSkill(db: Db, projectId: string, skillId: string, userId: string): Promise<void> {
+export async function deleteSkill(
+  db: Db,
+  projectId: string,
+  skillId: string,
+  userId: string
+): Promise<void> {
   const skill = await getSkill(db, projectId, skillId, userId);
   if (skill.isBuiltin) throw errors.forbidden('Builtin skills cannot be deleted');
   await db
@@ -243,7 +270,10 @@ export async function resolveSkillProfile(
       .where(
         and(
           eq(schema.skills.id, skillNameOrId),
-          or(eq(schema.skills.projectId, projectId), and(isNull(schema.skills.projectId), eq(schema.skills.userId, userId)))
+          or(
+            eq(schema.skills.projectId, projectId),
+            and(isNull(schema.skills.projectId), eq(schema.skills.userId, userId))
+          )
         )
       )
       .limit(1);
@@ -267,9 +297,10 @@ export async function resolveSkillProfile(
     userId,
     env
   );
-  const promptAppend = [profile.systemPromptAppend, skill?.systemPromptAppend]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .join('\n\n') || null;
+  const promptAppend =
+    [profile.systemPromptAppend, skill?.systemPromptAppend]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .join('\n\n') || null;
 
   return {
     ...profile,
@@ -290,7 +321,10 @@ export async function resolveSkillProfile(
     runtime: isAgentProfileRuntime(skill?.runtime) ? skill.runtime : profile.runtime,
     devcontainerConfigName: skill?.devcontainerConfigName ?? profile.devcontainerConfigName,
     taskMode: skill?.taskMode ?? profile.taskMode,
-    resourceRequirementsJson: skill?.resourceRequirementsJson ?? null,
+    resourceRequirementsJson: skill
+      ? skill.resourceRequirementsJson
+      : profile.resourceRequirementsJson,
+    agentProfileResourceRequirementsJson: profile.resourceRequirementsJson,
     defaultProfileId: skill?.defaultProfileId ?? null,
   };
 }

@@ -41,6 +41,10 @@ import {
 } from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
+import {
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '../../services/resource-requirements-input';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import type { TaskTitleConfig } from '../../services/task-title';
@@ -139,6 +143,18 @@ submitRoutes.post(
 
     // Validated by Valibot middleware
     const body = c.req.valid('json');
+    const taskResourceRequirements = (() => {
+      try {
+        return body.resourceRequirements === undefined
+          ? undefined
+          : normalizeResourceRequirementsInput(body.resourceRequirements);
+      } catch (err) {
+        if (err instanceof ResourceRequirementsValidationError) {
+          throw errors.badRequest(err.message);
+        }
+        throw err;
+      }
+    })();
 
     if (body.message.trim().length === 0) {
       throw errors.badRequest('Message is required');
@@ -284,8 +300,12 @@ submitRoutes.post(
       body.agentProfileId || body.skillId
         ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
         : null;
+    const profileResourceRequirements = parseSkillResourceRequirementsJson(
+      resolvedProfile?.agentProfileResourceRequirementsJson ??
+        (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson)
+    );
     const skillResourceRequirements = parseSkillResourceRequirementsJson(
-      resolvedProfile?.resourceRequirementsJson
+      resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null
     );
 
     const placement = (() => {
@@ -315,8 +335,9 @@ submitRoutes.post(
           credentialProjectPolicy: 'current-project-unless-inherited',
           taskModeDefault: 'workspace-profile',
           resourceRequirements: {
-            task: body.resourceRequirements,
+            task: taskResourceRequirements,
             skill: skillResourceRequirements,
+            agentProfile: profileResourceRequirements,
           },
         });
       } catch (err) {
@@ -416,9 +437,11 @@ submitRoutes.post(
       outputBranch: branchName,
       requestedVmSize: vmSize,
       requestedVmSizeSource: vmSizeSource,
-      resourceRequirementsJson: body.resourceRequirements
-        ? JSON.stringify(body.resourceRequirements)
-        : (resolvedProfile?.resourceRequirementsJson ?? null),
+      resourceRequirementsJson: taskResourceRequirements
+        ? JSON.stringify(taskResourceRequirements)
+        : (resolvedProfile?.resourceRequirementsJson ??
+          resolvedProfile?.agentProfileResourceRequirementsJson ??
+          null),
       resourceRequirementsSource: resolvedReservation.source,
       resolvedReservationJson: JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -606,7 +629,11 @@ submitRoutes.post(
           nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
           warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
         },
-        resourceRequirements: body.resourceRequirements ?? null,
+        resourceRequirements:
+          taskResourceRequirements ??
+          skillResourceRequirements ??
+          profileResourceRequirements ??
+          null,
         resolvedReservation,
         capacityPoolSelection,
         vmSizeSource,

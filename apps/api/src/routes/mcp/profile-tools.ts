@@ -3,7 +3,10 @@
  *
  * Wires MCP handlers to existing service functions in services/agent-profiles.ts.
  */
-import type { CreateAgentProfileRequest, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
+import type {
+  CreateAgentProfileRequest,
+  UpdateAgentProfileRequest,
+} from '@simple-agent-manager/shared';
 import { isAgentEffort } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -32,21 +35,42 @@ import {
 } from './_helpers';
 
 /** Extract optional profile fields from MCP params — shared by create and update handlers. */
-export function extractProfileFields(params: Record<string, unknown>): Omit<UpdateAgentProfileRequest, 'name'> {
+export function extractProfileFields(
+  params: Record<string, unknown>
+): Omit<UpdateAgentProfileRequest, 'name'> {
   const fields: Omit<UpdateAgentProfileRequest, 'name'> = {};
   if (typeof params.description === 'string') fields.description = params.description;
   if (typeof params.agentType === 'string') fields.agentType = params.agentType;
   if (typeof params.model === 'string') fields.model = params.model;
   if (isAgentEffort(params.effort)) fields.effort = params.effort;
   if (typeof params.permissionMode === 'string') fields.permissionMode = params.permissionMode;
-  if (typeof params.systemPromptAppend === 'string') fields.systemPromptAppend = params.systemPromptAppend;
+  if (typeof params.systemPromptAppend === 'string')
+    fields.systemPromptAppend = params.systemPromptAppend;
   if (typeof params.maxTurns === 'number') fields.maxTurns = params.maxTurns;
   if (typeof params.timeoutMinutes === 'number') fields.timeoutMinutes = params.timeoutMinutes;
   if (typeof params.vmSizeOverride === 'string') fields.vmSizeOverride = params.vmSizeOverride;
+  if (
+    params.resourceRequirements === null ||
+    (typeof params.resourceRequirements === 'object' && !Array.isArray(params.resourceRequirements))
+  ) {
+    fields.resourceRequirements =
+      params.resourceRequirements as UpdateAgentProfileRequest['resourceRequirements'];
+  }
+  if (
+    typeof params.resourceRequirementsJson === 'string' ||
+    params.resourceRequirementsJson === null
+  ) {
+    fields.resourceRequirementsJson = params.resourceRequirementsJson;
+  }
   if (typeof params.provider === 'string') fields.provider = params.provider;
   if (typeof params.vmLocation === 'string') fields.vmLocation = params.vmLocation;
-  if (typeof params.workspaceProfile === 'string') fields.workspaceProfile = params.workspaceProfile;
-  if (typeof params.devcontainerConfigName === 'string') fields.devcontainerConfigName = params.devcontainerConfigName;
+  if (typeof params.workspaceProfile === 'string')
+    fields.workspaceProfile = params.workspaceProfile;
+  if (typeof params.runtime === 'string' || params.runtime === null) {
+    fields.runtime = params.runtime as UpdateAgentProfileRequest['runtime'];
+  }
+  if (typeof params.devcontainerConfigName === 'string')
+    fields.devcontainerConfigName = params.devcontainerConfigName;
   if (typeof params.taskMode === 'string') fields.taskMode = params.taskMode;
   return fields;
 }
@@ -55,29 +79,40 @@ export async function handleListAgentProfiles(
   requestId: string | number | null,
   _params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   try {
     const db = drizzle(env.DATABASE, { schema });
     await requireProjectAccess(db, tokenData.projectId, tokenData.userId);
-    const profiles = await agentProfileService.listProfiles(db, tokenData.projectId, tokenData.userId, env);
+    const profiles = await agentProfileService.listProfiles(
+      db,
+      tokenData.projectId,
+      tokenData.userId,
+      env
+    );
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          profiles: profiles.map((p) => ({
-            id: p.id,
-            name: p.name,
-            description: p.description,
-            agentType: p.agentType,
-            model: p.model,
-            effort: p.effort,
-            isBuiltin: p.isBuiltin,
-          })),
-          count: profiles.length,
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              profiles: profiles.map((p) => ({
+                id: p.id,
+                name: p.name,
+                description: p.description,
+                agentType: p.agentType,
+                model: p.model,
+                effort: p.effort,
+                isBuiltin: p.isBuiltin,
+              })),
+              count: profiles.length,
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
     return mapServiceError(requestId, err, {
@@ -92,7 +127,7 @@ export async function handleGetAgentProfile(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const profileId = typeof params.profileId === 'string' ? params.profileId.trim() : '';
   if (!profileId) {
@@ -102,33 +137,45 @@ export async function handleGetAgentProfile(
   try {
     const db = drizzle(env.DATABASE, { schema });
     await requireProjectAccess(db, tokenData.projectId, tokenData.userId);
-    const profile = await agentProfileService.getProfile(db, tokenData.projectId, profileId, tokenData.userId);
+    const profile = await agentProfileService.getProfile(
+      db,
+      tokenData.projectId,
+      profileId,
+      tokenData.userId
+    );
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          id: profile.id,
-          name: profile.name,
-          description: profile.description,
-          agentType: profile.agentType,
-          model: profile.model,
-          effort: profile.effort,
-          permissionMode: profile.permissionMode,
-          systemPromptAppend: profile.systemPromptAppend,
-          maxTurns: profile.maxTurns,
-          timeoutMinutes: profile.timeoutMinutes,
-          vmSizeOverride: profile.vmSizeOverride,
-          provider: profile.provider,
-          vmLocation: profile.vmLocation,
-          workspaceProfile: profile.workspaceProfile,
-          devcontainerConfigName: profile.devcontainerConfigName,
-          taskMode: profile.taskMode,
-          isBuiltin: profile.isBuiltin,
-          createdAt: profile.createdAt,
-          updatedAt: profile.updatedAt,
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              id: profile.id,
+              name: profile.name,
+              description: profile.description,
+              agentType: profile.agentType,
+              model: profile.model,
+              effort: profile.effort,
+              permissionMode: profile.permissionMode,
+              systemPromptAppend: profile.systemPromptAppend,
+              maxTurns: profile.maxTurns,
+              timeoutMinutes: profile.timeoutMinutes,
+              vmSizeOverride: profile.vmSizeOverride,
+              resourceRequirementsJson: profile.resourceRequirementsJson,
+              provider: profile.provider,
+              vmLocation: profile.vmLocation,
+              workspaceProfile: profile.workspaceProfile,
+              devcontainerConfigName: profile.devcontainerConfigName,
+              taskMode: profile.taskMode,
+              isBuiltin: profile.isBuiltin,
+              createdAt: profile.createdAt,
+              updatedAt: profile.updatedAt,
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
     return mapServiceError(requestId, err, {
@@ -144,11 +191,15 @@ export async function handleCreateAgentProfile(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const name = typeof params.name === 'string' ? params.name.trim() : '';
   if (!name) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'name is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'name is required and must be a non-empty string'
+    );
   }
 
   const body: CreateAgentProfileRequest = { name, ...extractProfileFields(params) };
@@ -156,7 +207,13 @@ export async function handleCreateAgentProfile(
   try {
     const db = drizzle(env.DATABASE, { schema });
     await requireProjectCapability(db, tokenData.projectId, tokenData.userId, 'project:update');
-    const profile = await agentProfileService.createProfile(db, tokenData.projectId, tokenData.userId, body, env);
+    const profile = await agentProfileService.createProfile(
+      db,
+      tokenData.projectId,
+      tokenData.userId,
+      body,
+      env
+    );
 
     log.info('mcp.create_agent_profile', {
       profileId: profile.id,
@@ -166,19 +223,26 @@ export async function handleCreateAgentProfile(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          id: profile.id,
-          name: profile.name,
-          description: profile.description,
-          agentType: profile.agentType,
-          model: profile.model,
-          effort: profile.effort,
-          isBuiltin: profile.isBuiltin,
-          message: 'Agent profile created successfully.',
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              id: profile.id,
+              name: profile.name,
+              description: profile.description,
+              agentType: profile.agentType,
+              model: profile.model,
+              effort: profile.effort,
+              resourceRequirementsJson: profile.resourceRequirementsJson,
+              isBuiltin: profile.isBuiltin,
+              message: 'Agent profile created successfully.',
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
     return mapServiceError(requestId, err, {
@@ -194,7 +258,7 @@ export async function handleUpdateAgentProfile(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const profileId = typeof params.profileId === 'string' ? params.profileId.trim() : '';
   if (!profileId) {
@@ -206,13 +270,23 @@ export async function handleUpdateAgentProfile(
   Object.assign(body, extractProfileFields(params));
 
   if (Object.keys(body).length === 0) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'No fields to update. Provide at least one field to change.');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'No fields to update. Provide at least one field to change.'
+    );
   }
 
   try {
     const db = drizzle(env.DATABASE, { schema });
     await requireProjectCapability(db, tokenData.projectId, tokenData.userId, 'project:update');
-    const profile = await agentProfileService.updateProfile(db, tokenData.projectId, profileId, tokenData.userId, body);
+    const profile = await agentProfileService.updateProfile(
+      db,
+      tokenData.projectId,
+      profileId,
+      tokenData.userId,
+      body
+    );
 
     log.info('mcp.update_agent_profile', {
       profileId,
@@ -221,15 +295,21 @@ export async function handleUpdateAgentProfile(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          updated: true,
-          id: profile.id,
-          name: profile.name,
-          updatedFields: Object.keys(body),
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              updated: true,
+              id: profile.id,
+              name: profile.name,
+              updatedFields: Object.keys(body),
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
     return mapServiceError(requestId, err, {
@@ -245,7 +325,7 @@ export async function handleDeleteAgentProfile(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const profileId = typeof params.profileId === 'string' ? params.profileId.trim() : '';
   if (!profileId) {
@@ -264,13 +344,19 @@ export async function handleDeleteAgentProfile(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          deleted: true,
-          profileId,
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              deleted: true,
+              profileId,
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
     return mapServiceError(requestId, err, {
@@ -286,7 +372,7 @@ export async function handleListProfileEnvVars(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const profileId = getProfileIdParam(params);
   if (!profileId) {
@@ -300,10 +386,12 @@ export async function handleListProfileEnvVars(
     const response = await buildProfileRuntimeConfigResponse(db, profileId, tokenData.userId);
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ envVars: response.envVars }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ envVars: response.envVars }, null, 2),
+        },
+      ],
     });
   } catch (err) {
     return profileRuntimeError(requestId, err, 'list_profile_env_vars', profileId);
@@ -314,7 +402,7 @@ export async function handleAddProfileEnvVar(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const profileId = getProfileIdParam(params);
   const key = typeof params.key === 'string' ? params.key.trim() : '';
@@ -349,10 +437,16 @@ export async function handleAddProfileEnvVar(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ updated: true, profileId, key, isSecret: Boolean(params.isSecret) }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            { updated: true, profileId, key, isSecret: Boolean(params.isSecret) },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
     return profileRuntimeError(requestId, err, 'add_profile_env_var', profileId);
@@ -363,7 +457,7 @@ export async function handleRemoveProfileEnvVar(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const profileId = getProfileIdParam(params);
   const key = typeof params.key === 'string' ? params.key.trim() : '';
@@ -379,10 +473,12 @@ export async function handleRemoveProfileEnvVar(
     await deleteProfileRuntimeEnvVar(db, profileId, tokenData.userId, key);
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ deleted: true, profileId, key }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ deleted: true, profileId, key }, null, 2),
+        },
+      ],
     });
   } catch (err) {
     return profileRuntimeError(requestId, err, 'remove_profile_env_var', profileId);
@@ -405,5 +501,9 @@ function profileRuntimeError(
   }
 
   log.error(`mcp.${toolName}_failed`, { profileId, error: String(err) });
-  return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to ${toolName}: ${(err as Error).message}`);
+  return jsonRpcError(
+    requestId,
+    INTERNAL_ERROR,
+    `Failed to ${toolName}: ${(err as Error).message}`
+  );
 }

@@ -18,6 +18,10 @@ import {
   validateCronExpression,
 } from '../../services/cron-utils';
 import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../../services/resource-requirements-input';
+import {
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
@@ -159,6 +163,25 @@ export async function handleUpdateTrigger(
     values.push(params.vmSizeOverride);
   }
 
+  if (params.resourceRequirements !== undefined || params.resourceRequirementsJson !== undefined) {
+    try {
+      const resourceRequirementsJson =
+        params.resourceRequirements !== undefined
+          ? serializeResourceRequirementsInput(params.resourceRequirements)
+          : serializeResourceRequirementsInput(
+              params.resourceRequirementsJson,
+              'resourceRequirementsJson'
+            );
+      updates.push('resource_requirements_json = ?');
+      values.push(resourceRequirementsJson);
+    } catch (err) {
+      if (err instanceof ResourceRequirementsValidationError) {
+        return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+      }
+      throw err;
+    }
+  }
+
   if (params.maxConcurrent !== undefined) {
     if (typeof params.maxConcurrent !== 'number' || !Number.isInteger(params.maxConcurrent)) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'maxConcurrent must be an integer');
@@ -290,7 +313,8 @@ export async function handleUpdateTrigger(
   const updated = await env.DATABASE.prepare(
     `SELECT id, project_id, name, description, status, source_type, cron_expression,
       cron_timezone, skip_if_running, prompt_template, agent_profile_id, skill_id,
-      task_mode, vm_size_override, max_concurrent, next_fire_at, created_at, updated_at
+      task_mode, vm_size_override, resource_requirements_json, max_concurrent, next_fire_at,
+      created_at, updated_at
      FROM triggers
      WHERE id = ? AND project_id = ?
      LIMIT 1`

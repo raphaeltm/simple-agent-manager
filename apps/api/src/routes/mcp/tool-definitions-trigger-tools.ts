@@ -74,8 +74,27 @@ export const TRIGGER_TOOLS = [
         },
         vmSizeOverride: {
           type: 'string',
-          description: 'VM size override (small, medium, large). Defaults to project default.',
+          description:
+            'Deprecated legacy VM size override (small, medium, large). Prefer resourceRequirements; the canonical compatibility adapter translates legacy tiers.',
           enum: ['small', 'medium', 'large'],
+        },
+        resourceRequirements: {
+          type: ['object', 'null'],
+          description:
+            'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. Omitted fields inherit; explicit false is preserved.',
+          properties: {
+            minVcpu: { type: 'number', minimum: 0 },
+            minMemoryGb: { type: 'number', minimum: 0 },
+            minDiskGb: { type: 'number', minimum: 0 },
+            exclusiveNode: { type: 'boolean' },
+            maxCoTenants: { type: 'number', minimum: 0 },
+          },
+          additionalProperties: true,
+        },
+        resourceRequirementsJson: {
+          type: ['string', 'null'],
+          description:
+            'Compatibility JSON string for trigger workload requirements. Prefer resourceRequirements.',
         },
       },
       required: ['name', 'cronExpression', 'promptTemplate'],
@@ -144,8 +163,27 @@ export const TRIGGER_TOOLS = [
         },
         vmSizeOverride: {
           type: ['string', 'null'],
-          description: 'VM size override. Use null to clear the override.',
+          description:
+            'Deprecated legacy VM size override. Use null to clear the override. Prefer resourceRequirements.',
           enum: ['small', 'medium', 'large', null],
+        },
+        resourceRequirements: {
+          type: ['object', 'null'],
+          description:
+            'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. Omitted fields inherit; explicit false is preserved. Use null to clear.',
+          properties: {
+            minVcpu: { type: 'number', minimum: 0 },
+            minMemoryGb: { type: 'number', minimum: 0 },
+            minDiskGb: { type: 'number', minimum: 0 },
+            exclusiveNode: { type: 'boolean' },
+            maxCoTenants: { type: 'number', minimum: 0 },
+          },
+          additionalProperties: true,
+        },
+        resourceRequirementsJson: {
+          type: ['string', 'null'],
+          description:
+            'Compatibility JSON string for trigger workload requirements. Prefer resourceRequirements. Use null to clear.',
         },
         maxConcurrent: {
           type: 'number',

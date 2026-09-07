@@ -31,6 +31,7 @@ export interface BaseProfileRow {
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
+  resourceRequirementsJson: string | null;
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
@@ -56,6 +57,7 @@ export interface BaseProfileFieldsResponse {
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
+  resourceRequirementsJson: string | null;
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
@@ -72,9 +74,7 @@ export interface BaseProfileFieldsResponse {
  * converting the integer `isBuiltin` flag to a boolean. Generic over the row type
  * so each caller preserves its exact field union types.
  */
-export function toBaseProfileFields<R extends BaseProfileRow>(
-  row: R
-): BaseProfileFieldsResponse {
+export function toBaseProfileFields<R extends BaseProfileRow>(row: R): BaseProfileFieldsResponse {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -89,6 +89,7 @@ export function toBaseProfileFields<R extends BaseProfileRow>(
     maxTurns: row.maxTurns,
     timeoutMinutes: row.timeoutMinutes,
     vmSizeOverride: row.vmSizeOverride,
+    resourceRequirementsJson: row.resourceRequirementsJson,
     provider: row.provider,
     vmLocation: row.vmLocation,
     workspaceProfile: row.workspaceProfile,
@@ -112,6 +113,7 @@ export interface BaseProfileWriteInput {
   maxTurns?: number | null;
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
+  resourceRequirementsJson?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
@@ -139,6 +141,7 @@ export function baseProfileInsertValues(
     maxTurns: body.maxTurns ?? null,
     timeoutMinutes: body.timeoutMinutes ?? null,
     vmSizeOverride: body.vmSizeOverride ?? null,
+    resourceRequirementsJson: body.resourceRequirementsJson ?? null,
     provider: body.provider ?? null,
     vmLocation: body.vmLocation ?? null,
     workspaceProfile: body.workspaceProfile ?? null,
@@ -162,6 +165,7 @@ const BASE_PROFILE_UPDATE_FIELDS = [
   'maxTurns',
   'timeoutMinutes',
   'vmSizeOverride',
+  'resourceRequirementsJson',
   'provider',
   'vmLocation',
   'workspaceProfile',

@@ -37,6 +37,35 @@ func TestSubmitTaskBuildsAuthenticatedRequest(t *testing.T) {
 	}
 }
 
+func TestSubmitTaskIncludesModernResourceRequirements(t *testing.T) {
+	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","branchName":"sam/demo","status":"queued"}`, http.StatusAccepted)
+	client := NewAPIClient(CLIConfig{
+		APIURL:        "https://api.example.com",
+		SessionCookie: "better-auth.session_token=secret",
+	}, doer)
+	minVCPU := 4.0
+	exclusive := false
+
+	_, err := client.SubmitTask(context.Background(), "project_1", "Build CLI", TaskSubmitOptions{
+		VMSize: "large",
+		Resource: &ResourceRequirements{
+			MinVCPU:       &minVCPU,
+			ExclusiveNode: &exclusive,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resources, ok := captured.JSON["resourceRequirements"].(map[string]any)
+	if !ok {
+		t.Fatalf("resourceRequirements missing from %#v", captured.JSON)
+	}
+	if captured.JSON["vmSize"] != "large" || resources["minVcpu"] != 4.0 || resources["exclusiveNode"] != false {
+		t.Fatalf("unexpected payload: %#v", captured.JSON)
+	}
+}
+
 func TestProjectAPIPathEscapesEveryDynamicSegment(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"success":true}`, http.StatusOK)
 	client := NewAPIClient(CLIConfig{

@@ -43,7 +43,26 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
   },
   vmSizeOverride: {
     type: 'string',
-    description: 'VM size override: small, medium, large',
+    description:
+      'Deprecated legacy VM size override: small, medium, large. Prefer resourceRequirements; the canonical compatibility adapter translates legacy tiers.',
+  },
+  resourceRequirements: {
+    type: ['object', 'null'],
+    description:
+      'Modern workload requirements for this configuration layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. Omitted fields inherit; explicit false is preserved. Null clears the value on update.',
+    properties: {
+      minVcpu: { type: 'number', minimum: 0 },
+      minMemoryGb: { type: 'number', minimum: 0 },
+      minDiskGb: { type: 'number', minimum: 0 },
+      exclusiveNode: { type: 'boolean' },
+      maxCoTenants: { type: 'number', minimum: 0 },
+    },
+    additionalProperties: true,
+  },
+  resourceRequirementsJson: {
+    type: ['string', 'null'],
+    description:
+      'Compatibility JSON string for workload requirements. Prefer resourceRequirements; accepted so older skill/profile clients can round-trip stored values.',
   },
   provider: {
     type: 'string',
@@ -73,6 +92,6 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
 export const VALID_VALUES_HINT =
   'Valid permissionMode values: default, acceptEdits, plan, dontAsk, bypassPermissions. ' +
   'Valid effort values: auto, low, medium, high, xhigh, max. ' +
-  'Valid vmSize values: small, medium, large. ' +
+  'Deprecated vmSize/vmSizeOverride values remain accepted: small, medium, large. Prefer resourceRequirements for workload sizing. ' +
   'Valid taskMode values: task, conversation. ' +
   'Valid workspaceProfile values: full, lightweight.';

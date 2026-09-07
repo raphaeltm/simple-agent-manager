@@ -11,7 +11,9 @@ import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-const mockValidateCron = vi.fn().mockReturnValue({ valid: true, humanReadable: 'Every day at 9:00 AM' });
+const mockValidateCron = vi
+  .fn()
+  .mockReturnValue({ valid: true, humanReadable: 'Every day at 9:00 AM' });
 vi.mock('../../../src/services/cron-utils', () => ({
   validateCronExpression: (...args: unknown[]) => mockValidateCron(...args),
   cronToNextFire: vi.fn().mockReturnValue('2026-04-10T09:00:00.000Z'),
@@ -83,7 +85,7 @@ describe('MCP create_trigger tool', () => {
         promptTemplate: 'Review all open PRs',
       },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeUndefined();
@@ -103,7 +105,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -115,7 +117,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -127,7 +129,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: '   ' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -140,7 +142,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: longTemplate },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -154,7 +156,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: 'not-valid', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -164,9 +166,14 @@ describe('MCP create_trigger tool', () => {
   it('rejects invalid timezone', async () => {
     const result = await handleCreateTrigger(
       'req-1',
-      { name: 'Test', cronExpression: '0 9 * * *', cronTimezone: 'Invalid/Zone', promptTemplate: 'Do stuff' },
+      {
+        name: 'Test',
+        cronExpression: '0 9 * * *',
+        cronTimezone: 'Invalid/Zone',
+        promptTemplate: 'Do stuff',
+      },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -186,7 +193,7 @@ describe('MCP create_trigger tool', () => {
         agentProfileId: 'nonexistent-profile',
       },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -201,7 +208,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Daily Review', cronExpression: '0 9 * * *', promptTemplate: 'Review PRs' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -220,7 +227,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -239,7 +246,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -258,7 +265,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeUndefined();
@@ -274,7 +281,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeUndefined();
@@ -283,7 +290,7 @@ describe('MCP create_trigger tool', () => {
     expect(parsed.cronTimezone).toBe('UTC');
   });
 
-  it('accepts optional fields (agentProfileId, taskMode, vmSizeOverride)', async () => {
+  it('accepts optional fields (agentProfileId, taskMode, vmSizeOverride, resourceRequirements)', async () => {
     // agentProfileId lookup: found
     mockD1._stmt.first.mockResolvedValueOnce({ id: 'profile-1' });
     // Name uniqueness: no conflict
@@ -302,9 +309,10 @@ describe('MCP create_trigger tool', () => {
         agentProfileId: 'profile-1',
         taskMode: 'conversation',
         vmSizeOverride: 'large',
+        resourceRequirements: { minVcpu: 4, exclusiveNode: false, maxCoTenants: 0 },
       },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeUndefined();
@@ -312,9 +320,12 @@ describe('MCP create_trigger tool', () => {
     const parsed = JSON.parse(content.text);
     expect(parsed.taskMode).toBe('conversation');
     expect(parsed.vmSizeOverride).toBe('large');
+    expect(parsed.resourceRequirementsJson).toBe(
+      '{"minVcpu":4,"exclusiveNode":false,"maxCoTenants":0}'
+    );
   });
 
-  it('ignores invalid vmSizeOverride values', async () => {
+  it('rejects invalid vmSizeOverride values', async () => {
     mockD1._stmt.first.mockResolvedValueOnce(null);
     mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
     mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
@@ -328,12 +339,27 @@ describe('MCP create_trigger tool', () => {
         vmSizeOverride: 'xlarge',
       },
       tokenData,
-      env as Env,
+      env as Env
     );
 
-    expect(result.error).toBeUndefined();
-    const content = (result.result as { content: { text: string }[] }).content[0];
-    const parsed = JSON.parse(content.text);
-    expect(parsed.vmSizeOverride).toBeNull();
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('vmSizeOverride must be');
+  });
+
+  it('rejects malformed resourceRequirements', async () => {
+    const result = await handleCreateTrigger(
+      'req-1',
+      {
+        name: 'Test',
+        cronExpression: '0 9 * * *',
+        promptTemplate: 'Do stuff',
+        resourceRequirements: { minMemoryGb: -1 },
+      },
+      tokenData,
+      env as Env
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('finite non-negative number');
   });
 });
