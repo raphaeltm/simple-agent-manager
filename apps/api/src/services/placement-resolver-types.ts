@@ -59,6 +59,8 @@ export interface PlacementProfileDefaults {
   skillId?: string | null;
   agentType?: string | null;
   vmSizeOverride?: string | null;
+  skillVmSizeOverride?: string | null;
+  agentProfileVmSizeOverride?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
@@ -241,4 +243,5 @@ export type PlacementResolutionErrorCode =
   | 'invalid-provider'
   | 'invalid-location'
   | 'invalid-resource-requirements'
+  | 'invalid-credential-attribution'
   | 'no-eligible-capacity-candidate';

@@ -8,11 +8,7 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
-import {
-  seedCloudCredential,
-  seedProjectWithMember,
-  seedUser,
-} from './capacity-pool-test-seeds';
+import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
 const mocks = vi.hoisted(() => ({
   requireRepositoryUserAccess: vi.fn(),
@@ -98,6 +94,26 @@ function seedRunRows(sqlite: Database.Database): void {
        )`
     )
     .run();
+}
+
+function readRunTaskResourceRow(sqlite: Database.Database): {
+  status: string;
+  resource_requirements_json: string | null;
+  resource_requirements_source: string | null;
+  resolved_reservation_json: string | null;
+} {
+  return sqlite
+    .prepare(
+      `SELECT status, resource_requirements_json, resource_requirements_source, resolved_reservation_json
+       FROM tasks
+       WHERE id = 'task-1'`
+    )
+    .get() as {
+    status: string;
+    resource_requirements_json: string | null;
+    resource_requirements_source: string | null;
+    resolved_reservation_json: string | null;
+  };
 }
 
 async function seedProjectDefaultPool(env: Env): Promise<void> {
@@ -209,5 +225,213 @@ describe('task run capacity-pool placement', () => {
         }),
       })
     );
+  });
+
+  it('preserves stored task resource requirements when the run request omits them', async () => {
+    const { sqlite, env } = createEnv();
+    seedRunRows(sqlite);
+    await seedProjectDefaultPool(env);
+    const storedRequirements = JSON.stringify({
+      minVcpu: 2,
+      exclusiveNode: false,
+      minDiskGb: 0,
+    });
+    sqlite
+      .prepare(`UPDATE tasks SET resource_requirements_json = ? WHERE id = 'task-1'`)
+      .run(storedRequirements);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/task-1/run',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      env,
+      executionCtx
+    );
+
+    expect(res.status).toBe(202);
+    const row = readRunTaskResourceRow(sqlite);
+    expect(row.resource_requirements_json).toBe(storedRequirements);
+    expect(row.resource_requirements_source).toBe('task');
+    const reservation = JSON.parse(row.resolved_reservation_json ?? '{}') as {
+      source: string;
+      sourceId: string;
+      diskMb: number;
+      exclusiveNode: boolean;
+      fieldProvenance: Record<string, { source: string; value: unknown }>;
+    };
+    expect(reservation.source).toBe('task');
+    expect(reservation.sourceId).toBe('task-1');
+    expect(reservation.diskMb).toBe(0);
+    expect(reservation.exclusiveNode).toBe(false);
+    expect(reservation.fieldProvenance.minDiskGb).toMatchObject({
+      source: 'task',
+      value: 0,
+    });
+    expect(reservation.fieldProvenance.exclusiveNode).toMatchObject({
+      source: 'task',
+      value: false,
+    });
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        resourceRequirements: {
+          minVcpu: 2,
+          exclusiveNode: false,
+          minDiskGb: 0,
+        },
+      })
+    );
+  });
+
+  it('uses explicit modern run requirements as the task layer and fills remaining fields from project layer', async () => {
+    const { sqlite, env } = createEnv();
+    seedRunRows(sqlite);
+    sqlite
+      .prepare(
+        `UPDATE projects
+         SET resource_requirements_json = ?
+         WHERE id = 'project-1'`
+      )
+      .run(JSON.stringify({ minVcpu: 2, exclusiveNode: false, minDiskGb: 0 }));
+    await seedProjectDefaultPool(env);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/task-1/run',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resourceRequirements: { minMemoryGb: 4 } }),
+      },
+      env,
+      executionCtx
+    );
+
+    expect(res.status).toBe(202);
+    const row = readRunTaskResourceRow(sqlite);
+    expect(JSON.parse(row.resource_requirements_json ?? '{}')).toEqual({ minMemoryGb: 4 });
+    const reservation = JSON.parse(row.resolved_reservation_json ?? '{}') as {
+      source: string;
+      fieldProvenance: Record<string, { source: string; value: unknown }>;
+    };
+    expect(reservation.source).toBe('task');
+    expect(reservation.fieldProvenance.minMemoryGb).toMatchObject({
+      source: 'task',
+      value: 4,
+    });
+    expect(reservation.fieldProvenance.minVcpu).toMatchObject({
+      source: 'project',
+      value: 2,
+    });
+    expect(reservation.fieldProvenance.minDiskGb).toMatchObject({
+      source: 'project',
+      value: 0,
+    });
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        resourceRequirements: { minMemoryGb: 4 },
+        resolvedReservation: expect.objectContaining({ source: 'task' }),
+      })
+    );
+  });
+
+  it('clears stored task requirements on explicit null and resolves lower project requirements', async () => {
+    const { sqlite, env } = createEnv();
+    seedRunRows(sqlite);
+    sqlite
+      .prepare(
+        `UPDATE projects
+         SET resource_requirements_json = ?
+         WHERE id = 'project-1'`
+      )
+      .run(JSON.stringify({ minVcpu: 2, exclusiveNode: false, minDiskGb: 0 }));
+    sqlite
+      .prepare(`UPDATE tasks SET resource_requirements_json = ? WHERE id = 'task-1'`)
+      .run(JSON.stringify({ minVcpu: 4 }));
+    await seedProjectDefaultPool(env);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/task-1/run',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resourceRequirements: null }),
+      },
+      env,
+      executionCtx
+    );
+
+    expect(res.status).toBe(202);
+    const row = readRunTaskResourceRow(sqlite);
+    expect(row.resource_requirements_json).toBeNull();
+    expect(row.resource_requirements_source).toBe('project');
+    const reservation = JSON.parse(row.resolved_reservation_json ?? '{}') as {
+      source: string;
+      fieldProvenance: Record<string, { source: string; value: unknown }>;
+    };
+    expect(reservation.source).toBe('project');
+    expect(reservation.fieldProvenance.minVcpu).toMatchObject({
+      source: 'project',
+      value: 2,
+    });
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        resourceRequirements: {
+          minVcpu: 2,
+          exclusiveNode: false,
+          minDiskGb: 0,
+        },
+      })
+    );
+  });
+
+  it('rejects malformed stored task requirements without wiping metadata or starting a runner', async () => {
+    const { sqlite, env } = createEnv();
+    seedRunRows(sqlite);
+    sqlite
+      .prepare(`UPDATE tasks SET resource_requirements_json = ? WHERE id = 'task-1'`)
+      .run('{malformed');
+
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/task-1/run',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+      env,
+      executionCtx
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.message).toContain('task.resourceRequirementsJson is malformed');
+    const row = readRunTaskResourceRow(sqlite);
+    expect(row.status).toBe('ready');
+    expect(row.resource_requirements_json).toBe('{malformed');
+    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid modern run requirements without updating the task', async () => {
+    const { sqlite, env } = createEnv();
+    seedRunRows(sqlite);
+    sqlite
+      .prepare(`UPDATE tasks SET resource_requirements_json = ? WHERE id = 'task-1'`)
+      .run(JSON.stringify({ minVcpu: 2 }));
+
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/task-1/run',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resourceRequirements: { minVcpu: 0 } }),
+      },
+      env,
+      executionCtx
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.message).toContain('minVcpu');
+    const row = readRunTaskResourceRow(sqlite);
+    expect(row.status).toBe('ready');
+    expect(JSON.parse(row.resource_requirements_json ?? '{}')).toEqual({ minVcpu: 2 });
+    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 });
