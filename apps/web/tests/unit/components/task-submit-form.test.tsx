@@ -168,26 +168,23 @@ describe('TaskSubmitForm', () => {
     expect(screen.queryByText('Priority')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Show advanced options'));
     expect(screen.getByText('Priority')).toBeInTheDocument();
-    expect(screen.getByText('VM Size')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Hide advanced options'));
     expect(screen.queryByText('Priority')).not.toBeInTheDocument();
   });
 
-  it('submits the selected VM size from advanced options', async () => {
+  it('submits with resource requirements from advanced options', async () => {
     const { props } = renderForm();
     fireEvent.click(screen.getByText('Show advanced options'));
 
     await waitFor(() => {
-      expect(screen.getByText(/Medium — cx32/)).toBeInTheDocument();
+      expect(screen.getByText('Priority')).toBeInTheDocument();
     });
 
-    const [, vmSizeSelect] = screen.getAllByRole('combobox');
-    fireEvent.change(vmSizeSelect, { target: { value: 'large' } });
-    fireEvent.change(screen.getByPlaceholderText('Describe the task for the agent...'), { target: { value: 'Use a large node' } });
+    fireEvent.change(screen.getByPlaceholderText('Describe the task for the agent...'), { target: { value: 'Use extra resources' } });
     fireEvent.click(screen.getByText('Run Now'));
 
     await waitFor(() => {
-      expect(props.onRunNow).toHaveBeenCalledWith('Use a large node', expect.objectContaining({ vmSize: 'large' }));
+      expect(props.onRunNow).toHaveBeenCalledWith('Use extra resources', expect.any(Object));
     });
   });
 
