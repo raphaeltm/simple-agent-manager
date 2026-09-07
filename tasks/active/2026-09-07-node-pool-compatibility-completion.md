@@ -239,3 +239,44 @@ recovery integration, native resource/effective-pool diagnostics, comprehensive
 compatibility/upgrade gates, documentation, final specialist reviews, and one
 coordinated staging sweep. Every original criterion remains required. The final
 deliverable is one green **open** PR; no merge is authorized by this request.
+
+### Recovery validation and review follow-up
+
+Request-persistence corrective commits are integrated at `eb89a8370`. API typecheck
+and 20 focused request-plan, retry, trigger-schema, dispatch-authority, and migration
+tests passed. The real Workers/D1 capacity-race suite also passed all six tests.
+These checkpoint checks do not replace final integrated acceptance.
+
+The allocation-authority and pool-reconciliation continuations stopped on provider
+usage limits. Their pushed application checkpoints were preserved, including
+meaningful autosaves. Replacement agents are recovering the remaining changes and
+addressing independent review findings on their own branches; failed workspaces
+remain untouched. Request authorization and form browser completion continue.
+
+The first executable boundary scanner is available at `93bfa4246` but remains
+unaccepted. Independent injected-fixture review found bypasses, metadata false
+positives, and incomplete allocation inventory evidence. A dedicated correction
+assignment owns those scanner defects. Its initial count of 76 findings is not a
+verified count of forbidden authority paths. Runtime, display, rollout, and final
+validation requirements remain unchanged.
+
+### Active recovery ownership
+
+The three original backend continuations terminated on provider usage limits.
+Their published checkpoints are preserved; unpublished filesystem recovery has
+not been verified. Replacement assignments use those checkpoints and reconstruct
+only missing changes, with independent review still required.
+
+| Scope | Current SAM task | Checkpoint or dependency |
+| --- | --- | --- |
+| Allocation authority and direct adapters | `01M1XFH3SHTKP79YDJ0DMC4CQ2` | Starts from `4e1d67565`; current-default and relay compensation findings remain required |
+| Pool reconciliation and settings | `01M1XFJSHZV180T9WTWDQZJGQC` | Merge `18054bfc3` reviewed; reserves additive migration `0153` |
+| Request persistence and execution authority | `01M1XH4423TCTD979QVXH4G4WH` | Starts from root `fba14b605`; four independent review findings remain required |
+| Actual resource-form browser proof | `01M1XDFEQT2VD51Z5XC5CTHH0C` | Completing real component interactions and screenshots |
+| Boundary scanner and allocation inventory | `01M1XG087A28G664J0YWDVT4A6` | WIP `830f8132d`; scanner review corrections remain required |
+
+The pool-reconciliation child's initial baseline typecheck claim was withdrawn:
+its command wrapper masked a nonzero exit status. It must rerun after installing
+dependencies. This correction does not invalidate the independently executed
+root checks on `eb89a8370` described above. No replacement checkpoint is accepted
+merely because it is pushed or its task is marked complete.

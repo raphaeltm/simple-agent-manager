@@ -8,6 +8,11 @@ import { and, eq, inArray, isNull, ne, or } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { AppDb } from '../middleware/project-auth';
+import {
+  authorizedRemainingExecutionPrincipals,
+  resolveTriggerExecutionUserId,
+  TRIGGER_EXECUTION_CAPABILITY,
+} from './trigger-execution-principal';
 
 const INHERITED_COMPUTE_TARGET = 'inherited-provider';
 
@@ -148,16 +153,29 @@ async function addTriggerResources(input: {
   departingUserId: string;
   defaultAgentType: string;
   remainingCoverage: Map<CoverageKey, RemainingAttachmentCoverage>;
+  hasAuthorizedRemainingExecutionPrincipal: boolean;
   resourcesByKey: Map<string, ResourceDraft>;
 }): Promise<void> {
+  // Inventory by EFFECTIVE EXECUTOR (`execution_user_id ?? user_id`), not by
+  // creator. A keep-active transfer moves the principal without touching
+  // `user_id`, so a creator-only predicate missed every transferred trigger:
+  // offboarding B after an A -> B transfer left the trigger running as a removed
+  // member. It also stops flagging a trigger for a departing creator whose
+  // access it no longer consumes.
   const triggers = await input.db
     .select()
     .from(schema.triggers)
     .where(
       and(
         eq(schema.triggers.projectId, input.project.id),
-        eq(schema.triggers.userId, input.departingUserId),
-        eq(schema.triggers.status, 'active')
+        eq(schema.triggers.status, 'active'),
+        or(
+          eq(schema.triggers.executionUserId, input.departingUserId),
+          and(
+            isNull(schema.triggers.executionUserId),
+            eq(schema.triggers.userId, input.departingUserId)
+          )
+        )
       )
     );
   if (triggers.length === 0) return;
@@ -185,7 +203,13 @@ async function addTriggerResources(input: {
       profile?.provider ?? input.project.defaultProvider ?? INHERITED_COMPUTE_TARGET;
     const agentCoverage = hasRemainingCoverage(input.remainingCoverage, 'agent', agentTarget);
     const computeCoverage = hasRemainingCoverage(input.remainingCoverage, 'compute', computeTarget);
-    const actions = buildActions(Boolean(agentCoverage && computeCoverage));
+    // Keeping a trigger active also needs a principal that can still execute it.
+    // Without one, `submitTriggeredTask` rejects the very next fire, so the
+    // option must not be offered.
+    const actions = buildActions(
+      Boolean(agentCoverage && computeCoverage) && input.hasAuthorizedRemainingExecutionPrincipal
+    );
+    const executionUserIdBefore = resolveTriggerExecutionUserId(trigger);
 
     addResource(input.resourcesByKey, {
       resourceKind: 'trigger',
@@ -194,7 +218,8 @@ async function addTriggerResources(input: {
       subtitle: trigger.sourceType === 'cron' ? trigger.cronExpression : trigger.sourceType,
       href: `/projects/${input.project.id}/triggers/${trigger.id}`,
       credentialSourceBefore: 'user',
-      attributionUserIdBefore: trigger.userId,
+      // The departing member whose access this trigger actually consumes.
+      attributionUserIdBefore: executionUserIdBefore,
       attributionProjectIdBefore: input.project.id,
       ...actions,
       requiresHumanDecision: true,
@@ -204,6 +229,14 @@ async function addTriggerResources(input: {
         sourceType: trigger.sourceType,
         agentTarget,
         computeTarget,
+        // Creator and executor are distinct after a keep-active transfer; the
+        // audit row records both so a reviewer can see which one is departing.
+        creatorUserId: trigger.userId,
+        executionUserId: trigger.executionUserId,
+        effectiveExecutionUserId: executionUserIdBefore,
+        executionCapability: TRIGGER_EXECUTION_CAPABILITY,
+        hasAuthorizedRemainingExecutionPrincipal:
+          input.hasAuthorizedRemainingExecutionPrincipal,
         remainingProjectCoverage: {
           agent: agentCoverage
             ? {
@@ -432,6 +465,31 @@ async function addProjectAttachmentResources(input: {
   }
 }
 
+/**
+ * Active project members other than the departing one who currently hold the
+ * trigger execution capability, in deterministic preference order.
+ */
+export async function loadAuthorizedRemainingExecutionPrincipals(input: {
+  db: AppDb;
+  projectId: string;
+  departingUserId: string;
+}) {
+  const members = await input.db
+    .select({
+      userId: schema.projectMembers.userId,
+      role: schema.projectMembers.role,
+      status: schema.projectMembers.status,
+    })
+    .from(schema.projectMembers)
+    .where(
+      and(
+        eq(schema.projectMembers.projectId, input.projectId),
+        eq(schema.projectMembers.status, 'active')
+      )
+    );
+  return authorizedRemainingExecutionPrincipals(members, input.departingUserId);
+}
+
 export async function enumerateOffboardingResources(input: {
   db: AppDb;
   project: schema.Project;
@@ -443,6 +501,15 @@ export async function enumerateOffboardingResources(input: {
     projectId: input.project.id,
     departingUserId: input.memberUserId,
   });
+  // Actor-independent on purpose: apply re-derives resources and compares
+  // `detailsJson` against the stored plan, so an actor-dependent value would
+  // make a plan previewed by one admin unapplyable by another.
+  const hasAuthorizedRemainingExecutionPrincipal =
+    (await loadAuthorizedRemainingExecutionPrincipals({
+      db: input.db,
+      projectId: input.project.id,
+      departingUserId: input.memberUserId,
+    })).length > 0;
   const resourcesByKey = new Map<string, ResourceDraft>();
 
   await addTriggerResources({
@@ -451,6 +518,7 @@ export async function enumerateOffboardingResources(input: {
     departingUserId: input.memberUserId,
     defaultAgentType: input.defaultAgentType,
     remainingCoverage,
+    hasAuthorizedRemainingExecutionPrincipal,
     resourcesByKey,
   });
   await addTaskResources({

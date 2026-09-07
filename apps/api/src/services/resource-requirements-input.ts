@@ -1,6 +1,7 @@
 import {
   normalizeResourceRequirements,
   type ResolvedResourceReservation,
+  type ResourceRequirementFieldProvenance,
   RESOURCE_REQUIREMENT_FIELDS,
   type ResourceRequirements,
   type ResourceRequirementsSource,
@@ -81,9 +82,18 @@ export interface PersistedTaskResourcePlanReadInput {
 
 export interface PersistedTaskResourcePlanReadOptions {
   /**
-   * Used by Run when an explicit modern replacement has already been supplied.
-   * It lets a caller repair malformed legacy task JSON without silently
-   * accepting malformed stored data on omitted retry/run requests.
+   * Used by Run when an explicit modern replacement for the TASK layer has
+   * already been supplied. It lets a caller repair malformed legacy task JSON
+   * without silently accepting malformed stored data on omitted retry/run
+   * requests.
+   *
+   * It suppresses ONLY the layer the explicit replacement actually replaces —
+   * the stored `task` layer (and legacy rows whose source cannot be attributed
+   * to any layer, which no inherited layer can claim). A legacy row whose
+   * source is `trigger`/`skill`/`agent-profile`/`project`/`user` describes an
+   * INHERITED requirement that a task-level override does not replace, so it is
+   * still parsed strictly and preserved. Suppressing those erased valid
+   * inherited requirements on every explicit Run object/null request.
    */
   ignoreLegacyResourceRequirementsJson?: boolean;
 }
@@ -250,7 +260,10 @@ export function readPersistedTaskResourcePlan(
     };
   }
 
-  const legacyJson = parseLegacyResourceRequirementsJson(input, options);
+  // The legacy source decides WHICH layer the stored row belongs to, so it must be
+  // resolved before deciding whether an explicit task override replaces it.
+  const legacyJsonSource = parseResourceRequirementsSource(input.resourceRequirementsSource);
+  const legacyJson = parseLegacyResourceRequirementsJson(input, options, legacyJsonSource);
   const resolvedReservation = parseStoredResolvedReservationJson(input.resolvedReservationJson);
   if (resolvedReservation?.fieldProvenance) {
     return {
@@ -262,7 +275,6 @@ export function readPersistedTaskResourcePlan(
     };
   }
 
-  const legacyJsonSource = parseResourceRequirementsSource(input.resourceRequirementsSource);
   if (legacyJson !== undefined) {
     if (!legacyJsonSource) {
       throw new ResourceRequirementsValidationError(
@@ -334,14 +346,35 @@ export function parseLegacyVmSize(value: string | null | undefined): VMSize | nu
 
 function parseLegacyResourceRequirementsJson(
   input: PersistedTaskResourcePlanReadInput,
-  options: PersistedTaskResourcePlanReadOptions
+  options: PersistedTaskResourcePlanReadOptions,
+  legacyJsonSource: ResourceRequirementsSource | null
 ): ResourceRequirements | undefined {
   if (!input.resourceRequirementsJson) return undefined;
-  if (options.ignoreLegacyResourceRequirementsJson) return undefined;
+  if (
+    options.ignoreLegacyResourceRequirementsJson &&
+    legacyResourceLayerIsReplacedByTaskOverride(legacyJsonSource)
+  ) {
+    return undefined;
+  }
   return parseStoredResourceRequirementsJson(
     input.resourceRequirementsJson,
     'resourceRequirementsJson'
   );
+}
+
+/**
+ * True when an explicit task-layer replacement supersedes this stored legacy
+ * row, so suppressing it cannot erase a requirement the caller did not replace.
+ *
+ * A `null` source is a legacy row that cannot be attributed to ANY layer — the
+ * non-suppressed path rejects it as ambiguous, and no inherited layer can claim
+ * it — so an explicit replacement is allowed to repair it too.
+ */
+function legacyResourceLayerIsReplacedByTaskOverride(
+  legacyJsonSource: ResourceRequirementsSource | null
+): boolean {
+  if (legacyJsonSource === null) return true;
+  return SOURCE_TO_RESOURCE_LAYER[legacyJsonSource] === 'task';
 }
 
 function normalizePersistedTaskResourcePlan(value: unknown): PersistedTaskResourcePlan {
@@ -413,7 +446,30 @@ function normalizeResolvedReservation(
     sourceId: stringOrUndefined(value.sourceId) ?? '',
     fieldProvenance: normalizeReservationFieldProvenance(value.fieldProvenance, fieldName),
   };
+  // `diagnostics` is semantic reservation state produced by
+  // `resolveResourceReservation` (legacy vm-size adapter notes). Dropping it here
+  // erased it on any no-op retry/run roundtrip, so it is preserved — including the
+  // empty array the resolver always emits, which is distinguishable from absent.
+  const diagnostics = normalizeReservationDiagnostics(value.diagnostics, fieldName);
+  if (diagnostics !== undefined) {
+    reservation.diagnostics = diagnostics;
+  }
   return reservation;
+}
+
+function normalizeReservationDiagnostics(value: unknown, fieldName: string): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    throw new ResourceRequirementsValidationError(`${fieldName}.diagnostics must be an array`);
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== 'string') {
+      throw new ResourceRequirementsValidationError(
+        `${fieldName}.diagnostics[${index}] must be a string`
+      );
+    }
+    return entry;
+  });
 }
 
 function normalizeReservationFieldProvenance(
@@ -439,7 +495,7 @@ function normalizeReservationFieldProvenance(
         `${fieldName}.fieldProvenance.${field}.source is invalid`
       );
     }
-    provenance[field] = {
+    const fieldProvenance: ResourceRequirementFieldProvenance = {
       source,
       sourceId: stringOrUndefined(raw.sourceId) ?? '',
       value:
@@ -447,8 +503,45 @@ function normalizeReservationFieldProvenance(
           ? booleanField(raw.value, `${fieldName}.fieldProvenance.${field}.value`)
           : numberField(raw.value, `${fieldName}.fieldProvenance.${field}.value`),
     };
+    // The legacy vm-size adapter records which adapter/version translated which
+    // legacy size into this field. Dropping it erased the audit trail on a
+    // no-op retry, leaving a translated value indistinguishable from an
+    // explicitly authored one.
+    const compatibility = normalizeReservationFieldCompatibility(
+      raw.compatibility,
+      `${fieldName}.fieldProvenance.${field}`
+    );
+    if (compatibility !== undefined) {
+      fieldProvenance.compatibility = compatibility;
+    }
+    provenance[field] = fieldProvenance;
   }
   return Object.keys(provenance).length > 0 ? provenance : undefined;
+}
+
+function normalizeReservationFieldCompatibility(
+  value: unknown,
+  fieldName: string
+): ResourceRequirementFieldProvenance['compatibility'] {
+  if (value === undefined || value === null) return undefined;
+  if (!isPlainObject(value)) {
+    throw new ResourceRequirementsValidationError(`${fieldName}.compatibility must be an object`);
+  }
+  const adapter = stringOrNull(value.adapter);
+  if (!adapter) {
+    throw new ResourceRequirementsValidationError(`${fieldName}.compatibility.adapter is invalid`);
+  }
+  const legacyVmSize = parseLegacyVmSize(stringOrNull(value.legacyVmSize));
+  if (!legacyVmSize) {
+    throw new ResourceRequirementsValidationError(
+      `${fieldName}.compatibility.legacyVmSize is invalid`
+    );
+  }
+  return {
+    adapter,
+    version: numberField(value.version, `${fieldName}.compatibility.version`),
+    legacyVmSize,
+  };
 }
 
 function layersFromReservationProvenance(
