@@ -1,8 +1,11 @@
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { capacityPlacementAuthorityGeneration } from '../../src/services/capacity-pool-authority';
+import { resolveCapacityPoolPlacementSettings } from '../../src/services/capacity-pool-placement-settings';
 import { assertNodeAllocationPlanCurrent } from '../../src/services/nodes';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
@@ -15,6 +18,7 @@ function makeEnv(): Env {
     schema.capacityPools,
     schema.capacitySources,
     schema.capacityPoolCandidates,
+    schema.platformSettings,
   ]);
   return { DATABASE: createSqliteD1(sqlite) } as Env;
 }
@@ -132,5 +136,43 @@ describe('node allocation plan guard', () => {
     await expect(
       assertNodeAllocationPlanCurrent(env, 'node-1', 'user-1', 'project-1')
     ).rejects.toThrow(message);
+  });
+
+  it('rejects when current semantic capacity authority no longer matches the planned snapshot', async () => {
+    const env = makeEnv();
+    seedCurrentPlan();
+    sqlite?.exec(`
+      UPDATE capacity_sources SET authority_generation = 101 WHERE id = 'source-1';
+      UPDATE capacity_pool_candidates SET authority_generation = 202 WHERE id = 'candidate-1';
+    `);
+    const settings = await resolveCapacityPoolPlacementSettings(
+      drizzle(env.DATABASE, { schema }),
+      env
+    );
+    const plannedAuthority = capacityPlacementAuthorityGeneration({
+      poolRevision: 7,
+      selectionSettingsGeneration: settings.placementSettings.sourceGeneration,
+      sourceAuthorityGeneration: 101,
+      candidateAuthorityGeneration: 202,
+    });
+    sqlite
+      ?.prepare(
+        `
+        UPDATE nodes
+        SET selection_settings_version = ?, capacity_authority_generation = ?
+        WHERE id = 'node-1'
+      `
+      )
+      .run(settings.placementSettings.sourceGeneration, plannedAuthority);
+
+    await expect(
+      assertNodeAllocationPlanCurrent(env, 'node-1', 'user-1', 'project-1')
+    ).resolves.toBeUndefined();
+
+    sqlite?.exec('UPDATE capacity_pool_candidates SET authority_generation = 303');
+
+    await expect(
+      assertNodeAllocationPlanCurrent(env, 'node-1', 'user-1', 'project-1')
+    ).rejects.toThrow('Selected capacity authority changed after placement');
   });
 });

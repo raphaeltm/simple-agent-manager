@@ -70,6 +70,8 @@ export interface CapacitySourceIdentity {
   credentialReference: string | null;
   credentialVersion: number | null;
   externalSourceRef: string | null;
+  /** Stable semantic source authority. This is not the refresh-order source_generation fence. */
+  authorityGeneration?: number;
   status: CapacityPoolStatus;
   createdAt: string;
   updatedAt: string;
@@ -127,6 +129,8 @@ export interface CapacityPoolCandidate {
   catalogAvailability?: 'available' | 'last-known-unavailable';
   catalogUnavailableAt?: string | null;
   catalogReturnedAt?: string | null;
+  /** Stable semantic candidate authority. This is not the refresh-order catalog_generation fence. */
+  authorityGeneration?: number;
   priority: number;
   candidateOrder: number;
   status: CapacityPoolStatus;
@@ -168,6 +172,9 @@ export interface CapacityPlacementSnapshot {
   exhaustionPolicy?: CapacityExhaustionPolicy | null;
   effectivePoolState?: DefaultCapacityPoolEffectiveState | null;
   selectionSettingsVersion?: number | null;
+  /** Stable semantic authority for the selected pool/source/candidate/settings plan. */
+  capacityAuthorityGeneration?: number | null;
+  /** Backward-compatible alias for capacityAuthorityGeneration in pre-rename consumers. */
   sourceGeneration?: number | null;
   placementExplanationJson?: string | null;
 }

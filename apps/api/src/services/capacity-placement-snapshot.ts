@@ -9,6 +9,8 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS = `
   placement_credential_source,
   placement_credential_reference,
   placement_credential_version,
+  selection_settings_version,
+  capacity_authority_generation,
   capacity_pool_project_id,
   workload_role,
   provider_instance_type,
@@ -25,7 +27,7 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS = `
   placement_explanation_json
 `;
 
-export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
+export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
 
 export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS = `
   capacity_pool_id = ?,
@@ -36,6 +38,8 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS = `
   placement_credential_source = ?,
   placement_credential_reference = ?,
   placement_credential_version = ?,
+  selection_settings_version = ?,
+  capacity_authority_generation = ?,
   capacity_pool_project_id = ?,
   workload_role = ?,
   provider_instance_type = ?,
@@ -64,6 +68,8 @@ export function capacityPlacementSnapshotSqlValues(
     snapshot?.placementCredentialSource ?? null,
     snapshot?.placementCredentialReference ?? null,
     snapshot?.placementCredentialVersion ?? null,
+    snapshot?.selectionSettingsVersion ?? null,
+    snapshot?.capacityAuthorityGeneration ?? snapshot?.sourceGeneration ?? null,
     snapshot?.capacityPoolProjectId ?? null,
     snapshot?.workloadRole ?? null,
     snapshot?.providerInstanceType ?? null,
@@ -92,6 +98,8 @@ export function capacityPlacementSnapshotDbValues(
   placementCredentialSource: string | null;
   placementCredentialReference: string | null;
   placementCredentialVersion: number | null;
+  selectionSettingsVersion: number | null;
+  capacityAuthorityGeneration: number | null;
   capacityPoolProjectId: string | null;
   workloadRole: string | null;
   providerInstanceType: string | null;
@@ -116,6 +124,9 @@ export function capacityPlacementSnapshotDbValues(
     placementCredentialSource: snapshot?.placementCredentialSource ?? null,
     placementCredentialReference: snapshot?.placementCredentialReference ?? null,
     placementCredentialVersion: snapshot?.placementCredentialVersion ?? null,
+    selectionSettingsVersion: snapshot?.selectionSettingsVersion ?? null,
+    capacityAuthorityGeneration:
+      snapshot?.capacityAuthorityGeneration ?? snapshot?.sourceGeneration ?? null,
     capacityPoolProjectId: snapshot?.capacityPoolProjectId ?? null,
     workloadRole: snapshot?.workloadRole ?? null,
     providerInstanceType: snapshot?.providerInstanceType ?? null,

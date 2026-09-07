@@ -177,6 +177,9 @@ export interface TaskStartCapacityCandidate {
   placementCredentialSource: CredentialSource;
   placementCredentialReference: string | null;
   placementCredentialVersion: number | null;
+  sourceAuthorityGeneration?: number;
+  candidateAuthorityGeneration?: number;
+  capacityAuthorityGeneration?: number;
   capacityPoolProjectId: string | null;
   /**
    * Optional precomputed placement snapshot. TaskRunner state may omit this to
@@ -212,6 +215,8 @@ export interface CapacityAwareNodePlacementRow {
   placementCredentialSource?: string | null;
   placementCredentialReference?: string | null;
   placementCredentialVersion?: number | null;
+  selectionSettingsVersion?: number | null;
+  capacityAuthorityGeneration?: number | null;
   capacityPoolProjectId: string | null;
   workloadRole: string | null;
   providerInstanceType?: string | null;

@@ -17,6 +17,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { capacitySourceAuthorityGeneration } from './capacity-pool-authority';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import {
   toCapacityPool,
@@ -35,11 +36,13 @@ import {
   resolveOfferingsForSeed,
 } from './default-capacity-source-credentials';
 import {
+  catalogSeedStateFingerprint,
   listInstallationProviderCatalogSeeds,
   listProjectProviderCatalogSeeds,
   listUserProviderCatalogSeeds,
   type ProviderCatalogCredentialSeed,
 } from './provider-catalogs';
+import { fingerprintEncryptedProviderCredential } from './provider-credential-exact';
 
 type Db = ReturnType<typeof drizzle>;
 
@@ -99,6 +102,7 @@ export interface CredentialCapacitySeed extends ScopeIdentity {
   encryptedToken: string;
   iv: string;
   createdBy: string | null;
+  stateFingerprint: string;
 }
 
 export interface DefaultCapacityPoolOfferingResolution {
@@ -417,9 +421,38 @@ async function listCredentialUserIdsPage(
     )
     .orderBy(asc(schema.ccAttachments.userId))
     .limit(limit);
+  const poolRows = await db
+    .select({ userId: schema.capacityPools.ownerUserId })
+    .from(schema.capacityPools)
+    .where(
+      and(
+        eq(schema.capacityPools.scope, 'user'),
+        eq(schema.capacityPools.isDefault, true),
+        isNotNull(schema.capacityPools.ownerUserId),
+        cursor ? gt(schema.capacityPools.ownerUserId, cursor) : undefined
+      )
+    )
+    .orderBy(asc(schema.capacityPools.ownerUserId))
+    .limit(limit);
+  const sourceRows = await db
+    .select({ userId: schema.capacitySources.ownerUserId })
+    .from(schema.capacitySources)
+    .where(
+      and(
+        eq(schema.capacitySources.scope, 'user'),
+        isNotNull(schema.capacitySources.ownerUserId),
+        cursor ? gt(schema.capacitySources.ownerUserId, cursor) : undefined
+      )
+    )
+    .orderBy(asc(schema.capacitySources.ownerUserId))
+    .limit(limit);
 
   return [
-    ...new Set([...legacyRows.map((row) => row.userId), ...ccRows.map((row) => row.userId)].sort()),
+    ...new Set(
+      [...legacyRows, ...ccRows, ...poolRows, ...sourceRows]
+        .flatMap((row) => (row.userId ? [row.userId] : []))
+        .sort()
+    ),
   ].slice(0, limit);
 }
 
@@ -462,10 +495,37 @@ async function listCredentialProjectIdsPage(
     )
     .orderBy(asc(schema.ccAttachments.projectId))
     .limit(limit);
+  const poolRows = await db
+    .select({ projectId: schema.capacityPools.ownerProjectId })
+    .from(schema.capacityPools)
+    .where(
+      and(
+        eq(schema.capacityPools.scope, 'project'),
+        eq(schema.capacityPools.isDefault, true),
+        isNotNull(schema.capacityPools.ownerProjectId),
+        cursor ? gt(schema.capacityPools.ownerProjectId, cursor) : undefined
+      )
+    )
+    .orderBy(asc(schema.capacityPools.ownerProjectId))
+    .limit(limit);
+  const sourceRows = await db
+    .select({ projectId: schema.capacitySources.ownerProjectId })
+    .from(schema.capacitySources)
+    .where(
+      and(
+        eq(schema.capacitySources.scope, 'project'),
+        isNotNull(schema.capacitySources.ownerProjectId),
+        cursor ? gt(schema.capacitySources.ownerProjectId, cursor) : undefined
+      )
+    )
+    .orderBy(asc(schema.capacitySources.ownerProjectId))
+    .limit(limit);
 
   return [
     ...new Set(
-      [...legacyRows, ...ccRows].flatMap((row) => (row.projectId ? [row.projectId] : [])).sort()
+      [...legacyRows, ...ccRows, ...poolRows, ...sourceRows]
+        .flatMap((row) => (row.projectId ? [row.projectId] : []))
+        .sort()
     ),
   ].slice(0, limit);
 }
@@ -644,6 +704,7 @@ function catalogSeedsToCapacitySeeds(
     encryptedToken: seed.encryptedToken,
     iv: seed.iv,
     createdBy: seed.createdBy,
+    stateFingerprint: seed.stateFingerprint,
   }));
 }
 
@@ -684,7 +745,13 @@ async function ensureDefaultPoolForCredentialSeeds(
     if (materializedSeed.active && !(await isCapacitySeedStillCurrent(db, seed))) continue;
     const existingSource = await findCapacitySourceForCredential(db, materializedSeed);
     if (!materializedSeed.active) {
-      if (existingSource) await disableCapacitySourceAvailability(db, scope, existingSource);
+      if (
+        existingSource &&
+        existingSource.sourceGeneration <= seedSnapshotGeneration &&
+        (await isCapacitySeedStillCurrent(db, seed, false))
+      ) {
+        await disableCapacitySourceAvailability(db, scope, existingSource);
+      }
       continue;
     }
     activeSeedKeys.add(sourceIdentityKeyForSeed(materializedSeed));
@@ -712,6 +779,7 @@ async function ensureDefaultPoolForCredentialSeeds(
         resolvedOfferings.offerings,
         {
           sourceGeneration: publication.generation,
+          sourceAuthorityGeneration: publication.source.authorityGeneration,
           catalogComplete: resolvedOfferings.catalogComplete !== false,
         }
       );
@@ -831,6 +899,7 @@ async function insertCapacitySourceForSeed(
 ): Promise<CapacitySourcePublication> {
   const id = defaultCapacitySourceId(seed);
   const generation = await nextCapacityPoolScopeGeneration(db, scope);
+  const authorityGeneration = await authorityGenerationForSeed(seed, ACTIVE_STATUS);
   const now = nextCapacityPoolTimestamp();
   await db
     .insert(schema.capacitySources)
@@ -847,6 +916,7 @@ async function insertCapacitySourceForSeed(
       credentialReference: seed.credentialReference,
       credentialVersion: seed.credentialVersion,
       externalSourceRef: seed.externalSourceRef,
+      authorityGeneration,
       sourceGeneration: generation,
       status: ACTIVE_STATUS,
       createdBy: seed.createdBy,
@@ -883,6 +953,7 @@ async function updateCapacitySourceForSeed(
   }
 
   const generation = await nextCapacityPoolScopeGeneration(db, scope);
+  const authorityGeneration = await authorityGenerationForSeed(seed, ACTIVE_STATUS);
   const now = nextCapacityPoolTimestamp();
   await db
     .update(schema.capacitySources)
@@ -894,6 +965,7 @@ async function updateCapacitySourceForSeed(
       credentialReference: seed.credentialReference,
       credentialVersion: seed.credentialVersion,
       externalSourceRef: seed.externalSourceRef,
+      authorityGeneration,
       sourceGeneration: generation,
       status: ACTIVE_STATUS,
       updatedAt: now,
@@ -936,16 +1008,82 @@ async function isCapacitySourceRefreshCurrent(
   );
 }
 
-async function isCapacitySeedStillCurrent(db: Db, seed: CredentialCapacitySeed): Promise<boolean> {
-  if (seed.platformCredentialId) return isPlatformCapacitySeedStillCurrent(db, seed);
-  if (seed.externalSourceRef) return isComposableCapacitySeedStillCurrent(db, seed);
-  if (seed.credentialId) return isLegacyCapacitySeedStillCurrent(db, seed);
+async function authorityGenerationForSeed(
+  seed: CredentialCapacitySeed,
+  status: typeof ACTIVE_STATUS | typeof DISABLED_STATUS
+): Promise<number> {
+  return capacitySourceAuthorityGeneration({
+    id: defaultCapacitySourceId(seed),
+    scope: seed.scope,
+    ownerUserId: seed.ownerUserId,
+    ownerProjectId: seed.ownerProjectId,
+    sourceKind: SOURCE_KIND_CLOUD_PROVIDER,
+    provider: seed.provider,
+    credentialSource: seed.credentialSource,
+    credentialId: seed.credentialId,
+    platformCredentialId: seed.platformCredentialId,
+    credentialReference: seed.credentialReference,
+    credentialVersion: seed.credentialVersion,
+    credentialContentFingerprint: await fingerprintEncryptedProviderCredential(
+      seed.encryptedToken,
+      seed.iv
+    ),
+    externalSourceRef: seed.externalSourceRef,
+    status,
+  });
+}
+
+function authorityGenerationForSourceRow(
+  source: Pick<
+    schema.CapacitySource,
+    | 'id'
+    | 'scope'
+    | 'ownerUserId'
+    | 'ownerProjectId'
+    | 'sourceKind'
+    | 'provider'
+    | 'credentialSource'
+    | 'credentialId'
+    | 'platformCredentialId'
+    | 'credentialReference'
+    | 'credentialVersion'
+    | 'externalSourceRef'
+  >,
+  status: typeof ACTIVE_STATUS | typeof DISABLED_STATUS
+): number {
+  return capacitySourceAuthorityGeneration({
+    id: source.id,
+    scope: source.scope as CapacityPoolScope,
+    ownerUserId: source.ownerUserId,
+    ownerProjectId: source.ownerProjectId,
+    sourceKind: SOURCE_KIND_CLOUD_PROVIDER,
+    provider: source.provider,
+    credentialSource: source.credentialSource as CapacityCredentialSource | null,
+    credentialId: source.credentialId,
+    platformCredentialId: source.platformCredentialId,
+    credentialReference: source.credentialReference,
+    credentialVersion: source.credentialVersion,
+    externalSourceRef: source.externalSourceRef,
+    status,
+  });
+}
+
+async function isCapacitySeedStillCurrent(
+  db: Db,
+  seed: CredentialCapacitySeed,
+  expectedActive = true
+): Promise<boolean> {
+  if (seed.platformCredentialId)
+    return isPlatformCapacitySeedStillCurrent(db, seed, expectedActive);
+  if (seed.externalSourceRef) return isComposableCapacitySeedStillCurrent(db, seed, expectedActive);
+  if (seed.credentialId) return isLegacyCapacitySeedStillCurrent(db, seed, expectedActive);
   return false;
 }
 
 async function isLegacyCapacitySeedStillCurrent(
   db: Db,
-  seed: CredentialCapacitySeed
+  seed: CredentialCapacitySeed,
+  expectedActive: boolean
 ): Promise<boolean> {
   if (!seed.credentialId) return false;
   const [row] = await db
@@ -972,18 +1110,33 @@ async function isLegacyCapacitySeedStillCurrent(
 
   return (
     row.credentialType === CREDENTIAL_TYPE_CLOUD_PROVIDER &&
-    row.isActive === true &&
+    row.isActive === expectedActive &&
     row.provider === seed.provider &&
     row.encryptedToken === seed.encryptedToken &&
     row.iv === seed.iv &&
     scopeMatches &&
-    credentialVersionMatches(seed, row.updatedAt ?? row.createdAt)
+    credentialVersionMatches(seed, row.updatedAt ?? row.createdAt) &&
+    seed.stateFingerprint ===
+      catalogSeedStateFingerprint([
+        'legacy',
+        seed.credentialId,
+        row.userId,
+        row.projectId,
+        row.provider,
+        row.credentialType,
+        row.isActive,
+        row.encryptedToken,
+        row.iv,
+        row.createdAt,
+        row.updatedAt,
+      ])
   );
 }
 
 async function isPlatformCapacitySeedStillCurrent(
   db: Db,
-  seed: CredentialCapacitySeed
+  seed: CredentialCapacitySeed,
+  expectedActive: boolean
 ): Promise<boolean> {
   if (!seed.platformCredentialId) return false;
   const [row] = await db
@@ -1000,20 +1153,34 @@ async function isPlatformCapacitySeedStillCurrent(
     .where(eq(schema.platformCredentials.id, seed.platformCredentialId))
     .limit(1);
 
+  if (!row) return false;
   return (
     seed.scope === 'installation' &&
-    row?.credentialType === CREDENTIAL_TYPE_CLOUD_PROVIDER &&
-    row.isEnabled === true &&
+    row.credentialType === CREDENTIAL_TYPE_CLOUD_PROVIDER &&
+    row.isEnabled === expectedActive &&
     row.provider === seed.provider &&
     row.encryptedToken === seed.encryptedToken &&
     row.iv === seed.iv &&
-    credentialVersionMatches(seed, row.updatedAt ?? row.createdAt)
+    credentialVersionMatches(seed, row.updatedAt ?? row.createdAt) &&
+    seed.stateFingerprint ===
+      catalogSeedStateFingerprint([
+        'platform',
+        seed.platformCredentialId,
+        row.provider,
+        row.credentialType,
+        row.isEnabled,
+        row.encryptedToken,
+        row.iv,
+        row.createdAt,
+        row.updatedAt,
+      ])
   );
 }
 
 async function isComposableCapacitySeedStillCurrent(
   db: Db,
-  seed: CredentialCapacitySeed
+  seed: CredentialCapacitySeed,
+  expectedActive: boolean
 ): Promise<boolean> {
   const attachmentId = attachmentIdFromExternalSourceRef(seed.externalSourceRef);
   if (!attachmentId || !seed.catalogCredentialId) return false;
@@ -1025,11 +1192,16 @@ async function isComposableCapacitySeedStillCurrent(
       attachmentActive: schema.ccAttachments.isActive,
       attachmentConsumerKind: schema.ccAttachments.consumerKind,
       attachmentConsumerTarget: schema.ccAttachments.consumerTarget,
+      attachmentCreatedAt: schema.ccAttachments.createdAt,
+      attachmentUpdatedAt: schema.ccAttachments.updatedAt,
+      configurationId: schema.ccConfigurations.id,
       configurationActive: schema.ccConfigurations.isActive,
       configurationOwnerId: schema.ccConfigurations.ownerId,
       configurationConsumerKind: schema.ccConfigurations.consumerKind,
       configurationConsumerTarget: schema.ccConfigurations.consumerTarget,
       configurationCredentialId: schema.ccConfigurations.credentialId,
+      configurationCreatedAt: schema.ccConfigurations.createdAt,
+      configurationUpdatedAt: schema.ccConfigurations.updatedAt,
       credentialOwnerId: schema.ccCredentials.ownerId,
       credentialKind: schema.ccCredentials.kind,
       credentialActive: schema.ccCredentials.isActive,
@@ -1051,6 +1223,11 @@ async function isComposableCapacitySeedStillCurrent(
     .limit(1);
 
   if (!row) return false;
+  const active =
+    row.attachmentActive &&
+    row.configurationActive &&
+    row.credentialActive &&
+    !!row.configurationCredentialId;
   const scopeMatches =
     seed.scope === 'project'
       ? row.projectId === seed.ownerProjectId
@@ -1058,11 +1235,9 @@ async function isComposableCapacitySeedStillCurrent(
 
   return (
     scopeMatches &&
+    active === expectedActive &&
     row.userId === row.configurationOwnerId &&
     row.credentialOwnerId === row.configurationOwnerId &&
-    row.attachmentActive === true &&
-    row.configurationActive === true &&
-    row.credentialActive === true &&
     row.attachmentConsumerKind === 'compute' &&
     row.configurationConsumerKind === 'compute' &&
     row.attachmentConsumerTarget === seed.provider &&
@@ -1071,7 +1246,34 @@ async function isComposableCapacitySeedStillCurrent(
     row.credentialKind === CREDENTIAL_TYPE_CLOUD_PROVIDER &&
     row.encryptedToken === seed.encryptedToken &&
     row.iv === seed.iv &&
-    credentialVersionMatches(seed, row.updatedAt ?? row.createdAt)
+    credentialVersionMatches(seed, row.updatedAt ?? row.createdAt) &&
+    seed.stateFingerprint ===
+      catalogSeedStateFingerprint([
+        'composable',
+        attachmentId,
+        row.configurationId,
+        row.userId,
+        row.projectId,
+        row.attachmentActive,
+        row.attachmentConsumerTarget,
+        row.attachmentCreatedAt,
+        row.attachmentUpdatedAt,
+        row.configurationActive,
+        row.configurationOwnerId,
+        row.configurationConsumerKind,
+        row.configurationConsumerTarget,
+        row.configurationCredentialId,
+        row.configurationCreatedAt,
+        row.configurationUpdatedAt,
+        seed.catalogCredentialId,
+        row.credentialOwnerId,
+        row.credentialKind,
+        row.credentialActive,
+        row.encryptedToken,
+        row.iv,
+        row.createdAt,
+        row.updatedAt,
+      ])
   );
 }
 
@@ -1088,13 +1290,34 @@ function credentialVersionMatches(seed: CredentialCapacitySeed, timestamp: strin
 async function disableCapacitySourceAvailability(
   db: Db,
   scope: ScopeIdentity,
-  source: Pick<schema.CapacitySource, 'id' | 'sourceGeneration'>
+  source: Pick<
+    schema.CapacitySource,
+    | 'id'
+    | 'scope'
+    | 'ownerUserId'
+    | 'ownerProjectId'
+    | 'sourceKind'
+    | 'provider'
+    | 'credentialSource'
+    | 'credentialId'
+    | 'platformCredentialId'
+    | 'credentialReference'
+    | 'credentialVersion'
+    | 'externalSourceRef'
+    | 'sourceGeneration'
+  >
 ): Promise<void> {
   const generation = await nextCapacityPoolScopeGeneration(db, scope);
+  const authorityGeneration = authorityGenerationForSourceRow(source, DISABLED_STATUS);
   const now = nextCapacityPoolTimestamp();
   await db
     .update(schema.capacitySources)
-    .set({ status: DISABLED_STATUS, sourceGeneration: generation, updatedAt: now })
+    .set({
+      status: DISABLED_STATUS,
+      authorityGeneration,
+      sourceGeneration: generation,
+      updatedAt: now,
+    })
     .where(
       and(
         eq(schema.capacitySources.id, source.id),
@@ -1172,10 +1395,7 @@ async function disableDefaultPoolAvailability(
     ownerProjectId: pool.ownerProjectId,
   };
   const sourceRows = await db
-    .select({
-      id: schema.capacitySources.id,
-      sourceGeneration: schema.capacitySources.sourceGeneration,
-    })
+    .select()
     .from(schema.capacitySources)
     .where(
       and(

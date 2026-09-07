@@ -87,8 +87,39 @@ async function listUserComputeAttachmentProjectIds(
     )
     .orderBy(asc(schema.ccAttachments.projectId))
     .limit(MAX_PROJECT_SCOPES_PER_CREDENTIAL_MUTATION + 1);
+  const poolRows = await db
+    .select({ projectId: schema.capacityPools.ownerProjectId })
+    .from(schema.capacityPools)
+    .innerJoin(schema.projects, eq(schema.capacityPools.ownerProjectId, schema.projects.id))
+    .where(
+      and(
+        eq(schema.projects.userId, userId),
+        eq(schema.capacityPools.scope, 'project'),
+        eq(schema.capacityPools.isDefault, true),
+        isNotNull(schema.capacityPools.ownerProjectId)
+      )
+    )
+    .orderBy(asc(schema.capacityPools.ownerProjectId))
+    .limit(MAX_PROJECT_SCOPES_PER_CREDENTIAL_MUTATION + 1);
+  const sourceRows = await db
+    .select({ projectId: schema.capacitySources.ownerProjectId })
+    .from(schema.capacitySources)
+    .innerJoin(schema.projects, eq(schema.capacitySources.ownerProjectId, schema.projects.id))
+    .where(
+      and(
+        eq(schema.projects.userId, userId),
+        eq(schema.capacitySources.scope, 'project'),
+        isNotNull(schema.capacitySources.ownerProjectId)
+      )
+    )
+    .orderBy(asc(schema.capacitySources.ownerProjectId))
+    .limit(MAX_PROJECT_SCOPES_PER_CREDENTIAL_MUTATION + 1);
   const projectIds = [
-    ...new Set(rows.flatMap((row) => (row.projectId ? [row.projectId] : [])).sort()),
+    ...new Set(
+      [...rows, ...poolRows, ...sourceRows]
+        .flatMap((row) => (row.projectId ? [row.projectId] : []))
+        .sort()
+    ),
   ];
   return {
     projectIds: projectIds.slice(0, MAX_PROJECT_SCOPES_PER_CREDENTIAL_MUTATION),

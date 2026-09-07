@@ -14,6 +14,7 @@ import type { RunTaskResponse, TaskStatus, VMSize } from '@simple-agent-manager/
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import { type InferOutput, safeParse } from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
@@ -22,7 +23,7 @@ import { ulid } from '../../lib/ulid';
 import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
-import { parseOptionalBody, RunTaskSchema } from '../../schemas';
+import { formatIssues, RunTaskSchema } from '../../schemas';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   capacityPlacementSnapshotSqlValues,
@@ -46,9 +47,24 @@ import { requireRepositoryUserAccess } from '../projects/_helpers';
 import { requireProjectTaskById } from './_helpers';
 
 const runRoutes = new Hono<{ Bindings: Env }>();
+type RunTaskBody = InferOutput<typeof RunTaskSchema>;
 
 // Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
 // See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
+
+async function parseRunTaskBody(req: Request): Promise<RunTaskBody> {
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return {} as RunTaskBody;
+  }
+  const result = safeParse(RunTaskSchema, raw);
+  if (!result.success) {
+    throw errors.badRequest(formatIssues(result.issues));
+  }
+  return result.output;
+}
 
 /**
  * POST /projects/:projectId/tasks/:taskId/run
@@ -116,7 +132,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   }
 
   // Parse request body (optional — empty body means use defaults)
-  const body = await parseOptionalBody(c.req.raw, RunTaskSchema, {} as Record<string, never>);
+  const body = await parseRunTaskBody(c.req.raw);
   const resourceRequirementsProvided = Object.prototype.hasOwnProperty.call(
     body,
     'resourceRequirements'

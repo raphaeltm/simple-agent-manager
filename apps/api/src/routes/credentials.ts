@@ -36,6 +36,7 @@ import {
   SaveAgentCredentialSchema,
 } from '../schemas';
 import { saveAgentCredentialForUser } from '../services/agent-credential-save';
+import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import {
   disconnectAgentCredentialFromCC,
   syncAgentCredentialToCC,
@@ -44,7 +45,6 @@ import {
   disconnectComputeCredentialFromCC,
   syncComputeCredentialToCC,
 } from '../services/composable-credentials/compute-sync';
-import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { lazyBackfillIfNeeded } from '../services/composable-credentials/lazy-backfill';
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { decrypt, encrypt } from '../services/encryption';

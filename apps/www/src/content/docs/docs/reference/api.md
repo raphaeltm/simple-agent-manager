@@ -194,7 +194,11 @@ or call the matching `/reconcile` endpoint, to refresh pool metadata from the cr
 provider-native catalog. Provider API failures are reported in catalog refresh metadata and do not
 synthesize static available rows for reconciliation. Provider catalog offerings expose
 `catalogSource`; capacity-pool candidates expose the persisted `providerInstanceCatalogSource` and
-`catalogAvailability` snapshot.
+`catalogAvailability` snapshot. `sourceGeneration` and `catalogGeneration` are refresh/fencing
+epochs and may advance on identical reconciliations. `authorityGeneration` on sources and
+candidates is a stable semantic authority value for the selected credential/source/offering state.
+Placement snapshots persist `capacityAuthorityGeneration`; the legacy `sourceGeneration` snapshot
+field is a compatibility alias for that same authority value, not the refresh epoch.
 
 Only an unconfigured scope inherits from the next default-pool scope. A configured project or user
 pool with state `configured-empty`, `source-disabled`, `catalog-unavailable`, or `migration-pending`

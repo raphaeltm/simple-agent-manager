@@ -55,6 +55,7 @@ export interface ProviderCatalogCredentialSeed {
   externalSourceRef: string | null;
   active: boolean;
   createdBy: string | null;
+  stateFingerprint: string;
 }
 
 export interface ProviderCatalogListResult {
@@ -224,6 +225,7 @@ export async function listInstallationProviderCatalogSeeds(
     .select({
       id: schema.platformCredentials.id,
       provider: schema.platformCredentials.provider,
+      credentialType: schema.platformCredentials.credentialType,
       encryptedToken: schema.platformCredentials.encryptedToken,
       iv: schema.platformCredentials.iv,
       isEnabled: schema.platformCredentials.isEnabled,
@@ -253,6 +255,17 @@ export async function listInstallationProviderCatalogSeeds(
         externalSourceRef: null,
         active,
         createdBy: row.createdBy,
+        stateFingerprint: catalogSeedStateFingerprint([
+          'platform',
+          row.id,
+          row.provider,
+          row.credentialType,
+          row.isEnabled,
+          row.encryptedToken,
+          row.iv,
+          row.createdAt,
+          row.updatedAt,
+        ]),
       } satisfies ProviderCatalogCredentialSeed,
     ];
   });
@@ -284,6 +297,7 @@ async function listLegacyProviderCatalogSeeds(
       userId: schema.credentials.userId,
       projectId: schema.credentials.projectId,
       provider: schema.credentials.provider,
+      credentialType: schema.credentials.credentialType,
       encryptedToken: schema.credentials.encryptedToken,
       iv: schema.credentials.iv,
       isActive: schema.credentials.isActive,
@@ -311,6 +325,19 @@ async function listLegacyProviderCatalogSeeds(
         externalSourceRef: null,
         active: row.isActive,
         createdBy: row.userId,
+        stateFingerprint: catalogSeedStateFingerprint([
+          'legacy',
+          row.id,
+          row.userId,
+          row.projectId,
+          row.provider,
+          row.credentialType,
+          row.isActive,
+          row.encryptedToken,
+          row.iv,
+          row.createdAt,
+          row.updatedAt,
+        ]),
       } satisfies ProviderCatalogCredentialSeed,
     ];
   });
@@ -363,8 +390,19 @@ async function listComposableProviderCatalogSeeds(
       projectId: schema.ccAttachments.projectId,
       attachmentActive: schema.ccAttachments.isActive,
       consumerTarget: schema.ccAttachments.consumerTarget,
+      attachmentCreatedAt: schema.ccAttachments.createdAt,
+      attachmentUpdatedAt: schema.ccAttachments.updatedAt,
+      configurationId: schema.ccConfigurations.id,
       configurationActive: schema.ccConfigurations.isActive,
+      configurationOwnerId: schema.ccConfigurations.ownerId,
+      configurationConsumerKind: schema.ccConfigurations.consumerKind,
+      configurationConsumerTarget: schema.ccConfigurations.consumerTarget,
+      configurationCredentialId: schema.ccConfigurations.credentialId,
+      configurationCreatedAt: schema.ccConfigurations.createdAt,
+      configurationUpdatedAt: schema.ccConfigurations.updatedAt,
       credentialId: schema.ccCredentials.id,
+      credentialOwnerId: schema.ccCredentials.ownerId,
+      credentialKind: schema.ccCredentials.kind,
       credentialActive: schema.ccCredentials.isActive,
       encryptedToken: schema.ccCredentials.encryptedToken,
       iv: schema.ccCredentials.iv,
@@ -404,9 +442,39 @@ async function listComposableProviderCatalogSeeds(
         externalSourceRef,
         active,
         createdBy: row.userId,
+        stateFingerprint: catalogSeedStateFingerprint([
+          'composable',
+          row.attachmentId,
+          row.configurationId,
+          row.userId,
+          row.projectId,
+          row.attachmentActive,
+          row.consumerTarget,
+          row.attachmentCreatedAt,
+          row.attachmentUpdatedAt,
+          row.configurationActive,
+          row.configurationOwnerId,
+          row.configurationConsumerKind,
+          row.configurationConsumerTarget,
+          row.configurationCredentialId,
+          row.configurationCreatedAt,
+          row.configurationUpdatedAt,
+          row.credentialId,
+          row.credentialOwnerId,
+          row.credentialKind,
+          row.credentialActive,
+          row.encryptedToken,
+          row.iv,
+          row.credentialCreatedAt,
+          row.credentialUpdatedAt,
+        ]),
       } satisfies ProviderCatalogCredentialSeed,
     ];
   });
+}
+
+export function catalogSeedStateFingerprint(parts: readonly unknown[]): string {
+  return JSON.stringify(parts);
 }
 
 function dedupeCatalogSeeds(

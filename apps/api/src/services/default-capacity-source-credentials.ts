@@ -97,6 +97,7 @@ export async function resolveOfferingsForSeed(
           externalSourceRef: seed.externalSourceRef,
           active: seed.active,
           createdBy: seed.createdBy,
+          stateFingerprint: seed.stateFingerprint,
         },
       });
       const refreshStatus = catalog.refreshStatus;

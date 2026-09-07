@@ -24,6 +24,8 @@ import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
+import { capacityPlacementAuthorityGeneration } from './capacity-pool-authority';
+import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
@@ -61,6 +63,8 @@ type NodeAllocationPlanGuardRow = {
   capacity_pool_project_id: string | null;
   placement_credential_reference: string | null;
   placement_credential_version: number | null;
+  selection_settings_version: number | null;
+  capacity_authority_generation: number | null;
   provider_instance_type: string | null;
   pool_status: string | null;
   pool_revision: number | null;
@@ -68,9 +72,11 @@ type NodeAllocationPlanGuardRow = {
   source_status: string | null;
   source_credential_reference: string | null;
   source_credential_version: number | null;
+  source_authority_generation: number | null;
   candidate_status: string | null;
   candidate_catalog_availability: string | null;
   candidate_provider_instance_type: string | null;
+  candidate_authority_generation: number | null;
 };
 
 function managedNodeStopDiagnostic(env: Env): string {
@@ -108,6 +114,8 @@ export async function assertNodeAllocationPlanCurrent(
        n.capacity_pool_project_id,
        n.placement_credential_reference,
        n.placement_credential_version,
+       n.selection_settings_version,
+       n.capacity_authority_generation,
        n.provider_instance_type,
        p.status AS pool_status,
        p.revision AS pool_revision,
@@ -115,9 +123,11 @@ export async function assertNodeAllocationPlanCurrent(
        s.status AS source_status,
        s.credential_reference AS source_credential_reference,
        s.credential_version AS source_credential_version,
+       s.authority_generation AS source_authority_generation,
        c.status AS candidate_status,
        c.catalog_availability AS candidate_catalog_availability,
-       c.provider_instance_type AS candidate_provider_instance_type
+       c.provider_instance_type AS candidate_provider_instance_type,
+       c.authority_generation AS candidate_authority_generation
      FROM nodes n
      LEFT JOIN capacity_pools p ON p.id = n.capacity_pool_id
      LEFT JOIN capacity_sources s ON s.id = n.capacity_source_id
@@ -181,6 +191,27 @@ export async function assertNodeAllocationPlanCurrent(
     row.placement_credential_version !== row.source_credential_version
   ) {
     throw new Error('Selected capacity source credential generation changed after placement');
+  }
+  if (row.capacity_authority_generation !== null) {
+    const settings = await resolveCapacityPoolPlacementSettings(
+      drizzle(env.DATABASE, { schema }),
+      env
+    );
+    if (
+      row.selection_settings_version !== null &&
+      row.selection_settings_version !== settings.placementSettings.sourceGeneration
+    ) {
+      throw new Error('Selected capacity placement settings changed after placement');
+    }
+    const currentAuthority = capacityPlacementAuthorityGeneration({
+      poolRevision: row.pool_revision,
+      selectionSettingsGeneration: settings.placementSettings.sourceGeneration,
+      sourceAuthorityGeneration: row.source_authority_generation,
+      candidateAuthorityGeneration: row.candidate_authority_generation,
+    });
+    if (row.capacity_authority_generation !== currentAuthority) {
+      throw new Error('Selected capacity authority changed after placement');
+    }
   }
 }
 

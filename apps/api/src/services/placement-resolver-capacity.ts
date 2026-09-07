@@ -17,6 +17,10 @@ import {
   resolveApproximateBillingMonthHours,
 } from '@simple-agent-manager/shared';
 
+import {
+  capacityPlacementAuthorityGeneration,
+  normalizeCapacityAuthorityGeneration,
+} from './capacity-pool-authority';
 import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
 import type { CapacityPoolSummary } from './default-capacity-pools';
 import {
@@ -47,6 +51,7 @@ export function capacityPoolSnapshotForPool(
     | 'workloadRole'
   >
 ): CapacityPlacementSnapshot {
+  const authorityGeneration = selectionCapacityAuthorityGeneration(selection);
   return {
     placementPlanVersion: CAPACITY_PLACEMENT_PLAN_VERSION,
     capacityPoolId: selection.poolId,
@@ -62,7 +67,8 @@ export function capacityPoolSnapshotForPool(
     exhaustionPolicy: selection.exhaustionPolicy,
     effectivePoolState: selection.effectiveState,
     selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
-    sourceGeneration: selectionSourceGeneration(selection),
+    capacityAuthorityGeneration: authorityGeneration,
+    sourceGeneration: authorityGeneration,
     placementExplanationJson: buildCapacityPlacementExplanation(selection),
   };
 }
@@ -153,6 +159,9 @@ export function capacityPlacementSnapshotForCandidate(
   >,
   candidate: TaskStartCapacityCandidate
 ): CapacityPlacementSnapshot {
+  const authorityGeneration =
+    candidate.capacityAuthorityGeneration ??
+    selectionCapacityAuthorityGeneration(selection, candidate);
   return (
     candidate.snapshot ?? {
       placementPlanVersion: CAPACITY_PLACEMENT_PLAN_VERSION,
@@ -177,7 +186,8 @@ export function capacityPlacementSnapshotForCandidate(
       exhaustionPolicy: selection.exhaustionPolicy,
       effectivePoolState: selection.effectiveState,
       selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
-      sourceGeneration: selectionSourceGeneration(selection, candidate),
+      capacityAuthorityGeneration: authorityGeneration,
+      sourceGeneration: authorityGeneration,
       placementExplanationJson: buildCapacityPlacementExplanation(selection, candidate),
     }
   );
@@ -287,6 +297,18 @@ function normalizeCapacityCandidate(
 
   const capacityPoolProjectId =
     pool.scope === 'project' ? (pool.ownerProjectId ?? placement.projectId) : null;
+  const sourceAuthorityGeneration = normalizeCapacityAuthorityGeneration(
+    source.authorityGeneration
+  );
+  const candidateAuthorityGeneration = normalizeCapacityAuthorityGeneration(
+    candidate.authorityGeneration
+  );
+  const authorityGeneration = capacityPlacementAuthorityGeneration({
+    poolRevision: pool.revision,
+    selectionSettingsGeneration: settings.sourceGeneration,
+    sourceAuthorityGeneration,
+    candidateAuthorityGeneration,
+  });
   const normalized: Omit<TaskStartCapacityCandidate, 'snapshot'> = {
     id: candidate.id,
     poolId: candidate.poolId,
@@ -317,6 +339,9 @@ function normalizeCapacityCandidate(
     placementCredentialSource: source.credentialSource,
     placementCredentialReference: source.credentialReference,
     placementCredentialVersion: source.credentialVersion,
+    sourceAuthorityGeneration,
+    candidateAuthorityGeneration,
+    capacityAuthorityGeneration: authorityGeneration,
     capacityPoolProjectId,
   };
 
@@ -349,13 +374,8 @@ function normalizeCapacityCandidate(
       exhaustionPolicy: pool.exhaustionPolicy,
       effectivePoolState: effectiveState,
       selectionSettingsVersion: settings.sourceGeneration,
-      sourceGeneration: selectionSourceGeneration(
-        {
-          revision: pool.revision,
-          selectionSettings: settings,
-        },
-        normalized
-      ),
+      capacityAuthorityGeneration: authorityGeneration,
+      sourceGeneration: authorityGeneration,
       placementExplanationJson: buildCapacityPlacementExplanation(
         {
           poolId: pool.id,
@@ -684,26 +704,20 @@ function boundedWeight(value: number): number {
   return Math.min(value, MAX_SCORE_WEIGHT);
 }
 
-function selectionSourceGeneration(
+function selectionCapacityAuthorityGeneration(
   selection: Pick<TaskStartCapacityPoolSelection, 'revision' | 'selectionSettings'>,
-  candidate?: Pick<TaskStartCapacityCandidate, 'placementCredentialVersion'> | null
+  candidate?: Pick<
+    TaskStartCapacityCandidate,
+    'sourceAuthorityGeneration' | 'candidateAuthorityGeneration'
+  > | null
 ): number {
-  return stablePositiveHash(
-    [
-      selection.revision,
+  return capacityPlacementAuthorityGeneration({
+    poolRevision: selection.revision,
+    selectionSettingsGeneration:
       selection.selectionSettings.sourceGeneration ?? selection.selectionSettings.version,
-      candidate?.placementCredentialVersion ?? 0,
-    ].join(':')
-  );
-}
-
-function stablePositiveHash(value: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0 || 1;
+    sourceAuthorityGeneration: candidate?.sourceAuthorityGeneration ?? 0,
+    candidateAuthorityGeneration: candidate?.candidateAuthorityGeneration ?? 0,
+  });
 }
 
 function comparablePriceMicros(
@@ -795,8 +809,14 @@ function buildCapacityPlacementExplanation(
     | 'providerInstancePriceMonthlyCents'
     | 'providerInstancePriceHourlyMicros'
     | 'placementCredentialVersion'
+    | 'sourceAuthorityGeneration'
+    | 'candidateAuthorityGeneration'
+    | 'capacityAuthorityGeneration'
   >
 ): string {
+  const authorityGeneration =
+    candidate?.capacityAuthorityGeneration ??
+    selectionCapacityAuthorityGeneration(selection, candidate);
   return JSON.stringify({
     kind: 'capacity_pool_default',
     placementPlanVersion: CAPACITY_PLACEMENT_PLAN_VERSION,
@@ -822,7 +842,10 @@ function buildCapacityPlacementExplanation(
     exhaustionPolicy: selection.exhaustionPolicy,
     effectivePoolState: selection.effectiveState,
     selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
-    sourceGeneration: selectionSourceGeneration(selection, candidate),
+    sourceAuthorityGeneration: candidate?.sourceAuthorityGeneration ?? null,
+    candidateAuthorityGeneration: candidate?.candidateAuthorityGeneration ?? null,
+    capacityAuthorityGeneration: authorityGeneration,
+    sourceGeneration: authorityGeneration,
     decidedAt: new Date().toISOString(),
   });
 }
