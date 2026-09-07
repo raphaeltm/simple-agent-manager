@@ -95,12 +95,12 @@ export function clearStoredFieldError(
   field: string
 ): Partial<ResourceRequirementsFormState> {
   const patch: Partial<ResourceRequirementsFormState> = {};
-  if (state.storedFieldErrors?.[field]) {
+  if (state.storedFieldErrors && Object.hasOwn(state.storedFieldErrors, field)) {
     const next = { ...state.storedFieldErrors };
     delete next[field];
     patch.storedFieldErrors = Object.keys(next).length > 0 ? next : undefined;
   }
-  if (state._rawInvalidFields?.[field]) {
+  if (state._rawInvalidFields && Object.hasOwn(state._rawInvalidFields, field)) {
     const next = { ...state._rawInvalidFields };
     delete next[field];
     patch._rawInvalidFields = Object.keys(next).length > 0 ? next : undefined;

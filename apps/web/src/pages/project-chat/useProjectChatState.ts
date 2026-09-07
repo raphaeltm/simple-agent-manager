@@ -727,7 +727,7 @@ export function useProjectChatState() {
         return;
       }
 
-      if (!hasCloudCredentials) {
+      if (selectedRuntime !== 'cf-container' && !hasCloudCredentials) {
         setSubmitError(
           'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.'
         );

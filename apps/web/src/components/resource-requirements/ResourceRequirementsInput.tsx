@@ -188,7 +188,7 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
             min={0}
             step="any"
             value={value.minVcpu}
-            onChange={(e) => update({ minVcpu: e.target.value })}
+            onChange={(e) => update({ minVcpu: e.target.value }, 'minVcpu')}
             placeholder="Auto"
             disabled={disabled}
             className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minVcpu)}`}
@@ -203,7 +203,7 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
             min={0}
             step="any"
             value={value.minMemoryGb}
-            onChange={(e) => update({ minMemoryGb: e.target.value })}
+            onChange={(e) => update({ minMemoryGb: e.target.value }, 'minMemoryGb')}
             placeholder="Auto"
             disabled={disabled}
             className={`${INPUT_CLASSES} ${inputBorderClass(!!errors?.minMemoryGb)}`}
@@ -239,11 +239,11 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
           }}
           onChange={() => {
             if (value.exclusiveNode === undefined) {
-              update({ exclusiveNode: true });
+              update({ exclusiveNode: true }, 'exclusiveNode');
             } else if (value.exclusiveNode === true) {
-              update({ exclusiveNode: false, maxCoTenants: '' });
+              update({ exclusiveNode: false }, 'exclusiveNode');
             } else {
-              update({ exclusiveNode: undefined });
+              update({ exclusiveNode: undefined }, 'exclusiveNode');
             }
           }}
           disabled={disabled}

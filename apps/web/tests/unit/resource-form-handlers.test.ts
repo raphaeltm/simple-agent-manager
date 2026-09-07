@@ -267,4 +267,56 @@ describe('clearStoredFieldError', () => {
     const patch = clearStoredFieldError(EMPTY_RESOURCE_STATE, 'minVcpu');
     expect(Object.keys(patch)).toHaveLength(0);
   });
+
+  it('clears stored null value (own-key presence, not truthiness)', () => {
+    const state: ResourceRequirementsFormState = {
+      ...EMPTY_RESOURCE_STATE,
+      storedFieldErrors: { minMemoryGb: 'Invalid type' },
+      _rawInvalidFields: { minMemoryGb: null },
+    };
+    const patch = clearStoredFieldError(state, 'minMemoryGb');
+    expect(patch._rawInvalidFields).toBeUndefined();
+    expect(patch.storedFieldErrors).toBeUndefined();
+  });
+
+  it('clears stored false value (own-key presence, not truthiness)', () => {
+    const state: ResourceRequirementsFormState = {
+      ...EMPTY_RESOURCE_STATE,
+      storedFieldErrors: { exclusiveNode: 'Invalid type' },
+      _rawInvalidFields: { exclusiveNode: false },
+    };
+    const patch = clearStoredFieldError(state, 'exclusiveNode');
+    expect(patch._rawInvalidFields).toBeUndefined();
+    expect(patch.storedFieldErrors).toBeUndefined();
+  });
+
+  it('clears stored empty string value (own-key presence, not truthiness)', () => {
+    const state: ResourceRequirementsFormState = {
+      ...EMPTY_RESOURCE_STATE,
+      storedFieldErrors: { minVcpu: 'Invalid' },
+      _rawInvalidFields: { minVcpu: '' },
+    };
+    const patch = clearStoredFieldError(state, 'minVcpu');
+    expect(patch._rawInvalidFields).toBeUndefined();
+    expect(patch.storedFieldErrors).toBeUndefined();
+  });
+});
+
+describe('null-typed field repair through form edit (end-to-end)', () => {
+  it('stored null minMemoryGb can be cleared by editing that field to a valid number', () => {
+    const json = JSON.stringify({ minVcpu: 2, minMemoryGb: null });
+    const state = deserializeResourceRequirements(json);
+    expect(state._rawInvalidFields?.minMemoryGb).toBeNull();
+    expect(state.storedFieldErrors?.minMemoryGb).toBeTruthy();
+
+    const fieldPatch = clearStoredFieldError(state, 'minMemoryGb');
+    const edited = { ...state, ...fieldPatch, minMemoryGb: '8' };
+
+    expect(edited._rawInvalidFields).toBeUndefined();
+    expect(edited.storedFieldErrors).toBeUndefined();
+    const errors = validateResourceState(edited);
+    expect(hasValidationErrors(errors)).toBe(false);
+    const saved = serializeResourceRequirements(edited);
+    expect(JSON.parse(saved!)).toEqual({ minVcpu: 2, minMemoryGb: 8 });
+  });
 });
