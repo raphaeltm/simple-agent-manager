@@ -360,15 +360,15 @@ describe('GitHub ProjectData event producer', () => {
           html_url: 'https://github.com/acme/check-run/runs/123456',
           details_url: 'https://github.com/acme/check-run/actions/runs/123456',
           check_suite: { id: 78910 },
+          pull_requests: [
+            {
+              number: 42,
+              head: { ref: 'feature/checks', sha: 'abc123def456abc123def456abc123def456abcd' },
+              base: { ref: 'main' },
+              html_url: 'https://github.com/acme/check-run/pull/42',
+            },
+          ],
           completed_at: '2026-08-28T13:00:00.000Z',
-        },
-        pull_request: {
-          number: 42,
-          state: 'open',
-          draft: false,
-          head: { ref: 'feature/checks', sha: 'abc123def456abc123def456abc123def456abcd' },
-          base: { ref: 'main' },
-          html_url: 'https://github.com/acme/check-run/pull/42',
         },
       },
       receivedAt: Date.parse('2026-08-28T13:00:01.000Z'),
@@ -392,10 +392,6 @@ describe('GitHub ProjectData event producer', () => {
           id: '9003',
           fullName: 'acme/check-run',
         },
-        pullRequest: {
-          number: '42',
-          headSha: 'abc123def456abc123def456abc123def456abcd',
-        },
         checkRun: {
           id: '123456',
           name: 'ci / test',
@@ -403,9 +399,11 @@ describe('GitHub ProjectData event producer', () => {
           conclusion: 'failure',
           headSha: 'abc123def456abc123def456abc123def456abcd',
           checkSuiteId: '78910',
+          pullRequests: ['42'],
         },
       },
     });
+    expect(status.events[0]?.metadata).not.toHaveProperty('pullRequest');
   });
 
   it('distinguishes workflow run results for older and newer commit heads', async () => {

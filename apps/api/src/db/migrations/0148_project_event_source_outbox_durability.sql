@@ -11,14 +11,10 @@ ALTER TABLE project_event_source_outbox ADD COLUMN claimed_at TEXT;
 ALTER TABLE project_event_source_outbox ADD COLUMN terminalized_at TEXT;
 
 CREATE INDEX idx_project_event_source_outbox_active_expiry
-  ON project_event_source_outbox(state, expires_at, id)
-  WHERE state IN ('pending', 'processing', 'retryable_failed');
+  ON project_event_source_outbox(state, expires_at, id);
 
 CREATE INDEX idx_project_event_source_outbox_active_attempts
-  ON project_event_source_outbox(state, attempt_count, id)
-  WHERE state IN ('pending', 'processing', 'retryable_failed');
+  ON project_event_source_outbox(state, attempt_count, id);
 
 CREATE INDEX idx_project_event_source_outbox_terminal_retention
-  ON project_event_source_outbox(state, terminalized_at, id)
-  WHERE state IN ('admitted', 'expired', 'permanent_failed')
-    AND terminalized_at IS NOT NULL;
+  ON project_event_source_outbox(state, terminalized_at, id);

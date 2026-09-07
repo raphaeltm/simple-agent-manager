@@ -1496,9 +1496,9 @@ export const agentSessions = sqliteTable(
     workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
     userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
     agentProfileIdIdx: index('idx_agent_sessions_agent_profile_id').on(table.agentProfileId),
-    credentialReferenceIdx: index('idx_agent_sessions_credential_reference').on(
-      table.agentCredentialReference
-    ).where(sql`agent_credential_reference IS NOT NULL`),
+    credentialReferenceIdx: index('idx_agent_sessions_credential_reference')
+      .on(table.agentCredentialReference)
+      .where(sql`agent_credential_reference IS NOT NULL`),
     skillIdIdx: index('idx_agent_sessions_skill_id').on(table.skillId),
     // Compound index for filtered session queries (P2 fix).
     workspaceUserStatusIdx: index('idx_agent_sessions_ws_user_status').on(
@@ -1520,7 +1520,9 @@ export const credentialLimitWindows = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     credentialReference: text('credential_reference').notNull(),
     windowType: text('window_type').notNull(),
-    credentialSource: text('credential_source', { enum: ['user', 'project', 'platform'] }).notNull(),
+    credentialSource: text('credential_source', {
+      enum: ['user', 'project', 'platform'],
+    }).notNull(),
     provider: text('provider').notNull(),
     providerMode: text('provider_mode').notNull(),
     agentType: text('agent_type'),
@@ -2615,17 +2617,21 @@ export const projectEventSourceOutbox = sqliteTable(
       table.processingLeaseExpiresAt,
       table.id
     ),
-    activeExpiryIdx: index('idx_project_event_source_outbox_active_expiry')
-      .on(table.state, table.expiresAt, table.id)
-      .where(sql`state IN ('pending', 'processing', 'retryable_failed')`),
-    activeAttemptsIdx: index('idx_project_event_source_outbox_active_attempts')
-      .on(table.state, table.attemptCount, table.id)
-      .where(sql`state IN ('pending', 'processing', 'retryable_failed')`),
-    terminalRetentionIdx: index('idx_project_event_source_outbox_terminal_retention')
-      .on(table.state, table.terminalizedAt, table.id)
-      .where(
-        sql`state IN ('admitted', 'expired', 'permanent_failed') AND terminalized_at IS NOT NULL`
-      ),
+    activeExpiryIdx: index('idx_project_event_source_outbox_active_expiry').on(
+      table.state,
+      table.expiresAt,
+      table.id
+    ),
+    activeAttemptsIdx: index('idx_project_event_source_outbox_active_attempts').on(
+      table.state,
+      table.attemptCount,
+      table.id
+    ),
+    terminalRetentionIdx: index('idx_project_event_source_outbox_terminal_retention').on(
+      table.state,
+      table.terminalizedAt,
+      table.id
+    ),
     projectSubjectIdx: index('idx_project_event_source_outbox_project_subject').on(
       table.projectId,
       table.subjectType,
