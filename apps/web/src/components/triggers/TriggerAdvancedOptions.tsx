@@ -5,7 +5,9 @@ import {
 } from '@simple-agent-manager/shared';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
-import { FOCUS_RING, VM_SIZES } from './trigger-form-support';
+import type { ResourceRequirementsFormState } from '../resource-requirements';
+import { ResourceRequirementsInput } from '../resource-requirements';
+import { FOCUS_RING } from './trigger-form-support';
 import { TriggerProfileSelect } from './TriggerProfileSelect';
 
 interface TriggerAdvancedOptionsProps {
@@ -16,13 +18,14 @@ interface TriggerAdvancedOptionsProps {
   onOpenChange: (value: boolean) => void;
   onSkipIfRunningChange: (value: boolean) => void;
   onTaskModeChange: (value: 'task' | 'conversation') => void;
-  onVmSizeChange: (value: string) => void;
+  onResourceReqsChange: (value: ResourceRequirementsFormState) => void;
   open: boolean;
   profiles: AgentProfile[];
+  resourceReqs: ResourceRequirementsFormState;
   skipIfRunning: boolean;
   sourceType: TriggerSourceType;
   taskMode: 'task' | 'conversation';
-  vmSize: string;
+  legacyVmSize?: string | null;
 }
 
 export function TriggerAdvancedOptions({
@@ -33,13 +36,14 @@ export function TriggerAdvancedOptions({
   onOpenChange,
   onSkipIfRunningChange,
   onTaskModeChange,
-  onVmSizeChange,
+  onResourceReqsChange,
   open,
   profiles,
+  resourceReqs,
   skipIfRunning,
   sourceType,
   taskMode,
-  vmSize,
+  legacyVmSize,
 }: TriggerAdvancedOptionsProps) {
   return (
     <div>
@@ -95,23 +99,13 @@ export function TriggerAdvancedOptions({
             />
           )}
 
-          <div>
-            <label htmlFor="vm-size" className="block text-sm text-fg-primary mb-1">
-              VM size
-            </label>
-            <select
-              id="vm-size"
-              value={vmSize}
-              onChange={(event) => onVmSizeChange(event.target.value)}
-              className={`px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-            >
-              {VM_SIZES.map((size) => (
-                <option key={size.value} value={size.value}>
-                  {size.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <ResourceRequirementsInput
+            value={resourceReqs}
+            onChange={onResourceReqsChange}
+            legacyVmSize={legacyVmSize}
+            inheritLabel="profile default"
+            hideDisk
+          />
 
           <div>
             <label htmlFor="task-mode" className="block text-sm text-fg-primary mb-1">
