@@ -933,7 +933,41 @@ test.describe('Project Settings Infrastructure', () => {
       const saveCount = await saveButtons.count();
       expect(saveCount).toBeGreaterThanOrEqual(2);
 
-      // Save RESOURCES — check payload includes resource data, not timeout
+      // FIRST: change timeout slider and save it (before resources, to avoid
+      // reload() resetting the slider state)
+      const slider = page.locator('#workspace-idle-timeout');
+      await slider.scrollIntoViewIfNeeded();
+      await expect(slider).toBeVisible();
+
+      // Move slider right via keyboard (each step = MIN_WORKSPACE_IDLE_TIMEOUT_MS)
+      await slider.focus();
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('ArrowRight');
+      await page.waitForTimeout(300);
+
+      const sliderVal = Number(await slider.inputValue());
+      expect(sliderVal).toBeGreaterThan(1800000);
+
+      // Save TIMEOUT — find the Save button in the timeout section
+      // It's the one AFTER the "Workspace Idle Timeout" heading
+      const timeoutSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Workspace Idle Timeout' }) });
+      const timeoutSaveBtn = timeoutSection.getByRole('button', { name: 'Save' });
+      await timeoutSaveBtn.scrollIntoViewIfNeeded();
+      await expect(timeoutSaveBtn).toBeEnabled();
+      await timeoutSaveBtn.click();
+      await page.waitForTimeout(500);
+
+      const timeoutPatch = capturedRequests.find(
+        (r) => r.method === 'PATCH' && r.path.match(/\/api\/projects\/[^/]+$/) &&
+               (r.body as Record<string, unknown>)?.workspaceIdleTimeoutMs !== undefined,
+      );
+      expect(timeoutPatch).toBeTruthy();
+      const tmBody = timeoutPatch!.body as Record<string, unknown>;
+      expect(tmBody.workspaceIdleTimeoutMs).toBe(sliderVal);
+      expect(tmBody.resourceRequirementsJson).toBeUndefined();
+
+      // SECOND: save resources — payload should include only resource data
+      await saveButtons.first().scrollIntoViewIfNeeded();
       await saveButtons.first().click();
       await page.waitForTimeout(500);
 
@@ -945,35 +979,6 @@ test.describe('Project Settings Infrastructure', () => {
       const resBody = resourcePatch!.body as Record<string, unknown>;
       expect(resBody.defaultVmSize).toBe('large');
       expect(resBody.workspaceIdleTimeoutMs).toBeUndefined();
-
-      // Change timeout slider value and save it independently
-      const slider = page.locator('#workspace-idle-timeout');
-      await slider.scrollIntoViewIfNeeded();
-      await expect(slider).toBeVisible();
-
-      // Change slider via keyboard: each ArrowRight step = MIN_WORKSPACE_IDLE_TIMEOUT_MS (1800000)
-      // Press right twice to go from 1800000 to 5400000
-      await slider.focus();
-      await page.keyboard.press('ArrowRight');
-      await page.keyboard.press('ArrowRight');
-      await page.waitForTimeout(300);
-
-      const sliderVal = Number(await slider.inputValue());
-      expect(sliderVal).toBeGreaterThan(1800000);
-
-      // Save TIMEOUT
-      await saveButtons.last().scrollIntoViewIfNeeded();
-      await saveButtons.last().click();
-      await page.waitForTimeout(500);
-
-      const timeoutPatch = capturedRequests.find(
-        (r) => r.method === 'PATCH' && r.path.match(/\/api\/projects\/[^/]+$/) &&
-               (r.body as Record<string, unknown>)?.workspaceIdleTimeoutMs !== undefined,
-      );
-      expect(timeoutPatch).toBeTruthy();
-      const tmBody = timeoutPatch!.body as Record<string, unknown>;
-      expect(tmBody.workspaceIdleTimeoutMs).toBe(sliderVal);
-      expect(tmBody.resourceRequirementsJson).toBeUndefined();
 
       await screenshot(page, 'proj-infra-timeout-desktop');
       await assertNoOverflow(page);
