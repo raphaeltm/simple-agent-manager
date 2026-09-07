@@ -17,7 +17,7 @@ const INTENT_SELECT_COLUMNS = `id, project_id AS projectId, source, event_type A
        credential_limit_window_type AS credentialLimitWindowType,
        credential_limit_observed_at AS credentialLimitObservedAt`;
 
-export async function loadProjectEventSourceIntentWhere(
+async function loadProjectEventSourceIntentWhere(
   env: Env,
   where: string,
   values: readonly unknown[]
