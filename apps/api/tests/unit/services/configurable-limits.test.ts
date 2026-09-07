@@ -8,9 +8,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
-
 import { DEFAULT_MAX_WORKSPACES_PER_NODE } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
 import { getRuntimeLimits } from '../../../src/services/limits';

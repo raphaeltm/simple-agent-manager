@@ -28,9 +28,9 @@ import {
   loadActiveWorkspaceReservationUsage,
   parseWorkspaceAdmissionMetrics,
   resolveWorkspaceAdmissionPolicy,
-  type TrustedWorkspaceNodeCapacityRow,
-  trustedWorkspaceNodeCapacityColumnsSql,
   scoreWorkspaceAdmissionMetrics,
+  trustedWorkspaceNodeCapacityColumnsSql,
+  type TrustedWorkspaceNodeCapacityRow,
 } from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
