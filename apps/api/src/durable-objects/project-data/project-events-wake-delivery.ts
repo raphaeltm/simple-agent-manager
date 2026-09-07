@@ -121,6 +121,7 @@ export function invalidProjectEventWakeDeliveryTargetResult(
               b.target_session_id,
               b.delivery_expires_at,
               s.lifecycle_state,
+              s.owner_task_id,
               s.expires_at,
               s.delivery_lifetime_expires_at,
               c.status AS chat_status
@@ -152,8 +153,10 @@ export function invalidProjectEventWakeDeliveryTargetResult(
   const lifetimeExpiresAt =
     typeof row.delivery_lifetime_expires_at === 'number' ? row.delivery_lifetime_expires_at : null;
   const chatStatus = typeof row.chat_status === 'string' ? row.chat_status : null;
+  const ownerTaskId = typeof row.owner_task_id === 'string' ? row.owner_task_id : null;
   if (
     targetSessionId !== claim.message.targetSessionId ||
+    ownerTaskId !== claim.message.sourceTaskId ||
     row.lifecycle_state !== 'active' ||
     (expiresAt !== null && expiresAt <= now) ||
     (subscriptionExpiresAt !== null && subscriptionExpiresAt <= now) ||
@@ -166,6 +169,8 @@ export function invalidProjectEventWakeDeliveryTargetResult(
       error:
         targetSessionId !== claim.message.targetSessionId
           ? 'Project event wake target session binding changed'
+          : ownerTaskId !== claim.message.sourceTaskId
+            ? 'Project event wake source task binding changed'
           : row.lifecycle_state !== 'active'
             ? 'Project event wake subscription is no longer active'
             : chatStatus !== 'active' && chatStatus !== 'sleeping'

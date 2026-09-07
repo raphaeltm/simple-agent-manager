@@ -1207,7 +1207,7 @@ describe('ProjectData event subscription core', () => {
     );
     expect(
       plans.syntheticAttempts.some((detail) =>
-        detail.includes('idx_project_event_delivery_attempts_project_batch')
+        detail.includes('idx_project_event_attempts_synthetic_retention')
       )
     ).toBe(true);
     expect(plans.batches.some((detail) => detail.includes('idx_project_event_batches_retention'))).toBe(

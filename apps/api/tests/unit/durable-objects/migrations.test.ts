@@ -530,8 +530,8 @@ describe('DO Migrations', () => {
       // chat search materialization state: 1 from migration 042
       // terminal archive sharding bridge: 3 from migration 043
       // project event wake delivery: 6 from migration 045
-      // project event wake retention repair indexes: 8 from migration 046
-      expect(indexes).toHaveLength(104);
+      // project event wake retention repair indexes: 9 from migration 046
+      expect(indexes).toHaveLength(105);
     });
   });
 });

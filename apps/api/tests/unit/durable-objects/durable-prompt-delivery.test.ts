@@ -407,6 +407,36 @@ describe('ProjectData durable prompt delivery', () => {
     });
   });
 
+  it('rejects event wake delivery when the subscription source binding changes', async () => {
+    const claim = acceptProjectEventWake('event-wake-source-binding-changed', {
+      sourceTaskId: 'recovery-task-1',
+      targetTaskId: 'recovery-task-1',
+    });
+    sql.exec(
+      `UPDATE project_event_subscriptions
+       SET owner_task_id = 'source-task-1'
+       WHERE id = 'sub-event-wake'`
+    );
+    const first = vi.fn().mockResolvedValue({ id: 'recovery-task-1' });
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task binding changed',
+    });
+    expect(first).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-source-binding-changed')).toMatchObject({
+      sourceTaskId: 'recovery-task-1',
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
   it('passes an event wake source guard through adapter boundaries when D1 authority is live', async () => {
     const claim = acceptProjectEventWake('event-wake-live-source');
     const first = vi.fn().mockResolvedValue({ id: 'source-task-1' });

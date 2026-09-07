@@ -2005,6 +2005,10 @@ export const MIGRATIONS: Migration[] = [
         ON project_event_delivery_attempts(project_id, state, created_at, id)
       `);
       sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_synthetic_retention
+        ON project_event_delivery_attempts(project_id, attempt_number, state, transport_state, created_at, id)
+      `);
+      sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_project_event_batches_retention
         ON project_event_delivery_batches(project_id, state, updated_at, id)
       `);
