@@ -259,6 +259,48 @@ export function projectEventSourceOutboxInsertValues(
   ] as const;
 }
 
+export function projectEventSourceOutboxNextRetryAt(
+  now: Date,
+  attemptCount: number,
+  config: ProjectEventSourceOutboxConfig
+): Date {
+  const exponent = Math.min(Math.max(0, attemptCount - 1), 16);
+  const delay = Math.min(config.retryMaxMs, config.retryBaseMs * 2 ** exponent);
+  return new Date(now.getTime() + delay);
+}
+
+export function projectEventSourceOutboxErrorText(error: unknown): string {
+  const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return raw.slice(0, 1024);
+}
+
+export function projectEventSourceOutboxClockFrom(
+  input: ProjectEventSourceAdmissionTiming | undefined
+): () => Date {
+  if (input instanceof Date) return () => new Date(input.getTime());
+  if (input?.clock) return input.clock;
+  if (input?.now) return () => new Date(input.now?.getTime() ?? Date.now());
+  return () => new Date();
+}
+
+export function withProjectEventSourceAdmissionTimeout<T>(
+  createPromise: () => Promise<T>,
+  timeoutMs: number
+): Promise<T> {
+  if (timeoutMs <= 0) {
+    return Promise.reject(new ProjectEventSourceAdmissionTimeoutError(timeoutMs));
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new ProjectEventSourceAdmissionTimeoutError(timeoutMs)),
+      timeoutMs
+    );
+    createPromise()
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timeout));
+  });
+}
+
 function parsePositiveInteger(value: string | undefined, fallback: number, min = 1): number {
   if (value === undefined || value.trim() === '') return fallback;
   const parsed = Number.parseInt(value, 10);
