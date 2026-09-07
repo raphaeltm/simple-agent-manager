@@ -150,6 +150,7 @@ import {
   buildSessionLifecycleEventInput,
   type SessionLifecycleEventInput,
 } from './project-lifecycle-event-inputs';
+import { recordReservedTaskSessionRevocation } from './reserved-task-session-revocations';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
 
@@ -631,6 +632,12 @@ export async function stopSession(
   sessionId: string
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'stopSession');
+  await recordReservedTaskSessionRevocation(env, {
+    projectId,
+    chatSessionId: sessionId,
+    reason: 'session_stopped',
+    source: 'project_data.stop_session',
+  });
   const stub = await getStub(env, projectId);
   const stopped = await stub.stopSession(sessionId);
   if (stopped) {
@@ -738,6 +745,12 @@ export async function failSession(
   errorMessage: string | null = null
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'failSession');
+  await recordReservedTaskSessionRevocation(env, {
+    projectId,
+    chatSessionId: sessionId,
+    reason: 'session_failed',
+    source: 'project_data.fail_session',
+  });
   const stub = await getStub(env, projectId);
   const failed = await stub.failSession(sessionId, errorMessage);
   if (failed) {

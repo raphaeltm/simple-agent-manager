@@ -56,9 +56,13 @@ async function assertReservedSubmissionGuard(
 ): Promise<void> {
   const task = await env.DATABASE.prepare(
     `SELECT t.status, t.project_id, t.user_id, t.chat_session_id,
-            c.intent_fingerprint, c.chat_session_id AS checkpoint_chat_session_id
+            c.intent_fingerprint, c.chat_session_id AS checkpoint_chat_session_id,
+            r.reason AS revocation_reason
        FROM tasks t
        INNER JOIN task_submission_checkpoints c ON c.task_id = t.id
+       LEFT JOIN reserved_task_session_revocations r
+         ON r.project_id = t.project_id
+        AND r.chat_session_id = t.chat_session_id
       WHERE t.id = ?
         AND t.project_id = ?
         AND t.user_id = ?
@@ -72,6 +76,7 @@ async function assertReservedSubmissionGuard(
       chat_session_id: string | null;
       intent_fingerprint: string;
       checkpoint_chat_session_id: string;
+      revocation_reason: string | null;
     }>();
 
   if (!task) {
@@ -86,6 +91,11 @@ async function assertReservedSubmissionGuard(
   }
   if (TERMINAL_TASK_STATUSES.has(task.status)) {
     revoked(`Reserved task submission authority revoked: task ${guard.taskId} is ${task.status}`);
+  }
+  if (task.revocation_reason) {
+    revoked(
+      `Reserved task submission authority revoked: session ${guard.chatSessionId} was revoked (${task.revocation_reason})`
+    );
   }
   if (options.requireQueuedTask && task.status !== 'queued') {
     revoked(
@@ -113,9 +123,16 @@ async function assertReservedSubmissionGuard(
   }
   const sessionStatus = typeof session.status === 'string' ? session.status : null;
   const sessionTaskId = typeof session.taskId === 'string' ? session.taskId : null;
+  const sessionCreatedByUserId =
+    typeof session.createdByUserId === 'string' ? session.createdByUserId : null;
   if (sessionTaskId !== guard.taskId) {
     revoked(
       `Reserved task submission authority revoked: session ${guard.chatSessionId} identity changed`
+    );
+  }
+  if (sessionCreatedByUserId !== guard.userId) {
+    revoked(
+      `Reserved task submission authority revoked: session ${guard.chatSessionId} owner changed`
     );
   }
   if (sessionStatus && TERMINAL_SESSION_STATUSES.has(sessionStatus)) {

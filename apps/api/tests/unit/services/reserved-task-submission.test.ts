@@ -553,6 +553,7 @@ From that information, derive the repository change request and append a short n
         initialMessageId: 'm'.repeat(160),
         initialStatusEventId: 's'.repeat(160),
       },
+      branchNameSeed: 'b'.repeat(512),
       source: {
         ...fixture.input.source,
         sourceId: validIdentity,
@@ -560,6 +561,7 @@ From that information, derive the repository change request and append a short n
         triggerId: validIdentity,
         triggerExecutionId: validIdentity,
         displayName: 'd'.repeat(512),
+        repositoryAccessFlow: 'f'.repeat(512),
         initialStatusReason: 'r'.repeat(1_024),
       },
     };
@@ -578,6 +580,15 @@ From that information, derive the repository change request and append a short n
       validateReservedTaskSubmissionInput(
         {
           ...base,
+          branchNameSeed: 'b'.repeat(513),
+        },
+        fixture.env
+      )
+    ).toBe('branchNameSeed must be 512 characters or fewer');
+    expect(
+      validateReservedTaskSubmissionInput(
+        {
+          ...base,
           source: { ...base.source, displayName: 'd'.repeat(513) },
         },
         fixture.env
@@ -587,11 +598,30 @@ From that information, derive the repository change request and append a short n
       validateReservedTaskSubmissionInput(
         {
           ...base,
+          source: { ...base.source, repositoryAccessFlow: 'f'.repeat(513) },
+        },
+        fixture.env
+      )
+    ).toBe('source.repositoryAccessFlow must be 512 characters or fewer');
+    expect(
+      validateReservedTaskSubmissionInput(
+        {
+          ...base,
           source: { ...base.source, initialStatusReason: 'r'.repeat(1_025) },
         },
         fixture.env
       )
     ).toBe('source.initialStatusReason must be 1024 characters or fewer');
+
+    expect(
+      validateReservedTaskSubmissionInput(
+        {
+          ...base,
+          source: { ...base.source, repositoryAccessFlow: 'f'.repeat(13) },
+        },
+        { ...fixture.env, RESERVED_TASK_REPOSITORY_ACCESS_FLOW_MAX_LENGTH: '12' }
+      )
+    ).toBe('source.repositoryAccessFlow must be 12 characters or fewer');
   });
 
   it('rejects a missing source reservation before creating any task effects', async () => {

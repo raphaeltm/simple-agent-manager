@@ -41,6 +41,7 @@ import * as projectDataService from './project-data';
 import {
   parseAcceptedSnapshot,
   prepareNewSubmission,
+  reservedSubmissionGuardFromSnapshot,
   reservedTaskSubmissionConflict as conflict,
   revalidateBeforePhysicalStart,
   startInputFromSnapshot,
@@ -48,6 +49,10 @@ import {
   validateReservedTaskSubmissionInput,
 } from './reserved-task-submission-intent';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
+import {
+  assertTaskRunnerStartGuard,
+  TaskRunnerStartGuardRevokedError,
+} from './task-runner-start-guard';
 import { generateTaskTitle } from './task-title';
 
 const TERMINAL_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
@@ -455,6 +460,25 @@ async function classifyUnconfirmedStart(
       sessionId: input.identities.chatSessionId,
       branchName: snapshot.task.outputBranch,
       startState: 'already_started',
+      reused,
+    };
+  }
+
+  try {
+    await assertTaskRunnerStartGuard(env, reservedSubmissionGuardFromSnapshot(snapshot), {
+      requireQueuedTask: true,
+    });
+  } catch (error) {
+    if (error instanceof TaskRunnerStartGuardRevokedError) {
+      return conflict(input, 'authority_unavailable', error.message, snapshot.task.outputBranch);
+    }
+    return {
+      outcome: 'pending',
+      taskId: input.identities.taskId,
+      sessionId: input.identities.chatSessionId,
+      branchName: snapshot.task.outputBranch,
+      pendingAt: 'task_runner_start',
+      reason: error instanceof Error ? error.message : String(error),
       reused,
     };
   }

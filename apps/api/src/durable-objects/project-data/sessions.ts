@@ -304,10 +304,17 @@ export function linkSessionToWorkspace(
   if (!session) {
     throw new Error(`Session ${sessionId} not found`);
   }
+  const status = typeof session.status === 'string' ? session.status : null;
+  if (status !== 'active' && status !== 'sleeping') {
+    throw new Error(`Session ${sessionId} is ${status ?? 'unknown'} and cannot be linked`);
+  }
 
   const now = Date.now();
   sql.exec(
-    'UPDATE chat_sessions SET workspace_id = ?, updated_at = ? WHERE id = ?',
+    `UPDATE chat_sessions
+        SET workspace_id = ?, updated_at = ?
+      WHERE id = ?
+        AND status IN ('active', 'sleeping')`,
     workspaceId,
     now,
     sessionId

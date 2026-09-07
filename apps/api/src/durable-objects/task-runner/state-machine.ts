@@ -368,20 +368,12 @@ export async function failTask(
     currentStatus === 'completed' ||
     currentStatus === 'cancelled'
   ) {
+    await recoverReservedWorkspaceAllocationForCleanup(state, rc);
     if (state.config.resumeSnapshotChatSessionId) {
       await failRecoveryLifecycle(state, errorMessage, rc);
     }
-    await cancelVmTaskAdmission(
-      rc.env,
-      state.taskId,
-      currentStatus === 'cancelled' ? 'cancelled' : 'task_failed'
-    ).catch((err) => {
-      log.warn('task_runner_do.admission_terminal_cleanup_failed', {
-        taskId: state.taskId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-    // Already terminal — skip
+    await cleanupOnFailure(state, rc, currentStatus === 'cancelled' ? 'cancelled' : 'task_failed');
+    // Already terminal — preserve the winning terminal task status.
     state.completed = true;
     await rc.ctx.storage.put('state', state);
     return;
@@ -398,9 +390,11 @@ export async function failTask(
     .run();
 
   if (!failureTransition.meta.changes) {
+    await recoverReservedWorkspaceAllocationForCleanup(state, rc);
     if (state.config.resumeSnapshotChatSessionId) {
       await failRecoveryLifecycle(state, errorMessage, rc);
     }
+    await cleanupOnFailure(state, rc);
     state.completed = true;
     await rc.ctx.storage.put('state', state);
     return;
@@ -586,11 +580,12 @@ async function failRecoveryLifecycle(
  */
 export async function cleanupOnFailure(
   state: TaskRunnerState,
-  rc: TaskRunnerContext
+  rc: TaskRunnerContext,
+  admissionCancelReason: 'task_failed' | 'cancelled' = 'task_failed'
 ): Promise<void> {
   const now = new Date().toISOString();
 
-  await cancelVmTaskAdmission(rc.env, state.taskId, 'task_failed').catch((err) => {
+  await cancelVmTaskAdmission(rc.env, state.taskId, admissionCancelReason).catch((err) => {
     log.warn('task_runner_do.cleanup.admission_cancel_failed', {
       taskId: state.taskId,
       error: err instanceof Error ? err.message : String(err),
@@ -617,7 +612,25 @@ export async function cleanupOnFailure(
     });
   }
 
+  let workspaceNeedsRuntimeStop = Boolean(state.stepResults.workspaceId && state.stepResults.nodeId);
   if (state.stepResults.workspaceId && state.stepResults.nodeId) {
+    const workspace = await rc.env.DATABASE.prepare(
+      `SELECT status, dispatched_at AS dispatchedAt FROM workspaces WHERE id = ?`
+    )
+      .bind(state.stepResults.workspaceId)
+      .first<{ status: string; dispatchedAt: string | null }>();
+
+    if (workspace?.status === 'creating' && !workspace.dispatchedAt) {
+      await rc.env.DATABASE.prepare(
+        `UPDATE workspaces SET status = 'stopped', error_message = ?, updated_at = ? WHERE id = ?`
+      )
+        .bind(`Task ended before workspace dispatch during ${state.currentStep}`, now, state.stepResults.workspaceId)
+        .run();
+      workspaceNeedsRuntimeStop = false;
+    }
+  }
+
+  if (workspaceNeedsRuntimeStop && state.stepResults.workspaceId && state.stepResults.nodeId) {
     const node = await rc.env.DATABASE.prepare(
       `SELECT runtime FROM nodes WHERE id = ? AND user_id = ?`
     )
@@ -641,7 +654,7 @@ export async function cleanupOnFailure(
   }
 
   // Stop workspace if one was created
-  if (state.stepResults.workspaceId && state.stepResults.nodeId) {
+  if (workspaceNeedsRuntimeStop && state.stepResults.workspaceId && state.stepResults.nodeId) {
     try {
       const { stopWorkspaceOnNode } = await import('../../services/node-agent');
       await stopWorkspaceOnNode(
@@ -768,4 +781,37 @@ export async function cleanupOnFailure(
       }
     }
   }
+}
+
+async function recoverReservedWorkspaceAllocationForCleanup(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<void> {
+  if (state.stepResults.workspaceId) return;
+  const guard = state.config.startGuard;
+  if (guard?.kind !== 'reserved_submission') return;
+
+  const workspace = await rc.env.DATABASE.prepare(
+    `SELECT id, node_id AS nodeId
+       FROM workspaces
+      WHERE project_id = ?
+        AND user_id = ?
+        AND chat_session_id = ?
+        AND repository = ?
+        AND status IN ('creating', 'running', 'recovery')
+      ORDER BY created_at ASC
+      LIMIT 1`
+  )
+    .bind(state.projectId, state.userId, guard.chatSessionId, state.config.repository)
+    .first<{ id: string; nodeId: string | null }>();
+
+  if (!workspace) return;
+  state.stepResults.workspaceId = workspace.id;
+  state.stepResults.nodeId = state.stepResults.nodeId ?? workspace.nodeId;
+  await rc.ctx.storage.put('state', state);
+
+  log.info('task_runner_do.cleanup.workspace_recovered_from_reserved_session', {
+    taskId: state.taskId,
+    workspaceId: workspace.id,
+  });
 }

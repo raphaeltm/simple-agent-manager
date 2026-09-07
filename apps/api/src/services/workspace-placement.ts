@@ -22,6 +22,7 @@ export interface WorkspacePlacementInput {
   normalizedDisplayName: string;
   repository: string;
   branch: string;
+  chatSessionId?: string | null;
   vmSize: VMSize;
   vmLocation: VMLocation;
   workspaceProfile: WorkspaceProfile;
@@ -61,11 +62,11 @@ export async function reserveWorkspacePlacement(
     .prepare(
       `INSERT INTO workspaces
          (id, node_id, project_id, user_id, installation_id, name, display_name,
-          normalized_display_name, repository, branch, status, vm_size, vm_location,
+          normalized_display_name, repository, branch, chat_session_id, status, vm_size, vm_location,
           workspace_profile, devcontainer_config_name, agent_profile_hint,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
           created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
           ?, ?
        FROM nodes n
@@ -93,6 +94,7 @@ export async function reserveWorkspacePlacement(
       input.normalizedDisplayName,
       input.repository,
       input.branch,
+      input.chatSessionId ?? null,
       input.vmSize,
       input.vmLocation,
       input.workspaceProfile,
@@ -131,6 +133,12 @@ function buildTaskLifecyclePlacementPredicate(
               AND guarded_task.user_id = ?
               AND guarded_task.status = 'queued'
               AND guarded_task.workspace_id IS NULL
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM reserved_task_session_revocations guarded_revocation
+                 WHERE guarded_revocation.project_id = guarded_task.project_id
+                   AND guarded_revocation.chat_session_id = guarded_task.chat_session_id
+              )
               AND (? IS NULL OR ? = 0 OR guarded_task.chat_session_id = ?)
               AND (
                 ? IS NULL

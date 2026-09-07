@@ -39,8 +39,10 @@ const FINGERPRINT_VERSION = 1;
 const SNAPSHOT_VERSION = 1;
 const MAX_RESERVED_ID_LENGTH = 160;
 const DEFAULT_RESERVED_PROMPT_MAX_LENGTH = 16_000;
-const MAX_RESERVED_DISPLAY_NAME_LENGTH = 512;
-const MAX_RESERVED_REASON_LENGTH = 1_024;
+const DEFAULT_RESERVED_BRANCH_NAME_SEED_MAX_LENGTH = 512;
+const DEFAULT_RESERVED_SOURCE_DISPLAY_NAME_MAX_LENGTH = 512;
+const DEFAULT_RESERVED_REPOSITORY_ACCESS_FLOW_MAX_LENGTH = 512;
+const DEFAULT_RESERVED_INITIAL_STATUS_REASON_MAX_LENGTH = 1_024;
 const SOURCE_KINDS = new Set<string>(['trigger', 'schedule', 'standing_watch']);
 const TASK_ACTOR_TYPES = new Set<string>(['user', 'system', 'workspace_callback']);
 const TRIGGERED_BY = new Set<string>(TRIGGERED_BY_VALUES);
@@ -80,7 +82,14 @@ function nonEmptyBoundedText(value: string, field: string, maxLength: number): s
 
 export function validateReservedTaskSubmissionInput(
   input: ReservedTaskSubmissionInput,
-  env: Pick<Env, 'MAX_TASK_MESSAGE_LENGTH'>
+  env: Pick<
+    Env,
+    | 'MAX_TASK_MESSAGE_LENGTH'
+    | 'RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH'
+    | 'RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH'
+    | 'RESERVED_TASK_REPOSITORY_ACCESS_FLOW_MAX_LENGTH'
+    | 'RESERVED_TASK_INITIAL_STATUS_REASON_MAX_LENGTH'
+  >
 ): string | null {
   try {
     nonEmptyIdentity(input.identities.taskId, 'identities.taskId');
@@ -94,7 +103,14 @@ export function validateReservedTaskSubmissionInput(
       'prompt',
       parsePositiveInt(env.MAX_TASK_MESSAGE_LENGTH, DEFAULT_RESERVED_PROMPT_MAX_LENGTH)
     );
-    nonEmptyBoundedText(input.branchNameSeed, 'branchNameSeed', MAX_RESERVED_DISPLAY_NAME_LENGTH);
+    nonEmptyBoundedText(
+      input.branchNameSeed,
+      'branchNameSeed',
+      parsePositiveInt(
+        env.RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH,
+        DEFAULT_RESERVED_BRANCH_NAME_SEED_MAX_LENGTH
+      )
+    );
     if (!SOURCE_KINDS.has(input.source.kind)) {
       throw new Error(`source.kind is invalid: ${input.source.kind}`);
     }
@@ -114,17 +130,26 @@ export function validateReservedTaskSubmissionInput(
     nonEmptyBoundedText(
       input.source.displayName,
       'source.displayName',
-      MAX_RESERVED_DISPLAY_NAME_LENGTH
+      parsePositiveInt(
+        env.RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH,
+        DEFAULT_RESERVED_SOURCE_DISPLAY_NAME_MAX_LENGTH
+      )
     );
     nonEmptyBoundedText(
       input.source.repositoryAccessFlow,
       'source.repositoryAccessFlow',
-      MAX_RESERVED_DISPLAY_NAME_LENGTH
+      parsePositiveInt(
+        env.RESERVED_TASK_REPOSITORY_ACCESS_FLOW_MAX_LENGTH,
+        DEFAULT_RESERVED_REPOSITORY_ACCESS_FLOW_MAX_LENGTH
+      )
     );
     nonEmptyBoundedText(
       input.source.initialStatusReason,
       'source.initialStatusReason',
-      MAX_RESERVED_REASON_LENGTH
+      parsePositiveInt(
+        env.RESERVED_TASK_INITIAL_STATUS_REASON_MAX_LENGTH,
+        DEFAULT_RESERVED_INITIAL_STATUS_REASON_MAX_LENGTH
+      )
     );
     if (input.source.kind === 'trigger') {
       if (input.source.triggerId !== input.source.sourceId) {
@@ -598,7 +623,7 @@ export async function revalidateBeforePhysicalStart(
   return null;
 }
 
-function reservedSubmissionGuardFromSnapshot(
+export function reservedSubmissionGuardFromSnapshot(
   snapshot: AcceptedSnapshot
 ): TaskRunnerReservedSubmissionGuard {
   return {

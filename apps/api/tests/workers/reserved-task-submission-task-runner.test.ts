@@ -1,7 +1,11 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { StartTaskInput, TaskRunner } from '../../src/durable-objects/task-runner';
+import type {
+  StartTaskInput,
+  TaskRunner,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import {
@@ -12,7 +16,7 @@ import type {
   ReservedTaskSubmissionDependencies,
   ReservedTaskSubmissionInput,
 } from '../../src/services/reserved-task-submission-contracts';
-import type { startTaskRunnerDO } from '../../src/services/task-runner-do';
+import { startTaskRunnerDO } from '../../src/services/task-runner-do';
 import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
@@ -65,6 +69,7 @@ async function seedReservedFixture(label: string): Promise<{
   userId: string;
   installationId: string;
   projectId: string;
+  repository: string;
   triggerId: string;
   executionId: string;
   input: ReservedTaskSubmissionInput;
@@ -73,6 +78,7 @@ async function seedReservedFixture(label: string): Promise<{
   const userId = `user-${suffix}`;
   const installationId = `installation-${suffix}`;
   const projectId = `project-${suffix}`;
+  const repository = `acme/${suffix}`;
   const triggerId = `trigger-${suffix}`;
   const executionId = `exec-${suffix}`;
   const prompt = `Run reserved task from ${label} with a real ProjectData session and TaskRunner DO boundary.`;
@@ -89,7 +95,7 @@ async function seedReservedFixture(label: string): Promise<{
   });
   await seedProject(projectId, userId, installationId, {
     name: `Project ${suffix}`,
-    repository: `acme/${suffix}`,
+    repository,
   });
   await env.DATABASE.prepare(
     `UPDATE projects
@@ -161,7 +167,7 @@ async function seedReservedFixture(label: string): Promise<{
     },
   };
 
-  return { userId, installationId, projectId, triggerId, executionId, input };
+  return { userId, installationId, projectId, repository, triggerId, executionId, input };
 }
 
 function submissionDeps(): ReservedTaskSubmissionDependencies {
@@ -174,13 +180,9 @@ function submissionDeps(): ReservedTaskSubmissionDependencies {
   };
 }
 
-async function startPausedTaskRunner(
-  _env: Env,
-  input: TaskRunnerStartBoundaryInput
-): Promise<void> {
-  const stub = taskRunnerStub(input.taskId);
+function toTaskRunnerStartInput(input: TaskRunnerStartBoundaryInput): StartTaskInput {
   const initialCapacityCandidate = input.capacityPoolSelection?.candidates[0] ?? null;
-  const startInput: StartTaskInput = {
+  return {
     taskId: input.taskId,
     projectId: input.projectId,
     userId: input.userId,
@@ -237,6 +239,14 @@ async function startPausedTaskRunner(
       startGuard: input.startGuard ?? null,
     },
   };
+}
+
+async function startPausedTaskRunner(
+  _env: Env,
+  input: TaskRunnerStartBoundaryInput
+): Promise<void> {
+  const stub = taskRunnerStub(input.taskId);
+  const startInput = toTaskRunnerStartInput(input);
 
   await runInDurableObject(stub, async (instance) => {
     await instance.start(startInput);
@@ -315,6 +325,70 @@ async function cancelTask(taskId: string, reason: string): Promise<void> {
     .run();
 }
 
+async function workspaceRowsForFixture(
+  fixture: Awaited<ReturnType<typeof seedReservedFixture>>
+): Promise<Array<{ id: string; status: string; chat_session_id: string | null }>> {
+  const { results } = await env.DATABASE.prepare(
+    `SELECT id, status, chat_session_id
+       FROM workspaces
+      WHERE project_id = ?
+        AND user_id = ?
+        AND chat_session_id = ?
+      ORDER BY created_at, id`
+  )
+    .bind(fixture.projectId, fixture.userId, fixture.input.identities.chatSessionId)
+    .all<{ id: string; status: string; chat_session_id: string | null }>();
+  return results ?? [];
+}
+
+async function reserveOrphanWorkspaceAllocation(
+  fixture: Awaited<ReturnType<typeof seedReservedFixture>>,
+  nodeId: string,
+  workspaceId: string
+): Promise<void> {
+  const checkpoint = await env.DATABASE.prepare(
+    `SELECT intent_fingerprint FROM task_submission_checkpoints WHERE task_id = ?`
+  )
+    .bind(fixture.input.identities.taskId)
+    .first<{ intent_fingerprint: string }>();
+  if (!checkpoint) throw new Error('Missing reserved checkpoint');
+
+  await expect(
+    reserveWorkspacePlacement(
+      env.DATABASE,
+      {
+        id: workspaceId,
+        nodeId,
+        projectId: fixture.projectId,
+        userId: fixture.userId,
+        installationId: fixture.installationId,
+        name: 'Recovered orphan workspace',
+        displayName: 'Recovered orphan workspace',
+        normalizedDisplayName: `recovered-${fixture.executionId}`,
+        repository: fixture.repository,
+        branch: 'main',
+        chatSessionId: fixture.input.identities.chatSessionId,
+        vmSize: 'small',
+        vmLocation: 'nbg1',
+        workspaceProfile: 'full',
+        devcontainerConfigName: null,
+        agentProfileHint: null,
+        capacityPlacementSnapshot: null,
+        taskLifecycleGuard: {
+          taskId: fixture.input.identities.taskId,
+          projectId: fixture.projectId,
+          userId: fixture.userId,
+          chatSessionId: fixture.input.identities.chatSessionId,
+          requireChatSessionMatch: true,
+          reservedIntentFingerprint: checkpoint.intent_fingerprint,
+        },
+        createdAt: new Date().toISOString(),
+      },
+      2
+    )
+  ).resolves.toBe(true);
+}
+
 describe('reserved submission adapter and TaskRunner durable fencing', () => {
   it('converges concurrent same-intent submissions to one physical allocation and one initial prompt', async () => {
     const fixture = await seedReservedFixture('same-intent-taskrunner');
@@ -363,6 +437,45 @@ describe('reserved submission adapter and TaskRunner durable fencing', () => {
       currentStep: 'workspace_dispatch',
       stepResults: { workspaceId: expect.any(String) },
     });
+    expect(await workspaceRowsForFixture(fixture)).toEqual([
+      {
+        id: expect.any(String),
+        status: 'creating',
+        chat_session_id: fixture.input.identities.chatSessionId,
+      },
+    ]);
+  });
+
+  it('deduplicates overlapping real TaskRunner first-start calls before allocation', async () => {
+    const fixture = await seedReservedFixture('overlapping-starts');
+    const capturedStarts: TaskRunnerStartBoundaryInput[] = [];
+    const deps = {
+      ...submissionDeps(),
+      startTaskRunner: vi.fn(async (_env: Env, input: TaskRunnerStartBoundaryInput) => {
+        capturedStarts.push(input);
+        throw new Error('lost before TaskRunner durable start');
+      }) as typeof startTaskRunnerDO,
+    } satisfies ReservedTaskSubmissionDependencies;
+
+    await expect(submitReservedTask(testEnv, fixture.input, deps)).resolves.toMatchObject({
+      outcome: 'pending',
+      pendingAt: 'task_runner_start',
+    });
+    expect(capturedStarts).toHaveLength(1);
+
+    const taskStart = toTaskRunnerStartInput(capturedStarts[0]!);
+    const stub = taskRunnerStub(fixture.input.identities.taskId);
+    await runInDurableObject(stub, async (instance) => {
+      await Promise.all([instance.start(taskStart), instance.start(taskStart)]);
+      await instance.ctx.storage.deleteAlarm();
+    });
+    expect(await stub.getStatus()).toMatchObject({
+      taskId: fixture.input.identities.taskId,
+      currentStep: 'node_selection',
+    });
+
+    expect(await workspaceRowsForFixture(fixture)).toEqual([]);
+    expect(await taskRow(fixture.input.identities.taskId)).toMatchObject({ status: 'queued' });
   });
 
   it('does not allocate physical resources when the task is cancelled after TaskRunner start', async () => {
@@ -405,6 +518,78 @@ describe('reserved submission adapter and TaskRunner durable fencing', () => {
       workspace_id: null,
     });
     expect((await taskCounts(fixture.input.identities.taskId)).workspaces).toBe(0);
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toBeNull();
+  });
+
+  it('fences task cancellation after ProjectData commit before TaskRunner start', async () => {
+    const fixture = await seedReservedFixture('cancel-after-projectdata');
+    const deps = {
+      ...submissionDeps(),
+      afterProjectDataCommit: async () => {
+        await cancelTask(fixture.input.identities.taskId, 'cancelled after ProjectData commit');
+      },
+    } satisfies ReservedTaskSubmissionDependencies;
+
+    const result = await submitReservedTask(testEnv, fixture.input, deps);
+
+    expect(result).toMatchObject({
+      outcome: 'conflict',
+      reason: 'authority_unavailable',
+      message: expect.stringContaining('cancelled'),
+    });
+    expect(await taskRow(fixture.input.identities.taskId)).toMatchObject({
+      status: 'cancelled',
+      workspace_id: null,
+    });
+    expect(await workspaceRowsForFixture(fixture)).toEqual([]);
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toBeNull();
+  });
+
+  it('fences task cancellation after adapter revalidation through the production start bridge', async () => {
+    const fixture = await seedReservedFixture('cancel-during-production-start');
+    const deps = {
+      ...submissionDeps(),
+      startTaskRunner: vi.fn(async (workerEnv: Env, input: TaskRunnerStartBoundaryInput) => {
+        await cancelTask(fixture.input.identities.taskId, 'cancelled during production start');
+        await startTaskRunnerDO(workerEnv, input);
+      }) as typeof startTaskRunnerDO,
+    } satisfies ReservedTaskSubmissionDependencies;
+
+    const result = await submitReservedTask(testEnv, fixture.input, deps);
+
+    expect(deps.startTaskRunner).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      outcome: 'terminal',
+      status: 'cancelled',
+      reason: 'cancelled during production start',
+    });
+    expect(await workspaceRowsForFixture(fixture)).toEqual([]);
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toBeNull();
+  });
+
+  it('fences session archive after adapter revalidation through the production start bridge', async () => {
+    const fixture = await seedReservedFixture('archive-during-production-start');
+    const deps = {
+      ...submissionDeps(),
+      startTaskRunner: vi.fn(async (workerEnv: Env, input: TaskRunnerStartBoundaryInput) => {
+        await projectDataService.stopSession(
+          testEnv,
+          fixture.projectId,
+          fixture.input.identities.chatSessionId
+        );
+        await startTaskRunnerDO(workerEnv, input);
+      }) as typeof startTaskRunnerDO,
+    } satisfies ReservedTaskSubmissionDependencies;
+
+    const result = await submitReservedTask(testEnv, fixture.input, deps);
+
+    expect(deps.startTaskRunner).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      outcome: 'conflict',
+      reason: 'authority_unavailable',
+      message: expect.stringContaining('session_stopped'),
+    });
+    expect(await workspaceRowsForFixture(fixture)).toEqual([]);
     expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toBeNull();
   });
 
@@ -466,6 +651,59 @@ describe('reserved submission adapter and TaskRunner durable fencing', () => {
     });
   });
 
+  it('does not allocate physical resources when the ProjectData session owner changes', async () => {
+    const fixture = await seedReservedFixture('projectdata-owner-change');
+    await makeReadyNode(`node-${fixture.executionId}`, fixture.userId);
+    await submitFixture(fixture);
+
+    const projectDataStub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(fixture.projectId));
+    await runInDurableObject(projectDataStub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE chat_sessions SET created_by_user_id = ?, updated_at = ? WHERE id = ?',
+        `other-${fixture.userId}`,
+        Date.now(),
+        fixture.input.identities.chatSessionId
+      );
+    });
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    expect(await workspaceRowsForFixture(fixture)).toEqual([]);
+    expect(await taskRow(fixture.input.identities.taskId)).toMatchObject({
+      status: 'failed',
+      workspace_id: null,
+      error_message: expect.stringContaining('owner changed'),
+    });
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toMatchObject({
+      completed: true,
+      currentStep: 'node_selection',
+    });
+  });
+
+  it('does not allocate physical resources when the task is cancelled after node selection', async () => {
+    const fixture = await seedReservedFixture('cancel-after-node-selection');
+    await makeReadyNode(`node-${fixture.executionId}`, fixture.userId);
+    await submitFixture(fixture);
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toMatchObject({
+      currentStep: 'workspace_creation',
+      stepResults: { nodeId: expect.any(String) },
+    });
+
+    await cancelTask(fixture.input.identities.taskId, 'cancelled after node selection');
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    expect(await workspaceRowsForFixture(fixture)).toEqual([]);
+    expect(await taskRow(fixture.input.identities.taskId)).toMatchObject({
+      status: 'cancelled',
+      workspace_id: null,
+    });
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toMatchObject({
+      completed: true,
+      currentStep: 'workspace_creation',
+    });
+  });
+
   it('rejects physical placement in the production SQL statement after task cancellation', async () => {
     const fixture = await seedReservedFixture('placement-sql-cancel');
     const nodeId = `node-${fixture.executionId}`;
@@ -491,8 +729,9 @@ describe('reserved submission adapter and TaskRunner durable fencing', () => {
           name: 'Workspace after cancellation',
           displayName: 'Workspace after cancellation',
           normalizedDisplayName: `workspace-${fixture.executionId}`,
-          repository: `acme/${fixture.executionId}`,
+          repository: fixture.repository,
           branch: 'main',
+          chatSessionId: fixture.input.identities.chatSessionId,
           vmSize: 'small',
           vmLocation: 'nbg1',
           workspaceProfile: 'full',
@@ -514,6 +753,99 @@ describe('reserved submission adapter and TaskRunner durable fencing', () => {
     ).resolves.toBe(false);
 
     expect((await taskCounts(fixture.input.identities.taskId)).workspaces).toBe(0);
+  });
+
+  it('recovers a workspace allocation that committed before task linkage', async () => {
+    const fixture = await seedReservedFixture('recover-orphan-allocation');
+    const nodeId = `node-${fixture.executionId}`;
+    const workspaceId = `workspace-${fixture.executionId}`;
+    await makeReadyNode(nodeId, fixture.userId);
+    await submitFixture(fixture);
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    await reserveOrphanWorkspaceAllocation(fixture, nodeId, workspaceId);
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    expect(await workspaceRowsForFixture(fixture)).toEqual([
+      {
+        id: workspaceId,
+        status: 'creating',
+        chat_session_id: fixture.input.identities.chatSessionId,
+      },
+    ]);
+    expect(await taskRow(fixture.input.identities.taskId)).toMatchObject({
+      status: 'delegated',
+      workspace_id: workspaceId,
+    });
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toMatchObject({
+      currentStep: 'workspace_dispatch',
+      stepResults: { workspaceId },
+    });
+  });
+
+  it('claims a recovered workspace allocation that was already stored in DO state', async () => {
+    const fixture = await seedReservedFixture('recover-state-before-task-link');
+    const nodeId = `node-${fixture.executionId}`;
+    const workspaceId = `workspace-${fixture.executionId}`;
+    await makeReadyNode(nodeId, fixture.userId);
+    await submitFixture(fixture);
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    await reserveOrphanWorkspaceAllocation(fixture, nodeId, workspaceId);
+    await runInDurableObject(taskRunnerStub(fixture.input.identities.taskId), async (instance) => {
+      const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+      if (!state) throw new Error('Missing TaskRunner state');
+      state.stepResults.workspaceId = workspaceId;
+      state.stepResults.nodeId = nodeId;
+      await instance.ctx.storage.put('state', state);
+      await instance.ctx.storage.deleteAlarm();
+    });
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    expect(await workspaceRowsForFixture(fixture)).toEqual([
+      {
+        id: workspaceId,
+        status: 'creating',
+        chat_session_id: fixture.input.identities.chatSessionId,
+      },
+    ]);
+    expect(await taskRow(fixture.input.identities.taskId)).toMatchObject({
+      status: 'delegated',
+      workspace_id: workspaceId,
+    });
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toMatchObject({
+      currentStep: 'workspace_dispatch',
+      stepResults: { workspaceId },
+    });
+  });
+
+  it('tombstones a workspace allocation when cancellation lands before task linkage', async () => {
+    const fixture = await seedReservedFixture('cancel-orphan-allocation');
+    const nodeId = `node-${fixture.executionId}`;
+    const workspaceId = `workspace-${fixture.executionId}`;
+    await makeReadyNode(nodeId, fixture.userId);
+    await submitFixture(fixture);
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    await reserveOrphanWorkspaceAllocation(fixture, nodeId, workspaceId);
+    await cancelTask(fixture.input.identities.taskId, 'cancelled after workspace insert');
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    expect(await workspaceRowsForFixture(fixture)).toEqual([
+      {
+        id: workspaceId,
+        status: 'stopped',
+        chat_session_id: fixture.input.identities.chatSessionId,
+      },
+    ]);
+    expect(await taskRow(fixture.input.identities.taskId)).toMatchObject({
+      status: 'cancelled',
+      workspace_id: null,
+    });
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toMatchObject({
+      completed: true,
+      currentStep: 'workspace_creation',
+    });
   });
 
   it('preserves accepted configuration when project defaults change before physical start', async () => {

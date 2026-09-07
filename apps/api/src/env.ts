@@ -865,6 +865,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MCP_DEPLOYMENT_LOG_MAX_LIMIT?: string; // Max deployment log rows for read_deployment_logs (default: 1000)
   // Configurable content limits
   MAX_TASK_MESSAGE_LENGTH?: string;
+  RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH?: string;
+  RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH?: string;
+  RESERVED_TASK_REPOSITORY_ACCESS_FLOW_MAX_LENGTH?: string;
+  RESERVED_TASK_INITIAL_STATUS_REASON_MAX_LENGTH?: string;
   MAX_ACTIVITY_MESSAGE_LENGTH?: string;
   MAX_LOG_MESSAGE_LENGTH?: string;
   MAX_OUTPUT_SUMMARY_LENGTH?: string;
