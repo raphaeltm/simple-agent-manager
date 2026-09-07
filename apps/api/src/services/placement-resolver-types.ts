@@ -1,12 +1,16 @@
 import type {
   AgentProfileRuntime,
+  CapacityExhaustionPolicy,
   CapacityPlacementSnapshot,
+  CapacityPoolPlacementSettings,
   CapacityPoolScope,
   CapacityPoolStrategy,
   CapacityWorkloadRole,
   CredentialProvider,
   CredentialSource,
+  DefaultCapacityPoolEffectiveState,
   ResolvedResourceReservation,
+  ResourceRequirements,
   ResourceRequirementsSource,
   ResourceResolutionInput,
   TaskMode,
@@ -47,6 +51,7 @@ export interface PlacementProjectDefaults {
   defaultWorkspaceProfile?: string | null;
   defaultDevcontainerConfigName?: string | null;
   defaultAgentType?: string | null;
+  resourceRequirementsJson?: string | null;
 }
 
 export interface PlacementProfileDefaults {
@@ -61,6 +66,7 @@ export interface PlacementProfileDefaults {
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
   resourceRequirementsJson?: string | null;
+  resourceRequirementsSource?: PlacementProfileVmSizeSource | null;
 }
 
 export interface PlacementExplicitOverrides {
@@ -100,6 +106,8 @@ export interface TaskStartPlacementInput {
   taskModeDefault: PlacementTaskModeDefault;
   profileVmSizeSource?: PlacementProfileVmSizeSource;
   resourceRequirements?: ResourceResolutionInput;
+  placementSettings?: CapacityPoolPlacementSettings | null;
+  legacyWorkloadMapping?: Record<VMSize, Required<ResourceRequirements>>;
   validateLocation?: boolean;
   runtimeDecision?: WorkspaceRuntimeDecision | null;
 }
@@ -133,6 +141,7 @@ export interface TaskStartPlacement {
   taskMode: TaskMode;
   agentType: string | null;
   resolvedReservation: ResolvedResourceReservation;
+  placementSettings?: CapacityPoolPlacementSettings | null;
   credentialLookup: PlacementCredentialLookup;
   inheritedCredentialAttribution: Required<PlacementCredentialAttributionInput>;
   runtime: PlacementRuntimeResolution;
@@ -157,6 +166,8 @@ export interface TaskStartCapacityCandidate {
   providerInstancePriceCurrency: string | null;
   providerInstancePriceMonthlyCents: number | null;
   providerInstancePriceHourlyMicros: number | null;
+  priceComparability: 'known' | 'unknown' | 'currency-mismatch';
+  catalogAvailability: 'available' | 'last-known-unavailable';
   priority: number;
   candidateOrder: number;
   credentialAttributionSource: CredentialSource;
@@ -177,6 +188,9 @@ export interface TaskStartCapacityPoolSelection {
   scope: CapacityPoolScope;
   revision: number;
   strategy: CapacityPoolStrategy;
+  exhaustionPolicy: CapacityExhaustionPolicy;
+  effectiveState: DefaultCapacityPoolEffectiveState;
+  selectionSettings: CapacityPoolPlacementSettings;
   capacityPoolProjectId: string | null;
   workloadRole: CapacityWorkloadRole;
   poolSnapshot: CapacityPlacementSnapshot;
@@ -226,4 +240,5 @@ export interface TaskStartPlacementWithCredential extends PlacementCredentialAtt
 export type PlacementResolutionErrorCode =
   | 'invalid-provider'
   | 'invalid-location'
+  | 'invalid-resource-requirements'
   | 'no-eligible-capacity-candidate';

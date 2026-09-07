@@ -17,6 +17,7 @@ import {
   getLocationsForProvider,
   isValidLocationForProvider,
   isValidProvider,
+  LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -24,6 +25,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { resolveCapacityPoolPlacementSettings } from './capacity-pool-placement-settings';
 import { resolveEffectiveDefaultCapacityPoolSummary } from './default-capacity-pools';
 import {
   buildCapacityPoolSelection,
@@ -120,6 +122,56 @@ export function resolveEffectivePlacementRuntime(input: {
   };
 }
 
+function resolvePlacementReservation(
+  input: TaskStartPlacementInput,
+  vmSize: VMSize,
+  vmSizeSource: ResourceRequirementsSource
+) {
+  const explicit = input.explicit ?? {};
+  const profile = input.profile ?? null;
+  const legacyVmSizes: Partial<Record<ResourceRequirementsSource, VMSize>> = {};
+
+  if (explicit.vmSize) {
+    legacyVmSizes[explicit.vmSizeSource ?? 'task'] = explicit.vmSize;
+  }
+  if (profile?.vmSizeOverride) {
+    legacyVmSizes[input.profileVmSizeSource ?? 'agent-profile'] = profile.vmSizeOverride as VMSize;
+  }
+  if (input.project.defaultVmSize) {
+    legacyVmSizes.project = input.project.defaultVmSize as VMSize;
+  }
+  if (Object.keys(legacyVmSizes).length === 0) {
+    legacyVmSizes[vmSizeSource] = vmSize;
+  }
+
+  try {
+    return resolveResourceReservation(
+      input.resourceRequirements ?? {},
+      {
+        taskId: input.taskId,
+        triggerId: input.triggerId,
+        skillId: profile?.skillId ?? undefined,
+        agentProfileId: profile?.profileId ?? undefined,
+        projectId: input.projectId,
+        userId: input.userId,
+      },
+      {
+        legacyVmSizes,
+        legacyWorkloadMapping: input.legacyWorkloadMapping,
+        compatibilityAdapterVersion:
+          input.placementSettings?.legacyWorkloadAdapterVersion ??
+          LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
+      }
+    );
+  } catch (error) {
+    throw new PlacementResolutionError(
+      'invalid-resource-requirements',
+      error instanceof Error ? error.message : 'Invalid resource requirements',
+      []
+    );
+  }
+}
+
 export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskStartPlacement {
   const profile = input.profile ?? null;
   const explicit = input.explicit ?? {};
@@ -145,19 +197,22 @@ export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskS
   const inheritedCredentialAttribution = normalizeCredentialAttribution(
     input.inheritedCredentialAttribution
   );
+  const vmSize = resolveVmSize(explicit.vmSize, profile, input.project);
+  const vmSizeSource = resolveVmSizeSource(
+    explicit,
+    profile,
+    input.project,
+    input.profileVmSizeSource ?? 'agent-profile'
+  );
+  const resolvedReservation = resolvePlacementReservation(input, vmSize, vmSizeSource);
 
   return {
     entryPoint: input.entryPoint,
     taskId: input.taskId,
     projectId: input.projectId,
     userId: input.userId,
-    vmSize: resolveVmSize(explicit.vmSize, profile, input.project),
-    vmSizeSource: resolveVmSizeSource(
-      explicit,
-      profile,
-      input.project,
-      input.profileVmSizeSource ?? 'agent-profile'
-    ),
+    vmSize,
+    vmSizeSource,
     provider,
     vmLocation,
     explicitVmLocation: explicit.vmLocation != null,
@@ -170,14 +225,8 @@ export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskS
     ),
     taskMode: resolveTaskMode(explicit.taskMode, profile, workspaceProfile, input.taskModeDefault),
     agentType: explicit.agentType ?? profile?.agentType ?? input.project.defaultAgentType ?? null,
-    resolvedReservation: resolveResourceReservation(input.resourceRequirements ?? {}, {
-      taskId: input.taskId,
-      triggerId: input.triggerId,
-      skillId: profile?.skillId ?? undefined,
-      agentProfileId: profile?.profileId ?? undefined,
-      projectId: input.projectId,
-      userId: input.userId,
-    }),
+    resolvedReservation,
+    placementSettings: input.placementSettings ?? null,
     credentialLookup: resolveCredentialLookup({
       userId: input.userId,
       projectId: input.projectId,
@@ -217,15 +266,26 @@ export async function resolveTaskStartCapacityPoolSelection(
   if (placement.runtime.isInstantRuntime) return null;
 
   try {
+    const resolvedSettings = options.env
+      ? await resolveCapacityPoolPlacementSettings(db, options.env)
+      : null;
     const summary = await resolveEffectiveDefaultCapacityPoolSummary(db, {
       userId: placement.userId,
       projectId: placement.projectId,
-      ensure: options.ensure ?? false,
+      ensure: options.ensure ?? true,
       env: options.env,
     });
     if (!summary) return null;
 
-    return buildCapacityPoolSelection(summary, placement, 'workspace');
+    return buildCapacityPoolSelection(
+      summary,
+      {
+        ...placement,
+        placementSettings: resolvedSettings?.placementSettings ?? placement.placementSettings,
+      },
+      'workspace',
+      resolvedSettings?.placementSettings ?? placement.placementSettings ?? undefined
+    );
   } catch (error) {
     if (options.failOpen === false) throw error;
     log.warn('placement_resolver.capacity_pool_unavailable', {
@@ -301,7 +361,15 @@ export async function resolveTaskStartPlacementCredentialAttribution(
 > {
   let placement: TaskStartPlacement;
   try {
-    placement = resolveTaskStartPlacement(input);
+    const settings = options?.env
+      ? await resolveCapacityPoolPlacementSettings(db, options.env)
+      : null;
+    placement = resolveTaskStartPlacement({
+      ...input,
+      placementSettings: settings?.placementSettings ?? input.placementSettings,
+      legacyWorkloadMapping:
+        settings?.resourceDefaults.legacyWorkloadMapping ?? input.legacyWorkloadMapping,
+    });
   } catch (err) {
     if (err instanceof PlacementResolutionError) {
       return { error: err.message, errorKind: 'placement' };

@@ -43,6 +43,9 @@ export { CREDENTIAL_PROVIDERS, GCP_CREDENTIAL_VERSION } from './user';
 export type {
   CapacityCredentialSource,
   CapacityExhaustionPolicy,
+  CapacityPoolConfigurationState,
+  CapacityPoolPlacementSettings,
+  CapacityPoolSelectionWeights,
   CapacityPlacementCredentialSource,
   CapacityPlacementSnapshot,
   CapacityPool,
@@ -54,6 +57,7 @@ export type {
   CapacitySourceIdentity,
   CapacitySourceKind,
   CapacityWorkloadRole,
+  DefaultCapacityPoolEffectiveState,
   DefaultCapacityPoolCandidateCatalogAddition,
   DefaultCapacityPoolCandidateStatusUpdate,
   DefaultCapacityPoolPolicyUpdate,
@@ -65,7 +69,9 @@ export type {
 export {
   CAPACITY_CREDENTIAL_SOURCES,
   CAPACITY_EXHAUSTION_POLICIES,
+  CAPACITY_POOL_CONFIGURATION_STATES,
   CAPACITY_PLACEMENT_CREDENTIAL_SOURCES,
+  DEFAULT_CAPACITY_POOL_EFFECTIVE_STATES,
   CAPACITY_POOL_SCOPES,
   CAPACITY_POOL_STATUSES,
   CAPACITY_POOL_STRATEGIES,
@@ -74,6 +80,7 @@ export {
   isCapacityCredentialSource,
   isCapacityExhaustionPolicy,
   isCapacityPlacementCredentialSource,
+  isCapacityPoolConfigurationState,
   isCapacityPoolScope,
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
@@ -779,8 +786,12 @@ export type {
 
 // Resource Requirements & Reservations
 export type {
+  LegacyVmSizeResolutionInput,
   PlacementExplanation,
   ResolvedResourceReservation,
+  ResourceRequirementField,
+  ResourceRequirementFieldProvenance,
+  ResourceRequirementProvenance,
   ResourceRequirements,
   ResourceRequirementsSource,
   ResourceResolutionInput,

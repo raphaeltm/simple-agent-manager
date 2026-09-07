@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
   PLATFORM_RESOURCE_DEFAULTS,
   resolveResourceReservation,
   RESOURCE_RESERVATION_VERSION,
@@ -10,7 +11,7 @@ import {
 describe('resolveResourceReservation', () => {
   it('returns platform defaults when no layers provide requirements', () => {
     const result = resolveResourceReservation({});
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       cpuMillis: PLATFORM_RESOURCE_DEFAULTS.minVcpu * 1000,
       memoryMb: PLATFORM_RESOURCE_DEFAULTS.minMemoryGb * 1024,
       diskMb: PLATFORM_RESOURCE_DEFAULTS.minDiskGb * 1024,
@@ -20,6 +21,7 @@ describe('resolveResourceReservation', () => {
       sourceId: 'platform',
       version: RESOURCE_RESERVATION_VERSION,
     });
+    expect(result.fieldProvenance?.minVcpu?.source).toBe('platform');
   });
 
   it('resolves task-level requirements as highest priority', () => {
@@ -146,15 +148,85 @@ describe('resolveResourceReservation', () => {
     expect(result.sourceId).toBe('proj-1');
   });
 
-  it('handles value 0 correctly (not treated as undefined)', () => {
-    const result = resolveResourceReservation({
-      task: { maxCoTenants: 0 },
-      project: { maxCoTenants: 4 },
-    });
+  it('rejects invalid zero tenant limits instead of silently accepting them', () => {
+    expect(() =>
+      resolveResourceReservation({
+        task: { maxCoTenants: 0 },
+        project: { maxCoTenants: 4 },
+      }),
+    ).toThrow('Invalid maxCoTenants');
+  });
 
-    // 0 is a defined value; task layer should win
-    expect(result.maxCoTenants).toBe(0);
-    expect(result.source).toBe('task');
+  it('maps legacy sizes to distinct workload slices with per-field provenance', () => {
+    const small = resolveResourceReservation({}, {}, { legacyVmSizes: { task: 'small' } });
+    const medium = resolveResourceReservation({}, {}, { legacyVmSizes: { task: 'medium' } });
+    const large = resolveResourceReservation({}, {}, { legacyVmSizes: { task: 'large' } });
+
+    expect(small.cpuMillis).toBe(
+      DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minVcpu * 1000,
+    );
+    expect(medium.cpuMillis).toBe(
+      DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.medium.minVcpu * 1000,
+    );
+    expect(large.cpuMillis).toBe(
+      DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.minVcpu * 1000,
+    );
+    expect(new Set([small.cpuMillis, medium.cpuMillis, large.cpuMillis]).size).toBe(3);
+    expect(small.fieldProvenance?.minVcpu?.compatibility).toMatchObject({
+      adapter: 'legacy-vm-size-workload',
+      legacyVmSize: 'small',
+    });
+  });
+
+  it('keeps modern fields authoritative over legacy values within the same layer', () => {
+    const result = resolveResourceReservation(
+      { task: { minMemoryGb: 12 } },
+      { taskId: 'task-modern' },
+      { legacyVmSizes: { task: 'small' } },
+    );
+
+    expect(result.cpuMillis).toBe(
+      DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minVcpu * 1000,
+    );
+    expect(result.memoryMb).toBe(12 * 1024);
+    expect(result.fieldProvenance?.minMemoryGb).toMatchObject({
+      source: 'task',
+      sourceId: 'task-modern',
+      value: 12,
+    });
+    expect(result.fieldProvenance?.minMemoryGb?.compatibility).toBeUndefined();
+  });
+
+  it('applies field precedence across task, skill, profile, project, user, and platform layers', () => {
+    const result = resolveResourceReservation(
+      {
+        task: { minDiskGb: 120 },
+        skill: { minVcpu: 6 },
+        agentProfile: { minMemoryGb: 10 },
+        project: { exclusiveNode: true },
+        user: { maxCoTenants: 2 },
+      },
+      {
+        taskId: 'task-1',
+        skillId: 'skill-1',
+        agentProfileId: 'profile-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+      },
+    );
+
+    expect(result).toMatchObject({
+      cpuMillis: 6000,
+      memoryMb: 10 * 1024,
+      diskMb: 120 * 1024,
+      exclusiveNode: true,
+      maxCoTenants: 2,
+      source: 'task',
+    });
+    expect(result.fieldProvenance?.minVcpu?.source).toBe('skill');
+    expect(result.fieldProvenance?.minMemoryGb?.source).toBe('agent-profile');
+    expect(result.fieldProvenance?.exclusiveNode?.source).toBe('project');
+    expect(result.fieldProvenance?.maxCoTenants?.source).toBe('user');
   });
 
   it('produces output safe for JSON.stringify (no undefined values)', () => {

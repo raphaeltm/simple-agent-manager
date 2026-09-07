@@ -32,10 +32,11 @@ function buildInstallationDefaultPoolResponse(
   summaries: DefaultCapacityPoolsEnsureResult,
   ensure: boolean
 ): ProjectDefaultCapacityPoolsResponse {
-  const effective = activeDefaultSummary(summaries.installation);
+  const effective = summaries.installation;
   return {
     effective,
     effectiveScope: effective?.pool.scope ?? null,
+    effectiveState: effective?.effectiveState,
     defaults: [
       {
         scope: 'project',
@@ -63,14 +64,6 @@ function buildInstallationDefaultPoolResponse(
     reconciledScopes: ensure ? ['installation'] : [],
     policyMutationSupported: true,
   };
-}
-
-function activeDefaultSummary(
-  summary: DefaultCapacityPoolsEnsureResult[keyof DefaultCapacityPoolsEnsureResult]
-): ProjectDefaultCapacityPoolsResponse['effective'] {
-  if (!summary || summary.pool.status !== 'active' || summary.activeCandidateCount <= 0)
-    return null;
-  return summary;
 }
 
 /**

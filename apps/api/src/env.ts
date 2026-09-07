@@ -312,6 +312,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
   MAX_WORKSPACES_PER_NODE?: string;
+  CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE?: string; // Optional max user/project scopes reconciled by one unscoped capacity-pool backfill call
+  CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON?: string; // Optional legacy-size workload slice mapping; platform_settings overrides it
+  CAPACITY_POOL_SELECTION_SETTINGS_JSON?: string; // Optional capacity-pool ranking/cohort settings; platform_settings overrides it
   VM_ADMISSION_CONTROL_MODE?: string;
   VM_ADMISSION_LEASE_TTL_MS?: string;
   VM_ADMISSION_RETRY_MIN_MS?: string;

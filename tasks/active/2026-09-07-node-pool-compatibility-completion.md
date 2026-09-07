@@ -80,30 +80,33 @@ Changing a deprecated size hint cannot change a native payload or accounting.
 
 ### A. Canonical requirements, pool state and migration (F1, F2, F3, F6, F7, F9, F11)
 
-- [ ] Implement one shared versioned legacy-to-workload adapter, validation,
+- [x] Implement one shared versioned legacy-to-workload adapter, validation,
   per-field precedence and provenance. Cover task/profile/skill/project/platform
   values, defaults, queued plans, retry and recovery. Reject nonfinite/negative
   resources and malformed compatibility constraints consistently.
-- [ ] Persist configurable defaults/mapping and strategy weights with validated
+- [x] Persist configurable defaults/mapping and strategy weights with validated
   environment fallbacks; expose their effective nonsecret values to clients.
-- [ ] Separate pool configuration state from current eligibility. Preserve a
+- [x] Separate pool configuration state from current eligibility. Preserve a
   configured pool when all selections are removed or a source is disabled.
-- [ ] Add bounded, resumable, idempotent migration/ensure independent of visiting
+- [x] Add bounded, resumable, idempotent migration/ensure independent of visiting
   settings; integrate credential create/attach/rotate/disable/delete/re-enable
   lifecycle. Backfill missing modern values with CAS and preserve concurrent
   edits, removals, original values and migration provenance.
-- [ ] Separate selected membership from catalog availability/staleness/retirement.
+- [x] Separate selected membership from catalog availability/staleness/retirement.
   Cache credential-scoped snapshots with bounded refresh; provider failure or
   incomplete pagination cannot replace a valid catalog with a narrow fallback.
   Returning inventory becomes available without reselecting removed inventory.
-- [ ] Make policy edits atomic and revisioned, including effective reconciliation
+- [x] Make policy edits atomic and revisioned, including effective reconciliation
   changes. Carry exhaustion policy and ranking settings in versioned plans.
   Define queue/fail/intra-pool fallback behavior; do not expose unsupported
   cross-pool semantics or claim settings execute when they do not.
-- [ ] Normalize comparable prices to one time unit and same currency; explicitly
+- [x] Normalize comparable prices to one time unit and same currency; explicitly
   rank unknown/noncomparable prices and preserve owner-defined priority order.
 - [ ] Distinguish explicit provider/location/architecture/image/network constraints
   from inherited preferences. Return actionable incompatibility reasons.
+  Slice A exports the plan/snapshot/settings fields and provider/location hard
+  checks used by pool selection; full architecture/image/network writer wiring
+  remains in downstream allocation/runtime slices.
 
 ### B. Provider-native contracts and actual hardware (F8)
 
@@ -174,7 +177,7 @@ Changing a deprecated size hint cannot change a native payload or accounting.
 
 ### E. No-leakage gates and release validation
 
-- [ ] Add a tested boundary/architecture gate banning legacy-size authority in
+- [x] Add a tested boundary/architecture gate banning legacy-size authority in
   canonical placement/provider/metering code outside named compatibility modules.
   Inventory allocation writers in a checked contract. Allow historical migrations,
   adapter fixtures, labeled historical displays and unrelated responsive CSS.

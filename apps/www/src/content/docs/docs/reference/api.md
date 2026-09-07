@@ -181,18 +181,26 @@ with `credentialSetupRequired: true` and a `credentialSetupMessage` suitable for
 ## Capacity pools
 
 Default capacity-pool endpoints expose non-secret pool, source, and concrete candidate metadata.
-Responses have this shape: `effective`, `effectiveScope`, `defaults`, `precedence`,
-`reconciledScopes`, and `policyMutationSupported`. Use `ensure=true` on GET endpoints, or call the
-matching `/reconcile` endpoint, to refresh pool metadata from the credential-scoped provider-native
-catalog. Provider API failures fall back to static curated catalog rows for that provider. Provider
-catalog offerings expose `catalogSource`; capacity-pool candidates expose the persisted
-`providerInstanceCatalogSource` snapshot.
+Responses have this shape: `effective`, `effectiveScope`, `effectiveState`, `defaults`,
+`precedence`, `reconciledScopes`, and `policyMutationSupported`. Each summary includes
+`activeCandidateCount`, `availableCandidateCount`, `effectiveState`, and non-secret diagnostics.
+Use `ensure=true` on GET endpoints, or call the matching `/reconcile` endpoint, to refresh pool
+metadata from the credential-scoped provider-native catalog. Provider API failures fall back to
+static curated catalog rows for that provider. Provider catalog offerings expose `catalogSource`;
+capacity-pool candidates expose the persisted `providerInstanceCatalogSource` and
+`catalogAvailability` snapshot.
+
+Only an unconfigured scope inherits from the next default-pool scope. A configured project or user
+pool with state `configured-empty`, `source-disabled`, `catalog-unavailable`, or `migration-pending`
+remains authoritative and is returned as `effective`; placement then queues/fails inside that pool
+according to its exhaustion policy.
 
 ### `GET /api/capacity-pools/defaults`
 
 Read the authenticated user's default compute pool. Optional `ensure=true` reconciles it from the
-user's active personal compute credentials. Disabled zero-active owned pools remain visible for the
-editor; they are not selected as `effective`.
+user's active personal compute credentials. Configured zero-active or catalog-unavailable owned
+pools remain visible and are still selected as `effective` so clients do not infer unsupported
+cross-scope fallback.
 
 ### `POST /api/capacity-pools/defaults/reconcile`
 
