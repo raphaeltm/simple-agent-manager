@@ -431,21 +431,21 @@ describe('Project event source outbox durability on migrated D1', () => {
       },
     ];
     for (const input of mismatchInputs) {
-      expect(() =>
-        projectEventSourceOutboxInsertStatement(testEnv, input, {
+      await expect(
+        enqueueProjectEventSourceIntent(testEnv, input, {
           id: `${projectId}-credential-capture-mismatch`,
           now: NOW,
           capture,
         })
-      ).toThrow();
+      ).rejects.toThrow();
     }
-    expect(() =>
-      projectEventSourceOutboxInsertStatement(testEnv, credentialEvent, {
+    await expect(
+      enqueueProjectEventSourceIntent(testEnv, credentialEvent, {
         id: `${projectId}-credential-capture-unsupported`,
         now: NOW,
         capture: { kind: 'unsupported', projectId } as never,
       })
-    ).toThrow('Unsupported project event source outbox capture kind');
+    ).rejects.toThrow('Unsupported project event source outbox capture kind');
   });
 
   it('does not enter ProjectData after ownership is lost before admission on migrated D1', async () => {

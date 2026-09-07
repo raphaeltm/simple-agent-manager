@@ -821,7 +821,7 @@ describe('project event source outbox', () => {
     ]);
   });
 
-  it('rejects credential capture identity mismatches and unsupported capture kinds', () => {
+  it('rejects credential capture identity mismatches and unsupported capture kinds', async () => {
     const observedAt = NOW.getTime();
     const event = {
       ...sourceEvent(),
@@ -864,21 +864,21 @@ describe('project event source outbox', () => {
     ] as const;
 
     for (const [input, error] of cases) {
-      expect(() =>
-        projectEventSourceOutboxInsertStatement(env, input, {
+      await expect(
+        enqueueProjectEventSourceIntent(env, input, {
           id: 'credential-window-mismatch',
           now: NOW,
           capture,
         })
-      ).toThrow(error);
+      ).rejects.toThrow(error);
     }
-    expect(() =>
-      projectEventSourceOutboxInsertStatement(env, event, {
+    await expect(
+      enqueueProjectEventSourceIntent(env, event, {
         id: 'credential-window-unsupported-kind',
         now: NOW,
         capture: { kind: 'unknown_capture_kind', projectId: 'project-1' } as never,
       })
-    ).toThrow('Unsupported project event source outbox capture kind');
+    ).rejects.toThrow('Unsupported project event source outbox capture kind');
     expect(
       sqlite.prepare(`SELECT COUNT(*) AS count FROM project_event_source_outbox`).get()
     ).toEqual({ count: 0 });
