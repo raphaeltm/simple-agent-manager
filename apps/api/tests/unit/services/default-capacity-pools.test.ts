@@ -861,6 +861,22 @@ describe('default capacity pool creation', () => {
     }).toEqual(firstCounts);
   });
 
+  it('clamps positive fractional backfill batch sizes to at least one scope', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    seedUserCredential({ id: 'project-1-hetzner', projectId: 'project-1' });
+
+    const result = await backfillDefaultCapacityPoolsForExistingCredentials(db as never, {
+      includeInstallation: false,
+      scopeBatchSize: 0.5,
+    });
+
+    expect(result.usersEnsured).toBe(1);
+    expect(result.projectsEnsured).toBe(1);
+    expect(getCount('capacity_pools', "scope = 'user'")).toBe(1);
+    expect(getCount('capacity_pools', "scope = 'project'")).toBe(1);
+  });
+
   it('bounds unscoped backfill work so repeated calls can resume safely', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-hetzner' });
