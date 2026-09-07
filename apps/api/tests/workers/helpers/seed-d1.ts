@@ -207,13 +207,29 @@ export async function seedWorkspace(
     projectId?: string;
     status?: string;
     chatSessionId?: string;
+    resolvedReservationJson?: string | null;
     createdAt?: string;
     updatedAt?: string;
   }
 ): Promise<void> {
+  const resolvedReservationJson =
+    opts?.resolvedReservationJson === undefined
+      ? JSON.stringify({
+          cpuMillis: 1000,
+          memoryMb: 1024,
+          diskMb: 1024,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+          source: 'platform',
+          sourceId: 'platform',
+          version: 1,
+        })
+      : opts.resolvedReservationJson;
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO workspaces (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location, chat_session_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?)`
+    `INSERT OR IGNORE INTO workspaces
+       (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location,
+        chat_session_id, resolved_reservation_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?, ?)`
   )
     .bind(
       workspaceId,
@@ -224,6 +240,7 @@ export async function seedWorkspace(
       'test-org/test-repo',
       opts?.status ?? 'running',
       opts?.chatSessionId ?? null,
+      resolvedReservationJson,
       opts?.createdAt ?? new Date().toISOString(),
       opts?.updatedAt ?? new Date().toISOString()
     )

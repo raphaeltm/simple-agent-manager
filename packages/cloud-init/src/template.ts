@@ -132,6 +132,10 @@ runcmd:
     fi
   - 'logger -t sam-boot "PHASE END: origin-ca-bootstrap"'
 
+  - 'logger -t sam-boot "PHASE START: resource-headroom"'
+  - /usr/local/sbin/sam-configure-docker-memory.sh
+  - 'logger -t sam-boot "PHASE END: resource-headroom"'
+
   - 'logger -t sam-boot "PHASE START: vm-agent-start"'
   - systemctl daemon-reload
   - systemctl enable vm-agent
@@ -211,12 +215,58 @@ write_files:
       Environment=ERROR_REPORT_RESPONSE_MAX_BYTES={{ error_report_response_max_bytes }}
       Environment=ERROR_REPORT_STORED_ERROR_MAX_BYTES={{ error_report_stored_error_max_bytes }}
       Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY={{ error_report_collector_concurrency }}
+      Environment=HEARTBEAT_DOCKER_STATS_TIMEOUT={{ heartbeat_docker_stats_timeout }}
+      Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS={{ heartbeat_workspace_metrics_max_containers }}
+      Slice=sam-infra.slice
+      MemoryAccounting=yes
+      OOMScoreAdjust=-900
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5
 
       [Install]
       WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/sam-infra.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM infrastructure services
+      Before=slices.target
+
+      [Slice]
+      MemoryAccounting=yes
+      MemoryMin={{ sam_infra_slice_memory_min_mb }}M
+
+  - path: /usr/local/sbin/sam-configure-docker-memory.sh
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      set -eu
+
+      RESERVE_MB="{{ vm_agent_memory_reserve_mb }}"
+      if [ "$RESERVE_MB" = "0" ]; then
+        logger -t sam-headroom "Docker MemoryMax reserve disabled"
+        exit 0
+      fi
+
+      MIN_DOCKER_MB="{{ docker_memory_min_mb }}"
+      TOTAL_KB="$(awk '/MemTotal:/ { print $2 }' /proc/meminfo)"
+      TOTAL_MB="$((TOTAL_KB / 1024))"
+      DOCKER_MEMORY_MAX_MB="$((TOTAL_MB - RESERVE_MB))"
+
+      if [ "$DOCKER_MEMORY_MAX_MB" -lt "$MIN_DOCKER_MB" ]; then
+        logger -t sam-headroom "Skipping Docker MemoryMax: total=\${TOTAL_MB}M reserve=\${RESERVE_MB}M leaves \${DOCKER_MEMORY_MAX_MB}M below minimum \${MIN_DOCKER_MB}M"
+        exit 0
+      fi
+
+      mkdir -p /etc/systemd/system/docker.service.d
+      cat >/etc/systemd/system/docker.service.d/sam-headroom.conf <<EOF
+      [Service]
+      MemoryAccounting=yes
+      MemoryMax=\${DOCKER_MEMORY_MAX_MB}M
+      EOF
+      logger -t sam-headroom "Configured Docker MemoryMax=\${DOCKER_MEMORY_MAX_MB}M with reserve=\${RESERVE_MB}M"
 
   - path: /etc/caddy/Caddyfile
     permissions: '0644'

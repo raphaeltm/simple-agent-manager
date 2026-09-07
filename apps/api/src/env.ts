@@ -352,6 +352,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Task run configuration (autonomous execution)
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
+  TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT?: string;
+  TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB?: string;
+  TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT?: string;
+  TASK_RUN_NODE_METRICS_TTL_MS?: string;
+  TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT?: string;
+  TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT?: string;
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   // Warm node pooling configuration
   NODE_WARM_TIMEOUT_MS?: string;
@@ -929,6 +935,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string; // "https" (default) or "http"
   VM_AGENT_PORT?: string; // "8443" (default) or custom port
+  VM_AGENT_MEMORY_RESERVE_MB?: string; // Optional Docker MemoryMax reserve for VM-agent reachability headroom
+  SAM_INFRA_SLICE_MEMORY_MIN_MB?: string; // systemd MemoryMin for vm-agent/system services slice
+  DOCKER_MEMORY_MIN_MB?: string; // Minimum Docker MemoryMax retained when VM_AGENT_MEMORY_RESERVE_MB is enabled
+  HEARTBEAT_DOCKER_STATS_TIMEOUT?: string; // VM-agent heartbeat Docker stats timeout (default: 2s)
+  HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS?: string; // Max workspace containers measured per heartbeat (default: 8)
   // Devcontainer image caching
   DEVCONTAINER_CACHE_ENABLED?: string; // "true" to enable managed registry caching (default: disabled)
   DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID?: string; // Cloudflare account for managed registry credentials

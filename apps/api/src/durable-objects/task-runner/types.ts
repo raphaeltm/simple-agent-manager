@@ -103,6 +103,12 @@ export interface TaskRunConfig {
     maxWorkspacesPerNode?: number | null;
     nodeCpuThresholdPercent?: number | null;
     nodeMemoryThresholdPercent?: number | null;
+    nodeCpuShareBudgetPercent?: number | null;
+    nodeHostMemoryReserveMb?: number | null;
+    nodeDiskPressureThresholdPercent?: number | null;
+    nodeMetricsTtlMs?: number | null;
+    nodeCpuScoreWeightPercent?: number | null;
+    nodeMemoryScoreWeightPercent?: number | null;
     warmNodeTimeoutMs?: number | null;
   } | null;
   /** Resolved resource requirements (audit-only, Phase 0). */

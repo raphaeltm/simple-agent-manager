@@ -7,7 +7,10 @@
  * classification boundary.
  */
 import { ProviderError } from '@simple-agent-manager/providers';
-import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
+import type {
+  CapacityPlacementSnapshot,
+  ResolvedResourceReservation,
+} from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -30,6 +33,7 @@ import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
+import type { WorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
 import {
   seedInstallation,
   seedNode,
@@ -105,7 +109,7 @@ function placement(
     Pick<
       WorkspacePlacementInput,
       'projectId' | 'userId' | 'installationId' | 'repository' | 'vmSize' | 'vmLocation'
-    >
+    > & { resolvedReservation?: ResolvedResourceReservation }
   > = {}
 ): WorkspacePlacementInput {
   return {
@@ -124,7 +128,41 @@ function placement(
     workspaceProfile: 'full',
     devcontainerConfigName: null,
     agentProfileHint: null,
+    resolvedReservation: overrides.resolvedReservation,
     createdAt: new Date().toISOString(),
+  };
+}
+
+function reservation(
+  overrides: Partial<ResolvedResourceReservation> = {}
+): ResolvedResourceReservation {
+  return {
+    cpuMillis: 1000,
+    memoryMb: 1024,
+    diskMb: 1024,
+    exclusiveNode: false,
+    maxCoTenants: 4,
+    source: 'platform',
+    sourceId: 'platform',
+    version: 1,
+    ...overrides,
+  };
+}
+
+function admissionPolicy(
+  overrides: Partial<WorkspaceAdmissionPolicy> = {}
+): WorkspaceAdmissionPolicy {
+  return {
+    maxWorkspaces: 4,
+    cpuShareBudgetPercent: 100,
+    hostMemoryReserveMb: 0,
+    diskPressureThresholdPercent: 90,
+    metricsTtlMs: 180_000,
+    cpuThresholdPercent: 90,
+    memoryThresholdPercent: 90,
+    cpuScoreWeightPercent: 40,
+    memoryScoreWeightPercent: 60,
+    ...overrides,
   };
 }
 
@@ -135,6 +173,8 @@ function taskState(
     installationId?: string;
     repository?: string;
     capacityPoolSelection?: TaskRunnerState['config']['capacityPoolSelection'];
+    projectScaling?: TaskRunnerState['config']['projectScaling'];
+    resolvedReservation?: ResolvedResourceReservation;
   } = {}
 ): TaskRunnerState {
   const now = Date.now();
@@ -187,9 +227,9 @@ function taskState(
       systemPromptAppend: null,
       agentProfileHint: null,
       attachments: null,
-      projectScaling: { maxWorkspacesPerNode: 2 },
+      projectScaling: overrides.projectScaling ?? { maxWorkspacesPerNode: 2 },
       resourceRequirements: null,
-      resolvedReservation: null,
+      resolvedReservation: overrides.resolvedReservation ?? null,
       capacityPoolSelection: overrides.capacityPoolSelection ?? null,
       vmSizeSource: null,
       resumeSnapshotChatSessionId: null,
@@ -339,6 +379,12 @@ async function makeReadyNode(
   opts: { nodeClass?: 'managed' | 'user-owned' } = {}
 ): Promise<void> {
   const now = new Date().toISOString();
+  const capacity =
+    vmSize === 'large'
+      ? { vcpu: 8, memoryMb: 16384, diskGb: 160 }
+      : vmSize === 'medium'
+        ? { vcpu: 4, memoryMb: 8192, diskGb: 80 }
+        : { vcpu: 2, memoryMb: 4096, diskGb: 40 };
   await seedNode(nodeId, userId, {
     vmSize,
     vmLocation: 'nbg1',
@@ -353,10 +399,23 @@ async function makeReadyNode(
        agent_version = 'current-sha',
        runtime = 'vm',
        node_role = 'workspace',
-       last_metrics = ?
+       last_metrics = ?,
+       provider_instance_type = ?,
+       provider_instance_vcpu_count = ?,
+       provider_instance_memory_mb = ?,
+       provider_instance_disk_gb = ?
      WHERE id = ?`
   )
-    .bind(now, now, JSON.stringify({ cpuLoadAvg1: 5, memoryPercent: 10 }), nodeId)
+    .bind(
+      now,
+      now,
+      JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+      `test-${vmSize}`,
+      capacity.vcpu,
+      capacity.memoryMb,
+      capacity.diskGb,
+      nodeId
+    )
     .run();
 }
 
@@ -538,6 +597,73 @@ describe('VM admission control D1 races', () => {
     expect(mediumPlacement).toBe(true);
     expect((await findNodeWithCapacity(taskState(USER_ID, 'medium'), rc))?.nodeId).toBe(largeNode);
     expect((await findNodeWithCapacity(taskState(USER_ID, 'large'), rc))?.nodeId).toBe(largeNode);
+  });
+
+  it('normalizes load average by vCPU count during advisory selection', async () => {
+    const userId = 'user-vm-admission-normalized-load';
+    const installationId = 'installation-vm-admission-normalized-load';
+    const projectId = 'project-vm-admission-normalized-load';
+    const smallBusyNode = 'node-vm-admission-normalized-load-small';
+    const largeAvailableNode = 'node-vm-admission-normalized-load-large';
+    await seedUser(userId);
+    await seedInstallation(installationId, userId);
+    await seedProject(projectId, userId, installationId);
+    await makeReadyNode(smallBusyNode, userId, 'small');
+    await makeReadyNode(largeAvailableNode, userId, 'large');
+    await env.DATABASE.prepare(`UPDATE nodes SET last_metrics = ? WHERE id = ?`)
+      .bind(JSON.stringify({ cpuLoadAvg1: 1.5, memoryPercent: 10, diskPercent: 10 }), smallBusyNode)
+      .run();
+    await env.DATABASE.prepare(`UPDATE nodes SET last_metrics = ? WHERE id = ?`)
+      .bind(
+        JSON.stringify({ cpuLoadAvg1: 1.5, memoryPercent: 10, diskPercent: 10 }),
+        largeAvailableNode
+      )
+      .run();
+
+    const rc = selectorContext();
+    const selected = await findNodeWithCapacity(
+      taskState(userId, 'small', {
+        projectId,
+        installationId,
+        projectScaling: {
+          maxWorkspacesPerNode: 2,
+          nodeCpuThresholdPercent: 70,
+          nodeMemoryThresholdPercent: 90,
+        },
+        resolvedReservation: reservation(),
+      }),
+      rc
+    );
+
+    expect(selected?.nodeId).toBe(largeAvailableNode);
+  });
+
+  it('vetoes high disk pressure during advisory existing-node selection', async () => {
+    const userId = 'user-vm-admission-selection-disk';
+    const installationId = 'installation-vm-admission-selection-disk';
+    const projectId = 'project-vm-admission-selection-disk';
+    const pressureNode = 'node-vm-admission-selection-disk-pressure';
+    const availableNode = 'node-vm-admission-selection-disk-available';
+    await seedUser(userId);
+    await seedInstallation(installationId, userId);
+    await seedProject(projectId, userId, installationId);
+    await makeReadyNode(pressureNode, userId, 'medium');
+    await makeReadyNode(availableNode, userId, 'medium');
+    await env.DATABASE.prepare(`UPDATE nodes SET last_metrics = ? WHERE id = ?`)
+      .bind(JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 95 }), pressureNode)
+      .run();
+
+    const rc = selectorContext();
+    const selected = await findNodeWithCapacity(
+      taskState(userId, 'medium', {
+        projectId,
+        installationId,
+        resolvedReservation: reservation(),
+      }),
+      rc
+    );
+
+    expect(selected?.nodeId).toBe(availableNode);
   });
 
   it('preserves same-user cross-project packing on user-scope workspace nodes', async () => {
@@ -761,9 +887,7 @@ describe('VM admission control D1 races', () => {
       )
     ).resolves.toBe(false);
 
-    const projectWorkspace = await env.DATABASE.prepare(
-      `SELECT id FROM workspaces WHERE id = ?`
-    )
+    const projectWorkspace = await env.DATABASE.prepare(`SELECT id FROM workspaces WHERE id = ?`)
       .bind('workspace-vm-admission-source-less-project')
       .first<{ id: string }>();
     expect(projectWorkspace).toBeNull();
@@ -906,6 +1030,131 @@ describe('VM admission control D1 races', () => {
       .bind(nodeId)
       .first<{ c: number }>();
     expect(count?.c).toBe(1);
+  });
+
+  it('atomically admits only reservations that fit the remaining CPU-share budget', async () => {
+    const nodeId = 'node-vm-admission-cpu-share-budget';
+    await makeReadyNode(nodeId, USER_ID, 'medium');
+    await seedWorkspace('workspace-vm-admission-cpu-share-active', nodeId, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'running',
+      resolvedReservationJson: JSON.stringify(reservation({ cpuMillis: 3000 })),
+    });
+
+    const outcomes = await Promise.all([
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-cpu-share-small', nodeId, {
+          resolvedReservation: reservation({ cpuMillis: 1000 }),
+        }),
+        admissionPolicy({ cpuShareBudgetPercent: 100 })
+      ),
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-cpu-share-large', nodeId, {
+          resolvedReservation: reservation({ cpuMillis: 1500 }),
+        }),
+        admissionPolicy({ cpuShareBudgetPercent: 100 })
+      ),
+    ]);
+
+    expect(outcomes.filter(Boolean)).toHaveLength(1);
+    const usage = await env.DATABASE.prepare(
+      `SELECT SUM(CAST(json_extract(resolved_reservation_json, '$.cpuMillis') AS INTEGER)) AS cpuMillis
+       FROM workspaces
+       WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
+    )
+      .bind(nodeId)
+      .first<{ cpuMillis: number }>();
+    expect(usage?.cpuMillis).toBeLessThanOrEqual(4000);
+  });
+
+  it('applies host memory reserve before admitting occupied-node co-tenancy', async () => {
+    const nodeId = 'node-vm-admission-host-headroom';
+    await makeReadyNode(nodeId, USER_ID, 'medium');
+    await seedWorkspace('workspace-vm-admission-host-headroom-active', nodeId, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'running',
+      resolvedReservationJson: JSON.stringify(reservation({ memoryMb: 6000 })),
+    });
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-host-headroom-denied', nodeId, {
+          resolvedReservation: reservation({ memoryMb: 2048 }),
+        }),
+        admissionPolicy({ hostMemoryReserveMb: 512 })
+      )
+    ).resolves.toBe(false);
+  });
+
+  it('vetoes final placement when fresh disk telemetry reports pressure', async () => {
+    const nodeId = 'node-vm-admission-disk-pressure';
+    await makeReadyNode(nodeId, USER_ID, 'medium');
+    await env.DATABASE.prepare(`UPDATE nodes SET last_metrics = ? WHERE id = ?`)
+      .bind(JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 95 }), nodeId)
+      .run();
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-disk-pressure-denied', nodeId, {
+          resolvedReservation: reservation(),
+        }),
+        admissionPolicy({ diskPressureThresholdPercent: 90 })
+      )
+    ).resolves.toBe(false);
+  });
+
+  it('fails closed on malformed occupied reservations but preserves empty unknown-capacity placement', async () => {
+    const occupiedNode = 'node-vm-admission-invalid-reservation-occupied';
+    const emptyUnknownNode = 'node-vm-admission-unknown-empty';
+    await makeReadyNode(occupiedNode, USER_ID, 'medium');
+    await seedWorkspace(
+      'workspace-vm-admission-invalid-reservation-active',
+      occupiedNode,
+      USER_ID,
+      {
+        projectId: PROJECT_ID,
+        status: 'running',
+        resolvedReservationJson: '{"cpuMillis":"bad"}',
+      }
+    );
+    await seedNode(emptyUnknownNode, USER_ID, {
+      vmSize: 'medium',
+      vmLocation: 'nbg1',
+      status: 'running',
+      healthStatus: 'healthy',
+    });
+    const now = new Date().toISOString();
+    await env.DATABASE.prepare(
+      `UPDATE nodes
+       SET last_heartbeat_at = ?, agent_ready_at = ?, agent_version = 'current-sha',
+           runtime = 'vm', node_role = 'workspace'
+       WHERE id = ?`
+    )
+      .bind(now, now, emptyUnknownNode)
+      .run();
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-invalid-reservation-denied', occupiedNode, {
+          resolvedReservation: reservation(),
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-unknown-empty-allowed', emptyUnknownNode, {
+          resolvedReservation: reservation({ memoryMb: 4096, diskMb: 40960 }),
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
   });
 
   it('vetoes final reservations when selected node state changed before insert', async () => {
