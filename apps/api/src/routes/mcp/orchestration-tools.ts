@@ -22,6 +22,7 @@ import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from '../../services/replacement-deletion-fence';
+import { parseStoredResourceRequirementsJson } from '../../services/resource-requirements-input';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
@@ -223,7 +224,9 @@ export async function handleRetrySubtask(
         },
         credentialProjectPolicy: 'inherited-or-none',
         taskModeDefault: 'task',
-        resourceRequirements: {},
+        resourceRequirements: {
+          project: parseStoredResourceRequirementsJson(project.resourceRequirementsJson),
+        },
       });
     } catch (err) {
       if (err instanceof PlacementResolutionError) {

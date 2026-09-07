@@ -11,6 +11,8 @@ ALTER TABLE capacity_pool_candidates ADD COLUMN provider_instance_boot_disk_size
 ALTER TABLE capacity_pool_candidates ADD COLUMN provider_instance_image TEXT;
 ALTER TABLE capacity_pool_candidates ADD COLUMN provider_instance_architecture TEXT;
 
+ALTER TABLE projects ADD COLUMN resource_requirements_json TEXT;
+
 ALTER TABLE nodes ADD COLUMN provider_instance_boot_disk_size_gb INTEGER;
 ALTER TABLE nodes ADD COLUMN provider_instance_image TEXT;
 ALTER TABLE nodes ADD COLUMN provider_instance_architecture TEXT;

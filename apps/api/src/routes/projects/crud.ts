@@ -65,6 +65,10 @@ import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
 import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../../services/resource-requirements-input';
+import {
   assertRepositoryAccess,
   buildProjectRuntimeConfigResponse,
   byteLength,
@@ -839,6 +843,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     'description',
     'defaultBranch',
     'defaultVmSize',
+    'resourceRequirementsJson',
     'defaultAgentType',
     'defaultWorkspaceProfile',
     'defaultDevcontainerConfigName',
@@ -879,6 +884,22 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     !validVmSizes.includes(body.defaultVmSize)
   ) {
     throw errors.badRequest('defaultVmSize must be small, medium, or large');
+  }
+
+  let resourceRequirementsJsonColumn: string | null | undefined;
+  try {
+    resourceRequirementsJsonColumn =
+      body.resourceRequirementsJson === undefined
+        ? undefined
+        : serializeResourceRequirementsInput(
+            body.resourceRequirementsJson,
+            'resourceRequirementsJson'
+          );
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.badRequest(err.message);
+    }
+    throw err;
   }
 
   if (
@@ -1059,6 +1080,10 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
       defaultBranch: nextDefaultBranch,
       defaultVmSize:
         body.defaultVmSize === undefined ? existing.defaultVmSize : (body.defaultVmSize ?? null),
+      resourceRequirementsJson:
+        resourceRequirementsJsonColumn === undefined
+          ? existing.resourceRequirementsJson
+          : resourceRequirementsJsonColumn,
       defaultAgentType:
         body.defaultAgentType === undefined
           ? existing.defaultAgentType

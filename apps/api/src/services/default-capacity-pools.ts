@@ -14,12 +14,12 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
 } from './capacity-pools';
-import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { ensureCandidatesForSource } from './default-capacity-pool-candidates';
 import {
   defaultCapacitySourceId,

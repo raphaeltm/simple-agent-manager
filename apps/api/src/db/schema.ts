@@ -394,6 +394,8 @@ export const projects = sqliteTable(
     // Per-project defaults (null = use platform defaults from env vars).
     // Resolved via `resolveProjectScalingConfig()` in task-runner and node services.
     defaultVmSize: text('default_vm_size'),
+    /** JSON project-level ResourceRequirements default for canonical placement. */
+    resourceRequirementsJson: text('resource_requirements_json'),
     defaultAgentType: text('default_agent_type'),
     defaultWorkspaceProfile: text('default_workspace_profile'),
     /** Default devcontainer config name for new workspaces. null = auto-discover default. */

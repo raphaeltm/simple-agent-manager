@@ -31,6 +31,7 @@ import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from './replacement-deletion-fence';
+import { parseStoredResourceRequirementsJson } from './resource-requirements-input';
 import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
 import {
   claimSessionSnapshotRecovery,
@@ -637,6 +638,7 @@ async function resolveRecoveryPlacement(
       task: sourceTask?.resourceRequirementsJson
         ? JSON.parse(sourceTask.resourceRequirementsJson)
         : undefined,
+      project: parseStoredResourceRequirementsJson(context.project.resourceRequirementsJson),
     },
   });
 

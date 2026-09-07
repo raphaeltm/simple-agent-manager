@@ -13,7 +13,9 @@ import {
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
 
-function reservation(overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}) {
+function reservation(
+  overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}
+) {
   return {
     cpuMillis: 2000,
     memoryMb: 4096,
@@ -178,7 +180,9 @@ describe('placement resolver parity', () => {
     });
     expect(placement.resolvedReservation).toMatchObject({
       cpuMillis: 4000,
-      memoryMb: 16 * 1024,
+      // The task-layer legacy vmSize fills fields missing from task modern
+      // requirements before lower skill defaults can fill them.
+      memoryMb: 2 * 1024,
       source: 'task',
       sourceId: 'task-submit-1',
     });
@@ -381,7 +385,9 @@ describe('placement resolver parity', () => {
       },
     });
     expect(placement.resolvedReservation).toMatchObject({
-      cpuMillis: 8000,
+      // The trigger-layer legacy vmSize fills CPU before the lower skill
+      // layer, while trigger modern disk remains authoritative.
+      cpuMillis: 1000,
       diskMb: 100 * 1024,
       source: 'trigger',
       sourceId: 'trigger-1',

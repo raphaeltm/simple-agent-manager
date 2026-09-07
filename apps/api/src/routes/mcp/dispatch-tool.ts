@@ -32,6 +32,7 @@ import {
 } from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
+import { parseStoredResourceRequirementsJson } from '../../services/resource-requirements-input';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { markQueuedTaskFailed } from '../../services/task-failure';
@@ -318,6 +319,7 @@ export async function handleDispatchTask(
       task: resourceRequirements,
       skill: skillResourceRequirements,
       agentProfile: profileResourceRequirements,
+      project: parseStoredResourceRequirementsJson(project.resourceRequirementsJson),
     },
   };
 

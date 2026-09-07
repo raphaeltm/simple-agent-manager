@@ -35,6 +35,7 @@ import {
 import * as projectDataService from '../../services/project-data';
 import {
   normalizeResourceRequirementsInput,
+  parseStoredResourceRequirementsJson,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
 import { isTaskBlocked } from '../../services/task-graph';
@@ -158,6 +159,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
         taskModeDefault: 'task',
         resourceRequirements: {
           task: taskResourceRequirements,
+          project: parseStoredResourceRequirementsJson(project.resourceRequirementsJson),
         },
       });
     } catch (err) {

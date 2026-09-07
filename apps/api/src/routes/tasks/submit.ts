@@ -43,6 +43,7 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import {
   normalizeResourceRequirementsInput,
+  parseStoredResourceRequirementsJson,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
@@ -338,6 +339,7 @@ submitRoutes.post(
             task: taskResourceRequirements,
             skill: skillResourceRequirements,
             agentProfile: profileResourceRequirements,
+            project: parseStoredResourceRequirementsJson(project.resourceRequirementsJson),
           },
         });
       } catch (err) {

@@ -126,6 +126,7 @@ export async function submitTriggeredTask(
           trigger: triggerResourceRequirements,
           skill: skillResourceRequirements,
           agentProfile: profileResourceRequirements,
+          project: parseStoredResourceRequirementsJson(project.resourceRequirementsJson),
         },
       });
     } catch (err) {
