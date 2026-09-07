@@ -17,7 +17,6 @@ export const PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES = [
   'pending',
   'retryable_failed',
   'processing',
-  'admitting',
 ] as const;
 export const PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES = [
   'admitted',

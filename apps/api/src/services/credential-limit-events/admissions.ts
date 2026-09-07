@@ -20,7 +20,7 @@ import type {
 import { nullableNumberEquals } from './values';
 
 const MILLIS_PER_DAY = 24 * 60 * 60_000;
-const ACTIVE_SOURCE_OUTBOX_STATES = "'pending', 'processing', 'admitting', 'retryable_failed'";
+const ACTIVE_SOURCE_OUTBOX_STATES = "'pending', 'processing', 'retryable_failed'";
 
 type D1RunLike = { meta?: { changes?: number } };
 

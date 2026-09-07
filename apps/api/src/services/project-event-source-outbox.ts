@@ -40,7 +40,7 @@ export type {
 const log = createModuleLogger('project_event_source_outbox');
 const ACTIVE_STATES = PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES;
 const TERMINAL_STATES = PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES;
-const ACTIVE_STATE_SQL = "'pending', 'retryable_failed', 'processing', 'admitting'";
+const ACTIVE_STATE_SQL = "'pending', 'retryable_failed', 'processing'";
 
 function withoutProjectId(
   input: AdmitProjectEventInput
@@ -221,7 +221,7 @@ async function loadIntentByClaim(
             last_error AS lastError,
             terminalized_at AS terminalizedAt
        FROM project_event_source_outbox
-      WHERE id = ? AND state IN ('processing', 'admitting') AND claim_token = ?
+      WHERE id = ? AND state = 'processing' AND claim_token = ?
       LIMIT 1`
   )
     .bind(id, claimToken)
@@ -351,7 +351,7 @@ async function terminalizeIneligibleClaim(env: Env, id: string, now: Date): Prom
       WHERE id = ? AND (
         (state IN ('pending', 'retryable_failed') AND (attempt_count >= max_attempts) = 1)
         OR (
-          state IN ('processing', 'admitting')
+          state = 'processing'
           AND processing_lease_expires_at IS NOT NULL
           AND processing_lease_expires_at <= ?
           AND (attempt_count >= max_attempts) = 1
@@ -379,7 +379,7 @@ async function claimIntent(
       WHERE id = ? AND expires_at > ? AND attempt_count < max_attempts
         AND (
           (state IN ('pending', 'retryable_failed') AND next_attempt_at <= ?)
-          OR (state IN ('processing', 'admitting') AND processing_lease_expires_at IS NOT NULL
+          OR (state = 'processing' AND processing_lease_expires_at IS NOT NULL
               AND processing_lease_expires_at <= ?)
         )`
   )
@@ -406,14 +406,14 @@ async function beginCredentialClaimedIntentAdmission(
   const nowIso = now.toISOString();
   const result = await env.DATABASE.prepare(
     `UPDATE project_event_source_outbox
-        SET state = 'admitting', updated_at = ?
+        SET updated_at = ?
       WHERE id = ? AND state = 'processing' AND claim_token = ?
         ${guard.sql}`
   )
     .bind(nowIso, intent.id, intent.claimToken, ...guard.values)
     .run();
   if (Number(result.meta.changes ?? 0) === 1) {
-    return { outcome: 'ready', intent: { ...intent, state: 'admitting' } };
+    return { outcome: 'ready', intent };
   }
 
   const current = await loadIntentById(env, intent.id);
@@ -442,7 +442,7 @@ async function updateClaimedIntent(
 ): Promise<ProjectEventSourceAdmissionResult> {
   const result = await env.DATABASE.prepare(
     `UPDATE project_event_source_outbox ${sqlSet}
-      WHERE id = ? AND state IN ('processing', 'admitting') AND claim_token = ?`
+      WHERE id = ? AND state = 'processing' AND claim_token = ?`
   )
     .bind(...values, intent.id, intent.claimToken)
     .run();
@@ -562,7 +562,7 @@ async function admitClaimedIntent(
     const state: ProjectEventSourceOutboxState =
       result.outcome === 'conflict' ? 'permanent_failed' : 'admitted';
     const nowIso = clock().toISOString();
-    return updateClaimedIntent(
+    return await updateClaimedIntent(
       env,
       admissionFence.intent,
       `SET state = ?, processing_lease_expires_at = NULL, claim_token = NULL,
@@ -705,11 +705,10 @@ async function terminalizeExhaustedRows(
   if (limit <= 0) return 0;
   const nowIso = now.toISOString();
   const processingPredicate =
-    state === 'processing' || state === 'admitting'
+    state === 'processing'
       ? `AND processing_lease_expires_at IS NOT NULL AND processing_lease_expires_at <= ?`
       : '';
-  const bindValues =
-    state === 'processing' || state === 'admitting' ? [state, nowIso, limit] : [state, limit];
+  const bindValues = state === 'processing' ? [state, nowIso, limit] : [state, limit];
   const result = await env.DATABASE.prepare(
     `UPDATE project_event_source_outbox
         SET state = 'permanent_failed', processing_lease_expires_at = NULL,
@@ -751,7 +750,7 @@ async function selectCandidateIds(env: Env, nowIso: string, limit: number): Prom
       `SELECT id FROM (
          SELECT id, expires_at, attempt_count, max_attempts
            FROM project_event_source_outbox
-          WHERE state IN ('processing', 'admitting') AND processing_lease_expires_at IS NOT NULL
+          WHERE state = 'processing' AND processing_lease_expires_at IS NOT NULL
             AND processing_lease_expires_at <= ?
           ORDER BY processing_lease_expires_at, id
           LIMIT ?
@@ -778,7 +777,7 @@ function countResult(
   else if (result.state === 'permanent_failed') stats.permanentFailed += 1;
   else if (result.state === 'expired') stats.expired += 1;
   else stats.skipped += 1;
-  if (result.state !== 'pending' && result.state !== 'processing' && result.state !== 'admitting') {
+  if (result.state !== 'pending' && result.state !== 'processing') {
     stats.attempted += 1;
   }
 }

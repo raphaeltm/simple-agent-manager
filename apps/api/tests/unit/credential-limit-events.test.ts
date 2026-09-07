@@ -10,7 +10,10 @@ import {
   createProjectEventSubscription,
 } from '../../src/durable-objects/project-data/project-events';
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
-import { handleAcpUsageCallback } from '../../src/services/acp-usage-callback-handler';
+import {
+  type AcpUsageCallbackReport,
+  handleAcpUsageCallback,
+} from '../../src/services/acp-usage-callback-handler';
 import {
   CREDENTIAL_LIMIT_EVENT_TYPES,
   type CredentialLimitObservation,
@@ -279,13 +282,27 @@ function createProjectEventStore() {
 }
 
 function makeContext(env: unknown, bodyHeaders: Record<string, string> = {}) {
-  const headers = { Authorization: 'Bearer callback-token', ...bodyHeaders };
+  const requestHeaders = new Map(
+    Object.entries({ Authorization: 'Bearer callback-token', ...bodyHeaders }).map(
+      ([name, value]) => [name.toLowerCase(), value]
+    )
+  );
+  const responseHeaders = new Headers();
   return {
     env,
     req: {
-      header: (name: string) => headers[name] ?? headers[name.toLowerCase()],
+      header: (name: string) => requestHeaders.get(name.toLowerCase()),
     },
-    body: (body: BodyInit | null, status?: number) => new Response(body, { status }),
+    header: (name: string, value: string) => {
+      responseHeaders.set(name, value);
+    },
+    body: (body: BodyInit | null, status?: number) =>
+      new Response(body, { status, headers: new Headers(responseHeaders) }),
+    json: (body: unknown, status?: number) => {
+      const headers = new Headers(responseHeaders);
+      headers.set('Content-Type', 'application/json');
+      return new Response(JSON.stringify(body), { status, headers });
+    },
   } as never;
 }
 
@@ -712,7 +729,7 @@ describe('ACP usage callback credential verification', () => {
     });
     seedCallback();
 
-    const body = {
+    const body: AcpUsageCallbackReport = {
       nodeId: 'node-1',
       agentType: 'claude-code',
       credentialReference: 'cc_credentials:cred-1',
@@ -729,7 +746,7 @@ describe('ACP usage callback credential verification', () => {
           resetsAt: 120_000,
         },
       ],
-    } as const;
+    };
 
     const first = await handleAcpUsageCallback(makeContext(env), {
       projectId: 'project-1',

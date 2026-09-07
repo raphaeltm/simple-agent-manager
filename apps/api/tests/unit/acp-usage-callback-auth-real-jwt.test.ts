@@ -119,13 +119,23 @@ function createCredentialD1() {
 }
 
 function makeContext(env: TestEnv, token: string) {
+  const responseHeaders = new Headers();
   return {
     env,
     req: {
       header: (name: string) =>
         name.toLowerCase() === 'authorization' ? `Bearer ${token}` : undefined,
     },
-    body: (body: BodyInit | null, status?: number) => new Response(body, { status }),
+    header: (name: string, value: string) => {
+      responseHeaders.set(name, value);
+    },
+    body: (body: BodyInit | null, status?: number) =>
+      new Response(body, { status, headers: new Headers(responseHeaders) }),
+    json: (body: unknown, status?: number) => {
+      const headers = new Headers(responseHeaders);
+      headers.set('Content-Type', 'application/json');
+      return new Response(JSON.stringify(body), { status, headers });
+    },
   } as never;
 }
 
