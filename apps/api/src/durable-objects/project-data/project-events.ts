@@ -18,7 +18,7 @@ import {
 } from './project-events-contracts';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEventSubscription } from './project-events-mappers';
-import { ensureProjectEventRetentionScheduled } from './project-events-materialization';
+import { ensureProjectEventRetentionScheduled } from './project-events-scheduler';
 import {
   assertProjectBinding,
   normalizeListLimit,
@@ -101,19 +101,32 @@ export {
 } from './project-events-delivery-resolver';
 export { resolveProjectEventLimits } from './project-events-limits';
 export {
+  cancelProjectEventWakeForRevokedSourceTask,
   type AcceptedProjectEventWake,
-  advanceProjectEventPromptAttemptCheckpoint,
+  type ProjectEventWakeMaterializationCandidate,
+  type ProjectEventWakeMaterializationResult,
+  type ProjectEventWakeSourceTaskGuard,
+  runProjectEventWakeMaterializationBatch,
+  selectProjectEventWakeMaterializationCandidate,
+  selectProjectEventWakeMaterializationCandidates,
+} from './project-events-materialization';
+export {
   computeProjectEventMaterializationAlarmTime,
   computeProjectEventRetentionAlarmTime,
   ensureProjectEventRetentionScheduled,
+  isProjectEventRetentionDue,
+  isProjectEventWakeEnabled,
+  markSchedulerSuccess,
+  readSchedulerState,
+  recordSchedulerFailure,
+} from './project-events-scheduler';
+export {
+  EVENT_WAKE_ADAPTER_ID,
+  advanceProjectEventPromptAttemptCheckpoint,
   hasProjectEventWakeLease,
   invalidProjectEventWakeDeliveryTargetResult,
-  isProjectEventRetentionDue,
-  type ProjectEventWakeMaterializationResult,
   readProjectEventWakeLeaseUntil,
-  recordSchedulerFailure,
-  runProjectEventWakeMaterializationBatch,
-} from './project-events-materialization';
+} from './project-events-wake-delivery';
 export { compileProjectEventFilter } from './project-events-normalization';
 export {
   ackProjectEventDelivery,
@@ -344,13 +357,26 @@ export function listProjectEventSubscriptions(
   const limit = normalizeListLimit(input.limit, limits);
   const state = input.state ?? 'active';
   const owner = input.owner ? normalizeOwnerForRead(input.owner, limits) : null;
+  const legacyOwners = (input.legacyOwners ?? []).map((legacyOwner) =>
+    normalizeOwnerForRead(legacyOwner, limits)
+  );
   const params: unknown[] = [projectId];
   let where = 'WHERE project_id = ?';
   if (state !== 'any') {
     where += ' AND lifecycle_state = ?';
     params.push(state);
   }
-  if (owner) {
+  if (owner && legacyOwners.length > 0) {
+    const ownerPredicates = ['(owner_type = ? AND owner_id = ?)'];
+    params.push(owner.type, owner.id);
+    for (const legacyOwner of legacyOwners) {
+      ownerPredicates.push(
+        '(COALESCE(owner_version, 1) = 1 AND owner_type = ? AND owner_id = ?)'
+      );
+      params.push(legacyOwner.type, legacyOwner.id);
+    }
+    where += ` AND (${ownerPredicates.join(' OR ')})`;
+  } else if (owner) {
     where += ' AND owner_type = ? AND owner_id = ?';
     params.push(owner.type, owner.id);
   }

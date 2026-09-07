@@ -337,6 +337,7 @@ export type ListProjectEventSubscriptionsInput = {
   projectId: string;
   state?: ProjectEventSubscriptionState | 'any' | null;
   owner?: ProjectEventSubscriptionOwner | null;
+  legacyOwners?: ProjectEventSubscriptionOwner[] | null;
   limit?: number | null;
 };
 
@@ -460,6 +461,7 @@ export type ProjectEventDeliveryBatchListResult = {
 
 export type ProjectEventAgentVisibility = {
   owner: ProjectEventSubscriptionOwner;
+  legacyOwners?: ProjectEventSubscriptionOwner[] | null;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
 };
 

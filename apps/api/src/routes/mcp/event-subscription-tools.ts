@@ -168,6 +168,7 @@ export async function handleCreateProjectEventSubscription(
       idempotent: result.idempotent,
       changed: result.changed,
       callerKind: result.callerKind,
+      wakeInstructions: result.wakeInstructions ?? null,
     });
   } catch (err) {
     return mapEventSubscriptionError(requestId, 'create_project_event_subscription', err);

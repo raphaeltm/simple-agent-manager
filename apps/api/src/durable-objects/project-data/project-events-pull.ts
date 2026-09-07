@@ -69,19 +69,6 @@ type MatchEventRow = Record<string, unknown> & {
 const NONDISCLOSING_EVENT_MISS = null;
 const PULL_ACK_TERMINAL_REASON = 'acknowledged by pull consumer';
 const PULL_DELIVERY_REASON = 'delivered through MCP pull replay';
-const VISIBLE_SUBSCRIPTION_PREDICATE_SQL = `((
-           s.owner_type = ?
-           AND s.owner_id = ?
-           AND s.target_session_id = ?
-         )
-         OR (
-           s.owner_type IN ('policy', 'system', 'standing_watch')
-           AND (
-             (s.target_task_id IS NOT NULL AND s.target_task_id = ?)
-             OR (s.target_session_id IS NOT NULL AND s.target_session_id = ?)
-             OR (s.target_agent_id IS NOT NULL AND s.target_agent_id = ?)
-           )
-         ))`;
 
 export function getProjectEvent(
   sql: SqlStorage,
@@ -276,7 +263,7 @@ function readVisibleSubscription(
   visibility: ProjectEventAgentVisibility,
   now: number
 ): ProjectEventSubscriptionRecord | null {
-  const where = VISIBLE_SUBSCRIPTION_PREDICATE_SQL;
+  const visibilityPredicate = visibleSubscriptionPredicate(visibility);
   const row = sql
     .exec(
       `SELECT *
@@ -295,12 +282,12 @@ function readVisibleSubscription(
                AND b.state NOT IN ('expired', 'cancelled')
            )
          )
-         AND ${where}`,
+         AND ${visibilityPredicate.sql}`,
       projectId,
       subscriptionId,
       now,
       now,
-      ...visibilityParams(visibility)
+      ...visibilityPredicate.params
     )
     .toArray()[0];
   return row ? readSubscriptionById(sql, projectId, subscriptionId) : null;
@@ -313,7 +300,7 @@ function readVisibleMatchForEvent(
   visibility: ProjectEventAgentVisibility,
   now: number
 ): MatchCursor | null {
-  const where = VISIBLE_SUBSCRIPTION_PREDICATE_SQL;
+  const visibilityPredicate = visibleSubscriptionPredicate(visibility);
   const row = sql
     .exec(
       `SELECT m.id AS match_id,
@@ -339,14 +326,14 @@ function readVisibleMatchForEvent(
              AND b.state NOT IN ('expired', 'cancelled')
            )
          )
-         AND ${where}
+         AND ${visibilityPredicate.sql}
        ORDER BY m.matched_at ASC, m.id ASC
        LIMIT 1`,
       projectId,
       eventId,
       now,
       now,
-      ...visibilityParams(visibility)
+      ...visibilityPredicate.params
     )
     .toArray()[0];
   return row ? parseMatchEventRow(row) : null;
@@ -359,7 +346,7 @@ function readVisibleDelivery(
   visibility: ProjectEventAgentVisibility,
   now: number
 ): { batch: ProjectEventDeliveryBatchRecord; eventIds: string[] } | null {
-  const where = VISIBLE_SUBSCRIPTION_PREDICATE_SQL;
+  const visibilityPredicate = visibleSubscriptionPredicate(visibility);
   const row = sql
     .exec(
       `SELECT b.*
@@ -372,13 +359,13 @@ function readVisibleDelivery(
            (s.lifecycle_state = 'active' AND (s.expires_at IS NULL OR s.expires_at > ?))
            OR (b.readable_until IS NOT NULL AND b.readable_until > ?)
          )
-         AND ${where}
+         AND ${visibilityPredicate.sql}
        LIMIT 1`,
       projectId,
       deliveryId,
       now,
       now,
-      ...visibilityParams(visibility)
+      ...visibilityPredicate.params
     )
     .toArray()[0];
   if (!row) return null;
@@ -386,15 +373,43 @@ function readVisibleDelivery(
   return { batch, eventIds: readEventIdsForBatch(sql, projectId, batch.id) };
 }
 
-function visibilityParams(visibility: ProjectEventAgentVisibility): unknown[] {
-  return [
+function visibleSubscriptionPredicate(visibility: ProjectEventAgentVisibility): {
+  sql: string;
+  params: unknown[];
+} {
+  const clauses = [
+    `(s.owner_type = ?
+      AND s.owner_id = ?
+      AND s.target_session_id = ?)`,
+  ];
+  const params: unknown[] = [
     visibility.owner.type,
     visibility.owner.id,
     visibility.target.sessionId ?? null,
+  ];
+  for (const legacyOwner of visibility.legacyOwners ?? []) {
+    clauses.push(
+      `(COALESCE(s.owner_version, 1) = 1
+        AND s.owner_type = ?
+        AND s.owner_id = ?
+        AND s.target_session_id = ?)`
+    );
+    params.push(legacyOwner.type, legacyOwner.id, visibility.target.sessionId ?? null);
+  }
+  clauses.push(
+    `(s.owner_type IN ('policy', 'system', 'standing_watch')
+      AND (
+        (s.target_task_id IS NOT NULL AND s.target_task_id = ?)
+        OR (s.target_session_id IS NOT NULL AND s.target_session_id = ?)
+        OR (s.target_agent_id IS NOT NULL AND s.target_agent_id = ?)
+      ))`
+  );
+  params.push(
     visibility.target.taskId ?? null,
     visibility.target.sessionId ?? null,
-    visibility.target.agentId ?? null,
-  ];
+    visibility.target.agentId ?? null
+  );
+  return { sql: `(${clauses.join(' OR ')})`, params };
 }
 
 function ensurePullDeliveryBatch(
@@ -684,6 +699,7 @@ function normalizeVisibility(
 ): ProjectEventAgentVisibility {
   return {
     owner: normalizeOwner(visibility.owner, maxBytes),
+    legacyOwners: (visibility.legacyOwners ?? []).map((owner) => normalizeOwner(owner, maxBytes)),
     target: {
       sessionId: normalizeNullableVisibilityText(
         visibility.target.sessionId,
