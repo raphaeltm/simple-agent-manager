@@ -61,6 +61,7 @@ vi.mock('../../../src/services/platform-credentials', () => ({
 }));
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+  createModuleLogger: () => ({ info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() }),
 }));
 
 import { aiProxyRoutes } from '../../../src/routes/ai-proxy';

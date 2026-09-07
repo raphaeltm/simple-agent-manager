@@ -19,8 +19,8 @@ import {
   recordCredentialLimitObservation,
 } from '../../src/services/credential-limit-events';
 import * as jwtService from '../../src/services/jwt';
-import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
 import * as projectDataService from '../../src/services/project-data';
+import { reconcileProjectEventSourceOutbox } from '../../src/services/project-event-source-outbox';
 import { createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 

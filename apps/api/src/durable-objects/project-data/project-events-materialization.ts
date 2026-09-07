@@ -10,13 +10,19 @@ import { resolveMaxMessagesPerSession } from './messages-persist-helpers';
 import { resolveProjectEventDelivery } from './project-events-delivery-resolver';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEvent, mapProjectEventSubscription } from './project-events-mappers';
-import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import {
   claimProjectEventMatchesForBatch,
   mapRows,
   nextPhysicalAttemptNumber,
 } from './project-events-storage-helpers';
 import { stableStringify } from './project-events-values';
+import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
+import { isProjectEventWakeEnabled } from './project-events-wake-config';
+import {
+  deferNextMaterialization,
+  markSchedulerSuccess,
+  readProjectEventWakeSchedulerState,
+} from './project-events-wake-scheduler';
 import {
   type AcceptedPromptDelivery,
   type AcceptPromptDeliveryInput,
@@ -26,6 +32,20 @@ import {
 } from './prompt-delivery';
 import type { Env } from './types';
 import { generateId } from './types';
+
+export { isProjectEventWakeEnabled } from './project-events-wake-config';
+export {
+  hasProjectEventWakeLease,
+  readProjectEventWakeLeaseUntil,
+} from './project-events-wake-leases';
+export {
+  computeProjectEventRetentionAlarmTime,
+  ensureProjectEventRetentionScheduled,
+  isProjectEventRetentionDue,
+  markSchedulerSuccess,
+  recordSchedulerFailure,
+} from './project-events-wake-scheduler';
+export { invalidProjectEventWakeDeliveryTargetResult } from './project-events-wake-targets';
 
 const EVENT_WAKE_ADAPTER_ID = 'projectdata-prompt-queue';
 const EVENT_WAKE_TERMINAL_REASON = 'queued for same-chat ProjectData event wake';
@@ -56,12 +76,6 @@ type BuildWakePromptInputOptions = {
   maxMessages: number;
 };
 
-export function isProjectEventWakeEnabled(env: Env): boolean {
-  const raw = env.PROJECT_EVENT_WAKE_ENABLED;
-  if (raw === undefined || raw.trim() === '') return true;
-  return raw === 'true';
-}
-
 export function computeProjectEventMaterializationAlarmTime(
   sql: SqlStorage,
   env: Env,
@@ -70,7 +84,7 @@ export function computeProjectEventMaterializationAlarmTime(
 ): number | null {
   if (!projectId || !isProjectEventWakeEnabled(env)) return null;
   const limits = resolveProjectEventLimits(env);
-  const checkpoint = readSchedulerState(sql, projectId);
+  const checkpoint = readProjectEventWakeSchedulerState(sql, projectId);
   if (checkpoint.nextAttemptAt !== null) {
     return Math.max(checkpoint.nextAttemptAt, now + limits.wakeMaterializationMinAlarmDelayMs);
   }
@@ -222,191 +236,6 @@ export function runProjectEventWakeMaterializationBatch(
     materialized: eventIds.length,
     accepted: [{ input: promptInput, accepted }],
   };
-}
-
-export function readProjectEventWakeLeaseUntil(
-  sql: SqlStorage,
-  sessionId: string,
-  now = Date.now()
-): number | null {
-  const pendingRow = sql
-    .exec(
-      `SELECT MIN(
-                CASE
-                  WHEN s.expires_at IS NULL THEN s.delivery_lifetime_expires_at
-                  WHEN s.delivery_lifetime_expires_at IS NULL THEN s.expires_at
-                  WHEN s.expires_at < s.delivery_lifetime_expires_at THEN s.expires_at
-                  ELSE s.delivery_lifetime_expires_at
-                END
-              ) AS lease_until
-       FROM project_event_subscriptions s
-       WHERE s.target_session_id = ?
-         AND s.contract_version >= 2
-         AND s.lifecycle_state = 'active'
-         AND s.requested_delivery = 'existing_session_prompt'
-         AND s.resolved_delivery = 'queued_for_prompt_delivery'
-         AND (s.expires_at IS NULL OR s.expires_at > ?)
-         AND s.delivery_lifetime_expires_at IS NOT NULL
-         AND s.delivery_lifetime_expires_at > ?
-         AND EXISTS (
-           SELECT 1 FROM project_event_matches m
-           WHERE m.project_id = s.project_id
-             AND m.subscription_id = s.id
-             AND m.state = 'matched'
-             AND m.batch_id IS NULL
-         )`,
-      sessionId,
-      now,
-      now
-    )
-    .toArray()[0];
-  const pendingLease =
-    typeof pendingRow?.lease_until === 'number' && pendingRow.lease_until > now
-      ? pendingRow.lease_until
-      : null;
-
-  const batchRow = sql
-    .exec(
-      `SELECT MIN(
-                CASE
-                  WHEN delivery_expires_at IS NULL THEN readable_until
-                  WHEN readable_until IS NULL THEN delivery_expires_at
-                  WHEN delivery_expires_at < readable_until THEN delivery_expires_at
-                  ELSE readable_until
-                END
-              ) AS lease_until
-       FROM project_event_delivery_batches
-       WHERE target_session_id = ?
-         AND delivery_channel = 'prompt_queue'
-         AND state IN ('pending', 'delivered')
-         AND delivery_expires_at IS NOT NULL
-         AND readable_until IS NOT NULL
-         AND (delivery_expires_at > ? OR readable_until > ?)`,
-      sessionId,
-      now,
-      now
-    )
-    .toArray()[0];
-  const batchLease =
-    typeof batchRow?.lease_until === 'number' && batchRow.lease_until > now
-      ? batchRow.lease_until
-      : null;
-
-  if (pendingLease === null) return batchLease;
-  if (batchLease === null) return pendingLease;
-  return Math.min(pendingLease, batchLease);
-}
-
-export function hasProjectEventWakeLease(
-  sql: SqlStorage,
-  sessionId: string,
-  now = Date.now()
-): boolean {
-  return readProjectEventWakeLeaseUntil(sql, sessionId, now) !== null;
-}
-
-export function invalidProjectEventWakeDeliveryTargetResult(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string | null,
-  claim: PromptDeliveryClaim,
-  now = Date.now()
-): PromptDeliveryResult | null {
-  if (claim.message.sourceKind !== 'project_event_wake') return null;
-  if (!projectId || !isProjectEventWakeEnabled(env)) {
-    return {
-      kind: 'failed',
-      reason: 'terminal_target',
-      error: !projectId
-        ? 'Project event wake has no project identity'
-        : 'Project event wake delivery is disabled',
-      runtimeIdentity: claim.message.runtimeIdentity,
-      capabilities: null,
-    };
-  }
-  const row = sql
-    .exec(
-      `SELECT b.id,
-              b.subscription_id,
-              b.target_session_id,
-              b.delivery_expires_at,
-              s.lifecycle_state,
-              s.expires_at,
-              s.delivery_lifetime_expires_at,
-              c.status AS chat_status
-       FROM project_event_delivery_batches b
-       JOIN project_event_subscriptions s
-         ON s.project_id = b.project_id AND s.id = b.subscription_id
-       LEFT JOIN chat_sessions c ON c.id = b.target_session_id
-       WHERE b.project_id = ?
-         AND b.id = ?
-         AND b.delivery_channel = 'prompt_queue'
-         AND b.state = 'pending'
-       LIMIT 1`,
-      projectId,
-      claim.message.id
-    )
-    .toArray()[0];
-  if (!row) {
-    return {
-      kind: 'failed',
-      reason: 'terminal_target',
-      error: 'Project event wake batch is no longer pending',
-      runtimeIdentity: claim.message.runtimeIdentity,
-      capabilities: null,
-    };
-  }
-  const subscriptionId = typeof row.subscription_id === 'string' ? row.subscription_id : null;
-  const targetSessionId = typeof row.target_session_id === 'string' ? row.target_session_id : null;
-  const expiresAt = typeof row.delivery_expires_at === 'number' ? row.delivery_expires_at : null;
-  const subscriptionExpiresAt = typeof row.expires_at === 'number' ? row.expires_at : null;
-  const lifetimeExpiresAt =
-    typeof row.delivery_lifetime_expires_at === 'number' ? row.delivery_lifetime_expires_at : null;
-  const chatStatus = typeof row.chat_status === 'string' ? row.chat_status : null;
-  if (
-    targetSessionId !== claim.message.targetSessionId ||
-    row.lifecycle_state !== 'active' ||
-    (expiresAt !== null && expiresAt <= now) ||
-    (subscriptionExpiresAt !== null && subscriptionExpiresAt <= now) ||
-    (lifetimeExpiresAt !== null && lifetimeExpiresAt <= now) ||
-    (chatStatus !== 'active' && chatStatus !== 'sleeping')
-  ) {
-    return {
-      kind: 'failed',
-      reason: 'terminal_target',
-      error:
-        targetSessionId !== claim.message.targetSessionId
-          ? 'Project event wake target session binding changed'
-          : row.lifecycle_state !== 'active'
-            ? 'Project event wake subscription is no longer active'
-            : chatStatus !== 'active' && chatStatus !== 'sleeping'
-              ? 'Project event wake target session is no longer active'
-              : 'Project event wake delivery lease expired',
-      runtimeIdentity: claim.message.runtimeIdentity,
-      capabilities: null,
-    };
-  }
-  if (!subscriptionId) {
-    return {
-      kind: 'failed',
-      reason: 'terminal_target',
-      error: 'Project event wake subscription binding is missing',
-      runtimeIdentity: claim.message.runtimeIdentity,
-      capabilities: null,
-    };
-  }
-  const subscription = readSubscription(sql, projectId, subscriptionId);
-  const events = readEventsForBatch(sql, projectId, claim.message.id);
-  if (events.some((event) => !subscriptionCanMatchProjectEvent(subscription, event))) {
-    return {
-      kind: 'failed',
-      reason: 'terminal_target',
-      error: 'Project event wake audience is no longer authorized for target',
-      runtimeIdentity: claim.message.runtimeIdentity,
-      capabilities: null,
-    };
-  }
-  return null;
 }
 
 export function advanceProjectEventPromptAttemptCheckpoint(
@@ -629,200 +458,6 @@ function selectWakeCandidate(
   };
 }
 
-function readSchedulerState(
-  sql: SqlStorage,
-  projectId: string
-): { nextAttemptAt: number | null; nextRetentionAt: number | null } {
-  const row = sql
-    .exec(
-      `SELECT next_attempt_at, next_retention_at
-       FROM project_event_wake_scheduler_state
-       WHERE project_id = ?`,
-      projectId
-    )
-    .toArray()[0];
-  return {
-    nextAttemptAt: typeof row?.next_attempt_at === 'number' ? row.next_attempt_at : null,
-    nextRetentionAt: typeof row?.next_retention_at === 'number' ? row.next_retention_at : null,
-  };
-}
-
-export function computeProjectEventRetentionAlarmTime(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string | null,
-  now = Date.now()
-): number | null {
-  if (!projectId) return null;
-  const limits = resolveProjectEventLimits(env);
-  const checkpoint = readSchedulerState(sql, projectId);
-  if (checkpoint.nextRetentionAt !== null) {
-    return Math.max(checkpoint.nextRetentionAt, now + limits.retentionMinAlarmDelayMs);
-  }
-  const row = sql
-    .exec(
-      `SELECT MIN(received_at) AS oldest_at
-       FROM project_events
-       WHERE project_id = ?`,
-      projectId
-    )
-    .toArray()[0];
-  return typeof row?.oldest_at === 'number' ? now + limits.retentionIntervalMs : null;
-}
-
-export function isProjectEventRetentionDue(
-  sql: SqlStorage,
-  _env: Env,
-  projectId: string | null,
-  now = Date.now()
-): boolean {
-  if (!projectId) return false;
-  const checkpoint = readSchedulerState(sql, projectId);
-  if (checkpoint.nextRetentionAt !== null) return checkpoint.nextRetentionAt <= now;
-  return false;
-}
-
-export function ensureProjectEventRetentionScheduled(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string,
-  now: number
-): void {
-  const limits = resolveProjectEventLimits(env);
-  sql.exec(
-    `INSERT INTO project_event_wake_scheduler_state
-     (project_id, next_retention_at, materialization_failures, retention_failures, updated_at)
-     VALUES (?, ?, 0, 0, ?)
-     ON CONFLICT(project_id) DO UPDATE SET
-       next_retention_at = COALESCE(project_event_wake_scheduler_state.next_retention_at, ?),
-       updated_at = ?`,
-    projectId,
-    now + limits.retentionIntervalMs,
-    now,
-    now + limits.retentionIntervalMs,
-    now
-  );
-}
-
-export function markSchedulerSuccess(
-  sql: SqlStorage,
-  projectId: string,
-  now: number,
-  phase: 'materialization' | 'retention',
-  nextAt: number | null = null
-): void {
-  const materialization = phase === 'materialization';
-  sql.exec(
-    `INSERT INTO project_event_wake_scheduler_state
-     (project_id, next_attempt_at, next_retention_at, materialization_failures, retention_failures,
-      last_materialization_succeeded_at, last_retention_succeeded_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(project_id) DO UPDATE SET
-       next_attempt_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.next_attempt_at END,
-       next_retention_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.next_retention_at END,
-       materialization_failures = CASE WHEN ? THEN 0 ELSE project_event_wake_scheduler_state.materialization_failures END,
-       retention_failures = CASE WHEN ? THEN 0 ELSE project_event_wake_scheduler_state.retention_failures END,
-       last_materialization_succeeded_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.last_materialization_succeeded_at END,
-       last_retention_succeeded_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.last_retention_succeeded_at END,
-       updated_at = ?`,
-    projectId,
-    materialization ? nextAt : null,
-    materialization ? null : nextAt,
-    0,
-    0,
-    materialization ? now : null,
-    materialization ? null : now,
-    now,
-    materialization ? 1 : 0,
-    nextAt,
-    materialization ? 0 : 1,
-    nextAt,
-    materialization ? 1 : 0,
-    materialization ? 0 : 1,
-    materialization ? 1 : 0,
-    now,
-    materialization ? 0 : 1,
-    now,
-    now
-  );
-}
-
-export function recordSchedulerFailure(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string | null,
-  phase: 'materialization' | 'retention',
-  error: unknown,
-  now = Date.now()
-): void {
-  if (!projectId) return;
-  const limits = resolveProjectEventLimits(env);
-  const materialization = phase === 'materialization';
-  const code = error instanceof Error ? error.name : 'Error';
-  const current = sql
-    .exec(
-      `SELECT materialization_failures, retention_failures
-       FROM project_event_wake_scheduler_state
-       WHERE project_id = ?`,
-      projectId
-    )
-    .toArray()[0];
-  const currentFailures = materialization
-    ? typeof current?.materialization_failures === 'number'
-      ? current.materialization_failures
-      : 0
-    : typeof current?.retention_failures === 'number'
-      ? current.retention_failures
-      : 0;
-  const exponent = Math.min(currentFailures, 10);
-  const backoff = Math.min(
-    limits.wakeMaterializationBackoffMaxMs,
-    limits.wakeMaterializationBackoffBaseMs * 2 ** exponent
-  );
-  sql.exec(
-    `INSERT INTO project_event_wake_scheduler_state
-     (project_id, next_attempt_at, next_retention_at, materialization_failures, retention_failures,
-      last_materialization_error_code, last_retention_error_code,
-      last_materialization_failed_at, last_retention_failed_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(project_id) DO UPDATE SET
-       next_attempt_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.next_attempt_at END,
-       next_retention_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.next_retention_at END,
-       materialization_failures = CASE WHEN ? THEN project_event_wake_scheduler_state.materialization_failures + 1 ELSE project_event_wake_scheduler_state.materialization_failures END,
-       retention_failures = CASE WHEN ? THEN project_event_wake_scheduler_state.retention_failures + 1 ELSE project_event_wake_scheduler_state.retention_failures END,
-       last_materialization_error_code = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.last_materialization_error_code END,
-       last_retention_error_code = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.last_retention_error_code END,
-       last_materialization_failed_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.last_materialization_failed_at END,
-       last_retention_failed_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.last_retention_failed_at END,
-       updated_at = ?`,
-    projectId,
-    materialization ? now + backoff : null,
-    materialization ? null : now + backoff,
-    materialization ? 1 : 0,
-    materialization ? 0 : 1,
-    materialization ? code : null,
-    materialization ? null : code,
-    materialization ? now : null,
-    materialization ? null : now,
-    now,
-    materialization ? 1 : 0,
-    now + backoff,
-    materialization ? 0 : 1,
-    now + backoff,
-    materialization ? 1 : 0,
-    materialization ? 0 : 1,
-    materialization ? 1 : 0,
-    code,
-    materialization ? 0 : 1,
-    code,
-    materialization ? 1 : 0,
-    now,
-    materialization ? 0 : 1,
-    now,
-    now
-  );
-}
-
 function readSubscription(
   sql: SqlStorage,
   projectId: string,
@@ -890,21 +525,6 @@ function readEvents(
     )
     .toArray();
   return mapRows(rows, mapProjectEvent, limit, 'project_event');
-}
-
-function readEventsForBatch(sql: SqlStorage, projectId: string, batchId: string): ProjectEventRecord[] {
-  return sql
-    .exec(
-      `SELECT e.*
-       FROM project_event_matches m
-       JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id
-       WHERE m.project_id = ? AND m.batch_id = ?
-       ORDER BY m.matched_at ASC, m.id ASC`,
-      projectId,
-      batchId
-    )
-    .toArray()
-    .map(mapProjectEvent);
 }
 
 function authorizedWakeMatches(
@@ -1103,13 +723,4 @@ function resolveMailboxMaxMessages(env: Env): number {
   return Number.isSafeInteger(parsed) && parsed > 0
     ? parsed
     : MAILBOX_DEFAULTS.MAX_MESSAGES_PER_PROJECT;
-}
-
-function deferNextMaterialization(
-  sql: SqlStorage,
-  projectId: string,
-  nextAt: number,
-  now: number
-): void {
-  markSchedulerSuccess(sql, projectId, now, 'materialization', nextAt);
 }

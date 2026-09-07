@@ -224,6 +224,7 @@ describe('runTriggerExecutionCleanup', () => {
         retentionPurged: 0,
         webhookDeliveriesPurged: 0,
         projectEventSourceOutboxAdmitted: 0,
+        credentialLimitWindowsPurged: 0,
         errors: 0,
       });
       expect(

@@ -5,9 +5,9 @@ import { canonicalJson } from '../../lib/canonical-json';
 import { ulid } from '../../lib/ulid';
 import {
   admitProjectEventSourceIntentById,
-  resolveProjectEventSourceOutboxConfig,
   type ProjectEventSourceAdmissionResult,
   type ProjectEventSourceOutboxState,
+  resolveProjectEventSourceOutboxConfig,
 } from '../project-event-source-outbox';
 import type {
   CredentialLimitDispatchOutcome,
