@@ -480,12 +480,6 @@ export async function findNodeWithCapacity(
       rejectionDiagnostics.push({ nodeId: node.id, reasons: capacity.reasons });
       continue;
     }
-    if (metrics) {
-      if (metrics.creatingWorkspaces > 0) continue;
-      const cpu = metrics.cpuPercent ?? 0;
-      const mem = metrics.memoryPercent ?? 0;
-      if (cpu >= policy.cpuThresholdPercent || mem >= policy.memoryThresholdPercent) continue;
-    }
     candidates.push({
       id: node.id,
       vmSize: node.vmSize,

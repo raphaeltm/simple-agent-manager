@@ -49,6 +49,16 @@ function reservation(
   };
 }
 
+function reservationV2(
+  overrides: Partial<ResolvedResourceReservation> = {}
+): ResolvedResourceReservation {
+  return {
+    ...reservation({ version: 2, ...overrides }),
+    fieldProvenance: { minVcpu: { source: 'task', sourceId: 'task-1' } },
+    diagnostics: { resolver: 'canonical-a' },
+  } as ResolvedResourceReservation;
+}
+
 function admissionPolicy(
   overrides: Partial<WorkspaceAdmissionPolicy> = {}
 ): WorkspaceAdmissionPolicy {
@@ -319,6 +329,108 @@ describe('workspace resource capacity final reservation CAS', () => {
     ).resolves.toBe(false);
   });
 
+  it('accounts for active v1 and v2 reservation snapshots in real D1 final CAS', async () => {
+    const nodeId = 'node-wrc-v2-reservations';
+    await makeReadyNode(nodeId, USER_ID, 'medium');
+    await seedWorkspace('workspace-wrc-v2-active-v1', nodeId, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'running',
+      resolvedReservationJson: JSON.stringify(
+        reservation({ cpuMillis: 1500, memoryMb: 2048, diskMb: 2048 })
+      ),
+    });
+    await seedWorkspace('workspace-wrc-v2-active-v2', nodeId, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'running',
+      resolvedReservationJson: JSON.stringify(
+        reservationV2({ cpuMillis: 1500, memoryMb: 2048, diskMb: 2048 })
+      ),
+    });
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-wrc-v2-fits', nodeId, {
+          resolvedReservation: reservationV2({ cpuMillis: 1000, memoryMb: 1024, diskMb: 1024 }),
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-wrc-v2-overbook', nodeId, {
+          resolvedReservation: reservationV2({ cpuMillis: 1100, memoryMb: 1024, diskMb: 1024 }),
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+  });
+
+  it('vetoes final reservations when selected node metrics change to unsafe pressure', async () => {
+    const cases: Array<{
+      name: string;
+      metrics: Record<string, number>;
+    }> = [
+      { name: 'cpu', metrics: { cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 } },
+      { name: 'memory', metrics: { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 } },
+      {
+        name: 'creating',
+        metrics: { cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const userId = `user-wrc-pressure-change-${testCase.name}`;
+      const installationId = `installation-wrc-pressure-change-${testCase.name}`;
+      const projectId = `project-wrc-pressure-change-${testCase.name}`;
+      const nodeId = `node-wrc-pressure-change-${testCase.name}`;
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `inst-wrc-pressure-change-${testCase.name}`,
+        accountName: `test-user-wrc-pressure-change-${testCase.name}`,
+      });
+      await seedProject(projectId, userId, installationId);
+      await makeReadyNode(nodeId, userId, 'medium');
+      await seedWorkspace(`workspace-wrc-pressure-active-${testCase.name}`, nodeId, userId, {
+        projectId,
+        status: 'running',
+        resolvedReservationJson: JSON.stringify(reservation()),
+      });
+
+      const selected = await findNodeWithCapacity(
+        taskState(userId, 'medium', {
+          projectId,
+          installationId,
+          projectScaling: {
+            maxWorkspacesPerNode: 4,
+            nodeCpuThresholdPercent: 90,
+            nodeMemoryThresholdPercent: 90,
+          },
+          resolvedReservation: reservation(),
+        }),
+        selectorContext()
+      );
+      expect(selected?.nodeId).toBe(nodeId);
+
+      await env.DATABASE.prepare(`UPDATE nodes SET last_metrics = ? WHERE id = ?`)
+        .bind(JSON.stringify(testCase.metrics), nodeId)
+        .run();
+
+      await expect(
+        reserveWorkspacePlacement(
+          env.DATABASE,
+          placement(`workspace-wrc-pressure-denied-${testCase.name}`, nodeId, {
+            userId,
+            projectId,
+            installationId,
+          }),
+          admissionPolicy({ cpuThresholdPercent: 90, memoryThresholdPercent: 90 })
+        )
+      ).resolves.toBe(false);
+    }
+  });
+
   it('fails closed for malformed active snapshots but preserves empty unknown-capacity placement', async () => {
     const occupiedNode = 'node-wrc-invalid-active';
     const unknownNode = 'node-wrc-empty-unknown';
@@ -363,7 +475,10 @@ describe('workspace resource capacity advisory selection', () => {
     const diskPressureNode = 'node-wrc-selection-disk-pressure';
     const largeAvailableNode = 'node-wrc-selection-large-available';
     await seedUser(userId);
-    await seedInstallation(installationId, userId);
+    await seedInstallation(installationId, userId, {
+      installationIdValue: 'inst-wrc-selection',
+      accountName: 'test-user-wrc-selection',
+    });
     await seedProject(projectId, userId, installationId);
     await makeReadyNode(smallBusyNode, userId, 'small', {
       lastMetrics: JSON.stringify({ cpuLoadAvg1: 1.5, memoryPercent: 10, diskPercent: 10 }),

@@ -381,11 +381,12 @@ type Config struct {
 	ErrorReportCollectorJobs  int           // Maximum concurrent automatic evidence collectors (default: 1)
 
 	// System info collection settings - configurable per constitution principle XI
-	SysInfoDockerTimeout                   time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
-	SysInfoVersionTimeout                  time.Duration // Timeout for version check commands (default: 5s)
-	SysInfoCacheTTL                        time.Duration // Cache TTL for system info responses (default: 5s)
-	HeartbeatDockerStatsTimeout            time.Duration // Timeout for heartbeat Docker stats (default: 2s)
-	HeartbeatWorkspaceMetricsMaxContainers int           // Max workspace containers measured per heartbeat (default: 8)
+	SysInfoDockerTimeout                    time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
+	SysInfoVersionTimeout                   time.Duration // Timeout for version check commands (default: 5s)
+	SysInfoCacheTTL                         time.Duration // Cache TTL for system info responses (default: 5s)
+	HeartbeatDockerStatsTimeout             time.Duration // Timeout for heartbeat Docker stats (default: 2s)
+	HeartbeatWorkspaceMetricsMaxContainers  int           // Max workspace containers measured per heartbeat (default: 8)
+	HeartbeatWorkspaceMetricsMaxOutputBytes int64         // Max bytes read from heartbeat Docker metric commands (default: 64 KiB)
 
 	// Log reader/stream settings - configurable per constitution principle XI
 	LogReaderTimeout          time.Duration // Timeout for journalctl read commands (default: 30s)

@@ -217,6 +217,7 @@ write_files:
       Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY={{ error_report_collector_concurrency }}
       Environment=HEARTBEAT_DOCKER_STATS_TIMEOUT={{ heartbeat_docker_stats_timeout }}
       Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS={{ heartbeat_workspace_metrics_max_containers }}
+      Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES={{ heartbeat_workspace_metrics_max_output_bytes }}
       Slice=sam-infra.slice
       MemoryAccounting=yes
       OOMScoreAdjust=-900
@@ -226,6 +227,17 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/sam.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM managed services and workload hierarchy
+      Before=slices.target
+
+      [Slice]
+      MemoryAccounting=yes
+      MemoryMin={{ sam_infra_slice_memory_min_mb }}M
 
   - path: /etc/systemd/system/sam-infra.slice
     permissions: '0644'
@@ -238,6 +250,16 @@ write_files:
       MemoryAccounting=yes
       MemoryMin={{ sam_infra_slice_memory_min_mb }}M
 
+  - path: /etc/systemd/system/sam-workload.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM Docker workload containers
+      Before=slices.target
+
+      [Slice]
+      MemoryAccounting=yes
+
   - path: /usr/local/sbin/sam-configure-docker-memory.sh
     permissions: '0755'
     content: |
@@ -246,7 +268,9 @@ write_files:
 
       RESERVE_MB="{{ vm_agent_memory_reserve_mb }}"
       if [ "$RESERVE_MB" = "0" ]; then
-        logger -t sam-headroom "Docker MemoryMax reserve disabled"
+        rm -f /etc/systemd/system/sam-workload.slice.d/50-headroom.conf
+        systemctl daemon-reload
+        logger -t sam-headroom "SAM workload MemoryMax reserve disabled"
         exit 0
       fi
 
@@ -256,17 +280,53 @@ write_files:
       DOCKER_MEMORY_MAX_MB="$((TOTAL_MB - RESERVE_MB))"
 
       if [ "$DOCKER_MEMORY_MAX_MB" -lt "$MIN_DOCKER_MB" ]; then
-        logger -t sam-headroom "Skipping Docker MemoryMax: total=\${TOTAL_MB}M reserve=\${RESERVE_MB}M leaves \${DOCKER_MEMORY_MAX_MB}M below minimum \${MIN_DOCKER_MB}M"
+        logger -t sam-headroom "Skipping SAM workload MemoryMax: total=\${TOTAL_MB}M reserve=\${RESERVE_MB}M leaves \${DOCKER_MEMORY_MAX_MB}M below minimum \${MIN_DOCKER_MB}M"
         exit 0
       fi
 
-      mkdir -p /etc/systemd/system/docker.service.d
-      cat >/etc/systemd/system/docker.service.d/sam-headroom.conf <<EOF
-      [Service]
+      mkdir -p /etc/systemd/system/sam-workload.slice.d
+      cat >/etc/systemd/system/sam-workload.slice.d/50-headroom.conf <<EOF
+      [Slice]
       MemoryAccounting=yes
       MemoryMax=\${DOCKER_MEMORY_MAX_MB}M
       EOF
-      logger -t sam-headroom "Configured Docker MemoryMax=\${DOCKER_MEMORY_MAX_MB}M with reserve=\${RESERVE_MB}M"
+      systemctl daemon-reload
+      if systemctl is-active --quiet docker; then
+        systemctl restart docker
+      fi
+      logger -t sam-headroom "Configured sam-workload.slice MemoryMax=\${DOCKER_MEMORY_MAX_MB}M with reserve=\${RESERVE_MB}M"
+
+  - path: /usr/local/sbin/sam-verify-workload-cgroup.sh
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      set -eu
+
+      CONTAINER_ID="\${1:-}"
+      if [ -z "$CONTAINER_ID" ]; then
+        echo "usage: $0 <container-id-or-name>" >&2
+        exit 64
+      fi
+
+      PID="$(docker inspect -f '{{.State.Pid}}' "$CONTAINER_ID")"
+      if [ -z "$PID" ] || [ "$PID" = "0" ]; then
+        echo "container $CONTAINER_ID is not running" >&2
+        exit 65
+      fi
+
+      CGROUP="$(cat "/proc/$PID/cgroup")"
+      case "$CGROUP" in
+        *sam-workload.slice*) ;;
+        *)
+          echo "container $CONTAINER_ID pid $PID is outside sam-workload.slice" >&2
+          echo "$CGROUP" >&2
+          exit 66
+          ;;
+      esac
+
+      systemctl show sam.slice sam-infra.slice sam-workload.slice \
+        -p MemoryMin -p EffectiveMemoryMin -p MemoryMax -p EffectiveMemoryMax --no-pager
+      echo "$CGROUP"
 
   - path: /etc/caddy/Caddyfile
     permissions: '0644'
@@ -489,6 +549,7 @@ write_files:
         "log-opts": {
           "tag": "docker/{{ docker_name_tag }}"
         },
+        "cgroup-parent": "sam-workload.slice",
         "dns": [{{ docker_dns_servers }}],
         "live-restore": true
       }

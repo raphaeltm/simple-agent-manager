@@ -276,11 +276,12 @@ func Load() (*Config, error) {
 		ErrorReportCollectorJobs:  getEnvInt("ERROR_REPORT_COLLECTOR_CONCURRENCY", DefaultErrorReportCollectorWorkers),
 
 		// System info settings - configurable per constitution principle XI
-		SysInfoDockerTimeout:                   getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
-		SysInfoVersionTimeout:                  getEnvDuration("SYSINFO_VERSION_TIMEOUT", 5*time.Second),
-		SysInfoCacheTTL:                        getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
-		HeartbeatDockerStatsTimeout:            getEnvDuration("HEARTBEAT_DOCKER_STATS_TIMEOUT", 2*time.Second),
-		HeartbeatWorkspaceMetricsMaxContainers: getEnvInt("HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS", 8),
+		SysInfoDockerTimeout:                    getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
+		SysInfoVersionTimeout:                   getEnvDuration("SYSINFO_VERSION_TIMEOUT", 5*time.Second),
+		SysInfoCacheTTL:                         getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
+		HeartbeatDockerStatsTimeout:             getEnvDuration("HEARTBEAT_DOCKER_STATS_TIMEOUT", 2*time.Second),
+		HeartbeatWorkspaceMetricsMaxContainers:  getEnvInt("HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS", 8),
+		HeartbeatWorkspaceMetricsMaxOutputBytes: getEnvInt64("HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES", 64*1024),
 
 		// Log reader/stream settings - configurable per constitution principle XI
 		LogReaderTimeout:          getEnvDuration("LOG_READER_TIMEOUT", 30*time.Second),
