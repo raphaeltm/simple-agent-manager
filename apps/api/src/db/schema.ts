@@ -876,6 +876,7 @@ export const tasks = sqliteTable(
     skillHint: text('skill_hint'),
     startedAt: text('started_at'),
     completedAt: text('completed_at'),
+    terminalTransitionId: text('terminal_transition_id'),
     errorMessage: text('error_message'),
     outputSummary: text('output_summary'),
     outputBranch: text('output_branch'),
@@ -2584,10 +2585,13 @@ export const projectEventSourceOutbox = sqliteTable(
     maxAttempts: integer('max_attempts').notNull(),
     nextAttemptAt: text('next_attempt_at').notNull(),
     processingLeaseExpiresAt: text('processing_lease_expires_at'),
+    claimToken: text('claim_token'),
+    claimedAt: text('claimed_at'),
     expiresAt: text('expires_at').notNull(),
     admittedEventId: text('admitted_event_id'),
     admissionOutcome: text('admission_outcome'),
     lastError: text('last_error'),
+    terminalizedAt: text('terminalized_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2611,6 +2615,17 @@ export const projectEventSourceOutbox = sqliteTable(
       table.processingLeaseExpiresAt,
       table.id
     ),
+    activeExpiryIdx: index('idx_project_event_source_outbox_active_expiry')
+      .on(table.state, table.expiresAt, table.id)
+      .where(sql`state IN ('pending', 'processing', 'retryable_failed')`),
+    activeAttemptsIdx: index('idx_project_event_source_outbox_active_attempts')
+      .on(table.state, table.attemptCount, table.id)
+      .where(sql`state IN ('pending', 'processing', 'retryable_failed')`),
+    terminalRetentionIdx: index('idx_project_event_source_outbox_terminal_retention')
+      .on(table.state, table.terminalizedAt, table.id)
+      .where(
+        sql`state IN ('admitted', 'expired', 'permanent_failed') AND terminalized_at IS NOT NULL`
+      ),
     projectSubjectIdx: index('idx_project_event_source_outbox_project_subject').on(
       table.projectId,
       table.subjectType,

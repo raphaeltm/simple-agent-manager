@@ -1,6 +1,7 @@
 import type {
   AdmitProjectEventInput,
   ProjectEventJsonValue,
+  ProjectEventLimits,
   ProjectEventMetadata,
   WebhookDeliveryOutcome,
   WebhookTriggerConfig,
@@ -8,14 +9,34 @@ import type {
 import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
+import { resolveProjectEventLimits } from '../durable-objects/project-data/project-events-limits';
+import { normalizeProjectEventInput } from '../durable-objects/project-data/project-events-normalization';
 import type { Env } from '../env';
 import { canonicalJson } from '../lib/canonical-json';
 import { enqueueAndAdmitProjectEventSourceIntent } from './project-event-source-outbox';
 
 const WEBHOOK_EVENT_SOURCE = 'webhook';
 const TRUNCATION_SUFFIX = '...[truncated]';
-const SENSITIVE_KEY_RE =
-  /(?:^|[_-])(authorization|cookie|token|secret|password|passwd|credential|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|session|set[_-]?cookie)(?:$|[_-])/i;
+const SENSITIVE_COMPACT_KEY_PARTS = [
+  'authorization',
+  'authtoken',
+  'apikey',
+  'clientsecret',
+  'cookie',
+  'credential',
+  'credentials',
+  'idtoken',
+  'password',
+  'passwd',
+  'privatekey',
+  'refreshtoken',
+  'secret',
+  'secrets',
+  'sessionid',
+  'setcookie',
+  'token',
+  'tokens',
+];
 
 export interface GenericWebhookProjectEventInput {
   trigger: schema.TriggerRow;
@@ -44,11 +65,8 @@ function truncateUtf8(value: string, maxBytes: number): string {
   let high = value.length;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (byteLength(value.slice(0, mid)) <= payloadMax) {
-      low = mid;
-    } else {
-      high = mid - 1;
-    }
+    if (byteLength(value.slice(0, mid)) <= payloadMax) low = mid;
+    else high = mid - 1;
   }
   return `${value.slice(0, low)}${TRUNCATION_SUFFIX}`;
 }
@@ -57,38 +75,118 @@ function boundedString(value: string, maxBytes = DEFAULT_PROJECT_EVENT_LIMITS.ma
   return truncateUtf8(value.trim(), maxBytes);
 }
 
-function normalizeJsonValue(
-  value: unknown,
-  key: string | undefined,
-  depth = 0
-): ProjectEventJsonValue | undefined {
-  if (key && SENSITIVE_KEY_RE.test(key)) return '[redacted]';
-  if (value === undefined) return undefined;
-  if (value === null || typeof value === 'boolean') return value;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (typeof value === 'string') return boundedString(value);
-  if (Array.isArray(value)) {
-    if (depth >= DEFAULT_PROJECT_EVENT_LIMITS.maxMetadataDepth) return [];
-    return value
-      .slice(0, DEFAULT_PROJECT_EVENT_LIMITS.maxMetadataArrayItems)
-      .map((item) => normalizeJsonValue(item, undefined, depth + 1))
-      .filter((item): item is ProjectEventJsonValue => item !== undefined);
+function compactKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function isSensitiveKey(value: string): boolean {
+  const compact = compactKey(value);
+  return SENSITIVE_COMPACT_KEY_PARTS.some((part) => compact.includes(part));
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Object.prototype.toString.call(value) === '[object Object]';
+}
+
+function safeNameList(values: Iterable<string>, limits: ProjectEventLimits): string[] {
+  const output = new Set<string>();
+  for (const raw of values) {
+    const trimmed = raw.trim();
+    if (!trimmed || isSensitiveKey(trimmed)) continue;
+    output.add(boundedString(trimmed, limits.maxFilterStringBytes));
+    if (output.size >= limits.maxMetadataArrayItems) break;
   }
-  if (typeof value === 'object') {
-    if (depth >= DEFAULT_PROJECT_EVENT_LIMITS.maxMetadataDepth) return {};
-    const normalized: ProjectEventMetadata = {};
-    for (const [childKey, childValue] of Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .slice(0, DEFAULT_PROJECT_EVENT_LIMITS.maxMetadataKeys)) {
-      const normalizedValue = normalizeJsonValue(childValue, childKey, depth + 1);
-      if (normalizedValue !== undefined) {
-        normalized[boundedString(childKey, DEFAULT_PROJECT_EVENT_LIMITS.maxFilterStringBytes)] =
-          normalizedValue;
-      }
+  return [...output].sort((left, right) => left.localeCompare(right));
+}
+
+function summarizeBodyShape(value: unknown, limits: ProjectEventLimits): ProjectEventMetadata {
+  const stats = {
+    objectKeys: 0,
+    arrayItems: 0,
+    primitiveValues: 0,
+    sensitiveKeys: 0,
+    blankKeys: 0,
+    maxDepth: 0,
+    truncated: false,
+  };
+  const topLevelKeys = isPlainObject(value) ? safeNameList(Object.keys(value), limits) : [];
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  const visitBudget = Math.max(1, limits.maxMetadataKeys * limits.maxMetadataArrayItems);
+  let visited = 0;
+
+  while (stack.length > 0) {
+    if (visited >= visitBudget) {
+      stats.truncated = true;
+      break;
     }
-    return normalized;
+    visited += 1;
+    const current = stack.pop();
+    if (!current) break;
+    stats.maxDepth = Math.max(stats.maxDepth, current.depth);
+    if (Array.isArray(current.value)) {
+      stats.arrayItems += current.value.length;
+      for (const item of current.value.slice(0, limits.maxMetadataArrayItems)) {
+        stack.push({ value: item, depth: current.depth + 1 });
+      }
+      if (current.value.length > limits.maxMetadataArrayItems) stats.truncated = true;
+      continue;
+    }
+    if (isPlainObject(current.value)) {
+      const entries = Object.entries(current.value);
+      stats.objectKeys += entries.length;
+      for (const [key, child] of entries.slice(0, limits.maxMetadataArrayItems)) {
+        const trimmed = key.trim();
+        if (!trimmed) stats.blankKeys += 1;
+        if (trimmed && isSensitiveKey(trimmed)) stats.sensitiveKeys += 1;
+        stack.push({ value: child, depth: current.depth + 1 });
+      }
+      if (entries.length > limits.maxMetadataArrayItems) stats.truncated = true;
+      continue;
+    }
+    if (current.value !== undefined) stats.primitiveValues += 1;
   }
-  return String(value);
+
+  return {
+    bodyTopLevelKeys: topLevelKeys,
+    bodyTopLevelKeyCount: isPlainObject(value) ? Object.keys(value).length : 0,
+    bodyObjectKeyCount: stats.objectKeys,
+    bodyArrayItemCount: stats.arrayItems,
+    bodyPrimitiveValueCount: stats.primitiveValues,
+    bodyMaxDepth: stats.maxDepth,
+    redactedSensitiveKeyCount: stats.sensitiveKeys,
+    skippedBlankKeyCount: stats.blankKeys,
+    shapeTruncated: stats.truncated,
+  };
+}
+
+function buildMetadata(
+  input: GenericWebhookProjectEventInput,
+  limits: ProjectEventLimits,
+  includeShape: boolean
+): ProjectEventMetadata {
+  return {
+    provider: 'webhook',
+    deliveryId: boundedString(input.deliveryId, limits.maxFilterStringBytes),
+    outcome: input.outcome,
+    trigger: {
+      id: boundedString(input.trigger.id, limits.maxFilterStringBytes),
+      name: boundedString(input.trigger.name, limits.maxFilterStringBytes),
+      sourceLabel: input.config.sourceLabel ?? null,
+    },
+    project: {
+      id: boundedString(input.trigger.projectId, limits.maxFilterStringBytes),
+      name: boundedString(input.projectName, limits.maxFilterStringBytes),
+    },
+    execution: {
+      id: input.executionId ? boundedString(input.executionId, limits.maxFilterStringBytes) : null,
+      sequenceNumber: input.sequenceNumber ?? null,
+    },
+    request: {
+      includedHeaderNames: safeNameList(Object.keys(input.headers), limits),
+      receivedHeaderCount: Object.keys(input.headers).length,
+      ...(includeShape ? summarizeBodyShape(input.body, limits) : { shapeTruncated: true }),
+    },
+  };
 }
 
 async function fingerprint(value: ProjectEventJsonValue): Promise<string> {
@@ -103,59 +201,59 @@ function receivedAtMs(receivedAt: string): number | undefined {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-export async function buildGenericWebhookProjectEventInput(
-  input: GenericWebhookProjectEventInput
+function projectEventLimits(env: Env): ProjectEventLimits {
+  return resolveProjectEventLimits(env as unknown as Parameters<typeof resolveProjectEventLimits>[0]);
+}
+
+async function buildValidatedEventInput(
+  env: Env,
+  input: GenericWebhookProjectEventInput,
+  includeShape: boolean
 ): Promise<AdmitProjectEventInput> {
+  const limits = projectEventLimits(env);
   const eventType = `webhook.${input.outcome}`;
   const subject = { type: 'webhook_trigger', id: input.trigger.id };
-  const metadata: ProjectEventMetadata = {
-    provider: 'webhook',
-    deliveryId: input.deliveryId,
-    outcome: input.outcome,
-    trigger: {
-      id: input.trigger.id,
-      name: boundedString(input.trigger.name),
-      sourceLabel: input.config.sourceLabel ?? null,
-    },
-    project: {
-      id: input.trigger.projectId,
-      name: boundedString(input.projectName),
-    },
-    execution: {
-      id: input.executionId ?? null,
-      sequenceNumber: input.sequenceNumber ?? null,
-    },
-    headers: (normalizeJsonValue(input.headers, 'headers') ?? {}) as ProjectEventJsonValue,
-    body: (normalizeJsonValue(input.body, 'body') ?? {}) as ProjectEventJsonValue,
-  };
-  return {
+  const metadata = buildMetadata(input, limits, includeShape);
+  const eventInput: AdmitProjectEventInput = {
     projectId: input.trigger.projectId,
     source: WEBHOOK_EVENT_SOURCE,
     eventType,
     subject,
     severity: input.outcome === 'internal_error' ? 'error' : 'info',
     deliveryKey: `delivery:${input.deliveryId}`,
-    payloadFingerprint: await fingerprint({
-      source: WEBHOOK_EVENT_SOURCE,
-      eventType,
-      subject,
-      metadata,
-    }),
+    payloadFingerprint: await fingerprint({ source: WEBHOOK_EVENT_SOURCE, eventType, subject, metadata }),
     metadata,
     display: {
       title: `Webhook ${input.outcome.replaceAll('_', ' ')}`,
-      summary: `Webhook trigger ${input.trigger.name} produced ${eventType}.`,
+      summary: `Webhook trigger ${boundedString(input.trigger.name)} produced ${eventType}.`,
       labels: ['webhook', input.outcome],
     },
     rawPayloadRef: null,
     occurredAt: receivedAtMs(input.receivedAt),
     receivedAt: receivedAtMs(input.receivedAt),
   };
+  normalizeProjectEventInput(eventInput, limits);
+  return eventInput;
 }
 
-export async function enqueueGenericWebhookProjectEvent(env: Env, input: GenericWebhookProjectEventInput) {
+export async function buildGenericWebhookProjectEventInput(
+  input: GenericWebhookProjectEventInput,
+  env?: Env
+): Promise<AdmitProjectEventInput> {
+  if (!env) return buildValidatedEventInput({} as Env, input, true);
+  try {
+    return await buildValidatedEventInput(env, input, true);
+  } catch {
+    return buildValidatedEventInput(env, input, false);
+  }
+}
+
+export async function enqueueGenericWebhookProjectEvent(
+  env: Env,
+  input: GenericWebhookProjectEventInput
+) {
   return enqueueAndAdmitProjectEventSourceIntent(
     env,
-    await buildGenericWebhookProjectEventInput(input)
+    await buildGenericWebhookProjectEventInput(input, env)
   );
 }
