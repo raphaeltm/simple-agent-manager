@@ -1644,15 +1644,17 @@ export class ProjectData extends DurableObject<Env> {
   private async runProjectEventWakeMaterializationAlarm(): Promise<void> {
     const projectId = this.getProjectId();
     if (!projectId) return;
+    const now = Date.now();
     const candidates = this.ctx.storage.transactionSync(() =>
-      projectEvents.selectProjectEventWakeMaterializationCandidates(this.sql, this.env, projectId)
+      projectEvents.selectProjectEventWakeMaterializationCandidates(this.sql, this.env, projectId, now)
     );
     if (candidates.length === 0) {
       this.ctx.storage.transactionSync(() =>
-        projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, projectId)
+        projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, projectId, now)
       );
       return;
     }
+    let deferredUntil: number | null = null;
     for (const candidate of candidates) {
       const sourceAuthorized = await isSessionRecoverySourceTaskGuardValid(
         this.env.DATABASE,
@@ -1673,12 +1675,18 @@ export class ProjectData extends DurableObject<Env> {
           this.sql,
           this.env,
           projectId,
-          Date.now(),
+          now,
           {
             subscriptionId: candidate.subscriptionId,
+            ignoreSchedulerCheckpoint: true,
+            recordGlobalCapacityDeferral: false,
           }
         )
       );
+      if (result.deferredUntil !== undefined && result.deferredUntil !== null) {
+        deferredUntil =
+          deferredUntil === null ? result.deferredUntil : Math.min(deferredUntil, result.deferredUntil);
+      }
       for (const item of result.accepted) {
         await durability.finalizeAcceptedPromptDelivery(
           this.sql,
@@ -1688,8 +1696,11 @@ export class ProjectData extends DurableObject<Env> {
           item.accepted
         );
       }
-      if (result.status === 'materialized' || result.status === 'not_due') return;
+      if (result.status === 'materialized' || result.status === 'disabled') return;
     }
+    this.ctx.storage.transactionSync(() =>
+      projectEvents.markSchedulerSuccess(this.sql, projectId, now, 'materialization', deferredUntil)
+    );
   }
 
   private runProjectEventRetentionAlarm(): void {

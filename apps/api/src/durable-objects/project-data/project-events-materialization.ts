@@ -51,6 +51,7 @@ export type ProjectEventWakeMaterializationResult = {
   status: ProjectEventWakeMaterializationStatus;
   materialized: number;
   accepted: AcceptedProjectEventWake[];
+  deferredUntil?: number | null;
 };
 
 export type ProjectEventWakeSourceTaskGuard = {
@@ -68,6 +69,8 @@ export type ProjectEventWakeMaterializationCandidate = {
 
 export type RunProjectEventWakeMaterializationOptions = {
   subscriptionId?: string;
+  ignoreSchedulerCheckpoint?: boolean;
+  recordGlobalCapacityDeferral?: boolean;
 };
 
 type BuildWakePromptInputOptions = {
@@ -92,7 +95,11 @@ export function runProjectEventWakeMaterializationBatch(
   }
   const limits = resolveProjectEventLimits(env);
   const checkpoint = readSchedulerState(sql, projectId);
-  if (checkpoint.nextAttemptAt !== null && checkpoint.nextAttemptAt > now) {
+  if (
+    options.ignoreSchedulerCheckpoint !== true &&
+    checkpoint.nextAttemptAt !== null &&
+    checkpoint.nextAttemptAt > now
+  ) {
     return { status: 'not_due', materialized: 0, accepted: [] };
   }
   terminalizeIneligibleWakeMatches(sql, projectId, now, limits.wakeMaxPerSubscription);
@@ -131,8 +138,10 @@ export function runProjectEventWakeMaterializationBatch(
     return materializeCandidate(sql, env, projectId, now, limits, candidate);
   }
 
-  markSchedulerSuccess(sql, projectId, now, 'materialization', deferredUntil);
-  return { status: 'capacity_deferred', materialized: 0, accepted: [] };
+  if (options.recordGlobalCapacityDeferral !== false) {
+    markSchedulerSuccess(sql, projectId, now, 'materialization', deferredUntil);
+  }
+  return { status: 'capacity_deferred', materialized: 0, accepted: [], deferredUntil };
 }
 
 export function selectProjectEventWakeMaterializationCandidate(
@@ -356,7 +365,7 @@ function buildWakePromptInput(options: BuildWakePromptInputOptions): AcceptPromp
     targetSessionId,
     displayContent: content,
     deliveryContent: content,
-    sourceTaskId: options.subscription.deliveryPreference.target?.taskId ?? null,
+    sourceTaskId: options.sourceTaskGuard.taskId,
     senderType: 'system',
     senderId: 'project-data',
     messageClass: 'deliver',
