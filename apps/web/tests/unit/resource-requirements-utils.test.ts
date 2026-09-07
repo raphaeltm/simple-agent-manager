@@ -87,7 +87,7 @@ describe('serializeResourceRequirements', () => {
     expect(parsed.minMemoryGb).toBe(8);
   });
 
-  it('excludes maxCoTenants when exclusiveNode is true', () => {
+  it('preserves maxCoTenants alongside exclusiveNode=true', () => {
     const result = serializeResourceRequirements({
       ...EMPTY_RESOURCE_STATE,
       exclusiveNode: true,
@@ -95,7 +95,7 @@ describe('serializeResourceRequirements', () => {
     });
     const parsed = JSON.parse(result!);
     expect(parsed.exclusiveNode).toBe(true);
-    expect(parsed.maxCoTenants).toBeUndefined();
+    expect(parsed.maxCoTenants).toBe(4);
   });
 
   it('includes exclusiveNode false', () => {
@@ -113,7 +113,7 @@ describe('serializeResourceRequirements', () => {
       minMemoryGb: '8',
       minDiskGb: '40',
       exclusiveNode: true,
-      maxCoTenants: '',
+      maxCoTenants: '2',
     };
     const serialized = serializeResourceRequirements(original);
     const deserialized = deserializeResourceRequirements(serialized);
@@ -121,6 +121,7 @@ describe('serializeResourceRequirements', () => {
     expect(deserialized.minMemoryGb).toBe('8');
     expect(deserialized.minDiskGb).toBe('40');
     expect(deserialized.exclusiveNode).toBe(true);
+    expect(deserialized.maxCoTenants).toBe('2');
   });
 });
 
@@ -200,6 +201,84 @@ describe('formatHardwareDisplay', () => {
       providerInstanceMemoryMb: 3584,
     });
     expect(result).toContain('3.5 GB');
+  });
+});
+
+describe('invalid number handling', () => {
+  it('rejects NaN values from serialization', () => {
+    const result = serializeResourceRequirements({
+      ...EMPTY_RESOURCE_STATE,
+      minVcpu: 'abc',
+      minMemoryGb: '8',
+    });
+    const parsed = JSON.parse(result!);
+    expect(parsed.minVcpu).toBeUndefined();
+    expect(parsed.minMemoryGb).toBe(8);
+  });
+
+  it('rejects negative values from serialization', () => {
+    const result = serializeResourceRequirements({
+      ...EMPTY_RESOURCE_STATE,
+      minVcpu: '-4',
+    });
+    expect(result).toBeNull();
+  });
+
+  it('rejects Infinity from serialization', () => {
+    const result = serializeResourceRequirements({
+      ...EMPTY_RESOURCE_STATE,
+      minVcpu: 'Infinity',
+    });
+    expect(result).toBeNull();
+  });
+
+  it('rejects NaN values from toResourceRequirements', () => {
+    const result = toResourceRequirements({
+      ...EMPTY_RESOURCE_STATE,
+      minVcpu: 'abc',
+      minMemoryGb: '8',
+    });
+    expect(result).toEqual({ minMemoryGb: 8 });
+  });
+
+  it('accepts zero disk value', () => {
+    const result = serializeResourceRequirements({
+      ...EMPTY_RESOURCE_STATE,
+      minDiskGb: '0',
+    });
+    const parsed = JSON.parse(result!);
+    expect(parsed.minDiskGb).toBe(0);
+  });
+
+  it('deserializes NaN/Infinity stored values as empty', () => {
+    const withNaN = deserializeResourceRequirements(JSON.stringify({ minVcpu: NaN }));
+    expect(withNaN.minVcpu).toBe('');
+
+    const withInf = deserializeResourceRequirements(JSON.stringify({ minMemoryGb: Infinity }));
+    expect(withInf.minMemoryGb).toBe('');
+  });
+});
+
+describe('exclusiveNode + maxCoTenants round-trip', () => {
+  it('preserves both fields through round-trip', () => {
+    const json = JSON.stringify({ exclusiveNode: true, maxCoTenants: 3 });
+    const deserialized = deserializeResourceRequirements(json);
+    expect(deserialized.exclusiveNode).toBe(true);
+    expect(deserialized.maxCoTenants).toBe('3');
+
+    const serialized = serializeResourceRequirements(deserialized);
+    const parsed = JSON.parse(serialized!);
+    expect(parsed.exclusiveNode).toBe(true);
+    expect(parsed.maxCoTenants).toBe(3);
+  });
+
+  it('preserves exclusiveNode=false with maxCoTenants', () => {
+    const json = JSON.stringify({ exclusiveNode: false, maxCoTenants: 5 });
+    const deserialized = deserializeResourceRequirements(json);
+    const serialized = serializeResourceRequirements(deserialized);
+    const parsed = JSON.parse(serialized!);
+    expect(parsed.exclusiveNode).toBe(false);
+    expect(parsed.maxCoTenants).toBe(5);
   });
 });
 
