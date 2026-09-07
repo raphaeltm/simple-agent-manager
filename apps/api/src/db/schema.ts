@@ -2634,6 +2634,13 @@ export const projectEventSourceOutbox = sqliteTable(
       table.expiresAt,
       table.id
     ),
+    activeCapacityIdx: index('idx_project_event_source_outbox_active_capacity').on(
+      table.projectId,
+      table.source,
+      table.state,
+      table.expiresAt,
+      table.id
+    ),
     activeAttemptsIdx: index('idx_project_event_source_outbox_active_attempts').on(
       table.state,
       table.attemptCount,

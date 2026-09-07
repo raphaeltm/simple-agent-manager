@@ -7,7 +7,9 @@ import {
   admitProjectEventSourceIntentById,
   enqueueAndAdmitProjectEventSourceIntent,
   enqueueProjectEventSourceIntent,
+  markProjectEventSourceIntentSuperseded,
   projectEventSourceOutboxInsertStatement,
+  readProjectEventSourceIntentByDelivery,
   reconcileProjectEventSourceOutbox,
 } from '../../../src/services/project-event-source-outbox';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -70,6 +72,8 @@ describe('project event source outbox', () => {
         ON project_event_source_outbox(state, processing_lease_expires_at, id);
       CREATE INDEX idx_project_event_source_outbox_active_expiry
         ON project_event_source_outbox(state, expires_at, id);
+      CREATE INDEX idx_project_event_source_outbox_active_capacity
+        ON project_event_source_outbox(project_id, source, state, expires_at, id);
       CREATE INDEX idx_project_event_source_outbox_active_attempts
         ON project_event_source_outbox(state, attempt_count, id);
       CREATE INDEX idx_project_event_source_outbox_exhausted_ready
@@ -688,20 +692,8 @@ describe('project event source outbox', () => {
     ).toEqual({ count: 1 });
   });
 
-  it('captures credential limit window transitions only with the winning D1 proof', async () => {
+  it('captures credential limit window transitions with stale-window and capacity guards', async () => {
     const observedAt = NOW.getTime();
-    sqlite
-      .prepare(
-        `INSERT INTO credential_limit_windows
-          (project_id, credential_reference, window_type, credential_source, provider,
-           provider_mode, user_id, source, status, last_event_level, observed_at,
-           freshness_ms, last_event_delivery_key, duplicate_sample_count,
-           stale_sample_count, created_at, updated_at)
-         VALUES ('project-1', 'cc_credentials:cred-1', 'openai.tokens', 'user',
-          'openai', 'user-api-key', 'user-1', 'proxy', 'allowed_warning',
-          'warning', ?, 0, 'credential-limit:winning', 0, 0, ?, ?)`
-      )
-      .run(observedAt, observedAt, observedAt);
     const event = {
       ...sourceEvent(),
       source: 'sam.credential_limit',
@@ -721,10 +713,23 @@ describe('project event source outbox', () => {
         credentialReference: 'cc_credentials:cred-1',
         windowType: 'openai.tokens',
         observedAt,
-        lastEventDeliveryKey: 'credential-limit:winning',
+        maxActiveIntentsPerProject: 2,
       },
     }).run();
-    const blocked = await projectEventSourceOutboxInsertStatement(
+    sqlite
+      .prepare(
+        `INSERT INTO credential_limit_windows
+          (project_id, credential_reference, window_type, credential_source, provider,
+           provider_mode, user_id, source, status, last_event_level, observed_at,
+           freshness_ms, last_event_delivery_key, duplicate_sample_count,
+           stale_sample_count, created_at, updated_at)
+         VALUES ('project-1', 'cc_credentials:cred-1', 'openai.tokens', 'user',
+          'openai', 'user-api-key', 'user-1', 'proxy', 'allowed_warning',
+          'warning', ?, 0, 'credential-limit:winning', 0, 0, ?, ?)`
+      )
+      .run(observedAt, observedAt, observedAt);
+
+    const stale = await projectEventSourceOutboxInsertStatement(
       env,
       {
         ...event,
@@ -740,21 +745,126 @@ describe('project event source outbox', () => {
           credentialReference: 'cc_credentials:cred-1',
           windowType: 'openai.tokens',
           observedAt,
-          lastEventDeliveryKey: 'credential-limit:losing',
+          maxActiveIntentsPerProject: 2,
+        },
+      }
+    ).run();
+    const capacity = await projectEventSourceOutboxInsertStatement(
+      env,
+      {
+        ...event,
+        subject: { type: 'credential', id: 'cc_credentials:cred-2' },
+        deliveryKey: 'credential-limit:capacity',
+        payloadFingerprint: 'sha256:credential-window-capacity',
+      },
+      {
+        id: 'credential-window-capacity-intent',
+        now: NOW,
+        capture: {
+          kind: 'credential_limit_window_transition',
+          projectId: 'project-1',
+          credentialReference: 'cc_credentials:cred-2',
+          windowType: 'openai.tokens',
+          observedAt,
+          maxActiveIntentsPerProject: 1,
         },
       }
     ).run();
 
     expect(inserted.meta.changes).toBe(1);
-    expect(blocked.meta.changes).toBe(0);
+    expect(stale.meta.changes).toBe(0);
+    expect(capacity.meta.changes).toBe(0);
+    expect(() =>
+      projectEventSourceOutboxInsertStatement(env, event, {
+        id: 'credential-window-mismatch',
+        now: NOW,
+        capture: {
+          kind: 'credential_limit_window_transition',
+          projectId: 'project-1',
+          credentialReference: 'cc_credentials:other',
+          windowType: 'openai.tokens',
+          observedAt,
+          maxActiveIntentsPerProject: 2,
+        },
+      })
+    ).toThrow('Credential limit capture credential does not match intent subject');
     expect(
       sqlite
         .prepare(
-          `SELECT id, delivery_key FROM project_event_source_outbox
+          `SELECT id, delivery_key, credential_limit_window_type, credential_limit_observed_at
+             FROM project_event_source_outbox
            WHERE source = 'sam.credential_limit'`
         )
         .all()
-    ).toEqual([{ id: 'credential-window-intent', delivery_key: 'credential-limit:winning' }]);
+    ).toEqual([
+      {
+        id: 'credential-window-intent',
+        delivery_key: 'credential-limit:winning',
+        credential_limit_window_type: 'openai.tokens',
+        credential_limit_observed_at: observedAt,
+      },
+    ]);
+  });
+
+  it('reads by delivery and supersedes only scoped non-live source intents', async () => {
+    await enqueueProjectEventSourceIntent(env, sourceEvent(), { id: 'supersede-intent', now: NOW });
+    await enqueueProjectEventSourceIntent(env, {
+      ...sourceEvent(),
+      deliveryKey: 'task:task-1:status:other',
+      payloadFingerprint: 'sha256:other',
+    });
+
+    const byDelivery = await readProjectEventSourceIntentByDelivery(env, {
+      projectId: 'project-1',
+      source: 'sam.lifecycle',
+      deliveryKey: 'task:task-1:status:completed',
+    });
+    expect(byDelivery?.id).toBe('supersede-intent');
+
+    sqlite
+      .prepare(
+        `UPDATE project_event_source_outbox
+            SET state = 'processing',
+                claim_token = 'live-claim',
+                processing_lease_expires_at = ?
+          WHERE id = 'supersede-intent'`
+      )
+      .run(new Date(NOW.getTime() + 10_000).toISOString());
+
+    await markProjectEventSourceIntentSuperseded(env, {
+      id: 'supersede-intent',
+      projectId: 'project-1',
+      source: 'sam.lifecycle',
+      deliveryKey: 'task:task-1:status:completed',
+      now: NOW,
+      reason: 'test supersede',
+    });
+    expect(rowById('supersede-intent')).toMatchObject({
+      state: 'processing',
+      claim_token: 'live-claim',
+      terminalized_at: null,
+    });
+
+    const afterLease = new Date(NOW.getTime() + 10_001);
+    await markProjectEventSourceIntentSuperseded(env, {
+      id: 'supersede-intent',
+      projectId: 'project-1',
+      source: 'sam.lifecycle',
+      deliveryKey: 'task:task-1:status:completed',
+      now: afterLease,
+      reason: 'test supersede',
+    });
+    expect(rowById('supersede-intent')).toMatchObject({
+      state: 'permanent_failed',
+      claim_token: null,
+      terminalized_at: afterLease.toISOString(),
+      last_error: 'test supersede',
+    });
+    expect(
+      sqlite
+        .prepare(`SELECT state FROM project_event_source_outbox WHERE delivery_key = ?`)
+        .get('task:task-1:status:other')
+    ).toEqual({ state: 'pending' });
   });
 
   it('uses the sweep limit as a finite work-item ceiling for candidate claim and settle', async () => {
@@ -773,16 +883,20 @@ describe('project event source outbox', () => {
       id: 'intent-limit-one',
       now: NOW,
     });
-    await enqueueProjectEventSourceIntent(env, {
-      ...sourceEvent(),
-      subject: { type: 'task', id: 'task-2' },
-      deliveryKey: 'task:task-2:status:completed',
-      payloadFingerprint: 'sha256:stable-2',
-      metadata: { taskId: 'task-2', status: 'completed' },
-    }, {
-      id: 'intent-limit-two',
-      now: NOW,
-    });
+    await enqueueProjectEventSourceIntent(
+      env,
+      {
+        ...sourceEvent(),
+        subject: { type: 'task', id: 'task-2' },
+        deliveryKey: 'task:task-2:status:completed',
+        payloadFingerprint: 'sha256:stable-2',
+        metadata: { taskId: 'task-2', status: 'completed' },
+      },
+      {
+        id: 'intent-limit-two',
+        now: NOW,
+      }
+    );
 
     const stats = await reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
 
@@ -833,7 +947,8 @@ describe('project event source outbox', () => {
     expect(rowById('intent-wall-budget')).toMatchObject({
       state: 'retryable_failed',
       attempt_count: 1,
-      last_error: 'ProjectEventSourceAdmissionTimeoutError: ProjectData admission timed out after 5ms',
+      last_error:
+        'ProjectEventSourceAdmissionTimeoutError: ProjectData admission timed out after 5ms',
     });
     resolveRemote?.({
       outcome: 'created',
@@ -1011,5 +1126,26 @@ describe('project event source outbox', () => {
       'idx_project_event_source_outbox_exhausted_ready'
     );
     expect(plan.map((row) => row.detail).join('\n')).not.toMatch(/\bSCAN\b/);
+  });
+
+  it('uses the active-capacity index for bounded credential capture capacity probes', () => {
+    const plan = sqlite
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT COUNT(*) FROM (
+           SELECT id FROM project_event_source_outbox
+            WHERE project_id = ? AND source = ?
+              AND state IN ('pending', 'processing', 'retryable_failed')
+              AND expires_at > ?
+            LIMIT ?
+         )`
+      )
+      .all('project-1', 'sam.credential_limit', NOW.toISOString(), 10) as Array<{
+      detail: string;
+    }>;
+
+    expect(plan.map((row) => row.detail).join('\n')).toContain(
+      'idx_project_event_source_outbox_active_capacity'
+    );
   });
 });
