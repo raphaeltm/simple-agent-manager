@@ -30,8 +30,8 @@ import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skill
 import { type startTaskRunnerDO } from './task-runner-do';
 import {
   assertTaskRunnerStartGuard,
-  TaskRunnerStartGuardRevokedError,
   type TaskRunnerReservedSubmissionGuard,
+  TaskRunnerStartGuardRevokedError,
 } from './task-runner-start-guard';
 import { getTaskTitleConfig } from './task-title';
 

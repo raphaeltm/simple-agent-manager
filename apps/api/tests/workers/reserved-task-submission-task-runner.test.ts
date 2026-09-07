@@ -1,7 +1,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { TaskRunner } from '../../src/durable-objects/task-runner';
+import type { StartTaskInput, TaskRunner } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
 import * as projectDataService from '../../src/services/project-data';
 import {
@@ -12,10 +12,12 @@ import type {
   ReservedTaskSubmissionDependencies,
   ReservedTaskSubmissionInput,
 } from '../../src/services/reserved-task-submission-contracts';
+import type { startTaskRunnerDO } from '../../src/services/task-runner-do';
 import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 const testEnv = env as unknown as Env;
+type TaskRunnerStartBoundaryInput = Parameters<typeof startTaskRunnerDO>[1];
 
 let counter = 0;
 
@@ -168,7 +170,78 @@ function submissionDeps(): ReservedTaskSubmissionDependencies {
     requireRepositoryAccess: vi.fn(async () => undefined) as NonNullable<
       ReservedTaskSubmissionDependencies['requireRepositoryAccess']
     >,
+    startTaskRunner: vi.fn(startPausedTaskRunner) as typeof startTaskRunnerDO,
   };
+}
+
+async function startPausedTaskRunner(
+  _env: Env,
+  input: TaskRunnerStartBoundaryInput
+): Promise<void> {
+  const stub = taskRunnerStub(input.taskId);
+  const initialCapacityCandidate = input.capacityPoolSelection?.candidates[0] ?? null;
+  const startInput: StartTaskInput = {
+    taskId: input.taskId,
+    projectId: input.projectId,
+    userId: input.userId,
+    config: {
+      vmSize: input.vmSize,
+      vmLocation: initialCapacityCandidate?.location ?? input.vmLocation,
+      branch: input.branch,
+      defaultBranch: input.defaultBranch ?? input.branch,
+      preferredNodeId: input.preferredNodeId ?? null,
+      userName: input.userName ?? null,
+      userEmail: input.userEmail ?? null,
+      githubId: input.githubId ?? null,
+      taskTitle: input.taskTitle,
+      taskDescription: input.taskDescription ?? null,
+      repository: input.repository,
+      installationId: input.installationId,
+      outputBranch: input.outputBranch ?? null,
+      projectDefaultVmSize: input.projectDefaultVmSize ?? null,
+      chatSessionId: input.chatSessionId ?? null,
+      agentType: input.agentType ?? null,
+      workspaceProfile: input.workspaceProfile ?? null,
+      devcontainerConfigName: input.devcontainerConfigName ?? null,
+      cloudProvider: initialCapacityCandidate?.provider ?? input.cloudProvider ?? null,
+      providerInstanceType: initialCapacityCandidate?.providerInstanceType ?? null,
+      credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
+      credentialAttributionProjectId:
+        (input.credentialAttributionSource ??
+          initialCapacityCandidate?.credentialAttributionSource) === 'project'
+          ? (input.credentialAttributionProjectId ??
+            initialCapacityCandidate?.capacityPoolProjectId ??
+            input.projectId)
+          : null,
+      credentialAttributionSource:
+        input.credentialAttributionSource ??
+        initialCapacityCandidate?.credentialAttributionSource ??
+        'user',
+      taskMode: input.taskMode ?? 'task',
+      model: input.model ?? null,
+      effort: input.effort ?? null,
+      permissionMode: input.permissionMode ?? null,
+      opencodeProvider: input.opencodeProvider ?? null,
+      opencodeBaseUrl: input.opencodeBaseUrl ?? null,
+      systemPromptAppend: input.systemPromptAppend ?? null,
+      agentProfileHint: input.agentProfileHint ?? null,
+      attachments: input.attachments ?? null,
+      projectScaling: input.projectScaling ?? null,
+      resourceRequirements: input.resourceRequirements ?? null,
+      resolvedReservation: input.resolvedReservation ?? null,
+      capacityPoolSelection: input.capacityPoolSelection ?? null,
+      vmSizeSource: input.vmSizeSource ?? null,
+      resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
+      recoverySourceTaskId: input.recoverySourceTaskId ?? null,
+      retrySourceTaskId: input.retrySourceTaskId ?? null,
+      startGuard: input.startGuard ?? null,
+    },
+  };
+
+  await runInDurableObject(stub, async (instance) => {
+    await instance.start(startInput);
+    await instance.ctx.storage.deleteAlarm();
+  });
 }
 
 async function submitFixture(
