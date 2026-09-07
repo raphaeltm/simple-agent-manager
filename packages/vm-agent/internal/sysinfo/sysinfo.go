@@ -687,12 +687,11 @@ func dockerCommandOutput(ctx context.Context, maxOutputBytes int64, args ...stri
 		return nil, fmt.Errorf("%s stderr exceeded %d bytes", dockerCommandSummary(args), maxOutputBytes)
 	}
 	if err != nil {
+		_ = terminateDockerCommand(cmd)
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			_ = terminateDockerCommand(cmd)
 			return nil, ctxErr
 		}
 		if errors.Is(err, exec.ErrWaitDelay) {
-			_ = terminateDockerCommand(cmd)
 			return nil, fmt.Errorf("%s output pipes did not close before wait delay", dockerCommandSummary(args))
 		}
 		if msg := sanitizeDockerCommandOutput(stderr.String()); msg != "" {
