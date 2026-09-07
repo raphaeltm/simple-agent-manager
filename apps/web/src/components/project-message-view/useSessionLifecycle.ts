@@ -20,7 +20,6 @@ import type {
   SessionStateSnapshot,
 } from '../../lib/api';
 import {
-  cancelAgentPrompt,
   getChatSession,
   getTerminalToken,
   getTranscribeApiUrl,
@@ -45,6 +44,7 @@ import {
   VIRTUAL_START,
 } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
+import { useCancelAgentPrompt } from './useCancelAgentPrompt';
 import { useCompletionDockWorking } from './useCompletionDockWorking';
 import { useConnectionRecovery } from './useConnectionRecovery';
 import { useSessionFileUpload } from './useSessionFileUpload';
@@ -531,6 +531,9 @@ export function useSessionLifecycle(
     setSendingFollowUp(true);
     setAgentActivity('prompting');
     setStaleNotice(false);
+    // A new turn supersedes any failed interrupt of the previous one — leaving
+    // the old error visible would attach it to work it has nothing to do with.
+    clearCancelError();
     try {
       if (sessionState === 'idle') {
         resetIdleTimer(projectId, sessionId)
@@ -610,22 +613,18 @@ export function useSessionLifecycle(
   };
 
   // Upload files
-  // Cancel the current in-flight prompt via REST API
-  const cancellingRef = useRef(false);
-  const handleCancelPrompt = useCallback(() => {
-    if (!completionDockWorking || cancellingRef.current) return;
-    cancellingRef.current = true;
-    cancelAgentPrompt(projectId, sessionId)
-      .then(() => {
-        setAgentActivity('idle');
-      })
-      .catch(() => {
-        // Network/server error — keep spinner visible so user can retry
-      })
-      .finally(() => {
-        cancellingRef.current = false;
-      });
-  }, [completionDockWorking, projectId, sessionId]);
+  const onCancelled = useCallback(() => setAgentActivity('idle'), []);
+  const {
+    cancelling,
+    cancelError,
+    cancelPrompt: handleCancelPrompt,
+    clearCancelError,
+  } = useCancelAgentPrompt({
+    projectId,
+    sessionId,
+    enabled: completionDockWorking,
+    onCancelled,
+  });
 
   // Load more (pagination)
   const loadMore = async () => {
@@ -746,6 +745,8 @@ export function useSessionLifecycle(
     handleOpenFileBrowser,
     handleOpenGitChanges,
     handleCancelPrompt,
+    cancelling,
+    cancelError,
     handleSendFollowUp,
     handleUploadFiles,
     loadMore,

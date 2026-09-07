@@ -2274,6 +2274,98 @@ describe('ProjectMessageView — cancel button', () => {
       expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
     });
   });
+
+  /**
+   * Drive the working state the way production does — an assistant message over
+   * the WebSocket — then return the Interrupt control.
+   */
+  async function renderWorkingSessionAndGetInterrupt() {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Working on it')])
+    );
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    await waitFor(() => {
+      expect(screen.getByText('Working on it')).toBeTruthy();
+    });
+    await act(async () => {
+      capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Still working'));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Interrupt agent' })).toBeTruthy();
+    });
+    return screen.getByRole('button', { name: 'Interrupt agent' });
+  }
+
+  it('shows a disabled interrupting state while the cancel is in flight', async () => {
+    // A deferred promise lets the test stop at the load-bearing midpoint — the
+    // request in flight — and assert the intermediate UI before releasing it.
+    // `mockResolvedValue` would settle before React could commit that state
+    // (.claude/rules/62, asynchronous ordering).
+    let release!: () => void;
+    mocks.cancelAgentPrompt.mockReturnValue(
+      new Promise<{ status: string; message: string }>((resolve) => {
+        release = () => resolve({ status: 'cancelled', message: 'Prompt cancel signal sent' });
+      })
+    );
+
+    const interrupt = await renderWorkingSessionAndGetInterrupt();
+    await act(async () => {
+      fireEvent.click(interrupt);
+    });
+
+    // Mid-flight: the control must say so and refuse further presses, instead of
+    // silently swallowing them behind a ref.
+    const busy = await screen.findByRole('button', { name: 'Interrupting agent' });
+    expect(busy).toBeDisabled();
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+
+    await act(async () => {
+      fireEvent.click(busy);
+    });
+    expect(mocks.cancelAgentPrompt).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      release();
+    });
+  });
+
+  it('surfaces a failed interrupt and leaves the control usable for a retry', async () => {
+    let reject!: (err: Error) => void;
+    mocks.cancelAgentPrompt.mockReturnValue(
+      new Promise<{ status: string; message: string }>((_resolve, rejectFn) => {
+        reject = rejectFn;
+      })
+    );
+
+    const interrupt = await renderWorkingSessionAndGetInterrupt();
+    await act(async () => {
+      fireEvent.click(interrupt);
+    });
+    await screen.findByRole('button', { name: 'Interrupting agent' });
+
+    await act(async () => {
+      reject(new Error('Failed to cancel prompt on agent'));
+    });
+
+    // The failure must be visible. It used to vanish into an empty `.catch()`.
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Failed to cancel prompt on agent');
+    });
+
+    // And the user must be able to try again — the activity state is left alone
+    // on failure precisely so the control stays available.
+    const retryable = screen.getByRole('button', { name: 'Interrupt agent' });
+    expect(retryable).toBeEnabled();
+
+    mocks.cancelAgentPrompt.mockResolvedValue({
+      status: 'cancelled',
+      message: 'Prompt cancel signal sent',
+    });
+    await act(async () => {
+      fireEvent.click(retryable);
+    });
+    expect(mocks.cancelAgentPrompt).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('ProjectMessageView — inline idle indicator', () => {
