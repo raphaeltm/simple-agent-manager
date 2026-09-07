@@ -85,13 +85,7 @@ function formatTokens(n: number): string {
 }
 
 function vmHardwareLabel(workspace: WorkspaceResponse): string {
-  return formatHardwareDisplay({
-    providerInstanceType: workspace.providerInstanceType,
-    providerInstanceVcpuCount: workspace.providerInstanceVcpuCount,
-    providerInstanceMemoryMb: workspace.providerInstanceMemoryMb,
-    providerInstanceDiskGb: workspace.providerInstanceDiskGb,
-    vmSize: workspace.vmSize,
-  });
+  return formatHardwareDisplay({ vmSize: workspace.vmSize });
 }
 
 function vmLocationLabel(location: string): string {
