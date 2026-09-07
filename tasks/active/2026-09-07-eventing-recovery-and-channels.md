@@ -29,3 +29,13 @@ No PR, main push, staging/deployment mutation, merge, or SAM grandchildren. Use 
 - D1 01M1X0NWXR6D0PHAHCK6NZFA49: active reserved-submission/lifecycle repair.
 - F1 01M1X58YFAN5TW99MR4DRJ96ME: complete and parent-validated, all commits integrated.
 - D schedules/watches and E UI: outstanding; no feature completion claimed until original checklist passes.
+
+## Recovery continuation checkpoint
+
+Replacement parent restored original integration99b36c364, merged current mainbef83db2d and finalA3 for review, then integrated B4c1f417690 as92b94e02d and fixed its final budget/TTL edges in43b4f60eb. All changes are pushed on `sam/use-sam-mcp-tools-5g5m8w`.
+
+Active A4 task **01M1XDRZSSYDQ5BAM0VTRSJ68B** on `sam/repair-verified-final-event-rsj68b` owns9independently reproduced final-A3 defects documented in the wake repair task, plus full original R6 canaries. Active E1 task **01M1XDHCVCHBHE6XAP44ENA6WQ** on `sam/implement-event-channels-atomic-ena6wq` owns the complete channel/member-API slice above. Both explicit Backend Implementation profiles were verified via production D1; VM/task/lightweight dispatch briefs preserve all constraints, and both emitted actual assistant output. A4 reserves additive DO050/D10152 if needed; E1DO048 unchanged; future schedulesDO049. C2 and D1 existing tasks continue without redispatch. No host/workspace deletion or retry occurred.
+
+Parent verification: frozen-lockfile install and shared/providers/cloud-init builds passed;39coreWorkers tests passed (does not close the independently reproduced A3 gaps). B4 before final corrections53focused+24Workers passed; after corrections60focused+13Workers passed, API typecheck, targeted ESLint, source-contract gate1288files and diff-check passed. Independent final B4 CF/security/constitution/env review passed the scoped corrected functions against real migrated SQLite. C2-owned generation/audience/producer composition still requires integration/review. Both local A3 reviews are CHANGES REQUIRED and tracked in A4, not silently accepted. F1 browser evidence remains preserved in the source repair task.
+
+Next: consume active C2/D1/A4/E1 handoffs, preserve A4 current helper bodies while composing C2 audience and D1 guards, then implement original D schedules/standing watches and E2 real project/session UI. Do not skip full validation/independent review/consolidated coordinated staging/desktop+mobile screenshots/green CI/iterative CodeRabbit. Deliver one unmerged PR. Parent registers durable wait key `recovery-await-core-credential-submission-channels-v1` for those4active tasks with conditionany and600second deadline so follow-up work resumes without keeping this runtime polling. No PR or staging started at this checkpoint.
