@@ -14,6 +14,7 @@ import { updateDefaultCapacityPool } from '../../services/default-capacity-pool-
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
+  toSafeEffectiveDefaultCapacityPoolSummary,
 } from '../../services/default-capacity-pools';
 import {
   assertDefaultCapacityPoolUpdateResult,
@@ -94,6 +95,12 @@ function resolveVisibleEffective(
   };
 }
 
+function resolveAuthoritativeEffective(
+  summaries: DefaultCapacityPoolsEnsureResult
+): ProjectDefaultCapacityPoolsResponse['effective'] {
+  return summaries.project ?? summaries.user ?? summaries.installation;
+}
+
 async function buildDefaultPoolResponse(
   db: ReturnType<typeof drizzle<typeof schema>>,
   input: {
@@ -108,15 +115,17 @@ async function buildDefaultPoolResponse(
   const summaries = await readDefaultCapacityPoolSummaries(db, {
     userId: input.userId,
     projectId: input.projectId,
-    includeInstallation: input.includeInstallation,
+    includeInstallation: true,
     ensure: input.ensure,
     includeDisabled: true,
     env: input.env,
   });
   const effective = resolveVisibleEffective(summaries, input.includeInstallation);
+  const authoritativeEffective = resolveAuthoritativeEffective(summaries);
 
   return {
     ...effective,
+    safeEffective: toSafeEffectiveDefaultCapacityPoolSummary(authoritativeEffective),
     defaults: toScopeSummaries(summaries, input.includeInstallation),
     precedence: PRECEDENCE,
     reconciledScopes: input.ensure ? reconciledScopes(input.includeInstallation) : [],

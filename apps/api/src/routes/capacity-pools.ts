@@ -12,6 +12,7 @@ import { updateDefaultCapacityPool } from '../services/default-capacity-pool-upd
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
+  toSafeEffectiveDefaultCapacityPoolSummary,
 } from '../services/default-capacity-pools';
 import {
   assertDefaultCapacityPoolUpdateResult,
@@ -33,10 +34,12 @@ function buildUserDefaultPoolResponse(
   ensure: boolean
 ): ProjectDefaultCapacityPoolsResponse {
   const effective = summaries.user;
+  const authoritativeEffective = summaries.user ?? summaries.installation;
   return {
     effective,
     effectiveScope: effective?.pool.scope ?? null,
     effectiveState: effective?.effectiveState,
+    safeEffective: toSafeEffectiveDefaultCapacityPoolSummary(authoritativeEffective),
     defaults: [
       {
         scope: 'project',
@@ -78,7 +81,7 @@ capacityPoolsRoutes.get('/defaults', async (c) => {
   const ensure = parseEnsureQuery(c.req.query('ensure'));
   const summaries = await readDefaultCapacityPoolSummaries(db, {
     userId,
-    includeInstallation: false,
+    includeInstallation: true,
     ensure,
     includeDisabled: true,
     env: c.env,
@@ -99,7 +102,7 @@ capacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const summaries = await readDefaultCapacityPoolSummaries(db, {
     userId,
-    includeInstallation: false,
+    includeInstallation: true,
     ensure: true,
     includeDisabled: true,
     env: c.env,
@@ -121,7 +124,7 @@ capacityPoolsRoutes.patch('/defaults', async (c) => {
   const update = await readDefaultCapacityPoolUpdateRequest(c);
   await readDefaultCapacityPoolSummaries(db, {
     userId,
-    includeInstallation: false,
+    includeInstallation: true,
     ensure: true,
     includeDisabled: true,
     env: c.env,
@@ -140,7 +143,7 @@ capacityPoolsRoutes.patch('/defaults', async (c) => {
 
   const summaries = await readDefaultCapacityPoolSummaries(db, {
     userId,
-    includeInstallation: false,
+    includeInstallation: true,
     includeDisabled: true,
     env: c.env,
   });

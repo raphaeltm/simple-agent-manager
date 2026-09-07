@@ -6,8 +6,10 @@ import type {
   CapacityPoolScope,
   CapacitySourceIdentity,
   CredentialProvider,
+  DefaultCapacityPoolEffectiveState,
   DefaultCapacityPoolSummary,
   ProviderInstanceOffering,
+  SafeEffectiveDefaultCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
 import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -122,6 +124,52 @@ export interface DefaultCapacityPoolsBackfillOptions {
   env?: Env;
   offeringResolver?: DefaultCapacityPoolOfferingResolver;
   scopeBatchSize?: number;
+}
+
+export function toSafeEffectiveDefaultCapacityPoolSummary(
+  summary: CapacityPoolSummary | null
+): SafeEffectiveDefaultCapacityPoolSummary {
+  if (!summary) {
+    return {
+      scope: null,
+      effectiveState: 'unconfigured',
+      safeState: 'unconfigured',
+      safeReason: 'no-effective-pool',
+      strategy: null,
+      exhaustionPolicy: null,
+      usableCount: 0,
+    };
+  }
+
+  const effectiveState = summary.effectiveState ?? 'unconfigured';
+  return {
+    scope: summary.pool.scope,
+    effectiveState,
+    safeState: safeStateForEffectiveState(effectiveState),
+    safeReason: safeReasonForEffectiveState(effectiveState),
+    strategy: summary.pool.strategy,
+    exhaustionPolicy: summary.pool.exhaustionPolicy,
+    usableCount: effectiveState === 'configured-ready' ? safeUsableCandidateCount(summary) : 0,
+  };
+}
+
+function safeStateForEffectiveState(
+  effectiveState: DefaultCapacityPoolEffectiveState
+): SafeEffectiveDefaultCapacityPoolSummary['safeState'] {
+  if (effectiveState === 'configured-ready') return 'usable';
+  if (effectiveState === 'unconfigured') return 'unconfigured';
+  return 'blocked';
+}
+
+function safeReasonForEffectiveState(
+  effectiveState: DefaultCapacityPoolEffectiveState
+): SafeEffectiveDefaultCapacityPoolSummary['safeReason'] {
+  return effectiveState === 'unconfigured' ? 'no-effective-pool' : effectiveState;
+}
+
+function safeUsableCandidateCount(summary: CapacityPoolSummary): number {
+  const count = summary.availableCandidateCount ?? summary.activeCandidateCount;
+  return Number.isSafeInteger(count) && count > 0 ? count : 0;
 }
 
 export async function ensureDefaultCapacityPoolsForExistingCredentials(

@@ -41,8 +41,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
+  const actual = await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
 
   return {
     ...actual,
@@ -177,6 +176,15 @@ describe('project capacity pool routes', () => {
       status: 'active',
     });
     expect(body.effective.activeCandidateCount).toBeGreaterThan(0);
+    expect(body.safeEffective).toMatchObject({
+      scope: 'project',
+      effectiveState: 'configured-ready',
+      safeState: 'usable',
+      safeReason: 'configured-ready',
+      strategy: 'balanced',
+      exhaustionPolicy: 'queue',
+    });
+    expect(body.safeEffective.usableCount).toBeGreaterThan(0);
     expect(body.defaults).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ scope: 'project', visibility: 'visible' }),
@@ -188,11 +196,49 @@ describe('project capacity pool routes', () => {
         }),
       ])
     );
+  });
 
-    const installationPoolCount = sqlite
-      .prepare(`SELECT COUNT(*) AS count FROM capacity_pools WHERE scope = 'installation'`)
-      .get() as { count: number };
-    expect(installationPoolCount.count).toBe(0);
+  it('returns a sanitized safe effective installation summary to ordinary members with installation-only funding', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedUser(sqlite, 'superadmin-1', 'superadmin');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'maintainer' });
+    seedPlatformCloudCredential(sqlite, 'platform-canary-account-credential-id');
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('platform-canary-account-credential-id');
+    expect(text).not.toContain('platform_credentials:');
+    expect(text).not.toContain(
+      'platform-encrypted-token-for-platform-canary-account-credential-id'
+    );
+    expect(text).not.toContain('platform-iv-for-platform-canary-account-credential-id');
+
+    const body = JSON.parse(text);
+    expect(body.effective).toBeNull();
+    expect(body.effectiveScope).toBeNull();
+    expect(body.safeEffective).toMatchObject({
+      scope: 'installation',
+      effectiveState: 'configured-ready',
+      safeState: 'usable',
+      safeReason: 'configured-ready',
+      strategy: 'balanced',
+      exhaustionPolicy: 'queue',
+    });
+    expect(body.safeEffective.usableCount).toBeGreaterThan(0);
+    expect(body.defaults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ scope: 'project', visibility: 'visible', summary: null }),
+        expect.objectContaining({ scope: 'user', visibility: 'visible', summary: null }),
+        expect.objectContaining({ scope: 'installation', visibility: 'hidden', summary: null }),
+      ])
+    );
   });
 
   it('GET ensure=true reconciles project defaults without exceeding D1 bind limits', async () => {
@@ -341,6 +387,15 @@ describe('project capacity pool routes', () => {
     const body = await res.json();
     expect(body.effectiveScope).toBe('project');
     expect(body.effectiveState).toBe('configured-empty');
+    expect(body.safeEffective).toEqual({
+      scope: 'project',
+      effectiveState: 'configured-empty',
+      safeState: 'blocked',
+      safeReason: 'configured-empty',
+      strategy: 'balanced',
+      exhaustionPolicy: 'queue',
+      usableCount: 0,
+    });
     expect(body.effective.pool).toMatchObject({ scope: 'project', status: 'active' });
     expect(body.defaults.find((item: { scope: string }) => item.scope === 'project')).toMatchObject(
       {
@@ -483,36 +538,28 @@ describe('project capacity pool routes', () => {
     );
     expect(source).toBeTruthy();
 
-    const remove = await requestProjectDefaults(
-      env,
-      '/capacity-pools/defaults',
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          candidates: [{ id: candidate.id, status: 'deleted' }],
-        }),
-      }
-    );
+    const remove = await requestProjectDefaults(env, '/capacity-pools/defaults', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        candidates: [{ id: candidate.id, status: 'deleted' }],
+      }),
+    });
     expect(remove.status).toBe(200);
 
-    const addBack = await requestProjectDefaults(
-      env,
-      '/capacity-pools/defaults',
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          catalogAdditions: [
-            {
-              sourceId: source.id,
-              provider: candidate.provider,
-              location: candidate.location,
-              providerInstanceType: candidate.providerInstanceType,
-              providerInstanceSku: candidate.providerInstanceSku ?? null,
-            },
-          ],
-        }),
-      }
-    );
+    const addBack = await requestProjectDefaults(env, '/capacity-pools/defaults', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        catalogAdditions: [
+          {
+            sourceId: source.id,
+            provider: candidate.provider,
+            location: candidate.location,
+            providerInstanceType: candidate.providerInstanceType,
+            providerInstanceSku: candidate.providerInstanceSku ?? null,
+          },
+        ],
+      }),
+    });
 
     expect(addBack.status).toBe(200);
     const body = await addBack.json();

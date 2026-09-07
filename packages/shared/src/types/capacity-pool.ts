@@ -209,6 +209,26 @@ export interface DefaultCapacityPoolScopeSummary {
   summary: DefaultCapacityPoolSummary | null;
 }
 
+export type SafeEffectiveDefaultCapacityPoolState = 'usable' | 'blocked' | 'unconfigured';
+
+export type SafeEffectiveDefaultCapacityPoolReason =
+  | 'configured-ready'
+  | 'configured-empty'
+  | 'source-disabled'
+  | 'catalog-unavailable'
+  | 'migration-pending'
+  | 'no-effective-pool';
+
+export interface SafeEffectiveDefaultCapacityPoolSummary {
+  scope: CapacityPoolScope | null;
+  effectiveState: DefaultCapacityPoolEffectiveState;
+  safeState: SafeEffectiveDefaultCapacityPoolState;
+  safeReason: SafeEffectiveDefaultCapacityPoolReason;
+  strategy: CapacityPoolStrategy | null;
+  exhaustionPolicy: CapacityExhaustionPolicy | null;
+  usableCount: number;
+}
+
 export interface DefaultCapacityPoolPolicyUpdate {
   strategy?: CapacityPoolStrategy;
   exhaustionPolicy?: CapacityExhaustionPolicy;
@@ -237,6 +257,7 @@ export interface ProjectDefaultCapacityPoolsResponse {
   effective: DefaultCapacityPoolSummary | null;
   effectiveScope: CapacityPoolScope | null;
   effectiveState?: DefaultCapacityPoolEffectiveState;
+  safeEffective: SafeEffectiveDefaultCapacityPoolSummary;
   defaults: DefaultCapacityPoolScopeSummary[];
   precedence: CapacityPoolScope[];
   reconciledScopes: CapacityPoolScope[];

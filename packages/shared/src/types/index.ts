@@ -65,6 +65,9 @@ export type {
   DefaultCapacityPoolSummary,
   DefaultCapacityPoolUpdateRequest,
   ProjectDefaultCapacityPoolsResponse,
+  SafeEffectiveDefaultCapacityPoolReason,
+  SafeEffectiveDefaultCapacityPoolState,
+  SafeEffectiveDefaultCapacityPoolSummary,
 } from './capacity-pool';
 export {
   CAPACITY_CREDENTIAL_SOURCES,

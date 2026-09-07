@@ -1,3 +1,4 @@
+import type { CredentialProvider } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -28,6 +29,19 @@ vi.mock('../../../src/middleware/auth', () => ({
   },
   getUserId: () => authState.userId,
 }));
+
+vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
+
+  return {
+    ...actual,
+    buildProviderCatalogForCredential: vi.fn(
+      async (input: { seed: { provider: CredentialProvider } }) => ({
+        offerings: actual.getStaticProviderCatalogOfferings(input.seed.provider),
+      })
+    ),
+  };
+});
 
 const { capacityPoolsRoutes } = await import('../../../src/routes/capacity-pools');
 const { adminCapacityPoolsRoutes } = await import('../../../src/routes/admin-capacity-pools');
@@ -182,6 +196,43 @@ describe('default capacity pool routes', () => {
       },
       visibleDefaults: ['user'],
     });
+  });
+
+  it('returns a sanitized safe effective installation summary on the personal defaults route', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedPlatformCloudCredential(sqlite, 'personal-route-platform-canary');
+
+    const res = await createApp().request(
+      '/api/capacity-pools/defaults?ensure=true',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('personal-route-platform-canary');
+    expect(text).not.toContain('platform_credentials:');
+    expect(text).not.toContain('platform-encrypted-token-for-personal-route-platform-canary');
+
+    const body = JSON.parse(text);
+    expect(body.effective).toBeNull();
+    expect(body.effectiveScope).toBeNull();
+    expect(body.safeEffective).toMatchObject({
+      scope: 'installation',
+      effectiveState: 'configured-ready',
+      safeState: 'usable',
+      safeReason: 'configured-ready',
+      strategy: 'balanced',
+      exhaustionPolicy: 'queue',
+    });
+    expect(body.safeEffective.usableCount).toBeGreaterThan(0);
+    expect(body.defaults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ scope: 'user', visibility: 'visible', summary: null }),
+        expect.objectContaining({ scope: 'installation', visibility: 'hidden', summary: null }),
+      ])
+    );
   });
 
   it('GET ensure=true reconciles user defaults without exceeding D1 bind limits', async () => {

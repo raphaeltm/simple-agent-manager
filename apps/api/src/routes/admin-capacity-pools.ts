@@ -12,6 +12,7 @@ import { updateDefaultCapacityPool } from '../services/default-capacity-pool-upd
 import {
   type DefaultCapacityPoolsEnsureResult,
   readDefaultCapacityPoolSummaries,
+  toSafeEffectiveDefaultCapacityPoolSummary,
 } from '../services/default-capacity-pools';
 import {
   assertDefaultCapacityPoolUpdateResult,
@@ -37,6 +38,7 @@ function buildInstallationDefaultPoolResponse(
     effective,
     effectiveScope: effective?.pool.scope ?? null,
     effectiveState: effective?.effectiveState,
+    safeEffective: toSafeEffectiveDefaultCapacityPoolSummary(effective),
     defaults: [
       {
         scope: 'project',
