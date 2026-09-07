@@ -46,6 +46,8 @@ import {
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import {
   findNodeWithCapacity,
+  getTaskReservation,
+  hasReusableNodeReservationCapacity,
   nodeSatisfiesTaskResources,
   releaseClaimedWarmNode,
   type ReusableNodeSelection,
@@ -137,6 +139,8 @@ export async function handleNodeSelection(
          provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
          provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
          placement_explanation_json AS placementExplanationJson,
+         last_metrics AS lastMetrics,
+         last_heartbeat_at AS lastHeartbeatAt,
          agent_version AS agentVersion
        FROM nodes WHERE id = ? AND user_id = ?`
     )
@@ -163,12 +167,20 @@ export async function handleNodeSelection(
         permanent: true,
       });
     }
+    if (!(await hasReusableNodeReservationCapacity(rc, state, node))) {
+      throw Object.assign(
+        new Error('Specified node lacks aggregate reservation capacity or fresh safe telemetry'),
+        {
+          permanent: true,
+        }
+      );
+    }
     const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
       selection: state.config.capacityPoolSelection,
       node,
       projectId: state.projectId,
       requestedVmSize: state.config.vmSize,
-      requestedReservation: state.config.resolvedReservation ?? null,
+      requestedReservation: getTaskReservation(state),
     });
     if (capacityPlacementSnapshot === undefined) {
       throw Object.assign(new Error('Specified node is outside the selected capacity pool'), {

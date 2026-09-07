@@ -187,6 +187,57 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       );
     }
   }
+  if (variables.vmAgentMemoryReserveMb !== undefined && variables.vmAgentMemoryReserveMb !== '') {
+    const reserve = Number(variables.vmAgentMemoryReserveMb);
+    if (!NUMERIC_RE.test(variables.vmAgentMemoryReserveMb) || reserve < 0 || reserve > 65536) {
+      errors.push(
+        `vmAgentMemoryReserveMb: must be numeric 0-65536 (got ${JSON.stringify(variables.vmAgentMemoryReserveMb)})`
+      );
+    }
+  }
+  if (
+    variables.samInfraSliceMemoryMinMb !== undefined &&
+    variables.samInfraSliceMemoryMinMb !== ''
+  ) {
+    const reserve = Number(variables.samInfraSliceMemoryMinMb);
+    if (!NUMERIC_RE.test(variables.samInfraSliceMemoryMinMb) || reserve < 1 || reserve > 65536) {
+      errors.push(
+        `samInfraSliceMemoryMinMb: must be numeric 1-65536 (got ${JSON.stringify(variables.samInfraSliceMemoryMinMb)})`
+      );
+    }
+  }
+  if (variables.dockerMemoryMinMb !== undefined && variables.dockerMemoryMinMb !== '') {
+    const minimum = Number(variables.dockerMemoryMinMb);
+    if (!NUMERIC_RE.test(variables.dockerMemoryMinMb) || minimum < 1 || minimum > 65536) {
+      errors.push(
+        `dockerMemoryMinMb: must be numeric 1-65536 (got ${JSON.stringify(variables.dockerMemoryMinMb)})`
+      );
+    }
+  }
+  if (
+    variables.heartbeatDockerStatsTimeout !== undefined &&
+    variables.heartbeatDockerStatsTimeout !== '' &&
+    !GO_DURATION_RE.test(variables.heartbeatDockerStatsTimeout)
+  ) {
+    errors.push(
+      `heartbeatDockerStatsTimeout: must be a Go duration (got ${JSON.stringify(variables.heartbeatDockerStatsTimeout)})`
+    );
+  }
+  if (
+    variables.heartbeatWorkspaceMetricsMaxContainers !== undefined &&
+    variables.heartbeatWorkspaceMetricsMaxContainers !== ''
+  ) {
+    const maxContainers = Number(variables.heartbeatWorkspaceMetricsMaxContainers);
+    if (
+      !NUMERIC_RE.test(variables.heartbeatWorkspaceMetricsMaxContainers) ||
+      maxContainers < 0 ||
+      maxContainers > 128
+    ) {
+      errors.push(
+        `heartbeatWorkspaceMetricsMaxContainers: must be numeric 0-128 (got ${JSON.stringify(variables.heartbeatWorkspaceMetricsMaxContainers)})`
+      );
+    }
+  }
   if (variables.role !== undefined && variables.role !== '') {
     if (variables.role !== 'workspace' && variables.role !== 'deployment') {
       errors.push(
@@ -359,6 +410,16 @@ export interface CloudInitVariables {
   swapSizeMb?: string;
   /** Swap swappiness value 0-100 (default: 60). Only relevant when swap is enabled. */
   swapSwappiness?: string;
+  /** Host memory reserve in MB subtracted from Docker's service cgroup (default: 0). */
+  vmAgentMemoryReserveMb?: string;
+  /** Minimum memory protection for VM agent/system services in MB (default: 256). */
+  samInfraSliceMemoryMinMb?: string;
+  /** Minimum Docker MemoryMax value retained when reserve is enabled (default: 512). */
+  dockerMemoryMinMb?: string;
+  /** Bounded Docker stats timeout for heartbeat workspace metrics (default: 2s). */
+  heartbeatDockerStatsTimeout?: string;
+  /** Max workspace containers measured by each heartbeat (default: 8). */
+  heartbeatWorkspaceMetricsMaxContainers?: string;
   /** VM agent role: 'workspace' (default) or 'deployment'. */
   role?: string;
   /** Deployment environment ID (required when role='deployment'). */
@@ -450,6 +511,12 @@ export function generateCloudInit(
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
     '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',
     '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
+    '{{ vm_agent_memory_reserve_mb }}': variables.vmAgentMemoryReserveMb ?? '0',
+    '{{ sam_infra_slice_memory_min_mb }}': variables.samInfraSliceMemoryMinMb ?? '256',
+    '{{ docker_memory_min_mb }}': variables.dockerMemoryMinMb ?? '512',
+    '{{ heartbeat_docker_stats_timeout }}': variables.heartbeatDockerStatsTimeout ?? '2s',
+    '{{ heartbeat_workspace_metrics_max_containers }}':
+      variables.heartbeatWorkspaceMetricsMaxContainers ?? '8',
     '{{ role }}': variables.role ?? '',
     '{{ environment_id }}': variables.environmentId ?? '',
     '{{ deploy_signing_pub_key }}': variables.deploySigningPubKey ?? '',

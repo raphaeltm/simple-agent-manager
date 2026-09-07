@@ -5,8 +5,9 @@
  */
 import {
   type CredentialSource,
-  DEFAULT_MAX_WORKSPACES_PER_NODE,
   DEFAULT_WORKSPACE_PROFILE,
+  type ResolvedResourceReservation,
+  resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
@@ -26,11 +27,10 @@ import {
 } from '../../services/vm-admission-control';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
 import {
-  computeBackoffMs,
-  getRecoverySourceTaskGuard,
-  isTransientError,
-  parseEnvInt,
-} from './helpers';
+  isResolvedResourceReservation,
+  resolveWorkspaceAdmissionPolicy,
+} from '../../services/workspace-resource-capacity';
+import { computeBackoffMs, getRecoverySourceTaskGuard, isTransientError } from './helpers';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 import { ensureBranchExistsOnRemote } from './workspace-branch';
@@ -202,9 +202,12 @@ async function createAndProvisionWorkspace(
   // workspace-row allocation (.claude/rules/49): a parent that terminalized
   // while we resolved the unique display name must not allocate compute.
   await rc.assertRecoveryAuthority(state);
-  const maxWorkspaces =
-    state.config.projectScaling?.maxWorkspacesPerNode ??
-    parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
+  const resolvedReservation = getWorkspaceReservationForState(state);
+  if (state.config.resolvedReservation !== resolvedReservation) {
+    state.config.resolvedReservation = resolvedReservation;
+    await rc.ctx.storage.put('state', state);
+  }
+  const admissionPolicy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
   const placementReserved = await reserveWorkspacePlacement(
     rc.env.DATABASE,
     {
@@ -224,16 +227,20 @@ async function createAndProvisionWorkspace(
       devcontainerConfigName: state.config.devcontainerConfigName ?? null,
       agentProfileHint: state.config.agentProfileHint ?? null,
       capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
+      resolvedReservation,
       createdAt: now,
     },
-    maxWorkspaces
+    admissionPolicy
   );
 
   if (!placementReserved) {
     log.warn('task_runner_do.workspace_placement_lost', {
       taskId: state.taskId,
       nodeId,
-      maxWorkspaces,
+      maxWorkspaces: admissionPolicy.maxWorkspaces,
+      cpuShareBudgetPercent: admissionPolicy.cpuShareBudgetPercent,
+      hostMemoryReserveMb: admissionPolicy.hostMemoryReserveMb,
+      diskPressureThresholdPercent: admissionPolicy.diskPressureThresholdPercent,
       preferredNode: state.config.preferredNodeId === nodeId,
     });
     if (state.config.preferredNodeId === nodeId) {
@@ -279,6 +286,21 @@ async function createAndProvisionWorkspace(
   await ensureWorkspaceBookkeeping(state, rc, workspaceId, now);
   await rc.ctx.storage.put('state', state);
   return true;
+}
+
+function getWorkspaceReservationForState(state: TaskRunnerState): ResolvedResourceReservation {
+  if (isResolvedResourceReservation(state.config.resolvedReservation)) {
+    return state.config.resolvedReservation;
+  }
+
+  return resolveResourceReservation(
+    { task: state.config.resourceRequirements ?? undefined },
+    {
+      taskId: state.taskId,
+      projectId: state.projectId,
+      userId: state.userId,
+    }
+  );
 }
 
 async function finalizeVmAdmissionPlacement(

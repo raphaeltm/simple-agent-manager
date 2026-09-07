@@ -328,6 +328,46 @@ describe('generateCloudInit', () => {
       // runcmd MUST contain systemctl start
       expect(runcmdSection).toContain('systemctl start vm-agent');
     });
+
+    it('renders VM-agent and Docker headroom primitives as write_files entries', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          vmAgentMemoryReserveMb: '512',
+          samInfraSliceMemoryMinMb: '256',
+          dockerMemoryMinMb: '768',
+          heartbeatDockerStatsTimeout: '1500ms',
+          heartbeatWorkspaceMetricsMaxContainers: '4',
+        })
+      );
+      const parsed = YAML.parse(config.replace(/^#cloud-config\n/, ''));
+      const unitFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+      );
+      const sliceFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam-infra.slice'
+      );
+      const headroomScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/usr/local/sbin/sam-configure-docker-memory.sh'
+      );
+
+      expect(unitFile.content).toContain('Slice=sam-infra.slice');
+      expect(unitFile.content).toContain('OOMScoreAdjust=-900');
+      expect(unitFile.content).toContain('Environment=HEARTBEAT_DOCKER_STATS_TIMEOUT=1500ms');
+      expect(unitFile.content).toContain(
+        'Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS=4'
+      );
+      expect(sliceFile.content).toContain('MemoryMin=256M');
+      expect(headroomScript.permissions).toBe('0755');
+      expect(headroomScript.content).toContain('RESERVE_MB="512"');
+      expect(headroomScript.content).toContain('MIN_DOCKER_MB="768"');
+      expect(headroomScript.content).toContain('MemoryMax=${DOCKER_MEMORY_MAX_MB}M');
+
+      const runcmd = parsed.runcmd as string[];
+      expect(runcmd).toContain('/usr/local/sbin/sam-configure-docker-memory.sh');
+      expect(runcmd.indexOf('/usr/local/sbin/sam-configure-docker-memory.sh')).toBeLessThan(
+        runcmd.indexOf('systemctl start vm-agent')
+      );
+    });
   });
 
   describe('TLS certificate bootstrap', () => {

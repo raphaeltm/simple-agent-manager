@@ -452,8 +452,8 @@ func TestParseDockerPS(t *testing.T) {
 			wantCount: 0,
 		},
 		{
-			name:  "invalid JSON lines skipped",
-			input: "not json\n{\"ID\":\"abc\",\"Names\":\"ok\",\"Image\":\"img\",\"Status\":\"Up\",\"State\":\"running\",\"CreatedAt\":\"now\"}\nmore garbage",
+			name:      "invalid JSON lines skipped",
+			input:     "not json\n{\"ID\":\"abc\",\"Names\":\"ok\",\"Image\":\"img\",\"Status\":\"Up\",\"State\":\"running\",\"CreatedAt\":\"now\"}\nmore garbage",
 			wantCount: 1,
 			wantFirst: ContainerInfo{
 				ID:        "abc",
@@ -568,6 +568,29 @@ func TestParseDockerStatsMerge(t *testing.T) {
 
 	if entry.MemUsage != "256MiB / 4GiB" {
 		t.Errorf("memUsage = %q, want %q", entry.MemUsage, "256MiB / 4GiB")
+	}
+}
+
+func TestParseDockerMemUsageBytes(t *testing.T) {
+	used, limit := parseDockerMemUsage("256MiB / 4GiB")
+	if used != 256*1024*1024 {
+		t.Fatalf("used bytes = %d, want %d", used, uint64(256*1024*1024))
+	}
+	if limit != 4*1024*1024*1024 {
+		t.Fatalf("limit bytes = %d, want %d", limit, uint64(4*1024*1024*1024))
+	}
+}
+
+func TestParseDockerPSLabelEntries(t *testing.T) {
+	output := `{"id":"abc123","names":"workspace","labels":"devcontainer.local_folder=/workspace/repo,other=value"}
+{"id":"bad","labels":`
+	entries := parseDockerPSLabelEntries(output)
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	labels := parseDockerLabelList(entries[0].Labels)
+	if labels["devcontainer.local_folder"] != "/workspace/repo" {
+		t.Fatalf("label value = %q, want /workspace/repo", labels["devcontainer.local_folder"])
 	}
 }
 

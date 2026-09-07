@@ -841,22 +841,28 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 
 ## Platform Limits
 
-| Variable                                     | Default            | Description                                                                   |
-| -------------------------------------------- | ------------------ | ----------------------------------------------------------------------------- |
-| `MAX_NODES_PER_USER`                         | `10`               | Max nodes per user                                                            |
-| `MAX_WORKSPACES_PER_NODE`                    | `3`                | Max workspaces packed onto one node                                           |
-| `VM_ADMISSION_CONTROL_MODE`                  | `enforce`          | VM task/session admission mode: `off`, `shadow`, or `enforce`                 |
-| `VM_ADMISSION_LEASE_TTL_MS`                  | `1200000` (20 min) | Fenced provisioning-claim lease duration                                      |
-| `VM_ADMISSION_RETRY_MIN_MS`                  | `15000`            | Minimum retry delay for tasks waiting on VM capacity                          |
-| `VM_ADMISSION_RETRY_MAX_MS`                  | `60000`            | Maximum retry delay for tasks waiting on VM capacity                          |
-| `VM_ADMISSION_WAIT_TIMEOUT_MS`               | `7200000` (2 h)    | Maximum visible wait for VM capacity before failing the task                  |
-| `VM_ADMISSION_PROVIDER_COOLDOWN_MS`          | `600000` (10 min)  | Cooldown after provider/account capacity errors such as Hetzner server limits |
-| `VM_ADMISSION_WAKE_BATCH_SIZE`               | `25`               | Maximum waiting TaskRunner DOs nudged by one capacity event                   |
-| `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` | `500`              | Maximum provider diagnostic message length stored on admission records        |
-| `MAX_AGENT_SESSIONS_PER_WORKSPACE`           | `10`               | Max concurrent agent sessions                                                 |
-| `MAX_PROJECTS_PER_USER`                      | `100`              | Max projects per user                                                         |
-| `MAX_TASKS_PER_PROJECT`                      | `10000`            | Max ideas per project                                                         |
-| `MAX_TASK_MESSAGE_LENGTH`                    | `16000`            | Max idea description length                                                   |
+| Variable                                        | Default            | Description                                                                       |
+| ----------------------------------------------- | ------------------ | --------------------------------------------------------------------------------- |
+| `MAX_NODES_PER_USER`                            | `10`               | Max nodes per user                                                                |
+| `MAX_WORKSPACES_PER_NODE`                       | `3`                | Max workspaces packed onto one node                                               |
+| `TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT`        | `100`              | CPU millicore share budget per node for aggregate workspace reservations          |
+| `TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB`          | `0`                | Memory reserved for the host/VM agent before admitting occupied-node packing      |
+| `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT` | `90`               | Fresh node disk telemetry at or above this percent vetoes VM workspace reuse      |
+| `TASK_RUN_NODE_METRICS_TTL_MS`                  | `180000`           | Freshness window for occupied-node resource telemetry                             |
+| `TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT`        | `40`               | CPU weight in existing-node load scoring after load average is normalized by vCPU |
+| `TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT`     | `60`               | Memory weight in existing-node load scoring                                       |
+| `VM_ADMISSION_CONTROL_MODE`                     | `enforce`          | VM task/session admission mode: `off`, `shadow`, or `enforce`                     |
+| `VM_ADMISSION_LEASE_TTL_MS`                     | `1200000` (20 min) | Fenced provisioning-claim lease duration                                          |
+| `VM_ADMISSION_RETRY_MIN_MS`                     | `15000`            | Minimum retry delay for tasks waiting on VM capacity                              |
+| `VM_ADMISSION_RETRY_MAX_MS`                     | `60000`            | Maximum retry delay for tasks waiting on VM capacity                              |
+| `VM_ADMISSION_WAIT_TIMEOUT_MS`                  | `7200000` (2 h)    | Maximum visible wait for VM capacity before failing the task                      |
+| `VM_ADMISSION_PROVIDER_COOLDOWN_MS`             | `600000` (10 min)  | Cooldown after provider/account capacity errors such as Hetzner server limits     |
+| `VM_ADMISSION_WAKE_BATCH_SIZE`                  | `25`               | Maximum waiting TaskRunner DOs nudged by one capacity event                       |
+| `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH`    | `500`              | Maximum provider diagnostic message length stored on admission records            |
+| `MAX_AGENT_SESSIONS_PER_WORKSPACE`              | `10`               | Max concurrent agent sessions                                                     |
+| `MAX_PROJECTS_PER_USER`                         | `100`              | Max projects per user                                                             |
+| `MAX_TASKS_PER_PROJECT`                         | `10000`            | Max ideas per project                                                             |
+| `MAX_TASK_MESSAGE_LENGTH`                       | `16000`            | Max idea description length                                                       |
 
 ## Durable Object Limits
 
@@ -1155,13 +1161,20 @@ lifecycle bookkeeping.
 
 ## VM TLS
 
-| Variable                       | Default | Description                                                           |
-| ------------------------------ | ------- | --------------------------------------------------------------------- |
-| `VM_AGENT_PROTOCOL`            | `https` | Protocol for VM agent communication                                   |
-| `VM_AGENT_PORT`                | `8443`  | VM agent listening port                                               |
-| `ORIGIN_CA_CERT_VALIDITY_DAYS` | `7`     | Validity for per-node Origin CA certificates signed by the API Worker |
+| Variable                                     | Default | Description                                                                      |
+| -------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| `VM_AGENT_PROTOCOL`                          | `https` | Protocol for VM agent communication                                              |
+| `VM_AGENT_PORT`                              | `8443`  | VM agent listening port                                                          |
+| `VM_AGENT_MEMORY_RESERVE_MB`                 | `0`     | Optional Docker service cgroup memory reserve for VM-agent reachability headroom |
+| `SAM_INFRA_SLICE_MEMORY_MIN_MB`              | `256`   | systemd `MemoryMin` for the VM-agent/system-services slice                       |
+| `DOCKER_MEMORY_MIN_MB`                       | `512`   | Minimum Docker `MemoryMax` retained when `VM_AGENT_MEMORY_RESERVE_MB` is enabled |
+| `HEARTBEAT_DOCKER_STATS_TIMEOUT`             | `2s`    | VM-agent timeout for heartbeat Docker stats used by workspace memory telemetry   |
+| `HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS` | `8`     | Maximum workspace containers measured by one heartbeat                           |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS`               | `7`     | Validity for per-node Origin CA certificates signed by the API Worker            |
 
 New nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
+
+VM workspace admission uses persisted `workspaces.resolved_reservation_json` snapshots and provider capacity fields in a final single-statement D1 reservation (`apps/api/src/services/workspace-placement.ts`). Advisory selection applies the same aggregate accounting, host-memory reserve, disk-pressure veto, telemetry TTL, and normalized CPU-load scoring (`apps/api/src/services/workspace-resource-capacity.ts`, `apps/api/src/durable-objects/task-runner/node-selection.ts`). VM agents report optional per-workspace memory telemetry in heartbeat metrics when Docker stats can be collected within the configured bound (`packages/vm-agent/internal/server/health.go`, `packages/vm-agent/internal/sysinfo/sysinfo.go`).
 
 ## Journald Configuration (VM)
 

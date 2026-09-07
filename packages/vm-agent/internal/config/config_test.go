@@ -404,6 +404,34 @@ func TestOperationalTimeoutDefaults(t *testing.T) {
 	}
 }
 
+func TestHeartbeatWorkspaceMetricDefaultsAndOverrides(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.HeartbeatDockerStatsTimeout != 2*time.Second {
+		t.Fatalf("HeartbeatDockerStatsTimeout = %v, want 2s", cfg.HeartbeatDockerStatsTimeout)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxContainers != 8 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxContainers = %d, want 8", cfg.HeartbeatWorkspaceMetricsMaxContainers)
+	}
+
+	t.Setenv("HEARTBEAT_DOCKER_STATS_TIMEOUT", "1500ms")
+	t.Setenv("HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS", "4")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() override error = %v", err)
+	}
+	if cfg.HeartbeatDockerStatsTimeout != 1500*time.Millisecond {
+		t.Fatalf("HeartbeatDockerStatsTimeout = %v, want 1500ms", cfg.HeartbeatDockerStatsTimeout)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxContainers != 4 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxContainers = %d, want 4", cfg.HeartbeatWorkspaceMetricsMaxContainers)
+	}
+}
+
 func TestOperationalTimeoutOverrides(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
