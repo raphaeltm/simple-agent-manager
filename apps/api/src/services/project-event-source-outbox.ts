@@ -5,11 +5,6 @@ import { createModuleLogger } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import * as projectDataService from './project-data';
 import {
-  credentialLimitAdmissionGuard,
-  credentialLimitIntentSuperseded,
-  credentialLimitSupersededUpdate,
-} from './project-event-source-outbox-credential';
-import {
   assertProjectEventSourceOutboxCaptureMatchesInput,
   PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES,
   PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES,
@@ -18,20 +13,25 @@ import {
   projectEventSourceAdmissionTimeoutMs,
   type ProjectEventSourceAdmissionTiming,
   type ProjectEventSourceOutboxActiveState,
+  projectEventSourceOutboxClockFrom,
+  projectEventSourceOutboxErrorText,
   type ProjectEventSourceOutboxInsertOptions,
   projectEventSourceOutboxInsertValues,
   type ProjectEventSourceOutboxIntent,
+  projectEventSourceOutboxNextRetryAt,
   type ProjectEventSourceOutboxReadByIdInput,
   projectEventSourceOutboxReplayConflict,
   type ProjectEventSourceOutboxState,
   type ProjectEventSourceOutboxStats,
   type ProjectEventSourceOutboxSupersedeInput,
-  projectEventSourceOutboxClockFrom,
-  projectEventSourceOutboxErrorText,
-  projectEventSourceOutboxNextRetryAt,
   resolveProjectEventSourceOutboxConfig,
   withProjectEventSourceAdmissionTimeout,
 } from './project-event-source-outbox-contract';
+import {
+  credentialLimitAdmissionGuard,
+  credentialLimitIntentSuperseded,
+  credentialLimitSupersededUpdate,
+} from './project-event-source-outbox-credential';
 import {
   backfillLegacyTerminalizedRows,
   CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS,
@@ -61,11 +61,11 @@ export type {
   ProjectEventSourceOutboxSupersedeInput,
 } from './project-event-source-outbox-contract';
 export {
-  projectEventSourceOutboxPayload,
-  projectEventSourceOutboxReplayConflict,
   projectEventSourceOutboxClockFrom,
   projectEventSourceOutboxErrorText,
   projectEventSourceOutboxNextRetryAt,
+  projectEventSourceOutboxPayload,
+  projectEventSourceOutboxReplayConflict,
   resolveProjectEventSourceOutboxConfig,
   withProjectEventSourceAdmissionTimeout,
 } from './project-event-source-outbox-contract';
