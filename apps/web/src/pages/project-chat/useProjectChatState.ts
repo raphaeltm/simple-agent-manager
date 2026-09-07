@@ -9,10 +9,7 @@ import type {
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_WORKSPACE_PROFILE,
-  hasByocComputeCredential,
-} from '@simple-agent-manager/shared';
+import { DEFAULT_WORKSPACE_PROFILE, hasByocComputeCredential } from '@simple-agent-manager/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -630,10 +627,12 @@ export function useProjectChatState() {
     }
     const workType = profileWizard.workType ?? 'conversation';
     const runtime = resolveWizardRuntime(workType, profileWizard.runtime);
-    const resourceJson =
-      runtime === 'cf-container' ? null : serializeResourceRequirements(profileWizard.resourceReqs);
     setProfileWizard((current) => ({ ...current, saving: true, error: null }));
     try {
+      const resourceJson =
+        runtime === 'cf-container'
+          ? null
+          : serializeResourceRequirements(profileWizard.resourceReqs);
       const profile = await createProfile({
         name,
         description:

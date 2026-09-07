@@ -1,6 +1,23 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
-import type { AgentInfo, AgentProfile, AgentProfileRuntime, AgentSkill, TaskMode, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
-import { Check, ChevronDown, ChevronRight, MessageSquare, Plus, Server, Settings, Wrench, Zap } from 'lucide-react';
+import type {
+  AgentInfo,
+  AgentProfile,
+  AgentProfileRuntime,
+  AgentSkill,
+  TaskMode,
+  UpdateAgentProfileRequest,
+} from '@simple-agent-manager/shared';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  MessageSquare,
+  Plus,
+  Server,
+  Settings,
+  Wrench,
+  Zap,
+} from 'lucide-react';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -14,6 +31,7 @@ import {
   type ResourceRequirementsFormState,
   ResourceRequirementsInput,
   type ResourceValidationErrors,
+  validateResourceState,
 } from '../../components/resource-requirements';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { ProfileWizardState, ProfileWizardStep } from './useProjectChatState';
@@ -131,7 +149,12 @@ function getComposerPlaceholder({
   needsProfileBeforeSubmit,
   wizardOpen,
   placeholder,
-}: Readonly<{ noAgents: boolean; needsProfileBeforeSubmit: boolean; wizardOpen: boolean; placeholder: string }>) {
+}: Readonly<{
+  noAgents: boolean;
+  needsProfileBeforeSubmit: boolean;
+  wizardOpen: boolean;
+  placeholder: string;
+}>) {
   if (noAgents) return 'Add an agent in Settings to start chatting...';
   if (needsProfileBeforeSubmit || wizardOpen) return 'Create a profile to start chatting...';
   return placeholder;
@@ -141,7 +164,9 @@ function canAdvanceWizard(profileWizard: ProfileWizardState) {
   if (profileWizard.step === 'agent') return Boolean(profileWizard.selectedAgentType);
   if (profileWizard.step === 'work-type') return Boolean(profileWizard.workType);
   if (profileWizard.step === 'runtime') return Boolean(profileWizard.runtime);
-  if (profileWizard.step === 'resources') return true;
+  if (profileWizard.step === 'resources') {
+    return !hasValidationErrors(validateResourceState(profileWizard.resourceReqs));
+  }
   return Boolean(profileWizard.profileName.trim());
 }
 
@@ -221,7 +246,7 @@ export function ChatInput({
   const hasResourceErrors = hasValidationErrors(taskResourceErrors);
 
   const selectedProfile = selectedProfileId
-    ? agentProfiles.find((p) => p.id === selectedProfileId) ?? null
+    ? (agentProfiles.find((p) => p.id === selectedProfileId) ?? null)
     : null;
   const skipAgentStep = agents.length === 1;
   const needsProfileBeforeSubmit = agentProfiles.length === 0 && agents.length >= 1;
@@ -235,7 +260,8 @@ export function ChatInput({
   });
   const canProceed = canAdvanceWizard(profileWizard);
 
-  const selectedWizardAgent = agents.find((agent) => agent.id === profileWizard.selectedAgentType) ?? agents[0] ?? null;
+  const selectedWizardAgent =
+    agents.find((agent) => agent.id === profileWizard.selectedAgentType) ?? agents[0] ?? null;
   const visibleWizardSteps = getWizardSteps(skipAgentStep, profileWizard.runtime);
   const stepNumber = getWizardStepNumber(profileWizard.step, visibleWizardSteps);
   const totalSteps = visibleWizardSteps.length;
@@ -252,7 +278,9 @@ export function ChatInput({
     if (nextStep === 'name') {
       onUpdateProfileWizard({
         step: 'name',
-        profileName: profileWizard.profileName.trim() || suggestProfileName(profileWizard.selectedAgentType, profileWizard.workType),
+        profileName:
+          profileWizard.profileName.trim() ||
+          suggestProfileName(profileWizard.selectedAgentType, profileWizard.workType),
       });
       return;
     }
@@ -272,15 +300,16 @@ export function ChatInput({
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
       {error && (
-        <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
-          {error}
-        </div>
+        <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">{error}</div>
       )}
 
       {noAgents && <NoAgentsNotice projectId={projectId} />}
 
       {agentProfiles.length > 0 && !profileWizard.open && (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Agent profiles and skills">
+        <div
+          className="mb-2 flex flex-wrap items-center gap-1.5"
+          aria-label="Agent profiles and skills"
+        >
           {agentProfiles.map((profile) => (
             <button
               key={profile.id}
@@ -332,7 +361,9 @@ export function ChatInput({
           </div>
           <div className="p-3 sm:p-4">
             <div className="mb-3">
-              <div className="text-[10px] uppercase text-fg-muted">Step {stepNumber} of {totalSteps}</div>
+              <div className="text-[10px] uppercase text-fg-muted">
+                Step {stepNumber} of {totalSteps}
+              </div>
               <h2 className="m-0 mt-1 text-sm font-semibold text-fg-primary">
                 {getWizardTitle(profileWizard.step)}
               </h2>
@@ -342,7 +373,10 @@ export function ChatInput({
             </div>
 
             {profileWizard.error && (
-              <div role="alert" className="mb-3 rounded-sm bg-danger-tint px-3 py-2 text-xs text-danger">
+              <div
+                role="alert"
+                className="mb-3 rounded-sm bg-danger-tint px-3 py-2 text-xs text-danger"
+              >
                 {profileWizard.error}
               </div>
             )}
@@ -361,8 +395,12 @@ export function ChatInput({
                         {getAgentInitial(agent)}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-fg-primary">{agent.name}</div>
-                        <div className="line-clamp-2 text-xs text-fg-muted">{agent.description || agent.id}</div>
+                        <div className="truncate text-sm font-semibold text-fg-primary">
+                          {agent.name}
+                        </div>
+                        <div className="line-clamp-2 text-xs text-fg-muted">
+                          {agent.description || agent.id}
+                        </div>
                       </div>
                     </div>
                   </SelectionCard>
@@ -398,7 +436,13 @@ export function ChatInput({
                   icon={<Zap size={20} />}
                   title="Instant container"
                   description="Starts a chat workspace in a Cloudflare Container without a VM provisioning step."
-                  onClick={() => onUpdateProfileWizard({ runtime: 'cf-container', resourceReqs: { ...EMPTY_RESOURCE_STATE }, workType: 'conversation' })}
+                  onClick={() =>
+                    onUpdateProfileWizard({
+                      runtime: 'cf-container',
+                      resourceReqs: { ...EMPTY_RESOURCE_STATE },
+                      workType: 'conversation',
+                    })
+                  }
                   disabled={profileWizard.saving}
                 />
                 <WorkTypeCard
@@ -416,10 +460,13 @@ export function ChatInput({
               <div className="rounded-md border border-border-default bg-surface p-3">
                 <ResourceRequirementsInput
                   value={profileWizard.resourceReqs}
-                  onChange={(next: ResourceRequirementsFormState) => onUpdateProfileWizard({ resourceReqs: next })}
+                  onChange={(next: ResourceRequirementsFormState) =>
+                    onUpdateProfileWizard({ resourceReqs: next })
+                  }
                   disabled={profileWizard.saving}
                   inheritLabel="platform default"
                   hideDisk
+                  errors={validateResourceState(profileWizard.resourceReqs)}
                 />
               </div>
             )}
@@ -438,12 +485,16 @@ export function ChatInput({
                   />
                 </label>
                 <div className="text-xs text-fg-muted">
-                  Summary: <strong className="text-fg-secondary">{selectedWizardAgent?.name ?? 'Agent'}</strong> ·{' '}
-                  {profileWizard.workType === 'task' ? 'Build and open PRs' : 'Chat and explore'} ·{' '}
-                  {getRuntimeSummary(profileWizard.runtime)}
-                  {profileWizard.runtime !== 'cf-container' && profileWizard.resourceReqs.minVcpu && (
-                    <> · {profileWizard.resourceReqs.minVcpu} vCPU</>
-                  )}
+                  Summary:{' '}
+                  <strong className="text-fg-secondary">
+                    {selectedWizardAgent?.name ?? 'Agent'}
+                  </strong>{' '}
+                  · {profileWizard.workType === 'task' ? 'Build and open PRs' : 'Chat and explore'}{' '}
+                  · {getRuntimeSummary(profileWizard.runtime)}
+                  {profileWizard.runtime !== 'cf-container' &&
+                    profileWizard.resourceReqs.minVcpu && (
+                      <> · {profileWizard.resourceReqs.minVcpu} vCPU</>
+                    )}
                 </div>
               </div>
             )}
@@ -488,7 +539,9 @@ export function ChatInput({
             disabled={submitting}
             className={[
               'text-[11px] flex items-center gap-1 bg-transparent border-none cursor-pointer p-0 disabled:opacity-50',
-              hasTaskResources ? 'text-accent font-medium' : 'text-fg-muted hover:text-fg-secondary',
+              hasTaskResources
+                ? 'text-accent font-medium'
+                : 'text-fg-muted hover:text-fg-secondary',
             ].join(' ')}
           >
             <Server size={12} aria-hidden="true" />
@@ -502,13 +555,18 @@ export function ChatInput({
         <div className="mb-2 rounded-md border border-border-default bg-surface px-3 py-2">
           <ResourceRequirementsInput
             value={taskResourceReqs}
-            onChange={(next) => { onTaskResourceReqsChange(next); onTaskResourceErrorsClear(); }}
+            onChange={(next) => {
+              onTaskResourceReqsChange(next);
+              onTaskResourceErrorsClear();
+            }}
             disabled={submitting}
             inheritLabel="profile/project default"
             errors={taskResourceErrors}
             compact={isMobile}
           />
-          <p className="m-0 mt-1 text-[10px] text-fg-muted">Override resources for this task only. Leave blank to inherit.</p>
+          <p className="m-0 mt-1 text-[10px] text-fg-muted">
+            Override resources for this task only. Leave blank to inherit.
+          </p>
         </div>
       )}
 
@@ -554,7 +612,9 @@ function NoAgentsNotice({ projectId }: Readonly<{ projectId: string }>) {
     <div className="mb-2 flex flex-col gap-3 rounded-md border border-border-default bg-surface px-3 py-3 sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-fg-primary">Add an agent to start chatting</div>
-        <div className="mt-1 text-xs text-fg-muted">Connect or enable an ACP-capable agent in project settings.</div>
+        <div className="mt-1 text-xs text-fg-muted">
+          Connect or enable an ACP-capable agent in project settings.
+        </div>
       </div>
       <button
         type="button"
@@ -572,7 +632,9 @@ function NoProfilesGate({ onStartWizard }: Readonly<{ onStartWizard: () => void 
     <div className="mb-3 flex flex-col gap-3 rounded-lg border border-accent/20 bg-accent/5 p-3 sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-fg-primary">Create a profile to start</div>
-        <div className="mt-1 text-xs text-fg-muted">Choose an agent and default runtime settings for this project chat.</div>
+        <div className="mt-1 text-xs text-fg-muted">
+          Choose an agent and default runtime settings for this project chat.
+        </div>
       </div>
       <button
         type="button"
@@ -603,7 +665,9 @@ function SelectionCard({
       onClick={onClick}
       disabled={disabled}
       className={`min-h-[56px] w-full rounded-md border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
-        selected ? 'border-accent bg-accent/10' : 'border-border-default bg-page hover:border-accent/60'
+        selected
+          ? 'border-accent bg-accent/10'
+          : 'border-border-default bg-page hover:border-accent/60'
       }`}
     >
       <div className="flex items-center gap-2">
@@ -635,7 +699,9 @@ function WorkTypeCard({
       onClick={onClick}
       disabled={disabled}
       className={`min-h-[132px] rounded-md border p-3 text-left transition-colors disabled:opacity-50 ${
-        selected ? 'border-accent bg-accent/10' : 'border-border-default bg-page hover:border-accent/60'
+        selected
+          ? 'border-accent bg-accent/10'
+          : 'border-border-default bg-page hover:border-accent/60'
       }`}
     >
       <div className="mb-2 text-fg-muted">{icon}</div>

@@ -428,8 +428,11 @@ function chooseRuntime(runtime: RegExp) {
   fireEvent.click(screen.getByRole('button', { name: /Next/i }));
 }
 
-function chooseVmSize(size: RegExp = /Medium/i) {
-  fireEvent.click(screen.getByRole('button', { name: size }));
+function chooseResources(cpu = '1', memory = '2') {
+  fireEvent.change(screen.getByRole('spinbutton', { name: /^vCPU/i }), { target: { value: cpu } });
+  fireEvent.change(screen.getByRole('spinbutton', { name: /Memory/i }), {
+    target: { value: memory },
+  });
   fireEvent.click(screen.getByRole('button', { name: /Next/i }));
 }
 
@@ -1055,7 +1058,7 @@ describe('ProjectChat profile setup wizard', () => {
 
     chooseWorkType(/Build and open PRs/i);
     chooseRuntime(/Cloud VM/i);
-    chooseVmSize(/Medium/i);
+    chooseResources();
 
     await createProfileFromWizard({
       defaultName: 'Claude Code Tasks',
@@ -1063,7 +1066,7 @@ describe('ProjectChat profile setup wizard', () => {
       expectedPayload: {
         agentType: 'claude-code',
         runtime: 'vm',
-        vmSizeOverride: 'medium',
+        resourceRequirementsJson: '{"minVcpu":1,"minMemoryGb":2}',
         workspaceProfile: 'full',
         taskMode: 'task',
       },
@@ -1083,6 +1086,29 @@ describe('ProjectChat profile setup wizard', () => {
           agentProfileId: 'created-profile',
         })
       );
+    });
+  });
+
+  it('keeps invalid resource requirements visible until corrected before creating a profile', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+    renderProjectChat();
+    await openProfileWizardFromGate();
+    chooseWorkType(/Build and open PRs/i);
+    chooseRuntime(/Cloud VM/i);
+
+    const cpu = screen.getByRole('spinbutton', { name: /^vCPU/i });
+    fireEvent.change(cpu, { target: { value: '0' } });
+    expect(cpu).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: /Next/i })).toBeDisabled();
+    expect(mocks.createAgentProfile).not.toHaveBeenCalled();
+
+    fireEvent.change(cpu, { target: { value: '0.5' } });
+    expect(cpu).toHaveAttribute('aria-invalid', 'false');
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    await createProfileFromWizard({
+      defaultName: 'Claude Code Tasks',
+      profileName: 'Validated resources',
+      expectedPayload: { runtime: 'vm', resourceRequirementsJson: '{"minVcpu":0.5}' },
     });
   });
 
@@ -1109,7 +1135,7 @@ describe('ProjectChat profile setup wizard', () => {
       expectedPayload: {
         agentType: 'claude-code',
         runtime: 'cf-container',
-        vmSizeOverride: null,
+        resourceRequirementsJson: null,
         workspaceProfile: 'lightweight',
         taskMode: 'conversation',
       },
@@ -1130,7 +1156,7 @@ describe('ProjectChat profile setup wizard', () => {
     chooseAgent(/OpenAI Codex/i);
     chooseWorkType(/Build and open PRs/i);
     chooseRuntime(/Cloud VM/i);
-    chooseVmSize(/Large/i);
+    chooseResources('2', '4');
 
     await createProfileFromWizard({
       defaultName: 'OpenAI Codex Tasks',
@@ -1138,14 +1164,14 @@ describe('ProjectChat profile setup wizard', () => {
       expectedPayload: {
         agentType: 'openai-codex',
         runtime: 'vm',
-        vmSizeOverride: 'large',
+        resourceRequirementsJson: '{"minVcpu":2,"minMemoryGb":4}',
         workspaceProfile: 'full',
         taskMode: 'task',
       },
     });
   });
 
-  it('shows provider specs and hides prices when the user has no BYOC key', async () => {
+  it('allows inherited workload resources without a personal cloud key', async () => {
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: true });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [TEST_PROVIDER_CATALOG] });
@@ -1155,12 +1181,16 @@ describe('ProjectChat profile setup wizard', () => {
 
     await openWizardVmStep();
 
-    expect(screen.getByText(/cx32/)).toBeInTheDocument();
-    expect(screen.getByText(/4 vCPU, 8 GB RAM, 80 GB storage/)).toBeInTheDocument();
-    expect(screen.queryByText(/€7.69/)).not.toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: /^vCPU/i })).toHaveValue(null);
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    await createProfileFromWizard({
+      defaultName: 'Claude Code Chat',
+      profileName: 'Inherited resources',
+      expectedPayload: { runtime: 'vm', resourceRequirementsJson: null },
+    });
   });
 
-  it('shows provider catalog pricing when the user has BYOC credentials', async () => {
+  it('clears an explicit workload back to inherited resources with BYOC credentials', async () => {
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [TEST_PROVIDER_CATALOG] });
     mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
 
@@ -1168,9 +1198,16 @@ describe('ProjectChat profile setup wizard', () => {
 
     await openWizardVmStep();
 
-    expect(screen.getByText(/cx32/)).toBeInTheDocument();
-    expect(screen.getByText(/4 vCPU, 8 GB RAM, 80 GB storage/)).toBeInTheDocument();
-    expect(screen.getByText(/€7.69\/mo/)).toBeInTheDocument();
+    const cpu = screen.getByRole('spinbutton', { name: /^vCPU/i });
+    fireEvent.change(cpu, { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: /Inherit platform default/i }));
+    expect(cpu).toHaveValue(null);
+    fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+    await createProfileFromWizard({
+      defaultName: 'Claude Code Chat',
+      profileName: 'Reset resources',
+      expectedPayload: { runtime: 'vm', resourceRequirementsJson: null },
+    });
   });
 
   it('directs users to settings when no agents are configured', async () => {
@@ -1210,7 +1247,7 @@ describe('ProjectChat profile setup wizard', () => {
     chooseAgent(/OpenAI Codex/i);
     chooseWorkType(/Build and open PRs/i);
     chooseRuntime(/Cloud VM/i);
-    chooseVmSize();
+    chooseResources();
     fireEvent.change(screen.getByLabelText('Profile name'), { target: { value: 'Codex Builder' } });
     const createButtons = screen.getAllByRole('button', { name: /Create profile/i });
     fireEvent.click(createButtons[createButtons.length - 1]);

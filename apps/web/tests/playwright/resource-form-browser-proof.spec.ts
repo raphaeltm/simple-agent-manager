@@ -204,17 +204,22 @@ interface CapturedRequest {
 async function scrollDialogToResources(page: Page) {
   const scrollContainer = page.locator('[role="dialog"] .overflow-y-auto');
   if ((await scrollContainer.count()) > 0) {
-    await scrollContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await scrollContainer.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
   }
   await page.waitForTimeout(300);
 }
 
-async function setupMocks(page: Page, overrides?: {
-  profiles?: typeof PROFILES;
-  skills?: typeof SKILLS;
-  triggers?: typeof TRIGGERS;
-  project?: typeof PROJECT;
-}) {
+async function setupMocks(
+  page: Page,
+  overrides?: {
+    profiles?: typeof PROFILES;
+    skills?: typeof SKILLS;
+    triggers?: typeof TRIGGERS;
+    project?: typeof PROJECT;
+  }
+) {
   const pageErrors: string[] = [];
   const capturedRequests: CapturedRequest[] = [];
   page.on('pageerror', (err) => pageErrors.push(err.message));
@@ -236,7 +241,11 @@ async function setupMocks(page: Page, overrides?: {
 
     if (method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE') {
       let body: unknown = null;
-      try { body = JSON.parse(req.postData() ?? ''); } catch { /* empty */ }
+      try {
+        body = JSON.parse(req.postData() ?? '');
+      } catch {
+        /* empty */
+      }
       capturedRequests.push({ method, path, body });
     }
 
@@ -248,26 +257,53 @@ async function setupMocks(page: Page, overrides?: {
     if (path === '/api/client-errors') return respond(null, 204);
     if (path === '/api/t') return respond(null, 204);
     if (path.includes('/credential-attribution-health')) return respond({ healthy: true });
-    if (path.includes('/notification') && path.includes('/preferences'))
-      return respond({});
+    if (path.includes('/notification') && path.includes('/preferences')) return respond({});
 
     // Dashboard
     if (path === '/api/dashboard/active-tasks') return respond({ tasks: [] });
-    if (path.startsWith('/api/notifications')) return respond({ notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond({ notifications: [], unreadCount: 0 });
     if (path === '/api/agents')
-      return respond({ agents: [{ id: 'claude-code', name: 'Claude Code', description: 'AI coding assistant', configured: true, supportsAcp: true }] });
+      return respond({
+        agents: [
+          {
+            id: 'claude-code',
+            name: 'Claude Code',
+            description: 'AI coding assistant',
+            configured: true,
+            supportsAcp: true,
+          },
+        ],
+      });
 
     // Credentials
     if (path.includes('/credentials/agent'))
-      return respond({ credentials: [{ agentType: 'claude-code', credentialKind: 'api-key', isActive: true }] });
+      return respond({
+        credentials: [{ agentType: 'claude-code', credentialKind: 'api-key', isActive: true }],
+      });
     if (path.includes('/credentials'))
-      return respond([{ id: 'cred-1', userId: 'user-test-1', provider: 'hetzner', isActive: true, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' }]);
+      return respond([
+        {
+          id: 'cred-1',
+          userId: 'user-test-1',
+          provider: 'hetzner',
+          isActive: true,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ]);
 
     // Providers
     if (path.includes('/capacity-pools'))
-      return respond({ effective: null, effectiveScope: null, defaults: [], precedence: ['project', 'user', 'installation'], reconciledScopes: [], policyMutationSupported: false });
-    if (path.includes('/providers/catalog'))
-      return respond({ catalogs: [] });
+      return respond({
+        effective: null,
+        effectiveScope: null,
+        defaults: [],
+        precedence: ['project', 'user', 'installation'],
+        reconciledScopes: [],
+        policyMutationSupported: false,
+      });
+    if (path.includes('/providers/catalog')) return respond({ catalogs: [] });
 
     // Installations
     if (path.includes('/installations'))
@@ -308,7 +344,12 @@ async function setupMocks(page: Page, overrides?: {
       if (sub === '/runtime-config') return respond({ envVars: [], files: [] });
       if (sub === '/repository-access') return respond({ repositories: [] });
       if (sub === '/devcontainer-configs')
-        return respond({ repository: project.repository, branch: project.defaultBranch, defaultConfigExists: false, configs: [] });
+        return respond({
+          repository: project.repository,
+          branch: project.defaultBranch,
+          defaultConfigExists: false,
+          configs: [],
+        });
       if (sub.startsWith('/cached-commands')) return respond({ commands: [] });
       if (sub.startsWith('/activity')) return respond({ events: [], nextCursor: null });
       if (sub.startsWith('/sessions') && !sub.includes('/state'))
@@ -316,8 +357,7 @@ async function setupMocks(page: Page, overrides?: {
       if (sub.includes('/state')) return respond({ state: {} });
       if (sub === '/agent-profiles') return respond({ items: profs });
       if (sub === '/skills') return respond({ items: skills });
-      if (sub.startsWith('/triggers') && sub !== '/triggers')
-        return respond(triggers[0] ?? {});
+      if (sub.startsWith('/triggers') && sub !== '/triggers') return respond(triggers[0] ?? {});
       if (sub === '/triggers') return respond({ triggers });
       if (sub.startsWith('/tasks')) return respond({ tasks: [], nextCursor: null });
       if (sub === '/trial') return respond({ available: false });
@@ -338,9 +378,7 @@ async function setupMocks(page: Page, overrides?: {
 }
 
 function assertNoPageErrors(errors: string[]) {
-  const real = errors.filter(
-    (e) => !e.includes('ResizeObserver') && !e.includes('WebSocket'),
-  );
+  const real = errors.filter((e) => !e.includes('ResizeObserver') && !e.includes('WebSocket'));
   if (real.length > 0) {
     throw new Error(`Unexpected page errors:\n${real.join('\n')}`);
   }
@@ -354,7 +392,9 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('create new profile — opens empty dialog with resource inputs visible', async ({ page }) => {
+    test('create new profile — opens empty dialog with resource inputs visible', async ({
+      page,
+    }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
       await expect(page.getByRole('button', { name: 'New Profile' })).toBeVisible();
@@ -411,7 +451,9 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       assertNoPageErrors(pageErrors);
     });
 
-    test('edit profile no-op save — preserves mixed legacy+modern in PUT payload', async ({ page }) => {
+    test('edit profile no-op save — preserves mixed legacy+modern in PUT payload', async ({
+      page,
+    }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
       const editBtn = page.getByRole('button', { name: `Edit ${PROFILE_MIXED.name}` });
@@ -427,7 +469,7 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       await page.waitForTimeout(500);
 
       const patch = capturedRequests.find(
-        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/'),
+        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/')
       );
       expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
@@ -462,7 +504,7 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       await page.waitForTimeout(500);
 
       const patch = capturedRequests.find(
-        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/'),
+        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/')
       );
       expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
@@ -503,7 +545,7 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       await page.waitForTimeout(500);
 
       const patch = capturedRequests.find(
-        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/'),
+        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/')
       );
       expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
@@ -519,7 +561,9 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
     test('create profile — resource controls and CTA reachable on mobile', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
-      await expect(page.getByRole('button', { name: 'New Profile' })).toBeVisible({ timeout: 15000 });
+      await expect(page.getByRole('button', { name: 'New Profile' })).toBeVisible({
+        timeout: 15000,
+      });
       await page.getByRole('button', { name: 'New Profile' }).click();
 
       const dialog = page.locator('[role="dialog"]');
@@ -618,9 +662,7 @@ test.describe('SkillFormDialog — Skills Page', () => {
       await dialog.getByRole('button', { name: 'Create Skill' }).click();
       await page.waitForTimeout(500);
 
-      const post = capturedRequests.find(
-        (r) => r.method === 'POST' && r.path.includes('/skills'),
-      );
+      const post = capturedRequests.find((r) => r.method === 'POST' && r.path.includes('/skills'));
       expect(post).toBeTruthy();
       const body = post!.body as Record<string, unknown>;
       expect(body.name).toBe('Test Compute Skill');
@@ -654,7 +696,7 @@ test.describe('SkillFormDialog — Skills Page', () => {
       await page.waitForTimeout(500);
 
       const patch = capturedRequests.find(
-        (r) => r.method === 'PATCH' && r.path.includes('/skills/'),
+        (r) => r.method === 'PATCH' && r.path.includes('/skills/')
       );
       expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
@@ -757,7 +799,9 @@ test.describe('TriggerForm — Triggers Page', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('create trigger with resources — POST payload includes resourceRequirementsJson', async ({ page }) => {
+    test('create trigger with resources — POST payload includes resourceRequirementsJson', async ({
+      page,
+    }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/triggers');
       await page.waitForTimeout(2000);
@@ -784,7 +828,9 @@ test.describe('TriggerForm — Triggers Page', () => {
 
       // Scroll the trigger form body to reach resource inputs
       const scrollBody = dialog.getByTestId('trigger-form-scroll-body');
-      await scrollBody.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await scrollBody.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
       await page.waitForTimeout(300);
 
       // Set vCPU in the advanced resource section
@@ -802,7 +848,7 @@ test.describe('TriggerForm — Triggers Page', () => {
       await page.waitForTimeout(500);
 
       const post = capturedRequests.find(
-        (r) => r.method === 'POST' && r.path.includes('/triggers'),
+        (r) => r.method === 'POST' && r.path.includes('/triggers')
       );
       expect(post).toBeTruthy();
       const body = post!.body as Record<string, unknown>;
@@ -820,7 +866,9 @@ test.describe('TriggerForm — Triggers Page', () => {
       await expect(page.getByText(TRIGGER_WITH_RESOURCES.name)).toBeVisible();
 
       // Open dropdown actions → Edit
-      const actionsBtn = page.getByRole('button', { name: `Actions for "${TRIGGER_WITH_RESOURCES.name}"` });
+      const actionsBtn = page.getByRole('button', {
+        name: `Actions for "${TRIGGER_WITH_RESOURCES.name}"`,
+      });
       await expect(actionsBtn).toBeVisible();
       await actionsBtn.click();
       await page.waitForTimeout(200);
@@ -839,7 +887,7 @@ test.describe('TriggerForm — Triggers Page', () => {
       await page.waitForTimeout(500);
 
       const patch = capturedRequests.find(
-        (r) => r.method === 'PATCH' && r.path.includes('/triggers/'),
+        (r) => r.method === 'PATCH' && r.path.includes('/triggers/')
       );
       expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
@@ -876,7 +924,9 @@ test.describe('TriggerForm — Triggers Page', () => {
 
       // Scroll trigger form body to resource controls
       const scrollBody = dialog.getByTestId('trigger-form-scroll-body');
-      await scrollBody.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await scrollBody.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
       await page.waitForTimeout(300);
 
       const vcpu = dialog.getByLabel('vCPU');
@@ -950,7 +1000,9 @@ test.describe('Project Settings Infrastructure', () => {
 
       // Save TIMEOUT — find the Save button in the timeout section
       // It's the one AFTER the "Workspace Idle Timeout" heading
-      const timeoutSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Workspace Idle Timeout' }) });
+      const timeoutSection = page
+        .locator('section')
+        .filter({ has: page.getByRole('heading', { name: 'Workspace Idle Timeout' }) });
       const timeoutSaveBtn = timeoutSection.getByRole('button', { name: 'Save' });
       await timeoutSaveBtn.scrollIntoViewIfNeeded();
       await expect(timeoutSaveBtn).toBeEnabled();
@@ -958,8 +1010,10 @@ test.describe('Project Settings Infrastructure', () => {
       await page.waitForTimeout(500);
 
       const timeoutPatch = capturedRequests.find(
-        (r) => r.method === 'PATCH' && r.path.match(/\/api\/projects\/[^/]+$/) &&
-               (r.body as Record<string, unknown>)?.workspaceIdleTimeoutMs !== undefined,
+        (r) =>
+          r.method === 'PATCH' &&
+          r.path.match(/\/api\/projects\/[^/]+$/) &&
+          (r.body as Record<string, unknown>)?.workspaceIdleTimeoutMs !== undefined
       );
       expect(timeoutPatch).toBeTruthy();
       const tmBody = timeoutPatch!.body as Record<string, unknown>;
@@ -972,8 +1026,10 @@ test.describe('Project Settings Infrastructure', () => {
       await page.waitForTimeout(500);
 
       const resourcePatch = capturedRequests.find(
-        (r) => r.method === 'PATCH' && r.path.match(/\/api\/projects\/[^/]+$/) &&
-               (r.body as Record<string, unknown>)?.resourceRequirementsJson !== undefined,
+        (r) =>
+          r.method === 'PATCH' &&
+          r.path.match(/\/api\/projects\/[^/]+$/) &&
+          (r.body as Record<string, unknown>)?.resourceRequirementsJson !== undefined
       );
       expect(resourcePatch).toBeTruthy();
       const resBody = resourcePatch!.body as Record<string, unknown>;
@@ -1012,7 +1068,9 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('submit VM task with resource overrides — payload includes resourceRequirements', async ({ page }) => {
+    test('submit VM task with resource overrides — payload includes resourceRequirements', async ({
+      page,
+    }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/chat');
       await page.waitForTimeout(2000);
@@ -1042,7 +1100,7 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
 
       // Check the submit payload includes resourceRequirements
       const submit = capturedRequests.find(
-        (r) => r.method === 'POST' && r.path.includes('/tasks/submit'),
+        (r) => r.method === 'POST' && r.path.includes('/tasks/submit')
       );
       expect(submit).toBeTruthy();
       const body = submit!.body as Record<string, unknown>;
@@ -1082,7 +1140,10 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
         await expect(vcpu).toHaveValue('');
       }
       // Button should no longer say "(custom)"
-      const btnText = await page.getByRole('button', { name: /resource/i }).first().innerText();
+      const btnText = await page
+        .getByRole('button', { name: /resource/i })
+        .first()
+        .innerText();
       expect(btnText).not.toContain('(custom)');
 
       await screenshot(page, 'chat-resource-reset-after-submit-desktop');
@@ -1113,7 +1174,7 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
 
       // No task should have been submitted
       const submit = capturedRequests.find(
-        (r) => r.method === 'POST' && r.path.includes('/tasks/submit'),
+        (r) => r.method === 'POST' && r.path.includes('/tasks/submit')
       );
       expect(submit).toBeUndefined();
 
@@ -1175,6 +1236,45 @@ test.describe('ChatInput — Resource Submit and Reset', () => {
 // =====================================================================================
 
 test.describe('ChatInput — Profile Wizard', () => {
+  test('invalid wizard resources show an error and block advancement until corrected', async ({
+    page,
+  }) => {
+    const { capturedRequests, pageErrors } = await setupMocks(page, { profiles: [] });
+    await page.goto('/projects/proj-test-1/chat');
+    await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+    await page.getByRole('button', { name: /Build and open PRs/i }).click();
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await page.getByRole('button', { name: /Cloud VM/i }).click();
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    const cpu = page.getByRole('spinbutton', { name: /^vCPU/i });
+    await cpu.fill('0');
+    await expect(cpu).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
+    await screenshot(page, `profile-wizard-invalid-resources-${page.viewportSize()?.width}`);
+    await assertNoOverflow(page);
+    await cpu.fill('0.5');
+    await expect(cpu).toHaveAttribute('aria-invalid', 'false');
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+    await page.getByLabel('Profile name').fill('Validated resources');
+    await page.getByRole('button', { name: 'Create profile', exact: true }).click();
+    await expect
+      .poll(
+        () =>
+          capturedRequests.filter(
+            (request) => request.method === 'POST' && request.path.endsWith('/agent-profiles')
+          ).length
+      )
+      .toBe(1);
+    const created = capturedRequests.find(
+      (request) => request.method === 'POST' && request.path.endsWith('/agent-profiles')
+    );
+    expect(created?.body).toMatchObject({
+      resourceRequirementsJson: '{"minVcpu":0.5}',
+      runtime: 'vm',
+    });
+    assertNoPageErrors(pageErrors);
+  });
+
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
@@ -1190,8 +1290,8 @@ test.describe('ChatInput — Profile Wizard', () => {
       const placeholder = await textarea.getAttribute('placeholder');
       expect(placeholder).toContain('profile');
 
-      // Click "+ New" to open the wizard
-      const newBtn = page.getByRole('button', { name: /new/i }).first();
+      // Open the first-profile setup gate.
+      const newBtn = page.getByRole('button', { name: 'Create profile', exact: true });
       await expect(newBtn).toBeVisible({ timeout: 5000 });
       await newBtn.click();
       await page.waitForTimeout(1000);
@@ -1211,8 +1311,8 @@ test.describe('ChatInput — Profile Wizard', () => {
       await page.goto('/projects/proj-test-1/chat');
       await page.waitForTimeout(2000);
 
-      // Click "+ New" to open wizard on mobile
-      const newBtn = page.getByRole('button', { name: /new/i }).first();
+      // Open the first-profile setup gate on mobile.
+      const newBtn = page.getByRole('button', { name: 'Create profile', exact: true });
       await expect(newBtn).toBeVisible({ timeout: 5000 });
       await newBtn.click();
       await page.waitForTimeout(1000);
@@ -1226,20 +1326,6 @@ test.describe('ChatInput — Profile Wizard', () => {
 
 // =====================================================================================
 // TaskSubmitForm — dead code inventory
-// =====================================================================================
-
-test.describe('TaskSubmitForm — dead code verification', () => {
-  test('TaskSubmitForm is not rendered on any route', async ({ page }) => {
-    // TaskSubmitForm is not imported or rendered anywhere in src/ except its own file.
-    // The chat composer (ChatInput + useProjectChatState) handles all task submission.
-    // This test documents the finding — the component is dead code.
-    // Verified by: grep -rn 'TaskSubmitForm' src/ --include='*.tsx' --include='*.ts'
-    //   Returns only: task/TaskSubmitForm.tsx (definition) and its test file.
-    expect(true).toBe(true);
-  });
-});
-
-// =====================================================================================
 // Edge cases: long data, Unicode, XSS, many items, empty state
 // =====================================================================================
 
@@ -1252,7 +1338,8 @@ test.describe('Edge cases — stress data', () => {
         ...PROFILE_EMPTY,
         id: `prof-${i}`,
         name: i === 0 ? 'A'.repeat(200) + ' Long Name Profile' : `Profile #${i + 1}`,
-        description: i === 1 ? '<script>alert("xss")</script> & ☃ \u{1F600} Unicode test' : `Description ${i}`,
+        description:
+          i === 1 ? '<script>alert("xss")</script> & ☃ \u{1F600} Unicode test' : `Description ${i}`,
       }));
 
       const { pageErrors } = await setupMocks(page, { profiles: manyProfiles });
@@ -1311,9 +1398,12 @@ test.describe('Edge cases — stress data', () => {
         ...PROFILE_MIXED,
         id: 'prof-malformed',
         name: 'Malformed Resources',
-        resourceRequirementsJson: '{"minVcpu":-5,"minMemoryGb":"not_a_number","_rawInvalidFields":{"minMemoryGb":"not_a_number"}}',
+        resourceRequirementsJson:
+          '{"minVcpu":-5,"minMemoryGb":"not_a_number","_rawInvalidFields":{"minMemoryGb":"not_a_number"}}',
       };
-      const { pageErrors, capturedRequests } = await setupMocks(page, { profiles: [malformedProfile] });
+      const { pageErrors, capturedRequests } = await setupMocks(page, {
+        profiles: [malformedProfile],
+      });
       await page.goto('/projects/proj-test-1/profiles');
       await page.waitForSelector('text=Malformed Resources');
 
@@ -1341,7 +1431,7 @@ test.describe('Edge cases — stress data', () => {
 
       // Save should NOT have gone through (blocked by validation)
       const savePatch = capturedRequests.find(
-        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/'),
+        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/')
       );
       // Malformed data should block the request
       expect(savePatch).toBeUndefined();
