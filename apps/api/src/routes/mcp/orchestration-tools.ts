@@ -43,6 +43,7 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+import { denyWhenMcpActorLacksCurrentProjectCapability } from './orchestration-authority';
 import { stopActiveChildAgentForRetry } from './orchestration-retry-stop';
 
 // ─── retry_subtask ──────────────────────────────────────────────────────────
@@ -75,6 +76,19 @@ export async function handleRetrySubtask(
     );
   }
   const newDescription = rawNewDescription;
+
+  // Current authority BEFORE any effect. A valid KV token plus stored parent
+  // lineage is not evidence that the actor may still act in this project, and
+  // everything below this point stops a child agent, writes task/status rows,
+  // creates a chat session, attributes credentials, and starts a runner.
+  const staleActor = await denyWhenMcpActorLacksCurrentProjectCapability(
+    requestId,
+    db,
+    tokenData,
+    'task:write',
+    'retry_subtask'
+  );
+  if (staleActor) return staleActor;
 
   // Fetch the child task
   const [childTask] = await db

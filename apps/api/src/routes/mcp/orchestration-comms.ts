@@ -28,6 +28,7 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+import { denyWhenMcpActorLacksCurrentProjectCapability } from './orchestration-authority';
 
 // ─── Shared resolution helpers ──────────────────────────────────────────────
 
@@ -467,6 +468,19 @@ export async function handleStopSubtask(
   // Resolve child agent. stop_subtask is destructive, so it intentionally keeps
   // the direct-parent restriction while send_message_to_subtask is project-scoped.
   const db = drizzle(env.DATABASE, { schema });
+
+  // Same current-authority gate as retry_subtask (rule 61: one guard, every
+  // entry point in the destructive child-control class). Runs before the
+  // warning prompt, the hard agent stop, and the terminal task transition.
+  const staleActor = await denyWhenMcpActorLacksCurrentProjectCapability(
+    requestId,
+    db,
+    tokenData,
+    'task:write',
+    'stop_subtask'
+  );
+  if (staleActor) return staleActor;
+
   const resolution = await resolveAgentTarget(requestId, taskId, tokenData, db, {
     authorization: 'direct-child-control',
     targetLabel: 'Child task',
