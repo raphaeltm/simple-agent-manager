@@ -1,3 +1,4 @@
+import type { ResourceRequirements } from './resource';
 import type { CredentialProvider } from './user';
 
 // =============================================================================
@@ -281,6 +282,7 @@ export interface CreateWorkspaceRequest {
   vmLocation?: VMLocation;
   installationId?: string;
   provider?: CredentialProvider;
+  resourceRequirements?: ResourceRequirements;
   /** Devcontainer config name (subdirectory under .devcontainer/). null/undefined = auto-discover default. */
   devcontainerConfigName?: string | null;
 }

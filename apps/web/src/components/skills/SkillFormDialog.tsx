@@ -10,6 +10,7 @@ import { type FC, useEffect, useState } from 'react';
 import {
   deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
+  hasAnyResourceValue,
   type ResourceRequirementsFormState,
   ResourceRequirementsInput,
   serializeResourceRequirements,
@@ -75,7 +76,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
         description: description.trim() || null,
         defaultProfileId: defaultProfileId || null,
         systemPromptAppend: systemPromptAppend.trim() || null,
-        vmSizeOverride: vmSizeOverride || null,
+        vmSizeOverride: hasAnyResourceValue(resourceReqs) ? null : vmSizeOverride || null,
         taskMode: taskMode || 'task',
         resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
       });
