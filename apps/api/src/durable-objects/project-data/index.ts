@@ -364,8 +364,12 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async failSession(sessionId: string, errorMessage: string | null = null): Promise<boolean> {
-    const result = sessions.failSession(this.sql, sessionId);
+  async failSession(
+    sessionId: string,
+    errorMessage: string | null = null,
+    guard?: sessions.SessionIdentityGuard | null
+  ): Promise<boolean> {
+    const result = sessions.failSession(this.sql, sessionId, guard);
     if (result) {
       activity.recordActivityEventInternal(
         this.sql,
@@ -411,7 +415,8 @@ export class ProjectData extends DurableObject<Env> {
     role: string,
     content: string,
     toolMetadata: string | null,
-    messageId?: string
+    messageId?: string,
+    guard?: sessions.SessionIdentityGuard | null
   ): Promise<string> {
     return this.withArchiveTranscriptLock(() =>
       messagePersistence.persistMessageWithSideEffects(
@@ -422,7 +427,8 @@ export class ProjectData extends DurableObject<Env> {
         role,
         content,
         toolMetadata,
-        messageId
+        messageId,
+        guard
       )
     );
   }
@@ -549,8 +555,12 @@ export class ProjectData extends DurableObject<Env> {
     return run;
   }
 
-  async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
-    sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId);
+  async linkSessionToWorkspace(
+    sessionId: string,
+    workspaceId: string,
+    guard?: sessions.SessionIdentityGuard | null
+  ): Promise<void> {
+    sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId, guard);
     this.recalculateAlarm().catch((err) =>
       log.warn('schedule_workspace_idle_alarm_after_link_failed', {
         workspaceId,

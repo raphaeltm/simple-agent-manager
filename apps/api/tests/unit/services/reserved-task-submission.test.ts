@@ -774,8 +774,10 @@ From that information, derive the repository change request and append a short n
     expectOneSubmission(fixture);
   });
 
-  it('returns admitted when a lost start acknowledgement races with a delegated D1 winner', async () => {
-    const fixture = seedReservedFixture('delegated-winner');
+  it.each(['delegated', 'in_progress'] as const)(
+    'returns admitted when a lost start acknowledgement races with a %s D1 winner',
+    async (winnerStatus) => {
+      const fixture = seedReservedFixture(`${winnerStatus}-winner`);
     let tick = 0;
     const deps: ReservedTaskSubmissionDependencies = {
       now: () => `2026-09-07T00:04:${String(++tick).padStart(2, '0')}.000Z`,
@@ -788,8 +790,8 @@ From that information, derive the repository change request and append a short n
       }) as typeof startTaskRunnerDO,
       ensureTaskRunnerStarted: vi.fn(async () => {
         fixture.sqlite
-          .prepare(`UPDATE tasks SET status = 'delegated' WHERE id = ?`)
-          .run(fixture.input.identities.taskId);
+          .prepare(`UPDATE tasks SET status = ? WHERE id = ?`)
+          .run(winnerStatus, fixture.input.identities.taskId);
         return false;
       }),
     };
@@ -803,7 +805,8 @@ From that information, derive the repository change request and append a short n
         .prepare('SELECT terminal_observed_at FROM task_submission_checkpoints WHERE task_id = ?')
         .get(fixture.input.identities.taskId)
     ).toEqual({ terminal_observed_at: null });
-  });
+    }
+  );
 
   it('does not fail, stop, or restart a terminal task on a late retry', async () => {
     const fixture = seedReservedFixture('terminal');

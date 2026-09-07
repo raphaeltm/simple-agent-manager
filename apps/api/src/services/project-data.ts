@@ -122,6 +122,7 @@ import type {
 import type {
   CreateReservedTaskSessionWithInitialMessageInput,
   CreateReservedTaskSessionWithInitialMessageResult,
+  SessionIdentityGuard as ProjectDataSessionIdentityGuard,
 } from '../durable-objects/project-data/sessions';
 import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
@@ -153,6 +154,8 @@ import {
 import { recordReservedTaskSessionRevocation } from './reserved-task-session-revocations';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
+
+export type { ProjectDataSessionIdentityGuard };
 
 function rootExactReadOwner(projectId: string, sessionId: string): ProjectDataArchiveLocation {
   return {
@@ -613,7 +616,8 @@ export async function linkSessionToWorkspace(
   env: Env,
   projectId: string,
   sessionId: string,
-  workspaceId: string
+  workspaceId: string,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<void> {
   await assertExactWriteAllowedIfArchiveEnabled(
     env,
@@ -622,7 +626,7 @@ export async function linkSessionToWorkspace(
     'linkSessionToWorkspace'
   );
   return callProjectDataWithRetry(env, projectId, 'linkSessionToWorkspace', (stub) =>
-    stub.linkSessionToWorkspace(sessionId, workspaceId)
+    stub.linkSessionToWorkspace(sessionId, workspaceId, guard ?? null)
   );
 }
 
@@ -742,7 +746,8 @@ export async function failSession(
   env: Env,
   projectId: string,
   sessionId: string,
-  errorMessage: string | null = null
+  errorMessage: string | null = null,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'failSession');
   await recordReservedTaskSessionRevocation(env, {
@@ -752,7 +757,7 @@ export async function failSession(
     source: 'project_data.fail_session',
   });
   const stub = await getStub(env, projectId);
-  const failed = await stub.failSession(sessionId, errorMessage);
+  const failed = await stub.failSession(sessionId, errorMessage, guard ?? null);
   if (failed) {
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
@@ -795,7 +800,8 @@ export async function persistMessage(
   role: string,
   content: string,
   toolMetadata: Record<string, unknown> | null,
-  messageId?: string
+  messageId?: string,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<string> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'persistMessage');
   return callProjectDataNoRetry(env, projectId, 'persistMessage', (stub) =>
@@ -804,7 +810,8 @@ export async function persistMessage(
       role,
       content,
       toolMetadata ? JSON.stringify(toolMetadata) : null,
-      messageId
+      messageId,
+      guard ?? null
     )
   );
 }

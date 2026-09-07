@@ -1,11 +1,3 @@
-/**
- * Retry-safe normal task submission adapter.
- *
- * Callers must durably reserve the immutable task/session/message/status identities
- * and source execution before invoking this adapter. The adapter records the D1
- * task, initial status event, and checkpoint in one batch, then reconciles the
- * ProjectData and TaskRunner boundaries by intent fingerprint on retry.
- */
 import { TASK_TERMINAL_STATUSES, type TaskTerminalStatus } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 

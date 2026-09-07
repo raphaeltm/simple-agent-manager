@@ -853,7 +853,7 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `MAX_AGENT_SESSIONS_PER_WORKSPACE`           | `10`               | Max concurrent agent sessions                                                 |
 | `MAX_PROJECTS_PER_USER`                      | `100`              | Max projects per user                                                         |
 | `MAX_TASKS_PER_PROJECT`                      | `10000`            | Max ideas per project                                                         |
-| `MAX_TASK_MESSAGE_LENGTH`                    | `16000`            | Max idea description length                                                   |
+| `MAX_TASK_MESSAGE_LENGTH`                    | `16000`            | Max task description and reserved prompt length                               |
 | `RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH`  | `512`              | Max branch-name seed characters accepted by reserved task submissions         |
 | `RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH` | `512`            | Max source display-name characters accepted by reserved task submissions      |
 | `RESERVED_TASK_REPOSITORY_ACCESS_FLOW_MAX_LENGTH` | `512`       | Max repository-access audit flow characters accepted by reserved submissions  |

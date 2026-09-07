@@ -4,6 +4,7 @@ import * as attention from './attention';
 import * as idleCleanup from './idle-cleanup';
 import * as messages from './messages';
 import * as sessionState from './session-state';
+import type { SessionIdentityGuard } from './sessions';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.messages');
@@ -40,7 +41,8 @@ export async function persistMessageWithSideEffects(
   role: string,
   content: string,
   toolMetadata: string | null,
-  messageId?: string
+  messageId?: string,
+  guard?: SessionIdentityGuard | null
 ): Promise<string> {
   const result = messages.persistMessage(
     sql,
@@ -49,7 +51,8 @@ export async function persistMessageWithSideEffects(
     role,
     content,
     toolMetadata,
-    messageId
+    messageId,
+    guard
   );
   if (!result.inserted) return result.id;
 
