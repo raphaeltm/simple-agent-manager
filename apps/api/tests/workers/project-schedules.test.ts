@@ -79,10 +79,18 @@ describe('scheduled actions public boundaries', () => {
       projectId: f.projectId,
       state: 'pending',
     });
-    expect(body<ProjectScheduleMutationResult>(await f.tool('reconcile_project_schedule', {
-      scheduleId: created.schedule.id, expectedVersion: created.schedule.version,
-    }))).toMatchObject({ changed: false, recovery: { outcome: 'not_admitted' },
-      schedule: { execution: { status: 'not_started' } } });
+    expect(
+      body<ProjectScheduleMutationResult>(
+        await f.tool('reconcile_project_schedule', {
+          scheduleId: created.schedule.id,
+          expectedVersion: created.schedule.version,
+        })
+      )
+    ).toMatchObject({
+      changed: false,
+      recovery: { outcome: 'not_admitted' },
+      schedule: { execution: { status: 'not_started' } },
+    });
     expect(
       body<ProjectScheduleMutationResult>(await f.tool('create_project_schedule', input)).idempotent
     ).toBe(true);
@@ -260,31 +268,82 @@ describe('scheduled actions public boundaries', () => {
       source_kind: 'scheduled_action',
     });
     await runInDurableObject(f.stub, async (_instance, state) => {
-      state.storage.sql.exec(`UPDATE project_schedules SET state='ambiguous', next_attempt_at=NULL WHERE id=?`, created.schedule.id);
-      state.storage.sql.exec(`UPDATE session_inbox SET delivery_state='ambiguous' WHERE id=?`, result.schedule!.deliveryId);
+      state.storage.sql.exec(
+        `UPDATE project_schedules SET state='ambiguous', next_attempt_at=NULL WHERE id=?`,
+        created.schedule.id
+      );
+      state.storage.sql.exec(
+        `UPDATE session_inbox SET delivery_state='ambiguous' WHERE id=?`,
+        result.schedule!.deliveryId
+      );
     });
-    const unresolvedResponse = await browser(f.projectId, f.userId,
-      `/schedules/${created.schedule.id}/reconcile`, 'POST', { expectedVersion: created.schedule.version });
+    const unresolvedResponse = await browser(
+      f.projectId,
+      f.userId,
+      `/schedules/${created.schedule.id}/reconcile`,
+      'POST',
+      { expectedVersion: created.schedule.version }
+    );
     expect(unresolvedResponse.status).toBe(200);
-    expect(await unresolvedResponse.json()).toMatchObject({ changed: false,
-      recovery: { outcome: 'unresolved' }, schedule: { execution: { status: 'ambiguous', retrySubmissionAllowed: false } } });
-    expect((await browser(f.projectId, f.userId,
-      `/schedules/${created.schedule.id}/reconcile`, 'POST', { expectedVersion: created.schedule.version, retrySubmission: true })).status).toBe(400);
-    await runInDurableObject(f.stub, async (_instance, state) => {
-      state.storage.sql.exec(`UPDATE session_inbox SET delivery_state='acked' WHERE id=?`, result.schedule!.deliveryId);
+    expect(await unresolvedResponse.json()).toMatchObject({
+      changed: false,
+      recovery: { outcome: 'unresolved' },
+      schedule: { execution: { status: 'ambiguous', retrySubmissionAllowed: false } },
     });
-    const recovered = body<ProjectScheduleMutationResult>(await f.tool('reconcile_project_schedule', {
-      scheduleId: created.schedule.id, expectedVersion: created.schedule.version,
-    }));
-    expect(recovered).toMatchObject({ changed: true, recovery: { outcome: 'observed' },
-      schedule: { deliveryId: result.schedule!.deliveryId, execution: { status: 'acked' } } });
+    expect(
+      (
+        await browser(
+          f.projectId,
+          f.userId,
+          `/schedules/${created.schedule.id}/reconcile`,
+          'POST',
+          { expectedVersion: created.schedule.version, retrySubmission: true }
+        )
+      ).status
+    ).toBe(400);
+    await runInDurableObject(f.stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE session_inbox SET delivery_state='acked' WHERE id=?`,
+        result.schedule!.deliveryId
+      );
+    });
+    const recovered = body<ProjectScheduleMutationResult>(
+      await f.tool('reconcile_project_schedule', {
+        scheduleId: created.schedule.id,
+        expectedVersion: created.schedule.version,
+      })
+    );
+    expect(recovered).toMatchObject({
+      changed: true,
+      recovery: { outcome: 'observed' },
+      schedule: { deliveryId: result.schedule!.deliveryId, execution: { status: 'acked' } },
+    });
     const persisted = await runInDurableObject(f.stub, async (_instance, state) => ({
-      schedule: state.storage.sql.exec('SELECT execution_finished_at, next_attempt_at FROM project_schedules WHERE id=?', created.schedule.id).toArray()[0],
-      deliveries: state.storage.sql.exec("SELECT id FROM session_inbox WHERE source_kind='scheduled_action'").toArray(),
+      schedule: state.storage.sql
+        .exec(
+          'SELECT execution_finished_at, next_attempt_at FROM project_schedules WHERE id=?',
+          created.schedule.id
+        )
+        .toArray()[0],
+      deliveries: state.storage.sql
+        .exec("SELECT id FROM session_inbox WHERE source_kind='scheduled_action'")
+        .toArray(),
     }));
-    expect(persisted.schedule).toMatchObject({ execution_finished_at: expect.any(Number), next_attempt_at: null });
+    expect(persisted.schedule).toMatchObject({
+      execution_finished_at: expect.any(Number),
+      next_attempt_at: null,
+    });
     expect(persisted.deliveries).toEqual([{ id: result.schedule!.deliveryId }]);
-    expect((await browser(f.projectId, f.userId,
-      `/schedules/${created.schedule.id}/reconcile`, 'POST', { expectedVersion: created.schedule.version })).status).toBe(409);
+    expect(
+      (
+        await browser(
+          f.projectId,
+          f.userId,
+          `/schedules/${created.schedule.id}/reconcile`,
+          'POST',
+          { expectedVersion: created.schedule.version }
+        )
+      ).status
+    ).toBe(409);
   });
 });

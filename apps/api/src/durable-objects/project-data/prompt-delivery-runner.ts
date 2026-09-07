@@ -1,18 +1,18 @@
-import { invalidScheduledDeliveryTarget } from './project-event-schedules-delivery';
 import {
   MAX_ORCHESTRATOR_WAIT_CHILDREN,
   TASK_TERMINAL_STATUSES,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
-import { recordDurableExecutionMetric } from '../../services/telemetry';
 import {
   isSessionRecoverySourceTaskGuardValid,
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
+import { recordDurableExecutionMetric } from '../../services/telemetry';
 import type { VmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
 import * as activity from './activity';
 import type { DurableExecutionConfig } from './durable-execution-config';
+import { invalidScheduledDeliveryTarget } from './project-event-schedules-delivery';
 import {
   advanceProjectEventPromptAttemptCheckpoint,
   invalidProjectEventWakeDeliveryTargetResult,

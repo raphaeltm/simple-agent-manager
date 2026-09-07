@@ -15,9 +15,9 @@
  * from, or returned to, tenant workspaces.
  */
 import {
-  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
+  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
   type Dialect,
   HARNESS_CAPABILITIES,
   type HarnessCapability,
@@ -31,7 +31,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { RequestBodyTooLargeError, readRequestJsonRecord } from '../lib/runtime-validation';
+import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import {
   checkRateLimit,
@@ -48,7 +48,13 @@ import {
 } from '../services/ai-token-usage-accounting';
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
-import { anthropicError, anthropicUsageGateError, credentialErrorHeaders, openaiError, openaiUsageGateError } from './ai-proxy-passthrough-errors';
+import {
+  anthropicError,
+  anthropicUsageGateError,
+  credentialErrorHeaders,
+  openaiError,
+  openaiUsageGateError,
+} from './ai-proxy-passthrough-errors';
 import { schedulePassthroughLimitHeaders } from './ai-proxy-passthrough-telemetry';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();

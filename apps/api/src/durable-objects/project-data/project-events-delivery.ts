@@ -18,7 +18,6 @@ import {
 } from './project-events-contracts';
 import { resolveProjectEventDelivery } from './project-events-delivery-resolver';
 import { resolveProjectEventLimits } from './project-events-limits';
-import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import {
   mapProjectEventDeliveryAttempt,
   mapProjectEventDeliveryBatch,
@@ -54,6 +53,7 @@ import {
   normalizeTimestamp,
   stableStringify,
 } from './project-events-values';
+import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import type { Env } from './types';
 import { generateId } from './types';
 

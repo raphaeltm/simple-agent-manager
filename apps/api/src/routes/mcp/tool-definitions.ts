@@ -40,7 +40,6 @@ export { WORKSPACE_TOOLS } from './tool-definitions-workspace-tools';
 import { COMMENT_TOOLS } from './tool-definitions-comment-tools';
 import { DEPLOYMENT_TOOLS } from './tool-definitions-deployment-tools';
 import { PROJECT_EVENT_SUBSCRIPTION_TOOLS } from './tool-definitions-event-subscription-tools';
-import { PROJECT_EVENT_CHANNEL_TOOLS } from './tool-definitions-project-event-channel-tools';
 import { INCIDENT_TOOLS } from './tool-definitions-incident-tools';
 import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
@@ -51,6 +50,7 @@ import { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-to
 import { POLICY_TOOLS } from './tool-definitions-policy-tools';
 import { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 import { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
+import { PROJECT_EVENT_CHANNEL_TOOLS } from './tool-definitions-project-event-channel-tools';
 import { PROJECT_EVENT_TOOLS } from './tool-definitions-project-event-tools';
 import { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
 import { SKILL_TOOLS } from './tool-definitions-skill-tools';

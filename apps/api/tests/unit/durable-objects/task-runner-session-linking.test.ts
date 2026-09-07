@@ -43,9 +43,7 @@ function createContext(
       return {
         run: vi.fn(async () => ({
           meta: {
-            changes: sql.includes('UPDATE tasks')
-              ? (options.taskUpdateChanges ?? 1)
-              : 1,
+            changes: sql.includes('UPDATE tasks') ? (options.taskUpdateChanges ?? 1) : 1,
           },
         })),
         first: vi.fn(async () => options.taskRow ?? null),
@@ -83,18 +81,23 @@ describe('ensureSessionLinked', () => {
       'project-1',
       'session-1',
       'ws-1',
-      null,
+      null
     );
     expect(scheduleIdleCleanupMock).toHaveBeenCalledWith(
       env,
       'project-1',
       'session-1',
       'ws-1',
-      'task-1',
+      'task-1'
     );
-    expect(
-      statements.find((statement) => statement.sql.includes('UPDATE tasks'))?.params
-    ).toEqual(['session-1', 'ws-1', expect.any(String), 'task-1', 'session-1', 'ws-1']);
+    expect(statements.find((statement) => statement.sql.includes('UPDATE tasks'))?.params).toEqual([
+      'session-1',
+      'ws-1',
+      expect.any(String),
+      'task-1',
+      'session-1',
+      'ws-1',
+    ]);
   });
 
   it('does not schedule idle cleanup for conversation-mode sessions', async () => {

@@ -36,7 +36,9 @@ export function openaiError(
   });
 }
 
-export function anthropicUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-cap'): Response {
+export function anthropicUsageGateError(
+  reason: 'daily-token-budget' | 'monthly-cost-cap'
+): Response {
   if (reason === 'daily-token-budget') {
     return anthropicError(
       'Daily token budget exceeded. Resets at midnight UTC.',
@@ -63,4 +65,3 @@ export function openaiUsageGateError(reason: 'daily-token-budget' | 'monthly-cos
     429
   );
 }
-

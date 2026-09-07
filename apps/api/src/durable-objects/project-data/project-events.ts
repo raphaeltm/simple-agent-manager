@@ -19,7 +19,6 @@ import {
 import { findNewerCredentialLimitEvent } from './project-events-credential-supersession';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEventSubscription } from './project-events-mappers';
-import { ensureProjectEventRetentionScheduled } from './project-events-scheduler';
 import {
   assertProjectBinding,
   normalizeListLimit,
@@ -27,6 +26,7 @@ import {
   normalizeProjectId,
   normalizeSubscriptionInput,
 } from './project-events-normalization';
+import { ensureProjectEventRetentionScheduled } from './project-events-scheduler';
 import {
   createMatchesForEvent,
   enforceActiveSubscriptionLimit,
@@ -102,8 +102,8 @@ export {
 } from './project-events-delivery-resolver';
 export { resolveProjectEventLimits } from './project-events-limits';
 export {
-  cancelProjectEventWakeForRevokedSourceTask,
   type AcceptedProjectEventWake,
+  cancelProjectEventWakeForRevokedSourceTask,
   type ProjectEventWakeMaterializationCandidate,
   type ProjectEventWakeMaterializationResult,
   type ProjectEventWakeSourceTaskGuard,
@@ -111,6 +111,12 @@ export {
   selectProjectEventWakeMaterializationCandidate,
   selectProjectEventWakeMaterializationCandidates,
 } from './project-events-materialization';
+export { compileProjectEventFilter } from './project-events-normalization';
+export {
+  ackProjectEventDelivery,
+  getProjectEvent,
+  listProjectEventSubscriptionEvents,
+} from './project-events-pull';
 export {
   computeProjectEventMaterializationAlarmTime,
   computeProjectEventRetentionAlarmTime,
@@ -122,25 +128,19 @@ export {
   recordSchedulerFailure,
 } from './project-events-scheduler';
 export {
-  EVENT_WAKE_ADAPTER_ID,
+  getProjectEventRecentStatus,
+  refreshProjectEventStorageAccounting,
+  runProjectEventRetention,
+} from './project-events-status-retention';
+export {
   advanceProjectEventPromptAttemptCheckpoint,
+  EVENT_WAKE_ADAPTER_ID,
   hasProjectEventWakeLease,
   invalidProjectEventWakeDeliveryTargetResult,
   readProjectEventWakeLeaseUntil,
   validateProjectEventWakeRecoveryAuthority,
   type ValidateProjectEventWakeRecoveryAuthorityInput,
 } from './project-events-wake-delivery';
-export { compileProjectEventFilter } from './project-events-normalization';
-export {
-  ackProjectEventDelivery,
-  getProjectEvent,
-  listProjectEventSubscriptionEvents,
-} from './project-events-pull';
-export {
-  getProjectEventRecentStatus,
-  refreshProjectEventStorageAccounting,
-  runProjectEventRetention,
-} from './project-events-status-retention';
 
 export function admitProjectEvent(
   sql: SqlStorage,

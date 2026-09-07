@@ -14,20 +14,20 @@ import {
   mapProjectEventDeliveryBatch,
   mapProjectEventMatch,
 } from './project-events-mappers';
-import { markSchedulerSuccess } from './project-events-scheduler';
-import { repairProjectEventOrphanMatches } from './project-events-orphan-retention';
 import {
   assertProjectBinding,
   normalizeListLimit,
   normalizeProjectId,
 } from './project-events-normalization';
+import { repairProjectEventOrphanMatches } from './project-events-orphan-retention';
+import { markSchedulerSuccess } from './project-events-scheduler';
+import { chunkIdsForBindBudget } from './project-events-storage-helpers';
 import {
   accountingFor,
   deleteRetentionRowsByIds,
   readAccounting,
   readRecentRows,
 } from './project-events-storage-maintenance';
-import { chunkIdsForBindBudget } from './project-events-storage-helpers';
 import { normalizeTimestamp } from './project-events-values';
 import type { Env } from './types';
 
@@ -341,8 +341,7 @@ function deleteEligibleAttempts(
   let count = 0;
   let hasMore = false;
   const phases = eligibleAttemptDeletionPhases(projectId, cutoff);
-  for (let index = 0; index < phases.length; index += 1) {
-    const phase = phases[index]!;
+  for (const [index, phase] of phases.entries()) {
     const selected = takeBudgetedIds(sql, phase.query, phase.params, remaining);
     const deleted = deleteRetentionRowsByIds(
       sql,
@@ -434,8 +433,7 @@ function deleteEligibleMatches(
   let count = 0;
   let hasMore = false;
   const phases = eligibleMatchDeletionPhases(projectId, cutoff);
-  for (let index = 0; index < phases.length; index += 1) {
-    const phase = phases[index]!;
+  for (const [index, phase] of phases.entries()) {
     const selected = takeBudgetedIds(sql, phase.query, phase.params, remaining);
     const deleted = deleteRetentionRowsByIds(sql, 'project_event_matches', projectId, selected.ids);
     count += deleted.count;

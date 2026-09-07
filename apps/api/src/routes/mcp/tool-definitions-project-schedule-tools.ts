@@ -95,7 +95,11 @@ export const PROJECT_SCHEDULE_TOOLS = [
       'Observe canonical task or delivery receipts after exhausted retries. Default receipt-only reconciliation never wakes compute or replays messages. Explicit retrySubmission reopens bounded task submission only when eligible, using the original identities and deadline. Unknown receipts retain standing-watch concurrency. Requires the current expectedVersion.',
     inputSchema: {
       type: 'object',
-      properties: { scheduleId: string, expectedVersion: timestamp, retrySubmission: { type: 'boolean' } },
+      properties: {
+        scheduleId: string,
+        expectedVersion: timestamp,
+        retrySubmission: { type: 'boolean' },
+      },
       required: ['scheduleId', 'expectedVersion'],
       additionalProperties: false,
     },

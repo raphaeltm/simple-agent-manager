@@ -23,12 +23,12 @@ After subscribing, call `list_subscription_events` with the `subscriptionId` to 
 
 Project members with read access can inspect subscriptions. Members with task write access can cancel human or agent subscriptions. System, policy and standing-watch subscriptions must be managed through their owning controls.
 
-| Method | Endpoint                                                              | Purpose                                                       |
-| ------ | --------------------------------------------------------------------- | ------------------------------------------------------------- |
-| GET    | `/api/projects/:projectId/event-subscriptions`                        | List subscriptions; optional `sessionId`, `state` and `limit` |
-| GET    | `/api/projects/:projectId/event-subscriptions/:subscriptionId`        | Inspect one subscription                                      |
-| GET | `/api/projects/:projectId/event-subscriptions/:subscriptionId/deliveries` | Inspect bounded recent transport outcomes; optional `limit` |
-| POST   | `/api/projects/:projectId/event-subscriptions/:subscriptionId/cancel` | Cancel with optional `{ "reason": "No longer needed" }`       |
+| Method | Endpoint                                                                  | Purpose                                                       |
+| ------ | ------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| GET    | `/api/projects/:projectId/event-subscriptions`                            | List subscriptions; optional `sessionId`, `state` and `limit` |
+| GET    | `/api/projects/:projectId/event-subscriptions/:subscriptionId`            | Inspect one subscription                                      |
+| GET    | `/api/projects/:projectId/event-subscriptions/:subscriptionId/deliveries` | Inspect bounded recent transport outcomes; optional `limit`   |
+| POST   | `/api/projects/:projectId/event-subscriptions/:subscriptionId/cancel`     | Cancel with optional `{ "reason": "No longer needed" }`       |
 
 The list defaults to active subscriptions and returns `{ subscriptions, hasMore }`. `state` accepts `active`, `cancelled`, `expired` or `any`. Results include ownership, target, requested and resolved delivery, expiry and cancellation details. Cancelling again is safe and reports `idempotent: true`; cancellation does not undo work an agent has already performed. The server derives the cancelling user's identity from the authenticated session.
 

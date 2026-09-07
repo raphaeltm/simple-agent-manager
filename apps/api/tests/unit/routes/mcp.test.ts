@@ -1,8 +1,8 @@
 import { getTableColumns } from 'drizzle-orm';
-import { tasks } from '../../../src/db/schema';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { tasks } from '../../../src/db/schema';
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
@@ -686,9 +686,18 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_subscription_events');
       expect(toolNames).toContain('get_event');
       expect(toolNames).toContain('ack_event_delivery');
-      for (const name of ['publish_channel_event', 'list_event_channels', 'get_channel_history',
-        'follow_event_channel', 'catch_up_event_channel', 'create_project_schedule',
-        'list_project_schedules', 'get_project_schedule', 'reschedule_project_schedule', 'cancel_project_schedule']) {
+      for (const name of [
+        'publish_channel_event',
+        'list_event_channels',
+        'get_channel_history',
+        'follow_event_channel',
+        'catch_up_event_channel',
+        'create_project_schedule',
+        'list_project_schedules',
+        'get_project_schedule',
+        'reschedule_project_schedule',
+        'cancel_project_schedule',
+      ]) {
         expect(toolNames).toContain(name);
       }
       expect(new Set(toolNames).size).toBe(toolNames.length);
@@ -948,14 +957,28 @@ describe('MCP Routes', () => {
 
     function mockInstructionRows(taskMode: 'task' | 'conversation') {
       const taskRow: Record<string, unknown> = {
-        id: 'task-123', projectId: 'proj-456', userId: 'user-789', workspaceId: 'ws-abc',
-        title: 'Test task', description: 'A test task', status: 'in_progress', priority: 0,
-        outputBranch: 'sam/test', taskMode, dispatchDepth: 0, triggeredBy: 'user',
-        agentCredentialSource: 'user', credentialAttributionSource: 'user',
-        createdBy: 'user-789', createdAt: '2026-07-04T00:00:00.000Z', updatedAt: '2026-07-04T00:00:00.000Z',
+        id: 'task-123',
+        projectId: 'proj-456',
+        userId: 'user-789',
+        workspaceId: 'ws-abc',
+        title: 'Test task',
+        description: 'A test task',
+        status: 'in_progress',
+        priority: 0,
+        outputBranch: 'sam/test',
+        taskMode,
+        dispatchDepth: 0,
+        triggeredBy: 'user',
+        agentCredentialSource: 'user',
+        credentialAttributionSource: 'user',
+        createdBy: 'user-789',
+        createdAt: '2026-07-04T00:00:00.000Z',
+        updatedAt: '2026-07-04T00:00:00.000Z',
       };
       mockD1._stmt.raw
-        .mockResolvedValueOnce([Object.keys(getTableColumns(tasks)).map((key) => taskRow[key] ?? null)])
+        .mockResolvedValueOnce([
+          Object.keys(getTableColumns(tasks)).map((key) => taskRow[key] ?? null),
+        ])
         .mockResolvedValueOnce([
           [
             'proj-456',

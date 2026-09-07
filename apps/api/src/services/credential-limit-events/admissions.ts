@@ -4,8 +4,8 @@ import type { Env } from '../../env';
 import { ulid } from '../../lib/ulid';
 import {
   admitProjectEventSourceIntentById,
-  projectEventSourceOutboxInsertStatement,
   type ProjectEventSourceAdmissionResult,
+  projectEventSourceOutboxInsertStatement,
   type ProjectEventSourceOutboxState,
 } from '../project-event-source-outbox';
 import type {

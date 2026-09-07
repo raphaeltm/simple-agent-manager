@@ -104,7 +104,9 @@ export async function handleScheduleTool(
     } else if (tool === 'reconcile_project_schedule') {
       const { scheduleId, ...request } = params;
       result = await projectData.reconcileProjectSchedule(env, context.projectId, {
-        userId: token.userId, id: text(scheduleId, 'scheduleId'), request,
+        userId: token.userId,
+        id: text(scheduleId, 'scheduleId'),
+        request,
       });
     } else {
       const { scheduleId, ...request } = params;

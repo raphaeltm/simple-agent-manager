@@ -1,4 +1,3 @@
-import { handleScheduleTool } from './project-schedule-tools';
 /**
  * MCP Server Route
  *
@@ -47,7 +46,6 @@ import {
   handleSetDeploymentEnvironmentConfig,
 } from './deployment-tools';
 import { handleDispatchTask } from './dispatch-tool';
-import { handleChannelTool } from './project-event-channel-tools';
 import {
   handleCancelProjectEventSubscription,
   handleCreateProjectEventSubscription,
@@ -141,11 +139,13 @@ import {
   handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
 } from './profile-tools';
+import { handleChannelTool } from './project-event-channel-tools';
 import {
   handleAckEventDelivery,
   handleGetEvent,
   handleListSubscriptionEvents,
 } from './project-event-tools';
+import { handleScheduleTool } from './project-schedule-tools';
 import {
   handleGetArchivedToolPayloads,
   handleGetSessionMessages,

@@ -98,22 +98,40 @@ function measuredSql(sql: SqlStorage) {
 
 describe('bounded durable orphan repair windows', () => {
   it('reports logical deletions while draining indexed attempts, matches, batches and events under one shared budget', async () => {
-    const stub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(crypto.randomUUID())) as DurableObjectStub<ProjectDataTestDouble>;
+    const stub = env.PROJECT_DATA.get(
+      env.PROJECT_DATA.idFromName(crypto.randomUUID())
+    ) as DurableObjectStub<ProjectDataTestDouble>;
     await runInDurableObject(stub, (_instance, state) => {
       const sql = state.storage.sql;
       seed(sql, 1);
-      sql.exec("UPDATE project_event_delivery_batches SET state = 'failed' WHERE id = 'healthy-batch'");
-      sql.exec(`INSERT INTO project_event_delivery_attempts
+      sql.exec(
+        "UPDATE project_event_delivery_batches SET state = 'failed' WHERE id = 'healthy-batch'"
+      );
+      sql.exec(
+        `INSERT INTO project_event_delivery_attempts
         (id, project_id, batch_id, idempotency_key, idempotency_fingerprint, attempt_number,
          state, started_at, completed_at, created_at)
         VALUES ('attempt', ?, 'healthy-batch', 'attempt-key', 'attempt-fp', 1, 'failed', ?, ?, ?)`,
-        projectId, NOW, NOW, NOW);
-      const counters = ['deletedAttempts', 'deletedMatches', 'deletedBatches', 'deletedEvents'] as const;
+        projectId,
+        NOW,
+        NOW,
+        NOW
+      );
+      const counters = [
+        'deletedAttempts',
+        'deletedMatches',
+        'deletedBatches',
+        'deletedEvents',
+      ] as const;
       for (const [pass, expected] of counters.entries()) {
-        const result = state.storage.transactionSync(() => runProjectEventRetention(
-          sql, { ...retentionEnv, PROJECT_EVENT_RETENTION_DAYS: '0' }, projectId,
-          { projectId, now: NOW + pass + 1, limit: 1, refreshAccounting: false }
-        ));
+        const result = state.storage.transactionSync(() =>
+          runProjectEventRetention(
+            sql,
+            { ...retentionEnv, PROJECT_EVENT_RETENTION_DAYS: '0' },
+            projectId,
+            { projectId, now: NOW + pass + 1, limit: 1, refreshAccounting: false }
+          )
+        );
         for (const counter of counters) expect(result[counter]).toBe(counter === expected ? 1 : 0);
         expect(result.hasMore).toBe(pass < counters.length - 1);
       }

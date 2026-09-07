@@ -8,8 +8,8 @@ import {
   DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,
   MAX_NOTIFICATION_BODY_LENGTH,
   parseCompletionEvidenceJson,
-  validateCompletionEvidence,
   type TaskTerminalTransitionEvent,
+  validateCompletionEvidence,
 } from '@simple-agent-manager/shared';
 import type { SQL } from 'drizzle-orm';
 import { and, desc, eq, like, or } from 'drizzle-orm';
@@ -441,9 +441,14 @@ export async function handleCompleteTask(
   }
 
   const completedEvent: TaskTerminalTransitionEvent = {
-    transitionId: ulid(), taskId: tokenData.taskId, projectId: tokenData.projectId,
-    parentTaskId: taskRow?.parent_task_id ?? null, status: 'completed', reason: summary,
-    occurredAt: now, source: 'mcp.complete_task',
+    transitionId: ulid(),
+    taskId: tokenData.taskId,
+    projectId: tokenData.projectId,
+    parentTaskId: taskRow?.parent_task_id ?? null,
+    status: 'completed',
+    reason: summary,
+    occurredAt: now,
+    source: 'mcp.complete_task',
   };
   // Capture before cleanup or other downstream work can fail after the winning CAS.
   // This remains hook-bound capture, not an atomic task/outbox write.

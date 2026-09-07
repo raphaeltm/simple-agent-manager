@@ -147,7 +147,9 @@ export function deleteRetentionRowsByIds(
   for (const chunk of chunkIdsForBindBudget(ids, 1)) {
     const placeholders = chunk.map(() => '?').join(', ');
     const result = sql.exec(
-      `${deleteRowsByIdsSql(table, placeholders)} RETURNING id`, projectId, ...chunk
+      `${deleteRowsByIdsSql(table, placeholders)} RETURNING id`,
+      projectId,
+      ...chunk
     );
     count += result.toArray().length;
     mutated += result.rowsWritten;

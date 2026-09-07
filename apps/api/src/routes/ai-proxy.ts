@@ -14,9 +14,9 @@
  */
 import {
   DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST,
-  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
+  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
@@ -25,7 +25,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { RequestBodyTooLargeError, readRequestJsonRecord } from '../lib/runtime-validation';
+import { readRequestJsonRecord, RequestBodyTooLargeError } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import {
   checkRateLimit,

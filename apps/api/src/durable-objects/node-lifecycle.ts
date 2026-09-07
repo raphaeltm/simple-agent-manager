@@ -39,8 +39,8 @@ import { log } from '../lib/logger';
 import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
 import {
   isSessionRecoveryTaskAuthorized,
-  sourceProjectMemberAuthoritySql,
   type SessionRecoverySourceTaskGuard,
+  sourceProjectMemberAuthoritySql,
 } from '../services/session-recovery-authority';
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
 import {

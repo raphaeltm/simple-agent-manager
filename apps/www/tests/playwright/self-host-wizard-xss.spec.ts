@@ -1,4 +1,4 @@
-import { expect, test, type Page } from './fixtures';
+import { expect, type Page, test } from './fixtures';
 import { expectNoHorizontalOverflow } from './self-host-overflow-helpers';
 
 async function openWizard(page: Page) {

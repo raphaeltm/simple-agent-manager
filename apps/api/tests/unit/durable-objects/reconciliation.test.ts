@@ -161,7 +161,11 @@ function createMockD1(
     if (query.includes('INSERT INTO task_status_events')) {
       const taskId = args[7] as string;
       const row = richTaskRow(taskId);
-      if (row?.status === args[9] && row.completed_at === args[10] && row.terminal_transition_id === args[11]) {
+      if (
+        row?.status === args[9] &&
+        row.completed_at === args[10] &&
+        row.terminal_transition_id === args[11]
+      ) {
         statusEvents.push({
           task_id: taskId,
           from_status: args[1],
@@ -177,7 +181,13 @@ function createMockD1(
     if (query.includes('INSERT OR IGNORE INTO project_event_source_outbox')) {
       const [taskId, projectId, transitionId] = args.slice(-3);
       const row = richTaskRow(String(taskId));
-      return { success: true, meta: { changes: row?.project_id === projectId && row.terminal_transition_id === transitionId ? 1 : 0 } };
+      return {
+        success: true,
+        meta: {
+          changes:
+            row?.project_id === projectId && row.terminal_transition_id === transitionId ? 1 : 0,
+        },
+      };
     }
     if (query.includes('UPDATE workspaces')) {
       const workspaceId = args[1] as string;

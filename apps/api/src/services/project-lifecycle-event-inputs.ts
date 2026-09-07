@@ -370,7 +370,14 @@ export async function buildTaskLifecycleEventInput(
     eventType,
     subject: lifecycleSubject('task', input.taskId),
     severity: taskSeverity(input.status),
-    deliveryKey: lifecycleKey('task', input.taskId, 'status', input.status, input.transitionId ? 'transition' : null, input.transitionId),
+    deliveryKey: lifecycleKey(
+      'task',
+      input.taskId,
+      'status',
+      input.status,
+      input.transitionId ? 'transition' : null,
+      input.transitionId
+    ),
     occurredAt: input.occurredAt,
     metadata: {
       taskId: input.taskId,

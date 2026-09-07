@@ -1,5 +1,5 @@
-import type { ProjectEventOrphanScanCursor } from './project-events-orphan-retention';
 import { resolveProjectEventLimits } from './project-events-limits';
+import type { ProjectEventOrphanScanCursor } from './project-events-orphan-retention';
 import type { Env } from './types';
 
 export type ProjectEventSchedulerPhase = 'materialization' | 'retention';

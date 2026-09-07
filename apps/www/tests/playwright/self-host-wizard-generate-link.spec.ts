@@ -1,4 +1,4 @@
-import { expect, test, type Page } from './fixtures';
+import { expect, type Page, test } from './fixtures';
 
 async function openWizard(page: Page) {
   await page.goto('/self-host/');

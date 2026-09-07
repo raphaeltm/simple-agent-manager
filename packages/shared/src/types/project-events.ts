@@ -441,9 +441,21 @@ export type ProjectEventDeliveryBatchRecord = {
 };
 
 /** Member-visible transport outcomes; deliberately excludes event payloads and match identities. */
-export type ProjectEventDeliveryOutcome = Pick<ProjectEventDeliveryBatchRecord,
-  'id' | 'state' | 'deliveryChannel' | 'deliveredVia' | 'requestedDelivery' | 'resolvedDelivery' |
-  'createdAt' | 'updatedAt' | 'deliveredAt' | 'ackedAt' | 'terminalAt' | 'terminalReason'>;
+export type ProjectEventDeliveryOutcome = Pick<
+  ProjectEventDeliveryBatchRecord,
+  | 'id'
+  | 'state'
+  | 'deliveryChannel'
+  | 'deliveredVia'
+  | 'requestedDelivery'
+  | 'resolvedDelivery'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'deliveredAt'
+  | 'ackedAt'
+  | 'terminalAt'
+  | 'terminalReason'
+>;
 export type ProjectEventDeliveryOutcomeList = {
   deliveries: ProjectEventDeliveryOutcome[];
   hasMore: boolean;

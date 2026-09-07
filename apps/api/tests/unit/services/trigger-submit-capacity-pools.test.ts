@@ -137,7 +137,12 @@ describe('submitTriggeredTask capacity-pool integration', () => {
       initialMessageInserted: true,
     });
     mocks.stopSession.mockResolvedValue(undefined);
-    mocks.getSession.mockResolvedValue({ id: 'chat_exec-1', taskId: 'exec-1', createdByUserId: 'user-1', status: 'active' });
+    mocks.getSession.mockResolvedValue({
+      id: 'chat_exec-1',
+      taskId: 'exec-1',
+      createdByUserId: 'user-1',
+      status: 'active',
+    });
     mocks.resolveSkillProfile.mockResolvedValue(null);
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);
@@ -145,31 +150,38 @@ describe('submitTriggeredTask capacity-pool integration', () => {
     mocks.generateTaskTitle.mockResolvedValue('Triggered capacity task');
   });
 
-  it.each([null, 'skill-1'])('uses centralized placement and persists selected skill %s through reserved task submission', async (skillId) => {
-    const { sqlite, env } = createEnv();
-    seedTriggerRows(sqlite);
-    await seedProjectDefaultPool(env);
-    if (skillId) mocks.resolveSkillProfile.mockResolvedValue({
-      skillId, skillHint: skillId, profileId: null, agentType: 'opencode', resourceRequirementsJson: null,
-    });
+  it.each([null, 'skill-1'])(
+    'uses centralized placement and persists selected skill %s through reserved task submission',
+    async (skillId) => {
+      const { sqlite, env } = createEnv();
+      seedTriggerRows(sqlite);
+      await seedProjectDefaultPool(env);
+      if (skillId)
+        mocks.resolveSkillProfile.mockResolvedValue({
+          skillId,
+          skillHint: skillId,
+          profileId: null,
+          agentType: 'opencode',
+          resourceRequirementsJson: null,
+        });
 
-    await submitTriggeredTask(env, {
-      triggerId: 'trigger-1',
-      triggerExecutionId: 'exec-1',
-      projectId: 'project-1',
-      userId: 'user-1',
-      renderedPrompt: 'Run the scheduled job',
-      triggeredBy: 'cron',
-      agentProfileId: null,
-      skillId,
-      taskMode: 'task',
-      vmSizeOverride: null,
-      triggerName: 'Scheduled Capacity',
-    });
+      await submitTriggeredTask(env, {
+        triggerId: 'trigger-1',
+        triggerExecutionId: 'exec-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        renderedPrompt: 'Run the scheduled job',
+        triggeredBy: 'cron',
+        agentProfileId: null,
+        skillId,
+        taskMode: 'task',
+        vmSizeOverride: null,
+        triggerName: 'Scheduled Capacity',
+      });
 
-    const taskRow = sqlite
-      .prepare(
-        `SELECT
+      const taskRow = sqlite
+        .prepare(
+          `SELECT
            skill_id, skill_hint,
            capacity_pool_id,
            capacity_pool_scope,
@@ -183,45 +195,53 @@ describe('submitTriggeredTask capacity-pool integration', () => {
            provider_instance_disk_gb
          FROM tasks
          WHERE project_id = 'project-1'`
-      )
-      .get() as Record<string, unknown>;
+        )
+        .get() as Record<string, unknown>;
 
-    expect(taskRow).toMatchObject({
-      skill_id: skillId, skill_hint: skillId,
-      capacity_pool_id: 'cap-pool-default:project:project-1',
-      capacity_pool_scope: 'project',
-      capacity_source_id: 'cap-source-default:project:project-cloud-1',
-      placement_credential_source: 'project',
-      placement_credential_reference: 'credentials:project-cloud-1',
-      provider_instance_type: 'cx23',
-      provider_instance_vcpu_count: 2,
-      provider_instance_memory_mb: 4096,
-      provider_instance_disk_gb: 40,
-    });
-    if (skillId) expect(mocks.resolveSkillProfile).toHaveBeenCalledWith(
-      expect.anything(), 'project-1', null, skillId, 'user-1', env
-    );
-    expect(String(taskRow.capacity_pool_candidate_id)).toContain(':hetzner:nbg1:cx23');
-    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({
-        taskId: expect.any(String),
-        projectId: 'project-1',
-        userId: 'user-1',
-        cloudProvider: 'hetzner',
-        credentialAttributionProjectId: 'project-1',
-        credentialAttributionSource: 'project',
-        capacityPoolSelection: expect.objectContaining({
-          poolId: 'cap-pool-default:project:project-1',
-          candidates: expect.arrayContaining([
-            expect.objectContaining({
-              provider: 'hetzner',
-              location: 'nbg1',
-              providerInstanceType: 'cx23',
-            }),
-          ]),
-        }),
-      })
-    );
-  });
+      expect(taskRow).toMatchObject({
+        skill_id: skillId,
+        skill_hint: skillId,
+        capacity_pool_id: 'cap-pool-default:project:project-1',
+        capacity_pool_scope: 'project',
+        capacity_source_id: 'cap-source-default:project:project-cloud-1',
+        placement_credential_source: 'project',
+        placement_credential_reference: 'credentials:project-cloud-1',
+        provider_instance_type: 'cx23',
+        provider_instance_vcpu_count: 2,
+        provider_instance_memory_mb: 4096,
+        provider_instance_disk_gb: 40,
+      });
+      if (skillId)
+        expect(mocks.resolveSkillProfile).toHaveBeenCalledWith(
+          expect.anything(),
+          'project-1',
+          null,
+          skillId,
+          'user-1',
+          env
+        );
+      expect(String(taskRow.capacity_pool_candidate_id)).toContain(':hetzner:nbg1:cx23');
+      expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+        env,
+        expect.objectContaining({
+          taskId: expect.any(String),
+          projectId: 'project-1',
+          userId: 'user-1',
+          cloudProvider: 'hetzner',
+          credentialAttributionProjectId: 'project-1',
+          credentialAttributionSource: 'project',
+          capacityPoolSelection: expect.objectContaining({
+            poolId: 'cap-pool-default:project:project-1',
+            candidates: expect.arrayContaining([
+              expect.objectContaining({
+                provider: 'hetzner',
+                location: 'nbg1',
+                providerInstanceType: 'cx23',
+              }),
+            ]),
+          }),
+        })
+      );
+    }
+  );
 });

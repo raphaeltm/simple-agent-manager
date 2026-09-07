@@ -1,5 +1,5 @@
-import { CREDENTIAL_LIMIT_EVENT_SOURCE } from '@simple-agent-manager/shared';
 import type { ProjectEventMetadata, ProjectEventRecord } from '@simple-agent-manager/shared';
+import { CREDENTIAL_LIMIT_EVENT_SOURCE } from '@simple-agent-manager/shared';
 
 import { mapProjectEvent } from './project-events-mappers';
 import type { NormalizedProjectEventInput } from './project-events-normalization';

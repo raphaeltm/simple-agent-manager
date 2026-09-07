@@ -1,12 +1,3 @@
-import * as standingWatches from './project-standing-watches-storage';
-import { runStandingWatchAlarm } from './project-standing-watches-runner';
-import * as eventSchedules from './project-event-schedules-storage';
-import { runScheduleAlarm } from './project-event-schedules-runner';
-import { requireScheduleMember, requireScheduleAction } from './project-event-schedules-authority';
-import { normalizeScheduledAction } from './project-event-schedules-validation';
-import { scheduleLimits } from './project-event-schedules-config';
-import { reconcileSchedule, withScheduleExecution } from './project-event-schedules-recovery';
-import { resolveProjectEventLimits } from './project-events-limits';
 // FILE SIZE EXCEPTION: Cloudflare RPC requires the public ProjectData methods to remain on the exported Durable Object class; domain logic is already split across the sibling modules delegated to below. See .claude/rules/18-file-size-limits.md
 /**
  * ProjectData Durable Object — per-project isolated data store.
@@ -57,12 +48,25 @@ import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
 import * as projectCommentInbox from './project-comment-inbox';
-import * as projectEvents from './project-events';
 import * as eventChannels from './project-event-channels';
 import {
   requireChannelActorAuthority,
   requireChannelActorChat,
 } from './project-event-channels-authority';
+import { requireScheduleAction, requireScheduleMember } from './project-event-schedules-authority';
+import { scheduleLimits } from './project-event-schedules-config';
+import {
+  reconcileSchedule,
+  withScheduleExecution,
+  withSingleScheduleExecution,
+} from './project-event-schedules-recovery';
+import { runScheduleAlarm } from './project-event-schedules-runner';
+import * as eventSchedules from './project-event-schedules-storage';
+import { normalizeScheduledAction } from './project-event-schedules-validation';
+import * as projectEvents from './project-events';
+import { resolveProjectEventLimits } from './project-events-limits';
+import { runStandingWatchAlarm } from './project-standing-watches-runner';
+import * as standingWatches from './project-standing-watches-storage';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
@@ -1109,7 +1113,10 @@ export class ProjectData extends DurableObject<Env> {
       )
     );
     await this.recalculateAlarm();
-    return { ...result, schedule: (await withScheduleExecution(this.sql, this.env, [result.schedule]))[0]! };
+    return {
+      ...result,
+      schedule: await withSingleScheduleExecution(this.sql, this.env, result.schedule),
+    };
   }
 
   async getProjectSchedule(input: { projectId: string; userId: string; id: string }) {
@@ -1118,7 +1125,7 @@ export class ProjectData extends DurableObject<Env> {
       throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
     await requireScheduleMember(this.env, input.projectId, input.userId, true);
     const schedule = eventSchedules.getSchedule(this.sql, input.projectId, input.id);
-    return schedule ? (await withScheduleExecution(this.sql, this.env, [schedule]))[0]! : null;
+    return schedule ? await withSingleScheduleExecution(this.sql, this.env, schedule) : null;
   }
 
   async listProjectSchedules(input: {
@@ -1133,7 +1140,10 @@ export class ProjectData extends DurableObject<Env> {
       throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
     await requireScheduleMember(this.env, input.projectId, input.userId, true);
     const result = eventSchedules.listSchedules(this.sql, this.env, input.projectId, input);
-    return { ...result, schedules: await withScheduleExecution(this.sql, this.env, result.schedules) };
+    return {
+      ...result,
+      schedules: await withScheduleExecution(this.sql, this.env, result.schedules),
+    };
   }
 
   async mutateProjectSchedule(input: {
@@ -1169,7 +1179,10 @@ export class ProjectData extends DurableObject<Env> {
           )
     );
     await this.recalculateAlarm();
-    return { ...result, schedule: (await withScheduleExecution(this.sql, this.env, [result.schedule]))[0]! };
+    return {
+      ...result,
+      schedule: await withSingleScheduleExecution(this.sql, this.env, result.schedule),
+    };
   }
 
   async reconcileProjectSchedule(input: {
@@ -1182,7 +1195,13 @@ export class ProjectData extends DurableObject<Env> {
     if (this.getProjectId() !== input.projectId)
       throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
     await requireScheduleMember(this.env, input.projectId, input.userId);
-    const result = await reconcileSchedule(this.sql, this.env, input.projectId, input.id, input.request);
+    const result = await reconcileSchedule(
+      this.sql,
+      this.env,
+      input.projectId,
+      input.id,
+      input.request
+    );
     await this.recalculateAlarm();
     return result;
   }

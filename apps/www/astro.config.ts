@@ -1,6 +1,6 @@
-import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
+import { defineConfig } from 'astro/config';
 export default defineConfig({
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
   server: {

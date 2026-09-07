@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
+
 import { describe, expect, it } from 'vitest';
 
 import { generateAppCreationUrl, generateAppManifest } from '../deploy/utils/github';

@@ -81,17 +81,45 @@ projectEventSubscriptionRoutes.get('/:subscriptionId/deliveries', async (c) => {
   }
   try {
     const subscriptionId = requireRouteParam(c, 'subscriptionId');
-    const subscription = await projectData.getProjectEventSubscription(c.env, projectId, { subscriptionId });
+    const subscription = await projectData.getProjectEventSubscription(c.env, projectId, {
+      subscriptionId,
+    });
     if (!subscription) throw errors.notFound('Event subscription');
-    const result = await projectData.listProjectEventDeliveryBatches(c.env, projectId, { subscriptionId, limit });
+    const result = await projectData.listProjectEventDeliveryBatches(c.env, projectId, {
+      subscriptionId,
+      limit,
+    });
     await requireProjectCapability(db, projectId, userId, 'task:read');
     return c.json({
-      deliveries: result.batches.map(({ id, state, deliveryChannel, deliveredVia,
-        requestedDelivery, resolvedDelivery, createdAt, updatedAt, deliveredAt,
-        ackedAt, terminalAt, terminalReason }) => ({
-        id, state, deliveryChannel, deliveredVia, requestedDelivery, resolvedDelivery,
-        createdAt, updatedAt, deliveredAt, ackedAt, terminalAt, terminalReason,
-      })),
+      deliveries: result.batches.map(
+        ({
+          id,
+          state,
+          deliveryChannel,
+          deliveredVia,
+          requestedDelivery,
+          resolvedDelivery,
+          createdAt,
+          updatedAt,
+          deliveredAt,
+          ackedAt,
+          terminalAt,
+          terminalReason,
+        }) => ({
+          id,
+          state,
+          deliveryChannel,
+          deliveredVia,
+          requestedDelivery,
+          resolvedDelivery,
+          createdAt,
+          updatedAt,
+          deliveredAt,
+          ackedAt,
+          terminalAt,
+          terminalReason,
+        })
+      ),
       hasMore: result.hasMore,
     });
   } catch (error) {

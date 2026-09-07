@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { expect, test, type Page } from './fixtures';
+import { expect, type Page, test } from './fixtures';
 import { expectNoHorizontalOverflow } from './self-host-overflow-helpers';
 
 const screenshotDir = resolve(

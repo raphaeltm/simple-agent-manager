@@ -1,4 +1,3 @@
-import { migrateProjectSchedules } from './project-data/project-event-schedules-schema';
 // FILE SIZE EXCEPTION: Append-only migration ledger must preserve one auditable execution order. See .claude/rules/18-file-size-limits.md
 /**
  * Durable Object SQLite migration runner and migration definitions.
@@ -9,10 +8,10 @@ import { migrateProjectSchedules } from './project-data/project-event-schedules-
  *
  * See: specs/018-project-first-architecture/research.md (Decision 6)
  */
-
 import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
+import { migrateProjectSchedules } from './project-data/project-event-schedules-schema';
 import { parseMigrationName } from './project-data/row-schemas';
 
 export interface Migration {

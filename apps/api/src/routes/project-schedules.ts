@@ -131,9 +131,11 @@ for (const operation of ['reschedule', 'cancel'] as const) {
 }
 
 projectScheduleRoutes.post('/:id/reconcile', async (c) =>
-  c.json(await projectData.reconcileProjectSchedule(c.env, requireRouteParam(c, 'projectId'), {
-    userId: getUserId(c),
-    id: requireRouteParam(c, 'id'),
-    request: await scheduleRequestBody(c.req.raw, c.env),
-  }))
+  c.json(
+    await projectData.reconcileProjectSchedule(c.env, requireRouteParam(c, 'projectId'), {
+      userId: getUserId(c),
+      id: requireRouteParam(c, 'id'),
+      request: await scheduleRequestBody(c.req.raw, c.env),
+    })
+  )
 );

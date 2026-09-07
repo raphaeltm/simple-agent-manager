@@ -11,12 +11,18 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const schemaSource = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
-const nodeLifecycleSource = readFileSync(resolve(process.cwd(), 'src/routes/node-lifecycle.ts'), 'utf8');
+const nodeLifecycleSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/node-lifecycle.ts'),
+  'utf8'
+);
 const taskRunnerWorkspaceSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
   'utf8'
 );
-const workspaceHelpersSource = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/_helpers.ts'), 'utf8');
+const workspaceHelpersSource = readFileSync(
+  resolve(process.cwd(), 'src/routes/workspaces/_helpers.ts'),
+  'utf8'
+);
 const migrationSource = readFileSync(
   resolve(process.cwd(), 'src/db/migrations/0050_workspace_dispatched_at.sql'),
   'utf8'
@@ -30,8 +36,6 @@ function sectionAfter(source: string, marker: string): string {
   return source.slice(start);
 }
 
-
-
 describe('workspace dispatch race prevention', () => {
   it('adds nullable dispatched_at to the workspaces table', () => {
     expect(migrationSource.trim()).toBe('ALTER TABLE workspaces ADD COLUMN dispatched_at TEXT;');
@@ -39,7 +43,10 @@ describe('workspace dispatch race prevention', () => {
   });
 
   it('ready handler does not re-dispatch workspaces that already have dispatched_at set', () => {
-    const replayQuery = sectionAfter(nodeLifecycleSource, 'const pendingWorkspaces = await innerDb');
+    const replayQuery = sectionAfter(
+      nodeLifecycleSource,
+      'const pendingWorkspaces = await innerDb'
+    );
 
     // Verify the required drizzle operators are imported (order-independent)
     expect(nodeLifecycleSource).toContain("from 'drizzle-orm'");
@@ -52,7 +59,10 @@ describe('workspace dispatch race prevention', () => {
   });
 
   it('ready handler still dispatches legacy creating workspaces without dispatched_at', () => {
-    const replayLoop = sectionAfter(nodeLifecycleSource, 'for (const workspace of pendingWorkspaces)');
+    const replayLoop = sectionAfter(
+      nodeLifecycleSource,
+      'for (const workspace of pendingWorkspaces)'
+    );
 
     expect(replayLoop).toContain('await createWorkspaceOnNode(nodeId, c.env, workspace.userId');
     expect(replayLoop).toContain('workspaceId: workspace.id');
@@ -61,8 +71,13 @@ describe('workspace dispatch race prevention', () => {
   });
 
   it('ready handler marks legacy workspaces as dispatched after successful replay dispatch', () => {
-    const replayLoop = sectionAfter(nodeLifecycleSource, 'for (const workspace of pendingWorkspaces)');
-    const dispatchIndex = replayLoop.indexOf('await createWorkspaceOnNode(nodeId, c.env, workspace.userId');
+    const replayLoop = sectionAfter(
+      nodeLifecycleSource,
+      'for (const workspace of pendingWorkspaces)'
+    );
+    const dispatchIndex = replayLoop.indexOf(
+      'await createWorkspaceOnNode(nodeId, c.env, workspace.userId'
+    );
     const markerIndex = replayLoop.indexOf('dispatchedAt: new Date().toISOString()');
 
     expect(dispatchIndex).toBeGreaterThanOrEqual(0);
@@ -72,25 +87,42 @@ describe('workspace dispatch race prevention', () => {
   // Runtime transition coverage: task-runner-workspace-recovery.test.ts invokes handleWorkspaceCreation.
 
   it('task runner sets dispatched_at after successful VM agent dispatch acknowledgement', () => {
-    const dispatchSection = sectionAfter(taskRunnerWorkspaceSource, 'export async function handleWorkspaceDispatch');
-    const dispatchIndex = dispatchSection.indexOf('await createWorkspaceOnVmAgent(state, rc, workspaceId, nodeId)');
-    const markerIndex = dispatchSection.indexOf('UPDATE workspaces SET dispatched_at = ?, updated_at = ? WHERE id = ?');
+    const dispatchSection = sectionAfter(
+      taskRunnerWorkspaceSource,
+      'export async function handleWorkspaceDispatch'
+    );
+    const dispatchIndex = dispatchSection.indexOf(
+      'await createWorkspaceOnVmAgent(state, rc, workspaceId, nodeId)'
+    );
+    const markerIndex = dispatchSection.indexOf(
+      'UPDATE workspaces SET dispatched_at = ?, updated_at = ? WHERE id = ?'
+    );
 
     expect(dispatchIndex).toBeGreaterThanOrEqual(0);
     expect(markerIndex).toBeGreaterThan(dispatchIndex);
   });
 
   it('workspace_ready sends undispatched recovered workspaces back to workspace_dispatch', () => {
-    const readySection = sectionAfter(taskRunnerWorkspaceSource, 'export async function handleWorkspaceReady');
+    const readySection = sectionAfter(
+      taskRunnerWorkspaceSource,
+      'export async function handleWorkspaceReady'
+    );
 
     expect(readySection).toContain('workspace_ready_without_dispatch_ack');
     expect(readySection).toContain("advanceToStep(state, 'workspace_dispatch')");
   });
 
   it('UI workspace creation path sets dispatched_at after successful VM agent workspace creation', () => {
-    const scheduleSection = sectionAfter(workspaceHelpersSource, 'export async function scheduleWorkspaceCreateOnNode');
-    const dispatchIndex = scheduleSection.indexOf('await createWorkspaceOnNode(nodeId, env, userId');
-    const markerIndex = scheduleSection.indexOf('UPDATE workspaces SET dispatched_at = ? WHERE id = ?');
+    const scheduleSection = sectionAfter(
+      workspaceHelpersSource,
+      'export async function scheduleWorkspaceCreateOnNode'
+    );
+    const dispatchIndex = scheduleSection.indexOf(
+      'await createWorkspaceOnNode(nodeId, env, userId'
+    );
+    const markerIndex = scheduleSection.indexOf(
+      'UPDATE workspaces SET dispatched_at = ? WHERE id = ?'
+    );
 
     expect(dispatchIndex).toBeGreaterThanOrEqual(0);
     expect(markerIndex).toBeGreaterThan(dispatchIndex);

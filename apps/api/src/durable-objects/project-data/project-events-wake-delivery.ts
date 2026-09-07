@@ -1,4 +1,3 @@
-import { isProjectEventWakeBatchAudienceAuthorized } from './project-events-wake-targets';
 import {
   type ProjectEventDeliveryAttemptState,
   type ProjectEventDeliveryBatchState,
@@ -7,6 +6,7 @@ import {
 import { isProjectEventWakeEnabled } from './project-events-scheduler';
 import { nextPhysicalAttemptNumber } from './project-events-storage-helpers';
 import { stableStringify } from './project-events-values';
+import { isProjectEventWakeBatchAudienceAuthorized } from './project-events-wake-targets';
 import { type PromptDeliveryClaim, type PromptDeliveryResult } from './prompt-delivery';
 import type { Env } from './types';
 import { generateId } from './types';

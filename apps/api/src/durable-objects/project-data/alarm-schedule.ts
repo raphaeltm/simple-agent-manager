@@ -1,5 +1,3 @@
-import { computeStandingWatchAlarmTime } from './project-standing-watches-runner';
-import { computeScheduleAlarmTime } from './project-event-schedules-runner';
 /**
  * Shared ProjectData alarm scheduling.
  *
@@ -13,10 +11,12 @@ import * as attention from './attention';
 import { resolveDurableExecutionConfig } from './durable-execution-config';
 import * as idleCleanup from './idle-cleanup';
 import * as mailbox from './mailbox';
+import { computeScheduleAlarmTime } from './project-event-schedules-runner';
 import {
   computeProjectEventMaterializationAlarmTime,
   computeProjectEventRetentionAlarmTime,
 } from './project-events-scheduler';
+import { computeStandingWatchAlarmTime } from './project-standing-watches-runner';
 import { computePromptDeliveryAlarmTime } from './prompt-delivery';
 import * as reconciliation from './reconciliation';
 import { parseMetaValue } from './row-schemas';
