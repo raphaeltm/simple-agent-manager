@@ -209,7 +209,7 @@ export function Nodes() {
                   const label = VM_SIZE_LABELS[size];
                   return (
                     <option key={size} value={size}>
-                      {label?.label ?? size} — {info?.vcpu ?? '?'} vCPU, {info?.ram ?? '?'} GB
+                      {label?.label ?? size} — {info?.vcpu ?? '?'} vCPU, {info?.ramGb ?? '?'} GB
                       {info?.price ? ` · ${info.price}` : ''}
                     </option>
                   );
