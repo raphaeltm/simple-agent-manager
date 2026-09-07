@@ -21,6 +21,7 @@ import type {
 
 import type { Env } from '../../env';
 import type { TaskStartCapacityPoolSelection } from '../../services/placement-resolver';
+import type { ProjectEventWakeRecoveryGuard } from '../../services/session-recovery-authority';
 
 // TaskRunner uses the full Env type because it delegates to service functions
 // (createNodeRecord, provisionNode, createWorkspaceOnNode, etc.) that expect
@@ -119,6 +120,8 @@ export interface TaskRunConfig {
   recoverySourceTaskId?: string | null;
   /** Failed/stopped predecessor whose workspace deletion must be confirmed before replacement. */
   retrySourceTaskId?: string | null;
+  /** Event wake batch/subscription identity that must still authorize guarded recovery. */
+  projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
 }
 
 export interface TaskRunnerState {

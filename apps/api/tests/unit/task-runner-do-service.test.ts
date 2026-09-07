@@ -219,7 +219,6 @@ describe('task-runner-do service', () => {
 
   it('does not forward a capacity candidate that conflicts with explicit placement', async () => {
     const { env, start } = createTaskRunnerEnv();
-
     await startTaskRunnerDO(env, {
       ...minimalStartInput,
       cloudProvider: 'hetzner',
@@ -234,6 +233,45 @@ describe('task-runner-do service', () => {
     expect(forwarded.config.cloudProvider).toBe('hetzner');
     expect(forwarded.config.vmLocation).toBe('nbg1');
     expect(forwarded.config.capacityPoolSelection).toBeNull();
+  });
+
+  it('persists exact event wake authority in the TaskRunner start config', async () => {
+    const { env, start } = createTaskRunnerEnv();
+
+    (env as Env & { DATABASE: unknown }).DATABASE = {
+      prepare: vi.fn(() => ({
+        bind: vi.fn(() => ({
+          first: vi.fn(async () => ({
+            workspaceId: 'workspace-event-wake',
+            workspaceStatus: 'deleted',
+            runtimeDeletionConfirmedAt: '2026-09-07T00:00:00.000Z',
+            nodeId: 'node-event-wake',
+            runtimeTerminationConfirmedAt: null,
+          })),
+        })),
+      })),
+    };
+
+    await startTaskRunnerDO(env, {
+      ...minimalStartInput,
+      chatSessionId: 'chat-event-wake',
+      resumeSnapshotChatSessionId: 'chat-event-wake',
+      recoverySourceTaskId: 'source-task-event-wake',
+      retrySourceTaskId: 'source-task-event-wake',
+      projectEventWakeGuard: {
+        batchId: 'batch-event-wake',
+        subscriptionId: 'sub-event-wake',
+      },
+    });
+
+    expect(start.mock.calls[0]?.[0].config).toMatchObject({
+      recoverySourceTaskId: 'source-task-event-wake',
+      retrySourceTaskId: 'source-task-event-wake',
+      projectEventWakeGuard: {
+        batchId: 'batch-event-wake',
+        subscriptionId: 'sub-event-wake',
+      },
+    });
   });
 
   it('forwards matching capacity candidates so flexible location choice is preserved', async () => {

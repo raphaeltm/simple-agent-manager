@@ -3,10 +3,16 @@ import { log } from '../lib/logger';
 const TERMINAL_TASK_STATUSES_SQL = "'completed', 'failed', 'cancelled'";
 const LIVE_TASK_STATUSES_SQL = "'queued', 'delegated', 'in_progress', 'awaiting_followup'";
 
+export interface ProjectEventWakeRecoveryGuard {
+  batchId: string;
+  subscriptionId: string;
+}
+
 export interface SessionRecoverySourceTaskGuard {
   taskId: string;
   projectId: string;
   chatSessionId: string;
+  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
 }
 
 export class SessionRecoveryAuthorityRevokedError extends Error {
@@ -109,8 +115,14 @@ export async function isSessionRecoveryTaskAuthorized(
           AND (
             (recovery.status = 'in_progress' AND snapshot.recovery_status = 'restored')
             OR (
-              source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
-              AND snapshot.recovery_status IN ('waking', 'restored')
+              snapshot.recovery_status IN ('waking', 'restored')
+              AND (
+                source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+                OR (
+                  source.status = 'cancelled'
+                  AND source.superseded_by_task_id = recovery.id
+                )
+              )
             )
           )
         LIMIT 1`

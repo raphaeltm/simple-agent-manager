@@ -3,7 +3,10 @@ import type {
   ProjectEventSubscriptionRecord,
 } from '@simple-agent-manager/shared';
 
-import { resolveMaxMessagesPerSession } from './messages-persist-helpers';
+import {
+  refreshWakeDueAtForMatches,
+  refreshWakeDueAtForSubscription,
+} from './project-events-due-state';
 import { resolveProjectEventDelivery } from './project-events-delivery-resolver';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEvent, mapProjectEventSubscription } from './project-events-mappers';
@@ -22,6 +25,7 @@ import {
   deferWakeTarget,
   isTargetAtWakeCapacity,
   readLivePromptBatchLeaseUntilForTarget,
+  resolveMailboxMaxMessages,
 } from './project-events-wake-targets';
 import { stableStringify } from './project-events-values';
 import {
@@ -188,6 +192,7 @@ export function cancelProjectEventWakeForRevokedSourceTask(
          cancelled_by_id = COALESCE(cancelled_by_id, 'project-event-wake-authority'),
          cancelled_by_name = COALESCE(cancelled_by_name, 'Project event wake authority guard'),
          cancel_reason = COALESCE(cancel_reason, ?),
+         wake_due_at = NULL,
          updated_at = ?
      WHERE project_id = ?
        AND id = ?
@@ -318,7 +323,7 @@ function materializeCandidate(
     eventIds,
     now,
     ttlMs: limits.wakePromptTtlMs,
-    maxMessages: resolveMaxMessagesPerSession(env),
+    maxMessages: resolveMailboxMaxMessages(env),
   });
   insertPromptQueueBatch(
     sql,
@@ -341,6 +346,7 @@ function materializeCandidate(
   if (claimed !== matchIds.length) {
     throw new Error('Project event wake match claim lost contention');
   }
+  refreshWakeDueAtForSubscription(sql, projectId, subscription.id, now);
   const accepted = acceptPromptDeliveryInTransaction(sql, env, promptInput, now);
   recordQueueCheckpoint(sql, projectId, batchId, now, limits.wakeSubscriptionCooldownMs);
   markSchedulerSuccess(sql, projectId, now, 'materialization');
@@ -417,21 +423,14 @@ function selectWakeCandidates(
          AND (s.expires_at IS NULL OR s.expires_at > ?)
          AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
          AND s.prompt_delivery_count < ?
+         AND s.wake_due_at IS NOT NULL
          AND (s.delivery_cooldown_until IS NULL OR s.delivery_cooldown_until <= ?)
          AND s.requested_delivery = 'existing_session_prompt'
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
          AND s.target_session_id IS NOT NULL
          AND c.status IN ('active', 'sleeping')
-         AND EXISTS (
-           SELECT 1
-           FROM project_event_matches m
-           WHERE m.project_id = s.project_id
-             AND m.subscription_id = s.id
-             AND m.state = 'matched'
-             AND m.batch_id IS NULL
-         )
          ${requiredPredicate}
-       ORDER BY s.last_matched_at ASC, s.id ASC
+       ORDER BY s.wake_due_at ASC, s.id ASC
        LIMIT ?`,
       ...params
     )
@@ -514,7 +513,7 @@ function terminalizeIneligibleWakeMatchesByPredicate(
 ): number {
   const rows = sql
     .exec(
-      `SELECT m.id AS id
+      `SELECT m.id AS id, m.subscription_id AS subscription_id
        FROM project_event_matches m
        JOIN project_event_subscriptions s
          ON s.project_id = m.project_id AND s.id = m.subscription_id
@@ -533,8 +532,12 @@ function terminalizeIneligibleWakeMatchesByPredicate(
       1
     )
     .toArray();
-  const ids = rows
-    .filter((row): row is { id: string } => typeof row.id === 'string')
+  const selected = rows
+    .filter(
+      (row): row is { id: string; subscription_id: string } =>
+        typeof row.id === 'string' && typeof row.subscription_id === 'string'
+    );
+  const ids = selected
     .map((row) => row.id);
   if (ids.length === 0) return 0;
   let mutated = 0;
@@ -555,6 +558,9 @@ function terminalizeIneligibleWakeMatchesByPredicate(
       input.projectId,
       ...chunk
     ).rowsWritten;
+  }
+  for (const subscriptionId of new Set(selected.map((row) => row.subscription_id))) {
+    refreshWakeDueAtForSubscription(sql, input.projectId, subscriptionId, input.now);
   }
   return mutated;
 }
@@ -753,6 +759,7 @@ export function terminalizeProjectEventWakeMatches(
       ...chunk
     );
   }
+  refreshWakeDueAtForMatches(sql, projectId, matchIds, now);
 }
 
 function earliestNonNull(current: number | null, candidate: number): number {

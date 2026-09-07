@@ -276,7 +276,7 @@ async function resolveAgentContext(
   const ownerId = `${projectId}:${sessionId}`;
   const sourceTaskId = task.recovery_source_task_id ?? task.id;
   const legacyOwners = uniqueOwners(
-    [agentSessionId, taskId]
+    [agentSessionId, `${taskId}:${sessionId}`]
       .filter((id): id is string => typeof id === 'string' && id.length > 0)
       .map((id) => ({
         type: 'agent' as const,

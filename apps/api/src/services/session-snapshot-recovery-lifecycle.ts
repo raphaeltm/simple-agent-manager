@@ -486,7 +486,13 @@ export async function completeSessionSnapshotRecovery(
               eq(recoveryTask.chatSessionId, chatSessionId),
               eq(recoveryTask.triggeredBy, 'session-recovery'),
               notInArray(recoveryTask.status, TERMINAL_TASK_STATUSES),
-              notInArray(recoverySourceTask.status, TERMINAL_TASK_STATUSES),
+              or(
+                notInArray(recoverySourceTask.status, TERMINAL_TASK_STATUSES),
+                and(
+                  eq(recoverySourceTask.status, 'cancelled'),
+                  eq(recoverySourceTask.supersededByTaskId, recoveryTask.id)
+                )
+              ),
               eq(recoveryTask.projectId, schema.sessionSnapshots.projectId)
             )
           )

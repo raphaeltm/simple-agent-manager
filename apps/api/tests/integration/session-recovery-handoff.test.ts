@@ -408,6 +408,52 @@ describe('session recovery handoff', () => {
     }
   });
 
+  it('binds a second-generation recovery when the original guarded source is cancelled', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+
+      const firstWake = await expectWakingRecovery(database);
+      markRecoveryTaskRunning(sqlite, firstWake.taskId);
+      sqlite.prepare(`UPDATE tasks SET status = 'cancelled' WHERE id = 'parent-1'`).run();
+      makeSnapshotClaimable(sqlite, '2026-08-15T00:02:00.000Z');
+
+      const secondWake = await expectWakingRecovery(database, guard());
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT chat_session_id, recovery_source_task_id, triggered_by
+               FROM tasks WHERE id = ?`
+          )
+          .get(secondWake.taskId)
+      ).toMatchObject({
+        chat_session_id: 'chat-1',
+        recovery_source_task_id: 'parent-1',
+        triggered_by: 'session-recovery',
+      });
+      expectTaskOwnership(sqlite, 'parent-1', {
+        status: 'cancelled',
+        chat_session_id: null,
+        superseded_by_task_id: secondWake.taskId,
+      });
+      expectTaskOwnership(sqlite, firstWake.taskId, {
+        chat_session_id: null,
+        superseded_by_task_id: secondWake.taskId,
+      });
+      await expect(isSessionRecoverySourceTaskGuardValid(database, guard())).resolves.toBe(true);
+      const runnerInput = startTaskRunnerDOMock.mock.calls.at(-1)?.[1];
+      expect(runnerInput).toMatchObject({
+        taskId: secondWake.taskId,
+        recoverySourceTaskId: 'parent-1',
+        retrySourceTaskId: 'parent-1',
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('marks the exact root-family owner during a guarded owner-path handoff', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -423,7 +469,7 @@ describe('session recovery handoff', () => {
 
       expectTaskOwnership(sqlite, 'parent-1', {
         chat_session_id: null,
-        superseded_by_task_id: firstWake.taskId,
+        superseded_by_task_id: secondWake.taskId,
       });
       expectTaskOwnership(sqlite, firstWake.taskId, {
         chat_session_id: null,

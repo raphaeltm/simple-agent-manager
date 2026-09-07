@@ -251,7 +251,7 @@ export function expireDueSubscriptions(
     const placeholders = chunk.map(() => '?').join(', ');
     sql.exec(
       `UPDATE project_event_subscriptions
-       SET lifecycle_state = 'expired', updated_at = ?
+       SET lifecycle_state = 'expired', wake_due_at = NULL, updated_at = ?
        WHERE project_id = ? AND id IN (${placeholders})`,
       now,
       projectId,
@@ -296,18 +296,25 @@ export function readMatchesByIds(
   subscriptionId: string,
   matchIds: string[]
 ): ProjectEventMatchRecord[] {
-  const placeholders = matchIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT * FROM project_event_matches
-       WHERE project_id = ? AND subscription_id = ? AND id IN (${placeholders})
-       ORDER BY matched_at ASC, id ASC`,
-      projectId,
-      subscriptionId,
-      ...matchIds
-    )
-    .toArray();
-  return mapRows(rows, mapProjectEventMatch, matchIds.length, 'event_match');
+  const rows: unknown[] = [];
+  for (const chunk of chunkIdsForBindBudget(matchIds, 2)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    rows.push(
+      ...sql
+        .exec(
+          `SELECT * FROM project_event_matches
+           WHERE project_id = ? AND subscription_id = ? AND id IN (${placeholders})
+           ORDER BY matched_at ASC, id ASC`,
+          projectId,
+          subscriptionId,
+          ...chunk
+        )
+        .toArray()
+    );
+  }
+  return mapRows(rows, mapProjectEventMatch, matchIds.length, 'event_match').sort(
+    (left, right) => left.matchedAt - right.matchedAt || left.id.localeCompare(right.id)
+  );
 }
 
 export function readEventsForMatches(
@@ -316,20 +323,26 @@ export function readEventsForMatches(
   matchIds: string[],
   limit: number
 ): ProjectEventRecord[] {
-  const placeholders = matchIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT e.*
-       FROM project_event_matches m
-       JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id
-       WHERE m.project_id = ? AND m.id IN (${placeholders})
-       ORDER BY m.matched_at ASC, m.id ASC
-       LIMIT ?`,
-      projectId,
-      ...matchIds,
-      limit
-    )
-    .toArray();
+  const rows: unknown[] = [];
+  for (const chunk of chunkIdsForBindBudget(matchIds, 2)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    rows.push(
+      ...sql
+        .exec(
+          `SELECT e.*
+           FROM project_event_matches m
+           JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id
+           WHERE m.project_id = ? AND m.id IN (${placeholders})
+           ORDER BY m.matched_at ASC, m.id ASC
+           LIMIT ?`,
+          projectId,
+          ...chunk,
+          Math.max(0, limit - rows.length)
+        )
+        .toArray()
+    );
+    if (rows.length >= limit) break;
+  }
   return mapRows(rows, mapProjectEvent, limit, 'project_event');
 }
 
@@ -395,17 +408,19 @@ export function updateMatchesForBatch(
   now: number
 ): void {
   const matchState = matchStateForBatchState(batchState);
-  const placeholders = matchIds.map(() => '?').join(', ');
-  sql.exec(
-    `UPDATE project_event_matches
-     SET batch_id = ?, state = ?, lifecycle_checked_at = ?
-     WHERE project_id = ? AND id IN (${placeholders})`,
-    batchId,
-    matchState,
-    now,
-    projectId,
-    ...matchIds
-  );
+  for (const chunk of chunkIdsForBindBudget(matchIds, 4)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE project_event_matches
+       SET batch_id = ?, state = ?, lifecycle_checked_at = ?
+       WHERE project_id = ? AND id IN (${placeholders})`,
+      batchId,
+      matchState,
+      now,
+      projectId,
+      ...chunk
+    );
+  }
 }
 
 function matchStateForBatchState(
@@ -666,8 +681,20 @@ function insertMatchIfAbsent(
   );
   sql.exec(
     `UPDATE project_event_subscriptions
-     SET last_matched_at = ?, updated_at = ?
+     SET last_matched_at = ?,
+         wake_due_at = CASE
+           WHEN requested_delivery = 'existing_session_prompt'
+            AND resolved_delivery = 'queued_for_prompt_delivery'
+            AND contract_version >= 2
+            AND owner_version >= 2
+            AND (wake_due_at IS NULL OR wake_due_at > ?)
+           THEN ?
+           ELSE wake_due_at
+         END,
+         updated_at = ?
      WHERE project_id = ? AND id = ? AND lifecycle_state = 'active'`,
+    now,
+    now,
     now,
     now,
     event.projectId,

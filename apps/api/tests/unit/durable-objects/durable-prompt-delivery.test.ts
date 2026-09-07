@@ -129,7 +129,12 @@ describe('ProjectData durable prompt delivery', () => {
         sourceTaskId,
         senderType: 'system',
         sourceKind: 'project_event_wake',
-        metadata: { projectEventWake: true, batchId: deliveryId, eventIds: ['event-1'] },
+        metadata: {
+          projectEventWake: true,
+          batchId: deliveryId,
+          subscriptionId: 'sub-event-wake',
+          eventIds: ['event-1'],
+        },
       },
       Date.now()
     );
@@ -445,6 +450,10 @@ describe('ProjectData durable prompt delivery', () => {
       taskId: 'source-task-1',
       projectId: 'project-1',
       chatSessionId: 'chat-1',
+      projectEventWake: {
+        batchId: 'event-wake-live-source',
+        subscriptionId: 'sub-event-wake',
+      },
     };
     const submit = vi.fn<VmPromptDeliveryAdapter['submit']>(async (input) => {
       expect(input.sourceTaskGuard).toEqual(expectedGuard);

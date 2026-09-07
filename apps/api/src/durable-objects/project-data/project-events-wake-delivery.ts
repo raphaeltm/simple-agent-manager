@@ -60,9 +60,8 @@ export function readProjectEventWakeLeaseUntil(
     .exec(
       `SELECT MIN(
                 CASE
-                  WHEN delivery_expires_at IS NULL THEN readable_until
-                  WHEN readable_until IS NULL THEN delivery_expires_at
-                  WHEN delivery_expires_at < readable_until THEN delivery_expires_at
+                  WHEN state = 'delivered' THEN readable_until
+                  WHEN delivery_expires_at IS NOT NULL THEN delivery_expires_at
                   ELSE readable_until
                 END
               ) AS lease_until
@@ -70,9 +69,10 @@ export function readProjectEventWakeLeaseUntil(
        WHERE target_session_id = ?
          AND delivery_channel = 'prompt_queue'
          AND state IN ('pending', 'delivered')
-         AND delivery_expires_at IS NOT NULL
-         AND readable_until IS NOT NULL
-         AND (delivery_expires_at > ? OR readable_until > ?)`,
+         AND (
+           (state = 'pending' AND delivery_expires_at IS NOT NULL AND delivery_expires_at > ?)
+           OR (state = 'delivered' AND readable_until IS NOT NULL AND readable_until > ?)
+         )`,
       sessionId,
       now,
       now
@@ -94,6 +94,62 @@ export function hasProjectEventWakeLease(
   now = Date.now()
 ): boolean {
   return readProjectEventWakeLeaseUntil(sql, sessionId, now) !== null;
+}
+
+
+export interface ValidateProjectEventWakeRecoveryAuthorityInput {
+  projectId: string;
+  chatSessionId: string;
+  sourceTaskId: string;
+  batchId: string;
+  subscriptionId: string;
+}
+
+export function validateProjectEventWakeRecoveryAuthority(
+  sql: SqlStorage,
+  env: Env,
+  storedProjectId: string | null,
+  input: ValidateProjectEventWakeRecoveryAuthorityInput,
+  now = Date.now()
+): boolean {
+  if (!storedProjectId || storedProjectId !== input.projectId || !isProjectEventWakeEnabled(env)) {
+    return false;
+  }
+  const row = sql
+    .exec(
+      `SELECT b.id
+       FROM project_event_delivery_batches b
+       JOIN project_event_subscriptions s
+         ON s.project_id = b.project_id AND s.id = b.subscription_id
+       LEFT JOIN chat_sessions c ON c.id = b.target_session_id
+       WHERE b.project_id = ?
+         AND b.id = ?
+         AND b.subscription_id = ?
+         AND b.delivery_channel = 'prompt_queue'
+         AND b.state = 'pending'
+         AND b.target_session_id = ?
+         AND (b.delivery_expires_at IS NULL OR b.delivery_expires_at > ?)
+         AND s.lifecycle_state = 'active'
+         AND s.owner_task_id = ?
+         AND s.target_session_id = ?
+         AND s.requested_delivery = 'existing_session_prompt'
+         AND s.resolved_delivery = 'queued_for_prompt_delivery'
+         AND (s.expires_at IS NULL OR s.expires_at > ?)
+         AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
+         AND (c.status = 'active' OR c.status = 'sleeping')
+       LIMIT 1`,
+      input.projectId,
+      input.batchId,
+      input.subscriptionId,
+      input.chatSessionId,
+      now,
+      input.sourceTaskId,
+      input.chatSessionId,
+      now,
+      now
+    )
+    .toArray()[0];
+  return Boolean(row);
 }
 
 export function invalidProjectEventWakeDeliveryTargetResult(
