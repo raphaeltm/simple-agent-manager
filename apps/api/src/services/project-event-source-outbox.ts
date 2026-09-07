@@ -14,11 +14,14 @@ import {
   PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES,
   PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES,
   type ProjectEventSourceAdmissionResult,
+  ProjectEventSourceAdmissionTimeoutError,
+  projectEventSourceAdmissionTimeoutMs,
   type ProjectEventSourceAdmissionTiming,
   type ProjectEventSourceOutboxActiveState,
   type ProjectEventSourceOutboxInsertOptions,
   projectEventSourceOutboxInsertValues,
   type ProjectEventSourceOutboxIntent,
+  type ProjectEventSourceOutboxReadByIdInput,
   projectEventSourceOutboxReplayConflict,
   type ProjectEventSourceOutboxState,
   type ProjectEventSourceOutboxStats,
@@ -33,8 +36,8 @@ import {
 import {
   loadProjectEventSourceIntentByClaim,
   loadProjectEventSourceIntentByDelivery,
-  loadProjectEventSourceIntentById,
   loadProjectEventSourceIntentByIdentity,
+  loadProjectEventSourceIntentByInternalId,
 } from './project-event-source-outbox-storage';
 
 export type {
@@ -44,6 +47,7 @@ export type {
   ProjectEventSourceOutboxConfig,
   ProjectEventSourceOutboxInsertOptions,
   ProjectEventSourceOutboxIntent,
+  ProjectEventSourceOutboxReadByIdInput,
   ProjectEventSourceOutboxState,
   ProjectEventSourceOutboxStats,
   ProjectEventSourceOutboxSupersedeInput,
@@ -60,6 +64,8 @@ export {
 
 const log = createModuleLogger('project_event_source_outbox');
 const ACTIVE_STATES = PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES;
+const TERMINAL_STATES = PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES;
+const CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS = 2;
 
 export function projectEventSourceOutboxInsertStatement(
   env: Env,
@@ -156,9 +162,9 @@ export async function readProjectEventSourceIntentByDelivery(
 
 export async function readProjectEventSourceIntentById(
   env: Env,
-  id: string
+  input: ProjectEventSourceOutboxReadByIdInput
 ): Promise<ProjectEventSourceOutboxIntent | null> {
-  return loadProjectEventSourceIntentById(env, id);
+  return loadProjectEventSourceIntentByIdentity(env, input);
 }
 
 export async function markProjectEventSourceIntentSuperseded(
@@ -235,7 +241,9 @@ export async function enqueueProjectEventSourceIntent(
   options: ProjectEventSourceOutboxInsertOptions = {}
 ): Promise<ProjectEventSourceOutboxIntent> {
   await projectEventSourceOutboxInsertStatement(env, input, options).run();
-  const intentById = options.id ? await loadProjectEventSourceIntentById(env, options.id) : null;
+  const intentById = options.id
+    ? await loadProjectEventSourceIntentByInternalId(env, options.id)
+    : null;
   const intent =
     intentById && projectEventSourceOutboxReplayConflict(intentById, input) === null
       ? intentById
@@ -250,7 +258,8 @@ export async function enqueueProjectEventSourceIntent(
 }
 
 function resultFromIntent(
-  intent: ProjectEventSourceOutboxIntent
+  intent: ProjectEventSourceOutboxIntent,
+  outboxMutations = 0
 ): ProjectEventSourceAdmissionResult {
   return {
     intentId: intent.id,
@@ -258,12 +267,13 @@ function resultFromIntent(
     admissionOutcome: intent.admissionOutcome ?? undefined,
     eventId: intent.admittedEventId ?? undefined,
     attemptCount: intent.attemptCount,
+    outboxMutations,
   };
 }
 
-async function terminalizeIneligibleClaim(env: Env, id: string, now: Date): Promise<void> {
+async function terminalizeIneligibleClaim(env: Env, id: string, now: Date): Promise<number> {
   const nowIso = now.toISOString();
-  await env.DATABASE.prepare(
+  const expired = await env.DATABASE.prepare(
     `UPDATE project_event_source_outbox
         SET state = 'expired', processing_lease_expires_at = NULL, claim_token = NULL,
             terminalized_at = ?, last_error = COALESCE(last_error, 'Intent expired'), updated_at = ?
@@ -271,7 +281,7 @@ async function terminalizeIneligibleClaim(env: Env, id: string, now: Date): Prom
   )
     .bind(nowIso, nowIso, id, nowIso)
     .run();
-  await env.DATABASE.prepare(
+  const exhausted = await env.DATABASE.prepare(
     `UPDATE project_event_source_outbox
         SET state = 'permanent_failed', processing_lease_expires_at = NULL, claim_token = NULL,
             terminalized_at = ?, last_error = COALESCE(last_error, 'Max attempts exhausted'), updated_at = ?
@@ -287,13 +297,14 @@ async function terminalizeIneligibleClaim(env: Env, id: string, now: Date): Prom
   )
     .bind(nowIso, nowIso, id, nowIso)
     .run();
+  return Number(expired.meta.changes ?? 0) + Number(exhausted.meta.changes ?? 0);
 }
 
 async function claimIntent(
   env: Env,
   id: string,
   now: Date
-): Promise<ProjectEventSourceOutboxIntent | null> {
+): Promise<{ intent: ProjectEventSourceOutboxIntent | null; outboxMutations: number }> {
   const config = resolveProjectEventSourceOutboxConfig(env);
   const claimToken = ulid();
   const nowIso = now.toISOString();
@@ -313,10 +324,15 @@ async function claimIntent(
     .bind(claimToken, nowIso, leaseExpiresAt, nowIso, id, nowIso, nowIso, nowIso)
     .run();
   if (Number(result.meta.changes ?? 0) === 0) {
-    await terminalizeIneligibleClaim(env, id, now);
-    return null;
+    return {
+      intent: null,
+      outboxMutations: await terminalizeIneligibleClaim(env, id, now),
+    };
   }
-  return loadProjectEventSourceIntentByClaim(env, id, claimToken);
+  return {
+    intent: await loadProjectEventSourceIntentByClaim(env, id, claimToken),
+    outboxMutations: 1,
+  };
 }
 
 async function beginCredentialClaimedIntentAdmission(
@@ -325,11 +341,11 @@ async function beginCredentialClaimedIntentAdmission(
   payload: Omit<AdmitProjectEventInput, 'projectId'>,
   now: Date
 ): Promise<
-  | { outcome: 'ready'; intent: ProjectEventSourceOutboxIntent }
+  | { outcome: 'ready'; intent: ProjectEventSourceOutboxIntent; outboxMutations: number }
   | { outcome: 'terminal'; result: ProjectEventSourceAdmissionResult }
 > {
   const guard = credentialLimitAdmissionGuard(intent, payload);
-  if (!guard) return { outcome: 'ready', intent };
+  if (!guard) return { outcome: 'ready', intent, outboxMutations: 0 };
   const nowIso = now.toISOString();
   const result = await env.DATABASE.prepare(
     `UPDATE project_event_source_outbox
@@ -339,11 +355,12 @@ async function beginCredentialClaimedIntentAdmission(
   )
     .bind(nowIso, intent.id, intent.claimToken, ...guard.values)
     .run();
-  if (Number(result.meta.changes ?? 0) === 1) {
-    return { outcome: 'ready', intent };
+  const outboxMutations = Number(result.meta.changes ?? 0);
+  if (outboxMutations === 1) {
+    return { outcome: 'ready', intent, outboxMutations };
   }
 
-  const current = await loadProjectEventSourceIntentById(env, intent.id);
+  const current = await loadProjectEventSourceIntentByInternalId(env, intent.id);
   if (!current) {
     return { outcome: 'terminal', result: { intentId: intent.id, state: 'permanent_failed' } };
   }
@@ -373,9 +390,12 @@ async function updateClaimedIntent(
   )
     .bind(...values, intent.id, intent.claimToken)
     .run();
-  const current = await loadProjectEventSourceIntentById(env, intent.id);
-  if (Number(result.meta.changes ?? 0) === 0 && current) return resultFromIntent(current);
-  return current ? resultFromIntent(current) : { intentId: intent.id, state: 'permanent_failed' };
+  const current = await loadProjectEventSourceIntentByInternalId(env, intent.id);
+  const outboxMutations = Number(result.meta.changes ?? 0);
+  if (outboxMutations === 0 && current) return resultFromIntent(current, 0);
+  return current
+    ? resultFromIntent(current, outboxMutations)
+    : { intentId: intent.id, state: 'permanent_failed', outboxMutations };
 }
 
 async function markIntentFailed(
@@ -440,7 +460,8 @@ async function admitClaimedIntent(
   env: Env,
   intent: ProjectEventSourceOutboxIntent,
   clock: () => Date,
-  admissionTimeoutMs?: number
+  admissionTimeoutMs?: number,
+  deadlineMs?: number
 ): Promise<ProjectEventSourceAdmissionResult> {
   let payload: Omit<AdmitProjectEventInput, 'projectId'>;
   try {
@@ -462,18 +483,18 @@ async function admitClaimedIntent(
       return await updateClaimedIntent(env, intent, superseded.sqlSet, superseded.values);
     }
     const config = resolveProjectEventSourceOutboxConfig(env);
-    const timeoutMs = Math.min(
-      config.admissionTimeoutMs,
-      Math.max(0, Math.floor(admissionTimeoutMs ?? config.admissionTimeoutMs))
-    );
     const currentClaim = await loadProjectEventSourceIntentByClaim(
       env,
       intent.id,
       intent.claimToken ?? ''
     );
     if (!currentClaim) {
-      const current = await loadProjectEventSourceIntentById(env, intent.id);
+      const current = await loadProjectEventSourceIntentByInternalId(env, intent.id);
       return current ? resultFromIntent(current) : resultFromIntent(intent);
+    }
+    const timeoutMs = projectEventSourceAdmissionTimeoutMs(config, admissionTimeoutMs, deadlineMs);
+    if (timeoutMs <= 0) {
+      return markIntentFailed(env, intent, new ProjectEventSourceAdmissionTimeoutError(0), clock());
     }
     const admissionFence = await beginCredentialClaimedIntentAdmission(
       env,
@@ -489,7 +510,7 @@ async function admitClaimedIntent(
     const state: ProjectEventSourceOutboxState =
       result.outcome === 'conflict' ? 'permanent_failed' : 'admitted';
     const nowIso = clock().toISOString();
-    return await updateClaimedIntent(
+    const settled = await updateClaimedIntent(
       env,
       admissionFence.intent,
       `SET state = ?, processing_lease_expires_at = NULL, claim_token = NULL,
@@ -504,6 +525,8 @@ async function admitClaimedIntent(
         nowIso,
       ]
     );
+    settled.outboxMutations = (settled.outboxMutations ?? 0) + admissionFence.outboxMutations;
+    return settled;
   } catch (error) {
     log.warn('project_event_source_outbox.admission_failed', {
       intentId: intent.id,
@@ -525,13 +548,22 @@ export async function admitProjectEventSourceIntentById(
   timing?: ProjectEventSourceAdmissionTiming
 ): Promise<ProjectEventSourceAdmissionResult | null> {
   const clock = projectEventSourceOutboxClockFrom(timing);
-  const intent = await claimIntent(env, id, clock());
-  if (!intent) {
-    const existing = await loadProjectEventSourceIntentById(env, id);
-    return existing ? resultFromIntent(existing) : null;
+  const claim = await claimIntent(env, id, clock());
+  if (!claim.intent) {
+    const existing = await loadProjectEventSourceIntentByInternalId(env, id);
+    return existing ? resultFromIntent(existing, claim.outboxMutations) : null;
   }
   const admissionTimeoutMs = timing instanceof Date ? undefined : timing?.admissionTimeoutMs;
-  return admitClaimedIntent(env, intent, clock, admissionTimeoutMs);
+  const deadlineMs = timing instanceof Date ? undefined : timing?.deadlineMs;
+  const result = await admitClaimedIntent(
+    env,
+    claim.intent,
+    clock,
+    admissionTimeoutMs,
+    deadlineMs
+  );
+  result.outboxMutations = (result.outboxMutations ?? 0) + claim.outboxMutations;
+  return result;
 }
 
 export async function enqueueAndAdmitProjectEventSourceIntent(
@@ -726,12 +758,14 @@ export async function reconcileProjectEventSourceOutbox(
     skipped: 0,
     terminalDeleted: 0,
     timedOut: 0,
+    outboxMutations: 0,
     hasMore: false,
   };
-  let remaining = limit;
+  let remainingMutations = limit;
   const spend = (changedRows: number) => {
-    const before = remaining;
-    remaining = Math.max(0, remaining - changedRows);
+    const before = remainingMutations;
+    remainingMutations = Math.max(0, remainingMutations - changedRows);
+    stats.outboxMutations += changedRows;
     if (changedRows >= before) stats.hasMore = true;
   };
 
@@ -745,51 +779,55 @@ export async function reconcileProjectEventSourceOutbox(
       'expired',
       'Intent expired',
       clock(),
-      remaining
+      remainingMutations
     );
     stats.expired += changed;
     spend(changed);
-    if (remaining <= 0 || Date.now() >= deadline) return stats;
+    if (remainingMutations <= 0 || Date.now() >= deadline) return stats;
   }
   for (const state of ACTIVE_STATES) {
-    const changed = await terminalizeExhaustedRows(env, state, clock(), remaining);
+    const changed = await terminalizeExhaustedRows(env, state, clock(), remainingMutations);
     stats.permanentFailed += changed;
     spend(changed);
-    if (remaining <= 0 || Date.now() >= deadline) return stats;
+    if (remainingMutations <= 0 || Date.now() >= deadline) return stats;
   }
   if (config.terminalRetentionMs >= 0) {
     const cutoff = new Date(clock().getTime() - config.terminalRetentionMs).toISOString();
-    for (const state of PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES) {
+    for (const state of TERMINAL_STATES) {
       const backfilled = await backfillLegacyTerminalizedRows(
         env,
         state,
         clock().toISOString(),
-        remaining
+        remainingMutations
       );
       spend(backfilled);
-      if (remaining <= 0 || Date.now() >= deadline) return stats;
-      const deleted = await deleteTerminalRows(env, state, cutoff, remaining);
+      if (remainingMutations <= 0 || Date.now() >= deadline) return stats;
+      const deleted = await deleteTerminalRows(env, state, cutoff, remainingMutations);
       stats.terminalDeleted += deleted;
       spend(deleted);
-      if (remaining <= 0 || Date.now() >= deadline) return stats;
+      if (remainingMutations <= 0 || Date.now() >= deadline) return stats;
     }
   }
 
-  const ids = await selectCandidateIds(env, clock().toISOString(), remaining);
-  stats.hasMore = stats.hasMore || ids.length >= remaining;
+  const candidateLimit = Math.floor(remainingMutations / CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS);
+  if (candidateLimit <= 0) {
+    stats.hasMore = true;
+    return stats;
+  }
+  const ids = await selectCandidateIds(env, clock().toISOString(), candidateLimit);
+  stats.hasMore = stats.hasMore || ids.length >= candidateLimit;
   for (const id of ids) {
-    if (Date.now() >= deadline) {
+    if (remainingMutations < CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS || Date.now() >= deadline) {
       stats.hasMore = true;
       break;
     }
-    const remainingWallMs = Math.max(0, deadline - Date.now());
     const result = await admitProjectEventSourceIntentById(env, id, {
       clock,
-      admissionTimeoutMs: remainingWallMs,
+      deadlineMs: deadline,
     });
-    spend(1);
+    spend(result?.outboxMutations ?? 0);
     if (result?.state === 'retryable_failed') {
-      const current = await loadProjectEventSourceIntentById(env, id);
+      const current = await loadProjectEventSourceIntentByInternalId(env, id);
       if (current?.claimToken === null && current.lastError?.includes('timed out'))
         stats.timedOut += 1;
     }

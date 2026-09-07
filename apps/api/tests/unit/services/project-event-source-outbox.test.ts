@@ -892,7 +892,7 @@ describe('project event source outbox', () => {
     ).toEqual({ state: 'pending' });
   });
 
-  it('uses the sweep limit as a finite work-item ceiling for candidate claim and settle', async () => {
+  it('requires two available mutations before claiming and settling a candidate', async () => {
     admitProjectEvent
       .mockResolvedValueOnce({
         outcome: 'created',
@@ -923,9 +923,41 @@ describe('project event source outbox', () => {
       }
     );
 
-    const stats = await reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
+    const tooSmall = await reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
 
-    expect(stats).toMatchObject({ attempted: 1, admitted: 1, hasMore: true });
+    expect(tooSmall).toMatchObject({
+      attempted: 0,
+      admitted: 0,
+      outboxMutations: 0,
+      hasMore: true,
+    });
+    expect(admitProjectEvent).not.toHaveBeenCalled();
+    expect(
+      sqlite
+        .prepare(
+          `SELECT state, COUNT(*) AS count
+             FROM project_event_source_outbox
+            GROUP BY state
+            ORDER BY state`
+        )
+        .all()
+    ).toEqual([{ state: 'pending', count: 2 }]);
+
+    const before = sqlite.prepare(`SELECT total_changes() AS changes`).get() as {
+      changes: number;
+    };
+    const minimum = await reconcileProjectEventSourceOutbox(env, { limit: 2, now: NOW });
+    const after = sqlite.prepare(`SELECT total_changes() AS changes`).get() as {
+      changes: number;
+    };
+
+    expect(after.changes - before.changes).toBe(2);
+    expect(minimum).toMatchObject({
+      attempted: 1,
+      admitted: 1,
+      outboxMutations: 2,
+      hasMore: true,
+    });
     expect(admitProjectEvent).toHaveBeenCalledTimes(1);
     expect(
       sqlite
@@ -963,12 +995,17 @@ describe('project event source outbox', () => {
       now: NOW,
     });
 
-    const statsPromise = reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
+    const statsPromise = reconcileProjectEventSourceOutbox(env, { limit: 2, now: NOW });
     await waitForProjectDataAdmissions(1);
     await vi.advanceTimersByTimeAsync(5);
     const stats = await statsPromise;
 
-    expect(stats).toMatchObject({ attempted: 1, retryableFailed: 1, timedOut: 1 });
+    expect(stats).toMatchObject({
+      attempted: 1,
+      retryableFailed: 1,
+      timedOut: 1,
+      outboxMutations: 2,
+    });
     expect(rowById('intent-wall-budget')).toMatchObject({
       state: 'retryable_failed',
       attempt_count: 1,

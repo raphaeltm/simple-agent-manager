@@ -86,6 +86,7 @@ export interface ProjectEventSourceAdmissionResult {
   admissionOutcome?: ProjectEventAdmissionOutcome;
   eventId?: string;
   attemptCount?: number;
+  outboxMutations?: number;
   conflict?: {
     deliveryKey: string;
     existingFingerprint: string;
@@ -103,6 +104,7 @@ export interface ProjectEventSourceOutboxStats {
   skipped: number;
   terminalDeleted: number;
   timedOut: number;
+  outboxMutations: number;
   hasMore: boolean;
 }
 
@@ -135,11 +137,14 @@ export type ProjectEventSourceOutboxInsertOptions = {
   capture?: ProjectEventSourceOutboxCaptureGuard;
 };
 
-export type ProjectEventSourceOutboxSupersedeInput = {
+export type ProjectEventSourceOutboxReadByIdInput = {
   id: string;
   projectId: string;
   source: string;
   deliveryKey: string;
+};
+
+export type ProjectEventSourceOutboxSupersedeInput = ProjectEventSourceOutboxReadByIdInput & {
   now?: Date;
   reason?: string;
 };
@@ -150,6 +155,7 @@ export type ProjectEventSourceAdmissionTiming =
       now?: Date;
       clock?: () => Date;
       admissionTimeoutMs?: number;
+      deadlineMs?: number;
     };
 
 export function projectEventSourceOutboxPayload(input: AdmitProjectEventInput): string {
@@ -189,7 +195,8 @@ export function assertProjectEventSourceOutboxCaptureMatchesInput(
   if (input.source !== CREDENTIAL_LIMIT_EVENT_SOURCE) {
     throw new Error('Credential limit capture source does not match credential event source');
   }
-  if (!Object.values(CREDENTIAL_LIMIT_EVENT_TYPES).includes(input.eventType)) {
+  const credentialEventTypes = Object.values(CREDENTIAL_LIMIT_EVENT_TYPES) as string[];
+  if (!credentialEventTypes.includes(input.eventType)) {
     throw new Error('Credential limit capture event type is invalid');
   }
   if (input.subject.type !== 'credential') {
@@ -281,6 +288,20 @@ export function projectEventSourceOutboxClockFrom(
   if (input?.clock) return input.clock;
   if (input?.now) return () => new Date(input.now?.getTime() ?? Date.now());
   return () => new Date();
+}
+
+export function projectEventSourceAdmissionTimeoutMs(
+  config: ProjectEventSourceOutboxConfig,
+  admissionTimeoutMs?: number,
+  deadlineMs?: number
+): number {
+  const configured = Math.min(
+    config.admissionTimeoutMs,
+    Math.max(0, Math.floor(admissionTimeoutMs ?? config.admissionTimeoutMs))
+  );
+  return deadlineMs === undefined
+    ? configured
+    : Math.min(configured, Math.max(0, Math.floor(deadlineMs - Date.now())));
 }
 
 export function withProjectEventSourceAdmissionTimeout<T>(
