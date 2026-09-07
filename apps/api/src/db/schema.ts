@@ -1172,6 +1172,66 @@ export const taskStatusEvents = sqliteTable(
   })
 );
 
+export const taskSubmissionCheckpoints = sqliteTable(
+  'task_submission_checkpoints',
+  {
+    taskId: text('task_id')
+      .primaryKey()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    chatSessionId: text('chat_session_id').notNull(),
+    initialMessageId: text('initial_message_id').notNull(),
+    initialStatusEventId: text('initial_status_event_id')
+      .notNull()
+      .references(() => taskStatusEvents.id, { onDelete: 'cascade' }),
+    sourceKind: text('source_kind').notNull(),
+    sourceId: text('source_id').notNull(),
+    sourceExecutionId: text('source_execution_id').notNull(),
+    triggeredBy: text('triggered_by').notNull(),
+    intentFingerprint: text('intent_fingerprint').notNull(),
+    acceptedSnapshotJson: text('accepted_snapshot_json').notNull(),
+    branchName: text('branch_name').notNull(),
+    taskTitle: text('task_title').notNull(),
+    checkpointState: text('checkpoint_state').notNull().default('d1_committed'),
+    projectDataCommittedAt: text('project_data_committed_at'),
+    runnerStartAttemptedAt: text('runner_start_attempted_at'),
+    runnerStartedAt: text('runner_started_at'),
+    terminalObservedAt: text('terminal_observed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    chatSessionIdUnique: uniqueIndex('idx_task_submission_checkpoints_chat_session').on(
+      table.chatSessionId
+    ),
+    initialMessageIdUnique: uniqueIndex('idx_task_submission_checkpoints_initial_message').on(
+      table.initialMessageId
+    ),
+    initialStatusEventIdUnique: uniqueIndex(
+      'idx_task_submission_checkpoints_initial_status_event'
+    ).on(table.initialStatusEventId),
+    sourceUnique: uniqueIndex('idx_task_submission_checkpoints_source').on(
+      table.projectId,
+      table.sourceKind,
+      table.sourceId,
+      table.sourceExecutionId
+    ),
+    stateIdx: index('idx_task_submission_checkpoints_state').on(
+      table.checkpointState,
+      table.updatedAt
+    ),
+  })
+);
+
 // =============================================================================
 // Nodes
 // =============================================================================
