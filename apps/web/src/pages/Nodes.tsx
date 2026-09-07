@@ -1,4 +1,4 @@
-import type { CredentialProvider, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
+import type { CredentialProvider, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import {
   Alert,
@@ -15,7 +15,11 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { NodeCard } from '../components/node/NodeCard';
-import { VmSizeCard } from '../components/vm/VmSizeCard';
+import {
+  type ResourceRequirementsFormState,
+  EMPTY_RESOURCE_STATE,
+  ResourceRequirementsInput,
+} from '../components/resource-requirements';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { createNode, deleteNode, stopNode } from '../lib/api';
 import { NODE_LIST_POLL_MS, WORKSPACE_LIST_POLL_MS } from '../lib/poll-intervals';
@@ -33,7 +37,9 @@ export function Nodes() {
 
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newNodeSize, setNewNodeSize] = useState<VMSize>('medium');
+  const [nodeResourceReqs, setNodeResourceReqs] = useState<ResourceRequirementsFormState>({
+    ...EMPTY_RESOURCE_STATE,
+  });
   const [newNodeLocation, setNewNodeLocation] = useState(DEFAULT_VM_LOCATION);
   const [selectedProvider, setSelectedProvider] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -101,7 +107,7 @@ export function Nodes() {
       const provider = effectiveProvider;
       const created = await createNode({
         name: `node-${timestamp}`,
-        vmSize: newNodeSize,
+        vmSize: 'medium',
         vmLocation: newNodeLocation,
         ...(provider ? { provider: provider as CredentialProvider } : {}),
       });
@@ -192,26 +198,11 @@ export function Nodes() {
             </div>
           )}
           <div>
-            {/* Not a <label>: this text describes a group of selectable cards
-                (VmSizeCard), not a single form control, so there is nothing
-                for a <label> to associate with (jsx-a11y/label-has-associated-control). */}
-            <div
-              className="block text-fg-muted font-medium mb-2"
-              style={{ fontSize: 'var(--sam-type-secondary-size)' }}
-            >
-              Node Size
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
-                <VmSizeCard
-                  key={size}
-                  size={size}
-                  sizeInfo={activeCatalog?.sizes[size] ?? null}
-                  selected={newNodeSize === size}
-                  onClick={() => setNewNodeSize(size)}
-                />
-              ))}
-            </div>
+            <ResourceRequirementsInput
+              value={nodeResourceReqs}
+              onChange={setNodeResourceReqs}
+              inheritLabel="platform default"
+            />
           </div>
           {activeCatalog && (
             <div>

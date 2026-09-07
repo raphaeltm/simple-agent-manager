@@ -5,7 +5,6 @@ import type {
   ProjectDetailResponse,
   ProjectSummary,
   ProviderCatalog,
-  VMSize,
 } from '@simple-agent-manager/shared';
 import {
   DEFAULT_VM_LOCATION,
@@ -28,7 +27,12 @@ import { useLocation, useNavigate } from 'react-router';
 import { BranchSelector } from '../components/BranchSelector';
 import { RepoSelector } from '../components/RepoSelector';
 import { formatVmSizeInline, lookupSizeInfo } from '../components/vm/format-vm-size';
-import { VmSizeCard } from '../components/vm/VmSizeCard';
+import {
+  type ResourceRequirementsFormState,
+  EMPTY_RESOURCE_STATE,
+  ResourceRequirementsInput,
+  toResourceRequirements,
+} from '../components/resource-requirements';
 import {
   createWorkspace,
   getProject,
@@ -143,7 +147,9 @@ export function CreateWorkspace() {
   const [branchesError, setBranchesError] = useState<string | null>(null);
   const [repoDefaultBranch, setRepoDefaultBranch] = useState<string | undefined>(undefined);
   const [installationId, setInstallationId] = useState('');
-  const [vmSize, setVmSize] = useState<VMSize>('medium');
+  const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
+    ...EMPTY_RESOURCE_STATE,
+  });
   const [vmLocation, setVmLocation] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string>(locationState?.nodeId ?? '');
 
@@ -291,9 +297,6 @@ export function CreateWorkspace() {
           setBranch(defBranch);
           setRepoDefaultBranch(defBranch);
           setInstallationId(proj.installationId ?? '');
-          if (proj.defaultVmSize) {
-            setVmSize(proj.defaultVmSize as VMSize);
-          }
           if (proj.defaultProvider) {
             setSelectedProvider(proj.defaultProvider);
           }
@@ -368,7 +371,6 @@ export function CreateWorkspace() {
         return;
       }
 
-      const effectiveVmSize = selectedNode?.vmSize ?? vmSize;
       const effectiveVmLocation =
         selectedNode?.vmLocation ??
         vmLocation ??
@@ -382,8 +384,11 @@ export function CreateWorkspace() {
         repository: repo,
         branch,
         installationId,
-        vmSize: effectiveVmSize,
+        vmSize: selectedNode?.vmSize ?? 'medium',
         vmLocation: effectiveVmLocation || undefined,
+        ...(toResourceRequirements(resourceReqs)
+          ? { resourceRequirements: toResourceRequirements(resourceReqs) }
+          : {}),
         ...(selectedProvider && !selectedNodeId
           ? { provider: selectedProvider as CredentialProvider }
           : {}),
@@ -719,19 +724,11 @@ export function CreateWorkspace() {
                   </span>
                 )}
               </label>
-              <div
-                className={`grid grid-cols-1 sm:grid-cols-3 gap-3${catalogLoading ? ' opacity-60 pointer-events-none' : ''}`}
-              >
-                {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
-                  <VmSizeCard
-                    key={size}
-                    size={size}
-                    sizeInfo={activeCatalog?.sizes[size] ?? null}
-                    selected={vmSize === size}
-                    onClick={() => setVmSize(size)}
-                  />
-                ))}
-              </div>
+              <ResourceRequirementsInput
+                value={resourceReqs}
+                onChange={setResourceReqs}
+                inheritLabel="project default"
+              />
             </div>
           )}
 

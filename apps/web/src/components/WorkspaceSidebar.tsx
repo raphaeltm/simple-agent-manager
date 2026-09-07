@@ -1,13 +1,14 @@
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
 import type { AgentSession } from '@simple-agent-manager/shared';
 import type { DetectedPort, Event, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import { VM_LOCATIONS } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { ExternalLink, GitBranch, Globe, Play, Trash2 } from 'lucide-react';
 import { type FC, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
+import { formatHardwareDisplay } from './resource-requirements';
 import type { GitStatusData } from '../lib/api';
 import { getPortAccessUrl } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
@@ -83,10 +84,10 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-// VM display helpers using shared provider-agnostic constants
-function vmSizeLabel(size: string): string {
-  const config = VM_SIZE_LABELS[size as keyof typeof VM_SIZE_LABELS];
-  return config ? `${config.label} (${config.shortDescription})` : size;
+function vmHardwareLabel(workspace: WorkspaceResponse): string {
+  return formatHardwareDisplay({
+    vmSize: workspace.vmSize,
+  });
 }
 
 function vmLocationLabel(location: string): string {
@@ -321,10 +322,10 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               </InfoRow>
             )}
 
-            {/* VM */}
-            {workspace?.vmSize && (
-              <InfoRow label="VM">
-                {vmSizeLabel(workspace.vmSize)}
+            {/* Hardware */}
+            {workspace && (
+              <InfoRow label="Hardware">
+                {vmHardwareLabel(workspace)}
                 {workspace.vmLocation ? ` \u00B7 ${vmLocationLabel(workspace.vmLocation)}` : ''}
               </InfoRow>
             )}
