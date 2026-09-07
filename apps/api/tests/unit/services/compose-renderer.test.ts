@@ -8,7 +8,7 @@ import type { DeploymentManifest } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
-import { type ComposeRenderContext, renderCompose } from '../../../src/services/compose-renderer';
+import { type ComposeRenderContext,renderCompose } from '../../../src/services/compose-renderer';
 
 // =============================================================================
 // Helpers
@@ -54,7 +54,9 @@ describe('renderCompose', () => {
 
   it('renders image as registry/repo@digest', () => {
     const doc = parse(renderCompose(makeManifest(), CTX));
-    expect(doc.services.web.image).toBe(`docker.io/myapp/web@sha256:${'a'.repeat(64)}`);
+    expect(doc.services.web.image).toBe(
+      `docker.io/myapp/web@sha256:${'a'.repeat(64)}`,
+    );
   });
 
   it('renders command array', () => {
@@ -87,13 +89,17 @@ describe('renderCompose', () => {
   it('renders volume bind mounts under environment-specific data subdirectories', () => {
     const doc = parse(renderCompose(makeManifest(), CTX));
     // The provider volume is mounted at /volumes/{name}; containers bind its data subdir.
-    expect(doc.services.web.volumes).toEqual(['/mnt/sam-env-env-001/volumes/data/data:/app/data']);
+    expect(doc.services.web.volumes).toEqual([
+      '/mnt/sam-env-env-001/volumes/data/data:/app/data',
+    ]);
   });
 
   it('uses custom volume root when provided', () => {
     const ctx: ComposeRenderContext = { ...CTX, volumeRoot: '/custom/volumes' };
     const doc = parse(renderCompose(makeManifest(), ctx));
-    expect(doc.services.web.volumes).toEqual(['/custom/volumes/data/data:/app/data']);
+    expect(doc.services.web.volumes).toEqual([
+      '/custom/volumes/data/data:/app/data',
+    ]);
   });
 
   it('omits volumes when service has none', () => {
@@ -168,20 +174,12 @@ describe('renderCompose', () => {
     const manifest = makeManifest({
       services: {
         web: {
-          image: {
-            registry: 'docker.io',
-            repository: 'app/web',
-            digest: 'sha256:' + 'a'.repeat(64),
-          },
+          image: { registry: 'docker.io', repository: 'app/web', digest: 'sha256:' + 'a'.repeat(64) },
           env: {},
           volumes: [],
         },
         worker: {
-          image: {
-            registry: 'docker.io',
-            repository: 'app/worker',
-            digest: 'sha256:' + 'b'.repeat(64),
-          },
+          image: { registry: 'docker.io', repository: 'app/worker', digest: 'sha256:' + 'b'.repeat(64) },
           env: { QUEUE: 'jobs' },
           volumes: [],
         },
@@ -218,23 +216,24 @@ describe('renderCompose', () => {
     };
     const doc = parse(renderCompose(manifest, CTX));
     expect(doc.services.web.environment.DB_URL).toBe(
-      'postgres://user:p@ss=w0rd@host:5432/db?sslmode=require'
+      'postgres://user:p@ss=w0rd@host:5432/db?sslmode=require',
     );
     expect(doc.services.web.environment.MULTILINE).toBe('line1\nline2\nline3');
   });
 
   it('publishes public route targets to loopback for host-level Caddy', () => {
-    const doc = parse(
-      renderCompose(makeManifest(), {
-        ...CTX,
-        routeTargets: [
-          { service: 'web', containerPort: 3000, hostPort: 35000 },
-          { service: 'web', containerPort: 3001, hostPort: 35001 },
-        ],
-      })
-    );
+    const doc = parse(renderCompose(makeManifest(), {
+      ...CTX,
+      routeTargets: [
+        { service: 'web', containerPort: 3000, hostPort: 35000 },
+        { service: 'web', containerPort: 3001, hostPort: 35001 },
+      ],
+    }));
 
-    expect(doc.services.web.ports).toEqual(['127.0.0.1:35000:3000', '127.0.0.1:35001:3001']);
+    expect(doc.services.web.ports).toEqual([
+      '127.0.0.1:35000:3000',
+      '127.0.0.1:35001:3001',
+    ]);
   });
 
   // =========================================================================
@@ -256,20 +255,12 @@ describe('renderCompose', () => {
     const manifest = makeManifest({
       services: {
         web: {
-          image: {
-            registry: 'docker.io',
-            repository: 'app/web',
-            digest: 'sha256:' + 'a'.repeat(64),
-          },
+          image: { registry: 'docker.io', repository: 'app/web', digest: 'sha256:' + 'a'.repeat(64) },
           env: {},
           volumes: [],
         },
         worker: {
-          image: {
-            registry: 'docker.io',
-            repository: 'app/worker',
-            digest: 'sha256:' + 'b'.repeat(64),
-          },
+          image: { registry: 'docker.io', repository: 'app/worker', digest: 'sha256:' + 'b'.repeat(64) },
           env: {},
           volumes: [],
         },
@@ -286,23 +277,19 @@ describe('renderCompose', () => {
   });
 
   it('respects custom log rotation settings', () => {
-    const doc = parse(
-      renderCompose(makeManifest(), {
-        ...CTX,
-        logRotation: { maxSize: '50m', maxFile: '5' },
-      })
-    );
+    const doc = parse(renderCompose(makeManifest(), {
+      ...CTX,
+      logRotation: { maxSize: '50m', maxFile: '5' },
+    }));
     expect(doc.services.web.logging.options['max-size']).toBe('50m');
     expect(doc.services.web.logging.options['max-file']).toBe('5');
   });
 
   it('uses defaults when logRotation is partially specified', () => {
-    const doc = parse(
-      renderCompose(makeManifest(), {
-        ...CTX,
-        logRotation: { maxSize: '25m' },
-      })
-    );
+    const doc = parse(renderCompose(makeManifest(), {
+      ...CTX,
+      logRotation: { maxSize: '25m' },
+    }));
     expect(doc.services.web.logging.options['max-size']).toBe('25m');
     expect(doc.services.web.logging.options['max-file']).toBe('3'); // default
   });

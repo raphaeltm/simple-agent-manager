@@ -688,9 +688,7 @@ describe('recoverStuckTasks — vertical slice', () => {
 describe('gatherDiagnostics', () => {
   it('includes workspace and node status from D1', async () => {
     await seedUser('user-st-diag');
-    await seedInstallation('install-st-diag', 'user-st-diag', {
-      installationIdValue: 'install-st-diag-ext',
-    });
+    await seedInstallation('install-st-diag', 'user-st-diag', { installationIdValue: 'install-st-diag-ext' });
     await seedProject('project-st-diag', 'user-st-diag', 'install-st-diag');
     await seedNode('node-st-diag', 'user-st-diag', { status: 'running', healthStatus: 'healthy' });
     await seedWorkspace('ws-st-diag', 'node-st-diag', 'user-st-diag', {

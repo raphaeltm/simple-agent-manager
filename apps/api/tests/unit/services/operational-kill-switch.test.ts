@@ -13,7 +13,7 @@ import {
 function makeEnv(
   get: (key: string) => Promise<string | null>,
   put: (key: string, value: string) => Promise<void> = vi.fn(),
-  overrides: Partial<Env> = {}
+  overrides: Partial<Env> = {},
 ): Env {
   return { KV: { get, put } as unknown as KVNamespace, ...overrides } as unknown as Env;
 }
@@ -25,26 +25,18 @@ describe('operational control-loop kill switches', () => {
   });
 
   it('defaults to enabled when the key is absent and when KV reads fail', async () => {
-    expect(
-      await isOperationalLoopEnabled(makeEnv(vi.fn().mockResolvedValue(null)), 'cron', 0)
-    ).toBe(true);
-    expect(
-      await isOperationalLoopEnabled(
-        makeEnv(vi.fn().mockRejectedValue(new Error('KV down'))),
-        'alarms',
-        0
-      )
-    ).toBe(true);
+    expect(await isOperationalLoopEnabled(makeEnv(vi.fn().mockResolvedValue(null)), 'cron', 0))
+      .toBe(true);
+    expect(await isOperationalLoopEnabled(makeEnv(vi.fn().mockRejectedValue(new Error('KV down'))), 'alarms', 0))
+      .toBe(true);
   });
 
   it('disabling stops alarm work and re-enabling resumes it immediately', async () => {
     const values = new Map<string, string>();
     const env = makeEnv(
       vi.fn(async (key) => values.get(key) ?? null),
-      vi.fn(async (key, value) => {
-        values.set(key, value);
-      }),
-      { CONTROL_LOOP_DISABLED_ALARM_RETRY_MS: '300000' }
+      vi.fn(async (key, value) => { values.set(key, value); }),
+      { CONTROL_LOOP_DISABLED_ALARM_RETRY_MS: '300000' },
     );
     const setAlarm = vi.fn();
     const storage = { setAlarm } as unknown as DurableObjectStorage;
@@ -73,13 +65,9 @@ describe('operational control-loop kill switches', () => {
   });
 
   it('caps in-memory cache configuration at 30 seconds', () => {
-    expect(
-      resolveOperationalKillSwitchCacheMs(
-        makeEnv(vi.fn(), vi.fn(), {
-          CONTROL_LOOP_KILL_SWITCH_CACHE_MS: '60000',
-        })
-      )
-    ).toBe(30_000);
+    expect(resolveOperationalKillSwitchCacheMs(makeEnv(vi.fn(), vi.fn(), {
+      CONTROL_LOOP_KILL_SWITCH_CACHE_MS: '60000',
+    }))).toBe(30_000);
   });
 
   it('clamps a dangerously short disabled-alarm retry to the safety floor', () => {

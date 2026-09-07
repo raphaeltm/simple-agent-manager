@@ -34,23 +34,11 @@ describe('Platform credential resolution design', () => {
     it('getDecryptedAgentKey returns credentialSource field in its type', async () => {
       // Type-level test: verify the function signature includes credentialSource
       // This confirms the type was properly updated
-      type Result = {
-        credential: string;
-        credentialKind: 'api-key' | 'oauth-token';
-        credentialSource: 'user' | 'platform';
-      } | null;
-      const mockResult: Result = {
-        credential: 'test',
-        credentialKind: 'api-key',
-        credentialSource: 'user',
-      };
+      type Result = { credential: string; credentialKind: 'api-key' | 'oauth-token'; credentialSource: 'user' | 'platform' } | null;
+      const mockResult: Result = { credential: 'test', credentialKind: 'api-key', credentialSource: 'user' };
       expect(mockResult.credentialSource).toBe('user');
 
-      const platformResult: Result = {
-        credential: 'test',
-        credentialKind: 'api-key',
-        credentialSource: 'platform',
-      };
+      const platformResult: Result = { credential: 'test', credentialKind: 'api-key', credentialSource: 'platform' };
       expect(platformResult.credentialSource).toBe('platform');
 
       const nullResult: Result = null;
@@ -59,23 +47,11 @@ describe('Platform credential resolution design', () => {
 
     it('createProviderForUser returns credentialSource field in its type', () => {
       // Type-level test: verify the function signature includes credentialSource
-      type Result = {
-        provider: unknown;
-        providerName: string;
-        credentialSource: 'user' | 'platform';
-      } | null;
-      const userResult: Result = {
-        provider: {},
-        providerName: 'hetzner',
-        credentialSource: 'user',
-      };
+      type Result = { provider: unknown; providerName: string; credentialSource: 'user' | 'platform' } | null;
+      const userResult: Result = { provider: {}, providerName: 'hetzner', credentialSource: 'user' };
       expect(userResult.credentialSource).toBe('user');
 
-      const platformResult: Result = {
-        provider: {},
-        providerName: 'hetzner',
-        credentialSource: 'platform',
-      };
+      const platformResult: Result = { provider: {}, providerName: 'hetzner', credentialSource: 'platform' };
       expect(platformResult.credentialSource).toBe('platform');
     });
   });
@@ -125,14 +101,12 @@ describe('Platform credential resolution design', () => {
       const { CreatePlatformCredentialSchema } = await import('../../src/schemas/admin');
       const { parse } = await import('valibot');
 
-      expect(() =>
-        parse(CreatePlatformCredentialSchema, {
-          credentialType: 'cloud-provider',
-          provider: 'hetzner',
-          label: '',
-          credential: 'test-token',
-        })
-      ).toThrow();
+      expect(() => parse(CreatePlatformCredentialSchema, {
+        credentialType: 'cloud-provider',
+        provider: 'hetzner',
+        label: '',
+        credential: 'test-token',
+      })).toThrow();
     });
 
     it('UpdatePlatformCredentialSchema validates label and isEnabled', async () => {

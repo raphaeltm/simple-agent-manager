@@ -26,10 +26,7 @@ describe('runComputeUsageCleanup', () => {
     await seedUser(USER_ID);
     await seedNode(NODE_ID, USER_ID);
     const wsId = 'ws-cu-stopped';
-    await seedWorkspace(wsId, NODE_ID, USER_ID, {
-      status: 'stopped',
-      updatedAt: '2026-05-14T10:00:00Z',
-    });
+    await seedWorkspace(wsId, NODE_ID, USER_ID, { status: 'stopped', updatedAt: '2026-05-14T10:00:00Z' });
     await seedComputeUsage('cu-stopped-1', USER_ID, wsId, NODE_ID, {
       startedAt: '2026-05-14T08:00:00Z',
       endedAt: null,
@@ -49,10 +46,7 @@ describe('runComputeUsageCleanup', () => {
     await seedUser(USER_ID);
     await seedNode(NODE_ID, USER_ID);
     const wsId = 'ws-cu-deleted';
-    await seedWorkspace(wsId, NODE_ID, USER_ID, {
-      status: 'deleted',
-      updatedAt: '2026-05-14T12:00:00Z',
-    });
+    await seedWorkspace(wsId, NODE_ID, USER_ID, { status: 'deleted', updatedAt: '2026-05-14T12:00:00Z' });
     await seedComputeUsage('cu-deleted-1', USER_ID, wsId, NODE_ID, {
       startedAt: '2026-05-14T08:00:00Z',
       endedAt: null,

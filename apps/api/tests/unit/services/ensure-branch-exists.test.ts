@@ -17,21 +17,11 @@ vi.mock('../../../src/lib/logger', () => ({
 // Mock jose to avoid crypto operations when getInstallationToken is called
 vi.mock('jose', () => {
   class MockSignJWT {
-    setProtectedHeader() {
-      return this;
-    }
-    setIssuedAt() {
-      return this;
-    }
-    setIssuer() {
-      return this;
-    }
-    setExpirationTime() {
-      return this;
-    }
-    async sign() {
-      return 'mock-jwt';
-    }
+    setProtectedHeader() { return this; }
+    setIssuedAt() { return this; }
+    setIssuer() { return this; }
+    setExpirationTime() { return this; }
+    async sign() { return 'mock-jwt'; }
   }
   return {
     importPKCS8: vi.fn().mockResolvedValue('mock-key'),
@@ -64,7 +54,7 @@ describe('ensureBranchExists', () => {
     const fetchMock = vi.fn();
     // First call is always getInstallationToken's internal fetch
     fetchMock.mockResolvedValueOnce(
-      Response.json({ token: 'test-installation-token', expires_at: '2026-12-31T00:00:00Z' })
+      Response.json({ token: 'test-installation-token', expires_at: '2026-12-31T00:00:00Z' }),
     );
     for (const resp of responses) {
       fetchMock.mockResolvedValueOnce(resp);
@@ -74,51 +64,44 @@ describe('ensureBranchExists', () => {
   }
 
   it('reports exists immediately when the branch is already on the remote', async () => {
-    const fetchMock = setupFetch(Response.json({ name: 'feature-branch' }));
+    const fetchMock = setupFetch(
+      Response.json({ name: 'feature-branch' }),
+    );
 
     const result = await ensureBranchExists(
-      'inst-123',
-      'owner',
-      'repo',
-      'feature-branch',
-      'main',
-      mockEnv
+      'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
     expect(result).toEqual({ status: 'exists' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+    expect(fetchMock).toHaveBeenNthCalledWith(2,
       'https://api.github.com/repos/owner/repo/branches/feature-branch',
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: 'Bearer test-installation-token',
         }),
-      })
+      }),
     );
   });
 
   it('uses the provided external GitHub installation id when minting the token', async () => {
-    const fetchMock = setupFetch(Response.json({ name: 'feature-branch' }));
+    const fetchMock = setupFetch(
+      Response.json({ name: 'feature-branch' }),
+    );
 
     const result = await ensureBranchExists(
-      '987654321',
-      'owner',
-      'repo',
-      'feature-branch',
-      'main',
-      mockEnv
+      '987654321', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
     expect(result).toEqual({ status: 'exists' });
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       'https://api.github.com/app/installations/987654321/access_tokens',
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({ method: 'POST' }),
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining('01KTDBROW000000000000000001'),
-      expect.anything()
+      expect.anything(),
     );
   });
 
@@ -126,45 +109,32 @@ describe('ensureBranchExists', () => {
     const fetchMock = setupFetch(
       new Response(null, { status: 404 }),
       Response.json({ ref: 'refs/heads/main', object: { sha: 'abc123def456' } }),
-      Response.json(
-        { ref: 'refs/heads/feature-branch', object: { sha: 'abc123def456' } },
-        { status: 201 }
-      )
+      Response.json({ ref: 'refs/heads/feature-branch', object: { sha: 'abc123def456' } }, { status: 201 }),
     );
 
     const result = await ensureBranchExists(
-      'inst-123',
-      'owner',
-      'repo',
-      'feature-branch',
-      'main',
-      mockEnv
+      'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
     expect(result).toEqual({ status: 'created' });
     expect(fetchMock).toHaveBeenCalledTimes(4);
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+    expect(fetchMock).toHaveBeenNthCalledWith(3,
       'https://api.github.com/repos/owner/repo/git/ref/heads/main',
-      expect.any(Object)
+      expect.any(Object),
     );
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      4,
+    expect(fetchMock).toHaveBeenNthCalledWith(4,
       'https://api.github.com/repos/owner/repo/git/refs',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ ref: 'refs/heads/feature-branch', sha: 'abc123def456' }),
-      })
+      }),
     );
 
     expect(mocks.log.info).toHaveBeenCalledWith('github.ensure_branch.created', {
-      owner: 'owner',
-      repo: 'repo',
-      branchName: 'feature-branch',
-      fromBranch: 'main',
-      sha: 'abc123def456',
+      owner: 'owner', repo: 'repo', branchName: 'feature-branch',
+      fromBranch: 'main', sha: 'abc123def456',
     });
   });
 
@@ -172,31 +142,24 @@ describe('ensureBranchExists', () => {
     setupFetch(
       new Response(null, { status: 404 }),
       Response.json({ ref: 'refs/heads/main', object: { sha: 'abc123' } }),
-      new Response(null, { status: 422 })
+      new Response(null, { status: 422 }),
     );
 
     const result = await ensureBranchExists(
-      'inst-123',
-      'owner',
-      'repo',
-      'feature-branch',
-      'main',
-      mockEnv
+      'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
     expect(result).toEqual({ status: 'exists' });
   });
 
   it('reports missing when the base branch ref lookup fails (branch confirmed absent)', async () => {
-    setupFetch(new Response(null, { status: 404 }), new Response(null, { status: 404 }));
+    setupFetch(
+      new Response(null, { status: 404 }),
+      new Response(null, { status: 404 }),
+    );
 
     const result = await ensureBranchExists(
-      'inst-123',
-      'owner',
-      'repo',
-      'feature-branch',
-      'main',
-      mockEnv
+      'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
     expect(result).toEqual({
@@ -205,7 +168,7 @@ describe('ensureBranchExists', () => {
     });
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.ensure_branch.default_branch_ref_failed',
-      expect.objectContaining({ status: 404 })
+      expect.objectContaining({ status: 404 }),
     );
   });
 
@@ -213,58 +176,45 @@ describe('ensureBranchExists', () => {
     setupFetch(
       new Response(null, { status: 404 }),
       Response.json({ ref: 'refs/heads/main', object: { sha: 'abc123' } }),
-      new Response(null, { status: 403 })
+      new Response(null, { status: 403 }),
     );
 
     const result = await ensureBranchExists(
-      'inst-123',
-      'owner',
-      'repo',
-      'feature-branch',
-      'main',
-      mockEnv
+      'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
     expect(result).toEqual({ status: 'missing', reason: 'branch creation failed (403)' });
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.ensure_branch.create_failed',
-      expect.objectContaining({ status: 403 })
+      expect.objectContaining({ status: 403 }),
     );
   });
 
   it('reports unknown when the branch check itself fails (nothing learned about the ref)', async () => {
-    const fetchMock = setupFetch(new Response(null, { status: 500 }));
+    const fetchMock = setupFetch(
+      new Response(null, { status: 500 }),
+    );
 
     const result = await ensureBranchExists(
-      'inst-123',
-      'owner',
-      'repo',
-      'feature-branch',
-      'main',
-      mockEnv
+      'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
     expect(result).toEqual({ status: 'unknown', reason: 'branch lookup returned 500' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.ensure_branch.check_failed',
-      expect.objectContaining({ status: 500 })
+      expect.objectContaining({ status: 500 }),
     );
   });
 
   it('reports missing when the base branch ref has no commit SHA', async () => {
     setupFetch(
       new Response(null, { status: 404 }),
-      Response.json({ ref: 'refs/heads/main', object: {} })
+      Response.json({ ref: 'refs/heads/main', object: {} }),
     );
 
     const result = await ensureBranchExists(
-      'inst-123',
-      'owner',
-      'repo',
-      'feature-branch',
-      'main',
-      mockEnv
+      'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
     expect(result).toEqual({
@@ -273,7 +223,7 @@ describe('ensureBranchExists', () => {
     });
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.ensure_branch.no_sha',
-      expect.objectContaining({ owner: 'owner', repo: 'repo' })
+      expect.objectContaining({ owner: 'owner', repo: 'repo' }),
     );
   });
 });

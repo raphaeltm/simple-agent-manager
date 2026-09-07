@@ -108,7 +108,9 @@ describe('computeSchedulerStates', () => {
   });
 
   it('handles tasks with no mission as schedulable', () => {
-    const tasks: TaskForScheduling[] = [{ id: 't1', status: 'queued', missionId: null }];
+    const tasks: TaskForScheduling[] = [
+      { id: 't1', status: 'queued', missionId: null },
+    ];
     const result = computeSchedulerStates(tasks, []);
     expect(result.get('t1')).toBe('schedulable');
   });

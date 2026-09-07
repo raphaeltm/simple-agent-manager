@@ -20,17 +20,13 @@ describe('upsertAppRouteDNSRecord', () => {
   });
 
   it('creates grey-cloud A records for HTTP-01 ACME', async () => {
-    const fetchMock = vi
-      .fn()
+    const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ result: { id: 'dns-new' } }), { status: 200 })
-      );
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-new' } }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(
-      upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
-    ).resolves.toBe('dns-new');
+    await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
+      .resolves.toBe('dns-new');
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const [, createInit] = fetchMock.mock.calls[1]!;
@@ -44,32 +40,15 @@ describe('upsertAppRouteDNSRecord', () => {
   });
 
   it('updates existing app route records idempotently', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: [
-              {
-                id: 'dns-existing',
-                name: 'r1-web.apps.example.com',
-                type: 'A',
-                content: '198.51.100.2',
-                proxied: false,
-              },
-            ],
-          }),
-          { status: 200 }
-        )
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ result: { id: 'dns-existing' } }), { status: 200 })
-      );
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: [{ id: 'dns-existing', name: 'r1-web.apps.example.com', type: 'A', content: '198.51.100.2', proxied: false }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'dns-existing' } }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(
-      upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env())
-    ).resolves.toBe('dns-existing');
+    await expect(upsertAppRouteDNSRecord('r1-web.apps.example.com', '203.0.113.10', env()))
+      .resolves.toBe('dns-existing');
 
     const [url, updateInit] = fetchMock.mock.calls[1]!;
     expect(String(url)).toContain('/dns_records/dns-existing');
@@ -87,16 +66,10 @@ describe('deleteAppRouteDNSRecord', () => {
   });
 
   it('finds the record by name and deletes it', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: [{ id: 'dns-1', name: 'r1-web.apps.example.com', type: 'A' }],
-          }),
-          { status: 200 }
-        )
-      )
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: [{ id: 'dns-1', name: 'r1-web.apps.example.com', type: 'A' }],
+      }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -108,8 +81,7 @@ describe('deleteAppRouteDNSRecord', () => {
   });
 
   it('is a no-op when no matching record exists', async () => {
-    const fetchMock = vi
-      .fn()
+    const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -118,16 +90,10 @@ describe('deleteAppRouteDNSRecord', () => {
   });
 
   it('tolerates a record deleted concurrently (404 on delete)', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: [{ id: 'dns-gone', name: 'r1-web.apps.example.com', type: 'A' }],
-          }),
-          { status: 200 }
-        )
-      )
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: [{ id: 'dns-gone', name: 'r1-web.apps.example.com', type: 'A' }],
+      }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 404 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -141,17 +107,11 @@ describe('cleanupAppRouteDNSRecords', () => {
   });
 
   it('deletes every matching record and returns the count actually removed', async () => {
-    const fetchMock = vi
-      .fn()
+    const fetchMock = vi.fn()
       // hostname 1: found + deleted
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: [{ id: 'dns-1', name: 'r1-web-3000-env.apps.example.com', type: 'A' }],
-          }),
-          { status: 200 }
-        )
-      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: [{ id: 'dns-1', name: 'r1-web-3000-env.apps.example.com', type: 'A' }],
+      }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }))
       // hostname 2: not found (no-op)
       .mockResolvedValueOnce(new Response(JSON.stringify({ result: [] }), { status: 200 }));
@@ -159,32 +119,26 @@ describe('cleanupAppRouteDNSRecords', () => {
 
     const deleted = await cleanupAppRouteDNSRecords(
       ['r1-web-3000-env.apps.example.com', 'r2-api-8081-env.apps.example.com'],
-      env()
+      env(),
     );
 
     expect(deleted).toBe(1);
   });
 
   it('skips a failing record and continues deleting the rest', async () => {
-    const fetchMock = vi
-      .fn()
+    const fetchMock = vi.fn()
       // hostname 1: search fails -> error swallowed, count unaffected
       .mockResolvedValueOnce(new Response('boom', { status: 500 }))
       // hostname 2: found + deleted
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: [{ id: 'dns-2', name: 'r2-api-8081-env.apps.example.com', type: 'A' }],
-          }),
-          { status: 200 }
-        )
-      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        result: [{ id: 'dns-2', name: 'r2-api-8081-env.apps.example.com', type: 'A' }],
+      }), { status: 200 }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     const deleted = await cleanupAppRouteDNSRecords(
       ['r1-web-3000-env.apps.example.com', 'r2-api-8081-env.apps.example.com'],
-      env()
+      env(),
     );
 
     expect(deleted).toBe(1);

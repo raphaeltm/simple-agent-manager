@@ -71,11 +71,7 @@ function createApp() {
 describe('node observability log routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireNodeOwnership.mockResolvedValue({
-      id: 'node-1',
-      status: 'running',
-      userId: 'user-1',
-    });
+    mockRequireNodeOwnership.mockResolvedValue({ id: 'node-1', status: 'running', userId: 'user-1' });
     mockGetNodeAgentRequestTimeoutMs.mockReturnValue(30_000);
     mockSignNodeManagementToken.mockResolvedValue({
       token: 'node-management-token',
@@ -86,14 +82,7 @@ describe('node observability log routes', () => {
 
   it('returns docker container entries from the node agent proxy', async () => {
     mockGetNodeLogsFromNode.mockResolvedValue({
-      entries: [
-        {
-          timestamp: '2026-06-18T10:00:00Z',
-          level: 'info',
-          source: 'docker:web-1',
-          message: 'ready',
-        },
-      ],
+      entries: [{ timestamp: '2026-06-18T10:00:00Z', level: 'info', source: 'docker:web-1', message: 'ready' }],
       nextCursor: null,
       hasMore: false,
     });
@@ -101,7 +90,7 @@ describe('node observability log routes', () => {
     const response = await createApp().request(
       '/api/nodes/node-1/logs?source=docker&container=web-1',
       {},
-      { DATABASE: {} } as Env
+      { DATABASE: {} } as Env,
     );
 
     expect(response.status).toBe(200);
@@ -111,7 +100,7 @@ describe('node observability log routes', () => {
       'node-1',
       expect.anything(),
       'user-1',
-      'source=docker&container=web-1'
+      'source=docker&container=web-1',
     );
   });
 
@@ -120,9 +109,7 @@ describe('node observability log routes', () => {
       containers: [{ id: 'abc', name: 'web-1', image: 'nginx', state: 'running', status: 'Up' }],
     });
 
-    const response = await createApp().request('/api/nodes/node-1/containers', {}, {
-      DATABASE: {},
-    } as Env);
+    const response = await createApp().request('/api/nodes/node-1/containers', {}, { DATABASE: {} } as Env);
 
     expect(response.status).toBe(200);
     const body = await response.json<any>();
@@ -150,16 +137,11 @@ describe('node observability log routes', () => {
         BASE_DOMAIN: 'example.com',
         VM_AGENT_PROTOCOL: 'https',
         VM_AGENT_PORT: '8443',
-      } as Env
+      } as Env,
     );
 
     expect(response.status).toBe(200);
-    expect(mockSignNodeManagementToken).toHaveBeenCalledWith(
-      'user-1',
-      'node-1',
-      null,
-      expect.anything()
-    );
+    expect(mockSignNodeManagementToken).toHaveBeenCalledWith('user-1', 'node-1', null, expect.anything());
     expect(mockFetchNodeAgent).toHaveBeenCalledTimes(1);
 
     const [, , vmUrl, init] = mockFetchNodeAgent.mock.calls[0];

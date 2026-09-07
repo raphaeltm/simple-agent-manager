@@ -18,17 +18,17 @@ import { runObservabilityPurge } from '../../src/scheduled/observability-purge';
 async function insertError(
   db: D1Database,
   id: string,
-  opts?: { createdAt?: number; message?: string }
+  opts?: { createdAt?: number; message?: string },
 ): Promise<void> {
   const createdAt = opts?.createdAt ?? Date.now();
-  await db
-    .prepare(
-      `INSERT INTO platform_errors (id, source, level, message, timestamp, created_at)
-     VALUES (?, 'api', 'error', ?, ?, ?)`
-    )
+  await db.prepare(
+    `INSERT INTO platform_errors (id, source, level, message, timestamp, created_at)
+     VALUES (?, 'api', 'error', ?, ?, ?)`,
+  )
     .bind(id, opts?.message ?? `Error ${id}`, createdAt, createdAt)
     .run();
 }
+
 
 describe('runObservabilityPurge', () => {
   it('deletes errors older than retention period', async () => {
@@ -52,10 +52,9 @@ describe('runObservabilityPurge', () => {
     await runObservabilityPurge(testEnv);
 
     // Old errors should be gone, recent ones should remain
-    const remaining = await db
-      .prepare('SELECT id FROM platform_errors WHERE id LIKE ? ORDER BY id')
-      .bind('purge-%')
-      .all<{ id: string }>();
+    const remaining = await db.prepare(
+      'SELECT id FROM platform_errors WHERE id LIKE ? ORDER BY id',
+    ).bind('purge-%').all<{ id: string }>();
 
     const ids = remaining.results.map((r) => r.id);
     expect(ids).toContain('purge-recent-1');
@@ -73,9 +72,7 @@ describe('runObservabilityPurge', () => {
 
     // Insert 5 recent errors
     for (let i = 0; i < 5; i++) {
-      await insertError(db, `count-${String(i).padStart(3, '0')}`, {
-        createdAt: now - (5 - i) * 1000,
-      });
+      await insertError(db, `count-${String(i).padStart(3, '0')}`, { createdAt: now - (5 - i) * 1000 });
     }
 
     const testEnv = {
@@ -87,10 +84,9 @@ describe('runObservabilityPurge', () => {
     await runObservabilityPurge(testEnv);
 
     // Only the 3 newest should remain
-    const remaining = await db
-      .prepare('SELECT id FROM platform_errors WHERE id LIKE ? ORDER BY created_at ASC')
-      .bind('count-%')
-      .all<{ id: string }>();
+    const remaining = await db.prepare(
+      'SELECT id FROM platform_errors WHERE id LIKE ? ORDER BY created_at ASC',
+    ).bind('count-%').all<{ id: string }>();
 
     expect(remaining.results.length).toBe(2);
     // The oldest 3 (count-000, count-001, count-002) should be deleted

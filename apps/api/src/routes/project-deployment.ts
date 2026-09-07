@@ -73,9 +73,11 @@ projectDeploymentRoutes.get(
     const stateTtl = c.env.GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS
       ? parseInt(c.env.GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS, 10)
       : DEFAULT_GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS;
-    await c.env.KV.put(`gcp-deploy-oauth-state:${state}`, JSON.stringify({ projectId, userId }), {
-      expirationTtl: stateTtl,
-    });
+    await c.env.KV.put(
+      `gcp-deploy-oauth-state:${state}`,
+      JSON.stringify({ projectId, userId }),
+      { expirationTtl: stateTtl },
+    );
 
     const redirectUri = `https://api.${c.env.BASE_DOMAIN}/api/deployment/gcp/callback`;
     const params = new URLSearchParams({
@@ -90,7 +92,7 @@ projectDeploymentRoutes.get(
     });
 
     return c.redirect(`${GOOGLE_AUTH_URL}?${params.toString()}`);
-  }
+  },
 );
 
 // OAuth callback moved to gcpDeployCallbackRoute — see below
@@ -114,9 +116,7 @@ projectDeploymentRoutes.get(
     const kvKey = `gcp-deploy-oauth-result:${userId}:${projectId}`;
     const handle = await c.env.KV.get(kvKey);
     if (!handle) {
-      throw errors.notFound(
-        'No pending OAuth result — it may have expired or already been retrieved'
-      );
+      throw errors.notFound('No pending OAuth result — it may have expired or already been retrieved');
     }
 
     // One-time use: delete after retrieval.
@@ -125,7 +125,7 @@ projectDeploymentRoutes.get(
     await c.env.KV.delete(kvKey);
 
     return c.json({ handle });
-  }
+  },
 );
 
 // ─── Setup + management (user session auth) ─────────────────────────────
@@ -159,7 +159,7 @@ projectDeploymentRoutes.post(
     } catch (err) {
       throw toSanitizedAppError(err, 'deploy-list-projects');
     }
-  }
+  },
 );
 
 /**
@@ -203,8 +203,8 @@ projectDeploymentRoutes.post(
       .where(
         and(
           eq(schema.projectDeploymentCredentials.projectId, projectId),
-          eq(schema.projectDeploymentCredentials.provider, 'gcp')
-        )
+          eq(schema.projectDeploymentCredentials.provider, 'gcp'),
+        ),
       )
       .limit(1);
 
@@ -246,43 +246,48 @@ projectDeploymentRoutes.post(
         createdAt: now,
       },
     });
-  }
+  },
 );
 
 /**
  * GET /api/projects/:id/deployment/gcp
  * Get deployment credential config for a project.
  */
-projectDeploymentRoutes.get('/:id/deployment/gcp', requireAuth(), requireApproved(), async (c) => {
-  const projectId = c.req.param('id');
-  const userId = getUserId(c);
-  const db = drizzle(c.env.DATABASE, { schema });
-  await requireProjectCapability(db, projectId, userId, 'infra:manage');
+projectDeploymentRoutes.get(
+  '/:id/deployment/gcp',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const projectId = c.req.param('id');
+    const userId = getUserId(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
-  const rows = await db
-    .select()
-    .from(schema.projectDeploymentCredentials)
-    .where(
-      and(
-        eq(schema.projectDeploymentCredentials.projectId, projectId),
-        eq(schema.projectDeploymentCredentials.provider, 'gcp')
+    const rows = await db
+      .select()
+      .from(schema.projectDeploymentCredentials)
+      .where(
+        and(
+          eq(schema.projectDeploymentCredentials.projectId, projectId),
+          eq(schema.projectDeploymentCredentials.provider, 'gcp'),
+        ),
       )
-    )
-    .limit(1);
+      .limit(1);
 
-  const cred = rows[0];
-  if (!cred) {
-    return c.json({ connected: false });
-  }
+    const cred = rows[0];
+    if (!cred) {
+      return c.json({ connected: false });
+    }
 
-  return c.json({
-    connected: true,
-    provider: 'gcp' as const,
-    gcpProjectId: cred.gcpProjectId,
-    serviceAccountEmail: cred.serviceAccountEmail,
-    createdAt: cred.createdAt,
-  });
-});
+    return c.json({
+      connected: true,
+      provider: 'gcp' as const,
+      gcpProjectId: cred.gcpProjectId,
+      serviceAccountEmail: cred.serviceAccountEmail,
+      createdAt: cred.createdAt,
+    });
+  },
+);
 
 /**
  * DELETE /api/projects/:id/deployment/gcp
@@ -303,12 +308,12 @@ projectDeploymentRoutes.delete(
       .where(
         and(
           eq(schema.projectDeploymentCredentials.projectId, projectId),
-          eq(schema.projectDeploymentCredentials.provider, 'gcp')
-        )
+          eq(schema.projectDeploymentCredentials.provider, 'gcp'),
+        ),
       );
 
     return c.json({ success: true });
-  }
+  },
 );
 
 // ─── Identity token endpoint (MCP token auth only) ──────────────────────
@@ -355,8 +360,8 @@ deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => 
     .where(
       and(
         eq(schema.projectDeploymentCredentials.projectId, projectId),
-        eq(schema.projectDeploymentCredentials.provider, 'gcp')
-      )
+        eq(schema.projectDeploymentCredentials.provider, 'gcp'),
+      ),
     )
     .limit(1);
 
@@ -370,8 +375,7 @@ deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => 
   // for identity tokens. The STS `audience` field in the credential config (deployment-tools.ts)
   // uses the protocol-relative `//` format. Both forms are intentionally different per GCP WIF spec.
   const poolId = cred.wifPoolId || c.env.GCP_DEPLOY_WIF_POOL_ID || DEFAULT_GCP_DEPLOY_WIF_POOL_ID;
-  const providerId =
-    cred.wifProviderId || c.env.GCP_DEPLOY_WIF_PROVIDER_ID || DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID;
+  const providerId = cred.wifProviderId || c.env.GCP_DEPLOY_WIF_PROVIDER_ID || DEFAULT_GCP_DEPLOY_WIF_PROVIDER_ID;
   const audience = `https://iam.googleapis.com/projects/${cred.gcpProjectNumber}/locations/global/workloadIdentityPools/${poolId}/providers/${providerId}`;
 
   const expirySeconds = c.env.GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS
@@ -398,7 +402,7 @@ deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => 
     c.env.KV,
     rlKey,
     rateLimitMax,
-    rateLimitWindowSeconds
+    rateLimitWindowSeconds,
   );
 
   c.header('X-RateLimit-Limit', rateLimitMax.toString());
@@ -419,7 +423,7 @@ deploymentIdentityTokenRoute.get('/:id/deployment-identity-token', async (c) => 
       audience,
     },
     c.env,
-    expirySeconds
+    expirySeconds,
   );
 
   // Cache the signed token with TTL = expiry - buffer (min floor)
@@ -455,136 +459,131 @@ const gcpDeployCallbackRoute = new Hono<{ Bindings: Env }>();
  * Project context comes from the KV state token, NOT the URL.
  * This allows a single static redirect URI in Google Cloud Console.
  */
-gcpDeployCallbackRoute.get('/gcp/callback', requireAuth(), requireApproved(), async (c) => {
-  const sessionUserId = getUserId(c);
-  const appBaseUrl = `https://app.${c.env.BASE_DOMAIN}`;
+gcpDeployCallbackRoute.get(
+  '/gcp/callback',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const sessionUserId = getUserId(c);
+    const appBaseUrl = `https://app.${c.env.BASE_DOMAIN}`;
 
-  const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
-  if (!googleOAuth) {
-    throw errors.badRequest('Google OAuth is not configured');
-  }
-
-  const code = c.req.query('code');
-  const state = c.req.query('state');
-  const error = c.req.query('error');
-
-  if (error) {
-    // No project context yet — redirect to dashboard with error
-    return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent(error)}`);
-  }
-
-  if (!code || !state) {
-    return c.redirect(
-      `${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Missing authorization code or state')}`
-    );
-  }
-
-  // Validate state format before KV lookup (state is always a UUID)
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!UUID_RE.test(state)) {
-    return c.redirect(
-      `${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid OAuth state')}`
-    );
-  }
-
-  // Validate CSRF state and extract project context
-  const storedStateRaw = await c.env.KV.get(`gcp-deploy-oauth-state:${state}`);
-  if (!storedStateRaw) {
-    return c.redirect(
-      `${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid or expired OAuth state')}`
-    );
-  }
-
-  let storedState: { projectId: string; userId: string };
-  try {
-    const parsed = expectJsonRecord(JSON.parse(storedStateRaw), 'gcp_deploy_oauth.state');
-    if (typeof parsed.projectId !== 'string' || typeof parsed.userId !== 'string') {
-      throw new Error('Invalid state structure');
+    const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
+    if (!googleOAuth) {
+      throw errors.badRequest('Google OAuth is not configured');
     }
-    storedState = { projectId: parsed.projectId, userId: parsed.userId };
-  } catch {
+
+    const code = c.req.query('code');
+    const state = c.req.query('state');
+    const error = c.req.query('error');
+
+    if (error) {
+      // No project context yet — redirect to dashboard with error
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent(error)}`);
+    }
+
+    if (!code || !state) {
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Missing authorization code or state')}`);
+    }
+
+    // Validate state format before KV lookup (state is always a UUID)
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(state)) {
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid OAuth state')}`);
+    }
+
+    // Validate CSRF state and extract project context
+    const storedStateRaw = await c.env.KV.get(`gcp-deploy-oauth-state:${state}`);
+    if (!storedStateRaw) {
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid or expired OAuth state')}`);
+    }
+
+    let storedState: { projectId: string; userId: string };
+    try {
+      const parsed = expectJsonRecord(JSON.parse(storedStateRaw), 'gcp_deploy_oauth.state');
+      if (typeof parsed.projectId !== 'string' || typeof parsed.userId !== 'string') {
+        throw new Error('Invalid state structure');
+      }
+      storedState = { projectId: parsed.projectId, userId: parsed.userId };
+    } catch {
+      await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid OAuth state format')}`);
+    }
+
+    if (!storedState.projectId || !storedState.userId) {
+      await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Incomplete OAuth state')}`);
+    }
+
+    // Validate user identity BEFORE consuming the state token — if the user doesn't
+    // match, the state remains valid for the legitimate user to retry
+    if (storedState.userId !== sessionUserId) {
+      return c.redirect(`${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('OAuth state user mismatch')}`);
+    }
+
+    // All validation passed — consume the state token (one-time use)
     await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
-    return c.redirect(
-      `${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Invalid OAuth state format')}`
-    );
-  }
 
-  if (!storedState.projectId || !storedState.userId) {
-    await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
-    return c.redirect(
-      `${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('Incomplete OAuth state')}`
-    );
-  }
+    const projectId = storedState.projectId;
 
-  // Validate user identity BEFORE consuming the state token — if the user doesn't
-  // match, the state remains valid for the legitimate user to retry
-  if (storedState.userId !== sessionUserId) {
-    return c.redirect(
-      `${appBaseUrl}?gcp_deploy_error=${encodeURIComponent('OAuth state user mismatch')}`
-    );
-  }
+    // Defense-in-depth: verify the session user can still manage project
+    // infrastructure, even though the KV state was created by an authenticated
+    // actor at authorize time.
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireProjectCapability(db, projectId, sessionUserId, 'infra:manage');
 
-  // All validation passed — consume the state token (one-time use)
-  await c.env.KV.delete(`gcp-deploy-oauth-state:${state}`);
+    const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${projectId}/settings/deploy`;
 
-  const projectId = storedState.projectId;
-
-  // Defense-in-depth: verify the session user can still manage project
-  // infrastructure, even though the KV state was created by an authenticated
-  // actor at authorize time.
-  const db = drizzle(c.env.DATABASE, { schema });
-  await requireProjectCapability(db, projectId, sessionUserId, 'infra:manage');
-
-  const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${projectId}/settings/deploy`;
-
-  // Exchange auth code for access token
-  const redirectUri = `https://api.${c.env.BASE_DOMAIN}/api/deployment/gcp/callback`;
-  const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      code,
-      client_id: googleOAuth.clientId,
-      client_secret: googleOAuth.clientSecret,
-      redirect_uri: redirectUri,
-      grant_type: 'authorization_code',
-    }),
-  });
-
-  if (!tokenResponse.ok) {
-    const errPayload: unknown = await tokenResponse.json().catch(() => ({}));
-    const errBody = maybeJsonRecord(errPayload) ?? {};
-    log.error('project_deployment.google_token_exchange_failed', {
-      status: tokenResponse.status,
-      error: typeof errBody.error === 'string' ? errBody.error : 'unknown',
+    // Exchange auth code for access token
+    const redirectUri = `https://api.${c.env.BASE_DOMAIN}/api/deployment/gcp/callback`;
+    const tokenResponse = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: googleOAuth.clientId,
+        client_secret: googleOAuth.clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }),
     });
-    return c.redirect(`${appUrl}?gcp_deploy_error=token_exchange_failed`);
-  }
 
-  const tokenData = await readResponseJson(
-    tokenResponse,
-    googleDeployTokenResponseSchema,
-    'project_deployment.google_token_response'
-  );
+    if (!tokenResponse.ok) {
+      const errPayload: unknown = await tokenResponse.json().catch(() => ({}));
+      const errBody = maybeJsonRecord(errPayload) ?? {};
+      log.error('project_deployment.google_token_exchange_failed', {
+        status: tokenResponse.status,
+        error: typeof errBody.error === 'string' ? errBody.error : 'unknown',
+      });
+      return c.redirect(`${appUrl}?gcp_deploy_error=token_exchange_failed`);
+    }
 
-  // Store token in KV with opaque handle (for subsequent API calls)
-  const handle = crypto.randomUUID();
-  const tokenHandleTtl = c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS
-    ? parseInt(c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS, 10)
-    : DEFAULT_GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS;
-  await c.env.KV.put(`gcp-deploy-oauth-token:${handle}`, tokenData.access_token, {
-    expirationTtl: tokenHandleTtl,
-  });
+    const tokenData = await readResponseJson(
+      tokenResponse,
+      googleDeployTokenResponseSchema,
+      'project_deployment.google_token_response',
+    );
 
-  // Store the handle reference in a user+project-scoped KV key so the frontend
-  // can retrieve it via an authenticated API call instead of from the URL.
-  // This prevents the handle from leaking in browser history, Referer headers, and logs.
-  await c.env.KV.put(`gcp-deploy-oauth-result:${sessionUserId}:${projectId}`, handle, {
-    expirationTtl: tokenHandleTtl,
-  });
+    // Store token in KV with opaque handle (for subsequent API calls)
+    const handle = crypto.randomUUID();
+    const tokenHandleTtl = c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS
+      ? parseInt(c.env.GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS, 10)
+      : DEFAULT_GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS;
+    await c.env.KV.put(`gcp-deploy-oauth-token:${handle}`, tokenData.access_token, {
+      expirationTtl: tokenHandleTtl,
+    });
 
-  // Redirect with only a flag — no sensitive token in the URL
-  return c.redirect(`${appUrl}?gcp_deploy_setup=ready`);
-});
+    // Store the handle reference in a user+project-scoped KV key so the frontend
+    // can retrieve it via an authenticated API call instead of from the URL.
+    // This prevents the handle from leaking in browser history, Referer headers, and logs.
+    await c.env.KV.put(
+      `gcp-deploy-oauth-result:${sessionUserId}:${projectId}`,
+      handle,
+      { expirationTtl: tokenHandleTtl },
+    );
 
-export { deploymentIdentityTokenRoute, gcpDeployCallbackRoute, projectDeploymentRoutes };
+    // Redirect with only a flag — no sensitive token in the URL
+    return c.redirect(`${appUrl}?gcp_deploy_setup=ready`);
+  },
+);
+
+export { deploymentIdentityTokenRoute,gcpDeployCallbackRoute, projectDeploymentRoutes };

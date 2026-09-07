@@ -1,5 +1,5 @@
 import { MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import {
   buildActionUrl,
@@ -147,17 +147,14 @@ describe('Notification Service', () => {
         outputBranch: 'fix-bug',
       });
 
-      expect(createNotificationMock).toHaveBeenCalledWith(
-        'user-123',
-        expect.objectContaining({
-          type: 'task_complete',
-          urgency: 'medium',
-          title: 'Task completed: Fix the bug',
-          projectId: 'proj-1',
-          taskId: 'task-1',
-          actionUrl: '/projects/proj-1',
-        })
-      );
+      expect(createNotificationMock).toHaveBeenCalledWith('user-123', expect.objectContaining({
+        type: 'task_complete',
+        urgency: 'medium',
+        title: 'Task completed: Fix the bug',
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        actionUrl: '/projects/proj-1',
+      }));
 
       const call = createNotificationMock.mock.calls[0]![1];
       expect(call.body).toContain('PR ready for review');
@@ -224,15 +221,12 @@ describe('Notification Service', () => {
         errorMessage: 'Build failed: syntax error',
       });
 
-      expect(createNotificationMock).toHaveBeenCalledWith(
-        'user-123',
-        expect.objectContaining({
-          type: 'error',
-          urgency: 'high',
-          title: 'Task failed: Deploy to prod',
-          body: 'Build failed: syntax error',
-        })
-      );
+      expect(createNotificationMock).toHaveBeenCalledWith('user-123', expect.objectContaining({
+        type: 'error',
+        urgency: 'high',
+        title: 'Task failed: Deploy to prod',
+        body: 'Build failed: syntax error',
+      }));
     });
 
     it('should include projectName in metadata', async () => {
@@ -270,14 +264,11 @@ describe('Notification Service', () => {
         taskTitle: 'Review code',
       });
 
-      expect(createNotificationMock).toHaveBeenCalledWith(
-        'user-123',
-        expect.objectContaining({
-          type: 'session_ended',
-          urgency: 'medium',
-          title: 'Agent finished: Review code',
-        })
-      );
+      expect(createNotificationMock).toHaveBeenCalledWith('user-123', expect.objectContaining({
+        type: 'session_ended',
+        urgency: 'medium',
+        title: 'Agent finished: Review code',
+      }));
     });
 
     it('should include projectName in metadata', async () => {
@@ -314,21 +305,18 @@ describe('Notification Service', () => {
         branchName: 'sam/add-tests',
       });
 
-      expect(createNotificationMock).toHaveBeenCalledWith(
-        'user-123',
-        expect.objectContaining({
-          type: 'pr_created',
-          urgency: 'medium',
-          title: 'PR created: Add tests',
-          body: 'Pull request is ready for review',
-          actionUrl: '/projects/proj-1',
-          metadata: {
-            projectName: 'My Project',
-            prUrl: 'https://github.com/org/repo/pull/99',
-            branchName: 'sam/add-tests',
-          },
-        })
-      );
+      expect(createNotificationMock).toHaveBeenCalledWith('user-123', expect.objectContaining({
+        type: 'pr_created',
+        urgency: 'medium',
+        title: 'PR created: Add tests',
+        body: 'Pull request is ready for review',
+        actionUrl: '/projects/proj-1',
+        metadata: {
+          projectName: 'My Project',
+          prUrl: 'https://github.com/org/repo/pull/99',
+          branchName: 'sam/add-tests',
+        },
+      }));
       const call = createNotificationMock.mock.calls[0]![1];
       expect(call.sessionId).toBeUndefined();
     });
@@ -346,23 +334,20 @@ describe('Notification Service', () => {
         options: ['Approve', 'Reject', 'Defer'],
       });
 
-      expect(createNotificationMock).toHaveBeenCalledWith(
-        'user-123',
-        expect.objectContaining({
-          type: 'needs_input',
-          urgency: 'high',
-          title: 'Approval needed: Deploy to prod',
-          body: 'I need approval to proceed with the database migration',
-          projectId: 'proj-1',
-          taskId: 'task-1',
-          actionUrl: '/projects/proj-1',
-          metadata: {
-            projectName: 'My Project',
-            category: 'approval',
-            options: ['Approve', 'Reject', 'Defer'],
-          },
-        })
-      );
+      expect(createNotificationMock).toHaveBeenCalledWith('user-123', expect.objectContaining({
+        type: 'needs_input',
+        urgency: 'high',
+        title: 'Approval needed: Deploy to prod',
+        body: 'I need approval to proceed with the database migration',
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        actionUrl: '/projects/proj-1',
+        metadata: {
+          projectName: 'My Project',
+          category: 'approval',
+          options: ['Approve', 'Reject', 'Defer'],
+        },
+      }));
     });
 
     it('should use generic label when no category provided', async () => {
@@ -405,18 +390,15 @@ describe('Notification Service', () => {
         message: 'Completed step 3 of 5: database schema migration',
       });
 
-      expect(createNotificationMock).toHaveBeenCalledWith(
-        'user-123',
-        expect.objectContaining({
-          type: 'progress',
-          urgency: 'low',
-          title: 'Progress: Implement feature',
-          body: 'Completed step 3 of 5: database schema migration',
-          projectId: 'proj-1',
-          taskId: 'task-1',
-          actionUrl: '/projects/proj-1',
-        })
-      );
+      expect(createNotificationMock).toHaveBeenCalledWith('user-123', expect.objectContaining({
+        type: 'progress',
+        urgency: 'low',
+        title: 'Progress: Implement feature',
+        body: 'Completed step 3 of 5: database schema migration',
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        actionUrl: '/projects/proj-1',
+      }));
     });
 
     it('should include projectName in metadata', async () => {
@@ -669,9 +651,7 @@ describe('Notification Service', () => {
 
       const sessionId = await getChatSessionId(env, 'ws-1');
       expect(sessionId).toBe('sess-42');
-      expect(env.DATABASE.prepare).toHaveBeenCalledWith(
-        'SELECT chat_session_id FROM workspaces WHERE id = ?'
-      );
+      expect(env.DATABASE.prepare).toHaveBeenCalledWith('SELECT chat_session_id FROM workspaces WHERE id = ?');
       expect(bindMock).toHaveBeenCalledWith('ws-1');
     });
 
@@ -722,45 +702,12 @@ describe('Notification Service', () => {
     // includes projectName in metadata so the frontend can display project names.
     it('every notification helper includes projectName in metadata', async () => {
       const helpers = [
-        () =>
-          notifyTaskComplete(env, 'u', {
-            projectId: 'p',
-            projectName: 'PN',
-            taskId: 't',
-            taskTitle: 'T',
-          }),
-        () =>
-          notifyTaskFailed(env, 'u', {
-            projectId: 'p',
-            projectName: 'PN',
-            taskId: 't',
-            taskTitle: 'T',
-          }),
+        () => notifyTaskComplete(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T' }),
+        () => notifyTaskFailed(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T' }),
         () => notifySessionEnded(env, 'u', { projectId: 'p', projectName: 'PN' }),
-        () =>
-          notifyPrCreated(env, 'u', {
-            projectId: 'p',
-            projectName: 'PN',
-            taskId: 't',
-            taskTitle: 'T',
-            prUrl: 'http://x',
-          }),
-        () =>
-          notifyNeedsInput(env, 'u', {
-            projectId: 'p',
-            projectName: 'PN',
-            taskId: 't',
-            taskTitle: 'T',
-            context: 'c',
-          }),
-        () =>
-          notifyProgress(env, 'u', {
-            projectId: 'p',
-            projectName: 'PN',
-            taskId: 't',
-            taskTitle: 'T',
-            message: 'm',
-          }),
+        () => notifyPrCreated(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T', prUrl: 'http://x' }),
+        () => notifyNeedsInput(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T', context: 'c' }),
+        () => notifyProgress(env, 'u', { projectId: 'p', projectName: 'PN', taskId: 't', taskTitle: 'T', message: 'm' }),
       ];
 
       for (const helper of helpers) {

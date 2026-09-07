@@ -49,17 +49,20 @@ async function resetUsers(): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT INTO users (id, email, email_verified, role, status)
      VALUES (?, 'anonymous-trials@simple-agent-manager.internal', 0, 'user', 'system')
-     ON CONFLICT(id) DO UPDATE SET role = 'user', status = 'system'`
+     ON CONFLICT(id) DO UPDATE SET role = 'user', status = 'system'`,
   )
     .bind(TRIAL_ANONYMOUS_USER_ID)
     .run();
 }
 
-async function insertUser(id: string, opts?: { role?: string; status?: string }): Promise<void> {
+async function insertUser(
+  id: string,
+  opts?: { role?: string; status?: string },
+): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT INTO users (id, email, email_verified, role, status)
      VALUES (?, ?, 1, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET role = excluded.role, status = excluded.status`
+     ON CONFLICT(id) DO UPDATE SET role = excluded.role, status = excluded.status`,
   )
     .bind(id, `${id}@example.com`, opts?.role ?? 'user', opts?.status ?? 'active')
     .run();
@@ -113,10 +116,7 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
     // Sentinel is never touched.
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({
-      role: 'user',
-      status: 'system',
-    });
+    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
   });
 
   it('does nothing when two real users exist (not single-operator)', async () => {
@@ -159,12 +159,9 @@ describe('migration 0062 — guarded superadmin backfill (real D1)', () => {
     // not promote it — there is no real human to heal.
     await env.DATABASE.exec(MIGRATION_UPDATE_SQL);
 
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({
-      role: 'user',
-      status: 'system',
-    });
+    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
     const superadmins = await env.DATABASE.prepare(
-      `SELECT COUNT(*) AS n FROM users WHERE role = 'superadmin'`
+      `SELECT COUNT(*) AS n FROM users WHERE role = 'superadmin'`,
     ).first<{ n: number }>();
     expect(superadmins?.n).toBe(0);
   });
@@ -180,10 +177,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     await hook({ userId: 'real-1' });
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({
-      role: 'user',
-      status: 'system',
-    });
+    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
   });
 
   it('is idempotent — a second login is a no-op', async () => {
@@ -249,10 +243,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
 
     await hook({ userId: TRIAL_ANONYMOUS_USER_ID });
 
-    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({
-      role: 'user',
-      status: 'system',
-    });
+    expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({ role: 'user', status: 'system' });
   });
 
   it('honors an env-overridden sentinel id', async () => {
@@ -261,7 +252,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     await env.DATABASE.prepare(`DELETE FROM users`).run();
     await env.DATABASE.prepare(
       `INSERT INTO users (id, email, email_verified, role, status)
-       VALUES ('custom_sentinel', 'c@x.internal', 0, 'user', 'system')`
+       VALUES ('custom_sentinel', 'c@x.internal', 0, 'user', 'system')`,
     ).run();
     await insertUser('real-1', { role: 'user', status: 'active' });
 

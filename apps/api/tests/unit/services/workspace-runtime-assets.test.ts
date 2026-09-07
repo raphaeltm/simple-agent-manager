@@ -67,12 +67,7 @@ describe('workspace runtime asset resolver', () => {
       ],
       [
         { path: 'shared.txt', storedContent: 'project-file', contentIv: null, isSecret: false },
-        {
-          path: 'project.txt',
-          storedContent: 'project-only-file',
-          contentIv: null,
-          isSecret: false,
-        },
+        { path: 'project.txt', storedContent: 'project-only-file', contentIv: null, isSecret: false },
       ],
       [
         { key: 'SHARED_KEY', storedValue: 'profile-value', valueIv: null, isSecret: false },
@@ -80,12 +75,7 @@ describe('workspace runtime asset resolver', () => {
       ],
       [
         { path: 'shared.txt', storedContent: 'profile-file', contentIv: null, isSecret: false },
-        {
-          path: 'profile.txt',
-          storedContent: 'profile-only-file',
-          contentIv: null,
-          isSecret: false,
-        },
+        { path: 'profile.txt', storedContent: 'profile-only-file', contentIv: null, isSecret: false },
       ],
       [
         { key: 'SHARED_KEY', storedValue: 'skill-value', valueIv: null, isSecret: false },
@@ -117,15 +107,13 @@ describe('workspace runtime asset resolver', () => {
     const db = makeDbWithLimitAwareness([
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
-      [
-        {
-          id: 'agent-session-1',
-          workspaceId: 'ws-1',
-          userId: 'user-1',
-          profileId: 'profile-1',
-          skillId: 'skill-1',
-        },
-      ],
+      [{
+        id: 'agent-session-1',
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        profileId: 'profile-1',
+        skillId: 'skill-1',
+      }],
       [{ id: 'profile-1' }],
       [{ id: 'skill-1' }],
       [],
@@ -152,15 +140,13 @@ describe('workspace runtime asset resolver', () => {
     const db = makeDbWithLimitAwareness([
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
-      [
-        {
-          id: 'agent-session-2',
-          workspaceId: 'ws-2',
-          userId: 'user-1',
-          profileId: 'profile-1',
-          skillId: null,
-        },
-      ],
+      [{
+        id: 'agent-session-2',
+        workspaceId: 'ws-2',
+        userId: 'user-1',
+        profileId: 'profile-1',
+        skillId: null,
+      }],
     ]);
 
     await expect(
@@ -176,15 +162,13 @@ describe('workspace runtime asset resolver', () => {
     const db = makeDbWithLimitAwareness([
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
       [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
-      [
-        {
-          id: 'agent-session-1',
-          workspaceId: 'ws-1',
-          userId: 'user-1',
-          profileId: 'profile-from-other-project',
-          skillId: null,
-        },
-      ],
+      [{
+        id: 'agent-session-1',
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        profileId: 'profile-from-other-project',
+        skillId: null,
+      }],
       [],
       [],
     ]);

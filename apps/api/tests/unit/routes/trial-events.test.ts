@@ -75,9 +75,7 @@ function makeEnvWithDO(
     },
     KV: {
       get: vi.fn(async (key: string) => kvStore.get(key) ?? null),
-      put: vi.fn(async (key: string, value: string) => {
-        kvStore.set(key, value);
-      }),
+      put: vi.fn(async (key: string, value: string) => { kvStore.set(key, value); }),
     },
     ...overrides,
   } as unknown as Env;
@@ -93,7 +91,11 @@ async function getEvents(
     'CF-Connecting-IP': '203.0.113.1', // test IP for rate limiting
   };
   if (cookie) headers['cookie'] = `sam_trial_fingerprint=${encodeURIComponent(cookie)}`;
-  return app.request(`/api/trial/${trialId}/events`, { method: 'GET', headers }, env);
+  return app.request(
+    `/api/trial/${trialId}/events`,
+    { method: 'GET', headers },
+    env
+  );
 }
 
 describe('GET /api/trial/:trialId/events — auth + bail-out', () => {
@@ -118,9 +120,10 @@ describe('GET /api/trial/:trialId/events — auth + bail-out', () => {
       claimed: false,
       expiresAt: Date.now() + 60_000,
     });
-    const env = makeEnvWithDO({ events: [], cursor: 0, closed: false }, {
-      TRIAL_CLAIM_TOKEN_SECRET: undefined,
-    } as Partial<Env>);
+    const env = makeEnvWithDO(
+      { events: [], cursor: 0, closed: false },
+      { TRIAL_CLAIM_TOKEN_SECRET: undefined } as Partial<Env>
+    );
     const resp = await getEvents(app, 't', 'anything', env);
     expect(resp.status).toBe(500);
   });

@@ -181,10 +181,12 @@ describe('lazy backfill wiring', () => {
 
     const { resolveForConsumer } =
       await import('../../src/services/composable-credentials/resolve');
-    const resolved = await resolveForConsumer(db, userId, ENCRYPTION_KEY, {
-      kind: 'compute',
-      provider: 'hetzner',
-    });
+    const resolved = await resolveForConsumer(
+      db,
+      userId,
+      ENCRYPTION_KEY,
+      { kind: 'compute', provider: 'hetzner' }
+    );
 
     expect(resolved).not.toBeNull();
     expect(resolved!.source).toBe('user-attachment');
@@ -664,80 +666,78 @@ describe('enabled platform default does not short-circuit user backfill', () => 
 
     const { ciphertext: authJsonCiphertext, iv: authJsonIv } = await encrypt(
       '{"tokens":{"access_token":"codex-access-token","refresh_token":"codex-refresh-token"}}',
-      ENCRYPTION_KEY
+      ENCRYPTION_KEY,
     );
     await env.DATABASE.prepare(
       `INSERT INTO cc_credentials
        (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, 'auth-json', ?, ?, 1, datetime('now'), datetime('now'))`
+       VALUES (?, ?, ?, 'auth-json', ?, ?, 1, datetime('now'), datetime('now'))`,
     )
-      .bind(
-        `${TEST_PREFIX}-cc-codex-auth-json`,
-        USER_I,
-        'Codex auth.json',
-        authJsonCiphertext,
-        authJsonIv
-      )
+      .bind(`${TEST_PREFIX}-cc-codex-auth-json`, USER_I, 'Codex auth.json', authJsonCiphertext, authJsonIv)
       .run();
     await env.DATABASE.prepare(
       `INSERT INTO cc_configurations
        (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, 'agent', 'openai-codex', ?, '{}', 1, datetime('now'), datetime('now'))`
+       VALUES (?, ?, ?, 'agent', 'openai-codex', ?, '{}', 1, datetime('now'), datetime('now'))`,
     )
       .bind(
         `${TEST_PREFIX}-cc-codex-auth-json-cfg`,
         USER_I,
         'Codex auth.json config',
-        `${TEST_PREFIX}-cc-codex-auth-json`
+        `${TEST_PREFIX}-cc-codex-auth-json`,
       )
       .run();
     await env.DATABASE.prepare(
       `INSERT INTO cc_attachments
        (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active, created_at, updated_at)
-       VALUES (?, ?, 'agent', 'openai-codex', ?, NULL, 1, datetime('now'), datetime('now'))`
+       VALUES (?, ?, 'agent', 'openai-codex', ?, NULL, 1, datetime('now'), datetime('now'))`,
     )
       .bind(
         `${TEST_PREFIX}-cc-codex-auth-json-att`,
         `${TEST_PREFIX}-cc-codex-auth-json-cfg`,
-        USER_I
+        USER_I,
       )
       .run();
 
     const { ciphertext: mismatchedCloudCiphertext, iv: mismatchedCloudIv } = await encrypt(
       JSON.stringify({ provider: 'scaleway', token: 'scaleway-secret-for-hetzner-consumer' }),
-      ENCRYPTION_KEY
+      ENCRYPTION_KEY,
     );
     await env.DATABASE.prepare(
       `INSERT INTO cc_credentials
        (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, 'cloud-provider', ?, ?, 1, datetime('now'), datetime('now'))`
+       VALUES (?, ?, ?, 'cloud-provider', ?, ?, 1, datetime('now'), datetime('now'))`,
     )
       .bind(
         `${TEST_PREFIX}-cc-mismatch-cloud`,
         USER_J,
         'Scaleway secret attached to Hetzner',
         mismatchedCloudCiphertext,
-        mismatchedCloudIv
+        mismatchedCloudIv,
       )
       .run();
     await env.DATABASE.prepare(
       `INSERT INTO cc_configurations
        (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, 'compute', 'hetzner', ?, '{}', 1, datetime('now'), datetime('now'))`
+       VALUES (?, ?, ?, 'compute', 'hetzner', ?, '{}', 1, datetime('now'), datetime('now'))`,
     )
       .bind(
         `${TEST_PREFIX}-cc-mismatch-cfg`,
         USER_J,
         'Hetzner compute with mismatched secret',
-        `${TEST_PREFIX}-cc-mismatch-cloud`
+        `${TEST_PREFIX}-cc-mismatch-cloud`,
       )
       .run();
     await env.DATABASE.prepare(
       `INSERT INTO cc_attachments
        (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active, created_at, updated_at)
-       VALUES (?, ?, 'compute', 'hetzner', ?, NULL, 1, datetime('now'), datetime('now'))`
+       VALUES (?, ?, 'compute', 'hetzner', ?, NULL, 1, datetime('now'), datetime('now'))`,
     )
-      .bind(`${TEST_PREFIX}-cc-mismatch-att`, `${TEST_PREFIX}-cc-mismatch-cfg`, USER_J)
+      .bind(
+        `${TEST_PREFIX}-cc-mismatch-att`,
+        `${TEST_PREFIX}-cc-mismatch-cfg`,
+        USER_J,
+      )
       .run();
   });
 
@@ -864,7 +864,7 @@ describe('enabled platform default does not short-circuit user backfill', () => 
     const { createProviderForUser } = await import('../../src/services/provider-credentials');
 
     await expect(
-      createProviderForUser(db, USER_J, ENCRYPTION_KEY, env as never, 'hetzner')
+      createProviderForUser(db, USER_J, ENCRYPTION_KEY, env as never, 'hetzner'),
     ).rejects.toThrow('compute provider mismatch: requested hetzner, credential is scaleway');
   });
 });

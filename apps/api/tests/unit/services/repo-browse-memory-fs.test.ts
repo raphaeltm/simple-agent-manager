@@ -12,9 +12,7 @@ describe('MemoryFS', () => {
     const fs = new MemoryFS();
     await fs.mkdir('/repo', { recursive: true });
     await fs.writeFile('/repo/a.txt', 'hello');
-    expect(new TextDecoder().decode((await fs.readFile('/repo/a.txt')) as Uint8Array)).toBe(
-      'hello'
-    );
+    expect(new TextDecoder().decode(await fs.readFile('/repo/a.txt') as Uint8Array)).toBe('hello');
     expect(await fs.readFile('/repo/a.txt', 'utf8')).toBe('hello');
   });
 

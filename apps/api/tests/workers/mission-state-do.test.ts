@@ -48,12 +48,7 @@ describe('ProjectData DO — Mission State', () => {
     const missionId = 'mission-001';
 
     const entry = await stub.createMissionStateEntry(
-      missionId,
-      'decision',
-      'Use REST API',
-      'Chose REST over GraphQL',
-      'task-001',
-      STATE_LIMITS
+      missionId, 'decision', 'Use REST API', 'Chose REST over GraphQL', 'task-001', STATE_LIMITS,
     );
 
     expect(entry.id).toBeTruthy();
@@ -89,19 +84,10 @@ describe('ProjectData DO — Mission State', () => {
     const missionId = 'mission-003';
 
     const entry = await stub.createMissionStateEntry(
-      missionId,
-      'assumption',
-      'SDK supports Go 1.24',
-      null,
-      null,
-      STATE_LIMITS
+      missionId, 'assumption', 'SDK supports Go 1.24', null, null, STATE_LIMITS,
     );
 
-    await stub.updateMissionStateEntry(
-      entry.id,
-      { title: 'SDK supports Go 1.25', content: 'Verified' },
-      STATE_LIMITS
-    );
+    await stub.updateMissionStateEntry(entry.id, { title: 'SDK supports Go 1.25', content: 'Verified' }, STATE_LIMITS);
 
     const updated = await stub.getMissionStateEntry(entry.id);
     expect(updated).not.toBeNull();
@@ -114,12 +100,7 @@ describe('ProjectData DO — Mission State', () => {
     const missionId = 'mission-004';
 
     const entry = await stub.createMissionStateEntry(
-      missionId,
-      'todo',
-      'Update docs',
-      null,
-      null,
-      STATE_LIMITS
+      missionId, 'todo', 'Update docs', null, null, STATE_LIMITS,
     );
 
     const deleted = await stub.deleteMissionStateEntry(entry.id);
@@ -132,25 +113,10 @@ describe('ProjectData DO — Mission State', () => {
   it('supports all 7 entry types', async () => {
     const stub = getStub('mission-state-test-5');
     const missionId = 'mission-005';
-    const types = [
-      'decision',
-      'assumption',
-      'fact',
-      'contract',
-      'artifact_ref',
-      'risk',
-      'todo',
-    ] as const;
+    const types = ['decision', 'assumption', 'fact', 'contract', 'artifact_ref', 'risk', 'todo'] as const;
 
     for (const entryType of types) {
-      await stub.createMissionStateEntry(
-        missionId,
-        entryType,
-        `Entry: ${entryType}`,
-        null,
-        null,
-        STATE_LIMITS
-      );
+      await stub.createMissionStateEntry(missionId, entryType, `Entry: ${entryType}`, null, null, STATE_LIMITS);
     }
 
     const all = await stub.getMissionStateEntries(missionId, null);
@@ -168,15 +134,13 @@ describe('ProjectData DO — Handoff Packets', () => {
     const missionId = 'mission-h01';
 
     const handoff = await stub.createHandoffPacket(
-      missionId,
-      'task-from',
-      'task-to',
+      missionId, 'task-from', 'task-to',
       'Completed API implementation',
       [{ key: 'api_version', value: 'v2' }],
       ['Should we add rate limiting?'],
       [{ type: 'pr', ref: 'PR #123' }],
       ['Add rate limiting', 'Write docs'],
-      HANDOFF_LIMITS
+      HANDOFF_LIMITS,
     );
 
     expect(handoff.id).toBeTruthy();
@@ -194,15 +158,9 @@ describe('ProjectData DO — Handoff Packets', () => {
     const missionId = 'mission-h02';
 
     const created = await stub.createHandoffPacket(
-      missionId,
-      'task-a',
-      null,
-      'Summary text',
-      [],
-      [],
-      [],
-      [],
-      HANDOFF_LIMITS
+      missionId, 'task-a', null,
+      'Summary text', [], [], [], [],
+      HANDOFF_LIMITS,
     );
 
     const packet = await stub.getHandoffPacket(created.id);
@@ -217,27 +175,11 @@ describe('ProjectData DO — Handoff Packets', () => {
 
     // Create handoff TO task-b
     await stub.createHandoffPacket(
-      missionId,
-      'task-a',
-      'task-b',
-      'For task B',
-      [],
-      [],
-      [],
-      [],
-      HANDOFF_LIMITS
+      missionId, 'task-a', 'task-b', 'For task B', [], [], [], [], HANDOFF_LIMITS,
     );
     // Create handoff TO task-c (should not appear)
     await stub.createHandoffPacket(
-      missionId,
-      'task-a',
-      'task-c',
-      'For task C',
-      [],
-      [],
-      [],
-      [],
-      HANDOFF_LIMITS
+      missionId, 'task-a', 'task-c', 'For task C', [], [], [], [], HANDOFF_LIMITS,
     );
 
     const forB = await stub.getHandoffPacketsForTask('task-b');
@@ -258,30 +200,20 @@ describe('ProjectData DO — Handoff Packets', () => {
     ];
 
     const handoff = await stub.createHandoffPacket(
-      missionId,
-      'task-x',
-      null,
-      'Done',
-      facts,
-      ['Q1?'],
-      artifactRefs,
-      ['Next step'],
-      HANDOFF_LIMITS
+      missionId, 'task-x', null,
+      'Done', facts, ['Q1?'], artifactRefs, ['Next step'],
+      HANDOFF_LIMITS,
     );
 
     const packet = await stub.getHandoffPacket(handoff.id);
     expect(packet).not.toBeNull();
 
     // JSON round-trip integrity
-    const parsedFacts =
-      typeof packet!.facts === 'string' ? JSON.parse(packet!.facts) : packet!.facts;
+    const parsedFacts = typeof packet!.facts === 'string' ? JSON.parse(packet!.facts) : packet!.facts;
     expect(parsedFacts).toHaveLength(2);
     expect(parsedFacts[0].key).toBe('provider');
 
-    const parsedRefs =
-      typeof packet!.artifactRefs === 'string'
-        ? JSON.parse(packet!.artifactRefs)
-        : packet!.artifactRefs;
+    const parsedRefs = typeof packet!.artifactRefs === 'string' ? JSON.parse(packet!.artifactRefs) : packet!.artifactRefs;
     expect(parsedRefs).toHaveLength(2);
     expect(parsedRefs[1].ref).toBe('#456');
   });

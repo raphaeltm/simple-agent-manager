@@ -37,9 +37,7 @@ function makeDO() {
   const ctx = {
     storage: {
       get: async <T>(key: string): Promise<T | undefined> => store.get(key) as T | undefined,
-      put: async (key: string, value: unknown): Promise<void> => {
-        store.set(key, value);
-      },
+      put: async (key: string, value: unknown): Promise<void> => { store.set(key, value); },
     },
   } as unknown;
   const env = {} as unknown;
@@ -56,9 +54,10 @@ function appendReq(event: unknown): Request {
 }
 
 function pollReq(cursor = 0, timeoutMs = 100): Request {
-  return new Request(`https://trial-event-bus/poll?cursor=${cursor}&timeoutMs=${timeoutMs}`, {
-    method: 'GET',
-  });
+  return new Request(
+    `https://trial-event-bus/poll?cursor=${cursor}&timeoutMs=${timeoutMs}`,
+    { method: 'GET' }
+  );
 }
 
 function closeReq(): Request {
@@ -122,7 +121,9 @@ describe('TrialEventBus DO', () => {
 
   it('Appending a terminal event (trial.error) closes the bus', async () => {
     const bus = makeDO();
-    await bus.fetch(appendReq({ type: 'trial.error', error: 'kaboom', message: 'x', at: 1 }));
+    await bus.fetch(
+      appendReq({ type: 'trial.error', error: 'kaboom', message: 'x', at: 1 })
+    );
 
     const poll = await bus.fetch(pollReq(0, 100));
     const body = (await poll.json()) as { closed: boolean };
@@ -186,7 +187,9 @@ describe('TrialEventBus DO', () => {
 
   it('unknown path returns 404', async () => {
     const bus = makeDO();
-    const r = await bus.fetch(new Request('https://trial-event-bus/garbage', { method: 'GET' }));
+    const r = await bus.fetch(
+      new Request('https://trial-event-bus/garbage', { method: 'GET' })
+    );
     expect(r.status).toBe(404);
   });
 });

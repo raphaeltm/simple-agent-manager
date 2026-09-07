@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 
 // Use vi.hoisted() so mock functions are available when vi.mock factories run
-const { mockInsertValues, mockInsert, mockSelectFrom, mockSelect, mockDelete } = vi.hoisted(() => {
+const {
+  mockInsertValues,
+  mockInsert,
+  mockSelectFrom,
+  mockSelect,
+  mockDelete,
+} = vi.hoisted(() => {
   const mockInsertValues = vi.fn().mockResolvedValue(undefined);
   const mockInsert = vi.fn().mockReturnValue({ values: mockInsertValues });
 
@@ -11,37 +17,14 @@ const { mockInsertValues, mockInsert, mockSelectFrom, mockSelect, mockDelete } =
   const mockSelectAll = vi.fn();
   const mockSelectLimit = vi.fn().mockReturnValue({ all: mockSelectAll, get: mockSelectGet });
   const mockSelectOrderBy = vi.fn().mockReturnValue({ limit: mockSelectLimit, all: mockSelectAll });
-  const mockSelectWhere = vi
-    .fn()
-    .mockReturnValue({
-      orderBy: mockSelectOrderBy,
-      limit: mockSelectLimit,
-      all: mockSelectAll,
-      get: mockSelectGet,
-    });
-  const mockSelectFrom = vi
-    .fn()
-    .mockReturnValue({
-      where: mockSelectWhere,
-      orderBy: mockSelectOrderBy,
-      limit: mockSelectLimit,
-      all: mockSelectAll,
-      get: mockSelectGet,
-    });
+  const mockSelectWhere = vi.fn().mockReturnValue({ orderBy: mockSelectOrderBy, limit: mockSelectLimit, all: mockSelectAll, get: mockSelectGet });
+  const mockSelectFrom = vi.fn().mockReturnValue({ where: mockSelectWhere, orderBy: mockSelectOrderBy, limit: mockSelectLimit, all: mockSelectAll, get: mockSelectGet });
   const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
 
   const mockDeleteWhere = vi.fn().mockResolvedValue(undefined);
   const mockDelete = vi.fn().mockReturnValue({ where: mockDeleteWhere });
 
-  return {
-    mockInsertValues,
-    mockInsert,
-    mockSelectFrom,
-    mockSelect,
-    mockDelete,
-    mockSelectGet,
-    mockSelectAll,
-  };
+  return { mockInsertValues, mockInsert, mockSelectFrom, mockSelect, mockDelete, mockSelectGet, mockSelectAll };
 });
 
 vi.mock('drizzle-orm/d1', () => ({

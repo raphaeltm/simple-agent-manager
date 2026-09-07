@@ -14,10 +14,7 @@ import { createMission } from '../../../src/durable-objects/sam-session/tools/cr
 import { dispatchTask } from '../../../src/durable-objects/sam-session/tools/dispatch-task';
 import { getMission } from '../../../src/durable-objects/sam-session/tools/get-mission';
 import { getTaskDetails } from '../../../src/durable-objects/sam-session/tools/get-task-details';
-import type {
-  CollectedToolCall,
-  ToolContext,
-} from '../../../src/durable-objects/sam-session/types';
+import type { CollectedToolCall, ToolContext } from '../../../src/durable-objects/sam-session/types';
 
 // Mock cloudflare:workers (vitest hoists vi.mock calls)
 vi.mock('cloudflare:workers', () => ({
@@ -51,13 +48,11 @@ const mockGetLatestAssistant = vi.mocked(getLatestAssistantMessageForTask);
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Create a mock D1Database that returns configurable results. */
-function mockD1(
-  options: {
-    firstResult?: Record<string, unknown> | null;
-    allResults?: Record<string, unknown>[];
-    runChanges?: number;
-  } = {}
-) {
+function mockD1(options: {
+  firstResult?: Record<string, unknown> | null;
+  allResults?: Record<string, unknown>[];
+  runChanges?: number;
+} = {}) {
   const results = options.allResults ?? [];
   const mockStatement = {
     bind: vi.fn().mockReturnThis(),
@@ -79,14 +74,12 @@ function mockD1(
 }
 
 /** Build a minimal ToolContext with mocked bindings. */
-function buildCtx(
-  overrides: {
-    dbFirstResult?: Record<string, unknown> | null;
-    dbAllResults?: Record<string, unknown>[];
-    dbRunChanges?: number;
-    userId?: string;
-  } = {}
-): ToolContext & { _db: ReturnType<typeof mockD1> } {
+function buildCtx(overrides: {
+  dbFirstResult?: Record<string, unknown> | null;
+  dbAllResults?: Record<string, unknown>[];
+  dbRunChanges?: number;
+  userId?: string;
+} = {}): ToolContext & { _db: ReturnType<typeof mockD1> } {
   const db = mockD1({
     firstResult: overrides.dbFirstResult,
     allResults: overrides.dbAllResults,
@@ -192,7 +185,7 @@ describe('get_task_details', () => {
     expect(mockGetLatestAssistant).toHaveBeenCalledWith(
       expect.anything(),
       'proj-1',
-      'chat-session-99'
+      'chat-session-99',
     );
   });
 });
@@ -254,13 +247,19 @@ describe('create_mission', () => {
 describe('dispatch_task', () => {
   it('rejects missing projectId', async () => {
     const ctx = buildCtx();
-    const result = await dispatchTask({ projectId: '', description: 'test' }, ctx);
+    const result = await dispatchTask(
+      { projectId: '', description: 'test' },
+      ctx,
+    );
     expect(result).toEqual({ error: 'projectId is required.' });
   });
 
   it('rejects missing description', async () => {
     const ctx = buildCtx();
-    const result = await dispatchTask({ projectId: 'proj-1', description: '' }, ctx);
+    const result = await dispatchTask(
+      { projectId: 'proj-1', description: '' },
+      ctx,
+    );
     expect(result).toEqual({ error: 'description is required.' });
   });
 
@@ -268,7 +267,7 @@ describe('dispatch_task', () => {
     const ctx = buildCtx();
     const result = await dispatchTask(
       { projectId: 'proj-1', description: 'test', vmSize: 'enormous' },
-      ctx
+      ctx,
     );
     expect(result).toEqual({ error: 'vmSize must be small, medium, or large.' });
   });
@@ -277,7 +276,7 @@ describe('dispatch_task', () => {
     const ctx = buildCtx();
     const result = await dispatchTask(
       { projectId: 'proj-1', description: 'test', taskMode: 'invalid' },
-      ctx
+      ctx,
     );
     expect((result as { error: string }).error).toContain('taskMode must be one of');
   });
@@ -286,7 +285,7 @@ describe('dispatch_task', () => {
     const ctx = buildCtx();
     const result = await dispatchTask(
       { projectId: 'proj-1', description: 'test', workspaceProfile: 'invalid' },
-      ctx
+      ctx,
     );
     expect((result as { error: string }).error).toContain('workspaceProfile must be one of');
   });
@@ -327,12 +326,7 @@ describe('Phase A tool registration', () => {
   });
 
   it('original 4 tools still work', async () => {
-    for (const toolName of [
-      'list_projects',
-      'get_project_status',
-      'search_tasks',
-      'search_conversation_history',
-    ]) {
+    for (const toolName of ['list_projects', 'get_project_status', 'search_tasks', 'search_conversation_history']) {
       const toolCall: CollectedToolCall = {
         id: `orig-${toolName}`,
         name: toolName,

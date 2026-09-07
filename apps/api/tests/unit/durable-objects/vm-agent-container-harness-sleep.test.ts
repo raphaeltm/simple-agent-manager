@@ -2,10 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { VmAgentContainerLaunchConfig } from '../../../src/durable-objects/vm-agent-container';
 import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-container';
-import {
-  ACTIVE_WORK_KEY,
-  type ActiveWorkState,
-} from '../../../src/durable-objects/vm-agent-container-active-work';
+import { ACTIVE_WORK_KEY, type ActiveWorkState } from '../../../src/durable-objects/vm-agent-container-active-work';
 
 const { mockIsHarnessWorkLeaseActive, mockParseHarnessWorkConfig, mockGetSessionState } =
   vi.hoisted(() => ({
@@ -115,7 +112,10 @@ describe('onActivityExpired harness work lease integration', () => {
     expect(mockGetSessionState).toHaveBeenCalledWith(fake.env, 'proj-1', 'sess-1');
     expect(mockIsHarnessWorkLeaseActive).toHaveBeenCalled();
     expect(fake.renewActivityTimeout).toHaveBeenCalledOnce();
-    expect(fake.storagePut).not.toHaveBeenCalledWith('lifecycleStatus', expect.anything());
+    expect(fake.storagePut).not.toHaveBeenCalledWith(
+      'lifecycleStatus',
+      expect.anything()
+    );
     expect(fake.markRuntimeSleeping).not.toHaveBeenCalled();
     expect(fake.stop).not.toHaveBeenCalled();
   });
@@ -226,10 +226,11 @@ describe('onActivityExpired harness work lease integration', () => {
     await callOnActivityExpired.call(fake);
 
     expect(mockParseHarnessWorkConfig).toHaveBeenCalledWith(fake.env);
-    expect(mockIsHarnessWorkLeaseActive).toHaveBeenCalledWith(sessionState, expect.any(Date), {
-      leaseMs: 120_000,
-      maxDurationMs: 1_800_000,
-    });
+    expect(mockIsHarnessWorkLeaseActive).toHaveBeenCalledWith(
+      sessionState,
+      expect.any(Date),
+      { leaseMs: 120_000, maxDurationMs: 1_800_000 }
+    );
   });
 
   it('renews keepalive when active work deadline has not passed', async () => {
@@ -244,7 +245,10 @@ describe('onActivityExpired harness work lease integration', () => {
     await callOnActivityExpired.call(fake);
 
     expect(fake.renewActiveWorkKeepalive).toHaveBeenCalledOnce();
-    expect(fake.storagePut).not.toHaveBeenCalledWith('lifecycleStatus', expect.anything());
+    expect(fake.storagePut).not.toHaveBeenCalledWith(
+      'lifecycleStatus',
+      expect.anything()
+    );
     expect(fake.markRuntimeSleeping).not.toHaveBeenCalled();
   });
 });

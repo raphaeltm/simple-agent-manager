@@ -188,18 +188,8 @@ describe('ProjectData messages getMessages', () => {
   });
 
   it('supports oldest-first lookups for the initial user prompt', () => {
-    const initialPrompt = makeRow({
-      id: 'initial',
-      content: 'Initial prompt',
-      created_at: 1000,
-      sequence: 1,
-    });
-    const followUp = makeRow({
-      id: 'follow-up',
-      content: 'Follow-up prompt',
-      created_at: 3000,
-      sequence: 3,
-    });
+    const initialPrompt = makeRow({ id: 'initial', content: 'Initial prompt', created_at: 1000, sequence: 1 });
+    const followUp = makeRow({ id: 'follow-up', content: 'Follow-up prompt', created_at: 3000, sequence: 3 });
     const sql = makeSql([initialPrompt, followUp]);
 
     const result = getMessages(sql, 'session-1', 1, null, null, ['user'], true, 'asc');

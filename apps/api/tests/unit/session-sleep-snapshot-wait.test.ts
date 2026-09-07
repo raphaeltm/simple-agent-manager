@@ -42,10 +42,7 @@ describe('waitForFinalSessionSnapshot', () => {
         SESSION_SNAPSHOT_POLL_INTERVAL_MS: '1',
       } as unknown as Env;
       const db = drizzle(testEnv.DATABASE, { schema });
-      mocks.hibernateAgentSessionOnNode.mockResolvedValueOnce({
-        status: 'pending',
-        accepted: true,
-      });
+      mocks.hibernateAgentSessionOnNode.mockResolvedValueOnce({ status: 'pending', accepted: true });
 
       await waitForFinalSessionSnapshot(db, testEnv, {
         nodeId: 'node-1',
@@ -72,9 +69,7 @@ describe('waitForFinalSessionSnapshot', () => {
       ]);
       expect(manifest).not.toHaveProperty('acpSessionId');
       expect(manifest).not.toHaveProperty('agentType');
-      expect(
-        sqlite.prepare(`SELECT capture_error FROM session_snapshots WHERE id = 'snapshot-1'`).get()
-      ).toEqual({
+      expect(sqlite.prepare(`SELECT capture_error FROM session_snapshots WHERE id = 'snapshot-1'`).get()).toEqual({
         capture_error: null,
       });
     } finally {

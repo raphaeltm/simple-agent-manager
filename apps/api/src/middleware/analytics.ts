@@ -79,7 +79,12 @@ export function getEventName(method: string, routePattern: string): string {
 // Route patterns to skip (noisy internal endpoints)
 // ---------------------------------------------------------------------------
 
-const DEFAULT_SKIP_PATTERNS = ['/health', '/api/health', '/favicon.ico', '/robots.txt'];
+const DEFAULT_SKIP_PATTERNS = [
+  '/health',
+  '/api/health',
+  '/favicon.ico',
+  '/robots.txt',
+];
 
 function shouldSkipRoute(path: string, extraSkipPatterns: string[]): boolean {
   const allPatterns = [...DEFAULT_SKIP_PATTERNS, ...extraSkipPatterns];
@@ -103,8 +108,7 @@ export function bucketUserAgent(ua: string | null | undefined): string {
   }
 
   // Mobile detection
-  const isMobile =
-    lower.includes('mobile') || lower.includes('android') || lower.includes('iphone');
+  const isMobile = lower.includes('mobile') || lower.includes('android') || lower.includes('iphone');
   const platform = isMobile ? 'mobile' : 'desktop';
 
   // Browser detection
@@ -186,9 +190,7 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
 
     // Parse extra skip patterns from env
     const extraSkip = c.env.ANALYTICS_SKIP_ROUTES
-      ? c.env.ANALYTICS_SKIP_ROUTES.split(',')
-          .map((s) => s.trim())
-          .filter(Boolean)
+      ? c.env.ANALYTICS_SKIP_ROUTES.split(',').map((s) => s.trim()).filter(Boolean)
       : [];
 
     if (shouldSkipRoute(path, extraSkip)) return;
@@ -211,10 +213,9 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
         }
 
         // Extract project ID from route params
-        const projectId =
-          (c.req.param as (key: string) => string | undefined)('projectId') ??
-          (c.req.param as (key: string) => string | undefined)('id') ??
-          '';
+        const projectId = (c.req.param as (key: string) => string | undefined)('projectId')
+          ?? (c.req.param as (key: string) => string | undefined)('id')
+          ?? '';
 
         // UTM params
         const utmSource = url.searchParams.get('utm_source') ?? '';
@@ -237,29 +238,27 @@ export function analyticsMiddleware(): MiddlewareHandler<{ Bindings: Env }> {
         await analytics.writeDataPoint({
           indexes: [userId],
           blobs: [
-            eventName, // blob1
-            projectId, // blob2
-            routePattern, // blob3
-            referrer, // blob4
-            utmSource, // blob5
-            utmMedium, // blob6
-            utmCampaign, // blob7
-            requestId, // blob8
+            eventName,       // blob1
+            projectId,       // blob2
+            routePattern,    // blob3
+            referrer,        // blob4
+            utmSource,       // blob5
+            utmMedium,       // blob6
+            utmCampaign,     // blob7
+            requestId,       // blob8
             userAgentBucket, // blob9
-            country, // blob10
-            entityId, // blob11
+            country,         // blob10
+            entityId,        // blob11
           ],
           doubles: [
-            responseTimeMs, // double1
-            statusCode, // double2
-            0, // double3 (reserved)
+            responseTimeMs,  // double1
+            statusCode,      // double2
+            0,               // double3 (reserved)
           ],
         });
       } catch (err) {
         // Analytics failures must NEVER surface to the user
-        log.warn('analytics.write_failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        log.warn('analytics.write_failed', { error: err instanceof Error ? err.message : String(err) });
       }
     };
 

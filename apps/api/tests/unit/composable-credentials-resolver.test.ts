@@ -31,7 +31,7 @@ const mockBuildSnapshot = vi.mocked(buildSnapshot);
 
 function expectResolved(
   resolved: CCResolvedEnvironment | null,
-  message = 'expected composable credential resolution to produce a result'
+  message = 'expected composable credential resolution to produce a result',
 ): CCResolvedEnvironment {
   expect(resolved, message).not.toBeNull();
   return resolved as CCResolvedEnvironment;
@@ -49,7 +49,7 @@ function makeCredential(overrides: Partial<CCCredential> & { id: string }): CCCr
 }
 
 function makeConfiguration(
-  overrides: Partial<CCConfiguration> & { id: string; credentialId: string }
+  overrides: Partial<CCConfiguration> & { id: string; credentialId: string },
 ): CCConfiguration {
   return {
     ownerId: 'user-1',
@@ -62,7 +62,7 @@ function makeConfiguration(
 }
 
 function makeAttachment(
-  overrides: Partial<CCAttachment> & { id: string; configurationId: string }
+  overrides: Partial<CCAttachment> & { id: string; configurationId: string },
 ): CCAttachment {
   return {
     consumer: { kind: 'agent', agentType: 'claude-code' },
@@ -163,14 +163,8 @@ describe('composable-credentials resolver', () => {
 
   describe('platform default fallback', () => {
     it('resolves active project, then active user, then platform, then null across scenarios', () => {
-      const projectCred = makeCredential({
-        id: 'cred-project',
-        secret: { kind: 'api-key', apiKey: 'sk-project' },
-      });
-      const userCred = makeCredential({
-        id: 'cred-user',
-        secret: { kind: 'api-key', apiKey: 'sk-user' },
-      });
+      const projectCred = makeCredential({ id: 'cred-project', secret: { kind: 'api-key', apiKey: 'sk-project' } });
+      const userCred = makeCredential({ id: 'cred-user', secret: { kind: 'api-key', apiKey: 'sk-user' } });
       const platformCred = makeCredential({
         id: 'cred-platform',
         ownerId: '__platform__',
@@ -189,55 +183,39 @@ describe('composable-credentials resolver', () => {
         target: { scope: 'user', userId: 'user-1' },
       });
 
-      const activeProject = resolveEnvironment(
-        {
-          credentials: [projectCred, userCred],
-          configurations: [projectCfg, userCfg],
-          attachments: [projectAtt, userAtt],
-          platform: { 'agent:claude-code': { mode: 'credential', credential: platformCred } },
-        },
-        consumer,
-        { userId: 'user-1', projectId: 'proj-1' }
-      );
+      const activeProject = resolveEnvironment({
+        credentials: [projectCred, userCred],
+        configurations: [projectCfg, userCfg],
+        attachments: [projectAtt, userAtt],
+        platform: { 'agent:claude-code': { mode: 'credential', credential: platformCred } },
+      }, consumer, { userId: 'user-1', projectId: 'proj-1' });
       expect(activeProject?.source).toBe('project-attachment');
       expect(activeProject?.credential?.id).toBe('cred-project');
 
-      const activeUser = resolveEnvironment(
-        {
-          credentials: [userCred],
-          configurations: [userCfg],
-          attachments: [userAtt],
-          platform: { 'agent:claude-code': { mode: 'credential', credential: platformCred } },
-        },
-        consumer,
-        { userId: 'user-1', projectId: 'proj-1' }
-      );
+      const activeUser = resolveEnvironment({
+        credentials: [userCred],
+        configurations: [userCfg],
+        attachments: [userAtt],
+        platform: { 'agent:claude-code': { mode: 'credential', credential: platformCred } },
+      }, consumer, { userId: 'user-1', projectId: 'proj-1' });
       expect(activeUser?.source).toBe('user-attachment');
       expect(activeUser?.credential?.id).toBe('cred-user');
 
-      const platform = resolveEnvironment(
-        {
-          credentials: [],
-          configurations: [],
-          attachments: [],
-          platform: { 'agent:claude-code': { mode: 'credential', credential: platformCred } },
-        },
-        consumer,
-        { userId: 'user-1', projectId: 'proj-1' }
-      );
+      const platform = resolveEnvironment({
+        credentials: [],
+        configurations: [],
+        attachments: [],
+        platform: { 'agent:claude-code': { mode: 'credential', credential: platformCred } },
+      }, consumer, { userId: 'user-1', projectId: 'proj-1' });
       expect(platform?.source).toBe('platform');
       expect(platform?.credential?.id).toBe('cred-platform');
 
-      const none = resolveEnvironment(
-        {
-          credentials: [],
-          configurations: [],
-          attachments: [],
-          platform: {},
-        },
-        consumer,
-        { userId: 'user-1', projectId: 'proj-1' }
-      );
+      const none = resolveEnvironment({
+        credentials: [],
+        configurations: [],
+        attachments: [],
+        platform: {},
+      }, consumer, { userId: 'user-1', projectId: 'proj-1' });
       expect(none).toBeNull();
     });
 
@@ -334,9 +312,14 @@ describe('composable-credentials resolver', () => {
       });
 
       await expect(
-        resolveComputeConfig({} as never, 'user-1', 'test-key', 'hetzner')
+        resolveComputeConfig({} as never, 'user-1', 'test-key', 'hetzner'),
       ).rejects.toThrow('compute provider mismatch: requested hetzner, credential is scaleway');
-      expect(mockBuildSnapshot).toHaveBeenCalledWith({}, 'user-1', 'test-key', undefined);
+      expect(mockBuildSnapshot).toHaveBeenCalledWith(
+        {},
+        'user-1',
+        'test-key',
+        undefined,
+      );
     });
   });
 });

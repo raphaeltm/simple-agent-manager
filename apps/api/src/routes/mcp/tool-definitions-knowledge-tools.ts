@@ -1,11 +1,7 @@
 /**
  * MCP tool definitions for the Knowledge Graph.
  */
-import {
-  KNOWLEDGE_ENTITY_TYPES,
-  KNOWLEDGE_RELATION_TYPES,
-  KNOWLEDGE_SOURCE_TYPES,
-} from '@simple-agent-manager/shared';
+import { KNOWLEDGE_ENTITY_TYPES, KNOWLEDGE_RELATION_TYPES, KNOWLEDGE_SOURCE_TYPES } from '@simple-agent-manager/shared';
 
 export const KNOWLEDGE_TOOLS = [
   {
@@ -17,26 +13,17 @@ export const KNOWLEDGE_TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        entityName: {
-          type: 'string',
-          description: 'Name of the knowledge entity (e.g., "CodeStyle", "User", "Architecture")',
-        },
+        entityName: { type: 'string', description: 'Name of the knowledge entity (e.g., "CodeStyle", "User", "Architecture")' },
         entityType: {
           type: 'string',
-          description:
-            'Type of entity: preference, style, context, expertise, workflow, personality, custom',
+          description: 'Type of entity: preference, style, context, expertise, workflow, personality, custom',
           enum: [...KNOWLEDGE_ENTITY_TYPES],
         },
         observation: { type: 'string', description: 'The fact or observation to store' },
-        confidence: {
-          type: 'number',
-          description:
-            'Confidence level 0.0-1.0 (default: 0.7). Use 0.9+ for explicit user statements.',
-        },
+        confidence: { type: 'number', description: 'Confidence level 0.0-1.0 (default: 0.7). Use 0.9+ for explicit user statements.' },
         sourceType: {
           type: 'string',
-          description:
-            'How this was learned: explicit (user said it), inferred (agent deduced), behavioral (observed from actions)',
+          description: 'How this was learned: explicit (user said it), inferred (agent deduced), behavioral (observed from actions)',
           enum: [...KNOWLEDGE_SOURCE_TYPES],
         },
       },
@@ -61,8 +48,7 @@ export const KNOWLEDGE_TOOLS = [
   },
   {
     name: 'remove_knowledge',
-    description:
-      'Soft-delete an observation (marks as inactive). Use when an observation is no longer accurate.',
+    description: 'Soft-delete an observation (marks as inactive). Use when an observation is no longer accurate.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -74,37 +60,25 @@ export const KNOWLEDGE_TOOLS = [
   },
   {
     name: 'get_knowledge',
-    description:
-      'Get a specific knowledge entity with all its active observations and relations. Look up by name or ID.',
+    description: 'Get a specific knowledge entity with all its active observations and relations. Look up by name or ID.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         entityName: { type: 'string', description: 'Name of the entity to retrieve' },
-        entityId: {
-          type: 'string',
-          description: 'ID of the entity to retrieve (alternative to entityName)',
-        },
+        entityId: { type: 'string', description: 'ID of the entity to retrieve (alternative to entityName)' },
       },
       additionalProperties: false,
     },
   },
   {
     name: 'search_knowledge',
-    description:
-      'Full-text search across all observations in the project knowledge graph. Returns matching observations with their entities.',
+    description: 'Full-text search across all observations in the project knowledge graph. Returns matching observations with their entities.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         query: { type: 'string', description: 'Search query text' },
-        entityType: {
-          type: 'string',
-          description: 'Optional filter by entity type',
-          enum: [...KNOWLEDGE_ENTITY_TYPES],
-        },
-        minConfidence: {
-          type: 'number',
-          description: 'Optional minimum confidence threshold (0.0-1.0)',
-        },
+        entityType: { type: 'string', description: 'Optional filter by entity type', enum: [...KNOWLEDGE_ENTITY_TYPES] },
+        minConfidence: { type: 'number', description: 'Optional minimum confidence threshold (0.0-1.0)' },
         limit: { type: 'number', description: 'Max results to return (default: 20)' },
       },
       required: ['query'],
@@ -113,16 +87,11 @@ export const KNOWLEDGE_TOOLS = [
   },
   {
     name: 'get_project_knowledge',
-    description:
-      'Get all knowledge entities in the project with observation counts, ordered by most recently updated.',
+    description: 'Get all knowledge entities in the project with observation counts, ordered by most recently updated.',
     inputSchema: {
       type: 'object' as const,
       properties: {
-        entityType: {
-          type: 'string',
-          description: 'Optional filter by entity type',
-          enum: [...KNOWLEDGE_ENTITY_TYPES],
-        },
+        entityType: { type: 'string', description: 'Optional filter by entity type', enum: [...KNOWLEDGE_ENTITY_TYPES] },
         limit: { type: 'number', description: 'Max entities to return (default: 50)' },
       },
       additionalProperties: false,
@@ -136,10 +105,7 @@ export const KNOWLEDGE_TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        context: {
-          type: 'string',
-          description: 'Context string (e.g., current task description, conversation topic)',
-        },
+        context: { type: 'string', description: 'Context string (e.g., current task description, conversation topic)' },
         limit: { type: 'number', description: 'Max observations to return (default: 20)' },
       },
       required: ['context'],
@@ -148,8 +114,7 @@ export const KNOWLEDGE_TOOLS = [
   },
   {
     name: 'relate_knowledge',
-    description:
-      'Create a relation between two knowledge entities. Both entities must already exist.',
+    description: 'Create a relation between two knowledge entities. Both entities must already exist.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -173,11 +138,7 @@ export const KNOWLEDGE_TOOLS = [
       type: 'object' as const,
       properties: {
         entityName: { type: 'string', description: 'Name of the entity' },
-        relationType: {
-          type: 'string',
-          description: 'Optional filter by relation type',
-          enum: [...KNOWLEDGE_RELATION_TYPES],
-        },
+        relationType: { type: 'string', description: 'Optional filter by relation type', enum: [...KNOWLEDGE_RELATION_TYPES] },
       },
       required: ['entityName'],
       additionalProperties: false,
@@ -204,10 +165,7 @@ export const KNOWLEDGE_TOOLS = [
     inputSchema: {
       type: 'object' as const,
       properties: {
-        existingObservationId: {
-          type: 'string',
-          description: 'ID of the existing observation being contradicted',
-        },
+        existingObservationId: { type: 'string', description: 'ID of the existing observation being contradicted' },
         newObservation: { type: 'string', description: 'The new contradicting observation text' },
       },
       required: ['existingObservationId', 'newObservation'],

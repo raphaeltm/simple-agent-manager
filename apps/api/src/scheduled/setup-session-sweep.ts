@@ -27,12 +27,7 @@ export async function runSetupSessionSweep(
   env: Env,
   ctx?: ExecutionContext
 ): Promise<SetupSessionSweepResult> {
-  const result: SetupSessionSweepResult = {
-    candidates: 0,
-    toreDown: 0,
-    orphansForced: 0,
-    errors: 0,
-  };
+  const result: SetupSessionSweepResult = { candidates: 0, toreDown: 0, orphansForced: 0, errors: 0 };
   // No DO namespace bound (e.g. local/miniflare without the binding) — nothing to do.
   if (!env.CREDENTIAL_SETUP_SESSION) return result;
 

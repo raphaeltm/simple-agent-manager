@@ -83,10 +83,7 @@ describe('ArtifactsRepoBrowser.getFile', () => {
 
   it('flags oversized files as tooLarge', async () => {
     iso.readBlob.mockResolvedValue({ blob: enc('hello world') });
-    const f = await browser(makeEnv({ REPO_BROWSE_MAX_INLINE_BYTES: '3' })).getFile(
-      'main',
-      'big.txt'
-    );
+    const f = await browser(makeEnv({ REPO_BROWSE_MAX_INLINE_BYTES: '3' })).getFile('main', 'big.txt');
     expect(f.tooLarge).toBe(true);
     expect(f.content).toBeNull();
   });
@@ -94,14 +91,12 @@ describe('ArtifactsRepoBrowser.getFile', () => {
 
 describe('ArtifactsRepoBrowser.listTree', () => {
   it('maps blob/tree entries from the walk', async () => {
-    iso.walk.mockImplementation(
-      async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
-        await map('src', [entry('tree', 't1')]);
-        await map('src/a.ts', [entry('blob', 'b1')]);
-        await map('.', [entry('tree', 'root')]); // root — skipped
-        return [];
-      }
-    );
+    iso.walk.mockImplementation(async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
+      await map('src', [entry('tree', 't1')]);
+      await map('src/a.ts', [entry('blob', 'b1')]);
+      await map('.', [entry('tree', 'root')]); // root — skipped
+      return [];
+    });
     const res = await browser().listTree('main');
     expect(res.entries).toEqual([
       { path: 'src', name: 'src', type: 'tree', size: null },
@@ -122,15 +117,13 @@ describe('ArtifactsRepoBrowser.compare (two-tree diff + real diff patches)', () 
       added: enc('hi\n'),
     };
     iso.readBlob.mockImplementation(async ({ oid }: { oid: string }) => ({ blob: blobs[oid] }));
-    iso.walk.mockImplementation(
-      async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
-        await map('mod.ts', [entry('blob', 'modBase'), entry('blob', 'modHead')]);
-        await map('gone.ts', [entry('blob', 'removed'), null]);
-        await map('new.ts', [null, entry('blob', 'added')]);
-        await map('same.ts', [entry('blob', 'x'), entry('blob', 'x')]); // unchanged — excluded
-        return [];
-      }
-    );
+    iso.walk.mockImplementation(async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
+      await map('mod.ts', [entry('blob', 'modBase'), entry('blob', 'modHead')]);
+      await map('gone.ts', [entry('blob', 'removed'), null]);
+      await map('new.ts', [null, entry('blob', 'added')]);
+      await map('same.ts', [entry('blob', 'x'), entry('blob', 'x')]); // unchanged — excluded
+      return [];
+    });
 
     const res = await browser().compare('main', 'feat');
     const byPath = Object.fromEntries(res.files.map((f) => [f.path, f]));
@@ -151,52 +144,35 @@ describe('ArtifactsRepoBrowser.compare (two-tree diff + real diff patches)', () 
     iso.readBlob.mockImplementation(async ({ oid }: { oid: string }) => ({
       blob: oid === 'p1' ? new Uint8Array([0, 1]) : new Uint8Array([0, 2]),
     }));
-    iso.walk.mockImplementation(
-      async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
-        await map('img.png', [entry('blob', 'p1'), entry('blob', 'p2')]);
-        return [];
-      }
-    );
+    iso.walk.mockImplementation(async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
+      await map('img.png', [entry('blob', 'p1'), entry('blob', 'p2')]);
+      return [];
+    });
     const res = await browser().compare('main', 'feat');
     expect(res.files[0]).toMatchObject({ path: 'img.png', isBinary: true, patch: null });
   });
 
   it('caps the number of changed files and reports truncation', async () => {
-    iso.resolveRef.mockImplementation(async ({ ref }: { ref: string }) =>
-      ref === 'main' ? 'baseOid' : 'headOid'
-    );
-    iso.readBlob.mockImplementation(async ({ oid }: { oid: string }) => ({
-      blob: enc(`${oid}\n`),
-    }));
-    iso.walk.mockImplementation(
-      async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
-        await map('a.ts', [entry('blob', 'a1'), entry('blob', 'a2')]);
-        await map('b.ts', [entry('blob', 'b1'), entry('blob', 'b2')]);
-        return [];
-      }
-    );
-    const res = await browser(makeEnv({ REPO_BROWSE_MAX_COMPARE_FILES: '1' })).compare(
-      'main',
-      'feat'
-    );
+    iso.resolveRef.mockImplementation(async ({ ref }: { ref: string }) => (ref === 'main' ? 'baseOid' : 'headOid'));
+    iso.readBlob.mockImplementation(async ({ oid }: { oid: string }) => ({ blob: enc(`${oid}\n`) }));
+    iso.walk.mockImplementation(async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
+      await map('a.ts', [entry('blob', 'a1'), entry('blob', 'a2')]);
+      await map('b.ts', [entry('blob', 'b1'), entry('blob', 'b2')]);
+      return [];
+    });
+    const res = await browser(makeEnv({ REPO_BROWSE_MAX_COMPARE_FILES: '1' })).compare('main', 'feat');
     expect(res.files).toHaveLength(1);
     expect(res.truncated).toBe(true);
   });
 
   it('skips tree-type entries during the compare walk', async () => {
-    iso.resolveRef.mockImplementation(async ({ ref }: { ref: string }) =>
-      ref === 'main' ? 'baseOid' : 'headOid'
-    );
-    iso.readBlob.mockImplementation(async ({ oid }: { oid: string }) => ({
-      blob: oid === 'x' ? enc('old\n') : enc('new\n'),
-    }));
-    iso.walk.mockImplementation(
-      async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
-        await map('src', [entry('tree', 't1'), entry('tree', 't2')]); // directory pair — skipped
-        await map('src/f.ts', [entry('blob', 'x'), entry('blob', 'y')]);
-        return [];
-      }
-    );
+    iso.resolveRef.mockImplementation(async ({ ref }: { ref: string }) => (ref === 'main' ? 'baseOid' : 'headOid'));
+    iso.readBlob.mockImplementation(async ({ oid }: { oid: string }) => ({ blob: oid === 'x' ? enc('old\n') : enc('new\n') }));
+    iso.walk.mockImplementation(async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
+      await map('src', [entry('tree', 't1'), entry('tree', 't2')]); // directory pair — skipped
+      await map('src/f.ts', [entry('blob', 'x'), entry('blob', 'y')]);
+      return [];
+    });
     const res = await browser().compare('main', 'feat');
     expect(res.files.map((f) => f.path)).toEqual(['src/f.ts']);
   });
@@ -215,13 +191,11 @@ describe('ArtifactsRepoBrowser.compare (two-tree diff + real diff patches)', () 
 
 describe('ArtifactsRepoBrowser.listTree edge cases', () => {
   it('skips null entries in the walk', async () => {
-    iso.walk.mockImplementation(
-      async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
-        await map('src/a.ts', [null]);
-        await map('src/b.ts', [entry('blob', 'b1')]);
-        return [];
-      }
-    );
+    iso.walk.mockImplementation(async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
+      await map('src/a.ts', [null]);
+      await map('src/b.ts', [entry('blob', 'b1')]);
+      return [];
+    });
     const res = await browser().listTree('main');
     expect(res.entries.map((e) => e.path)).toEqual(['src/b.ts']);
   });

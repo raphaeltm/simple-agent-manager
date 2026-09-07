@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 
@@ -111,11 +111,7 @@ describe('Instrumented Logger', () => {
         source: 'api',
         level: 'error',
         message: 'api_failure',
-        context: expect.objectContaining({
-          userId: 'user-1',
-          path: '/api/test',
-          authorization: '[REDACTED]',
-        }),
+        context: expect.objectContaining({ userId: 'user-1', path: '/api/test', authorization: '[REDACTED]' }),
       }),
       undefined
     );

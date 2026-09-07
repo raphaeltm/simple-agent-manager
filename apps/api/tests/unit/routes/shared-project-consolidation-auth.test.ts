@@ -193,9 +193,11 @@ describe('shared project authorization consolidation', () => {
     const { db, deleteSpy, batchSpy } = createDeleteDb();
     mocks.currentDb = db;
 
-    const response = await createApp().request('/api/projects/proj-1', { method: 'DELETE' }, {
-      DATABASE: {},
-    } as Env);
+    const response = await createApp().request(
+      '/api/projects/proj-1',
+      { method: 'DELETE' },
+      { DATABASE: {} } as Env
+    );
 
     expect(response.status).toBe(403);
     const body = await response.json<{ error: string; message: string }>();

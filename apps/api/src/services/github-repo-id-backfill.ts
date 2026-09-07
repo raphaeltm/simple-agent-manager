@@ -36,11 +36,7 @@ const DEFAULT_BULK_BACKFILL_BATCH_SIZE = 50;
 /** Emit a progress log every this many processed projects within a batch. */
 const BULK_BACKFILL_PROGRESS_INTERVAL = 25;
 
-export type BackfillStatus =
-  | 'backfilled'
-  | 'skipped_no_repo'
-  | 'skipped_collision'
-  | 'fetch_failed';
+export type BackfillStatus = 'backfilled' | 'skipped_no_repo' | 'skipped_collision' | 'fetch_failed';
 
 export interface BackfillResult {
   status: BackfillStatus;
@@ -80,7 +76,7 @@ export async function backfillProjectGithubRepoId(
      * (the lazy self-heal path), a token is minted on demand.
      */
     installationToken?: string;
-  }
+  },
 ): Promise<BackfillResult> {
   const { projectId, repository, externalInstallationId, installationToken } = params;
 
@@ -93,23 +89,12 @@ export async function backfillProjectGithubRepoId(
       externalInstallationId,
       reason: 'unparseable_repository',
     });
-    return {
-      status: 'skipped_no_repo',
-      githubRepoId: null,
-      githubRepoNodeId: null,
-      fullName: null,
-    };
+    return { status: 'skipped_no_repo', githubRepoId: null, githubRepoNodeId: null, fullName: null };
   }
 
   let metadata;
   try {
-    metadata = await getRepositoryMetadata(
-      externalInstallationId,
-      owner,
-      repo,
-      env,
-      installationToken
-    );
+    metadata = await getRepositoryMetadata(externalInstallationId, owner, repo, env, installationToken);
   } catch (err) {
     log.warn('github_repo_id_backfill.fetch_failed', {
       projectId,
@@ -126,12 +111,7 @@ export async function backfillProjectGithubRepoId(
       externalInstallationId,
       reason: 'repo_inaccessible',
     });
-    return {
-      status: 'skipped_no_repo',
-      githubRepoId: null,
-      githubRepoNodeId: null,
-      fullName: null,
-    };
+    return { status: 'skipped_no_repo', githubRepoId: null, githubRepoNodeId: null, fullName: null };
   }
 
   // Idempotent + race-safe: only heal rows still missing the id. Also refresh
@@ -211,7 +191,7 @@ export interface BulkBackfillSummary {
 export async function bulkBackfillGithubRepoIds(
   db: DrizzleD1Database<typeof schema>,
   env: Env,
-  options?: { limit?: number }
+  options?: { limit?: number },
 ): Promise<BulkBackfillSummary> {
   const configuredDefault = Number.parseInt(env.GITHUB_REPO_ID_BACKFILL_BATCH_SIZE ?? '', 10);
   const defaultLimit =

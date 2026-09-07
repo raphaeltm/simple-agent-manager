@@ -111,24 +111,9 @@ describe('bulkSweepMismatchedPersonalInstallations', () => {
     // Row A: account 999 != user 111 -> mismatch, unreferenced -> DELETE.
     // Row B: account 222 == user 222 -> match -> keep (never touched).
     // Row D: account 888 != user 333 -> mismatch, project-referenced -> SKIP.
-    const rowA = personalRow({
-      id: 'rowA',
-      userId: 'userA',
-      externalInstallationId: 'extA',
-      accountName: 'a',
-    });
-    const rowB = personalRow({
-      id: 'rowB',
-      userId: 'userB',
-      externalInstallationId: 'extB',
-      accountName: 'b',
-    });
-    const rowD = personalRow({
-      id: 'rowD',
-      userId: 'userD',
-      externalInstallationId: 'extD',
-      accountName: 'd',
-    });
+    const rowA = personalRow({ id: 'rowA', userId: 'userA', externalInstallationId: 'extA', accountName: 'a' });
+    const rowB = personalRow({ id: 'rowB', userId: 'userB', externalInstallationId: 'extB', accountName: 'b' });
+    const rowD = personalRow({ id: 'rowD', userId: 'userD', externalInstallationId: 'extD', accountName: 'd' });
 
     mocks.getInstallationAccount.mockImplementation(async (externalInstallationId: string) => {
       const byId: Record<string, { id: number; login: string; type: string }> = {
@@ -170,21 +155,11 @@ describe('bulkSweepMismatchedPersonalInstallations', () => {
     expect(deletedConditions).toHaveLength(1);
     expect(mocks.log.info).toHaveBeenCalledWith(
       'github.installation_leak_sweep.deleted_mismatched_personal',
-      expect.objectContaining({
-        installationRowId: 'rowA',
-        userId: 'userA',
-        accountId: '999',
-        userGithubId: '111',
-      })
+      expect.objectContaining({ installationRowId: 'rowA', userId: 'userA', accountId: '999', userGithubId: '111' }),
     );
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.installation_leak_sweep.skipped_referenced',
-      expect.objectContaining({
-        installationRowId: 'rowD',
-        userId: 'userD',
-        accountId: '888',
-        userGithubId: '333',
-      })
+      expect.objectContaining({ installationRowId: 'rowD', userId: 'userD', accountId: '888', userGithubId: '333' }),
     );
   });
 
@@ -204,7 +179,7 @@ describe('bulkSweepMismatchedPersonalInstallations', () => {
     expect(mocks.getInstallationAccount).not.toHaveBeenCalled();
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.installation_leak_sweep.no_user_github_id',
-      expect.objectContaining({ installationRowId: 'row-1', userId: 'user-1' })
+      expect.objectContaining({ installationRowId: 'row-1', userId: 'user-1' }),
     );
   });
 
@@ -223,7 +198,7 @@ describe('bulkSweepMismatchedPersonalInstallations', () => {
     expect(deletedConditions).toHaveLength(0);
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.installation_leak_sweep.account_fetch_failed',
-      expect.objectContaining({ installationRowId: 'row-1' })
+      expect.objectContaining({ installationRowId: 'row-1' }),
     );
   });
 
@@ -242,7 +217,7 @@ describe('bulkSweepMismatchedPersonalInstallations', () => {
     expect(deletedConditions).toHaveLength(0);
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.installation_leak_sweep.account_unresolved',
-      expect.objectContaining({ installationRowId: 'row-1' })
+      expect.objectContaining({ installationRowId: 'row-1' }),
     );
   });
 
@@ -284,7 +259,9 @@ describe('bulkSweepMismatchedPersonalInstallations', () => {
     await bulkSweepMismatchedPersonalInstallations(db, env);
 
     expect(installationsWhere).toHaveLength(1);
-    expect(installationsWhere[0]).toEqual(eq(schema.githubInstallations.accountType, 'personal'));
+    expect(installationsWhere[0]).toEqual(
+      eq(schema.githubInstallations.accountType, 'personal')
+    );
   });
 
   it('skips a mismatched row referenced only by a workspace (dangling-FK guard) without deleting it', async () => {
@@ -308,7 +285,7 @@ describe('bulkSweepMismatchedPersonalInstallations', () => {
     expect(deletedConditions).toHaveLength(0);
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.installation_leak_sweep.skipped_referenced',
-      expect.objectContaining({ installationRowId: 'row-1', referencedBy: 'workspace' })
+      expect.objectContaining({ installationRowId: 'row-1', referencedBy: 'workspace' }),
     );
   });
 

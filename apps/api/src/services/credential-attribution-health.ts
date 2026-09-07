@@ -11,7 +11,10 @@ import type { AppDb } from '../middleware/project-auth';
 import { parseCacheTtlMs } from './cache-config';
 import { getProjectMultiplayerState } from './project-multiplayer';
 
-type ProjectRow = Pick<schema.Project, 'id' | 'defaultAgentType' | 'defaultProvider'>;
+type ProjectRow = Pick<
+  schema.Project,
+  'id' | 'defaultAgentType' | 'defaultProvider'
+>;
 
 type TriggerWithProfile = schema.TriggerRow & {
   profileAgentType: string | null;
@@ -57,17 +60,12 @@ interface ProjectAttachmentCoverage {
   ownerId: string | null;
 }
 
-function userMeta(
-  row:
-    | {
-        id: string;
-        name: string | null;
-        email: string | null;
-        avatarUrl: string | null;
-      }
-    | null
-    | undefined
-): CredentialAttributionUser | null {
+function userMeta(row: {
+  id: string;
+  name: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+} | null | undefined): CredentialAttributionUser | null {
   if (!row) return null;
   return {
     id: row.id,
@@ -98,7 +96,7 @@ function findCoverage(
   const computeCoverage = Array.from(coverage.entries())
     .filter(([key]) => key.startsWith('compute:'))
     .map(([, item]) => item);
-  return computeCoverage.length === 1 ? (computeCoverage[0] ?? null) : null;
+  return computeCoverage.length === 1 ? computeCoverage[0] ?? null : null;
 }
 
 function resourceHasPersonalWarning(resource: CredentialAttributionResource): boolean {
@@ -165,10 +163,7 @@ async function loadProjectAttachmentCoverage(
       schema.ccConfigurations,
       eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id)
     )
-    .leftJoin(
-      schema.ccCredentials,
-      eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id)
-    )
+    .leftJoin(schema.ccCredentials, eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id))
     .where(
       and(
         eq(schema.ccAttachments.projectId, projectId),
@@ -191,10 +186,7 @@ async function loadProjectAttachmentCoverage(
   return coverage;
 }
 
-async function loadUsers(
-  db: AppDb,
-  userIds: string[]
-): Promise<Map<string, CredentialAttributionUser>> {
+async function loadUsers(db: AppDb, userIds: string[]): Promise<Map<string, CredentialAttributionUser>> {
   const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
   if (uniqueIds.length === 0) return new Map();
 
@@ -284,7 +276,7 @@ export async function buildCredentialAttributionForTriggers(input: {
         label: `Agent credential (${agentTarget})`,
         owner,
         coverage: agentCoverage,
-        coverageOwner: agentCoverage?.ownerId ? (users.get(agentCoverage.ownerId) ?? null) : null,
+        coverageOwner: agentCoverage?.ownerId ? users.get(agentCoverage.ownerId) ?? null : null,
         fixHref,
       }),
       buildCheck({
@@ -293,9 +285,7 @@ export async function buildCredentialAttributionForTriggers(input: {
         label: `Compute credential (${computeTarget})`,
         owner,
         coverage: computeCoverage,
-        coverageOwner: computeCoverage?.ownerId
-          ? (users.get(computeCoverage.ownerId) ?? null)
-          : null,
+        coverageOwner: computeCoverage?.ownerId ? users.get(computeCoverage.ownerId) ?? null : null,
         fixHref,
       }),
     ]);
@@ -320,9 +310,8 @@ export async function getProjectCredentialAttributionHealth(input: {
     return cached.summary;
   }
 
-  const multiplayerActive =
-    input.multiplayerActive ??
-    (await getProjectMultiplayerState(db, project.id, new Date(nowMs), input.env))
+  const multiplayerActive = input.multiplayerActive
+    ?? (await getProjectMultiplayerState(db, project.id, new Date(nowMs), input.env))
       .multiplayerActive;
   const triggerRows = await db
     .select()
@@ -343,7 +332,9 @@ export async function getProjectCredentialAttributionHealth(input: {
       projectId: project.id,
       kind: 'trigger',
       title: trigger.name,
-      subtitle: trigger.sourceType === 'cron' ? trigger.cronExpression : trigger.sourceType,
+      subtitle: trigger.sourceType === 'cron'
+        ? trigger.cronExpression
+        : trigger.sourceType,
       href: `/projects/${project.id}/triggers/${trigger.id}`,
       createdBy,
       checks,

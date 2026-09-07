@@ -35,9 +35,11 @@ export async function appendBootLog(
   existing.push(entry);
   const maxEntries = getBootLogMaxEntries(env);
   const trimmed = existing.length > maxEntries ? existing.slice(-maxEntries) : existing;
-  await kv.put(`${BOOT_LOG_PREFIX}${workspaceId}`, JSON.stringify(trimmed), {
-    expirationTtl: getBootLogTTL(env),
-  });
+  await kv.put(
+    `${BOOT_LOG_PREFIX}${workspaceId}`,
+    JSON.stringify(trimmed),
+    { expirationTtl: getBootLogTTL(env) }
+  );
 }
 
 export async function writeBootLogs(
@@ -46,7 +48,9 @@ export async function writeBootLogs(
   logs: BootLogEntry[],
   env?: { BOOT_LOG_TTL_SECONDS?: string }
 ): Promise<void> {
-  await kv.put(`${BOOT_LOG_PREFIX}${workspaceId}`, JSON.stringify(logs), {
-    expirationTtl: getBootLogTTL(env),
-  });
+  await kv.put(
+    `${BOOT_LOG_PREFIX}${workspaceId}`,
+    JSON.stringify(logs),
+    { expirationTtl: getBootLogTTL(env) }
+  );
 }

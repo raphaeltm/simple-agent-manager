@@ -49,8 +49,8 @@ vi.mock('../../../src/services/jwt', () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-const mockFetchNodeAgent = vi.fn((_nodeId: string, _env: Env, url: string, options: RequestInit) =>
-  mockFetch(url, options)
+const mockFetchNodeAgent = vi.fn(
+  (_nodeId: string, _env: Env, url: string, options: RequestInit) => mockFetch(url, options),
 );
 vi.mock('../../../src/services/node-agent', () => ({
   fetchNodeAgent: (...args: Parameters<typeof mockFetchNodeAgent>) => mockFetchNodeAgent(...args),
@@ -151,9 +151,7 @@ describe('MCP Library Tools', () => {
       const result = await handleListLibraryFiles(1, {}, tokenData, mockEnv as Env);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.files).toHaveLength(1);
       expect(content.files[0].id).toBe('file-001');
       expect(content.files[0].tags).toEqual(['config']);
@@ -163,18 +161,13 @@ describe('MCP Library Tools', () => {
     it('passes filters to listFiles service', async () => {
       mockListFiles.mockResolvedValueOnce({ files: [], total: 0, cursor: null });
 
-      await handleListLibraryFiles(
-        1,
-        {
-          tags: ['config', 'production'],
-          fileType: 'application/json',
-          source: 'agent',
-          sortBy: 'filename',
-          limit: 10,
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      await handleListLibraryFiles(1, {
+        tags: ['config', 'production'],
+        fileType: 'application/json',
+        source: 'agent',
+        sortBy: 'filename',
+        limit: 10,
+      }, tokenData, mockEnv as Env);
 
       expect(mockListFiles).toHaveBeenCalledWith(
         expect.anything(),
@@ -186,7 +179,7 @@ describe('MCP Library Tools', () => {
           uploadSource: 'agent',
           sortBy: 'filename',
           limit: 10,
-        })
+        }),
       );
     });
 
@@ -202,16 +195,9 @@ describe('MCP Library Tools', () => {
     it('returns empty list when no files match', async () => {
       mockListFiles.mockResolvedValueOnce({ files: [], total: 0, cursor: null });
 
-      const result = await handleListLibraryFiles(
-        1,
-        { tags: ['nonexistent'] },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleListLibraryFiles(1, { tags: ['nonexistent'] }, tokenData, mockEnv as Env);
 
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.files).toHaveLength(0);
       expect(content.totalCount).toBe(0);
     });
@@ -221,12 +207,7 @@ describe('MCP Library Tools', () => {
 
   describe('handleDownloadLibraryFile', () => {
     it('requires workspace context', async () => {
-      const result = await handleDownloadLibraryFile(
-        1,
-        { fileId: 'file-001' },
-        tokenDataNoWorkspace,
-        mockEnv as Env
-      );
+      const result = await handleDownloadLibraryFile(1, { fileId: 'file-001' }, tokenDataNoWorkspace, mockEnv as Env);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('workspace');
     });
@@ -251,17 +232,10 @@ describe('MCP Library Tools', () => {
       // Mock VM agent upload
       mockFetch.mockResolvedValueOnce(new Response('{}', { status: 200 }));
 
-      const result = await handleDownloadLibraryFile(
-        1,
-        { fileId: 'file-001' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDownloadLibraryFile(1, { fileId: 'file-001' }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.downloadedTo).toBe('.library/config.json');
       expect(content.filename).toBe('config.json');
       expect(content.sizeBytes).toBe(100);
@@ -276,16 +250,9 @@ describe('MCP Library Tools', () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
       mockFetch.mockResolvedValueOnce(new Response('{}', { status: 200 }));
 
-      const result = await handleDownloadLibraryFile(
-        1,
-        { fileId: 'file-001', targetPath: 'my-data' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDownloadLibraryFile(1, { fileId: 'file-001', targetPath: 'my-data' }, tokenData, mockEnv as Env);
 
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.downloadedTo).toBe('my-data/data.csv');
     });
 
@@ -294,12 +261,7 @@ describe('MCP Library Tools', () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
       mockDownloadFile.mockRejectedValueOnce(new Error('Not Found'));
 
-      const result = await handleDownloadLibraryFile(
-        1,
-        { fileId: 'bad-id' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDownloadLibraryFile(1, { fileId: 'bad-id' }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('not found');
@@ -308,12 +270,7 @@ describe('MCP Library Tools', () => {
     it('returns error when workspace is not running', async () => {
       mockD1Query({ id: 'ws-001', status: 'stopped', nodeId: 'node-001' });
 
-      const result = await handleDownloadLibraryFile(
-        1,
-        { fileId: 'file-001' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDownloadLibraryFile(1, { fileId: 'file-001' }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('not running');
@@ -324,12 +281,7 @@ describe('MCP Library Tools', () => {
       mockD1._stmt.raw.mockResolvedValueOnce([]);
       mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
 
-      const result = await handleDownloadLibraryFile(
-        1,
-        { fileId: 'file-001' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDownloadLibraryFile(1, { fileId: 'file-001' }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('not found');
@@ -345,12 +297,7 @@ describe('MCP Library Tools', () => {
       // VM agent returns 500
       mockFetch.mockResolvedValueOnce(new Response('server error', { status: 500 }));
 
-      const result = await handleDownloadLibraryFile(
-        1,
-        { fileId: 'file-001' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDownloadLibraryFile(1, { fileId: 'file-001' }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Failed to download library file');
@@ -364,15 +311,10 @@ describe('MCP Library Tools', () => {
         metadata: {},
       });
 
-      const result = await handleDownloadLibraryFile(
-        1,
-        {
-          fileId: 'file-001',
-          targetPath: '../../etc',
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDownloadLibraryFile(1, {
+        fileId: 'file-001',
+        targetPath: '../../etc',
+      }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('..');
@@ -386,15 +328,10 @@ describe('MCP Library Tools', () => {
         metadata: {},
       });
 
-      const result = await handleDownloadLibraryFile(
-        1,
-        {
-          fileId: 'file-001',
-          targetPath: '/root/.ssh',
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDownloadLibraryFile(1, {
+        fileId: 'file-001',
+        targetPath: '/root/.ssh',
+      }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('relative');
@@ -405,12 +342,7 @@ describe('MCP Library Tools', () => {
 
   describe('handleUploadToLibrary', () => {
     it('requires workspace context', async () => {
-      const result = await handleUploadToLibrary(
-        1,
-        { filePath: '/app/file.txt' },
-        tokenDataNoWorkspace,
-        mockEnv as Env
-      );
+      const result = await handleUploadToLibrary(1, { filePath: '/app/file.txt' }, tokenDataNoWorkspace, mockEnv as Env);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('workspace');
     });
@@ -426,12 +358,10 @@ describe('MCP Library Tools', () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
 
       // Mock VM agent download
-      mockFetch.mockResolvedValueOnce(
-        new Response('file content', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
+      mockFetch.mockResolvedValueOnce(new Response('file content', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
 
       // Mock library upload
       mockUploadFile.mockResolvedValueOnce({
@@ -441,21 +371,14 @@ describe('MCP Library Tools', () => {
         sizeBytes: 12,
       });
 
-      const result = await handleUploadToLibrary(
-        1,
-        {
-          filePath: '/app/notes.txt',
-          description: 'My notes',
-          tags: ['notes', 'draft'],
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleUploadToLibrary(1, {
+        filePath: '/app/notes.txt',
+        description: 'My notes',
+        tags: ['notes', 'draft'],
+      }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.fileId).toBe('file-new-001');
       expect(content.filename).toBe('notes.txt');
       // mimeType lets the DocumentCard pick the correct preview tier from rawOutput
@@ -478,7 +401,7 @@ describe('MCP Library Tools', () => {
           uploadTaskId: 'task-001',
           tagSource: 'agent',
           tags: ['notes', 'draft'],
-        })
+        }),
       );
     });
 
@@ -487,58 +410,44 @@ describe('MCP Library Tools', () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
 
       // Mock VM agent download
-      mockFetch.mockResolvedValueOnce(
-        new Response('new content', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
+      mockFetch.mockResolvedValueOnce(new Response('new content', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
 
       // Mock library upload failure — duplicate filename
       mockUploadFile.mockRejectedValueOnce(
-        Object.assign(
-          new Error('File "notes.txt" already exists in this project. Use replace to update it.'),
-          {
-            statusCode: 409,
-          }
-        )
+        Object.assign(new Error('File "notes.txt" already exists in this project. Use replace to update it.'), {
+          statusCode: 409,
+        }),
       );
 
       // Mock the D1 lookup for existing file metadata in the catch block.
-      mockD1Query([
-        {
-          id: 'existing-file-001',
-          projectId: 'proj-001',
-          filename: 'notes.txt',
-          mimeType: 'text/plain',
-          sizeBytes: 500,
-          description: null,
-          uploadedBy: 'user-002',
-          uploadSource: 'user',
-          uploadSessionId: null,
-          uploadTaskId: null,
-          replacedAt: null,
-          replacedBy: null,
-          status: 'ready',
-          r2Key: 'library/proj-001/existing-file-001',
-          extractedTextPreview: null,
-          createdAt: '2026-04-01T00:00:00Z',
-          updatedAt: '2026-04-01T00:00:00Z',
-        },
-      ]);
+      mockD1Query([{
+        id: 'existing-file-001',
+        projectId: 'proj-001',
+        filename: 'notes.txt',
+        mimeType: 'text/plain',
+        sizeBytes: 500,
+        description: null,
+        uploadedBy: 'user-002',
+        uploadSource: 'user',
+        uploadSessionId: null,
+        uploadTaskId: null,
+        replacedAt: null,
+        replacedBy: null,
+        status: 'ready',
+        r2Key: 'library/proj-001/existing-file-001',
+        extractedTextPreview: null,
+        createdAt: '2026-04-01T00:00:00Z',
+        updatedAt: '2026-04-01T00:00:00Z',
+      }]);
 
-      const result = await handleUploadToLibrary(
-        1,
-        { filePath: '/app/notes.txt' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleUploadToLibrary(1, { filePath: '/app/notes.txt' }, tokenData, mockEnv as Env);
 
       // FILE_EXISTS is returned as a success response with error field in content
       expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.error).toBe('FILE_EXISTS');
       expect(content.existingFile.id).toBe('existing-file-001');
       expect(content.existingFile.filename).toBe('notes.txt');
@@ -553,12 +462,7 @@ describe('MCP Library Tools', () => {
       // Mock VM agent download failure
       mockFetch.mockResolvedValueOnce(new Response('not found', { status: 404 }));
 
-      const result = await handleUploadToLibrary(
-        1,
-        { filePath: '/app/missing.txt' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleUploadToLibrary(1, { filePath: '/app/missing.txt' }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('not found');
@@ -568,12 +472,7 @@ describe('MCP Library Tools', () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
       mockFetch.mockResolvedValueOnce(new Response('server error', { status: 500 }));
 
-      const result = await handleUploadToLibrary(
-        1,
-        { filePath: '/app/file.txt' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleUploadToLibrary(1, { filePath: '/app/file.txt' }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Failed to upload to library');
@@ -581,26 +480,17 @@ describe('MCP Library Tools', () => {
 
     it('falls through to jsonRpcError when FILE_EXISTS but D1 lookup returns no row', async () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
-      mockFetch.mockResolvedValueOnce(
-        new Response('data', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
-      mockUploadFile.mockRejectedValueOnce(
-        new Error('File "ghost.txt" already exists in this project.')
-      );
+      mockFetch.mockResolvedValueOnce(new Response('data', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
+      mockUploadFile.mockRejectedValueOnce(new Error('File "ghost.txt" already exists in this project.'));
 
       // D1 lookup returns empty — file was deleted between upload and lookup
       mockD1._stmt.raw.mockResolvedValueOnce([]);
       mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
 
-      const result = await handleUploadToLibrary(
-        1,
-        { filePath: '/app/ghost.txt' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleUploadToLibrary(1, { filePath: '/app/ghost.txt' }, tokenData, mockEnv as Env);
 
       // Falls through to jsonRpcError since no existing file found
       expect(result.error).toBeDefined();
@@ -609,26 +499,17 @@ describe('MCP Library Tools', () => {
 
     it('falls through to jsonRpcError when FILE_EXISTS and D1 lookup throws', async () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
-      mockFetch.mockResolvedValueOnce(
-        new Response('data', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
-      mockUploadFile.mockRejectedValueOnce(
-        new Error('File "broken.txt" already exists in this project.')
-      );
+      mockFetch.mockResolvedValueOnce(new Response('data', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
+      mockUploadFile.mockRejectedValueOnce(new Error('File "broken.txt" already exists in this project.'));
 
       // D1 lookup throws
       mockD1._stmt.raw.mockRejectedValueOnce(new Error('D1 unavailable'));
       mockD1._stmt.all.mockRejectedValueOnce(new Error('D1 unavailable'));
 
-      const result = await handleUploadToLibrary(
-        1,
-        { filePath: '/app/broken.txt' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleUploadToLibrary(1, { filePath: '/app/broken.txt' }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('already exists');
@@ -636,30 +517,21 @@ describe('MCP Library Tools', () => {
 
     it('verifies uploadSessionId is set from taskId', async () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
-      mockFetch.mockResolvedValueOnce(
-        new Response('data', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
+      mockFetch.mockResolvedValueOnce(new Response('data', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
       mockUploadFile.mockResolvedValueOnce({ id: 'f1', filename: 'a.txt', sizeBytes: 4 });
 
       await handleUploadToLibrary(1, { filePath: '/app/a.txt' }, tokenData, mockEnv as Env);
 
       expect(mockUploadFile).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.anything(),
-        expect.anything(),
-        mockEnv,
-        'proj-001',
-        'user-001',
-        'a.txt',
-        'text/plain',
-        expect.any(ArrayBuffer),
+        expect.anything(), expect.anything(), expect.anything(),
+        mockEnv, 'proj-001', 'user-001', 'a.txt', 'text/plain', expect.any(ArrayBuffer),
         expect.objectContaining({
           uploadSessionId: 'task-001',
           uploadTaskId: 'task-001',
-        })
+        }),
       );
     });
   });
@@ -668,23 +540,13 @@ describe('MCP Library Tools', () => {
 
   describe('handleReplaceLibraryFile', () => {
     it('requires workspace context', async () => {
-      const result = await handleReplaceLibraryFile(
-        1,
-        { fileId: 'f1', filePath: '/app/f.txt' },
-        tokenDataNoWorkspace,
-        mockEnv as Env
-      );
+      const result = await handleReplaceLibraryFile(1, { fileId: 'f1', filePath: '/app/f.txt' }, tokenDataNoWorkspace, mockEnv as Env);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('workspace');
     });
 
     it('requires fileId parameter', async () => {
-      const result = await handleReplaceLibraryFile(
-        1,
-        { filePath: '/app/f.txt' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleReplaceLibraryFile(1, { filePath: '/app/f.txt' }, tokenData, mockEnv as Env);
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('fileId');
     });
@@ -706,12 +568,10 @@ describe('MCP Library Tools', () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
 
       // Mock VM agent download
-      mockFetch.mockResolvedValueOnce(
-        new Response('new config content', {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      );
+      mockFetch.mockResolvedValueOnce(new Response('new config content', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
 
       // Mock library replace
       mockReplaceFile.mockResolvedValueOnce({
@@ -721,21 +581,14 @@ describe('MCP Library Tools', () => {
         sizeBytes: 18,
       });
 
-      const result = await handleReplaceLibraryFile(
-        1,
-        {
-          fileId: 'file-001',
-          filePath: '/app/config.json',
-          tags: ['updated'],
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleReplaceLibraryFile(1, {
+        fileId: 'file-001',
+        filePath: '/app/config.json',
+        tags: ['updated'],
+      }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.fileId).toBe('file-001');
       expect(content.mimeType).toBe('application/json');
       expect(content.sizeBytes).toBe(18);
@@ -748,28 +601,21 @@ describe('MCP Library Tools', () => {
         'proj-001',
         'file-001',
         { add: ['updated'] },
-        'agent'
+        'agent',
       );
     });
 
     it('returns FILE_NOT_FOUND for invalid fileId', async () => {
       mockGetFile.mockRejectedValueOnce(new Error('Not Found'));
 
-      const result = await handleReplaceLibraryFile(
-        1,
-        {
-          fileId: 'bad-id',
-          filePath: '/app/file.txt',
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleReplaceLibraryFile(1, {
+        fileId: 'bad-id',
+        filePath: '/app/file.txt',
+      }, tokenData, mockEnv as Env);
 
       // FILE_NOT_FOUND is returned as success with error in content
       expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.error).toBe('FILE_NOT_FOUND');
     });
 
@@ -779,37 +625,23 @@ describe('MCP Library Tools', () => {
         tags: [],
       });
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
-      mockFetch.mockResolvedValueOnce(
-        new Response('updated', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
+      mockFetch.mockResolvedValueOnce(new Response('updated', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
       mockReplaceFile.mockResolvedValueOnce({ id: 'file-001', filename: 'doc.txt', sizeBytes: 7 });
 
-      await handleReplaceLibraryFile(
-        1,
-        {
-          fileId: 'file-001',
-          filePath: '/app/doc.txt',
-          description: 'Updated doc',
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      await handleReplaceLibraryFile(1, {
+        fileId: 'file-001',
+        filePath: '/app/doc.txt',
+        description: 'Updated doc',
+      }, tokenData, mockEnv as Env);
 
       expect(mockReplaceFile).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.anything(),
-        expect.anything(),
-        mockEnv,
-        'proj-001',
-        'file-001',
-        'user-001',
-        'doc.txt',
-        'text/plain',
+        expect.anything(), expect.anything(), expect.anything(),
+        mockEnv, 'proj-001', 'file-001', 'user-001', 'doc.txt', 'text/plain',
         expect.any(ArrayBuffer),
-        expect.objectContaining({ description: 'Updated doc' })
+        expect.objectContaining({ description: 'Updated doc' }),
       );
     });
 
@@ -821,15 +653,10 @@ describe('MCP Library Tools', () => {
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
       mockFetch.mockResolvedValueOnce(new Response('server error', { status: 500 }));
 
-      const result = await handleReplaceLibraryFile(
-        1,
-        {
-          fileId: 'file-001',
-          filePath: '/app/doc.txt',
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleReplaceLibraryFile(1, {
+        fileId: 'file-001',
+        filePath: '/app/doc.txt',
+      }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Failed to replace library file');
@@ -841,23 +668,16 @@ describe('MCP Library Tools', () => {
         tags: [],
       });
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
-      mockFetch.mockResolvedValueOnce(
-        new Response('content', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
+      mockFetch.mockResolvedValueOnce(new Response('content', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
       mockReplaceFile.mockRejectedValueOnce(new Error('R2 write failed'));
 
-      const result = await handleReplaceLibraryFile(
-        1,
-        {
-          fileId: 'file-001',
-          filePath: '/app/doc.txt',
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleReplaceLibraryFile(1, {
+        fileId: 'file-001',
+        filePath: '/app/doc.txt',
+      }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeDefined();
       expect(result.error!.message).toContain('Failed to replace library file');
@@ -869,27 +689,20 @@ describe('MCP Library Tools', () => {
         tags: [],
       });
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
-      mockFetch.mockResolvedValueOnce(
-        new Response('updated', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
+      mockFetch.mockResolvedValueOnce(new Response('updated', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
       mockReplaceFile.mockResolvedValueOnce({
         id: 'file-001',
         filename: 'doc.txt',
         sizeBytes: 7,
       });
 
-      await handleReplaceLibraryFile(
-        1,
-        {
-          fileId: 'file-001',
-          filePath: '/app/doc.txt',
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      await handleReplaceLibraryFile(1, {
+        fileId: 'file-001',
+        filePath: '/app/doc.txt',
+      }, tokenData, mockEnv as Env);
 
       expect(mockUpdateTags).not.toHaveBeenCalled();
     });
@@ -901,19 +714,14 @@ describe('MCP Library Tools', () => {
     it('upload fails with FILE_EXISTS, then replace succeeds', async () => {
       // Step 1: Upload fails with FILE_EXISTS
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
-      mockFetch.mockResolvedValueOnce(
-        new Response('data', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
+      mockFetch.mockResolvedValueOnce(new Response('data', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
       mockUploadFile.mockRejectedValueOnce(
-        Object.assign(
-          new Error('File "report.txt" already exists in this project. Use replace to update it.'),
-          {
-            statusCode: 409,
-          }
-        )
+        Object.assign(new Error('File "report.txt" already exists in this project. Use replace to update it.'), {
+          statusCode: 409,
+        }),
       );
       // Mock D1 lookup for existing file in catch block
       mockD1Query({
@@ -936,15 +744,8 @@ describe('MCP Library Tools', () => {
         updatedAt: '2026-04-05T00:00:00Z',
       });
 
-      const uploadResult = await handleUploadToLibrary(
-        1,
-        { filePath: '/app/report.txt' },
-        tokenData,
-        mockEnv as Env
-      );
-      const uploadContent = JSON.parse(
-        (uploadResult.result as { content: { text: string }[] }).content[0].text
-      );
+      const uploadResult = await handleUploadToLibrary(1, { filePath: '/app/report.txt' }, tokenData, mockEnv as Env);
+      const uploadContent = JSON.parse((uploadResult.result as { content: { text: string }[] }).content[0].text);
       expect(uploadContent.error).toBe('FILE_EXISTS');
       const existingFileId = uploadContent.existingFile.id;
 
@@ -959,33 +760,24 @@ describe('MCP Library Tools', () => {
         tags: [{ fileId: existingFileId, tag: 'report', tagSource: 'agent' }],
       });
       mockD1Query({ id: 'ws-001', status: 'running', nodeId: 'node-001' });
-      mockFetch.mockResolvedValueOnce(
-        new Response('updated report data', {
-          status: 200,
-          headers: { 'Content-Type': 'text/plain' },
-        })
-      );
+      mockFetch.mockResolvedValueOnce(new Response('updated report data', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }));
       mockReplaceFile.mockResolvedValueOnce({
         id: existingFileId,
         filename: 'report.txt',
         sizeBytes: 20,
       });
 
-      const replaceResult = await handleReplaceLibraryFile(
-        2,
-        {
-          fileId: existingFileId,
-          filePath: '/app/report.txt',
-          tags: ['v2'],
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      const replaceResult = await handleReplaceLibraryFile(2, {
+        fileId: existingFileId,
+        filePath: '/app/report.txt',
+        tags: ['v2'],
+      }, tokenData, mockEnv as Env);
 
       expect(replaceResult.error).toBeUndefined();
-      const replaceContent = JSON.parse(
-        (replaceResult.result as { content: { text: string }[] }).content[0].text
-      );
+      const replaceContent = JSON.parse((replaceResult.result as { content: { text: string }[] }).content[0].text);
       expect(replaceContent.fileId).toBe(existingFileId);
       expect(replaceContent.previousSizeBytes).toBe(300);
       expect(replaceContent.sizeBytes).toBe(20);
@@ -997,7 +789,7 @@ describe('MCP Library Tools', () => {
         'proj-001',
         existingFileId,
         { add: ['v2'] },
-        'agent'
+        'agent',
       );
     });
   });
@@ -1013,27 +805,15 @@ describe('MCP Library Tools', () => {
 
     it('returns file metadata for a valid fileId (no workspace required)', async () => {
       mockGetFile.mockResolvedValueOnce({
-        file: {
-          id: 'file-001',
-          filename: 'auth-explainer.md',
-          mimeType: 'text/markdown',
-          sizeBytes: 4096,
-        },
+        file: { id: 'file-001', filename: 'auth-explainer.md', mimeType: 'text/markdown', sizeBytes: 4096 },
         tags: [],
       });
 
       // Note: tokenDataNoWorkspace — display_from_library must work without a workspace.
-      const result = await handleDisplayFromLibrary(
-        1,
-        { fileId: 'file-001' },
-        tokenDataNoWorkspace,
-        mockEnv as Env
-      );
+      const result = await handleDisplayFromLibrary(1, { fileId: 'file-001' }, tokenDataNoWorkspace, mockEnv as Env);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.fileId).toBe('file-001');
       expect(content.filename).toBe('auth-explainer.md');
       expect(content.mimeType).toBe('text/markdown');
@@ -1049,17 +829,10 @@ describe('MCP Library Tools', () => {
       // project — the trust boundary that prevents cross-project disclosure.
       mockGetFile.mockRejectedValueOnce(new Error('Not Found'));
 
-      const result = await handleDisplayFromLibrary(
-        1,
-        { fileId: 'other-project-file' },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDisplayFromLibrary(1, { fileId: 'other-project-file' }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.error).toBe('FILE_NOT_FOUND');
       expect(content.fileId).toBeUndefined();
       // Prove the ownership scope is passed: getFile must be called with the
@@ -1077,12 +850,10 @@ describe('MCP Library Tools', () => {
         1,
         { fileId: 'file-floor', caption: 'x'.repeat(100) },
         tokenData,
-        { ...mockEnv, LIBRARY_MCP_CAPTION_MAX_LENGTH: '1' } as Env
+        { ...mockEnv, LIBRARY_MCP_CAPTION_MAX_LENGTH: '1' } as Env,
       );
 
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       // 1 is below the floor (20), so the caption keeps at least 20 chars.
       expect(content.caption.length).toBeGreaterThanOrEqual(20);
     });
@@ -1093,19 +864,12 @@ describe('MCP Library Tools', () => {
         tags: [],
       });
 
-      const result = await handleDisplayFromLibrary(
-        1,
-        {
-          fileId: 'file-002',
-          caption: 'Section 3 covers your question about token refresh',
-        },
-        tokenData,
-        mockEnv as Env
-      );
+      const result = await handleDisplayFromLibrary(1, {
+        fileId: 'file-002',
+        caption: 'Section 3 covers your question about token refresh',
+      }, tokenData, mockEnv as Env);
 
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.caption).toBe('Section 3 covers your question about token refresh');
     });
 
@@ -1120,12 +884,10 @@ describe('MCP Library Tools', () => {
         1,
         { fileId: 'file-003', caption: longCaption },
         tokenData,
-        { ...mockEnv, LIBRARY_MCP_CAPTION_MAX_LENGTH: '50' } as Env
+        { ...mockEnv, LIBRARY_MCP_CAPTION_MAX_LENGTH: '50' } as Env,
       );
 
-      const content = JSON.parse(
-        (result.result as { content: { text: string }[] }).content[0].text
-      );
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.caption).toHaveLength(50);
     });
   });

@@ -22,7 +22,7 @@ export async function handleLinkIdea(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
   if (!taskId) {
@@ -30,27 +30,18 @@ export async function handleLinkIdea(
   }
 
   const limits = getMcpLimits(env);
-  const context =
-    typeof params.context === 'string'
-      ? sanitizeUserInput(params.context.trim()).slice(0, limits.ideaContextMaxLength)
-      : null;
+  const context = typeof params.context === 'string' ? sanitizeUserInput(params.context.trim()).slice(0, limits.ideaContextMaxLength) : null;
 
   // Resolve session ID from workspace
   const sessionId = await resolveSessionId(env, tokenData.workspaceId);
   if (!sessionId) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'No chat session found for the current workspace'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No chat session found for the current workspace');
   }
 
   // Verify the task exists in this project
   const task = await env.DATABASE.prepare(
-    'SELECT id, title FROM tasks WHERE id = ? AND project_id = ?'
-  )
-    .bind(taskId, tokenData.projectId)
-    .first<{ id: string; title: string }>();
+    'SELECT id, title FROM tasks WHERE id = ? AND project_id = ?',
+  ).bind(taskId, tokenData.projectId).first<{ id: string; title: string }>();
 
   if (!task) {
     return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${taskId}`);
@@ -59,22 +50,16 @@ export async function handleLinkIdea(
   await projectDataService.linkSessionIdea(env, tokenData.projectId, sessionId, taskId, context);
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            linked: true,
-            sessionId,
-            taskId,
-            taskTitle: task.title,
-            context,
-          },
-          null,
-          2
-        ),
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        linked: true,
+        sessionId,
+        taskId,
+        taskTitle: task.title,
+        context,
+      }, null, 2),
+    }],
   });
 }
 
@@ -82,7 +67,7 @@ export async function handleUnlinkIdea(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
   if (!taskId) {
@@ -91,22 +76,16 @@ export async function handleUnlinkIdea(
 
   const sessionId = await resolveSessionId(env, tokenData.workspaceId);
   if (!sessionId) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'No chat session found for the current workspace'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No chat session found for the current workspace');
   }
 
   await projectDataService.unlinkSessionIdea(env, tokenData.projectId, sessionId, taskId);
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify({ unlinked: true, sessionId, taskId }, null, 2),
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ unlinked: true, sessionId, taskId }, null, 2),
+    }],
   });
 }
 
@@ -114,15 +93,11 @@ export async function handleListLinkedIdeas(
   requestId: string | number | null,
   _params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const sessionId = await resolveSessionId(env, tokenData.workspaceId);
   if (!sessionId) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'No chat session found for the current workspace'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No chat session found for the current workspace');
   }
 
   const links = await projectDataService.getIdeasForSession(env, tokenData.projectId, sessionId);
@@ -140,10 +115,8 @@ export async function handleListLinkedIdeas(
     // Batch-fetch task details in a single D1 query
     const placeholders = links.map(() => '?').join(', ');
     const rows = await env.DATABASE.prepare(
-      `SELECT id, title, status FROM tasks WHERE project_id = ? AND id IN (${placeholders})`
-    )
-      .bind(tokenData.projectId, ...links.map((l) => l.taskId))
-      .all<{ id: string; title: string; status: string }>();
+      `SELECT id, title, status FROM tasks WHERE project_id = ? AND id IN (${placeholders})`,
+    ).bind(tokenData.projectId, ...links.map((l) => l.taskId)).all<{ id: string; title: string; status: string }>();
 
     const taskMap = new Map((rows.results ?? []).map((t) => [t.id, t]));
 
@@ -160,20 +133,14 @@ export async function handleListLinkedIdeas(
   }
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            sessionId,
-            ideas: enriched,
-            count: enriched.length,
-          },
-          null,
-          2
-        ),
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        sessionId,
+        ideas: enriched,
+        count: enriched.length,
+      }, null, 2),
+    }],
   });
 }
 
@@ -181,7 +148,7 @@ export async function handleFindRelatedIdeas(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const query = typeof params.query === 'string' ? params.query.trim() : '';
   if (!query) {
@@ -221,30 +188,23 @@ export async function handleFindRelatedIdeas(
   const snippetLength = limits.taskDescriptionSnippetLength;
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            ideas: (results.results ?? []).map((t) => ({
-              taskId: t.id,
-              title: t.title,
-              status: t.status,
-              priority: t.priority,
-              description: t.description
-                ? t.description.slice(0, snippetLength) +
-                  (t.description.length > snippetLength ? '...' : '')
-                : null,
-              updatedAt: t.updated_at,
-            })),
-            count: results.results?.length ?? 0,
-            query,
-          },
-          null,
-          2
-        ),
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideas: (results.results ?? []).map((t) => ({
+          taskId: t.id,
+          title: t.title,
+          status: t.status,
+          priority: t.priority,
+          description: t.description
+            ? t.description.slice(0, snippetLength) + (t.description.length > snippetLength ? '...' : '')
+            : null,
+          updatedAt: t.updated_at,
+        })),
+        count: results.results?.length ?? 0,
+        query,
+      }, null, 2),
+    }],
   });
 }
 
@@ -254,51 +214,30 @@ export async function handleCreateIdea(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
 
-  const title =
-    typeof params.title === 'string'
-      ? sanitizeUserInput(params.title.trim()).slice(0, limits.ideaTitleMaxLength)
-      : '';
+  const title = typeof params.title === 'string' ? sanitizeUserInput(params.title.trim()).slice(0, limits.ideaTitleMaxLength) : '';
   if (!title) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'title is required and must be a non-empty string'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'title is required and must be a non-empty string');
   }
 
-  const content =
-    typeof params.content === 'string'
-      ? sanitizeUserInput(params.content).slice(0, limits.ideaContentMaxLength)
-      : null;
+  const content = typeof params.content === 'string'
+    ? sanitizeUserInput(params.content).slice(0, limits.ideaContentMaxLength)
+    : null;
 
-  const priority =
-    typeof params.priority === 'number'
-      ? Math.min(Math.max(0, Math.round(params.priority)), limits.dispatchMaxPriority)
-      : 0;
+  const priority = typeof params.priority === 'number'
+    ? Math.min(Math.max(0, Math.round(params.priority)), limits.dispatchMaxPriority)
+    : 0;
 
   const ideaId = ulid();
   const now = new Date().toISOString();
 
   await env.DATABASE.prepare(
     `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?)`
-  )
-    .bind(
-      ideaId,
-      tokenData.projectId,
-      tokenData.userId,
-      title,
-      content,
-      priority,
-      tokenData.userId,
-      now,
-      now
-    )
-    .run();
+     VALUES (?, ?, ?, ?, ?, 'draft', ?, 'task', 0, ?, ?, ?)`,
+  ).bind(ideaId, tokenData.projectId, tokenData.userId, title, content, priority, tokenData.userId, now, now).run();
 
   log.info('mcp.create_idea', {
     ideaId,
@@ -313,29 +252,29 @@ export async function handleCreateIdea(
   // single KV lookup.
   try {
     const { bridgeIdeaCreated } = await import('../../services/trial/bridge');
-    await bridgeIdeaCreated(env, tokenData.projectId, ideaId, title, (content ?? '').slice(0, 280));
+    await bridgeIdeaCreated(
+      env,
+      tokenData.projectId,
+      ideaId,
+      title,
+      (content ?? '').slice(0, 280),
+    );
   } catch {
     // Bridge errors are logged inside the helper; never block MCP.
   }
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            ideaId,
-            title,
-            contentLength: content?.length ?? 0,
-            priority,
-            status: 'draft',
-            message: 'Idea created. Use link_idea to associate it with the current session.',
-          },
-          null,
-          2
-        ),
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideaId,
+        title,
+        contentLength: content?.length ?? 0,
+        priority,
+        status: 'draft',
+        message: 'Idea created. Use link_idea to associate it with the current session.',
+      }, null, 2),
+    }],
   });
 }
 
@@ -366,7 +305,7 @@ const UPDATABLE_IDEA_STATUSES = Object.keys(IDEA_STATUS_TRANSITIONS);
 
 export function validateIdeaStatusTransition(
   currentStatus: string,
-  newStatus: string
+  newStatus: string,
 ): string | null {
   const allowed = IDEA_STATUS_TRANSITIONS[currentStatus];
   if (!allowed) {
@@ -382,7 +321,7 @@ export async function handleUpdateIdea(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
 
@@ -393,27 +332,15 @@ export async function handleUpdateIdea(
 
   // Fetch the existing idea — must be in a non-terminal status and in this project
   const existing = await env.DATABASE.prepare(
-    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ?'
-  )
-    .bind(ideaId, tokenData.projectId)
-    .first<{
-      id: string;
-      title: string;
-      description: string | null;
-      status: string;
-      priority: number;
-    }>();
+    'SELECT id, title, description, status, priority FROM tasks WHERE id = ? AND project_id = ?',
+  ).bind(ideaId, tokenData.projectId).first<{ id: string; title: string; description: string | null; status: string; priority: number }>();
 
   if (!existing) {
     return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}`);
   }
 
   if (!UPDATABLE_IDEA_STATUSES.includes(existing.status)) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      `Cannot update idea in terminal status '${existing.status}'`
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, `Cannot update idea in terminal status '${existing.status}'`);
   }
 
   // Build update fields
@@ -449,9 +376,7 @@ export async function handleUpdateIdea(
 
     if (append) {
       // Atomic append: concatenates in SQL to avoid read-then-write races
-      updates.push(
-        'description = CASE WHEN description IS NULL THEN ? ELSE substr(description || char(10) || char(10) || ?, 1, ?) END'
-      );
+      updates.push('description = CASE WHEN description IS NULL THEN ? ELSE substr(description || char(10) || char(10) || ?, 1, ?) END');
       bindValues.push(newContent, newContent, limits.ideaContentMaxLength);
     } else {
       updates.push('description = ?');
@@ -461,20 +386,13 @@ export async function handleUpdateIdea(
 
   // Priority update
   if (typeof params.priority === 'number') {
-    const newPriority = Math.min(
-      Math.max(0, Math.round(params.priority)),
-      limits.dispatchMaxPriority
-    );
+    const newPriority = Math.min(Math.max(0, Math.round(params.priority)), limits.dispatchMaxPriority);
     updates.push('priority = ?');
     bindValues.push(newPriority);
   }
 
   if (updates.length === 0) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'No fields to update. Provide at least one of: title, content, priority, status.'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No fields to update. Provide at least one of: title, content, priority, status.');
   }
 
   updates.push('updated_at = ?');
@@ -483,7 +401,7 @@ export async function handleUpdateIdea(
   bindValues.push(ideaId, tokenData.projectId);
 
   const updateStmt = env.DATABASE.prepare(
-    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`
+    `UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`,
   ).bind(...bindValues);
 
   // Use D1 batch to atomically update the task and record the status event
@@ -491,7 +409,7 @@ export async function handleUpdateIdea(
     const eventId = ulid();
     const eventStmt = env.DATABASE.prepare(
       `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
-       VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`
+       VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`,
     ).bind(eventId, ideaId, statusTransition.from, statusTransition.to, tokenData.userId, now, now);
     await env.DATABASE.batch([updateStmt, eventStmt]);
   } else {
@@ -502,28 +420,18 @@ export async function handleUpdateIdea(
     ideaId,
     projectId: tokenData.projectId,
     updatedFields: updates.filter((u) => !u.startsWith('updated_at')).map((u) => u.split(' = ')[0]),
-    ...(statusTransition
-      ? { statusTransition: `${statusTransition.from} → ${statusTransition.to}` }
-      : {}),
+    ...(statusTransition ? { statusTransition: `${statusTransition.from} → ${statusTransition.to}` } : {}),
   });
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            updated: true,
-            ideaId,
-            updatedFields: updates
-              .filter((u) => !u.startsWith('updated_at'))
-              .map((u) => u.split(' = ')[0]),
-          },
-          null,
-          2
-        ),
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        updated: true,
+        ideaId,
+        updatedFields: updates.filter((u) => !u.startsWith('updated_at')).map((u) => u.split(' = ')[0]),
+      }, null, 2),
+    }],
   });
 }
 
@@ -531,7 +439,7 @@ export async function handleGetIdea(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const ideaId = typeof params.ideaId === 'string' ? params.ideaId.trim() : '';
   if (!ideaId) {
@@ -539,43 +447,35 @@ export async function handleGetIdea(
   }
 
   const idea = await env.DATABASE.prepare(
-    'SELECT id, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?'
-  )
-    .bind(ideaId, tokenData.projectId)
-    .first<{
-      id: string;
-      title: string;
-      description: string | null;
-      status: string;
-      priority: number;
-      created_at: string;
-      updated_at: string;
-    }>();
+    'SELECT id, title, description, status, priority, created_at, updated_at FROM tasks WHERE id = ? AND project_id = ?',
+  ).bind(ideaId, tokenData.projectId).first<{
+    id: string;
+    title: string;
+    description: string | null;
+    status: string;
+    priority: number;
+    created_at: string;
+    updated_at: string;
+  }>();
 
   if (!idea) {
     return jsonRpcError(requestId, INVALID_PARAMS, `Idea not found in this project: ${ideaId}`);
   }
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            ideaId: idea.id,
-            title: idea.title,
-            content: idea.description,
-            contentLength: idea.description?.length ?? 0,
-            priority: idea.priority,
-            status: idea.status,
-            createdAt: idea.created_at,
-            updatedAt: idea.updated_at,
-          },
-          null,
-          2
-        ),
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideaId: idea.id,
+        title: idea.title,
+        content: idea.description,
+        contentLength: idea.description?.length ?? 0,
+        priority: idea.priority,
+        status: idea.status,
+        createdAt: idea.created_at,
+        updatedAt: idea.updated_at,
+      }, null, 2),
+    }],
   });
 }
 
@@ -583,7 +483,7 @@ export async function handleListIdeas(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
   const requestedLimit = typeof params.limit === 'number' ? params.limit : limits.ideaListLimit;
@@ -592,42 +492,33 @@ export async function handleListIdeas(
   const snippetLength = limits.taskDescriptionSnippetLength;
 
   const results = await env.DATABASE.prepare(
-    'SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? ORDER BY updated_at DESC LIMIT ?'
-  )
-    .bind(tokenData.projectId, 'draft', limit)
-    .all<{
-      id: string;
-      title: string;
-      description: string | null;
-      priority: number;
-      created_at: string;
-      updated_at: string;
-    }>();
+    'SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? ORDER BY updated_at DESC LIMIT ?',
+  ).bind(tokenData.projectId, 'draft', limit).all<{
+    id: string;
+    title: string;
+    description: string | null;
+    priority: number;
+    created_at: string;
+    updated_at: string;
+  }>();
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            ideas: (results.results ?? []).map((idea) => ({
-              ideaId: idea.id,
-              title: idea.title,
-              contentSnippet: idea.description
-                ? idea.description.slice(0, snippetLength) +
-                  (idea.description.length > snippetLength ? '...' : '')
-                : null,
-              priority: idea.priority,
-              createdAt: idea.created_at,
-              updatedAt: idea.updated_at,
-            })),
-            count: results.results?.length ?? 0,
-          },
-          null,
-          2
-        ),
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideas: (results.results ?? []).map((idea) => ({
+          ideaId: idea.id,
+          title: idea.title,
+          contentSnippet: idea.description
+            ? idea.description.slice(0, snippetLength) + (idea.description.length > snippetLength ? '...' : '')
+            : null,
+          priority: idea.priority,
+          createdAt: idea.created_at,
+          updatedAt: idea.updated_at,
+        })),
+        count: results.results?.length ?? 0,
+      }, null, 2),
+    }],
   });
 }
 
@@ -635,7 +526,7 @@ export async function handleSearchIdeas(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const query = typeof params.query === 'string' ? params.query.trim() : '';
   if (!query) {
@@ -653,42 +544,33 @@ export async function handleSearchIdeas(
   const searchPattern = `%${query}%`;
 
   const results = await env.DATABASE.prepare(
-    'SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND (title LIKE ? OR description LIKE ?) ORDER BY updated_at DESC LIMIT ?'
-  )
-    .bind(tokenData.projectId, 'draft', searchPattern, searchPattern, limit)
-    .all<{
-      id: string;
-      title: string;
-      description: string | null;
-      priority: number;
-      created_at: string;
-      updated_at: string;
-    }>();
+    'SELECT id, title, description, priority, created_at, updated_at FROM tasks WHERE project_id = ? AND status = ? AND (title LIKE ? OR description LIKE ?) ORDER BY updated_at DESC LIMIT ?',
+  ).bind(tokenData.projectId, 'draft', searchPattern, searchPattern, limit).all<{
+    id: string;
+    title: string;
+    description: string | null;
+    priority: number;
+    created_at: string;
+    updated_at: string;
+  }>();
 
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: JSON.stringify(
-          {
-            ideas: (results.results ?? []).map((idea) => ({
-              ideaId: idea.id,
-              title: idea.title,
-              contentSnippet: idea.description
-                ? idea.description.slice(0, snippetLength) +
-                  (idea.description.length > snippetLength ? '...' : '')
-                : null,
-              priority: idea.priority,
-              createdAt: idea.created_at,
-              updatedAt: idea.updated_at,
-            })),
-            count: results.results?.length ?? 0,
-            query,
-          },
-          null,
-          2
-        ),
-      },
-    ],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        ideas: (results.results ?? []).map((idea) => ({
+          ideaId: idea.id,
+          title: idea.title,
+          contentSnippet: idea.description
+            ? idea.description.slice(0, snippetLength) + (idea.description.length > snippetLength ? '...' : '')
+            : null,
+          priority: idea.priority,
+          createdAt: idea.created_at,
+          updatedAt: idea.updated_at,
+        })),
+        count: results.results?.length ?? 0,
+        query,
+      }, null, 2),
+    }],
   });
 }

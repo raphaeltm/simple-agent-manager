@@ -5,8 +5,8 @@ import { log } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { optionalAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { getRateLimit, rateLimit } from '../middleware/rate-limit';
-import { ClientErrorBatchSchema, jsonValidator } from '../schemas';
+import { getRateLimit,rateLimit } from '../middleware/rate-limit';
+import { ClientErrorBatchSchema,jsonValidator } from '../schemas';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 
 /** Default max body size: 64 KB (configurable via MAX_CLIENT_ERROR_BODY_BYTES) */
@@ -33,11 +33,7 @@ function getPositiveInteger(value: string | undefined, fallback: number): number
 }
 
 function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
-  return (
-    c.req.header('CF-Connecting-IP') ??
-    c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
+  return c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ?? 'unknown';
 }
 
 const clientErrorsRoutes = new Hono<{ Bindings: Env }>();
@@ -126,7 +122,9 @@ clientErrorsRoutes.post('/', jsonValidator(ClientErrorBatchSchema), async (c) =>
 
     if (!message || !source) continue; // Skip malformed entries
 
-    const level = typeof e.level === 'string' && VALID_LEVELS.has(e.level) ? e.level : 'error';
+    const level = typeof e.level === 'string' && VALID_LEVELS.has(e.level)
+      ? e.level
+      : 'error';
 
     log.error('client_error', {
       level,
@@ -151,28 +149,15 @@ clientErrorsRoutes.post('/', jsonValidator(ClientErrorBatchSchema), async (c) =>
       userId,
       ipAddress: ip,
       userAgent: typeof e.userAgent === 'string' ? e.userAgent : null,
-      timestamp:
-        typeof e.timestamp === 'string'
-          ? new Date(e.timestamp).getTime() || Date.now()
-          : Date.now(),
+      timestamp: typeof e.timestamp === 'string' ? new Date(e.timestamp).getTime() || Date.now() : Date.now(),
     });
   }
 
   // Persist to observability D1 (fire-and-forget, fail-silent)
   if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
-    const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env).catch(
-      (e) => {
-        log.error('observability.persist_client_error_batch_failed', {
-          count: persistInputs.length,
-          error: String(e),
-        });
-      }
-    );
-    try {
-      c.executionCtx.waitUntil(promise);
-    } catch {
-      /* no exec ctx (e.g. tests) */
-    }
+    const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env)
+      .catch((e) => { log.error('observability.persist_client_error_batch_failed', { count: persistInputs.length, error: String(e) }); });
+    try { c.executionCtx.waitUntil(promise); } catch { /* no exec ctx (e.g. tests) */ }
   }
 
   return c.body(null, 204);

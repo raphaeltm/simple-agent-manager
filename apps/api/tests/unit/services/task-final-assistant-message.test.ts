@@ -41,9 +41,7 @@ describe('getLatestAssistantMessageForTask', () => {
 
   it('returns null when the assistant message has non-string content', async () => {
     mockGetMessages.mockResolvedValue({
-      messages: [
-        { id: 'msg-1', role: 'assistant', content: 42 as unknown as string, createdAt: 1000 },
-      ],
+      messages: [{ id: 'msg-1', role: 'assistant', content: 42 as unknown as string, createdAt: 1000 }],
       hasMore: false,
     });
 
@@ -53,14 +51,7 @@ describe('getLatestAssistantMessageForTask', () => {
 
   it('returns the latest assistant message with bounded content', async () => {
     mockGetMessages.mockResolvedValue({
-      messages: [
-        {
-          id: 'msg-latest',
-          role: 'assistant',
-          content: 'Final findings here',
-          createdAt: 1710000002000,
-        },
-      ],
+      messages: [{ id: 'msg-latest', role: 'assistant', content: 'Final findings here', createdAt: 1710000002000 }],
       hasMore: false,
     });
 
@@ -74,9 +65,7 @@ describe('getLatestAssistantMessageForTask', () => {
 
   it('requests messages with limit=1 and order=desc to get the newest', async () => {
     mockGetMessages.mockResolvedValue({
-      messages: [
-        { id: 'msg-newest', role: 'assistant', content: 'Latest output', createdAt: 1710000005000 },
-      ],
+      messages: [{ id: 'msg-newest', role: 'assistant', content: 'Latest output', createdAt: 1710000005000 }],
       hasMore: false,
     });
 
@@ -90,7 +79,7 @@ describe('getLatestAssistantMessageForTask', () => {
       null,
       ['assistant'],
       false,
-      'desc'
+      'desc',
     );
   });
 
