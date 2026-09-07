@@ -40,7 +40,7 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
     "needs.changes.outputs.api == 'true'"
   );
   expect(job).toContain('needs: [changes]');
-  expect(job).toContain('timeout-minutes: 15');
+  expect(job).toContain('timeout-minutes: 30');
   expect(step).toContain('run: pnpm --filter @simple-agent-manager/api test:workers');
   expect(step).not.toContain('continue-on-error');
 }

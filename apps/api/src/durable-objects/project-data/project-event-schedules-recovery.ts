@@ -9,7 +9,7 @@ import { scheduleLimits } from './project-event-schedules-config';
 import { getSchedule, ProjectScheduleNotFoundError } from './project-event-schedules-storage';
 import { normalizeScheduleVersion } from './project-event-schedules-validation';
 import { ProjectEventValidationError } from './project-events-contracts';
-import { chunkIdsForBindBudget } from './project-events-storage-accounting';
+import { chunkIdsForBindBudget } from './project-events-storage-helpers';
 import { isPlainObject } from './project-events-values';
 import type { Env } from './types';
 

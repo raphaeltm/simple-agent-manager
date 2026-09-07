@@ -9,10 +9,12 @@ import {
   refreshWakeDueAtForSubscription,
 } from './project-events-due-state';
 import { resolveProjectEventLimits } from './project-events-limits';
-import { mapProjectEvent, mapProjectEventSubscription } from './project-events-mappers';
 import {
   insertPromptQueueBatch,
   recordQueueCheckpoint,
+  readSubscription,
+  selectMatchesForSubscription,
+  readEvents,
 } from './project-events-materialization-storage';
 import {
   isProjectEventWakeEnabled,
@@ -22,7 +24,6 @@ import {
 import {
   chunkIdsForBindBudget,
   claimProjectEventMatchesForBatch,
-  mapRows,
 } from './project-events-storage-helpers';
 import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import { EVENT_WAKE_ADAPTER_ID } from './project-events-wake-delivery';
@@ -428,7 +429,7 @@ function selectWakeCandidates(
   limit: number,
   requiredSubscriptionId: string | null
 ): ProjectEventWakeMaterializationCandidate[] {
-  const requiredPredicate = requiredSubscriptionId ? 'AND s.id = ?' : '';
+  const whereClause = requiredSubscriptionId ? 'AND s.id = ?' : '';
   const params: unknown[] = [projectId, projectId, now, now, maxPerSubscription, now];
   if (requiredSubscriptionId) params.push(requiredSubscriptionId);
   params.push(Math.max(1, limit));
@@ -459,7 +460,7 @@ function selectWakeCandidates(
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
          AND s.target_session_id IS NOT NULL
          AND c.status IN ('active', 'sleeping')
-         ${requiredPredicate}
+         ${whereClause}
        ORDER BY s.wake_due_at ASC, s.id ASC
        LIMIT ?`,
       ...params
@@ -497,6 +498,13 @@ function selectWakeCandidates(
     }));
 }
 
+// Only these fixed predicates can enter the query; their values remain bound separately.
+const INELIGIBLE_WAKE_PREDICATES = {
+  lifetime_expired: 's.delivery_lifetime_expires_at IS NOT NULL AND s.delivery_lifetime_expires_at <= ?',
+  count_exhausted: 's.prompt_delivery_count >= ?',
+  target_inactive: "(s.target_session_id IS NULL OR c.id IS NULL OR c.status NOT IN ('active', 'sleeping'))",
+} as const;
+
 function terminalizeIneligibleWakeMatches(
   sql: SqlStorage,
   projectId: string,
@@ -509,7 +517,7 @@ function terminalizeIneligibleWakeMatches(
     now,
     state: 'expired',
     reason: 'event wake subscription lifetime expired',
-    predicate: `s.delivery_lifetime_expires_at IS NOT NULL AND s.delivery_lifetime_expires_at <= ?`,
+    predicate: 'lifetime_expired',
     params: [now],
   });
   mutated += terminalizeIneligibleWakeMatchesByPredicate(sql, {
@@ -517,7 +525,7 @@ function terminalizeIneligibleWakeMatches(
     now,
     state: 'recorded_not_injected',
     reason: 'event wake subscription delivery count exhausted',
-    predicate: `s.prompt_delivery_count >= ?`,
+    predicate: 'count_exhausted',
     params: [maxPerSubscription],
   });
   mutated += terminalizeIneligibleWakeMatchesByPredicate(sql, {
@@ -525,7 +533,7 @@ function terminalizeIneligibleWakeMatches(
     now,
     state: 'recorded_not_injected',
     reason: 'event wake target session is no longer active',
-    predicate: `(s.target_session_id IS NULL OR c.id IS NULL OR c.status NOT IN ('active', 'sleeping'))`,
+    predicate: 'target_inactive',
     params: [],
   });
   return mutated;
@@ -538,10 +546,11 @@ function terminalizeIneligibleWakeMatchesByPredicate(
     now: number;
     state: 'expired' | 'recorded_not_injected' | 'cancelled';
     reason: string;
-    predicate: string;
+    predicate: keyof typeof INELIGIBLE_WAKE_PREDICATES;
     params: unknown[];
   }
 ): number {
+  const whereClause = INELIGIBLE_WAKE_PREDICATES[input.predicate];
   const subscriptionRows = sql
     .exec(
       `SELECT s.id AS subscription_id
@@ -553,7 +562,7 @@ function terminalizeIneligibleWakeMatchesByPredicate(
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
          AND s.lifecycle_state = 'active'
          AND s.wake_due_at IS NOT NULL
-         AND (${input.predicate})
+         AND (${whereClause})
          AND EXISTS (
            SELECT 1 FROM project_event_matches m
            WHERE m.project_id = s.project_id
@@ -655,81 +664,6 @@ function repairStaleWakeDueAtBackstop(
     repaired += 1;
   }
   return repaired;
-}
-
-function readSubscription(
-  sql: SqlStorage,
-  projectId: string,
-  subscriptionId: string
-): ProjectEventSubscriptionRecord {
-  return mapProjectEventSubscription(
-    sql
-      .exec(
-        `SELECT *
-         FROM project_event_subscriptions
-         WHERE project_id = ? AND id = ?
-         LIMIT 1`,
-        projectId,
-        subscriptionId
-      )
-      .toArray()[0]
-  );
-}
-
-function selectMatchesForSubscription(
-  sql: SqlStorage,
-  projectId: string,
-  subscriptionId: string,
-  limit: number
-): Array<{ id: string; eventId: string }> {
-  return sql
-    .exec(
-      `SELECT id, event_id
-       FROM project_event_matches
-       WHERE project_id = ?
-         AND subscription_id = ?
-         AND state = 'matched'
-         AND batch_id IS NULL
-       ORDER BY matched_at ASC, id ASC
-       LIMIT ?`,
-      projectId,
-      subscriptionId,
-      limit
-    )
-    .toArray()
-    .filter(
-      (row): row is { id: string; event_id: string } =>
-        typeof row.id === 'string' && typeof row.event_id === 'string'
-    )
-    .map((row) => ({ id: row.id, eventId: row.event_id }));
-}
-
-function readEvents(
-  sql: SqlStorage,
-  projectId: string,
-  eventIds: string[],
-  limit: number
-): ProjectEventRecord[] {
-  if (eventIds.length === 0) return [];
-  const rows: unknown[] = [];
-  for (const chunk of chunkIdsForBindBudget(eventIds.slice(0, limit), 2)) {
-    const placeholders = chunk.map(() => '?').join(', ');
-    rows.push(
-      ...sql
-        .exec(
-          `SELECT *
-           FROM project_events
-           WHERE project_id = ? AND id IN (${placeholders})
-           LIMIT ?`,
-          projectId,
-          ...chunk,
-          Math.max(0, limit - rows.length)
-        )
-        .toArray()
-    );
-    if (rows.length >= limit) break;
-  }
-  return mapRows(rows, mapProjectEvent, limit, 'project_event');
 }
 
 export function terminalizeProjectEventWakeMatches(

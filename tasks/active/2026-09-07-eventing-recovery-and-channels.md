@@ -144,3 +144,36 @@ Resource limitation: workspace4GB RAM/2GBswap. Per-agent serial jobs still overl
 - Remaining: final Workers/Go checks, serialized workspace quality/build/type/lint/tests, final specialist evidence, one consolidated staging window and real canaries, one open green PR with durable screenshots and CodeRabbit review. No merge, SAM subtasks, staging deployment or resource mutation has occurred.
 
 Follow-up validation: final focused Workers run passed91/94 tests across7 files. Delivery inspection, schedule receipt/recovery, reserved submission and10k mailbox capacity passed. Three retention assertions exposed physical SQLite index writes leaking into logical result counters; repaired/deleted counts now use RETURNING rows while the shared conservative write budget is retained. Existing orphan drain and a new dependency-safe attempt/match/batch/event budget-one scenario await repeat. Full Go ACP package with `-race` passed (`.tmp/eventing/go-acp-final.log`); full VM coverage run is underway. Public-site wizard/sidebar evidence tests are source-complete; source frozen for final format/build/typecheck/lint.
+
+
+## Paused at user request — 2026-09-07
+
+PR: https://github.com/raphaeltm/simple-agent-manager/pull/2031. Leave OPEN; DO NOT MERGE. Revisit during the week of 2026-09-14. User paused continued work because of usage cost. Stop local agents, tests, deployments and review loops; no automatic continuation or scheduled task was requested. No SAM subtasks were dispatched during this continuation.
+
+Implementation is substantially complete, but the PR is not green. Last fully evaluated remote head: 288ae32dad9ca424b7923d1e1842b85baa4d5652, CI run34131964961. Latest source repairs are saved as an explicitly unvalidated checkpoint with CI skipped to avoid continuing work after the pause.
+
+Verified before pause:
+
+- Remote build/typecheck/lint and VM unit/integration/E2E/smoke checks passed. Local full VM coverage and ACP race passed before the latest test-only deduplication.
+- Fresh focused API regressions:24 files/536 tests passed after repairing all20 suites that failed the initial full run. Latest focused native Workers results:95 tests across7 suites passed before the newest SQL/test dedup edits.
+- Events browser runs:14 baseline,6 outcome/recovery and2 delivery repeat checks passed;94 PNGs retained. APIs were mocked, not live staging.
+- Public-site mobile overflow was reproduced and fixed using shrinkable grid tracks and Astro global dt/dd selectors. The interrupted local128-case run logged125 passing cases, no failures, but no final aggregate completion. Log: /tmp/eventing-www-focused-browser.log. Do not claim128 passed.
+- Latest local SQL AST and migration checks passed; full workspace quality earlier failed only the materialization file-size gate, now source-extracted but not rerun.
+
+Saved CI remediation, not yet fully revalidated:
+
+- Static SQL construction and literal migration probes; dead duplicate modules removed; shared Worker fairness fixtures and actual production TaskRunner DTO capture replace copied test machinery; Go usage reporter test helper deduplication. These need scoped tests and measured Sonar reanalysis.
+- Two existing chat unit test wrappers now include MemoryRouter, addressing69 CI failures across2 files.
+- Worker CI job budget15→30 minutes because the serial suite passed55/74 files before timeout. Matching workflow contract test updated; no test removal or sharding.
+- Public-site CSS mobile fix. Sonar previously failed only duplication5.2% against3%; current refactors have not been reanalyzed.
+
+Next work, in order:
+
+1. Resume from this branch; inspect current git/CI and task records. Serialize ALL heavy validation across the4GB workspace. Do not restart the whole original investigation.
+2. Format/scoped lint latest source; test2 web fixture files, Worker reserved submission/project-data-events/orphan retention/schedules, affected SQL/schedule/pull units, ACP race. Rerun failed file-size and workflow wiring gates, then final CI. Existing full build/type/lint evidence predates this checkpoint.
+3. Secret Scan has an existing non-secret code identifier moved to a new line. Private review confirmed identical candidate bytes already on main. Review exact current AND PR-range locations, then extend the expiring exact-finding baseline per scripts/quality/README.md. Do not expose private reports, candidate material or hashes in PR/logs. Private scanner helper .tmp/eventing/private-scan.py is ignored, path-concatenation bug repaired; no new baseline entry yet.
+4. Complete interrupted www browser run and remaining screenshot captures/review. Publish reviewed desktop/mobile images for every changed UI surface. Draft inventory .tmp/eventing/ui-evidence-body.md is stale for www; root artifacts .codex/tmp/playwright-screenshots/. Fix PR exact preflight checkbox, official-documentation wording, per-surface evidence and pending specialist rows truthfully.
+5. One final staging deployment and REAL event/schedule/source/VM canaries remain entirely pending. No staging mutation or resource creation was done. Effective enabled platform Hetzner/Claude credentials were verified read-only; missing personal cloud credentials are not a blocker. Preserve all pre-existing resources. User's local-only constraint prohibits SAM delegation; no staging waiver was given.
+6. Only after all non-CodeRabbit gates pass, apply coderabbit-review and resolve its findings. Keep one green PR OPEN and DO NOT MERGE. Final task-completion review is required before archive; task files remain active and unarchived.
+
+Artifacts: .tmp/eventing/quality-results.json and quality-*.log, api-tests-fixed.log, workers-retention-fixed.log, go-acp-final.log, go-vm-final.log, CI failure logs and Sonar duplication metadata. These are workspace-local ignored files; durable source and this handoff are committed. No reliable completion-time estimate: full CI, live integration and external review can uncover more defects.

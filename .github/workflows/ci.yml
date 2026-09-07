@@ -666,7 +666,9 @@ jobs:
     name: Durable Object Workers
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
-    timeout-minutes: 15
+    # The serial workerd suite passed 55/74 files before the former 15-minute
+    # job budget expired; include setup/build and the full suite with bounded headroom.
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

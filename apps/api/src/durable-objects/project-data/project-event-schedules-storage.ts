@@ -291,15 +291,22 @@ export function listSchedules(
   const query = (
     column: 'creator_chat_session_id' | 'target_session_id' | null
   ): ProjectSchedule[] => {
+    const conditions = ['project_id = ?'];
     const bindings: Array<string | number> = [projectId];
-    if (column && sessionId) bindings.push(sessionId);
-    if (cursor) bindings.push(cursor.createdAt, cursor.id);
+    if (column && sessionId) {
+      conditions.push(column === 'creator_chat_session_id'
+        ? 'creator_chat_session_id = ?' : 'target_session_id = ?');
+      bindings.push(sessionId);
+    }
+    if (cursor) {
+      conditions.push('(created_at, id) < (?, ?)');
+      bindings.push(cursor.createdAt, cursor.id);
+    }
     bindings.push(limit + 1);
+    const whereClause = conditions.join(' AND ');
     return sql
       .exec(
-        `SELECT * FROM project_schedules WHERE project_id = ?
-       ${column && sessionId ? `AND ${column} = ?` : ''}
-       ${cursor ? 'AND (created_at, id) < (?, ?)' : ''}
+        `SELECT * FROM project_schedules WHERE ${whereClause}
        ORDER BY created_at DESC, id DESC LIMIT ?`,
         ...bindings
       )

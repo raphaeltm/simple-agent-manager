@@ -146,11 +146,10 @@ export function deleteRetentionRowsByIds(
   let mutated = 0;
   for (const chunk of chunkIdsForBindBudget(ids, 1)) {
     const placeholders = chunk.map(() => '?').join(', ');
-    const result = sql.exec(
-      `${deleteRowsByIdsSql(table, placeholders)} RETURNING id`,
-      projectId,
-      ...chunk
-    );
+    // The table comes from the internal closed ProjectEventTable union; only
+    // placeholder punctuation is assembled here. Every row identifier stays bound.
+    const deleteSql = `${deleteRowsByIdsSql(table, placeholders)} RETURNING id`;
+    const result = sql.exec(deleteSql, projectId, ...chunk);
     count += result.toArray().length;
     mutated += result.rowsWritten;
   }

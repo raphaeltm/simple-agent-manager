@@ -357,31 +357,9 @@ func TestUsageReporterPreservesDistinctPendingWindowsAndFlushes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			HTTPClient:                     server.Client(),
-			TerminalActivityReportAttempts: 1,
-			ActivityReportTimeout:          time.Second,
-		},
-	})
+	host := newUsageReporterTestHost(server)
 	request := func(window string) usageReportRequest {
-		return usageReportRequest{
-			url:           server.URL,
-			callbackToken: "callback-token",
-			payload: usageReportPayload{
-				NodeID:              "node-1",
-				AgentType:           "claude-code",
-				CredentialSource:    "user",
-				CredentialReference: "cc_credentials:cred-1",
-				Source:              "claude-acp.usage_update",
-				RateLimits: []usageLimitPayload{{
-					Provider:   "anthropic",
-					Source:     "claude-acp.rate_limit",
-					WindowType: window,
-					Status:     "allowed_warning",
-				}},
-			},
-		}
+		return usageReportRequestForTest(server.URL, window, "allowed_warning", 0, nil)
 	}
 
 	host.enqueueUsageReport(request("claude.five_hour"))
@@ -407,57 +385,18 @@ func TestUsageReporterPreservesDistinctPendingWindowsAndFlushes(t *testing.T) {
 }
 
 func TestUsageReporterCoalescesEquivalentPendingReportsToLatest(t *testing.T) {
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	received := make(chan usageReportPayload, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload usageReportPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("decode usage report: %v", err)
-		}
-		received <- payload
-		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
-			close(firstStarted)
-			<-releaseFirst
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	server, firstStarted, releaseFirst, received := newBlockedUsageRecorder(t, 2)
 
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			HTTPClient:                     server.Client(),
-			TerminalActivityReportAttempts: 1,
-			ActivityReportTimeout:          time.Second,
-		},
-	})
+	host := newUsageReporterTestHost(server)
 	request := func(window string, observedAt int64) usageReportRequest {
-		return usageReportRequest{
-			url:           server.URL,
-			callbackToken: "callback-token",
-			payload: usageReportPayload{
-				NodeID:              "node-1",
-				AgentType:           "claude-code",
-				CredentialSource:    "user",
-				CredentialReference: "cc_credentials:cred-1",
-				Source:              "claude-acp.usage_update",
-				ObservedAt:          observedAt,
-				RateLimits: []usageLimitPayload{{
-					Provider:   "anthropic",
-					Source:     "claude-acp.rate_limit",
-					WindowType: window,
-					Status:     "allowed_warning",
-					ObservedAt: observedAt,
-				}},
-			},
-		}
+		return usageReportRequestForTest(server.URL, window, "allowed_warning", observedAt, nil)
 	}
 
 	host.enqueueUsageReport(request("blocker", 1))
 	<-firstStarted
 	host.enqueueUsageReport(request("claude.five_hour", 2))
 	host.enqueueUsageReport(request("claude.five_hour", 3))
-	close(releaseFirst)
+	releaseFirst()
 
 	if err := host.flushUsageReports(time.Second); err != nil {
 		t.Fatalf("flushUsageReports: %v", err)
@@ -651,30 +590,9 @@ func TestSessionUpdateUsageReporterPreservesRepeatedMeaningfulCycle(t *testing.T
 }
 
 func TestUsageReporterKeepsSameStatusThresholdChangesDistinct(t *testing.T) {
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	received := make(chan usageReportPayload, 3)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload usageReportPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("decode usage report: %v", err)
-		}
-		received <- payload
-		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
-			close(firstStarted)
-			<-releaseFirst
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	server, firstStarted, releaseFirst, received := newBlockedUsageRecorder(t, 3)
 
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			HTTPClient:                     server.Client(),
-			TerminalActivityReportAttempts: 1,
-			ActivityReportTimeout:          time.Second,
-		},
-	})
+	host := newUsageReporterTestHost(server)
 
 	util80 := 80.0
 	util95 := 95.0
@@ -682,7 +600,7 @@ func TestUsageReporterKeepsSameStatusThresholdChangesDistinct(t *testing.T) {
 	<-firstStarted
 	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "claude.five_hour", "allowed_warning", 1, &util80))
 	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "claude.five_hour", "allowed_warning", 2, &util95))
-	close(releaseFirst)
+	releaseFirst()
 
 	if err := host.flushUsageReports(time.Second); err != nil {
 		t.Fatalf("flushUsageReports: %v", err)
@@ -704,13 +622,7 @@ func TestUsageReporterFlushReportsDeliveryFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			HTTPClient:                     server.Client(),
-			TerminalActivityReportAttempts: 1,
-			ActivityReportTimeout:          time.Second,
-		},
-	})
+	host := newUsageReporterTestHost(server)
 	host.enqueueUsageReport(usageReportRequest{
 		url:           server.URL,
 		callbackToken: "callback-token",
@@ -726,22 +638,7 @@ func TestUsageReporterFlushReportsDeliveryFailure(t *testing.T) {
 }
 
 func TestUsageReporterOverflowMakesDrainFail(t *testing.T) {
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	received := make(chan usageReportPayload, 3)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload usageReportPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("decode usage report: %v", err)
-		}
-		received <- payload
-		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
-			close(firstStarted)
-			<-releaseFirst
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	server, firstStarted, releaseFirst, received := newBlockedUsageRecorder(t, 3)
 
 	host := NewSessionHost(SessionHostConfig{
 		GatewayConfig: GatewayConfig{
@@ -755,7 +652,7 @@ func TestUsageReporterOverflowMakesDrainFail(t *testing.T) {
 	<-firstStarted
 	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "claude.five_hour", "allowed_warning", 1, nil))
 	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "claude.seven_day", "allowed_warning", 2, nil))
-	close(releaseFirst)
+	releaseFirst()
 
 	if err := host.flushUsageReports(time.Second); err == nil {
 		t.Fatal("flushUsageReports returned nil after queue capacity eviction")
@@ -1343,33 +1240,9 @@ func TestMissingReplacementCredentialClearsUsageAttribution(t *testing.T) {
 }
 
 func TestUsageReporterPreservesCredentialGenerationsWhileBlocked(t *testing.T) {
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	var releaseOnce sync.Once
-	release := func() { releaseOnce.Do(func() { close(releaseFirst) }) }
-	received := make(chan usageReportPayload, 3)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload usageReportPayload
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("decode usage report: %v", err)
-		}
-		received <- payload
-		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
-			close(firstStarted)
-			<-releaseFirst
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-	defer release()
+	server, firstStarted, release, received := newBlockedUsageRecorder(t, 3)
 
-	host := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{
-			HTTPClient:                     server.Client(),
-			TerminalActivityReportAttempts: 1,
-			ActivityReportTimeout:          time.Second,
-		},
-	})
+	host := newUsageReporterTestHost(server)
 	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "blocker", "allowed", 1, nil))
 	select {
 	case <-firstStarted:
@@ -1403,4 +1276,42 @@ func TestUsageReporterPreservesCredentialGenerationsWhileBlocked(t *testing.T) {
 			t.Fatal("credential identity changed while preserving generations")
 		}
 	}
+}
+
+// newBlockedUsageRecorder records real HTTP payloads and holds the first blocker
+// until the scenario releases it. Cleanup also releases it after a failed assertion.
+func newBlockedUsageRecorder(t *testing.T, capacity int) (*httptest.Server, <-chan struct{}, func(), <-chan usageReportPayload) {
+	t.Helper()
+	started := make(chan struct{})
+	unblock := make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(unblock) }) }
+	received := make(chan usageReportPayload, capacity)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload usageReportPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode usage report: %v", err)
+		}
+		received <- payload
+		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
+			close(started)
+			<-unblock
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(func() {
+		release()
+		server.Close()
+	})
+	return server, started, release, received
+}
+
+func newUsageReporterTestHost(server *httptest.Server) *SessionHost {
+	return NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 1,
+			ActivityReportTimeout:          time.Second,
+		},
+	})
 }

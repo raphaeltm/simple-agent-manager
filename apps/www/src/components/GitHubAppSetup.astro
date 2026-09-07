@@ -322,18 +322,19 @@
 
   .url-preview dl {
     display: grid;
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 0.25rem 0.75rem;
     margin: 0;
   }
 
-  .url-preview dt {
+  .url-preview :global(dt) {
     color: var(--wizard-text-muted);
     font-size: 0.8rem;
     padding-top: 2px;
   }
 
-  .url-preview dd {
+  .url-preview :global(dd) {
+    min-width: 0;
     margin: 0;
     font-family: var(--wizard-mono);
     font-size: 0.8rem;
@@ -491,9 +492,9 @@
       border-bottom: 1px solid var(--wizard-border);
     }
     .url-preview dl {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
-    .url-preview dt {
+    .url-preview :global(dt) {
       margin-top: 0.5rem;
     }
   }

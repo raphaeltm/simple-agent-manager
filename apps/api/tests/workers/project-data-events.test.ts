@@ -25,6 +25,7 @@ import type { PromptDeliveryResult } from '../../src/durable-objects/project-dat
 import { parseMailboxMessageRow } from '../../src/durable-objects/project-data/row-schemas';
 import type { Env } from '../../src/env';
 import * as svc from '../../src/services/project-data';
+import { seedMaterializationFairnessPrefix } from './helpers/project-event-fairness-fixture';
 import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
@@ -830,75 +831,12 @@ describe('ProjectData event subscription core', () => {
         blocked.subscription.id,
         blockedSessionId
       );
-      for (let index = 0; index < 120; index += 1) {
-        const eventId = `event-fair-blocked-a-${index}`;
-        state.storage.sql.exec(
-          `INSERT INTO project_events
-           (id, project_id, contract_version, source, event_type, subject_type, subject_id,
-            severity, delivery_key, payload_fingerprint, metadata_json, metadata_bytes,
-            display_json, display_bytes, raw_payload_ref_json, raw_payload_ref_bytes,
-            occurred_at, received_at, updated_at, state)
-           VALUES (?, ?, 1, 'github', 'check_suite.completed', 'pull_request', ?,
-            'warning', ?, ?, '{}', 2, '{"untrusted":true}', 18, NULL, 0, ?, ?, ?, 'recorded')`,
-          eventId,
-          projectId,
-          `fair-blocked-a-${index}`,
-          `delivery-fair-blocked-a-${index}`,
-          `sha256:fair-blocked-a-${index}`,
-          1000 + index,
-          1000 + index,
-          1000 + index
-        );
-        state.storage.sql.exec(
-          `INSERT INTO project_event_matches
-           (id, project_id, event_id, subscription_id, state, matched_at,
-            lifecycle_checked_at, batch_id, reason)
-           VALUES (?, ?, ?, ?, 'matched', ?, ?, NULL, NULL)`,
-          `match-fair-blocked-a-${index}`,
-          projectId,
-          eventId,
-          blocked.subscription.id,
-          1000 + index,
-          1000 + index
-        );
-      }
-      state.storage.sql.exec(
-        `INSERT INTO project_events
-         (id, project_id, contract_version, source, event_type, subject_type, subject_id,
-          severity, delivery_key, payload_fingerprint, metadata_json, metadata_bytes,
-          display_json, display_bytes, raw_payload_ref_json, raw_payload_ref_bytes,
-          occurred_at, received_at, updated_at, state)
-         VALUES ('event-fair-ready-b', ?, 1, 'github', 'check_suite.completed', 'pull_request',
-          'fair-ready-b', 'warning', 'delivery-fair-ready-b', 'sha256:fair-ready-b',
-          '{}', 2, '{"untrusted":true}', 18, NULL, 0, 2000, 2000, 2000, 'recorded')`,
-        projectId
-      );
-      state.storage.sql.exec(
-        `INSERT INTO project_event_matches
-         (id, project_id, event_id, subscription_id, state, matched_at,
-          lifecycle_checked_at, batch_id, reason)
-         VALUES ('match-fair-ready-b', ?, 'event-fair-ready-b', ?, 'matched', 2000, 2000, NULL, NULL)`,
+      seedMaterializationFairnessPrefix(
+        state.storage.sql,
         projectId,
-        ready.subscription.id
-      );
-      state.storage.sql.exec(
-        `UPDATE project_event_subscriptions
-         SET last_matched_at = CASE
-             WHEN id = ? THEN 1000
-             WHEN id = ? THEN 2000
-             ELSE last_matched_at
-           END,
-           wake_due_at = CASE
-             WHEN id = ? THEN 1000
-             WHEN id = ? THEN 2000
-             ELSE wake_due_at
-           END
-         WHERE project_id = ?`,
         blocked.subscription.id,
         ready.subscription.id,
-        blocked.subscription.id,
-        ready.subscription.id,
-        projectId
+        'fair'
       );
     });
 
@@ -1036,77 +974,12 @@ describe('ProjectData event subscription core', () => {
         blockedSessionId,
         blockedTaskId
       );
-      for (let index = 0; index < 120; index += 1) {
-        const eventId = `event-alarm-fair-blocked-a-${index}`;
-        state.storage.sql.exec(
-          `INSERT INTO project_events
-           (id, project_id, contract_version, source, event_type, subject_type, subject_id,
-            severity, delivery_key, payload_fingerprint, metadata_json, metadata_bytes,
-            display_json, display_bytes, raw_payload_ref_json, raw_payload_ref_bytes,
-            occurred_at, received_at, updated_at, state)
-           VALUES (?, ?, 1, 'github', 'check_suite.completed', 'pull_request', ?,
-            'warning', ?, ?, '{}', 2, '{"untrusted":true}', 18, NULL, 0, ?, ?, ?, 'recorded')`,
-          eventId,
-          projectId,
-          `alarm-fair-blocked-a-${index}`,
-          `delivery-alarm-fair-blocked-a-${index}`,
-          `sha256:alarm-fair-blocked-a-${index}`,
-          1000 + index,
-          1000 + index,
-          1000 + index
-        );
-        state.storage.sql.exec(
-          `INSERT INTO project_event_matches
-           (id, project_id, event_id, subscription_id, state, matched_at,
-            lifecycle_checked_at, batch_id, reason)
-           VALUES (?, ?, ?, ?, 'matched', ?, ?, NULL, NULL)`,
-          `match-alarm-fair-blocked-a-${index}`,
-          projectId,
-          eventId,
-          blocked.subscription.id,
-          1000 + index,
-          1000 + index
-        );
-      }
-      state.storage.sql.exec(
-        `INSERT INTO project_events
-         (id, project_id, contract_version, source, event_type, subject_type, subject_id,
-          severity, delivery_key, payload_fingerprint, metadata_json, metadata_bytes,
-          display_json, display_bytes, raw_payload_ref_json, raw_payload_ref_bytes,
-          occurred_at, received_at, updated_at, state)
-         VALUES ('event-alarm-fair-ready-b', ?, 1, 'github', 'check_suite.completed',
-          'pull_request', 'alarm-fair-ready-b', 'warning', 'delivery-alarm-fair-ready-b',
-          'sha256:alarm-fair-ready-b', '{}', 2, '{"untrusted":true}', 18, NULL, 0,
-          2000, 2000, 2000, 'recorded')`,
-        projectId
-      );
-      state.storage.sql.exec(
-        `INSERT INTO project_event_matches
-         (id, project_id, event_id, subscription_id, state, matched_at,
-          lifecycle_checked_at, batch_id, reason)
-         VALUES ('match-alarm-fair-ready-b', ?, 'event-alarm-fair-ready-b', ?,
-          'matched', 2000, 2000, NULL, NULL)`,
+      seedMaterializationFairnessPrefix(
+        state.storage.sql,
         projectId,
-        ready.subscription.id
-      );
-      state.storage.sql.exec(
-        `UPDATE project_event_subscriptions
-         SET last_matched_at = CASE
-             WHEN id = ? THEN 1000
-             WHEN id = ? THEN 2000
-             ELSE last_matched_at
-           END,
-           wake_due_at = CASE
-             WHEN id = ? THEN 1000
-             WHEN id = ? THEN 2000
-             ELSE wake_due_at
-           END
-         WHERE project_id = ?`,
         blocked.subscription.id,
         ready.subscription.id,
-        blocked.subscription.id,
-        ready.subscription.id,
-        projectId
+        'alarm-fair'
       );
     });
 

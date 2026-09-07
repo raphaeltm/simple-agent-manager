@@ -312,13 +312,17 @@ export function listWatches(
     }
   }
   const budget = sessionId ? scheduleLimits(env).maxWatches : limit;
+  const conditions = ['project_id = ?'];
   const bindings: Array<string | number> = [projectId];
-  if (cursor) bindings.push(cursor.createdAt, cursor.id);
+  if (cursor) {
+    conditions.push('(created_at,id) < (?,?)');
+    bindings.push(cursor.createdAt, cursor.id);
+  }
   bindings.push(budget + 1);
+  const whereClause = conditions.join(' AND ');
   const rows = sql
     .exec(
-      `SELECT * FROM project_standing_watches WHERE project_id = ?
-     ${cursor ? 'AND (created_at,id) < (?,?)' : ''}
+      `SELECT * FROM project_standing_watches WHERE ${whereClause}
      ORDER BY created_at DESC,id DESC LIMIT ?`,
       ...bindings
     )

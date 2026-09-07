@@ -11,11 +11,11 @@ function readCandidates(
   cursor: ProjectEventOrphanScanCursor | null,
   scanLimit: number
 ): Candidate[] {
-  const seek = cursor ? ' AND (lifecycle_checked_at, id) > (?, ?)' : '';
+  const whereClause = cursor ? ' AND (lifecycle_checked_at, id) > (?, ?)' : '';
   return sql
     .exec(
       `SELECT id, lifecycle_checked_at, batch_id FROM project_event_matches
-     WHERE project_id = ? AND state = 'batch_created' AND batch_id IS NOT NULL${seek}
+     WHERE project_id = ? AND state = 'batch_created' AND batch_id IS NOT NULL${whereClause}
      ORDER BY lifecycle_checked_at ASC, id LIMIT ?`,
       projectId,
       ...(cursor ? [cursor.lifecycleAt, cursor.matchId] : []),
@@ -68,10 +68,11 @@ export function repairProjectEventOrphanMatches(
   const window = candidates.slice(0, scanLimit);
   const liveBatches = new Set<string>();
   for (const ids of chunkIdsForBindBudget([...new Set(window.map((row) => row.batchId))], 1)) {
+    const placeholders = ids.map(() => '?').join(', ');
     for (const row of sql
       .exec(
         `SELECT id FROM project_event_delivery_batches
-       WHERE project_id = ? AND id IN (${ids.map(() => '?').join(', ')})`,
+       WHERE project_id = ? AND id IN (${placeholders})`,
         projectId,
         ...ids
       )
@@ -94,11 +95,12 @@ export function repairProjectEventOrphanMatches(
   let mutated = 0;
   let repaired = 0;
   for (const ids of chunkIdsForBindBudget(repairIds, 5)) {
+    const placeholders = ids.map(() => '?').join(', ');
     const result = sql.exec(
       `UPDATE project_event_matches SET state = 'expired',
        matched_at = CASE WHEN matched_at > ? THEN ? ELSE matched_at END,
        lifecycle_checked_at = ?, reason = ?
-       WHERE project_id = ? AND id IN (${ids.map(() => '?').join(', ')})
+       WHERE project_id = ? AND id IN (${placeholders})
          AND state = 'batch_created' AND batch_id IS NOT NULL
          AND NOT EXISTS (SELECT 1 FROM project_event_delivery_batches b
            WHERE b.project_id = project_event_matches.project_id AND b.id = project_event_matches.batch_id)

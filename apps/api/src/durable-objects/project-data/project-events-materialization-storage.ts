@@ -1,6 +1,8 @@
-import type { ProjectEventSubscriptionRecord } from '@simple-agent-manager/shared';
+import type { ProjectEventRecord, ProjectEventSubscriptionRecord } from '@simple-agent-manager/shared';
 
 import type { resolveProjectEventLimits } from './project-events-limits';
+import { mapProjectEvent, mapProjectEventSubscription } from './project-events-mappers';
+import { chunkIdsForBindBudget, mapRows } from './project-events-storage-helpers';
 import { stableStringify } from './project-events-values';
 import { EVENT_WAKE_ADAPTER_ID } from './project-events-wake-delivery';
 import { generateId } from './types';
@@ -95,4 +97,79 @@ export function recordQueueCheckpoint(
     projectId,
     batchId
   );
+}
+
+export function readSubscription(
+  sql: SqlStorage,
+  projectId: string,
+  subscriptionId: string
+): ProjectEventSubscriptionRecord {
+  return mapProjectEventSubscription(
+    sql
+      .exec(
+        `SELECT *
+         FROM project_event_subscriptions
+         WHERE project_id = ? AND id = ?
+         LIMIT 1`,
+        projectId,
+        subscriptionId
+      )
+      .toArray()[0]
+  );
+}
+
+export function selectMatchesForSubscription(
+  sql: SqlStorage,
+  projectId: string,
+  subscriptionId: string,
+  limit: number
+): Array<{ id: string; eventId: string }> {
+  return sql
+    .exec(
+      `SELECT id, event_id
+       FROM project_event_matches
+       WHERE project_id = ?
+         AND subscription_id = ?
+         AND state = 'matched'
+         AND batch_id IS NULL
+       ORDER BY matched_at ASC, id ASC
+       LIMIT ?`,
+      projectId,
+      subscriptionId,
+      limit
+    )
+    .toArray()
+    .filter(
+      (row): row is { id: string; event_id: string } =>
+        typeof row.id === 'string' && typeof row.event_id === 'string'
+    )
+    .map((row) => ({ id: row.id, eventId: row.event_id }));
+}
+
+export function readEvents(
+  sql: SqlStorage,
+  projectId: string,
+  eventIds: string[],
+  limit: number
+): ProjectEventRecord[] {
+  if (eventIds.length === 0) return [];
+  const rows: unknown[] = [];
+  for (const chunk of chunkIdsForBindBudget(eventIds.slice(0, limit), 2)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    rows.push(
+      ...sql
+        .exec(
+          `SELECT *
+           FROM project_events
+           WHERE project_id = ? AND id IN (${placeholders})
+           LIMIT ?`,
+          projectId,
+          ...chunk,
+          Math.max(0, limit - rows.length)
+        )
+        .toArray()
+    );
+    if (rows.length >= limit) break;
+  }
+  return mapRows(rows, mapProjectEvent, limit, 'project_event');
 }

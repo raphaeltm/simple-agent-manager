@@ -278,15 +278,15 @@ function persistRetentionCheckpoint(
      (project_id, next_retention_at, materialization_failures, retention_failures, updated_at)
      VALUES (?, ?, 0, 0, ?)
      ON CONFLICT(project_id) DO UPDATE SET
-       next_retention_at = ${
-         preserveExisting
-           ? 'COALESCE(project_event_wake_scheduler_state.next_retention_at, ?)'
-           : '?'
-       },
+       next_retention_at = CASE WHEN ? = 1
+         THEN COALESCE(project_event_wake_scheduler_state.next_retention_at, ?)
+         ELSE ? END,
        updated_at = ?`,
     projectId,
     nextRetentionAt,
     now,
+    preserveExisting ? 1 : 0,
+    nextRetentionAt,
     nextRetentionAt,
     now
   );

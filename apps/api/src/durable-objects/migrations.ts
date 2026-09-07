@@ -1916,7 +1916,7 @@ export const MIGRATIONS: Migration[] = [
         ],
       ] as const;
 
-      for (const [table, column, statement] of additiveColumns) {
+      for (const [, column, statement] of additiveColumns) {
         try {
           sql.exec(statement);
         } catch (error) {
@@ -1924,8 +1924,15 @@ export const MIGRATIONS: Migration[] = [
           if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
             throw error;
         }
-        sql.exec(`SELECT ${column} FROM ${table} LIMIT 0`);
       }
+      // Static projections verify every added column, following migration 044.
+      sql.exec(`SELECT owner_version, owner_project_id, owner_chat_session_id,
+        owner_task_id, owner_runtime_id, recovery_lineage_json, prompt_delivery_count,
+        prompt_delivery_last_at, delivery_cooldown_until, delivery_lifetime_expires_at
+        FROM project_event_subscriptions LIMIT 0`);
+      sql.exec(`SELECT delivery_channel, delivered_via, delivery_expires_at, readable_until
+        FROM project_event_delivery_batches LIMIT 0`);
+      sql.exec('SELECT transport_state FROM project_event_delivery_attempts LIMIT 0');
 
       sql.exec(`
         CREATE TABLE IF NOT EXISTS project_event_wake_scheduler_state (
@@ -2037,8 +2044,8 @@ export const MIGRATIONS: Migration[] = [
           if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
             throw error;
         }
-        sql.exec(`SELECT ${column} FROM project_events LIMIT 0`);
       }
+      sql.exec('SELECT audience_scope, audience_project_id, audience_user_id FROM project_events LIMIT 0');
       sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_project_events_audience
         ON project_events(project_id, audience_scope, audience_user_id, received_at DESC, id)
@@ -2161,12 +2168,14 @@ export const MIGRATIONS: Migration[] = [
   {
     name: '054-project-event-orphan-retention-cursor',
     run: (sql) => {
-      for (const [column, type] of [
-        ['orphan_scan_lifecycle_at', 'INTEGER'],
-        ['orphan_scan_match_id', 'TEXT'],
+      for (const [column, statement] of [
+        ['orphan_scan_lifecycle_at',
+          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_lifecycle_at INTEGER'],
+        ['orphan_scan_match_id',
+          'ALTER TABLE project_event_wake_scheduler_state ADD COLUMN orphan_scan_match_id TEXT'],
       ] as const) {
         try {
-          sql.exec(`ALTER TABLE project_event_wake_scheduler_state ADD COLUMN ${column} ${type}`);
+          sql.exec(statement);
         } catch (error) {
           if (
             !(error instanceof Error) ||
@@ -2174,8 +2183,9 @@ export const MIGRATIONS: Migration[] = [
           )
             throw error;
         }
-        sql.exec(`SELECT ${column} FROM project_event_wake_scheduler_state LIMIT 0`);
       }
+      sql.exec(`SELECT orphan_scan_lifecycle_at, orphan_scan_match_id
+        FROM project_event_wake_scheduler_state LIMIT 0`);
     },
   },
 ];

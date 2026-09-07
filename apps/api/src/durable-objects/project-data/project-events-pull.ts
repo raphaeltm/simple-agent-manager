@@ -269,7 +269,7 @@ export function readVisibleSubscription(
   visibility: ProjectEventAgentVisibility,
   now: number
 ): ProjectEventSubscriptionRecord | null {
-  const visibilityPredicate = visibleSubscriptionPredicate(visibility);
+  const { whereClause, params } = visibleSubscriptionPredicate(visibility);
   const row = sql
     .exec(
       `SELECT *
@@ -288,12 +288,12 @@ export function readVisibleSubscription(
                AND b.state NOT IN ('expired', 'cancelled')
            )
          )
-         AND ${visibilityPredicate.sql}`,
+         AND ${whereClause}`,
       projectId,
       subscriptionId,
       now,
       now,
-      ...visibilityPredicate.params
+      ...params
     )
     .toArray()[0];
   return row ? readSubscriptionById(sql, projectId, subscriptionId) : null;
@@ -306,7 +306,7 @@ function readVisibleMatchForEvent(
   visibility: ProjectEventAgentVisibility,
   now: number
 ): MatchCursor | null {
-  const visibilityPredicate = visibleSubscriptionPredicate(visibility);
+  const { whereClause, params } = visibleSubscriptionPredicate(visibility);
   const row = sql
     .exec(
       `SELECT m.id AS match_id,
@@ -332,14 +332,14 @@ function readVisibleMatchForEvent(
              AND b.state NOT IN ('expired', 'cancelled')
            )
          )
-         AND ${visibilityPredicate.sql}
+         AND ${whereClause}
        ORDER BY m.matched_at ASC, m.id ASC
        LIMIT 1`,
       projectId,
       eventId,
       now,
       now,
-      ...visibilityPredicate.params
+      ...params
     )
     .toArray()[0];
   return row ? parseMatchEventRow(row) : null;
@@ -352,7 +352,7 @@ function readVisibleDelivery(
   visibility: ProjectEventAgentVisibility,
   now: number
 ): { batch: ProjectEventDeliveryBatchRecord; eventIds: string[] } | null {
-  const visibilityPredicate = visibleSubscriptionPredicate(visibility);
+  const { whereClause, params } = visibleSubscriptionPredicate(visibility);
   const row = sql
     .exec(
       `SELECT b.*
@@ -365,13 +365,13 @@ function readVisibleDelivery(
            (s.lifecycle_state = 'active' AND (s.expires_at IS NULL OR s.expires_at > ?))
            OR (b.readable_until IS NOT NULL AND b.readable_until > ?)
          )
-         AND ${visibilityPredicate.sql}
+         AND ${whereClause}
        LIMIT 1`,
       projectId,
       deliveryId,
       now,
       now,
-      ...visibilityPredicate.params
+      ...params
     )
     .toArray()[0];
   if (!row) return null;
@@ -382,8 +382,9 @@ function readVisibleDelivery(
   return { batch, eventIds: events.map((event) => event.id) };
 }
 
+// Clause text is fixed here; caller/owner identities are carried only in bound params.
 function visibleSubscriptionPredicate(visibility: ProjectEventAgentVisibility): {
-  sql: string;
+  whereClause: string;
   params: unknown[];
 } {
   const clauses = [
@@ -418,7 +419,7 @@ function visibleSubscriptionPredicate(visibility: ProjectEventAgentVisibility): 
     visibility.target.sessionId ?? null,
     visibility.target.agentId ?? null
   );
-  return { sql: `(${clauses.join(' OR ')})`, params };
+  return { whereClause: `(${clauses.join(' OR ')})`, params };
 }
 
 function ensurePullDeliveryBatch(
