@@ -52,3 +52,9 @@ This checkpoint is fetched but not integrated or accepted. It removes the separa
 - [ ] **Report bounded-queue loss honestly.** Capacity eviction drops pending observations without a failed-delivery disposition; the flush can still return nil. Make overflow observable as delivery failure and prove the bounded policy preserves meaningful transitions or reports their loss. Include rejection/reset, overflow, late callback and replacement-during-retry tests.
 
 The Go findings above are independent code-path review, not rerun Go tests. The root lost-reset and retention probes are executed in-memory evidence, not workerd or live provisioning. Native audience and full producer/callback runtime validation remain required; no whole-slice acceptance is implied.
+
+### Native audience follow-up
+
+Independent actual-function/SQLite review of `27564546de` confirms affected-user match/read succeeds, peer-user match/read fails, peer target override is forbidden, and missing audience user fails closed. No reachable peer-agent disclosure was demonstrated: agent creation verifies task/workspace/session ownership and forces the caller's target, while reads/ack receive verified user context. The helper's permissive non-human-owner branch must remain paired with those outer checks.
+
+Required remaining evidence: exercise automatic materialization/delivery/read/ack using real agent-created subscriptions for two users (the new human-owned wake fixture is rejected by the real platform surface); preserve C2's audience check in A3's moved final delivery guard; explicitly test the intended upgrade behavior where DO047 legacy null audience project IDs deny old credential events. This is bounded function review, not composed workerd acceptance.
