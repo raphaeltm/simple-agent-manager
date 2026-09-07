@@ -206,9 +206,9 @@ async function upsertCandidateIfSourceGenerationCurrent(
       ${value.providerInstanceVcpuCount},
       ${value.providerInstanceMemoryMb},
       ${value.providerInstanceDiskGb},
-      ${value.providerInstanceBootDiskSizeGb},
-      ${value.providerInstanceImage},
-      ${value.providerInstanceArchitecture},
+      ${value.providerInstanceBootDiskSizeGb ?? null},
+      ${value.providerInstanceImage ?? null},
+      ${value.providerInstanceArchitecture ?? null},
       ${value.providerInstancePriceDisplay},
       ${value.providerInstancePriceCurrency},
       ${value.providerInstancePriceMonthlyCents},
@@ -378,7 +378,8 @@ async function markMissingCandidatesForSource(
         providerInstanceCatalogLastSeenAt: null,
         catalogAvailability: 'last-known-unavailable',
         catalogUnavailableAt: now,
-        catalogGeneration: options.sourceGeneration ?? sql`${schema.capacityPoolCandidates.catalogGeneration}`,
+        catalogGeneration:
+          options.sourceGeneration ?? sql`${schema.capacityPoolCandidates.catalogGeneration}`,
         updatedAt: now,
       })
       .where(

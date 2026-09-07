@@ -13,13 +13,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/capacity-pool-reconciliation';
+import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
+import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
 import {
   ensureCandidatesForSource,
   initialStatusForProviderOffering,
 } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
-import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
 import {
   backfillDefaultCapacityPoolsForExistingCredentials,
   ensureDefaultCapacityPoolsForExistingCredentials,
@@ -277,6 +279,9 @@ function seedComposableCloudCredential(input: {
   projectId?: string | null;
   provider?: string;
   isActive?: 0 | 1;
+  encryptedToken?: string;
+  iv?: string;
+  updatedAt?: string;
 }): void {
   const userId = input.userId ?? 'user-1';
   const provider = input.provider ?? 'hetzner';
@@ -294,11 +299,11 @@ function seedComposableCloudCredential(input: {
       input.credentialId,
       userId,
       `${provider} composable credential`,
-      `encrypted-token-for-${input.credentialId}`,
-      `iv-for-${input.credentialId}`,
+      input.encryptedToken ?? `encrypted-token-for-${input.credentialId}`,
+      input.iv ?? `iv-for-${input.credentialId}`,
       active,
-      '2026-08-28T00:00:00.000Z',
-      '2026-08-28T00:00:00.000Z'
+      input.updatedAt ?? '2026-08-28T00:00:00.000Z',
+      input.updatedAt ?? '2026-08-28T00:00:00.000Z'
     );
   sqlite
     ?.prepare(
@@ -317,8 +322,8 @@ function seedComposableCloudCredential(input: {
       provider,
       input.credentialId,
       active,
-      '2026-08-28T00:00:00.000Z',
-      '2026-08-28T00:00:00.000Z'
+      input.updatedAt ?? '2026-08-28T00:00:00.000Z',
+      input.updatedAt ?? '2026-08-28T00:00:00.000Z'
     );
   sqlite
     ?.prepare(
@@ -337,8 +342,8 @@ function seedComposableCloudCredential(input: {
       userId,
       input.projectId ?? null,
       active,
-      '2026-08-28T00:00:00.000Z',
-      '2026-08-28T00:00:00.000Z'
+      input.updatedAt ?? '2026-08-28T00:00:00.000Z',
+      input.updatedAt ?? '2026-08-28T00:00:00.000Z'
     );
 }
 
@@ -843,6 +848,112 @@ describe('default capacity pool creation', () => {
     expect(getCount('capacity_pools', "scope = 'project'")).toBe(2);
   });
 
+  it('continues credential lifecycle work for more than 25 project attachments through scheduled backfill', async () => {
+    createDb();
+    const encrypted = await encrypt('vultr-token-for-scheduled-backfill', TEST_ENCRYPTION_KEY);
+    const insertProject = sqlite!.prepare(
+      `
+        INSERT INTO projects (id, user_id, name, normalized_name, installation_id, repository, created_by)
+        VALUES (?, 'user-1', ?, ?, 'installation-1', ?, 'user-1')
+      `
+    );
+
+    for (let index = 1; index <= 26; index += 1) {
+      const projectId = `overflow-project-${String(index).padStart(3, '0')}`;
+      insertProject.run(projectId, `Overflow ${index}`, projectId, `repo-overflow-${index}`);
+      seedComposableCloudCredential({
+        credentialId: `cc-overflow-cred-${String(index).padStart(3, '0')}`,
+        configurationId: `cc-overflow-cfg-${String(index).padStart(3, '0')}`,
+        attachmentId: `cc-overflow-att-${String(index).padStart(3, '0')}`,
+        projectId,
+        provider: 'vultr',
+        encryptedToken: encrypted.ciphertext,
+        iv: encrypted.iv,
+        updatedAt: `2026-08-28T00:${String(index).padStart(2, '0')}:00.000Z`,
+      });
+    }
+
+    const env = {
+      ...catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+      CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE: '8',
+    } as Env;
+
+    await reconcileCapacityPoolsForCredentialMutation(env, { scope: 'user', userId: 'user-1' });
+
+    expect(getCount('capacity_pools', "scope = 'project'")).toBe(25);
+    expect(
+      getCount(
+        'capacity_sources',
+        "owner_project_id = 'overflow-project-026' AND status = 'active'"
+      )
+    ).toBe(0);
+
+    const scheduledResults = [];
+    for (let run = 0; run < 4; run += 1) {
+      scheduledResults.push(await runScheduledCapacityPoolReconciliation(env));
+    }
+
+    expect(scheduledResults.map((result) => result.projectsEnsured)).toEqual([8, 8, 8, 2]);
+    expect(scheduledResults.every((result) => result.projectsEnsured <= 8)).toBe(true);
+    expect(getCount('capacity_pools', "scope = 'project'")).toBe(26);
+    expect(
+      getCount(
+        'capacity_sources',
+        "owner_project_id = 'overflow-project-026' AND status = 'active'"
+      )
+    ).toBe(1);
+    expect(
+      getRows<{ status: string; count: number }>(`
+        SELECT status, COUNT(*) AS count
+        FROM capacity_sources
+        WHERE owner_project_id LIKE 'overflow-project-%'
+        GROUP BY status
+      `)
+    ).toEqual([{ status: 'active', count: 26 }]);
+  });
+
+  it('keeps project backfill cursor scans bounded by covering indexes', () => {
+    createDb();
+
+    const legacyPlan = sqlite!
+      .prepare(
+        `
+        EXPLAIN QUERY PLAN
+        SELECT project_id
+        FROM credentials
+        WHERE credential_type = 'cloud-provider'
+          AND project_id IS NOT NULL
+          AND project_id > 'overflow-project-008'
+        ORDER BY project_id
+        LIMIT 8
+      `
+      )
+      .all()
+      .map((row) => (row as { detail: string }).detail)
+      .join('\n');
+    const composablePlan = sqlite!
+      .prepare(
+        `
+        EXPLAIN QUERY PLAN
+        SELECT project_id
+        FROM cc_attachments
+        WHERE consumer_kind = 'compute'
+          AND project_id IS NOT NULL
+          AND project_id > 'overflow-project-008'
+        ORDER BY project_id
+        LIMIT 8
+      `
+      )
+      .all()
+      .map((row) => (row as { detail: string }).detail)
+      .join('\n');
+
+    expect(legacyPlan).toContain('idx_credentials_cloud_provider_project_active');
+    expect(legacyPlan).not.toContain('SCAN credentials');
+    expect(composablePlan).toContain('idx_cc_attachments_project_compute_active');
+    expect(composablePlan).not.toContain('SCAN cc_attachments');
+  });
+
   it('keeps one default pool per scope while allowing multiple credential-backed sources', async () => {
     const db = createDb();
     seedPlatformCredential({ id: 'platform-hetzner' });
@@ -1259,7 +1370,7 @@ describe('default capacity pool creation', () => {
     expectCpx62CatalogCandidate(expect.any(String));
   });
 
-  it('logs sanitized provider catalog fallback warnings and marks static Hetzner rows', async () => {
+  it('reports provider catalog failures without seeding static Hetzner rows', async () => {
     const db = createDb();
     const encrypted = await encrypt('live-hetzner-token', TEST_ENCRYPTION_KEY);
     seedUserCredential({
@@ -1274,7 +1385,7 @@ describe('default capacity pool creation', () => {
       })
     ) as typeof fetch;
 
-    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
       env: catalogEnv(),
@@ -1286,6 +1397,7 @@ describe('default capacity pool creation', () => {
     expect(warningPayloads.length).toBeGreaterThan(0);
     expect(warningPayloads[0]).toContain('hetzner catalog API unavailable');
     expect(warningPayloads.join('\n')).not.toContain('live-hetzner-token');
+    expect(result.user?.effectiveState).toBe('configured-empty');
     expect(
       getRows<{ provider_instance_catalog_source: string }>(`
         SELECT provider_instance_catalog_source
@@ -1293,7 +1405,56 @@ describe('default capacity pool creation', () => {
         WHERE provider_instance_type = 'cx23'
         LIMIT 1
       `)[0]
-    ).toEqual({ provider_instance_catalog_source: 'static' });
+    ).toBeUndefined();
+  });
+
+  it('disables failed-refresh sources with no candidates when the backing credential is disabled', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const failedRefresh = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => ({
+        offerings: [],
+        refreshSucceeded: false,
+        catalogComplete: false,
+      }),
+    });
+
+    expect(failedRefresh.user?.effectiveState).toBe('configured-empty');
+    expect(getCount('capacity_pool_candidates')).toBe(0);
+    expect(
+      sqlite
+        ?.prepare(
+          "SELECT status, source_generation FROM capacity_sources WHERE credential_id = 'user-hetzner'"
+        )
+        .get()
+    ).toEqual({ status: 'active', source_generation: 1 });
+
+    sqlite
+      ?.prepare("UPDATE credentials SET is_active = 0, updated_at = ? WHERE id = 'user-hetzner'")
+      .run('2026-08-28T01:00:00.000Z');
+    const disabled = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => ({
+        offerings: [],
+        refreshSucceeded: false,
+        catalogComplete: false,
+      }),
+    });
+
+    expect(disabled.user?.effectiveState).toBe('source-disabled');
+    expect(
+      sqlite
+        ?.prepare(
+          "SELECT status, source_generation FROM capacity_sources WHERE credential_id = 'user-hetzner'"
+        )
+        .get()
+    ).toEqual({ status: 'disabled', source_generation: 2 });
+    expect(
+      sqlite?.prepare("SELECT configuration_state FROM capacity_pools WHERE scope = 'user'").get()
+    ).toEqual({ configuration_state: 'source-disabled' });
   });
 
   it('reconciles large provider catalogs without exceeding D1 bind limits', async () => {
@@ -1414,7 +1575,10 @@ describe('default capacity pool creation', () => {
       scope: 'user',
       provider: 'hetzner',
       credentialSource: 'user',
-      credentialId: externalCapacitySourceCredentialId('cc_attachments:cc-att-user'),
+      credentialId: externalCapacitySourceCredentialId(
+        'cc_attachments:cc-att-user',
+        Date.parse('2026-08-28T00:00:00.000Z')
+      ),
       platformCredentialId: null,
       credentialReference: 'cc_credentials:cc-cred-user',
       externalSourceRef: 'cc_attachments:cc-att-user',
@@ -1423,7 +1587,10 @@ describe('default capacity pool creation', () => {
       scope: 'project',
       provider: 'vultr',
       credentialSource: 'project',
-      credentialId: externalCapacitySourceCredentialId('cc_attachments:cc-att-project'),
+      credentialId: externalCapacitySourceCredentialId(
+        'cc_attachments:cc-att-project',
+        Date.parse('2026-08-28T00:00:00.000Z')
+      ),
       platformCredentialId: null,
       credentialReference: 'cc_credentials:cc-cred-project',
       externalSourceRef: 'cc_attachments:cc-att-project',
@@ -1447,12 +1614,18 @@ describe('default capacity pool creation', () => {
       `)
     ).toEqual([
       {
-        id: externalCapacitySourceCredentialId('cc_attachments:cc-att-project'),
+        id: externalCapacitySourceCredentialId(
+          'cc_attachments:cc-att-project',
+          Date.parse('2026-08-28T00:00:00.000Z')
+        ),
         credential_type: 'capacity-source-external-ref',
         provider: 'vultr',
       },
       {
-        id: externalCapacitySourceCredentialId('cc_attachments:cc-att-user'),
+        id: externalCapacitySourceCredentialId(
+          'cc_attachments:cc-att-user',
+          Date.parse('2026-08-28T00:00:00.000Z')
+        ),
         credential_type: 'capacity-source-external-ref',
         provider: 'hetzner',
       },
@@ -2644,6 +2817,139 @@ describe('default capacity pool creation', () => {
     ).toEqual({ configuration_state: 'source-disabled' });
   });
 
+  it('does not let a stale seed snapshot disable a newly added credential source', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner-a' });
+
+    let releaseOlderRefresh: (() => void) | null = null;
+    const olderRefresh = ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => {
+        await new Promise<void>((resolve) => {
+          releaseOlderRefresh = resolve;
+        });
+        return [
+          liveHetznerOffering({
+            location: 'fsn1',
+            providerInstanceType: 'cx23',
+            displayName: 'CX23',
+          }),
+        ];
+      },
+    });
+    await vi.waitFor(() => expect(releaseOlderRefresh).toBeTypeOf('function'));
+
+    seedUserCredential({ id: 'user-hetzner-b' });
+    const newerDb = drizzle(sqlite!, { schema });
+    await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async (seed) => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: seed.id.endsWith('-b') ? 'cx33' : 'cx23',
+          displayName: seed.id.endsWith('-b') ? 'CX33' : 'CX23',
+        }),
+      ],
+    });
+
+    releaseOlderRefresh?.();
+    await olderRefresh;
+
+    expect(
+      getRows<{ credential_id: string; status: string }>(`
+        SELECT credential_id, status
+        FROM capacity_sources
+        WHERE credential_id IN ('user-hetzner-a', 'user-hetzner-b')
+        ORDER BY credential_id
+      `)
+    ).toEqual([
+      { credential_id: 'user-hetzner-a', status: 'active' },
+      { credential_id: 'user-hetzner-b', status: 'active' },
+    ]);
+  });
+
+  it('uses source-generation CAS across service contexts at the publication boundary', async () => {
+    const db = createDb();
+    seedUserCredential({
+      id: 'user-hetzner',
+      provider: 'hetzner',
+      updatedAt: '2026-08-28T10:00:00.000Z',
+    });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+      ],
+    });
+
+    let releaseOlderPublication: (() => void) | null = null;
+    const olderPublication = ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      beforeSourcePublication: async () => {
+        await new Promise<void>((resolve) => {
+          releaseOlderPublication = resolve;
+        });
+      },
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'old-publisher-only',
+          displayName: 'Old Publisher Only',
+        }),
+      ],
+    });
+    await vi.waitFor(() => expect(releaseOlderPublication).toBeTypeOf('function'));
+
+    sqlite
+      ?.prepare(
+        `
+        UPDATE credentials
+        SET provider = 'vultr', updated_at = '2026-08-28T10:00:00.000Z'
+        WHERE id = 'user-hetzner'
+      `
+      )
+      .run();
+    const newerDb = drizzle(sqlite!, { schema });
+    await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          provider: 'vultr',
+          location: 'ewr',
+          providerInstanceType: 'vc2-2c-4gb',
+          displayName: 'vc2-2c-4gb',
+        }),
+      ],
+    });
+
+    releaseOlderPublication?.();
+    await olderPublication;
+
+    expect(
+      getRows<{ provider: string; source_generation: number }>(`
+        SELECT provider, source_generation
+        FROM capacity_sources
+        WHERE credential_id = 'user-hetzner'
+      `)[0]
+    ).toEqual({ provider: 'vultr', source_generation: 2 });
+    expect(
+      getRows<{ provider_instance_type: string }>(`
+        SELECT provider_instance_type
+        FROM capacity_pool_candidates
+        WHERE provider_instance_type = 'old-publisher-only'
+      `)
+    ).toEqual([]);
+  });
+
   it('chunks missing-candidate reconciliation below the D1 bind limit', async () => {
     createDb();
     seedUserCredential({ id: 'user-hetzner' });
@@ -3178,6 +3484,23 @@ describe('default capacity pool creation', () => {
           rolloutCohortPercent: 101,
         })
       );
+    sqlite
+      ?.prepare(
+        `
+        INSERT INTO platform_settings (key, value, updated_at)
+        VALUES (?, ?, '2026-08-28T12:00:00.000Z')
+      `
+      )
+      .run(
+        'capacityPools.platformDefaults.v1',
+        JSON.stringify({
+          minVcpu: 0,
+          minMemoryGb: 4,
+          minDiskGb: 40,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+        })
+      );
 
     const result = await resolveCapacityPoolPlacementSettings(
       db as never,
@@ -3209,10 +3532,24 @@ describe('default capacity pool creation', () => {
           selectionWeights: { priority: 2, price: 3, fit: 5, capacity: 7, candidateOrder: 11 },
           rolloutCohortPercent: 42,
         }),
+        CAPACITY_POOL_PLATFORM_DEFAULTS_JSON: JSON.stringify({
+          minVcpu: 9,
+          minMemoryGb: 10,
+          minDiskGb: 0,
+          exclusiveNode: false,
+          maxCoTenants: 2,
+        }),
       } as Env
     );
 
     expect(result.resourceDefaults.legacyWorkloadMapping.small.minVcpu).toBe(2);
+    expect(result.resourceDefaults.platformDefaults).toEqual({
+      minVcpu: 9,
+      minMemoryGb: 10,
+      minDiskGb: 0,
+      exclusiveNode: false,
+      maxCoTenants: 2,
+    });
     expect(result.placementSettings.selectionWeights).toEqual({
       priority: 2,
       price: 3,
@@ -3223,13 +3560,76 @@ describe('default capacity pool creation', () => {
     expect(result.placementSettings.rolloutCohortPercent).toBe(42);
     expect(result.placementSettings.source).toEqual({
       legacyWorkloadMapping: 'environment',
+      platformDefaults: 'environment',
       selection: 'environment',
     });
     expect(result.placementSettings.diagnostics).toEqual(
       expect.arrayContaining([
         'persisted:legacyWorkloadMapping.medium:invalid',
         'persisted:selectionSettings.rolloutCohortPercent:invalid',
+        'persisted:platformDefaults:invalid',
       ])
+    );
+
+    sqlite
+      ?.prepare(
+        `
+        UPDATE platform_settings
+        SET value = ?
+        WHERE key = 'capacityPools.platformDefaults.v1'
+      `
+      )
+      .run(
+        JSON.stringify({
+          minVcpu: -10,
+          minMemoryGb: 99,
+          minDiskGb: 99,
+          exclusiveNode: true,
+          maxCoTenants: 99,
+        })
+      );
+
+    const sameEffectiveSettings = await resolveCapacityPoolPlacementSettings(
+      db as never,
+      {
+        CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON: JSON.stringify({
+          small: {
+            minVcpu: 2,
+            minMemoryGb: 3,
+            minDiskGb: 4,
+            exclusiveNode: false,
+            maxCoTenants: 5,
+          },
+          medium: {
+            minVcpu: 3,
+            minMemoryGb: 4,
+            minDiskGb: 5,
+            exclusiveNode: false,
+            maxCoTenants: 4,
+          },
+          large: {
+            minVcpu: 4,
+            minMemoryGb: 5,
+            minDiskGb: 6,
+            exclusiveNode: false,
+            maxCoTenants: 3,
+          },
+        }),
+        CAPACITY_POOL_SELECTION_SETTINGS_JSON: JSON.stringify({
+          selectionWeights: { priority: 2, price: 3, fit: 5, capacity: 7, candidateOrder: 11 },
+          rolloutCohortPercent: 42,
+        }),
+        CAPACITY_POOL_PLATFORM_DEFAULTS_JSON: JSON.stringify({
+          minVcpu: 9,
+          minMemoryGb: 10,
+          minDiskGb: 0,
+          exclusiveNode: false,
+          maxCoTenants: 2,
+        }),
+      } as Env
+    );
+    expect(sameEffectiveSettings.placementSettings.sourceGeneration).toBe(
+      result.placementSettings.sourceGeneration
     );
   });
 
@@ -3264,6 +3664,9 @@ describe('default capacity pool creation', () => {
     );
     const firstSnapshot = capacityPlacementSnapshotForTaskStart(first);
 
+    const firstSettingsGeneration = firstSnapshot?.selectionSettingsVersion;
+    const firstSourceGeneration = firstSnapshot?.sourceGeneration;
+
     sqlite
       ?.prepare(
         "UPDATE platform_settings SET updated_at = '2026-08-28T12:00:00.000Z' WHERE key = 'capacityPools.selectionSettings.v1'"
@@ -3286,9 +3689,34 @@ describe('default capacity pool creation', () => {
     );
     const secondSnapshot = capacityPlacementSnapshotForTaskStart(second);
 
-    expect(firstSnapshot?.selectionSettingsVersion).toBe(Date.parse('2026-08-28T11:00:00.000Z'));
-    expect(secondSnapshot?.selectionSettingsVersion).toBe(Date.parse('2026-08-28T12:00:00.000Z'));
-    expect(secondSnapshot?.sourceGeneration).toBe(Date.parse('2026-08-28T13:00:00.000Z'));
-    expect(secondSnapshot?.sourceGeneration).toBeGreaterThan(firstSnapshot?.sourceGeneration ?? 0);
+    expect(firstSettingsGeneration).toEqual(expect.any(Number));
+    expect(secondSnapshot?.selectionSettingsVersion).toBe(firstSettingsGeneration);
+    expect(secondSnapshot?.placementCredentialVersion).toBe(Date.parse('2026-08-28T13:00:00.000Z'));
+    expect(secondSnapshot?.sourceGeneration).not.toBe(firstSourceGeneration);
+
+    sqlite
+      ?.prepare(
+        `
+        UPDATE platform_settings
+        SET value = ?
+        WHERE key = 'capacityPools.selectionSettings.v1'
+      `
+      )
+      .run(
+        JSON.stringify({
+          selectionWeights: { priority: 2, price: 1, fit: 1, capacity: 1, candidateOrder: 1 },
+          rolloutCohortPercent: 100,
+        })
+      );
+
+    const third = await resolveTaskStartCapacityPoolSelection(
+      db as never,
+      defaultTaskPlacement('settings-generation-third'),
+      { ensure: false, env: { CAPACITY_POOL_SELECTION_SETTINGS_JSON: '' } as Env }
+    );
+    const thirdSnapshot = capacityPlacementSnapshotForTaskStart(third);
+
+    expect(thirdSnapshot?.selectionSettingsVersion).not.toBe(firstSettingsGeneration);
+    expect(thirdSnapshot?.sourceGeneration).not.toBe(secondSnapshot?.sourceGeneration);
   });
 });

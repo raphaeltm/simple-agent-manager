@@ -1,13 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { enabledMock, isolateMock, logInfoMock, sessionSleepLifecycleRepairMock, sessionSleepMock } =
-  vi.hoisted(() => ({
-    enabledMock: vi.fn(),
-    isolateMock: vi.fn(async () => undefined),
-    logInfoMock: vi.fn(),
-    sessionSleepLifecycleRepairMock: vi.fn(),
-    sessionSleepMock: vi.fn(),
-  }));
+const {
+  capacityPoolReconciliationMock,
+  enabledMock,
+  isolateMock,
+  logInfoMock,
+  sessionSleepLifecycleRepairMock,
+  sessionSleepMock,
+} = vi.hoisted(() => ({
+  capacityPoolReconciliationMock: vi.fn(),
+  enabledMock: vi.fn(),
+  isolateMock: vi.fn(async () => undefined),
+  logInfoMock: vi.fn(),
+  sessionSleepLifecycleRepairMock: vi.fn(),
+  sessionSleepMock: vi.fn(),
+}));
 
 vi.mock('../../../src/services/operational-kill-switch', () => ({
   isOperationalLoopEnabled: enabledMock,
@@ -24,6 +31,9 @@ vi.mock('../../../src/scheduled/session-sleep', () => ({
 }));
 vi.mock('../../../src/scheduled/session-sleep-lifecycle-repair', () => ({
   runSessionSleepLifecycleRepair: sessionSleepLifecycleRepairMock,
+}));
+vi.mock('../../../src/scheduled/capacity-pool-reconciliation', () => ({
+  runScheduledCapacityPoolReconciliation: capacityPoolReconciliationMock,
 }));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
@@ -61,6 +71,7 @@ describe('scheduled operational sweep kill switch', () => {
     expect(isolateMock).toHaveBeenCalled();
     const sweepNames = isolateMock.mock.calls.map(([name]) => name);
     expect(sweepNames).toContain('node_cleanup');
+    expect(sweepNames).toContain('capacity_pool_reconciliation');
     expect(sweepNames).toContain('session_sleep_lifecycle_repair');
     expect(sweepNames).toContain('deployment_release_retention');
     expect(sweepNames).toContain('session_snapshot_purge');
@@ -108,6 +119,17 @@ describe('scheduled operational sweep kill switch', () => {
     expect(sessionSleepCallback).toEqual(expect.any(Function));
     await sessionSleepCallback?.();
     expect(sessionSleepMock).toHaveBeenCalledWith(env, expect.any(Date), context);
+    capacityPoolReconciliationMock.mockResolvedValue({
+      installationEnsured: true,
+      usersEnsured: 2,
+      projectsEnsured: 3,
+    });
+    const capacityPoolCallback = isolateMock.mock.calls.find(
+      ([name]) => name === 'capacity_pool_reconciliation'
+    )?.[1];
+    expect(capacityPoolCallback).toEqual(expect.any(Function));
+    await capacityPoolCallback?.();
+    expect(capacityPoolReconciliationMock).toHaveBeenCalledWith(env);
     expect(logInfoMock).toHaveBeenCalledWith(
       'cron.completed',
       expect.objectContaining({ type: 'sweep', failedSweeps: [] })

@@ -131,6 +131,39 @@ function resolveVisibleEffective(
   };
 }
 
+async function readProjectDefaultPoolSummaries(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  input: {
+    userId: string;
+    projectId: string;
+    includeInstallation: boolean;
+    ensure: boolean;
+    env: Env;
+  }
+): Promise<DefaultCapacityPoolsEnsureResult> {
+  const summaries = await readDefaultCapacityPoolSummaries(db, {
+    userId: input.userId,
+    projectId: input.projectId,
+    includeInstallation: input.includeInstallation,
+    ensure: input.ensure,
+    includeDisabled: true,
+    env: input.env,
+  });
+
+  if (input.includeInstallation) return summaries;
+
+  const fallback = await readDefaultCapacityPoolSummaries(db, {
+    userId: input.userId,
+    projectId: input.projectId,
+    includeInstallation: true,
+    ensure: false,
+    includeDisabled: true,
+    env: input.env,
+  });
+
+  return { ...summaries, installation: fallback.installation };
+}
+
 async function buildDefaultPoolResponse(
   db: ReturnType<typeof drizzle<typeof schema>>,
   input: {
@@ -143,12 +176,11 @@ async function buildDefaultPoolResponse(
     env: Env;
   }
 ): Promise<ProjectDefaultCapacityPoolsResponse> {
-  const summaries = await readDefaultCapacityPoolSummaries(db, {
+  const summaries = await readProjectDefaultPoolSummaries(db, {
     userId: input.userId,
     projectId: input.projectId,
-    includeInstallation: true,
+    includeInstallation: input.includeInstallation,
     ensure: input.ensure,
-    includeDisabled: true,
     env: input.env,
   });
   const effective = resolveVisibleEffective(

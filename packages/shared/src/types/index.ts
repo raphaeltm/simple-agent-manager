@@ -79,7 +79,6 @@ export {
   CAPACITY_SOURCE_KINDS,
   CAPACITY_WORKLOAD_ROLES,
   DEFAULT_CAPACITY_POOL_EFFECTIVE_STATES,
-  SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
   isCapacityCredentialSource,
   isCapacityExhaustionPolicy,
   isCapacityPlacementCredentialSource,
@@ -89,6 +88,7 @@ export {
   isCapacityPoolStrategy,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
+  SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
 } from './capacity-pool';
 
 // GitHub
@@ -168,12 +168,18 @@ export type {
   LocationInfo,
   ProviderCatalog,
   ProviderCatalogOfferingInfo,
+  ProviderCatalogRefreshOrigin,
+  ProviderCatalogRefreshStatus,
   ProviderCatalogResponse,
   ProviderInstanceCatalogSource,
   ProviderInstanceOffering,
   SizeInfo,
 } from './provider';
-export { isProviderInstanceCatalogSource, PROVIDER_INSTANCE_CATALOG_SOURCES } from './provider';
+export {
+  isProviderInstanceCatalogSource,
+  PROVIDER_CATALOG_REFRESH_ORIGINS,
+  PROVIDER_INSTANCE_CATALOG_SOURCES,
+} from './provider';
 
 // Project
 export type {
