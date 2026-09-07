@@ -7,25 +7,21 @@ import {
   type ProviderInstanceOffering,
 } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { drizzle as drizzleD1 } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { runScheduledCapacityPoolReconciliation } from '../../../src/scheduled/capacity-pool-reconciliation';
+import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
+import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
 import {
   capacityCandidateBaseId,
   capacityCandidateIdForRole,
   capacityCandidateRoleFromId,
   capacityCandidateSatisfiesWorkloadRole,
 } from '../../../src/services/capacity-pool-workload-roles';
-import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
-import { resolveCapacityPoolPlacementSettings } from '../../../src/services/capacity-pool-placement-settings';
-import {
-  ensureCandidatesForSource,
-  initialStatusForProviderOffering,
-} from '../../../src/services/default-capacity-pool-candidates';
+import { initialStatusForProviderOffering } from '../../../src/services/default-capacity-pool-candidates';
 import { externalCapacitySourceCredentialId } from '../../../src/services/default-capacity-pool-helpers';
 import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import {
@@ -40,7 +36,6 @@ import {
   scrubCapacitySourceCredentialSecrets,
 } from '../../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../../src/services/encryption';
-import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
 import {
   capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
@@ -48,6 +43,7 @@ import {
   resolveTaskStartCapacityPoolSelection,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
+import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
 import { applyCapacityPoolSchemaMigrations } from '../../helpers/capacity-pool-migrations';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
@@ -5140,7 +5136,9 @@ describe('capacity pool review findings', () => {
       expect(deploymentRow).toBeDefined();
       expect(deploymentRow?.workload_role).toBe('deployment');
       expect(deploymentRow?.status).toBe(candidateRow(workspaceIds[0])?.status);
-      expect(deploymentRow?.provider_instance_type).toBe('cx23');
+      // The mirror carries the SAME provider-native identity as the visible row: same
+      // location, legacy size hint, instance type and status.
+      expect(getDeploymentCandidateStatusRows(['cx23'])).toEqual(getCandidateStatusRows(['cx23']));
     });
 
     it('hides the placement-only deployment row from the pool editor surface', async () => {

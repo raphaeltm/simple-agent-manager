@@ -266,8 +266,9 @@ async function publishPoolEditAtomically(
   await db.batch(statements as SqliteBatch);
 
   // Read back rather than trusting a driver-specific `changes` shape. Comparing BOTH the
-  // revision and the exact timestamp this edit wrote closes the ABA window where a
-  // concurrent editor also advanced guardRevision -> guardRevision + 1.
+  // revision and the exact timestamp this edit wrote narrows the ABA window (a concurrent
+  // editor that also advanced guardRevision -> guardRevision + 1) to another isolate writing
+  // in the same millisecond; nextCapacityPoolTimestamp is strictly monotonic within one.
   const [after] = await db
     .select({
       revision: schema.capacityPools.revision,
@@ -424,16 +425,21 @@ async function resolveCandidateStatusUpdates(
 
   const coupledById = await readCandidateIdentities(db, poolId, coupledCandidateIds(updates));
   const resolvedStatuses = new Map<string, CapacityPoolStatus>();
+  // Coupled mirrors are resolved FIRST so an explicit request for a specific row always wins
+  // over a status inherited from its sibling, regardless of input ordering.
   for (const update of updates) {
     const requested = requestedById.get(update.id);
     if (!requested) continue;
-    resolvedStatuses.set(update.id, update.status);
     for (const coupledId of coupledCandidateIds([update])) {
       const coupled = coupledById.get(coupledId);
       if (!coupled) continue;
       if (!sharesExactProviderNativeIdentity(requested, coupled)) continue;
       resolvedStatuses.set(coupledId, update.status);
     }
+  }
+  for (const update of updates) {
+    if (!requestedById.has(update.id)) continue;
+    resolvedStatuses.set(update.id, update.status);
   }
 
   const changedUpdates = [...resolvedStatuses.entries()]
