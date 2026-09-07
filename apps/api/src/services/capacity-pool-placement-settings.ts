@@ -2,6 +2,7 @@ import type {
   CapacityPoolPlacementSettings,
   CapacityPoolSelectionWeights,
   ResourceRequirements,
+  SafeCapacityPoolPlacementSettingsSummary,
   VMSize,
 } from '@simple-agent-manager/shared';
 import {
@@ -141,6 +142,34 @@ export async function resolveCapacityPoolPlacementSettings(
       diagnostics,
     },
   };
+}
+
+export function toSafeCapacityPoolPlacementSettingsSummary(
+  resolved: ResolvedCapacityPoolPlacementSettings
+): SafeCapacityPoolPlacementSettingsSummary {
+  return {
+    version: resolved.placementSettings.version,
+    sourceGeneration: resolved.placementSettings.sourceGeneration,
+    legacyWorkloadAdapterVersion: resolved.placementSettings.legacyWorkloadAdapterVersion,
+    selectionWeights: resolved.placementSettings.selectionWeights,
+    rolloutCohortPercent: resolved.placementSettings.rolloutCohortPercent,
+    source: resolved.placementSettings.source,
+    resourceDefaults: resolved.resourceDefaults,
+  };
+}
+
+export async function resolveSafeCapacityPoolPlacementSettingsSummary(
+  db: Db,
+  env?: Pick<
+    Env,
+    | 'CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON'
+    | 'CAPACITY_POOL_SELECTION_SETTINGS_JSON'
+    | 'CAPACITY_POOL_PLATFORM_DEFAULTS_JSON'
+  >
+): Promise<SafeCapacityPoolPlacementSettingsSummary> {
+  return toSafeCapacityPoolPlacementSettingsSummary(
+    await resolveCapacityPoolPlacementSettings(db, env)
+  );
 }
 
 function parseLegacyWorkloadMapping(

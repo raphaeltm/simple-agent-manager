@@ -3,7 +3,9 @@
 // =============================================================================
 
 import type { ProviderInstanceCatalogSource } from './provider';
+import type { ResourceRequirements } from './resource';
 import type { CredentialProvider } from './user';
+import type { VMSize } from './workspace';
 
 export const CAPACITY_POOL_SCOPES = ['installation', 'user', 'project'] as const;
 export type CapacityPoolScope = (typeof CAPACITY_POOL_SCOPES)[number];
@@ -193,6 +195,24 @@ export interface CapacityPoolPlacementSettings {
   diagnostics: string[];
 }
 
+export interface SafeCapacityPoolPlacementSettingsSummary {
+  version: number;
+  /** Fingerprint of the selected behavior-affecting settings. */
+  sourceGeneration: number;
+  legacyWorkloadAdapterVersion: number;
+  selectionWeights: CapacityPoolSelectionWeights;
+  rolloutCohortPercent: number;
+  source: {
+    legacyWorkloadMapping: 'persisted' | 'environment' | 'default';
+    platformDefaults: 'persisted' | 'environment' | 'default';
+    selection: 'persisted' | 'environment' | 'default';
+  };
+  resourceDefaults: {
+    legacyWorkloadMapping: Record<VMSize, Required<ResourceRequirements>>;
+    platformDefaults: Required<ResourceRequirements>;
+  };
+}
+
 // =============================================================================
 // Capacity Pool API Response Types
 // =============================================================================
@@ -204,8 +224,7 @@ export const SAFE_EFFECTIVE_CAPACITY_POOL_REASONS = [
   'configured-default-pool-catalog-last-known-unavailable',
   'configured-default-pool-migration-pending',
 ] as const;
-export type SafeEffectiveCapacityPoolReason =
-  (typeof SAFE_EFFECTIVE_CAPACITY_POOL_REASONS)[number];
+export type SafeEffectiveCapacityPoolReason = (typeof SAFE_EFFECTIVE_CAPACITY_POOL_REASONS)[number];
 
 export interface SafeEffectiveCapacityPoolSummary {
   scope: CapacityPoolScope | null;
@@ -268,7 +287,7 @@ export interface ProjectDefaultCapacityPoolsResponse {
   precedence: CapacityPoolScope[];
   reconciledScopes: CapacityPoolScope[];
   policyMutationSupported: boolean;
-  placementSettings?: CapacityPoolPlacementSettings;
+  placementSettings?: SafeCapacityPoolPlacementSettingsSummary;
 }
 
 export function isCapacityPoolScope(value: unknown): value is CapacityPoolScope {

@@ -1457,6 +1457,71 @@ describe('default capacity pool creation', () => {
     ).toEqual({ configuration_state: 'source-disabled' });
   });
 
+  it('does not let incomplete catalog snapshots replace provider-scoped last-known-good inventory', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx33',
+          displayName: 'CX33',
+        }),
+      ],
+    });
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => ({
+        offerings: [
+          liveHetznerOffering({
+            location: 'fsn1',
+            providerInstanceType: 'cx33',
+            displayName: 'CX33 static subset',
+            catalogSource: 'static',
+          }),
+        ],
+        refreshSucceeded: true,
+        catalogComplete: false,
+      }),
+    });
+
+    expect(
+      getRows<{
+        provider_instance_type: string;
+        catalog_availability: string;
+        provider_instance_catalog_source: string | null;
+      }>(`
+        SELECT provider_instance_type, catalog_availability, provider_instance_catalog_source
+        FROM capacity_pool_candidates
+        WHERE provider_instance_type IN ('cx23', 'cx33')
+        ORDER BY provider_instance_type
+      `)
+    ).toEqual([
+      {
+        provider_instance_type: 'cx23',
+        catalog_availability: 'available',
+        provider_instance_catalog_source: 'api',
+      },
+      {
+        provider_instance_type: 'cx33',
+        catalog_availability: 'available',
+        provider_instance_catalog_source: 'static',
+      },
+    ]);
+    expect(
+      sqlite?.prepare("SELECT configuration_state FROM capacity_pools WHERE scope = 'user'").get()
+    ).toEqual({ configuration_state: 'configured-ready' });
+  });
+
   it('reconciles large provider catalogs without exceeding D1 bind limits', async () => {
     createDb();
     seedUserCredential({ id: 'user-hetzner' });
@@ -2868,6 +2933,68 @@ describe('default capacity pool creation', () => {
       { credential_id: 'user-hetzner-a', status: 'active' },
       { credential_id: 'user-hetzner-b', status: 'active' },
     ]);
+  });
+
+  it('does not let seeds added after an old seed SELECT be disabled by old cleanup', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner-a' });
+
+    let seedSelectionPaused = false;
+    let releaseOlderCleanup: (() => void) | null = null;
+    const olderRefresh = ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      afterCredentialSeedSelection: async ({ scope, seedSnapshotGeneration, seedCount }) => {
+        if (scope.scope !== 'user' || seedSelectionPaused) return;
+        seedSelectionPaused = true;
+        expect(seedSnapshotGeneration).toBe(0);
+        expect(seedCount).toBe(1);
+        await new Promise<void>((resolve) => {
+          releaseOlderCleanup = resolve;
+        });
+      },
+      offeringResolver: async (seed) => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: seed.id.endsWith('-b') ? 'cx33' : 'cx23',
+          displayName: seed.id.endsWith('-b') ? 'CX33' : 'CX23',
+        }),
+      ],
+    });
+    await vi.waitFor(() => expect(releaseOlderCleanup).toBeTypeOf('function'));
+
+    seedUserCredential({ id: 'user-hetzner-b' });
+    const newerDb = drizzle(sqlite!, { schema });
+    await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async (seed) => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: seed.id.endsWith('-b') ? 'cx33' : 'cx23',
+          displayName: seed.id.endsWith('-b') ? 'CX33' : 'CX23',
+        }),
+      ],
+    });
+
+    releaseOlderCleanup?.();
+    await olderRefresh;
+
+    expect(
+      getRows<{ credential_id: string; status: string }>(`
+        SELECT credential_id, status
+        FROM capacity_sources
+        WHERE credential_id IN ('user-hetzner-a', 'user-hetzner-b')
+        ORDER BY credential_id
+      `)
+    ).toEqual([
+      { credential_id: 'user-hetzner-a', status: 'active' },
+      { credential_id: 'user-hetzner-b', status: 'active' },
+    ]);
+    expect(getCatalogCandidateRow('cx33')).toMatchObject({
+      provider_instance_type: 'cx33',
+      provider_instance_catalog_source: 'api',
+    });
   });
 
   it('uses source-generation CAS across service contexts at the publication boundary', async () => {
