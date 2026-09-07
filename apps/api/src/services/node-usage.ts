@@ -66,6 +66,15 @@ export interface NodeUsageCalculationRow {
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
   providerInstancePriceDisplay?: string | null;
   credentialSource: string | null;
   /** Ownership class; user-owned (BYO) nodes accrue $0 regardless of credentialSource. */
@@ -114,6 +123,7 @@ function addNodeToTotals(
     | 'vmSize'
     | 'cloudProvider'
     | 'providerInstanceVcpuCount'
+    | 'observedProviderInstanceVcpuCount'
     | 'credentialSource'
     | 'nodeClass'
     | 'status'
@@ -140,7 +150,10 @@ function addNodeToTotals(
   }
   const endedAt = getNodeEndedAt(node.status, node.updatedAt);
   const hours = calculateNodeHoursInPeriod(node.createdAt, endedAt, periodStart, periodEnd, now);
-  const vcpus = node.providerInstanceVcpuCount ?? getVcpuCount(node.vmSize, node.cloudProvider);
+  const vcpus =
+    node.observedProviderInstanceVcpuCount ??
+    node.providerInstanceVcpuCount ??
+    getVcpuCount(node.vmSize, node.cloudProvider);
   const vcpuHours = hours * vcpus;
   const isPlatform = node.credentialSource === 'platform';
 
@@ -224,6 +237,15 @@ async function getUserOverlappingNodeRows(
       providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
       providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
       providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: schema.nodes.providerInstanceBootDiskSizeGb,
+      providerInstanceImage: schema.nodes.providerInstanceImage,
+      providerInstanceArchitecture: schema.nodes.providerInstanceArchitecture,
+      observedProviderInstanceType: schema.nodes.observedProviderInstanceType,
+      observedProviderInstanceVcpuCount: schema.nodes.observedProviderInstanceVcpuCount,
+      observedProviderInstanceMemoryMb: schema.nodes.observedProviderInstanceMemoryMb,
+      observedProviderInstanceDiskGb: schema.nodes.observedProviderInstanceDiskGb,
+      observedHardwareJson: schema.nodes.observedHardwareJson,
+      observedHardwareSource: schema.nodes.observedHardwareSource,
       providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
       credentialSource: schema.nodes.credentialSource,
       nodeClass: schema.nodes.nodeClass,
@@ -257,6 +279,15 @@ async function getAllOverlappingNodeRows(
       providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
       providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
       providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: schema.nodes.providerInstanceBootDiskSizeGb,
+      providerInstanceImage: schema.nodes.providerInstanceImage,
+      providerInstanceArchitecture: schema.nodes.providerInstanceArchitecture,
+      observedProviderInstanceType: schema.nodes.observedProviderInstanceType,
+      observedProviderInstanceVcpuCount: schema.nodes.observedProviderInstanceVcpuCount,
+      observedProviderInstanceMemoryMb: schema.nodes.observedProviderInstanceMemoryMb,
+      observedProviderInstanceDiskGb: schema.nodes.observedProviderInstanceDiskGb,
+      observedHardwareJson: schema.nodes.observedHardwareJson,
+      observedHardwareSource: schema.nodes.observedHardwareSource,
       providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
       credentialSource: schema.nodes.credentialSource,
       nodeClass: schema.nodes.nodeClass,
@@ -280,11 +311,23 @@ function toActiveComputeSession(node: NodeUsageRow): ActiveComputeSession | null
     workspaceId: node.id,
     serverType: node.vmSize,
     vmSize: node.vmSize,
-    vcpuCount: node.providerInstanceVcpuCount ?? getVcpuCount(node.vmSize, node.cloudProvider),
+    vcpuCount:
+      node.observedProviderInstanceVcpuCount ??
+      node.providerInstanceVcpuCount ??
+      getVcpuCount(node.vmSize, node.cloudProvider),
     providerInstanceType: node.providerInstanceType,
     providerInstanceVcpuCount: node.providerInstanceVcpuCount,
     providerInstanceMemoryMb: node.providerInstanceMemoryMb,
     providerInstanceDiskGb: node.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: node.providerInstanceImage,
+    providerInstanceArchitecture: node.providerInstanceArchitecture,
+    observedProviderInstanceType: node.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: node.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: node.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: node.observedProviderInstanceDiskGb,
+    observedHardwareJson: node.observedHardwareJson,
+    observedHardwareSource: node.observedHardwareSource,
     providerInstancePriceDisplay: node.providerInstancePriceDisplay,
     startedAt: node.createdAt,
     createdAt: node.createdAt,
@@ -301,11 +344,23 @@ function toNodeUsageRecord(
     nodeId: node.id,
     name: node.name,
     vmSize: node.vmSize,
-    vcpuCount: node.providerInstanceVcpuCount ?? getVcpuCount(node.vmSize, node.cloudProvider),
+    vcpuCount:
+      node.observedProviderInstanceVcpuCount ??
+      node.providerInstanceVcpuCount ??
+      getVcpuCount(node.vmSize, node.cloudProvider),
     providerInstanceType: node.providerInstanceType,
     providerInstanceVcpuCount: node.providerInstanceVcpuCount,
     providerInstanceMemoryMb: node.providerInstanceMemoryMb,
     providerInstanceDiskGb: node.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: node.providerInstanceImage,
+    providerInstanceArchitecture: node.providerInstanceArchitecture,
+    observedProviderInstanceType: node.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: node.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: node.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: node.observedProviderInstanceDiskGb,
+    observedHardwareJson: node.observedHardwareJson,
+    observedHardwareSource: node.observedHardwareSource,
     providerInstancePriceDisplay: node.providerInstancePriceDisplay,
     vmLocation: node.vmLocation,
     cloudProvider: node.cloudProvider,

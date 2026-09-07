@@ -12,6 +12,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
@@ -74,6 +75,19 @@ nodesRoutes.use('/*', async (c, next) => {
 });
 
 type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
+
+function optionalPositiveInteger(value: number | undefined, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value <= 0) {
+    throw errors.badRequest(`${field} must be a positive integer`);
+  }
+  return value;
+}
+
+function optionalTrimmedString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
 
 async function cleanupHostedDeploymentRouteDns(
   db: NodesDb,
@@ -239,15 +253,21 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
   }
 
   // Enforce compute quota when platform credentials will be used
-  const { resolveCredentialSource } = await import('../services/provider-credentials');
-  const credResult = await resolveCredentialSource(db, userId, provider ?? undefined);
-  if (!credResult) {
+  const { createProviderForUser } = await import('../services/provider-credentials');
+  const providerResult = await createProviderForUser(
+    db,
+    userId,
+    getCredentialEncryptionKey(c.env),
+    c.env,
+    provider ?? undefined
+  );
+  if (!providerResult) {
     throw errors.forbidden(
       'Cloud provider credentials required. Connect your account in Settings.'
     );
   }
   if (
-    credResult.credentialSource === 'platform' &&
+    providerResult.credentialSource === 'platform' &&
     c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false'
   ) {
     const { checkQuotaForUser } = await import('../services/compute-quotas');
@@ -260,13 +280,34 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     }
   }
 
+  const providerInstanceType =
+    optionalTrimmedString(body.providerInstanceType) ?? optionalTrimmedString(body.nativeOffering);
   const created = await createNodeRecord(c.env, {
     userId,
+    credentialAttributionUserId: userId,
+    credentialAttributionSource: providerResult.credentialSource,
     name: body.name.trim(),
     vmSize: body.vmSize ?? DEFAULT_VM_SIZE,
     vmLocation,
-    cloudProvider: provider,
+    cloudProvider: providerResult.providerName,
+    providerInstanceType,
+    providerInstanceBootDiskSizeGb: optionalPositiveInteger(body.bootDiskSizeGb, 'bootDiskSizeGb'),
+    providerInstanceImage: optionalTrimmedString(body.image),
+    providerInstanceArchitecture: body.architecture ?? null,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+    capacityPlacementSnapshot: {
+      capacityPoolId: null,
+      capacityPoolScope: null,
+      capacityPoolRevision: null,
+      capacitySourceId: null,
+      capacityPoolCandidateId: null,
+      placementCredentialSource: providerResult.exactCredentialBinding?.credentialSource ?? null,
+      placementCredentialReference:
+        providerResult.exactCredentialBinding?.credentialReference ?? null,
+      placementCredentialVersion: providerResult.exactCredentialBinding?.credentialVersion ?? null,
+      capacityPoolProjectId: null,
+      workloadRole: 'workspace',
+    },
   });
 
   recordNodeRoutingMetric(

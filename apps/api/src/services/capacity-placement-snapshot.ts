@@ -15,6 +15,9 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS = `
   provider_instance_vcpu_count,
   provider_instance_memory_mb,
   provider_instance_disk_gb,
+  provider_instance_boot_disk_size_gb,
+  provider_instance_image,
+  provider_instance_architecture,
   provider_instance_price_display,
   provider_instance_price_currency,
   provider_instance_price_monthly_cents,
@@ -22,7 +25,7 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS = `
   placement_explanation_json
 `;
 
-export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
+export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
 
 export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS = `
   capacity_pool_id = ?,
@@ -39,6 +42,9 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS = `
   provider_instance_vcpu_count = ?,
   provider_instance_memory_mb = ?,
   provider_instance_disk_gb = ?,
+  provider_instance_boot_disk_size_gb = ?,
+  provider_instance_image = ?,
+  provider_instance_architecture = ?,
   provider_instance_price_display = ?,
   provider_instance_price_currency = ?,
   provider_instance_price_monthly_cents = ?,
@@ -64,6 +70,9 @@ export function capacityPlacementSnapshotSqlValues(
     snapshot?.providerInstanceVcpuCount ?? null,
     snapshot?.providerInstanceMemoryMb ?? null,
     snapshot?.providerInstanceDiskGb ?? null,
+    snapshot?.providerInstanceBootDiskSizeGb ?? null,
+    snapshot?.providerInstanceImage ?? null,
+    snapshot?.providerInstanceArchitecture ?? null,
     snapshot?.providerInstancePriceDisplay ?? null,
     snapshot?.providerInstancePriceCurrency ?? null,
     snapshot?.providerInstancePriceMonthlyCents ?? null,
@@ -89,6 +98,9 @@ export function capacityPlacementSnapshotDbValues(
   providerInstanceVcpuCount: number | null;
   providerInstanceMemoryMb: number | null;
   providerInstanceDiskGb: number | null;
+  providerInstanceBootDiskSizeGb: number | null;
+  providerInstanceImage: string | null;
+  providerInstanceArchitecture: string | null;
   providerInstancePriceDisplay: string | null;
   providerInstancePriceCurrency: string | null;
   providerInstancePriceMonthlyCents: number | null;
@@ -110,6 +122,9 @@ export function capacityPlacementSnapshotDbValues(
     providerInstanceVcpuCount: snapshot?.providerInstanceVcpuCount ?? null,
     providerInstanceMemoryMb: snapshot?.providerInstanceMemoryMb ?? null,
     providerInstanceDiskGb: snapshot?.providerInstanceDiskGb ?? null,
+    providerInstanceBootDiskSizeGb: snapshot?.providerInstanceBootDiskSizeGb ?? null,
+    providerInstanceImage: snapshot?.providerInstanceImage ?? null,
+    providerInstanceArchitecture: snapshot?.providerInstanceArchitecture ?? null,
     providerInstancePriceDisplay: snapshot?.providerInstancePriceDisplay ?? null,
     providerInstancePriceCurrency: snapshot?.providerInstancePriceCurrency ?? null,
     providerInstancePriceMonthlyCents: snapshot?.providerInstancePriceMonthlyCents ?? null,

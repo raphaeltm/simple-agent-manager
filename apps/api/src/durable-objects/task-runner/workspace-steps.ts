@@ -141,6 +141,9 @@ async function recoverWorkspaceFromD1(
        provider_instance_vcpu_count AS providerInstanceVcpuCount,
        provider_instance_memory_mb AS providerInstanceMemoryMb,
        provider_instance_disk_gb AS providerInstanceDiskGb,
+       provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+       provider_instance_image AS providerInstanceImage,
+       provider_instance_architecture AS providerInstanceArchitecture,
        provider_instance_price_display AS providerInstancePriceDisplay,
        provider_instance_price_currency AS providerInstancePriceCurrency,
        provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
@@ -341,12 +344,41 @@ async function startComputeTrackingBestEffort(
   try {
     const { startComputeTracking } = await import('../../services/compute-usage');
     const nodeRow = await rc.env.DATABASE.prepare(
-      `SELECT cloud_provider, credential_source FROM nodes WHERE id = ?`
+      `SELECT
+         cloud_provider,
+         credential_source,
+         provider_instance_type,
+         provider_instance_vcpu_count,
+         provider_instance_memory_mb,
+         provider_instance_disk_gb,
+         provider_instance_boot_disk_size_gb,
+         provider_instance_image,
+         provider_instance_architecture,
+         observed_provider_instance_type,
+         observed_provider_instance_vcpu_count,
+         observed_provider_instance_memory_mb,
+         observed_provider_instance_disk_gb,
+         observed_hardware_json,
+         observed_hardware_source
+       FROM nodes WHERE id = ?`
     )
       .bind(nodeId)
       .first<{
         cloud_provider: string | null;
         credential_source: string | null;
+        provider_instance_type: string | null;
+        provider_instance_vcpu_count: number | null;
+        provider_instance_memory_mb: number | null;
+        provider_instance_disk_gb: number | null;
+        provider_instance_boot_disk_size_gb: number | null;
+        provider_instance_image: string | null;
+        provider_instance_architecture: string | null;
+        observed_provider_instance_type: string | null;
+        observed_provider_instance_vcpu_count: number | null;
+        observed_provider_instance_memory_mb: number | null;
+        observed_provider_instance_disk_gb: number | null;
+        observed_hardware_json: string | null;
+        observed_hardware_source: string | null;
       }>();
 
     await startComputeTracking(db as Parameters<typeof startComputeTracking>[0], {
@@ -355,6 +387,19 @@ async function startComputeTrackingBestEffort(
       nodeId,
       vmSize: state.config.vmSize,
       cloudProvider: nodeRow?.cloud_provider,
+      providerInstanceType: nodeRow?.provider_instance_type,
+      providerInstanceVcpuCount: nodeRow?.provider_instance_vcpu_count,
+      providerInstanceMemoryMb: nodeRow?.provider_instance_memory_mb,
+      providerInstanceDiskGb: nodeRow?.provider_instance_disk_gb,
+      providerInstanceBootDiskSizeGb: nodeRow?.provider_instance_boot_disk_size_gb,
+      providerInstanceImage: nodeRow?.provider_instance_image,
+      providerInstanceArchitecture: nodeRow?.provider_instance_architecture,
+      observedProviderInstanceType: nodeRow?.observed_provider_instance_type,
+      observedProviderInstanceVcpuCount: nodeRow?.observed_provider_instance_vcpu_count,
+      observedProviderInstanceMemoryMb: nodeRow?.observed_provider_instance_memory_mb,
+      observedProviderInstanceDiskGb: nodeRow?.observed_provider_instance_disk_gb,
+      observedHardwareJson: nodeRow?.observed_hardware_json,
+      observedHardwareSource: nodeRow?.observed_hardware_source,
       credentialSource: (nodeRow?.credential_source as CredentialSource | null) ?? 'user',
     });
   } catch (err) {

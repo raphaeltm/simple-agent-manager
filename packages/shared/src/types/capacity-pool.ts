@@ -113,6 +113,9 @@ export interface CapacityPoolCandidate {
   providerInstanceVcpuCount: number | null;
   providerInstanceMemoryMb: number | null;
   providerInstanceDiskGb: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay: string | null;
   providerInstancePriceCurrency: string | null;
   providerInstancePriceMonthlyCents: number | null;
@@ -153,6 +156,9 @@ export interface CapacityPlacementSnapshot {
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;

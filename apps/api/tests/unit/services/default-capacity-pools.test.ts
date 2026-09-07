@@ -137,6 +137,10 @@ function createDb() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE compute_usage (
+      id TEXT PRIMARY KEY
+    );
+
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

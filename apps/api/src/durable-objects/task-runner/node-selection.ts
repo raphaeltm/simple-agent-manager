@@ -57,6 +57,9 @@ export type NodePlacementFields = {
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;
@@ -200,6 +203,9 @@ export async function tryClaimWarmNode(
        n.provider_instance_vcpu_count AS providerInstanceVcpuCount,
        n.provider_instance_memory_mb AS providerInstanceMemoryMb,
        n.provider_instance_disk_gb AS providerInstanceDiskGb,
+       n.provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+       n.provider_instance_image AS providerInstanceImage,
+       n.provider_instance_architecture AS providerInstanceArchitecture,
        n.provider_instance_price_display AS providerInstancePriceDisplay,
        n.provider_instance_price_currency AS providerInstancePriceCurrency,
        n.provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
@@ -255,6 +261,9 @@ export async function tryClaimWarmNode(
        provider_instance_vcpu_count AS providerInstanceVcpuCount,
        provider_instance_memory_mb AS providerInstanceMemoryMb,
        provider_instance_disk_gb AS providerInstanceDiskGb,
+       provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+       provider_instance_image AS providerInstanceImage,
+       provider_instance_architecture AS providerInstanceArchitecture,
        provider_instance_price_display AS providerInstancePriceDisplay,
        provider_instance_price_currency AS providerInstancePriceCurrency,
        provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
@@ -316,6 +325,9 @@ export async function tryClaimWarmNode(
            provider_instance_vcpu_count AS providerInstanceVcpuCount,
            provider_instance_memory_mb AS providerInstanceMemoryMb,
            provider_instance_disk_gb AS providerInstanceDiskGb,
+           provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+           provider_instance_image AS providerInstanceImage,
+           provider_instance_architecture AS providerInstanceArchitecture,
            provider_instance_price_display AS providerInstancePriceDisplay,
            provider_instance_price_currency AS providerInstancePriceCurrency,
            provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
@@ -400,6 +412,9 @@ export async function findNodeWithCapacity(
        provider_instance_vcpu_count AS providerInstanceVcpuCount,
        provider_instance_memory_mb AS providerInstanceMemoryMb,
        provider_instance_disk_gb AS providerInstanceDiskGb,
+       provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+       provider_instance_image AS providerInstanceImage,
+       provider_instance_architecture AS providerInstanceArchitecture,
        provider_instance_price_display AS providerInstancePriceDisplay,
        provider_instance_price_currency AS providerInstancePriceCurrency,
        provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
@@ -433,6 +448,9 @@ export async function findNodeWithCapacity(
       providerInstanceVcpuCount: number | null;
       providerInstanceMemoryMb: number | null;
       providerInstanceDiskGb: number | null;
+      providerInstanceBootDiskSizeGb: number | null;
+      providerInstanceImage: string | null;
+      providerInstanceArchitecture: string | null;
       providerInstancePriceDisplay: string | null;
       providerInstancePriceCurrency: string | null;
       providerInstancePriceMonthlyCents: number | null;

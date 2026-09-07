@@ -148,6 +148,9 @@ export function toCapacityPoolCandidate(
     providerInstanceVcpuCount: row.providerInstanceVcpuCount,
     providerInstanceMemoryMb: row.providerInstanceMemoryMb,
     providerInstanceDiskGb: row.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: row.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: row.providerInstanceImage,
+    providerInstanceArchitecture: row.providerInstanceArchitecture,
     providerInstancePriceDisplay: row.providerInstancePriceDisplay,
     providerInstancePriceCurrency: row.providerInstancePriceCurrency,
     providerInstancePriceMonthlyCents: row.providerInstancePriceMonthlyCents,
@@ -188,6 +191,9 @@ export interface CapacityPlacementSnapshotRow {
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;
@@ -225,6 +231,9 @@ export function toCapacityPlacementSnapshot(
     providerInstanceVcpuCount: row.providerInstanceVcpuCount ?? null,
     providerInstanceMemoryMb: row.providerInstanceMemoryMb ?? null,
     providerInstanceDiskGb: row.providerInstanceDiskGb ?? null,
+    providerInstanceBootDiskSizeGb: row.providerInstanceBootDiskSizeGb ?? null,
+    providerInstanceImage: row.providerInstanceImage ?? null,
+    providerInstanceArchitecture: row.providerInstanceArchitecture ?? null,
     providerInstancePriceDisplay: row.providerInstancePriceDisplay ?? null,
     providerInstancePriceCurrency: row.providerInstancePriceCurrency ?? null,
     providerInstancePriceMonthlyCents: row.providerInstancePriceMonthlyCents ?? null,

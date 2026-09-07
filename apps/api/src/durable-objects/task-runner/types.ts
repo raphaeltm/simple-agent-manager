@@ -73,6 +73,9 @@ export interface TaskRunConfig {
   cloudProvider: CredentialProvider | null;
   /** Provider-native instance type/SKU selected from a compute pool. Null preserves legacy size mapping. */
   providerInstanceType?: string | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: 'x86_64' | 'arm64' | null;
   /** Root-pinned credential attribution user for this task tree. */
   credentialAttributionUserId: string;
   /** Project scope when credentialAttributionSource is 'project'. */

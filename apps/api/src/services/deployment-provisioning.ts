@@ -19,8 +19,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { createNodeRecord, provisionNode } from './nodes';
-import { resolveCredentialSource } from './provider-credentials';
+import { createProviderForUser } from './provider-credentials';
 
 /** Default VM size for deployment nodes — apps are typically smaller than dev workspaces. */
 export const DEPLOYMENT_DEFAULT_VM_SIZE = 'small';
@@ -49,6 +50,9 @@ interface DeploymentPlacement {
   location: string;
   vmSize: string;
   credentialSource: CredentialSource;
+  placementCredentialSource: CredentialSource | null;
+  placementCredentialReference: string | null;
+  placementCredentialVersion: number | null;
 }
 
 interface DeploymentNodeCandidate {
@@ -266,25 +270,24 @@ export async function resolveDeploymentPlacement(
 ): Promise<DeploymentPlacement | null> {
   const db = drizzle(env.DATABASE, { schema });
 
-  let cloudProvider: CredentialProvider;
-  let credentialSource: CredentialSource;
-  if (options?.providerOverride) {
-    const credential = await resolveCredentialSource(db, userId, options.providerOverride, projectId);
-    if (!credential) {
-      log.error('deployment_provisioning.no_provider', { userId, projectId, provider: options.providerOverride });
-      return null;
-    }
-    cloudProvider = credential.providerName;
-    credentialSource = credential.credentialSource;
-  } else {
-    const credential = await resolveCredentialSource(db, userId, undefined, projectId);
-    if (!credential) {
-      log.error('deployment_provisioning.no_provider', { userId, projectId });
-      return null;
-    }
-    cloudProvider = credential.providerName;
-    credentialSource = credential.credentialSource;
+  const credential = await createProviderForUser(
+    db,
+    userId,
+    getCredentialEncryptionKey(env),
+    env,
+    options?.providerOverride,
+    projectId
+  );
+  if (!credential) {
+    log.error('deployment_provisioning.no_provider', {
+      userId,
+      projectId,
+      provider: options?.providerOverride,
+    });
+    return null;
   }
+  const cloudProvider: CredentialProvider = credential.providerName;
+  const credentialSource: CredentialSource = credential.credentialSource;
 
   const vmLocation =
     options?.vmLocationOverride?.trim() ||
@@ -297,6 +300,9 @@ export async function resolveDeploymentPlacement(
     location: vmLocation,
     vmSize: options?.vmSizeOverride?.trim() || defaultVmSize,
     credentialSource,
+    placementCredentialSource: credential.exactCredentialBinding?.credentialSource ?? null,
+    placementCredentialReference: credential.exactCredentialBinding?.credentialReference ?? null,
+    placementCredentialVersion: credential.exactCredentialBinding?.credentialVersion ?? null,
   };
 }
 
@@ -392,6 +398,18 @@ export async function provisionDeploymentNode(
     cloudProvider: placement.provider,
     nodeRole: 'deployment',
     nodeMode,
+    capacityPlacementSnapshot: {
+      capacityPoolId: null,
+      capacityPoolScope: null,
+      capacityPoolRevision: null,
+      capacitySourceId: null,
+      capacityPoolCandidateId: null,
+      placementCredentialSource: placement.placementCredentialSource,
+      placementCredentialReference: placement.placementCredentialReference,
+      placementCredentialVersion: placement.placementCredentialVersion,
+      capacityPoolProjectId: null,
+      workloadRole: 'deployment',
+    },
   });
 
   const linkedFreshNode = await linkEnvironmentToNode({
