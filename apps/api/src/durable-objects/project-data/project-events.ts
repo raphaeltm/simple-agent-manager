@@ -314,7 +314,7 @@ export function createProjectEventSubscription(
     normalized.deliveryPreference.resolved === 'queued_for_prompt_delivery' ? 2 : 1,
     normalized.projectId,
     normalized.deliveryPreference.target?.sessionId ?? null,
-    normalized.deliveryPreference.target?.taskId ?? null,
+    normalized.ownerTaskId ?? normalized.deliveryPreference.target?.taskId ?? null,
     normalized.deliveryPreference.target?.runtimeId ??
       normalized.deliveryPreference.target?.agentId ??
       null,
@@ -371,7 +371,7 @@ export function listProjectEventSubscriptions(
     params.push(owner.type, owner.id);
     for (const legacyOwner of legacyOwners) {
       ownerPredicates.push(
-        '(COALESCE(owner_version, 1) = 1 AND owner_type = ? AND owner_id = ?)'
+        '(owner_version = 1 AND owner_type = ? AND owner_id = ?)'
       );
       params.push(legacyOwner.type, legacyOwner.id);
     }

@@ -57,7 +57,7 @@ export function computeProjectEventMaterializationAlarmTime(
           AND m.subscription_id = s.id
          WHERE s.project_id = ?
            AND s.contract_version >= 2
-           AND COALESCE(s.owner_version, 1) >= 2
+           AND s.owner_version >= 2
            AND s.owner_type = 'agent'
            AND s.owner_project_id = s.project_id
            AND s.owner_chat_session_id = s.target_session_id
@@ -65,7 +65,7 @@ export function computeProjectEventMaterializationAlarmTime(
            AND s.lifecycle_state = 'active'
            AND (s.expires_at IS NULL OR s.expires_at > ?)
            AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
-           AND COALESCE(s.prompt_delivery_count, 0) < ?
+           AND s.prompt_delivery_count < ?
            AND s.requested_delivery = 'existing_session_prompt'
            AND s.resolved_delivery = 'queued_for_prompt_delivery'
            AND s.target_session_id IS NOT NULL

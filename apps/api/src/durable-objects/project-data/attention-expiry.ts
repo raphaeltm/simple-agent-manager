@@ -4,7 +4,7 @@ import { transitionTaskToTerminal } from '../../services/task-terminal-transitio
 import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
-import { readProjectEventWakeLeaseUntil } from './project-events-materialization';
+import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import {
   activeWorkHardStallMs,
   reconciliationDeadlineMs,

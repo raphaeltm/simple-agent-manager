@@ -88,6 +88,36 @@ describe('session recovery source guard — real D1/DO vertical slice', () => {
     ).resolves.toEqual({ authorized: true, prepared: true });
   });
 
+  it('allows a live root source through a second recovery generation that owns the same chat', async () => {
+    const sourceTaskId = 'guard-source-two-generation';
+    const firstRecoveryTaskId = 'guard-recovery-two-generation-a';
+    const secondRecoveryTaskId = 'guard-recovery-two-generation-b';
+    const chatSessionId = 'guard-chat-two-generation';
+    await seedTask(sourceTaskId, PROJECT_ID, USER_ID, { status: 'awaiting_followup' });
+    await seedTask(firstRecoveryTaskId, PROJECT_ID, USER_ID, { status: 'failed' });
+    await seedTask(secondRecoveryTaskId, PROJECT_ID, USER_ID, { status: 'in_progress' });
+    await setTaskFields(sourceTaskId, { status: 'awaiting_followup' });
+    await setTaskFields(firstRecoveryTaskId, {
+      recoverySourceTaskId: sourceTaskId,
+      triggeredBy: 'session-recovery',
+      status: 'failed',
+    });
+    await setTaskFields(secondRecoveryTaskId, {
+      chatSessionId,
+      recoverySourceTaskId: sourceTaskId,
+      triggeredBy: 'session-recovery',
+      status: 'in_progress',
+    });
+
+    await expect(
+      containerStub('guard-container-two-generation').__guardedPrepare({
+        taskId: sourceTaskId,
+        projectId: PROJECT_ID,
+        chatSessionId,
+      })
+    ).resolves.toEqual({ authorized: true, prepared: true });
+  });
+
   it('rejects terminal and wrong-lineage sources before DO preparation', async () => {
     const sourceTaskId = 'guard-source-rejected';
     const unrelatedTaskId = 'guard-unrelated-owner';

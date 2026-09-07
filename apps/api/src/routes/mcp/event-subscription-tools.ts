@@ -52,7 +52,7 @@ function agentCallerFromToken(tokenData: McpTokenData) {
 }
 
 function rejectIdentityOverrides(params: Record<string, unknown>): void {
-  for (const field of ['projectId', 'owner', 'ownerScope', 'cancelledBy']) {
+  for (const field of ['projectId', 'owner', 'ownerScope', 'cancelledBy', 'ownerTaskId']) {
     if (Object.prototype.hasOwnProperty.call(params, field)) {
       throw new AppError(403, 'FORBIDDEN', `${field} is derived from MCP caller context`);
     }
@@ -155,14 +155,21 @@ export async function handleCreateProjectEventSubscription(
 ): Promise<JsonRpcResponse> {
   try {
     rejectIdentityOverrides(params);
-    const result = await createProjectEventSubscriptionForCaller(env, agentCallerFromToken(tokenData), {
-      idempotencyKey: normalizeString(params.idempotencyKey, 'idempotencyKey'),
-      filter: normalizeFilter(params.filter),
-      requestedDelivery: normalizeString(params.requestedDelivery, 'requestedDelivery') as ProjectEventSubscriptionCreateRequest['requestedDelivery'],
-      target: normalizeTarget(params.target),
-      reason: normalizeOptionalString(params.reason, 'reason') ?? null,
-      expiresAt: normalizeExpiresAt(params.expiresAt),
-    });
+    const result = await createProjectEventSubscriptionForCaller(
+      env,
+      agentCallerFromToken(tokenData),
+      {
+        idempotencyKey: normalizeString(params.idempotencyKey, 'idempotencyKey'),
+        filter: normalizeFilter(params.filter),
+        requestedDelivery: normalizeString(
+          params.requestedDelivery,
+          'requestedDelivery'
+        ) as ProjectEventSubscriptionCreateRequest['requestedDelivery'],
+        target: normalizeTarget(params.target),
+        reason: normalizeOptionalString(params.reason, 'reason') ?? null,
+        expiresAt: normalizeExpiresAt(params.expiresAt),
+      }
+    );
     return textResult(requestId, {
       subscription: result.subscription,
       idempotent: result.idempotent,
@@ -183,10 +190,14 @@ export async function handleListProjectEventSubscriptions(
 ): Promise<JsonRpcResponse> {
   try {
     rejectIdentityOverrides(params);
-    const result = await listProjectEventSubscriptionsForCaller(env, agentCallerFromToken(tokenData), {
-      state: normalizeState(params.state),
-      limit: normalizeLimit(params.limit),
-    });
+    const result = await listProjectEventSubscriptionsForCaller(
+      env,
+      agentCallerFromToken(tokenData),
+      {
+        state: normalizeState(params.state),
+        limit: normalizeLimit(params.limit),
+      }
+    );
     return textResult(requestId, result);
   } catch (err) {
     return mapEventSubscriptionError(requestId, 'list_project_event_subscriptions', err);
@@ -201,10 +212,14 @@ export async function handleGetProjectEventSubscription(
 ): Promise<JsonRpcResponse> {
   try {
     rejectIdentityOverrides(params);
-    const result = await getProjectEventSubscriptionForCaller(env, agentCallerFromToken(tokenData), {
-      subscriptionId: normalizeString(params.subscriptionId, 'subscriptionId'),
-      required: normalizeRequired(params.required),
-    });
+    const result = await getProjectEventSubscriptionForCaller(
+      env,
+      agentCallerFromToken(tokenData),
+      {
+        subscriptionId: normalizeString(params.subscriptionId, 'subscriptionId'),
+        required: normalizeRequired(params.required),
+      }
+    );
     return textResult(requestId, result);
   } catch (err) {
     return mapEventSubscriptionError(requestId, 'get_project_event_subscription', err);

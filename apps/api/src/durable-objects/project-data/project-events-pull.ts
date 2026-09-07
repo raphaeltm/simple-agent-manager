@@ -389,7 +389,7 @@ function visibleSubscriptionPredicate(visibility: ProjectEventAgentVisibility): 
   ];
   for (const legacyOwner of visibility.legacyOwners ?? []) {
     clauses.push(
-      `(COALESCE(s.owner_version, 1) = 1
+      `(s.owner_version = 1
         AND s.owner_type = ?
         AND s.owner_id = ?
         AND s.target_session_id = ?)`

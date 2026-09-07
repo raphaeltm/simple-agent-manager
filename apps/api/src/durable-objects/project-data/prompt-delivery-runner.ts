@@ -15,7 +15,7 @@ import type { DurableExecutionConfig } from './durable-execution-config';
 import {
   advanceProjectEventPromptAttemptCheckpoint,
   invalidProjectEventWakeDeliveryTargetResult,
-} from './project-events-materialization';
+} from './project-events-wake-delivery';
 import {
   applyPromptDeliveryResult,
   type PromptDeliveryClaim,

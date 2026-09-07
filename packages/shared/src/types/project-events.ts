@@ -329,6 +329,8 @@ export type CreateProjectEventSubscriptionInput = {
   idempotencyKey: string;
   filter: ProjectEventFilterV1;
   deliveryPreference: ProjectEventDeliveryPreference;
+  /** Stable source-task authority for versioned agent-owned wake subscriptions. */
+  ownerTaskId?: string | null;
   reason?: string | null;
   expiresAt?: number | null;
 };

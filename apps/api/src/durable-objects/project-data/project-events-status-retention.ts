@@ -160,14 +160,16 @@ export function runProjectEventRetention(
     deletedMatches: deletedMatches.mutated,
     deletedBatches: deletedBatches.mutated,
     deletedAttempts: deletedAttempts.mutated,
-    expiredSubscriptions: expired.mutated,
-    repairedOrphanMatches: repaired.mutated,
+    expiredSubscriptions: expired.expiredSubscriptions,
+    repairedOrphanMatches: repaired.count,
     hasMore,
     accounting,
   };
 }
 
 type BudgetedMutation = { mutated: number; hasMore: boolean };
+type CountedBudgetedMutation = BudgetedMutation & { count: number };
+type SubscriptionExpiryMutation = BudgetedMutation & { expiredSubscriptions: number };
 
 function takeBudgetedIds(
   sql: SqlStorage,
@@ -205,9 +207,10 @@ function expireDueSubscriptionsWithinBudget(
   projectId: string,
   now: number,
   budget: number
-): BudgetedMutation {
+): SubscriptionExpiryMutation {
   let remaining = budget;
   let mutated = 0;
+  let expiredSubscriptions = 0;
   let hasMore = false;
   const selected = takeBudgetedIds(
     sql,
@@ -232,12 +235,14 @@ function expireDueSubscriptionsWithinBudget(
       projectId,
       ...chunk
     ).rowsWritten;
+    expiredSubscriptions += chunk.length;
     mutated += written;
     remaining -= written;
   }
   if (remaining <= 0) {
     return {
       mutated,
+      expiredSubscriptions,
       hasMore: hasMore || hasExpiredSubscriptionUnbatchedMatches(sql, projectId, now),
     };
   }
@@ -282,6 +287,7 @@ function expireDueSubscriptionsWithinBudget(
   }
   return {
     mutated,
+    expiredSubscriptions,
     hasMore: hasMore || matchedRowsWritten < selectedMatches.ids.length,
   };
 }
@@ -317,7 +323,7 @@ function repairOrphanMatches(
   projectId: string,
   now: number,
   budget: number
-): BudgetedMutation {
+): CountedBudgetedMutation {
   const selected = takeBudgetedIds(
     sql,
     `SELECT m.id AS id
@@ -334,11 +340,12 @@ function repairOrphanMatches(
     [projectId],
     budget
   );
-  if (selected.ids.length === 0) return { mutated: 0, hasMore: selected.hasMore };
+  if (selected.ids.length === 0) return { mutated: 0, count: 0, hasMore: selected.hasMore };
   let mutated = 0;
+  let repaired = 0;
   for (const chunk of chunkIdsForBindBudget(selected.ids, 5)) {
     const placeholders = chunk.map(() => '?').join(', ');
-    mutated += sql.exec(
+    const written = sql.exec(
       `UPDATE project_event_matches
        SET state = 'expired',
            matched_at = CASE WHEN matched_at > ? THEN ? ELSE matched_at END,
@@ -360,8 +367,10 @@ function repairOrphanMatches(
       projectId,
       ...chunk
     ).rowsWritten;
+    mutated += written;
+    repaired += written > 0 ? chunk.length : 0;
   }
-  return { mutated, hasMore: selected.hasMore || mutated < selected.ids.length };
+  return { mutated, count: repaired, hasMore: selected.hasMore || repaired < selected.ids.length };
 }
 
 function deleteEligibleAttempts(
@@ -396,14 +405,18 @@ function deleteEligibleMatches(
   let remaining = budget;
   let mutated = 0;
   let hasMore = false;
-  for (const phase of eligibleMatchDeletionPhases(projectId, cutoff)) {
+  const phases = eligibleMatchDeletionPhases(projectId, cutoff);
+  for (let index = 0; index < phases.length; index += 1) {
+    const phase = phases[index]!;
     const selected = takeBudgetedIds(sql, phase.query, phase.params, remaining);
     const deleted = deleteRowsByIds(sql, 'project_event_matches', projectId, selected.ids);
     mutated += deleted;
     remaining -= deleted;
     hasMore ||= selected.hasMore || deleted < selected.ids.length;
     if (remaining <= 0) {
-      hasMore ||= hasEligibleRows(sql, phase.query, phase.params);
+      hasMore ||= phases
+        .slice(index)
+        .some((candidate) => hasEligibleRows(sql, candidate.query, candidate.params));
       break;
     }
   }

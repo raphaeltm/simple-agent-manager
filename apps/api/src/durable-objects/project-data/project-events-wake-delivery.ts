@@ -35,7 +35,7 @@ export function readProjectEventWakeLeaseUntil(
        FROM project_event_subscriptions s
        WHERE s.target_session_id = ?
          AND s.contract_version >= 2
-         AND COALESCE(s.owner_version, 1) >= 2
+         AND s.owner_version >= 2
          AND s.owner_type = 'agent'
          AND s.owner_project_id = s.project_id
          AND s.owner_chat_session_id = s.target_session_id

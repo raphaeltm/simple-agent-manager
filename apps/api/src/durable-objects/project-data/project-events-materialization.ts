@@ -288,7 +288,7 @@ function materializeCandidate(
     resolution.batchState !== 'pending' ||
     resolution.resolvedDelivery !== 'queued_for_prompt_delivery'
   ) {
-    terminalizeMatches(
+    terminalizeProjectEventWakeMatches(
       sql,
       projectId,
       matches.map((match) => match.id),
@@ -400,14 +400,14 @@ function selectWakeCandidates(
        WHERE s.project_id = ?
          AND s.owner_project_id = ?
          AND s.contract_version >= 2
-         AND COALESCE(s.owner_version, 1) >= 2
+         AND s.owner_version >= 2
          AND s.owner_type = 'agent'
          AND s.owner_chat_session_id = s.target_session_id
          AND s.owner_task_id IS NOT NULL
          AND s.lifecycle_state = 'active'
          AND (s.expires_at IS NULL OR s.expires_at > ?)
          AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
-         AND COALESCE(s.prompt_delivery_count, 0) < ?
+         AND s.prompt_delivery_count < ?
          AND (s.delivery_cooldown_until IS NULL OR s.delivery_cooldown_until <= ?)
          AND s.requested_delivery = 'existing_session_prompt'
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
@@ -429,7 +429,9 @@ function selectWakeCandidates(
     .toArray();
   return rows
     .filter(
-      (row): row is {
+      (
+        row
+      ): row is {
         subscription_id: string;
         target_session_id: string;
         target_task_id: string | null;
@@ -476,7 +478,7 @@ function terminalizeIneligibleWakeMatches(
     now,
     state: 'recorded_not_injected',
     reason: 'event wake subscription delivery count exhausted',
-    predicate: `COALESCE(s.prompt_delivery_count, 0) >= ?`,
+    predicate: `s.prompt_delivery_count >= ?`,
     params: [maxPerSubscription],
   });
   mutated += terminalizeIneligibleWakeMatchesByPredicate(sql, {
@@ -715,7 +717,7 @@ function recordQueueCheckpoint(
   );
 }
 
-function terminalizeMatches(
+export function terminalizeProjectEventWakeMatches(
   sql: SqlStorage,
   projectId: string,
   matchIds: string[],

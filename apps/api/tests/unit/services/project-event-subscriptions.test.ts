@@ -41,6 +41,7 @@ type TaskRow = {
   status: string;
   workspace_id: string | null;
   chat_session_id: string | null;
+  recovery_source_task_id: string | null;
 };
 
 type WorkspaceRow = {
@@ -82,6 +83,7 @@ function makeEnv(fixtures: D1Fixtures = {}): Env {
       status: 'in_progress',
       workspace_id: 'workspace-1',
       chat_session_id: 'session-1',
+      recovery_source_task_id: null,
     },
   };
   const workspaces = fixtures.workspaces ?? {
@@ -165,7 +167,7 @@ function makeSubscription(
 ): ProjectEventSubscriptionRecord {
   const owner: ProjectEventSubscriptionOwner = {
     type: 'agent',
-    id: 'agent-session-1',
+    id: 'project-1:session-1',
     name: 'agent-session-1',
   };
   return {
@@ -224,7 +226,8 @@ describe('internal ProjectData event subscription surface', () => {
           owner: input.owner as ProjectEventSubscriptionOwner,
           idempotencyKey: input.idempotencyKey as string,
           filter: input.filter as ProjectEventFilterV1,
-          deliveryPreference: input.deliveryPreference as ProjectEventSubscriptionRecord['deliveryPreference'],
+          deliveryPreference:
+            input.deliveryPreference as ProjectEventSubscriptionRecord['deliveryPreference'],
           reason: input.reason as string | null,
           expiresAt: input.expiresAt as number | null,
         }),
@@ -265,37 +268,81 @@ describe('internal ProjectData event subscription surface', () => {
     });
 
     expect(response).toMatchObject({ callerKind: 'agent', changed: true, idempotent: false });
+    expect(projectDataMocks.createProjectEventSubscription).toHaveBeenCalledWith(env, 'project-1', {
+      owner: { type: 'agent', id: 'project-1:session-1', name: 'agent-session-1' },
+      idempotencyKey: 'idem-1',
+      filter,
+      deliveryPreference: {
+        requested: 'existing_session_prompt',
+        resolved: 'queued_for_prompt_delivery',
+        target: {
+          sessionId: 'session-1',
+          taskId: 'task-1',
+          runtimeId: null,
+          agentId: 'agent-session-1',
+        },
+      },
+      ownerTaskId: 'task-1',
+      reason: 'watch CI',
+      expiresAt: now + 120_000,
+    });
+  });
+
+  it('stores the recovery-lineage root as the source task guard while preserving current target validation', async () => {
+    const env = makeEnv({
+      tasks: {
+        'recovery-task-1': {
+          id: 'recovery-task-1',
+          project_id: 'project-1',
+          user_id: 'user-1',
+          status: 'in_progress',
+          workspace_id: 'workspace-1',
+          chat_session_id: 'session-1',
+          recovery_source_task_id: 'source-task-1',
+        },
+      },
+    });
+
+    await createProjectEventSubscriptionForCaller(
+      env,
+      makeAgentCaller({ taskId: 'recovery-task-1' }),
+      {
+        idempotencyKey: 'idem-recovery',
+        filter,
+        requestedDelivery: 'existing_session_prompt',
+        target: {
+          sessionId: 'session-1',
+          taskId: 'recovery-task-1',
+          agentId: 'agent-session-1',
+        },
+      }
+    );
+
     expect(projectDataMocks.createProjectEventSubscription).toHaveBeenCalledWith(
       env,
       'project-1',
-      {
-        owner: { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
-        idempotencyKey: 'idem-1',
-        filter,
-        deliveryPreference: {
-          requested: 'existing_session_prompt',
-          resolved: 'recorded_not_injected',
-          target: {
-            sessionId: 'session-1',
-            taskId: 'task-1',
-            runtimeId: null,
-            agentId: 'agent-session-1',
-          },
-        },
-        reason: 'watch CI',
-        expiresAt: now + 120_000,
-      }
+      expect.objectContaining({
+        owner: { type: 'agent', id: 'project-1:session-1', name: 'agent-session-1' },
+        ownerTaskId: 'source-task-1',
+        deliveryPreference: expect.objectContaining({
+          target: expect.objectContaining({ taskId: 'recovery-task-1' }),
+        }),
+      })
     );
   });
 
   it('caps agent subscription expiry by the MCP token maximum lifetime', async () => {
     await expectAppError(
-      createProjectEventSubscriptionForCaller(makeEnv(), makeAgentCaller({ mcpTokenCreatedAt: null }), {
-        idempotencyKey: 'idem-1',
-        filter,
-        requestedDelivery: 'record_only',
-        expiresAt: now + 301_000,
-      }),
+      createProjectEventSubscriptionForCaller(
+        makeEnv(),
+        makeAgentCaller({ mcpTokenCreatedAt: null }),
+        {
+          idempotencyKey: 'idem-1',
+          filter,
+          requestedDelivery: 'record_only',
+          expiresAt: now + 301_000,
+        }
+      ),
       403,
       'token lifetime'
     );
@@ -351,11 +398,15 @@ describe('internal ProjectData event subscription surface', () => {
 
   it('rejects invalid caller project and workspace bindings before storage writes', async () => {
     await expectAppError(
-      createProjectEventSubscriptionForCaller(makeEnv(), makeAgentCaller({ projectId: 'project-2' }), {
-        idempotencyKey: 'idem-1',
-        filter,
-        requestedDelivery: 'record_only',
-      }),
+      createProjectEventSubscriptionForCaller(
+        makeEnv(),
+        makeAgentCaller({ projectId: 'project-2' }),
+        {
+          idempotencyKey: 'idem-1',
+          filter,
+          requestedDelivery: 'record_only',
+        }
+      ),
       404,
       'Calling task'
     );
@@ -370,6 +421,7 @@ describe('internal ProjectData event subscription surface', () => {
               user_id: 'user-1',
               status: 'running',
               chat_session_id: 'session-1',
+              recovery_source_task_id: null,
             },
           },
         }),
@@ -430,7 +482,7 @@ describe('internal ProjectData event subscription surface', () => {
         owner: { type: 'standing_watch', id: 'watch-1', name: 'PR CI watch' },
         deliveryPreference: expect.objectContaining({
           requested: 'existing_session_prompt',
-          resolved: 'recorded_not_injected',
+          resolved: 'queued_for_prompt_delivery',
         }),
       })
     );
@@ -446,6 +498,7 @@ describe('internal ProjectData event subscription surface', () => {
           status: 'in_progress',
           workspace_id: 'workspace-2',
           chat_session_id: 'session-2',
+          recovery_source_task_id: null,
         },
       },
     });
@@ -546,7 +599,11 @@ describe('internal ProjectData event subscription surface', () => {
       'project-1',
       {
         state: 'active',
-        owner: { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
+        owner: { type: 'agent', id: 'project-1:session-1', name: 'agent-session-1' },
+        legacyOwners: [
+          { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
+          { type: 'agent', id: 'task-1', name: 'agent-session-1' },
+        ],
         limit: null,
       }
     );
@@ -565,6 +622,18 @@ describe('internal ProjectData event subscription surface', () => {
         required: false,
       })
     ).resolves.toEqual({ subscription: null, required: false });
+
+    projectDataMocks.getProjectEventSubscription.mockResolvedValueOnce(
+      makeSubscription({ owner: { type: 'agent', id: 'agent-session-1' } })
+    );
+    await expect(
+      getProjectEventSubscriptionForCaller(makeEnv(), makeAgentCaller(), {
+        subscriptionId: 'legacy-subscription',
+      })
+    ).resolves.toMatchObject({
+      subscription: { owner: { id: 'agent-session-1' } },
+      required: true,
+    });
 
     projectDataMocks.getProjectEventSubscription.mockResolvedValueOnce(
       makeSubscription({ owner: { type: 'agent', id: 'task-2' } })
@@ -599,7 +668,7 @@ describe('internal ProjectData event subscription surface', () => {
       'project-1',
       {
         subscriptionId: 'subscription-1',
-        cancelledBy: { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
+        cancelledBy: { type: 'agent', id: 'project-1:session-1', name: 'agent-session-1' },
         reason: 'done',
       }
     );

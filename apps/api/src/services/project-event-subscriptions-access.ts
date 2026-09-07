@@ -33,6 +33,7 @@ type AgentTaskRow = {
   status: string;
   workspace_id: string | null;
   chat_session_id: string | null;
+  recovery_source_task_id: string | null;
 };
 
 type WorkspaceRow = {
@@ -54,6 +55,7 @@ export type AgentSubscriptionContext = {
   projectId: string;
   owner: ProjectEventSubscriptionOwner;
   legacyOwners: ProjectEventSubscriptionOwner[];
+  sourceTaskId: string;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
 };
 
@@ -190,7 +192,7 @@ async function resolveAgentContext(
 
   const task = await firstRow<AgentTaskRow>(
     env,
-    `SELECT id, project_id, user_id, status, workspace_id, chat_session_id
+    `SELECT id, project_id, user_id, status, workspace_id, chat_session_id, recovery_source_task_id
      FROM tasks
      WHERE id = ? AND project_id = ?
      LIMIT 1`,
@@ -272,6 +274,7 @@ async function resolveAgentContext(
     );
   }
   const ownerId = `${projectId}:${sessionId}`;
+  const sourceTaskId = task.recovery_source_task_id ?? task.id;
   const legacyOwners = uniqueOwners(
     [agentSessionId, taskId]
       .filter((id): id is string => typeof id === 'string' && id.length > 0)
@@ -290,6 +293,7 @@ async function resolveAgentContext(
       name: caller.ownerName ?? agentSessionId ?? taskId,
     },
     legacyOwners,
+    sourceTaskId,
     target: {
       sessionId,
       taskId,

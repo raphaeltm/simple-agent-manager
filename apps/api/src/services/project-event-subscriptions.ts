@@ -80,6 +80,7 @@ export async function createProjectEventSubscriptionForCaller(
     idempotencyKey: request.idempotencyKey,
     filter: request.filter,
     deliveryPreference: resolveDeliveryPreference(requestedDelivery, target),
+    ownerTaskId: context.callerKind === 'agent' ? context.sourceTaskId : null,
     reason: request.reason ?? null,
     expiresAt,
   });
@@ -153,9 +154,13 @@ export async function getProjectEventSubscriptionForCaller(
   const subscriptionId = normalizeSubscriptionId(request.subscriptionId);
   const required = request.required !== false;
 
-  const subscription = await projectDataService.getProjectEventSubscription(env, context.projectId, {
-    subscriptionId,
-  });
+  const subscription = await projectDataService.getProjectEventSubscription(
+    env,
+    context.projectId,
+    {
+      subscriptionId,
+    }
+  );
   if (!subscription) {
     if (!required) return { subscription: null, required };
     throw errors.notFound('Event subscription');
@@ -242,6 +247,8 @@ export async function expireProjectEventSubscriptionsForCaller(
   return { ...result, callerKind: context.callerKind };
 }
 
-export function describeProjectEventSubscriptionOwner(owner: ProjectEventSubscriptionOwner): string {
+export function describeProjectEventSubscriptionOwner(
+  owner: ProjectEventSubscriptionOwner
+): string {
   return `${owner.type}:${owner.id}`;
 }
