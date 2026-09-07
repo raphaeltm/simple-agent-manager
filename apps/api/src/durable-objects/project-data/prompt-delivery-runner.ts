@@ -9,6 +9,10 @@ import type { VmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-
 import * as activity from './activity';
 import type { DurableExecutionConfig } from './durable-execution-config';
 import {
+  advanceProjectEventPromptAttemptCheckpoint,
+  invalidProjectEventWakeDeliveryTargetResult,
+} from './project-events-materialization';
+import {
   applyPromptDeliveryResult,
   type PromptDeliveryClaim,
   type PromptDeliveryResult,
@@ -119,8 +123,7 @@ async function invalidParentWakeTargetResult(
     ? (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status)
     : false;
   const parentIsWakeable =
-    parent &&
-    (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
+    parent && (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
   if (
     !parent ||
     !parentIsWakeable ||
@@ -204,12 +207,16 @@ export async function runPromptDeliveryClaim(
         return parentWakeValidationReadFailure(claim, error);
       }
     };
+    const validateProjectEventWakeTarget = (): PromptDeliveryResult | null =>
+      invalidProjectEventWakeDeliveryTargetResult(sql, env, hooks.projectId, claim);
+    const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> =>
+      (await validateParentWakeTarget()) ?? validateProjectEventWakeTarget();
     const input = {
       projectId: hooks.projectId ?? '',
       claim,
       allowLegacyVm: config.legacyVmCompatEnabled,
       requestTimeoutMs: config.backgroundTimeoutMs,
-      beforeSideEffect: validateParentWakeTarget,
+      beforeSideEffect: validateDeliveryTarget,
       sourceTaskGuard:
         claim.message.sourceKind === 'parent_wakeup' && claim.message.sourceTaskId
           ? {
@@ -220,7 +227,7 @@ export async function runPromptDeliveryClaim(
           : undefined,
     };
     result =
-      (await validateParentWakeTarget()) ??
+      (await validateDeliveryTarget()) ??
       (claim.mode === 'submit' ? await adapter.submit(input) : await adapter.reconcile(input));
   } catch (error) {
     result = {
@@ -234,6 +241,9 @@ export async function runPromptDeliveryClaim(
   }
 
   const applied = applyPromptDeliveryResult(sql, claim, result, config);
+  if (applied) {
+    advanceProjectEventPromptAttemptCheckpoint(sql, hooks.projectId, claim, result);
+  }
   if (applied && result.kind === 'accepted') {
     sessionState.markPromptAccepted(
       sql,

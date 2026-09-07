@@ -1172,6 +1172,66 @@ export const taskStatusEvents = sqliteTable(
   })
 );
 
+export const taskSubmissionCheckpoints = sqliteTable(
+  'task_submission_checkpoints',
+  {
+    taskId: text('task_id')
+      .primaryKey()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    chatSessionId: text('chat_session_id').notNull(),
+    initialMessageId: text('initial_message_id').notNull(),
+    initialStatusEventId: text('initial_status_event_id')
+      .notNull()
+      .references(() => taskStatusEvents.id, { onDelete: 'cascade' }),
+    sourceKind: text('source_kind').notNull(),
+    sourceId: text('source_id').notNull(),
+    sourceExecutionId: text('source_execution_id').notNull(),
+    triggeredBy: text('triggered_by').notNull(),
+    intentFingerprint: text('intent_fingerprint').notNull(),
+    acceptedSnapshotJson: text('accepted_snapshot_json').notNull(),
+    branchName: text('branch_name').notNull(),
+    taskTitle: text('task_title').notNull(),
+    checkpointState: text('checkpoint_state').notNull().default('d1_committed'),
+    projectDataCommittedAt: text('project_data_committed_at'),
+    runnerStartAttemptedAt: text('runner_start_attempted_at'),
+    runnerStartedAt: text('runner_started_at'),
+    terminalObservedAt: text('terminal_observed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    chatSessionIdUnique: uniqueIndex('idx_task_submission_checkpoints_chat_session').on(
+      table.chatSessionId
+    ),
+    initialMessageIdUnique: uniqueIndex('idx_task_submission_checkpoints_initial_message').on(
+      table.initialMessageId
+    ),
+    initialStatusEventIdUnique: uniqueIndex(
+      'idx_task_submission_checkpoints_initial_status_event'
+    ).on(table.initialStatusEventId),
+    sourceUnique: uniqueIndex('idx_task_submission_checkpoints_source').on(
+      table.projectId,
+      table.sourceKind,
+      table.sourceId,
+      table.sourceExecutionId
+    ),
+    stateIdx: index('idx_task_submission_checkpoints_state').on(
+      table.checkpointState,
+      table.updatedAt
+    ),
+  })
+);
+
 // =============================================================================
 // Nodes
 // =============================================================================
@@ -2553,6 +2613,67 @@ export const webhookDeliveries = sqliteTable(
 
 export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;
 export type NewWebhookDeliveryRow = typeof webhookDeliveries.$inferInsert;
+
+// =============================================================================
+// Project Event Source Outbox (producer-side admission retry ledger)
+// =============================================================================
+export const projectEventSourceOutbox = sqliteTable(
+  'project_event_source_outbox',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    source: text('source').notNull(),
+    eventType: text('event_type').notNull(),
+    subjectType: text('subject_type').notNull(),
+    subjectId: text('subject_id').notNull(),
+    deliveryKey: text('delivery_key').notNull(),
+    payloadFingerprint: text('payload_fingerprint').notNull(),
+    eventPayloadJson: text('event_payload_json').notNull(),
+    state: text('state').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull(),
+    nextAttemptAt: text('next_attempt_at').notNull(),
+    processingLeaseExpiresAt: text('processing_lease_expires_at'),
+    expiresAt: text('expires_at').notNull(),
+    admittedEventId: text('admitted_event_id'),
+    admissionOutcome: text('admission_outcome'),
+    lastError: text('last_error'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    deliveryUnique: uniqueIndex('idx_project_event_source_outbox_delivery').on(
+      table.projectId,
+      table.source,
+      table.deliveryKey
+    ),
+    dueIdx: index('idx_project_event_source_outbox_due').on(
+      table.state,
+      table.nextAttemptAt,
+      table.id
+    ),
+    processingLeaseIdx: index('idx_project_event_source_outbox_processing_lease').on(
+      table.state,
+      table.processingLeaseExpiresAt,
+      table.id
+    ),
+    projectSubjectIdx: index('idx_project_event_source_outbox_project_subject').on(
+      table.projectId,
+      table.subjectType,
+      table.subjectId,
+      table.state
+    ),
+  })
+);
+
+export type ProjectEventSourceOutboxRow = typeof projectEventSourceOutbox.$inferSelect;
+export type NewProjectEventSourceOutboxRow = typeof projectEventSourceOutbox.$inferInsert;
 
 // =============================================================================
 // Platform Credentials (admin-managed fallback keys)

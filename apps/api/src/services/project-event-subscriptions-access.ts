@@ -143,11 +143,15 @@ export function resolveDeliveryPreference(
   requested: ProjectEventRequestedDeliveryMode,
   target: ProjectEventDeliveryPreference['target']
 ): ProjectEventDeliveryPreference {
+  const resolved =
+    requested === 'record_only'
+      ? 'record_only'
+      : requested === 'existing_session_prompt'
+        ? 'queued_for_prompt_delivery'
+        : 'recorded_not_injected';
   return {
     requested,
-    // The canonical pull model records caller delivery intent but does not queue
-    // prompts, steer runtimes, interrupt runtimes, or spawn tasks.
-    resolved: requested === 'record_only' ? 'record_only' : 'recorded_not_injected',
+    resolved,
     target,
   };
 }
@@ -255,7 +259,7 @@ async function resolveAgentContext(
       'Calling task has no durable chat session for event subscription target'
     );
   }
-  const ownerId = agentSessionId ?? `${taskId}:${sessionId}`;
+  const ownerId = `${projectId}:${sessionId}`;
 
   return {
     projectId,

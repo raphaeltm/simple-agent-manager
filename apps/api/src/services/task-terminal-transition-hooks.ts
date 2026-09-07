@@ -3,7 +3,7 @@ import type { TaskTerminalTransitionEvent } from '@simple-agent-manager/shared';
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import * as projectDataService from './project-data';
-import { recordTaskLifecycleEventBestEffort } from './project-lifecycle-events';
+import { recordTaskLifecycleEventViaSourceOutbox } from './project-lifecycle-events';
 
 const log = createModuleLogger('task_terminal_transition_hooks');
 
@@ -33,15 +33,16 @@ export function createTaskWaitTerminalTransitionHook(env: Env): TaskTerminalTran
 }
 
 /**
- * Best-effort ProjectData lifecycle event producer for terminal task status
- * changes. This records only the normalized transition summary; callback and
- * runtime payloads remain outside ProjectData event storage.
+ * ProjectData lifecycle event producer for terminal task status changes. The
+ * producer writes through the D1 source outbox, so failed ProjectData admission
+ * leaves a bounded retry intent under the same stable lifecycle delivery key.
+ * Callback and runtime payloads remain outside ProjectData event storage.
  */
 export function createProjectEventTaskTerminalTransitionHook(env: Env): TaskTerminalTransitionHook {
   return {
     name: 'project-lifecycle-task-terminal',
     async handle(event) {
-      await recordTaskLifecycleEventBestEffort(env, {
+      await recordTaskLifecycleEventViaSourceOutbox(env, {
         projectId: event.projectId,
         taskId: event.taskId,
         status: event.status,

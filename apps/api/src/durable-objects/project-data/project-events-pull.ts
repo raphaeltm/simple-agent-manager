@@ -34,6 +34,7 @@ import {
   normalizeProjectId,
 } from './project-events-normalization';
 import {
+  claimProjectEventMatchesForBatch,
   expireDueSubscriptions,
   readBatchById,
   readEventById,
@@ -157,11 +158,27 @@ export function listProjectEventSubscriptionEvents(
        WHERE m.project_id = ?
          AND m.subscription_id = ?
          AND m.state NOT IN ('expired', 'cancelled')
+         AND (
+           ? = 1
+           OR EXISTS (
+             SELECT 1 FROM project_event_delivery_batches b
+             WHERE b.project_id = m.project_id
+               AND b.id = m.batch_id
+               AND b.readable_until IS NOT NULL
+               AND b.readable_until > ?
+               AND b.state NOT IN ('expired', 'cancelled')
+           )
+         )
          AND (m.matched_at > ? OR (m.matched_at = ? AND m.id > ?))
        ORDER BY m.matched_at ASC, m.id ASC
        LIMIT ?`,
       projectId,
       subscriptionId,
+      subscription.state === 'active' &&
+        (subscription.expiresAt === null || subscription.expiresAt > now)
+        ? 1
+        : 0,
+      now,
       cursor.afterMatchedAt,
       cursor.afterMatchedAt,
       cursor.afterMatchId,
@@ -272,11 +289,22 @@ function readVisibleSubscription(
        FROM project_event_subscriptions s
        WHERE s.project_id = ?
          AND s.id = ?
-         AND s.lifecycle_state = 'active'
-         AND (s.expires_at IS NULL OR s.expires_at > ?)
+         AND s.lifecycle_state != 'cancelled'
+         AND (
+           (s.lifecycle_state = 'active' AND (s.expires_at IS NULL OR s.expires_at > ?))
+           OR EXISTS (
+             SELECT 1 FROM project_event_delivery_batches b
+             WHERE b.project_id = s.project_id
+               AND b.subscription_id = s.id
+               AND b.readable_until IS NOT NULL
+               AND b.readable_until > ?
+               AND b.state NOT IN ('expired', 'cancelled')
+           )
+         )
          AND ${where}`,
       projectId,
       subscriptionId,
+      now,
       now,
       ...visibilityParams(visibility)
     )
@@ -304,16 +332,25 @@ function readVisibleMatchForEvent(
               m.reason AS match_reason
        FROM project_event_matches m
        JOIN project_event_subscriptions s ON s.project_id = m.project_id AND s.id = m.subscription_id
+       LEFT JOIN project_event_delivery_batches b ON b.project_id = m.project_id AND b.id = m.batch_id
        WHERE m.project_id = ?
          AND m.event_id = ?
          AND m.state NOT IN ('expired', 'cancelled')
-         AND s.lifecycle_state = 'active'
-         AND (s.expires_at IS NULL OR s.expires_at > ?)
+         AND s.lifecycle_state != 'cancelled'
+         AND (
+           (s.lifecycle_state = 'active' AND (s.expires_at IS NULL OR s.expires_at > ?))
+           OR (
+             b.readable_until IS NOT NULL
+             AND b.readable_until > ?
+             AND b.state NOT IN ('expired', 'cancelled')
+           )
+         )
          AND ${where}
        ORDER BY m.matched_at ASC, m.id ASC
        LIMIT 1`,
       projectId,
       eventId,
+      now,
       now,
       ...visibilityParams(visibility)
     )
@@ -336,12 +373,16 @@ function readVisibleDelivery(
        JOIN project_event_subscriptions s ON s.project_id = b.project_id AND s.id = b.subscription_id
        WHERE b.project_id = ?
          AND b.id = ?
-         AND s.lifecycle_state = 'active'
-         AND (s.expires_at IS NULL OR s.expires_at > ?)
+         AND s.lifecycle_state != 'cancelled'
+         AND (
+           (s.lifecycle_state = 'active' AND (s.expires_at IS NULL OR s.expires_at > ?))
+           OR (b.readable_until IS NOT NULL AND b.readable_until > ?)
+         )
          AND ${where}
        LIMIT 1`,
       projectId,
       deliveryId,
+      now,
       now,
       ...visibilityParams(visibility)
     )
@@ -417,11 +458,11 @@ function createPullDeliveryBatch(
   sql.exec(
     `INSERT INTO project_event_delivery_batches
      (id, project_id, subscription_id, idempotency_key, idempotency_fingerprint, state,
-      ack_required, requested_delivery, resolved_delivery, adapter_decision_json,
+      delivery_channel, delivered_via, ack_required, requested_delivery, resolved_delivery, adapter_decision_json,
       target_session_id, target_task_id, target_runtime_id, target_agent_id,
       match_ids_json, event_count, created_at, updated_at, delivered_at, terminal_at,
       terminal_reason)
-     VALUES (?, ?, ?, ?, ?, 'delivered', 1, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, 'delivered', 'pull', 'pull', 1, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
     batchId,
     projectId,
     subscription.id,
@@ -441,16 +482,17 @@ function createPullDeliveryBatch(
     now,
     resolution.terminalReason ?? PULL_DELIVERY_REASON
   );
-  sql.exec(
-    `UPDATE project_event_matches
-     SET batch_id = ?, state = 'batch_created', lifecycle_checked_at = ?, reason = ?
-     WHERE project_id = ? AND id = ? AND batch_id IS NULL`,
+  const claimed = claimProjectEventMatchesForBatch(
+    sql,
+    projectId,
+    [match.id],
     batchId,
     now,
-    PULL_DELIVERY_REASON,
-    projectId,
-    match.id
+    PULL_DELIVERY_REASON
   );
+  if (claimed !== 1) {
+    throw new ProjectEventValidationError('Project event pull match claim lost contention');
+  }
   return readBatchById(sql, projectId, batchId);
 }
 
@@ -460,6 +502,32 @@ function markBatchObservedForPull(
   batch: ProjectEventDeliveryBatchRecord,
   now: number
 ): ProjectEventDeliveryBatchRecord {
+  if (batch.deliveryChannel === 'prompt_queue') {
+    if (batch.state !== 'pending') return batch;
+    const cancelledRows = cancelQueuedWakeInboxBeforePull(sql, batch.id);
+    if (cancelledRows === 0) return batch;
+    sql.exec(
+      `UPDATE project_event_delivery_batches
+       SET ack_required = 1,
+           delivered_via = 'pull',
+           delivered_at = COALESCE(delivered_at, ?),
+           state = 'delivered',
+           updated_at = ?,
+           terminal_at = COALESCE(terminal_at, ?),
+           terminal_reason = ?
+       WHERE project_id = ?
+         AND id = ?
+         AND delivery_channel = 'prompt_queue'
+         AND state = 'pending'`,
+      now,
+      now,
+      now,
+      PULL_DELIVERY_REASON,
+      projectId,
+      batch.id
+    );
+    return readBatchById(sql, projectId, batch.id);
+  }
   if (batch.state === 'acked') return batch;
   if (
     batch.state === 'failed' ||
@@ -472,6 +540,7 @@ function markBatchObservedForPull(
   sql.exec(
     `UPDATE project_event_delivery_batches
      SET ack_required = 1,
+         delivered_via = COALESCE(delivered_via, 'pull'),
          delivered_at = COALESCE(delivered_at, ?),
          state = CASE
            WHEN state IN ('pending', 'recorded_not_injected') THEN 'delivered'
@@ -491,6 +560,21 @@ function markBatchObservedForPull(
   return readBatchById(sql, projectId, batch.id);
 }
 
+function cancelQueuedWakeInboxBeforePull(sql: SqlStorage, batchId: string): number {
+  return sql.exec(
+    `UPDATE session_inbox
+     SET delivery_state = 'failed',
+         terminal_reason = 'pulled_before_prompt_submission',
+         last_error = 'Project event wake was read through MCP pull before prompt submission',
+         next_attempt_at = NULL,
+         attempt_started_at = NULL
+     WHERE id = ?
+       AND source_kind = 'project_event_wake'
+       AND delivery_state IN ('queued', 'retry_wait')`,
+    batchId
+  ).rowsWritten;
+}
+
 function readEventsForBatch(
   sql: SqlStorage,
   projectId: string,
@@ -498,13 +582,18 @@ function readEventsForBatch(
 ): ProjectEventRecord[] {
   return sql
     .exec(
-      `SELECT e.*\n       FROM project_event_matches m\n       JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id\n       WHERE m.project_id = ? AND m.batch_id = ?\n       ORDER BY m.matched_at ASC, m.id ASC`,
+      `SELECT e.*
+       FROM project_event_matches m
+       JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id
+       WHERE m.project_id = ? AND m.batch_id = ?
+       ORDER BY m.matched_at ASC, m.id ASC`,
       projectId,
       batchId
     )
     .toArray()
     .map(mapProjectEvent);
 }
+
 
 function parseMatchEventRow(row: unknown): MatchCursor {
   if (!isJsonRecord(row)) throw new ProjectEventValidationError('event match row is invalid');
@@ -582,6 +671,9 @@ function deliveryInfoForResponse(
     id: batch.id,
     subscriptionId: batch.subscriptionId,
     state: batch.state,
+    deliveryChannel: batch.deliveryChannel,
+    deliveredVia: batch.deliveredVia,
+    readableUntil: batch.readableUntil,
     ackRequired: batch.ackRequired,
     requestedDelivery: batch.requestedDelivery,
     resolvedDelivery: batch.resolvedDelivery,

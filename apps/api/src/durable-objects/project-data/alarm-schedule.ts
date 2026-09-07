@@ -11,8 +11,13 @@ import * as attention from './attention';
 import { resolveDurableExecutionConfig } from './durable-execution-config';
 import * as idleCleanup from './idle-cleanup';
 import * as mailbox from './mailbox';
+import {
+  computeProjectEventMaterializationAlarmTime,
+  computeProjectEventRetentionAlarmTime,
+} from './project-events-materialization';
 import { computePromptDeliveryAlarmTime } from './prompt-delivery';
 import * as reconciliation from './reconciliation';
+import { parseMetaValue } from './row-schemas';
 import { computeSessionActivityProbeAlarmTime } from './session-activity-reconciliation';
 import { computeStorageSafetyAlarmTime } from './storage-safety';
 import { computeTaskWaitAlarmTime } from './task-waits';
@@ -21,6 +26,7 @@ import type { Env } from './types';
 const log = createModuleLogger('project_data.alarm_schedule');
 
 export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number | null {
+  const projectId = readStoredProjectId(sql);
   const { idleCleanupTime, workspaceIdleCheckTime } = idleCleanup.computeIdleAlarmTimes(sql);
   const heartbeatTime = acpSessions.computeHeartbeatAlarmTime(sql, env);
   const pollIntervalMs = Number.parseInt(env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
@@ -30,11 +36,12 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
     const deliveryConfig = resolveDurableExecutionConfig(env);
     if (deliveryConfig.deliveryEnabled) {
       const durableDeliveryTime = computePromptDeliveryAlarmTime(sql, deliveryConfig);
-      mailboxTime = durableDeliveryTime === null
-        ? legacyMailboxTime
-        : legacyMailboxTime === null
-          ? durableDeliveryTime
-          : Math.min(durableDeliveryTime, legacyMailboxTime);
+      mailboxTime =
+        durableDeliveryTime === null
+          ? legacyMailboxTime
+          : legacyMailboxTime === null
+            ? durableDeliveryTime
+            : Math.min(durableDeliveryTime, legacyMailboxTime);
     }
   } catch (error) {
     // Invalid durability configuration fails the new delivery engine closed,
@@ -51,6 +58,12 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
   const activityProbeTime = computeSessionActivityProbeAlarmTime(sql, env);
   const taskWaitTime = computeTaskWaitAlarmTime(sql);
   const storageSafetyTime = computeStorageSafetyAlarmTime(sql, env);
+  const projectEventMaterializationTime = computeProjectEventMaterializationAlarmTime(
+    sql,
+    env,
+    projectId
+  );
+  const projectEventRetentionTime = computeProjectEventRetentionAlarmTime(sql, env, projectId);
 
   const candidates = [
     idleCleanupTime,
@@ -62,7 +75,14 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
     activityProbeTime,
     taskWaitTime,
     storageSafetyTime,
+    projectEventMaterializationTime,
+    projectEventRetentionTime,
   ].filter((time): time is number => time !== null);
 
   return candidates.length > 0 ? Math.min(...candidates) : null;
+}
+
+function readStoredProjectId(sql: SqlStorage): string | null {
+  const row = sql.exec('SELECT value FROM do_meta WHERE key = ?', 'projectId').toArray()[0];
+  return row ? parseMetaValue(row, 'project_data.alarm_schedule.project_id') : null;
 }

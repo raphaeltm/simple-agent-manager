@@ -119,6 +119,10 @@ import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
 } from '../durable-objects/project-data/prompt-delivery';
+import type {
+  CreateReservedTaskSessionWithInitialMessageInput,
+  CreateReservedTaskSessionWithInitialMessageResult,
+} from '../durable-objects/project-data/sessions';
 import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -567,6 +571,41 @@ export async function createSession(
     occurredAt: Date.now(),
   });
   return sessionId;
+}
+
+export async function createReservedTaskSessionWithInitialMessage(
+  env: Env,
+  projectId: string,
+  input: CreateReservedTaskSessionWithInitialMessageInput
+): Promise<CreateReservedTaskSessionWithInitialMessageResult> {
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    input.sessionId,
+    'createReservedTaskSessionWithInitialMessage'
+  );
+  const result = await callProjectDataWithRetry<CreateReservedTaskSessionWithInitialMessageResult>(
+    env,
+    projectId,
+    'createReservedTaskSessionWithInitialMessage',
+    async (stub) =>
+      (await stub.createReservedTaskSessionWithInitialMessage(
+        input
+      )) as CreateReservedTaskSessionWithInitialMessageResult
+  );
+  if (result.outcome === 'created' && result.sessionInserted) {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId: input.sessionId,
+      lifecycle: 'started',
+      status: 'active',
+      taskId: input.taskId,
+      workspaceId: input.workspaceId,
+      source: 'project_data.create_reserved_task_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return result;
 }
 
 export async function linkSessionToWorkspace(

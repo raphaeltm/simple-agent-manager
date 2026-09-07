@@ -299,7 +299,7 @@ export type ProjectEventSubscriptionState = (typeof PROJECT_EVENT_SUBSCRIPTION_S
 export type ProjectEventSubscriptionRecord = {
   id: string;
   projectId: string;
-  contractVersion: typeof PROJECT_EVENT_CONTRACT_VERSION;
+  contractVersion: number;
   owner: ProjectEventSubscriptionOwner;
   idempotencyKey: string;
   filter: ProjectEventFilterV1;
@@ -405,6 +405,10 @@ export type ProjectEventDeliveryBatchRecord = {
   subscriptionId: string;
   idempotencyKey: string;
   state: ProjectEventDeliveryBatchState;
+  deliveryChannel: 'pull' | 'prompt_queue';
+  deliveredVia: 'pull' | 'prompt_queue' | null;
+  deliveryExpiresAt: number | null;
+  readableUntil: number | null;
   ackRequired: boolean;
   requestedDelivery: ProjectEventRequestedDeliveryMode;
   resolvedDelivery: ProjectEventResolvedDeliveryMode;
@@ -464,6 +468,9 @@ export type ProjectEventPullDeliveryInfo = {
   id: string;
   subscriptionId: string;
   state: ProjectEventDeliveryBatchState;
+  deliveryChannel: ProjectEventDeliveryBatchRecord['deliveryChannel'];
+  deliveredVia: ProjectEventDeliveryBatchRecord['deliveredVia'];
+  readableUntil: number | null;
   ackRequired: boolean;
   requestedDelivery: ProjectEventRequestedDeliveryMode;
   resolvedDelivery: ProjectEventResolvedDeliveryMode;
@@ -563,6 +570,7 @@ export type ProjectEventDeliveryAttemptRecord = {
   idempotencyKey: string;
   attemptNumber: number;
   state: ProjectEventDeliveryAttemptState;
+  transportState: 'queued' | 'delivering' | 'expired' | 'cancelled' | null;
   adapter: string | null;
   protocolVersion: string | null;
   runtimeId: string | null;
@@ -624,6 +632,8 @@ export type ProjectEventRetentionResult = {
   deletedBatches: number;
   deletedAttempts: number;
   expiredSubscriptions: number;
+  repairedOrphanMatches: number;
+  hasMore: boolean;
   accounting: ProjectEventStorageAccountingRecord[];
 };
 
@@ -631,6 +641,7 @@ export type RunProjectEventRetentionInput = {
   projectId: string;
   now?: number;
   limit?: number | null;
+  refreshAccounting?: boolean | null;
 };
 
 export type GetProjectEventRecentStatusInput = {
@@ -670,4 +681,15 @@ export type ProjectEventLimits = {
   recentStatusLimit: number;
   retentionDays: number;
   retentionBatchRows: number;
+  retentionIntervalMs: number;
+  retentionMinAlarmDelayMs: number;
+  wakeMaterializationMinAlarmDelayMs: number;
+  wakeMaterializationBackoffBaseMs: number;
+  wakeMaterializationBackoffMaxMs: number;
+  wakePromptTtlMs: number;
+  wakeReadGraceMs: number;
+  wakeTargetCooldownMs: number;
+  wakeSubscriptionCooldownMs: number;
+  wakeSubscriptionLifetimeMs: number;
+  wakeMaxPerSubscription: number;
 };
