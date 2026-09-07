@@ -66,7 +66,7 @@ export const ResourceRequirementsInput: FC<ResourceRequirementsInputProps> = ({
         )}
         {hasInvalidRaw && !value.storedJsonError && (
           <div role="alert" className="rounded-sm bg-danger-tint px-2 py-1 text-[10px] text-danger">
-            Invalid stored fields: {Object.keys(value._rawInvalidFields!).join(', ')}. Clear to fix.
+            Invalid stored fields: {Object.keys(value._rawInvalidFields ?? {}).join(', ')}. Clear to fix.
           </div>
         )}
         <div className="flex flex-wrap items-end gap-2">
