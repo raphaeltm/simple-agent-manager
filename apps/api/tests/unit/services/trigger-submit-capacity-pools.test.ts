@@ -8,8 +8,7 @@ import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/s
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
-  createSession: vi.fn(),
-  persistMessage: vi.fn(),
+  createReservedTaskSessionWithInitialMessage: vi.fn(),
   stopSession: vi.fn(),
   requireRepositoryOwnerAccess: vi.fn(),
   startTaskRunnerDO: vi.fn(),
@@ -18,8 +17,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
-  createSession: mocks.createSession,
-  persistMessage: mocks.persistMessage,
+  createReservedTaskSessionWithInitialMessage: mocks.createReservedTaskSessionWithInitialMessage,
   stopSession: mocks.stopSession,
 }));
 
@@ -58,6 +56,7 @@ function createEnv() {
       BASE_DOMAIN: 'sammy.party',
       BRANCH_NAME_PREFIX: 'sam/',
       BRANCH_NAME_MAX_LENGTH: '60',
+      DEFAULT_TASK_AGENT_TYPE: 'opencode',
     } as Env,
   };
 }
@@ -102,6 +101,18 @@ function seedTriggerRows(sqlite: Database.Database): void {
        )`
     )
     .run();
+  sqlite
+    .prepare(
+      `INSERT INTO trigger_executions (
+         id, trigger_id, project_id, status, rendered_prompt, scheduled_at,
+         sequence_number, created_at
+       )
+       VALUES (
+         'exec-1', 'trigger-1', 'project-1', 'queued', 'Run the scheduled job',
+         '2026-09-07T00:00:00.000Z', 1, '2026-09-07T00:00:00.000Z'
+       )`
+    )
+    .run();
 }
 
 async function seedProjectDefaultPool(env: Env): Promise<void> {
@@ -115,8 +126,13 @@ async function seedProjectDefaultPool(env: Env): Promise<void> {
 describe('submitTriggeredTask capacity-pool integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createSession.mockResolvedValue('session-1');
-    mocks.persistMessage.mockResolvedValue(undefined);
+    mocks.createReservedTaskSessionWithInitialMessage.mockResolvedValue({
+      outcome: 'created',
+      sessionId: 'chat_exec-1',
+      initialMessageId: 'msg_exec-1',
+      sessionInserted: true,
+      initialMessageInserted: true,
+    });
     mocks.stopSession.mockResolvedValue(undefined);
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);

@@ -209,12 +209,10 @@ export class ProjectData extends DurableObject<Env> {
   async createReservedTaskSessionWithInitialMessage(
     input: sessions.CreateReservedTaskSessionWithInitialMessageInput
   ): Promise<sessions.CreateReservedTaskSessionWithInitialMessageResult> {
-    let created:
-      | {
-          session: sessions.CreateReservedTaskSessionResult;
-          message: ReturnType<typeof messages.persistMessage>;
-        }
-      | null = null;
+    let created: {
+      session: sessions.CreateReservedTaskSessionResult;
+      message: ReturnType<typeof messages.persistMessage>;
+    } | null = null;
     try {
       created = this.ctx.storage.transactionSync(() => {
         const session = sessions.createReservedTaskSession(this.sql, this.env, input);
