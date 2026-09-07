@@ -34,7 +34,7 @@ export function toUpCloudVM(server: UpCloudServer): VMInstance {
     ip: publicUpCloudIPv4(server),
     status:
       server.state === 'started' ? 'running' : server.state === 'stopped' ? 'off' : 'initializing',
-    serverType: server.plan,
+    serverType: server.plan ?? '',
     observedHardware: observedHardware({
       serverType: server.plan,
       resources,

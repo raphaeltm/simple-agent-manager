@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { InfomaniakProvider } from '../../src';
+import { toUpCloudVM } from '../../src/upcloud-utils';
 import {
   validateGcpInstance,
   validateHetznerServerResponse,
@@ -82,6 +83,42 @@ describe('provider observed hardware response validation', () => {
         'droplet'
       )
     ).toThrow();
+
+    expect(() =>
+      validateDigitalOceanDropletResponse(
+        {
+          droplet: {
+            id: 1,
+            name: 'vm',
+            status: 'active',
+            size_slug: 's-2vcpu-4gb',
+            created_at: '2026-09-07T00:00:00Z',
+            networks: { v4: [] },
+            tags: [],
+            size: { vcpus: 2, memory: 4096.5, disk: 80 },
+          },
+        },
+        'droplet'
+      )
+    ).toThrow();
+
+    expect(
+      validateDigitalOceanDropletResponse(
+        {
+          droplet: {
+            id: 1,
+            name: 'vm',
+            status: 'active',
+            size_slug: 'diskless',
+            created_at: '2026-09-07T00:00:00Z',
+            networks: { v4: [] },
+            tags: [],
+            size: { vcpus: 2, memory: 4096, disk: 0 },
+          },
+        },
+        'droplet'
+      ).droplet.size
+    ).toEqual({ vcpus: 2, memory: 4096, disk: 0 });
   });
 
   it('rejects malformed Vultr observed plan resources', () => {
@@ -98,6 +135,29 @@ describe('provider observed hardware response validation', () => {
             plan: 'vc2-2c-4gb',
             vcpu_count: '2',
             ram: 4096,
+            disk: 80,
+            date_created: '2026-09-07T00:00:00Z',
+            label: 'vm',
+            tags: [],
+          },
+        },
+        'instance'
+      )
+    ).toThrow();
+
+    expect(() =>
+      validateVultrInstanceResponse(
+        {
+          instance: {
+            id: 'instance-1',
+            main_ip: '203.0.113.10',
+            status: 'active',
+            power_status: 'running',
+            server_status: 'ok',
+            region: 'fra',
+            plan: 'vc2-2c-4gb',
+            vcpu_count: 2,
+            ram: 0,
             disk: 80,
             date_created: '2026-09-07T00:00:00Z',
             label: 'vm',
@@ -144,6 +204,26 @@ describe('provider observed hardware response validation', () => {
       )
     ).toThrow();
 
+    expect(() =>
+      validateUpCloudServerResponse(
+        {
+          server: {
+            uuid: 'server-1',
+            state: 'started',
+            zone: 'de-fra1',
+            plan: 'DEV-2xCPU-4GB',
+            core_number: '',
+            memory_amount: '4096',
+            created: '2026-09-07T00:00:00Z',
+            labels: { label: [] },
+            ip_addresses: { ip_address: [] },
+            storage_devices: { storage_device: [] },
+          },
+        },
+        'server'
+      )
+    ).toThrow();
+
     expect(
       validateUpCloudServerResponse(
         {
@@ -163,6 +243,34 @@ describe('provider observed hardware response validation', () => {
         'server'
       )
     ).toMatchObject({ coreNumber: 2, memoryAmount: 4096 });
+  });
+
+  it('keeps missing UpCloud plan/resources as unknown observations instead of inventing them', () => {
+    const parsed = validateUpCloudServerResponse(
+      {
+        server: {
+          uuid: 'server-1',
+          title: 'vm',
+          hostname: 'vm',
+          state: 'started',
+          zone: 'de-fra1',
+          created: '2026-09-07T00:00:00Z',
+          labels: { label: [] },
+          ip_addresses: { ip_address: [] },
+          storage_devices: { storage_device: [] },
+        },
+      },
+      'server'
+    );
+
+    expect(parsed.plan).toBeUndefined();
+    expect(parsed.coreNumber).toBeUndefined();
+    expect(parsed.memoryAmount).toBeUndefined();
+    expect(toUpCloudVM(parsed).serverType).toBe('');
+    expect(toUpCloudVM(parsed).observedHardware).toMatchObject({
+      serverType: { source: 'unknown', value: null },
+      resources: { source: 'unknown', value: null },
+    });
   });
 
   it('rejects malformed Infomaniak observed flavor resources', async () => {

@@ -26,6 +26,7 @@ import {
 import { fetchPaginatedHetznerList } from './hetzner-pagination';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import {
+  assertIncludedBootDiskCapacity,
   type ResolvedNativeVMConfig,
   resolveVMConfigWithLegacySizeAdapter,
 } from './native-vm-config';
@@ -139,6 +140,7 @@ export class HetznerProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: DEFAULT_HETZNER_IMAGE,
     });
+    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
 
     const deadline = Date.now() + this.capacityRetryBudgetMs;
     let lastCapacityError: ProviderError | undefined;

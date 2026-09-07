@@ -17,7 +17,7 @@ export interface UpCloudServer {
   hostname: string;
   state: string;
   zone: string;
-  plan: string;
+  plan?: string;
   coreNumber?: number;
   memoryAmount?: number;
   created: string;
@@ -98,13 +98,14 @@ function labels(v: unknown, c: string): UpCloudLabel[] {
 function server(o: Record<string, unknown>, c: string): UpCloudServer {
   const ips = expectObject(o.ip_addresses ?? { ip_address: [] }, 'upcloud', c),
     dev = expectObject(o.storage_devices ?? { storage_device: [] }, 'upcloud', c);
+  const plan = optionalString(o, 'plan', 'upcloud', c);
   return {
     uuid: requireString(o, 'uuid', 'upcloud', c),
     title: optionalString(o, 'title', 'upcloud', c) ?? '',
     hostname: optionalString(o, 'hostname', 'upcloud', c) ?? '',
     state: requireString(o, 'state', 'upcloud', c),
     zone: requireString(o, 'zone', 'upcloud', c),
-    plan: optionalString(o, 'plan', 'upcloud', c) ?? 'custom',
+    ...(plan ? { plan } : {}),
     ...optionalServerResources(o, c),
     created: optionalString(o, 'created', 'upcloud', c) ?? '',
     labels: labels(o.labels, c),
@@ -147,9 +148,20 @@ function optionalNumericString(
 ): number | undefined {
   const value = o[key];
   if (value === undefined || value === null) return undefined;
-  const parsed = typeof value === 'number' ? value : Number(optionalString(o, key, 'upcloud', c));
+  const parsed =
+    typeof value === 'number' ? value : parseUpCloudInteger(optionalString(o, key, 'upcloud', c), c, key);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw validationError('upcloud', `${c}.${key}`, 'expected positive integer');
+  }
+  return parsed;
+}
+function parseUpCloudInteger(value: string | undefined, c: string, key: string): number {
+  if (value === undefined || value.trim().length === 0) {
+    throw validationError('upcloud', `${c}.${key}`, 'expected positive integer');
+  }
+  const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
-    throw validationError('upcloud', `${c}.${key}`, 'expected finite number');
+    throw validationError('upcloud', `${c}.${key}`, 'expected positive integer');
   }
   return parsed;
 }
@@ -159,8 +171,8 @@ function storage(o: Record<string, unknown>, c: string): UpCloudStorage {
     typeof o.size === 'number'
       ? requireNumber(o, 'size', 'upcloud', c)
       : Number(requireString(o, 'size', 'upcloud', c));
-  if (!Number.isFinite(size))
-    throw validationError('upcloud', c + '.size', 'expected finite number');
+  if (!Number.isInteger(size) || size <= 0)
+    throw validationError('upcloud', c + '.size', 'expected positive integer');
   return {
     uuid: requireString(o, 'uuid', 'upcloud', c),
     title: requireString(o, 'title', 'upcloud', c),

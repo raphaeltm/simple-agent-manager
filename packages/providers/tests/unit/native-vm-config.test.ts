@@ -28,6 +28,22 @@ describe('native VM config resolver', () => {
     });
   });
 
+  it('can let a provider default boot disk override legacy-size storage for compatibility callers', () => {
+    const resolved = resolveVMConfigWithLegacySizeAdapter(
+      { ...baseConfig, size: 'small' },
+      {
+        providerName: 'gcp',
+        defaultLocation: 'region-default',
+        legacySizes,
+        defaultBootDiskSizeGb: 200,
+        legacyBootDiskSizeAuthority: 'provider-default',
+      }
+    );
+
+    expect(resolved.bootDiskSizeGb).toBe(200);
+    expect(resolved.resources).toEqual({ vcpuCount: 1, memoryMb: 2048, diskGb: 20 });
+  });
+
   it('lets exact native configuration work without a legacy size', () => {
     const resolved = resolveVMConfigWithLegacySizeAdapter(
       {
@@ -64,6 +80,34 @@ describe('native VM config resolver', () => {
 
     expect(resolved.instanceType).toBe('provider-exact-42');
     expect(resolved.bootDiskSizeGb).toBe(64);
+  });
+
+  it('preserves diskless native resource metadata while rejecting invalid resource units', () => {
+    const diskless = resolveVMConfigWithLegacySizeAdapter(
+      {
+        ...baseConfig,
+        native: {
+          instanceType: 'diskless-supported-sku',
+          resources: { vcpuCount: 2, memoryMb: 4096, diskGb: 0 },
+        },
+      },
+      { providerName: 'test', defaultLocation: 'region-default', legacySizes }
+    );
+
+    expect(diskless.resources).toEqual({ vcpuCount: 2, memoryMb: 4096, diskGb: 0 });
+
+    expect(() =>
+      resolveVMConfigWithLegacySizeAdapter(
+        {
+          ...baseConfig,
+          native: {
+            instanceType: 'bad-sku',
+            resources: { vcpuCount: 2, memoryMb: 4096, diskGb: -1 },
+          },
+        },
+        { providerName: 'test', defaultLocation: 'region-default', legacySizes }
+      )
+    ).toThrow('native.resources.diskGb must be a non-negative integer');
   });
 
   it('rejects invalid native resources and incompatible image architecture before provider calls', () => {

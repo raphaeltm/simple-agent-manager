@@ -29,7 +29,11 @@ import {
   DigitalOceanVolumeClient,
 } from './digitalocean-volumes';
 import { getProviderCatalogOfferings } from './instance-offerings';
-import { observedHardware, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
+import {
+  assertIncludedBootDiskCapacity,
+  observedHardware,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
 import {
   providerDelay,
   providerFetch,
@@ -142,6 +146,7 @@ export class DigitalOceanProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: this.image,
     });
+    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
 
     const response = await this.doFetch(
       '/droplets',

@@ -169,7 +169,7 @@ export class UpCloudProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: this.imageTitle,
     });
-    const bootDiskSizeGb = resolveUpCloudBootDiskSize(nativeConfig, this.sizes);
+    const bootDiskSizeGb = resolveUpCloudBootDiskSize(nativeConfig);
     assertUpCloudVolumeSize(bootDiskSizeGb, UPCLOUD_VOLUME_MIN_SIZE_GB, UPCLOUD_VOLUME_MAX_SIZE_GB);
     await this.assertZoneAvailable(nativeConfig.location, context);
     await this.assertPlanAvailable(nativeConfig.instanceType, context);
@@ -639,17 +639,9 @@ export class UpCloudProvider implements Provider {
   }
 }
 
-function resolveUpCloudBootDiskSize(
-  config: ReturnType<typeof resolveVMConfigWithLegacySizeAdapter>,
-  sizes: Readonly<Record<VMSize, SizeConfig>>
-): number {
+function resolveUpCloudBootDiskSize(config: ReturnType<typeof resolveVMConfigWithLegacySizeAdapter>): number {
   if (config.bootDiskSizeGb !== undefined) return config.bootDiskSizeGb;
   if (config.resources?.diskGb !== undefined) return config.resources.diskGb;
-
-  const catalogMatch = Object.values(sizes).find((sizeConfig) => {
-    return sizeConfig.type === config.instanceType;
-  });
-  if (catalogMatch) return catalogMatch.storageGb;
 
   throw new ProviderError(
     'upcloud',

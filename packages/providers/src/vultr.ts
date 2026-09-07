@@ -3,7 +3,11 @@ import { DEFAULT_VULTR_OS_NAME, DEFAULT_VULTR_REGION } from '@simple-agent-manag
 
 import { getProviderCatalogOfferings } from './instance-offerings';
 import { kvTagsToLabels, labelsToKvTags } from './kv-tags';
-import { observedHardware, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
+import {
+  assertIncludedBootDiskCapacity,
+  observedHardware,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
 import {
   providerDelay,
   providerFetch,
@@ -86,7 +90,7 @@ export class VultrProvider implements Provider {
   private readonly ipPollIntervalMs: number;
   private readonly logger: ProviderLogger;
   private readonly volumeClient: VultrVolumeClient;
-  private osIdCache?: number;
+  private readonly osIdCache = new Map<string, number>();
 
   constructor(apiToken: string, options?: VultrProviderRuntimeOptions) {
     this.apiToken = apiToken;
@@ -121,6 +125,7 @@ export class VultrProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: this.osName,
     });
+    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
     const osId = await this.resolveOsId(nativeConfig.image, nativeConfig.architecture, context);
     throwIfProviderRequestAborted(context);
 
@@ -283,16 +288,21 @@ export class VultrProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<number> {
     throwIfProviderRequestAborted(context);
-    // Explicit numeric os_id override
-    if (image && /^\d+$/.test(image.trim())) {
+    if (image && /^\d+$/.test(image.trim()) && !architecture) {
       return Number.parseInt(image.trim(), 10);
     }
+
     const targetName = image || this.osName;
-    if (!image && this.osIdCache !== undefined) return this.osIdCache;
+    const cacheKey = `${targetName}\u0000${architecture ?? 'any'}`;
+    const cached = this.osIdCache.get(cacheKey);
+    if (!image && cached !== undefined) return cached;
 
     const list = await this.fetchAllOs(context);
     throwIfProviderRequestAborted(context);
-    const match = findVultrOs(list, targetName);
+    const numericOsId =
+      image && /^\d+$/.test(image.trim()) ? Number.parseInt(image.trim(), 10) : undefined;
+    const match =
+      numericOsId === undefined ? findVultrOs(list, targetName) : list.find((os) => os.id === numericOsId);
     if (!match) {
       throw new ProviderError(this.name, undefined, `No Vultr OS found matching "${targetName}"`, {
         category: 'invalid_config',
@@ -306,7 +316,7 @@ export class VultrProvider implements Provider {
         { category: 'invalid_config' }
       );
     }
-    if (!image) this.osIdCache = match.id;
+    if (!image) this.osIdCache.set(cacheKey, match.id);
     return match.id;
   }
 

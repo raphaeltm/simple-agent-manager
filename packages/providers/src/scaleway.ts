@@ -2,7 +2,11 @@ import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_SCALEWAY_IMAGE_NAME, DEFAULT_SCALEWAY_ZONE } from '@simple-agent-manager/shared';
 
 import { getProviderCatalogOfferings } from './instance-offerings';
-import { observedHardware, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
+import {
+  assertIncludedBootDiskCapacity,
+  observedHardware,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
 import {
   providerFetch,
   rethrowIfProviderRequestAborted,
@@ -183,6 +187,7 @@ export class ScalewayProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: this.imageName,
     });
+    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
 
     // Resolve image UUID by name for the target zone
     const imageId = await this.resolveImageId(

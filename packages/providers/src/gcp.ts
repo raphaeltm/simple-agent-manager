@@ -289,6 +289,7 @@ export class GcpProvider implements Provider {
       defaultImage: this.imageFamily,
       defaultBootDiskSizeGb: this.diskSizeGb,
       minBootDiskSizeGb: 10,
+      legacyBootDiskSizeAuthority: 'provider-default',
     });
     const zone = nativeConfig.location;
     const headers = await this.authHeaders(context);
@@ -317,7 +318,7 @@ export class GcpProvider implements Provider {
           boot: true,
           autoDelete: true,
           initializeParams: {
-            sourceImage: `projects/${this.imageProject}/global/images/family/${nativeConfig.image ?? this.imageFamily}`,
+            sourceImage: resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
             diskSizeGb: String(nativeConfig.bootDiskSizeGb ?? this.diskSizeGb),
           },
         },
@@ -805,4 +806,30 @@ export class GcpProvider implements Provider {
     const match = machineType.match(/zones\/([^/]+)/);
     return match?.[1] || this.defaultLocation;
   }
+}
+
+function resolveGcpSourceImage(image: string, imageProject: string): string {
+  const trimmed = image.trim();
+  const projectScopedImageRef = /^projects\/[^/]+\/global\/images\/(?:family\/)?[^/]+$/;
+  const globalImageRef = /^global\/images\/(?:family\/)?[^/]+$/;
+  const shortImageRef = /^(?:family|images)\/[^/]+$/;
+  const familyName = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
+
+  if (
+    /^https:\/\/(?:www\.)?googleapis\.com\/compute\/v1\/projects\/[^/]+\/global\/images\/(?:family\/)?[^/]+$/.test(
+      trimmed
+    )
+  ) {
+    return trimmed;
+  }
+  if (projectScopedImageRef.test(trimmed) || globalImageRef.test(trimmed)) return trimmed;
+  if (shortImageRef.test(trimmed)) return `projects/${imageProject}/global/images/${trimmed}`;
+  if (familyName.test(trimmed)) return `projects/${imageProject}/global/images/family/${trimmed}`;
+
+  throw new ProviderError(
+    'gcp',
+    400,
+    `GCP image must be an image family name or a Compute Engine image/family reference: ${trimmed}`,
+    { category: 'invalid_config' }
+  );
 }

@@ -1,7 +1,11 @@
 import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 
 import { getProviderCatalogOfferings } from './instance-offerings';
-import { observedHardware, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
+import {
+  assertIncludedBootDiskCapacity,
+  observedHardware,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
 import {
   providerDelay,
   providerFetch,
@@ -161,6 +165,20 @@ function asNumber(value: unknown, path: string): number {
 function optionalNumber(value: unknown, path: string): number | undefined {
   if (value === undefined || value === null) return undefined;
   return asNumber(value, path);
+}
+function optionalPositiveInteger(value: unknown, path: string): number | undefined {
+  const number = optionalNumber(value, path);
+  if (number === undefined) return undefined;
+  if (!Number.isInteger(number) || number <= 0)
+    throw new ProviderError('infomaniak', undefined, `Invalid Infomaniak response at ${path}`);
+  return number;
+}
+function optionalNonNegativeInteger(value: unknown, path: string): number | undefined {
+  const number = optionalNumber(value, path);
+  if (number === undefined) return undefined;
+  if (!Number.isInteger(number) || number < 0)
+    throw new ProviderError('infomaniak', undefined, `Invalid Infomaniak response at ${path}`);
+  return number;
 }
 function metadata(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -412,6 +430,7 @@ export class InfomaniakProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: this.imageName,
     });
+    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
     if (nativeConfig.location !== this.region)
       throw new ProviderError(
         'infomaniak',
@@ -495,9 +514,9 @@ export class InfomaniakProvider implements Provider {
       typeof flavor.original_name === 'string'
         ? flavor.original_name
         : asString(flavor.id, 'flavor.id');
-    const vcpus = optionalNumber(flavor.vcpus, 'flavor.vcpus');
-    const ram = optionalNumber(flavor.ram, 'flavor.ram');
-    const disk = optionalNumber(flavor.disk, 'flavor.disk');
+    const vcpus = optionalPositiveInteger(flavor.vcpus, 'flavor.vcpus');
+    const ram = optionalPositiveInteger(flavor.ram, 'flavor.ram');
+    const disk = optionalNonNegativeInteger(flavor.disk, 'flavor.disk');
     const resources =
       vcpus !== undefined && ram !== undefined && disk !== undefined
         ? { vcpuCount: vcpus, memoryMb: ram, diskGb: disk }

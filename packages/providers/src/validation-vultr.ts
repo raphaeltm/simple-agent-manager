@@ -1,8 +1,9 @@
 import {
   expectObject,
   type JsonObject,
-  optionalNumber,
+  optionalNonNegativeInteger,
   optionalObject,
+  optionalPositiveInteger,
   optionalString,
   requireArray,
   requireNumber,
@@ -136,9 +137,9 @@ function optionalInstanceResources(
   inst: JsonObject,
   context: string
 ): Pick<VultrInstancePayload, 'vcpu_count' | 'ram' | 'disk'> {
-  const vcpuCount = optionalNumber(inst, 'vcpu_count', 'vultr', context);
-  const ram = optionalNumber(inst, 'ram', 'vultr', context);
-  const disk = optionalNumber(inst, 'disk', 'vultr', context);
+  const vcpuCount = optionalPositiveInteger(inst, 'vcpu_count', 'vultr', context);
+  const ram = optionalPositiveInteger(inst, 'ram', 'vultr', context);
+  const disk = optionalNonNegativeInteger(inst, 'disk', 'vultr', context);
   return {
     ...(vcpuCount !== undefined ? { vcpu_count: vcpuCount } : {}),
     ...(ram !== undefined ? { ram } : {}),

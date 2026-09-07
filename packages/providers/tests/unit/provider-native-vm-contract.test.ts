@@ -39,6 +39,23 @@ function nativeConfig(size: string): VMConfig {
   };
 }
 
+function nativeOnlyConfig(native: NonNullable<VMConfig['native']>): VMConfig {
+  return {
+    name: 'sam-native-node',
+    location: 'native-region',
+    userData: '#cloud-config\n',
+    native,
+  };
+}
+
+function unsupportedBootDiskConfig(instanceType: string, includedDiskGb: number): VMConfig {
+  return nativeOnlyConfig({
+    instanceType,
+    bootDiskSizeGb: includedDiskGb + 1,
+    resources: { vcpuCount: 2, memoryMb: 4096, diskGb: includedDiskGb },
+  });
+}
+
 function normalizeBody(body: unknown): unknown {
   const text = String(body);
   return text ? JSON.parse(text) : undefined;
@@ -63,7 +80,10 @@ describe('provider native VM request contracts', () => {
     }) as typeof fetch;
 
     const provider = new HetznerProvider('token', 'fsn1', undefined, false);
-    const first = await provider.createVM({ ...nativeConfig('small'), location: 'fsn1' });
+    const first = await provider.createVM({
+      ...nativeOnlyConfig(nativeConfig('small').native!),
+      location: 'fsn1',
+    });
     const second = await provider.createVM({ ...nativeConfig('large'), location: 'fsn1' });
 
     expect(bodies).toHaveLength(2);
@@ -74,6 +94,20 @@ describe('provider native VM request contracts', () => {
       source: 'observed',
     });
     expect(second.serverType).toBe('native-exact-type');
+  });
+
+  it('Hetzner rejects unsupported fixed-root boot disk requests before allocation', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const provider = new HetznerProvider('token', 'fsn1', undefined, false);
+    await expect(
+      provider.createVM({
+        ...unsupportedBootDiskConfig('arbitrary-hetzner-type', 80),
+        location: 'fsn1',
+      })
+    ).rejects.toThrow('cannot satisfy requested native.bootDiskSizeGb');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('Scaleway uses native commercial_type and requested architecture for image lookup', async () => {
@@ -103,9 +137,12 @@ describe('provider native VM request contracts', () => {
 
     const provider = new ScalewayProvider('secret', 'project', 'fr-par-1');
     await provider.createVM({
-      ...nativeConfig('small'),
+      ...nativeOnlyConfig({
+        ...nativeConfig('small').native!,
+        instanceType: 'native-exact-type',
+        architecture: 'arm64',
+      }),
       location: 'fr-par-1',
-      native: { ...nativeConfig('small').native!, instanceType: 'native-exact-type', architecture: 'arm64' },
     });
     await provider.createVM({
       ...nativeConfig('large'),
@@ -120,6 +157,20 @@ describe('provider native VM request contracts', () => {
       expect.stringContaining('arch=arm64'),
       expect.stringContaining('arch=arm64'),
     ]);
+  });
+
+  it('Scaleway rejects unsupported fixed-root boot disk requests before allocation', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const provider = new ScalewayProvider('secret', 'project', 'fr-par-1');
+    await expect(
+      provider.createVM({
+        ...unsupportedBootDiskConfig('arbitrary-scaleway-type', 40),
+        location: 'fr-par-1',
+      })
+    ).rejects.toThrow('cannot satisfy requested native.bootDiskSizeGb');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('DigitalOcean uses native size slug without legacy storage authority', async () => {
@@ -141,7 +192,10 @@ describe('provider native VM request contracts', () => {
     }) as typeof fetch;
 
     const provider = new DigitalOceanProvider('token', { region: 'fra1', ipPollTimeoutMs: 1 });
-    const first = await provider.createVM({ ...nativeConfig('small'), location: 'fra1' });
+    const first = await provider.createVM({
+      ...nativeOnlyConfig(nativeConfig('small').native!),
+      location: 'fra1',
+    });
     const second = await provider.createVM({ ...nativeConfig('large'), location: 'fra1' });
 
     expect(bodies).toHaveLength(2);
@@ -152,6 +206,20 @@ describe('provider native VM request contracts', () => {
       source: 'observed',
     });
     expect(second.serverType).toBe('native-exact-type');
+  });
+
+  it('DigitalOcean rejects unsupported fixed-root boot disk requests before allocation', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const provider = new DigitalOceanProvider('token', { region: 'fra1', ipPollTimeoutMs: 1 });
+    await expect(
+      provider.createVM({
+        ...unsupportedBootDiskConfig('arbitrary-do-size', 80),
+        location: 'fra1',
+      })
+    ).rejects.toThrow('cannot satisfy requested native.bootDiskSizeGb');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('Vultr uses native plan and validates requested OS architecture', async () => {
@@ -188,9 +256,8 @@ describe('provider native VM request contracts', () => {
 
     const provider = new VultrProvider('token', { region: 'fra', ipPollTimeoutMs: 1 });
     await provider.createVM({
-      ...nativeConfig('small'),
+      ...nativeOnlyConfig({ ...nativeConfig('small').native!, architecture: 'x86_64' }),
       location: 'fra',
-      native: { ...nativeConfig('small').native!, architecture: 'x86_64' },
     });
     await provider.createVM({
       ...nativeConfig('large'),
@@ -201,6 +268,115 @@ describe('provider native VM request contracts', () => {
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toEqual(bodies[1]);
     expect((bodies[0] as { plan: string }).plan).toBe('native-exact-type');
+  });
+
+  it('Vultr rejects unsupported fixed-root boot disk requests before allocation', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const provider = new VultrProvider('token', { region: 'fra', ipPollTimeoutMs: 1 });
+    await expect(
+      provider.createVM({
+        ...unsupportedBootDiskConfig('arbitrary-vultr-plan', 80),
+        location: 'fra',
+      })
+    ).rejects.toThrow('cannot satisfy requested native.bootDiskSizeGb');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('Vultr validates numeric OS overrides against requested architecture before allocation', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.includes('/os?')) {
+        return json({
+          os: [{ id: 1743, name: 'Ubuntu 24.04 LTS x64', arch: 'x64', family: 'ubuntu' }],
+        });
+      }
+      if (url.endsWith('/instances') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new VultrProvider('token', { region: 'fra', ipPollTimeoutMs: 1 });
+    await expect(
+      provider.createVM({
+        ...nativeOnlyConfig({
+          instanceType: 'native-exact-type',
+          bootDiskSizeGb: 96,
+          image: '1743',
+          architecture: 'arm64',
+          resources: { vcpuCount: 7, memoryMb: 14_336, diskGb: 96 },
+        }),
+        location: 'fra',
+      })
+    ).rejects.toThrow('cannot satisfy "arm64"');
+    expect(bodies).toEqual([]);
+  });
+
+  it('Vultr keys OS cache by architecture and revalidates neutral-name matches', async () => {
+    const bodies: unknown[] = [];
+    let osFetches = 0;
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.includes('/os?')) {
+        osFetches += 1;
+        return json({
+          os: [{ id: 1743, name: 'Ubuntu 24.04 LTS x64', arch: 'x64', family: 'ubuntu' }],
+        });
+      }
+      if (url.endsWith('/instances') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({
+          instance: {
+            id: 'instance-1',
+            main_ip: '203.0.113.10',
+            status: 'active',
+            power_status: 'running',
+            server_status: 'ok',
+            region: 'fra',
+            plan: 'native-exact-type',
+            vcpu_count: 7,
+            ram: 14_336,
+            disk: 96,
+            date_created: '2026-09-07T00:00:00Z',
+            label: 'sam-native-node',
+            tags: [],
+          },
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new VultrProvider('token', {
+      region: 'fra',
+      osName: 'Ubuntu 24.04 LTS',
+      ipPollTimeoutMs: 1,
+    });
+    await provider.createVM({
+      ...nativeOnlyConfig({
+        instanceType: 'native-exact-type',
+        bootDiskSizeGb: 96,
+        architecture: 'x86_64',
+        resources: { vcpuCount: 7, memoryMb: 14_336, diskGb: 96 },
+      }),
+      location: 'fra',
+    });
+
+    await expect(
+      provider.createVM({
+        ...nativeOnlyConfig({
+          instanceType: 'native-exact-type',
+          bootDiskSizeGb: 96,
+          architecture: 'arm64',
+          resources: { vcpuCount: 7, memoryMb: 14_336, diskGb: 96 },
+        }),
+        location: 'fra',
+      })
+    ).rejects.toThrow('cannot satisfy "arm64"');
+    expect(osFetches).toBe(2);
+    expect(bodies).toHaveLength(1);
   });
 
   it('GCP uses native machineType and requested boot disk size', async () => {
@@ -229,16 +405,114 @@ describe('provider native VM request contracts', () => {
     }) as typeof fetch;
 
     const provider = new GcpProvider('project', async () => 'token', 'us-central1-a');
-    const first = await provider.createVM({ ...nativeConfig('small'), location: 'us-central1-a' });
+    const first = await provider.createVM({
+      ...nativeOnlyConfig(nativeConfig('small').native!),
+      location: 'us-central1-a',
+    });
     const second = await provider.createVM({ ...nativeConfig('large'), location: 'us-central1-a' });
 
     expect(bodies).toHaveLength(2);
     expect(bodies[0]).toEqual(bodies[1]);
-    const body = bodies[0] as { machineType: string; disks: Array<{ initializeParams: { diskSizeGb: string } }> };
+    const body = bodies[0] as {
+      machineType: string;
+      disks: Array<{ initializeParams: { diskSizeGb: string; sourceImage: string } }>;
+    };
     expect(body.machineType).toContain('/machineTypes/native-exact-type');
     expect(body.disks[0]?.initializeParams.diskSizeGb).toBe('96');
+    expect(body.disks[0]?.initializeParams.sourceImage).toBe(
+      'projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64'
+    );
     expect(first.observedHardware.resources.source).toBe('unknown');
     expect(second.serverType).toBe('native-exact-type');
+  });
+
+  it('GCP keeps provider disk defaults for legacy callers and accepts full image refs', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith('/global/firewalls') && init.method === 'POST') {
+        return json({ error: { code: 409, message: 'already exists' } }, 409);
+      }
+      if (url.endsWith('/instances') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({ name: 'operation-1', status: 'PENDING' });
+      }
+      if (url.includes('/operations/')) return json({ name: 'operation-1', status: 'DONE' });
+      if (url.includes('/instances/sam-native-node')) {
+        return json({
+          id: 'instance-1',
+          name: 'sam-native-node',
+          status: 'RUNNING',
+          machineType: 'zones/us-central1-a/machineTypes/e2-medium',
+          creationTimestamp: '2026-09-07T00:00:00Z',
+          networkInterfaces: [{ accessConfigs: [{ natIP: '203.0.113.10' }] }],
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new GcpProvider(
+      'project',
+      async () => 'token',
+      'us-central1-a',
+      'ubuntu-2404-lts-amd64',
+      'ubuntu-os-cloud',
+      200
+    );
+    await provider.createVM({
+      name: 'sam-native-node',
+      size: 'small',
+      location: 'us-central1-a',
+      userData: '#cloud-config\n',
+      image: 'projects/custom-images/global/images/sam-node-v20260907',
+    });
+
+    const body = bodies[0] as { disks: Array<{ initializeParams: { diskSizeGb: string; sourceImage: string } }> };
+    expect(body.disks[0]?.initializeParams.diskSizeGb).toBe('200');
+    expect(body.disks[0]?.initializeParams.sourceImage).toBe(
+      'projects/custom-images/global/images/sam-node-v20260907'
+    );
+  });
+
+  it('GCP resolves configured image family names and native family references', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith('/global/firewalls') && init.method === 'POST') {
+        return json({ error: { code: 409, message: 'already exists' } }, 409);
+      }
+      if (url.endsWith('/instances') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({ name: 'operation-1', status: 'PENDING' });
+      }
+      if (url.includes('/operations/')) return json({ name: 'operation-1', status: 'DONE' });
+      if (url.includes('/instances/sam-native-node')) {
+        return json({
+          id: 'instance-1',
+          name: 'sam-native-node',
+          status: 'RUNNING',
+          machineType: 'zones/us-central1-a/machineTypes/native-exact-type',
+          creationTimestamp: '2026-09-07T00:00:00Z',
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new GcpProvider('project', async () => 'token', 'us-central1-a');
+    await provider.createVM({
+      ...nativeOnlyConfig({
+        instanceType: 'native-exact-type',
+        bootDiskSizeGb: 64,
+        image: 'family/debian-12',
+        resources: { vcpuCount: 2, memoryMb: 4096, diskGb: 64 },
+      }),
+      location: 'us-central1-a',
+    });
+
+    const body = bodies[0] as { disks: Array<{ initializeParams: { sourceImage: string } }> };
+    expect(body.disks[0]?.initializeParams.sourceImage).toBe(
+      'projects/ubuntu-os-cloud/global/images/family/debian-12'
+    );
   });
 
   it('Infomaniak resolves native flavor names without legacy size authority', async () => {
@@ -296,7 +570,10 @@ describe('provider native VM request contracts', () => {
     }) as typeof fetch;
 
     const provider = new InfomaniakProvider('id', 'secret', { authUrl });
-    const first = await provider.createVM({ ...nativeConfig('small'), location: 'dc4-a' });
+    const first = await provider.createVM({
+      ...nativeOnlyConfig(nativeConfig('small').native!),
+      location: 'dc4-a',
+    });
     const second = await provider.createVM({ ...nativeConfig('large'), location: 'dc4-a' });
 
     expect(bodies).toHaveLength(2);
@@ -307,6 +584,20 @@ describe('provider native VM request contracts', () => {
       source: 'observed',
     });
     expect(second.serverType).toBe('native-exact-type');
+  });
+
+  it('Infomaniak rejects unsupported fixed-root boot disk requests before allocation', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: 'https://auth.example/v3' });
+    await expect(
+      provider.createVM({
+        ...unsupportedBootDiskConfig('arbitrary-infomaniak-flavor', 20),
+        location: 'dc4-a',
+      })
+    ).rejects.toThrow('cannot satisfy requested native.bootDiskSizeGb');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('UpCloud uses native plan and disk request independent of legacy size', async () => {
@@ -355,7 +646,10 @@ describe('provider native VM request contracts', () => {
     }) as typeof fetch;
 
     const provider = new UpCloudProvider('user', 'password', { zone: 'de-fra1', ipPollTimeoutMs: 1 });
-    const first = await provider.createVM({ ...nativeConfig('small'), location: 'de-fra1' });
+    const first = await provider.createVM({
+      ...nativeOnlyConfig(nativeConfig('small').native!),
+      location: 'de-fra1',
+    });
     const second = await provider.createVM({ ...nativeConfig('large'), location: 'de-fra1' });
 
     expect(bodies).toHaveLength(2);
@@ -368,5 +662,122 @@ describe('provider native VM request contracts', () => {
       source: 'observed',
     });
     expect(second.serverType).toBe('native-exact-type');
+  });
+
+  it('UpCloud supports arbitrary native plans with concrete disk metadata and no legacy size', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith('/zone')) return json({ zones: { zone: [{ id: 'de-fra1' }] } });
+      if (url.endsWith('/plan')) return json({ plans: { plan: [{ name: 'DEV-64xCPU-384GB' }] } });
+      if (url.endsWith('/storage/template')) {
+        return json({
+          storages: {
+            storage: [
+              {
+                uuid: 'template-1',
+                title: 'Ubuntu Server 24.04 LTS',
+                size: 10,
+                zone: '',
+                type: 'template',
+                template_type: 'cloud-init',
+                servers: { server: [] },
+              },
+            ],
+          },
+        });
+      }
+      if (url.endsWith('/server') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({
+          server: {
+            uuid: 'server-1',
+            title: 'sam-native-node',
+            state: 'started',
+            zone: 'de-fra1',
+            plan: 'DEV-64xCPU-384GB',
+            core_number: 64,
+            memory_amount: 393_216,
+            created: '2026-09-07T00:00:00Z',
+            labels: { label: [] },
+            ip_addresses: {
+              ip_address: [{ access: 'public', family: 'IPv4', address: '203.0.113.10' }],
+            },
+            storage_devices: { storage_device: [] },
+          },
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new UpCloudProvider('user', 'password', { zone: 'de-fra1', ipPollTimeoutMs: 1 });
+    await provider.createVM({
+      ...nativeOnlyConfig({
+        instanceType: 'DEV-64xCPU-384GB',
+        resources: { vcpuCount: 64, memoryMb: 393_216, diskGb: 480 },
+      }),
+      location: 'de-fra1',
+    });
+
+    const body = bodies[0] as { server: { storage_devices: { storage_device: Array<{ size: number }> } } };
+    expect(body.server.storage_devices.storage_device[0]?.size).toBe(480);
+  });
+
+  it('UpCloud top-level instanceType compatibility uses alias disk only through the adapter', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith('/zone')) return json({ zones: { zone: [{ id: 'de-fra1' }] } });
+      if (url.endsWith('/plan')) return json({ plans: { plan: [{ name: '4xCPU-8GB' }] } });
+      if (url.endsWith('/storage/template')) {
+        return json({
+          storages: {
+            storage: [
+              {
+                uuid: 'template-1',
+                title: 'Ubuntu Server 24.04 LTS',
+                size: 10,
+                zone: '',
+                type: 'template',
+                template_type: 'cloud-init',
+                servers: { server: [] },
+              },
+            ],
+          },
+        });
+      }
+      if (url.endsWith('/server') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({
+          server: {
+            uuid: 'server-1',
+            title: 'sam-native-node',
+            state: 'started',
+            zone: 'de-fra1',
+            plan: '4xCPU-8GB',
+            core_number: 4,
+            memory_amount: 8192,
+            created: '2026-09-07T00:00:00Z',
+            labels: { label: [] },
+            ip_addresses: {
+              ip_address: [{ access: 'public', family: 'IPv4', address: '203.0.113.10' }],
+            },
+            storage_devices: { storage_device: [] },
+          },
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new UpCloudProvider('user', 'password', { zone: 'de-fra1', ipPollTimeoutMs: 1 });
+    await provider.createVM({
+      name: 'sam-native-node',
+      instanceType: '4xCPU-8GB',
+      location: 'de-fra1',
+      userData: '#cloud-config\n',
+    });
+
+    const body = bodies[0] as { server: { storage_devices: { storage_device: Array<{ size: number }> } } };
+    expect(body.server.storage_devices.storage_device[0]?.size).toBe(80);
   });
 });

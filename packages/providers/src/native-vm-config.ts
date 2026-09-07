@@ -34,6 +34,7 @@ export interface NativeVMResolveOptions {
   defaultBootDiskSizeGb?: number;
   minBootDiskSizeGb?: number;
   maxBootDiskSizeGb?: number;
+  legacyBootDiskSizeAuthority?: 'legacy-size' | 'provider-default';
 }
 
 export function resolveVMConfigWithLegacySizeAdapter(
@@ -85,6 +86,57 @@ export function legacySizeToNativeVMConfig(
       diskGb: sizeConfig.storageGb,
     },
   };
+}
+
+export function topLevelInstanceTypeToNativeVMConfig(
+  instanceType: string,
+  options: Pick<NativeVMResolveOptions, 'legacySizes'> & { image?: string }
+): NativeVMConfig {
+  const matchedLegacySize = Object.values(options.legacySizes).find((sizeConfig) => {
+    return sizeConfig.type === instanceType;
+  });
+
+  return {
+    instanceType,
+    ...(options.image ? { image: options.image } : {}),
+    ...(matchedLegacySize
+      ? {
+          bootDiskSizeGb: matchedLegacySize.storageGb,
+          resources: {
+            vcpuCount: matchedLegacySize.vcpu,
+            memoryMb: matchedLegacySize.ramGb * 1024,
+            diskGb: matchedLegacySize.storageGb,
+          },
+        }
+      : {}),
+  };
+}
+
+export function assertIncludedBootDiskCapacity(
+  providerName: string,
+  config: Pick<ResolvedNativeVMConfig, 'instanceType' | 'bootDiskSizeGb' | 'resources'>,
+  legacySizes: Readonly<Record<string, SizeConfig>>
+): void {
+  if (config.bootDiskSizeGb === undefined) return;
+
+  const includedDiskGb = resolveIncludedDiskGb(config, legacySizes);
+  if (includedDiskGb === undefined) {
+    throw new ProviderError(
+      providerName,
+      400,
+      `${providerName} instance type ${config.instanceType} does not expose included root disk capacity; native.bootDiskSizeGb cannot be validated for this fixed-root-disk provider`,
+      { category: 'invalid_config' }
+    );
+  }
+
+  if (config.bootDiskSizeGb > includedDiskGb) {
+    throw new ProviderError(
+      providerName,
+      400,
+      `${providerName} instance type ${config.instanceType} includes ${includedDiskGb}GB root disk and cannot satisfy requested native.bootDiskSizeGb ${config.bootDiskSizeGb}GB`,
+      { category: 'invalid_config' }
+    );
+  }
 }
 
 export function assertBootDiskSizeGb(
@@ -145,13 +197,18 @@ function normalizeNativeVMConfig(
   options: NativeVMResolveOptions
 ): NativeVMConfig {
   const explicitNative = config.native;
+  const source: 'native' | 'top-level-instance-type' | 'legacy-size' = explicitNative
+    ? 'native'
+    : config.instanceType
+      ? 'top-level-instance-type'
+      : 'legacy-size';
   const candidate: NativeVMConfig =
     explicitNative ??
     (config.instanceType
-      ? {
-          instanceType: config.instanceType,
-          image: config.image,
-        }
+      ? topLevelInstanceTypeToNativeVMConfig(config.instanceType, {
+          legacySizes: options.legacySizes,
+          ...(config.image ? { image: config.image } : {}),
+        })
       : legacySizeToNativeVMConfig(config.size, options));
 
   if (!candidate.instanceType || candidate.instanceType.trim().length === 0) {
@@ -160,7 +217,12 @@ function normalizeNativeVMConfig(
     });
   }
 
-  const bootDiskSizeGb = candidate.bootDiskSizeGb ?? options.defaultBootDiskSizeGb;
+  const bootDiskSizeGb =
+    source === 'legacy-size' &&
+    options.legacyBootDiskSizeAuthority === 'provider-default' &&
+    options.defaultBootDiskSizeGb !== undefined
+      ? options.defaultBootDiskSizeGb
+      : (candidate.bootDiskSizeGb ?? options.defaultBootDiskSizeGb);
   assertBootDiskSizeGb(options.providerName, bootDiskSizeGb, {
     min: options.minBootDiskSizeGb,
     max: options.maxBootDiskSizeGb,
@@ -191,12 +253,29 @@ function validateResources(resources: VMHardwareResources, providerName: string)
   }
   if (
     resources.diskGb !== undefined &&
-    (!Number.isInteger(resources.diskGb) || resources.diskGb <= 0)
+    (!Number.isInteger(resources.diskGb) || resources.diskGb < 0)
   ) {
-    throw new ProviderError(providerName, 400, 'native.resources.diskGb must be a positive integer', {
-      category: 'invalid_config',
-    });
+    throw new ProviderError(
+      providerName,
+      400,
+      'native.resources.diskGb must be a non-negative integer',
+      {
+        category: 'invalid_config',
+      }
+    );
   }
+}
+
+function resolveIncludedDiskGb(
+  config: Pick<ResolvedNativeVMConfig, 'instanceType' | 'resources'>,
+  legacySizes: Readonly<Record<string, SizeConfig>>
+): number | undefined {
+  if (config.resources?.diskGb !== undefined) return config.resources.diskGb;
+
+  const matchedLegacySize = Object.values(legacySizes).find((sizeConfig) => {
+    return sizeConfig.type === config.instanceType;
+  });
+  return matchedLegacySize?.storageGb;
 }
 
 function validateImageArchitecture(

@@ -1,8 +1,9 @@
 import {
   expectObject,
   type JsonObject,
-  optionalNumber,
+  optionalNonNegativeInteger,
   optionalObject,
+  optionalPositiveInteger,
   optionalString,
   requireArray,
   requireNumber,
@@ -128,9 +129,9 @@ function extractSize(
   const size = optionalObject(droplet, 'size', PROVIDER, context);
   if (!size) return {};
   const parsed = {
-    vcpus: optionalNumber(size, 'vcpus', PROVIDER, `${context}.size`),
-    memory: optionalNumber(size, 'memory', PROVIDER, `${context}.size`),
-    disk: optionalNumber(size, 'disk', PROVIDER, `${context}.size`),
+    vcpus: optionalPositiveInteger(size, 'vcpus', PROVIDER, `${context}.size`),
+    memory: optionalPositiveInteger(size, 'memory', PROVIDER, `${context}.size`),
+    disk: optionalNonNegativeInteger(size, 'disk', PROVIDER, `${context}.size`),
   };
   if (parsed.vcpus === undefined || parsed.memory === undefined || parsed.disk === undefined) {
     throw validationError(PROVIDER, `${context}.size`, 'expected vcpus, memory, and disk numbers');
