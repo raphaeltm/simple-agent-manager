@@ -41,15 +41,25 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+  serializeError: (error: unknown) => ({
+    error: error instanceof Error ? error.message : String(error),
+  }),
 }));
 
 type FirstResolver = (sql: string, values: unknown[]) => unknown;
+
+/** Statements executed through `.run()` (writes), captured for assertions. */
+const executedWrites: Array<{ sql: string; values: unknown[] }> = [];
 
 function makeEnv(resolveFirst: FirstResolver): Env {
   const database = {
     prepare: vi.fn((sql: string) => ({
       bind: (...values: unknown[]) => ({
         first: async () => resolveFirst(sql, values),
+        run: async () => {
+          executedWrites.push({ sql, values });
+          return { meta: { changes: 1 } };
+        },
       }),
     })),
   } as unknown as D1Database;
@@ -133,6 +143,7 @@ function largeSourceNode(agentVersion = 'legacy-version') {
 describe('session snapshot upload relay', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    executedWrites.length = 0;
     mocks.placementProjectDefaultsFromRow.mockImplementation((project) => project);
     mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue(canonicalAllocation());
     mocks.checkQuotaForUser.mockResolvedValue({ allowed: true });
@@ -486,5 +497,151 @@ describe('session snapshot upload relay', () => {
       reason: 'session_snapshot_relay_not_running',
     });
     expect(mocks.markIdle).not.toHaveBeenCalled();
+  });
+
+  // The fresh-relay sequence pays a provider BEFORE the post-provision authority
+  // recheck, the warm-timeout read and the warm-pool enrolment RPC. Each of those
+  // can fail after the node is already running (source stopped, agent upgraded or
+  // membership revoked while DNS settled), which used to leave a paid relay that
+  // was never enrolled in warm cleanup and therefore never reaped.
+  describe('fresh relay compensation', () => {
+    function provisionedRunningEnv(): Env {
+      return makeEnv((sql) => {
+        if (sql.includes('agent_version, provider_instance_type')) return sourceNode();
+        if (sql.includes('agent_version = ?')) return null;
+        if (sql.includes('FROM projects') && sql.includes('default_vm_size'))
+          return projectDefaultsRow();
+        if (sql.includes('name = ?')) return null;
+        if (sql.includes('SELECT status FROM nodes')) return { status: 'running' };
+        if (sql.includes('warm_node_timeout_ms')) return { warm_node_timeout_ms: 7_200_000 };
+        throw new Error(`unexpected SQL: ${sql}`);
+      });
+    }
+
+    it('cleans up the exact fresh VM when authority is revoked after the node is running', async () => {
+      const env = provisionedRunningEnv();
+      const revoked = new Error(
+        'Session snapshot relay provisioning authority is no longer current'
+      );
+      // First call is the pre-createVM check inside provisionNode's option; the
+      // post-provision recheck is the one that fails, after the node is running.
+      mocks.assertRelayProvisioningAuthority.mockRejectedValueOnce(revoked);
+
+      await expect(
+        ensureSessionSnapshotUploadRelay(env, {
+          userId: 'user-1',
+          sourceNodeId: 'legacy-node',
+          projectId: 'project-1',
+        })
+      ).rejects.toThrow(revoked);
+
+      expect(mocks.cleanupFreshProvisioningNode).toHaveBeenCalledWith(env, {
+        nodeId: 'relay-node',
+        userId: 'user-1',
+        nodeRole: 'workspace',
+        reason: 'session_snapshot_relay_provisioning_failed',
+      });
+      // Strictly the VM this call created — never the reused relay or the source.
+      expect(mocks.cleanupFreshProvisioningNode).toHaveBeenCalledTimes(1);
+      expect(mocks.markIdle).not.toHaveBeenCalled();
+    });
+
+    it('cleans up when warm-pool enrolment fails after provisioning succeeded', async () => {
+      const env = provisionedRunningEnv();
+      const enrolmentFailure = new Error('NodeLifecycle unavailable');
+      mocks.markIdle.mockRejectedValueOnce(enrolmentFailure);
+
+      await expect(
+        ensureSessionSnapshotUploadRelay(env, {
+          userId: 'user-1',
+          sourceNodeId: 'legacy-node',
+          projectId: 'project-1',
+        })
+      ).rejects.toThrow(enrolmentFailure);
+
+      expect(mocks.cleanupFreshProvisioningNode).toHaveBeenCalledWith(
+        env,
+        expect.objectContaining({
+          nodeId: 'relay-node',
+          reason: 'session_snapshot_relay_provisioning_failed',
+        })
+      );
+    });
+
+    it('cleans up when provisioning itself throws', async () => {
+      const env = provisionedRunningEnv();
+      const provisionFailure = new Error('provider capacity exhausted');
+      mocks.provisionNode.mockRejectedValueOnce(provisionFailure);
+
+      await expect(
+        ensureSessionSnapshotUploadRelay(env, {
+          userId: 'user-1',
+          sourceNodeId: 'legacy-node',
+          projectId: 'project-1',
+        })
+      ).rejects.toThrow(provisionFailure);
+
+      expect(mocks.cleanupFreshProvisioningNode).toHaveBeenCalledWith(
+        env,
+        expect.objectContaining({ nodeId: 'relay-node' })
+      );
+    });
+
+    it('records durable evidence on the exact node when cleanup fails, without touching lifecycle', async () => {
+      const env = provisionedRunningEnv();
+      mocks.assertRelayProvisioningAuthority.mockRejectedValueOnce(new Error('membership revoked'));
+      mocks.cleanupFreshProvisioningNode.mockResolvedValueOnce('failed');
+
+      await expect(
+        ensureSessionSnapshotUploadRelay(env, {
+          userId: 'user-1',
+          sourceNodeId: 'legacy-node',
+          projectId: 'project-1',
+        })
+      ).rejects.toThrow('membership revoked');
+
+      const evidence = executedWrites.find((write) => write.sql.includes('error_message = ?'));
+      expect(evidence).toBeDefined();
+      expect(evidence!.values).toContain('relay-node');
+      expect(evidence!.values).toContain('user-1');
+      expect(String(evidence!.values[0])).toContain('Session snapshot relay cleanup failed');
+      // Lifecycle status is deliberately untouched so evidence cannot resurrect
+      // or terminalise a node the deletion path already moved.
+      expect(evidence!.sql).not.toContain('status =');
+    });
+
+    it('leaves a successful fresh relay enrolled and uncompensated', async () => {
+      const env = provisionedRunningEnv();
+
+      await ensureSessionSnapshotUploadRelay(env, {
+        userId: 'user-1',
+        sourceNodeId: 'legacy-node',
+        projectId: 'project-1',
+      });
+
+      expect(mocks.markIdle).toHaveBeenCalledWith('relay-node', 'user-1', 7_200_000);
+      expect(mocks.cleanupFreshProvisioningNode).not.toHaveBeenCalled();
+      expect(executedWrites.some((write) => write.sql.includes('error_message = ?'))).toBe(false);
+    });
+
+    it('never compensates when an existing relay is reused', async () => {
+      const env = makeEnv((sql) => {
+        if (sql.includes('agent_version, provider_instance_type')) return sourceNode();
+        if (sql.includes('FROM projects') && sql.includes('default_vm_size'))
+          return projectDefaultsRow();
+        if (sql.includes('agent_version = ?')) return { id: 'existing-relay', name: 'relay' };
+        throw new Error(`unexpected SQL: ${sql}`);
+      });
+
+      await ensureSessionSnapshotUploadRelay(env, {
+        userId: 'user-1',
+        sourceNodeId: 'legacy-node',
+        projectId: 'project-1',
+      });
+
+      expect(mocks.createNodeRecord).not.toHaveBeenCalled();
+      expect(mocks.cleanupFreshProvisioningNode).not.toHaveBeenCalled();
+      expect(mocks.provisionNode).not.toHaveBeenCalled();
+    });
   });
 });
