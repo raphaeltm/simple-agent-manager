@@ -983,6 +983,19 @@ describe('project event source outbox', () => {
     ).toEqual({ state: 'pending' });
   });
 
+  it.each(['1', '0', '-1', '2.5', '2rows', 'Infinity'])(
+    'rejects invalid configured mutation budget %s before writes',
+    async (budget) => {
+      env.PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS = budget;
+      const before = sqlite.prepare('SELECT total_changes() AS changes').get();
+      await expect(reconcileProjectEventSourceOutbox(env, { now: NOW })).rejects.toThrow(
+        'at least 2'
+      );
+      expect(sqlite.prepare('SELECT total_changes() AS changes').get()).toEqual(before);
+      expect(admitProjectEvent).not.toHaveBeenCalled();
+    }
+  );
+
   it('requires two available mutations before claiming and settling a candidate', async () => {
     admitProjectEvent
       .mockResolvedValueOnce({
@@ -1014,14 +1027,9 @@ describe('project event source outbox', () => {
       }
     );
 
-    const tooSmall = await reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW });
-
-    expect(tooSmall).toMatchObject({
-      attempted: 0,
-      admitted: 0,
-      outboxMutations: 0,
-      hasMore: true,
-    });
+    await expect(reconcileProjectEventSourceOutbox(env, { limit: 1, now: NOW })).rejects.toThrow(
+      'at least 2'
+    );
     expect(admitProjectEvent).not.toHaveBeenCalled();
     expect(
       sqlite
@@ -1110,62 +1118,69 @@ describe('project event source outbox', () => {
     });
   });
 
-  it('does not start external admission after claim reads consume the sweep wall', async () => {
-    env.PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS = '20';
-    env.PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS = '40';
-    admitProjectEvent.mockResolvedValue({
-      outcome: 'created',
-      event: { id: 'event-after-deadline', state: 'recorded' },
-      matches: [],
-    });
-    await enqueueProjectEventSourceIntent(env, sourceEvent(), {
-      id: 'intent-deadline-before-admission',
-      now: NOW,
-    });
+  it.each(['wall', 'ttl'])(
+    'does not start external admission after claim reads consume %s',
+    async (deadline) => {
+      env.PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS = deadline === 'wall' ? '20' : '2500';
+      if (deadline === 'ttl') env.PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS = '20';
+      env.PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS = '40';
+      admitProjectEvent.mockResolvedValue({
+        outcome: 'created',
+        event: { id: 'event-after-deadline', state: 'recorded' },
+        matches: [],
+      });
+      await enqueueProjectEventSourceIntent(env, sourceEvent(), {
+        id: 'intent-deadline-before-admission',
+        now: NOW,
+      });
 
-    const database = env.DATABASE;
-    let delayed = false;
-    env.DATABASE = {
-      ...database,
-      prepare: (sql: string) => {
-        const statement = database.prepare(sql);
-        if (delayed || !sql.includes("WHERE id = ? AND state = 'processing' AND claim_token = ?")) {
-          return statement;
-        }
-        return {
-          ...statement,
-          bind: (...params: unknown[]) => {
-            const bound = statement.bind(...params);
-            return {
-              ...bound,
-              first: async (column?: string) => {
-                delayed = true;
-                await vi.advanceTimersByTimeAsync(35);
-                return bound.first(column);
-              },
-            };
-          },
-        } as D1PreparedStatement;
-      },
-    } as D1Database;
+      const database = env.DATABASE;
+      let delayed = false;
+      env.DATABASE = {
+        ...database,
+        prepare: (sql: string) => {
+          const statement = database.prepare(sql);
+          if (
+            delayed ||
+            !sql.includes("WHERE id = ? AND state = 'processing' AND claim_token = ?")
+          ) {
+            return statement;
+          }
+          return {
+            ...statement,
+            bind: (...params: unknown[]) => {
+              const bound = statement.bind(...params);
+              return {
+                ...bound,
+                first: async (column?: string) => {
+                  delayed = true;
+                  await vi.advanceTimersByTimeAsync(35);
+                  return bound.first(column);
+                },
+              };
+            },
+          } as D1PreparedStatement;
+        },
+      } as D1Database;
 
-    const stats = await reconcileProjectEventSourceOutbox(env, { limit: 2, now: NOW });
+      const stats = await reconcileProjectEventSourceOutbox(env, {
+        limit: 2,
+        clock: () => new Date(),
+      });
 
-    expect(admitProjectEvent).not.toHaveBeenCalled();
-    expect(stats).toMatchObject({
-      attempted: 1,
-      retryableFailed: 1,
-      timedOut: 1,
-      outboxMutations: 2,
-    });
-    expect(rowById('intent-deadline-before-admission')).toMatchObject({
-      state: 'retryable_failed',
-      attempt_count: 1,
-      claim_token: null,
-      last_error:
-        'ProjectEventSourceAdmissionTimeoutError: ProjectData admission timed out after 0ms',
-    });
-  });
+      expect(admitProjectEvent).not.toHaveBeenCalled();
+      expect(stats).toMatchObject({
+        attempted: 1,
+        outboxMutations: 2,
+        ...(deadline === 'wall' ? { retryableFailed: 1, timedOut: 1 } : { expired: 1 }),
+      });
+      expect(rowById('intent-deadline-before-admission')).toMatchObject({
+        state: deadline === 'wall' ? 'retryable_failed' : 'expired',
+        attempt_count: 1,
+        claim_token: null,
+      });
+    }
+  );
 
   it('bounds expired history before due admission candidates', async () => {
     admitProjectEvent.mockResolvedValue({

@@ -22,6 +22,16 @@ export const PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES = [
   'retryable_failed',
   'processing',
 ] as const;
+// A candidate must reserve both its claim and its fenced settlement write.
+export const CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS = 2;
+
+export function assertProjectEventSourceMutationBudget(value: number): void {
+  if (!Number.isSafeInteger(value) || value < CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS) {
+    throw new RangeError(
+      'Project event source outbox mutation budget must be an integer of at least 2'
+    );
+  }
+}
 export const PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES = [
   'admitted',
   'expired',
@@ -334,11 +344,11 @@ function parsePositiveInteger(value: string | undefined, fallback: number, min =
 }
 
 export function resolveProjectEventSourceOutboxConfig(env: Env): ProjectEventSourceOutboxConfig {
+  const rawBudget = env.PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS?.trim();
+  const batchRows = rawBudget ? Number(rawBudget) : DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS;
+  assertProjectEventSourceMutationBudget(batchRows);
   return {
-    batchRows: parsePositiveInteger(
-      env.PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS,
-      DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS
-    ),
+    batchRows,
     maxAttempts: parsePositiveInteger(
       env.PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS,
       DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS

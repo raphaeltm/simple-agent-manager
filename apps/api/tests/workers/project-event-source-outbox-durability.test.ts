@@ -347,14 +347,9 @@ describe('Project event source outbox durability on migrated D1', () => {
       now: NOW,
     });
 
-    const tooSmall = await reconcileProjectEventSourceOutbox(testEnv, { limit: 1, now: NOW });
-
-    expect(tooSmall).toMatchObject({
-      attempted: 0,
-      admitted: 0,
-      outboxMutations: 0,
-      hasMore: true,
-    });
+    await expect(
+      reconcileProjectEventSourceOutbox(testEnv, { limit: 1, now: NOW })
+    ).rejects.toThrow('at least 2');
     expect(await projectDataService.getProjectEventRecentStatus(testEnv, projectId)).toMatchObject({
       events: [],
     });

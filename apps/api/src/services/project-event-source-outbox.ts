@@ -5,7 +5,9 @@ import { createModuleLogger } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import * as projectDataService from './project-data';
 import {
+  assertProjectEventSourceMutationBudget,
   assertProjectEventSourceOutboxCaptureMatchesInput,
+  CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS,
   PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES,
   PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES,
   type ProjectEventSourceAdmissionResult,
@@ -56,7 +58,6 @@ export {
 const log = createModuleLogger('project_event_source_outbox');
 const ACTIVE_STATES = PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES;
 const TERMINAL_STATES = PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES;
-const CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS = 2;
 
 export function projectEventSourceOutboxInsertStatement(
   env: Env,
@@ -414,6 +415,15 @@ async function admitClaimedIntent(
       const current = await loadProjectEventSourceIntentByInternalId(env, intent.id);
       return current ? resultFromIntent(current) : resultFromIntent(intent);
     }
+    const admissionNow = clock();
+    if (Date.parse(currentClaim.expiresAt) <= admissionNow.getTime()) {
+      return markIntentFailed(
+        env,
+        currentClaim,
+        new Error('Project event source intent expired before admission'),
+        admissionNow
+      );
+    }
     const timeoutMs = projectEventSourceAdmissionTimeoutMs(config, admissionTimeoutMs, deadlineMs);
     if (timeoutMs <= 0) {
       return markIntentFailed(env, intent, new ProjectEventSourceAdmissionTimeoutError(0), clock());
@@ -651,7 +661,8 @@ export async function reconcileProjectEventSourceOutbox(
   options: { limit?: number; now?: Date; clock?: () => Date } = {}
 ): Promise<ProjectEventSourceOutboxStats> {
   const config = resolveProjectEventSourceOutboxConfig(env);
-  const limit = Math.max(1, Math.min(options.limit ?? config.batchRows, config.batchRows));
+  assertProjectEventSourceMutationBudget(options.limit ?? config.batchRows);
+  const limit = Math.min(options.limit ?? config.batchRows, config.batchRows);
   const clock = projectEventSourceOutboxClockFrom(
     options.clock ? { clock: options.clock } : options.now
   );
