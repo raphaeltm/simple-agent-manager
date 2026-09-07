@@ -64,6 +64,16 @@ export type ProjectEventSubscriptionCreateRequest = {
 
 export type ProjectEventSubscriptionCreateResponse = ProjectEventSubscriptionMutationResult & {
   callerKind: ProjectEventSubscriptionCallerKind;
+  wakeInstructions?: ProjectEventWakeInstructions | null;
+};
+
+export type ProjectEventWakeInstructions = {
+  mode: 'durable_same_chat_event_wake';
+  wakeContentPolicy: 'ids_only';
+  checkpoint: string;
+  endTurn: string;
+  noMatch: string;
+  eventReadTrust: string;
 };
 
 export type ProjectEventSubscriptionListRequest = {

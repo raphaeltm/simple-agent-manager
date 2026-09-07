@@ -329,6 +329,8 @@ export type CreateProjectEventSubscriptionInput = {
   idempotencyKey: string;
   filter: ProjectEventFilterV1;
   deliveryPreference: ProjectEventDeliveryPreference;
+  /** Stable source-task authority for versioned agent-owned wake subscriptions. */
+  ownerTaskId?: string | null;
   reason?: string | null;
   expiresAt?: number | null;
 };
@@ -337,6 +339,7 @@ export type ListProjectEventSubscriptionsInput = {
   projectId: string;
   state?: ProjectEventSubscriptionState | 'any' | null;
   owner?: ProjectEventSubscriptionOwner | null;
+  legacyOwners?: ProjectEventSubscriptionOwner[] | null;
   limit?: number | null;
 };
 
@@ -460,6 +463,7 @@ export type ProjectEventDeliveryBatchListResult = {
 
 export type ProjectEventAgentVisibility = {
   owner: ProjectEventSubscriptionOwner;
+  legacyOwners?: ProjectEventSubscriptionOwner[] | null;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
 };
 

@@ -23,6 +23,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import { isSessionRecoverySourceTaskGuardValid } from '../../services/session-recovery-authority';
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
@@ -1725,18 +1726,65 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private async runProjectEventWakeMaterializationAlarm(): Promise<void> {
-    const result = this.ctx.storage.transactionSync(() =>
-      projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, this.getProjectId())
+    const projectId = this.getProjectId();
+    if (!projectId) return;
+    const now = Date.now();
+    const candidates = this.ctx.storage.transactionSync(() =>
+      projectEvents.selectProjectEventWakeMaterializationCandidates(this.sql, this.env, projectId, now)
     );
-    for (const item of result.accepted) {
-      await durability.finalizeAcceptedPromptDelivery(
-        this.sql,
-        this.env,
-        this.durabilityHooks(),
-        item.input,
-        item.accepted
+    if (candidates.length === 0) {
+      this.ctx.storage.transactionSync(() =>
+        projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, projectId, now)
       );
+      return;
     }
+    let deferredUntil: number | null = null;
+    for (const candidate of candidates) {
+      const sourceAuthorized = await isSessionRecoverySourceTaskGuardValid(
+        this.env.DATABASE,
+        candidate.sourceTaskGuard
+      );
+      if (!sourceAuthorized) {
+        this.ctx.storage.transactionSync(() =>
+          projectEvents.cancelProjectEventWakeForRevokedSourceTask(
+            this.sql,
+            projectId,
+            candidate.subscriptionId
+          )
+        );
+        continue;
+      }
+      const result = this.ctx.storage.transactionSync(() =>
+        projectEvents.runProjectEventWakeMaterializationBatch(
+          this.sql,
+          this.env,
+          projectId,
+          now,
+          {
+            subscriptionId: candidate.subscriptionId,
+            ignoreSchedulerCheckpoint: true,
+            recordGlobalCapacityDeferral: false,
+          }
+        )
+      );
+      if (result.deferredUntil !== undefined && result.deferredUntil !== null) {
+        deferredUntil =
+          deferredUntil === null ? result.deferredUntil : Math.min(deferredUntil, result.deferredUntil);
+      }
+      for (const item of result.accepted) {
+        await durability.finalizeAcceptedPromptDelivery(
+          this.sql,
+          this.env,
+          this.durabilityHooks(),
+          item.input,
+          item.accepted
+        );
+      }
+      if (result.status === 'materialized' || result.status === 'disabled') return;
+    }
+    this.ctx.storage.transactionSync(() =>
+      projectEvents.markSchedulerSuccess(this.sql, projectId, now, 'materialization', deferredUntil)
+    );
   }
 
   private runProjectEventRetentionAlarm(): void {
@@ -1749,6 +1797,24 @@ export class ProjectData extends DurableObject<Env> {
         refreshAccounting: false,
       })
     );
+  }
+
+  private recordProjectEventSchedulerFailure(
+    phase: 'materialization' | 'retention',
+    err: unknown
+  ): void {
+    try {
+      this.ctx.storage.transactionSync(() =>
+        projectEvents.recordSchedulerFailure(this.sql, this.env, this.getProjectId(), phase, err)
+      );
+    } catch (checkpointErr) {
+      log.error('alarm.project_event_scheduler_failure_checkpoint_failed', {
+        phase,
+        originalError: err instanceof Error ? err.message : String(err),
+        checkpointError:
+          checkpointErr instanceof Error ? checkpointErr.message : String(checkpointErr),
+      });
+    }
   }
 
   // --- DO Alarm Handler ---
@@ -1875,15 +1941,7 @@ export class ProjectData extends DurableObject<Env> {
         log.error('alarm.project_event_wake_materialization_failed', {
           error: err instanceof Error ? err.message : String(err),
         });
-        this.ctx.storage.transactionSync(() =>
-          projectEvents.recordSchedulerFailure(
-            this.sql,
-            this.env,
-            this.getProjectId(),
-            'materialization',
-            err
-          )
-        );
+        this.recordProjectEventSchedulerFailure('materialization', err);
       }
 
       // Resolve due waits before claiming prompt deliveries so a newly enqueued
@@ -1905,15 +1963,7 @@ export class ProjectData extends DurableObject<Env> {
         log.error('alarm.project_event_retention_failed', {
           error: err instanceof Error ? err.message : String(err),
         });
-        this.ctx.storage.transactionSync(() =>
-          projectEvents.recordSchedulerFailure(
-            this.sql,
-            this.env,
-            this.getProjectId(),
-            'retention',
-            err
-          )
-        );
+        this.recordProjectEventSchedulerFailure('retention', err);
       }
     } finally {
       await this.recalculateAlarm();

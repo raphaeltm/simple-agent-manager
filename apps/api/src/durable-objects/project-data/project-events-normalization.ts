@@ -76,6 +76,7 @@ export type NormalizedSubscriptionInput = {
   idempotencyFingerprint: string;
   compiledFilter: CompiledProjectEventFilter;
   deliveryPreference: ProjectEventDeliveryPreference;
+  ownerTaskId: string | null;
   reason: string | null;
   expiresAt: number | null;
 };
@@ -203,6 +204,11 @@ export function normalizeSubscriptionInput(
   );
   const compiledFilter = compileProjectEventFilter(input.filter, limits);
   const deliveryPreference = normalizeDeliveryPreference(input.deliveryPreference, limits);
+  const ownerTaskId = normalizeNullableText(
+    input.ownerTaskId ?? null,
+    'ownerTaskId',
+    limits.maxFilterStringBytes
+  );
   const reason = normalizeNullableText(input.reason ?? null, 'reason', limits.maxReasonBytes);
   const expiresAt =
     input.expiresAt === null || input.expiresAt === undefined
@@ -214,6 +220,7 @@ export function normalizeSubscriptionInput(
     owner.id,
     compiledFilter.fingerprint,
     deliveryPreference,
+    ownerTaskId,
     reason,
     expiresAt,
   ]);
@@ -225,6 +232,7 @@ export function normalizeSubscriptionInput(
     idempotencyFingerprint,
     compiledFilter,
     deliveryPreference,
+    ownerTaskId,
     reason,
     expiresAt,
   };

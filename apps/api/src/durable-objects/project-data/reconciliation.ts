@@ -20,7 +20,7 @@ import { DefaultVmPromptDeliveryAdapter } from '../../services/vm-prompt-deliver
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { persistMessage } from './messages';
-import { readProjectEventWakeLeaseUntil } from './project-events-materialization';
+import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
 import type { PromptDeliveryClaim } from './prompt-delivery';
 import {
   CANDIDATE_GATE_META_PREFIX,

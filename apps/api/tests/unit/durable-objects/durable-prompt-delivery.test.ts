@@ -113,6 +113,62 @@ describe('ProjectData durable prompt delivery', () => {
     return claimDuePromptDeliveries(sql, config, Date.now())[0];
   }
 
+  function acceptProjectEventWake(
+    deliveryId: string,
+    options: { sourceTaskId?: string; targetTaskId?: string } = {}
+  ) {
+    const sourceTaskId = options.sourceTaskId ?? 'source-task-1';
+    const targetTaskId = options.targetTaskId ?? sourceTaskId;
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId,
+        targetSessionId: 'chat-1',
+        displayContent: 'Project event wake batch is ready. Event IDs: event-1.',
+        sourceTaskId,
+        senderType: 'system',
+        sourceKind: 'project_event_wake',
+        metadata: { projectEventWake: true, batchId: deliveryId, eventIds: ['event-1'] },
+      },
+      Date.now()
+    );
+    sql.exec(
+      `INSERT INTO project_event_subscriptions
+       (id, project_id, contract_version, owner_type, owner_id, owner_name,
+        idempotency_key, idempotency_fingerprint, filter_version, filter_json,
+        filter_fingerprint, match_key_count, requested_delivery, resolved_delivery,
+        target_session_id, target_task_id, target_runtime_id, target_agent_id,
+        lifecycle_state, reason, created_at, updated_at, expires_at,
+        owner_version, owner_project_id, owner_chat_session_id, owner_task_id,
+        owner_runtime_id, prompt_delivery_count, prompt_delivery_last_at,
+        delivery_cooldown_until, delivery_lifetime_expires_at)
+       VALUES ('sub-event-wake', 'project-1', 2, 'agent', 'project-1:chat-1', NULL,
+        'idem-event-wake', 'fp-event-wake', 1, '{"version":1}', 'filter-event-wake', 0,
+        'existing_session_prompt', 'queued_for_prompt_delivery', 'chat-1', ?,
+        NULL, 'agent-1', 'active', NULL, 10000, 10000, NULL, 2, 'project-1', 'chat-1',
+        ?, NULL, 0, NULL, NULL, 70000)`,
+      targetTaskId,
+      sourceTaskId
+    );
+    sql.exec(
+      `INSERT INTO project_event_delivery_batches
+       (id, project_id, subscription_id, idempotency_key, idempotency_fingerprint, state,
+        delivery_channel, delivery_expires_at, readable_until, ack_required,
+        requested_delivery, resolved_delivery, adapter_decision_json,
+       target_session_id, target_task_id, target_runtime_id, target_agent_id,
+       match_ids_json, event_count, created_at, updated_at, terminal_reason)
+       VALUES (?, 'project-1', 'sub-event-wake', ?, ?, 'pending', 'prompt_queue',
+        70000, 70000, 1, 'existing_session_prompt', 'queued_for_prompt_delivery', '{}',
+        'chat-1', ?, NULL, 'agent-1', '[]', 1, 10000, 10000, NULL)`,
+      deliveryId,
+      `event-wake:${deliveryId}`,
+      `fp:event-wake:${deliveryId}`,
+      targetTaskId
+    );
+    return claimDuePromptDeliveries(sql, config, Date.now())[0];
+  }
+
   function taskRow(
     id: string,
     status: string,
@@ -143,6 +199,16 @@ describe('ProjectData durable prompt delivery', () => {
           bind: vi.fn(() => ({
             all: vi.fn().mockResolvedValue({ results }),
           })),
+        })),
+      },
+    } as never;
+  }
+
+  function envWithSourceGuard(first: () => Promise<{ id: string } | null>) {
+    return {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({ first })),
         })),
       },
     } as never;
@@ -293,6 +359,111 @@ describe('ProjectData durable prompt delivery', () => {
       deliveryState: 'failed',
       terminalReason: 'terminal_target',
     });
+  });
+
+  it('fails an event wake claim before adapter side effects when source authority is revoked', async () => {
+    const claim = acceptProjectEventWake('event-wake-revoked-source');
+    const first = vi.fn().mockResolvedValue(null);
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task authority was revoked',
+    });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-revoked-source')).toMatchObject({
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('validates event wake delivery against the original source task when target task differs', async () => {
+    const claim = acceptProjectEventWake('event-wake-recovery-target-revoked-source', {
+      sourceTaskId: 'source-task-1',
+      targetTaskId: 'recovery-task-1',
+    });
+    const first = vi.fn().mockResolvedValue(null);
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task authority was revoked',
+    });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-recovery-target-revoked-source')).toMatchObject({
+      sourceTaskId: 'source-task-1',
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('rejects event wake delivery when the subscription source binding changes', async () => {
+    const claim = acceptProjectEventWake('event-wake-source-binding-changed', {
+      sourceTaskId: 'recovery-task-1',
+      targetTaskId: 'recovery-task-1',
+    });
+    sql.exec(
+      `UPDATE project_event_subscriptions
+       SET owner_task_id = 'source-task-1'
+       WHERE id = 'sub-event-wake'`
+    );
+    const first = vi.fn().mockResolvedValue({ id: 'recovery-task-1' });
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task binding changed',
+    });
+    expect(first).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-source-binding-changed')).toMatchObject({
+      sourceTaskId: 'recovery-task-1',
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('passes an event wake source guard through adapter boundaries when D1 authority is live', async () => {
+    const claim = acceptProjectEventWake('event-wake-live-source');
+    const first = vi.fn().mockResolvedValue({ id: 'source-task-1' });
+    const env = envWithSourceGuard(first);
+    const expectedGuard = {
+      taskId: 'source-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>(async (input) => {
+      expect(input.sourceTaskGuard).toEqual(expectedGuard);
+      await expect(input.beforeSideEffect?.()).resolves.toBeNull();
+      return {
+        kind: 'accepted',
+        acpSessionId: 'acp-1',
+        promptEpoch: Date.now(),
+        runtimeIdentity: 'runtime-1',
+        capabilities,
+        receipt: null,
+      };
+    });
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(submit).toHaveBeenCalledTimes(1);
   });
 
   it('accepts the recovery task as session owner while preserving the live source parent', async () => {

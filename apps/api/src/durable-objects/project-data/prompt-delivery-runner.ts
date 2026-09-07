@@ -5,13 +5,17 @@ import {
 
 import { createModuleLogger } from '../../lib/logger';
 import { recordDurableExecutionMetric } from '../../services/telemetry';
+import {
+  isSessionRecoverySourceTaskGuardValid,
+  type SessionRecoverySourceTaskGuard,
+} from '../../services/session-recovery-authority';
 import type { VmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
 import * as activity from './activity';
 import type { DurableExecutionConfig } from './durable-execution-config';
 import {
   advanceProjectEventPromptAttemptCheckpoint,
   invalidProjectEventWakeDeliveryTargetResult,
-} from './project-events-materialization';
+} from './project-events-wake-delivery';
 import {
   applyPromptDeliveryResult,
   type PromptDeliveryClaim,
@@ -178,6 +182,80 @@ function parentWakeValidationReadFailure(
   };
 }
 
+function sourceTaskGuardForClaim(
+  claim: PromptDeliveryClaim,
+  projectId: string | null
+): SessionRecoverySourceTaskGuard | undefined {
+  if (
+    claim.message.sourceKind !== 'parent_wakeup' &&
+    claim.message.sourceKind !== 'project_event_wake'
+  ) {
+    return undefined;
+  }
+  if (!claim.message.sourceTaskId || !projectId) return undefined;
+  return {
+    taskId: claim.message.sourceTaskId,
+    projectId,
+    chatSessionId: claim.message.targetSessionId,
+  };
+}
+
+async function invalidProjectEventWakeSourceTaskResult(
+  env: Env,
+  projectId: string | null,
+  claim: PromptDeliveryClaim
+): Promise<PromptDeliveryResult | null> {
+  if (claim.message.sourceKind !== 'project_event_wake') return null;
+  if (!claim.message.sourceTaskId || !projectId) {
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: !projectId
+        ? 'Project event wake has no project identity'
+        : 'Project event wake has no source task authority',
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
+  const valid = await isSessionRecoverySourceTaskGuardValid(env.DATABASE, {
+    taskId: claim.message.sourceTaskId,
+    projectId,
+    chatSessionId: claim.message.targetSessionId,
+  });
+  if (valid) return null;
+  return {
+    kind: 'failed',
+    reason: 'terminal_target',
+    error: 'Project event wake source task authority was revoked',
+    runtimeIdentity: claim.message.runtimeIdentity,
+    capabilities: null,
+  };
+}
+
+function projectEventWakeValidationReadFailure(
+  claim: PromptDeliveryClaim,
+  error: unknown
+): PromptDeliveryResult {
+  const message = error instanceof Error ? error.message : String(error);
+  if (claim.mode === 'reconcile') {
+    return {
+      kind: 'ambiguous',
+      reason: 'receipt_unavailable',
+      error: `Project event wake source authority validation failed during receipt reconciliation: ${message}`,
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+      receipt: null,
+    };
+  }
+  return {
+    kind: 'retry',
+    reason: 'not_ready',
+    error: `Project event wake source authority validation temporarily failed: ${message}`,
+    runtimeIdentity: claim.message.runtimeIdentity,
+    capabilities: null,
+  };
+}
+
 export async function runPromptDeliveryClaim(
   sql: SqlStorage,
   env: Env,
@@ -200,6 +278,7 @@ export async function runPromptDeliveryClaim(
 
   let result: PromptDeliveryResult;
   try {
+    const sourceTaskGuard = sourceTaskGuardForClaim(claim, hooks.projectId);
     const validateParentWakeTarget = async (): Promise<PromptDeliveryResult | null> => {
       try {
         return await invalidParentWakeTargetResult(env, hooks.projectId, claim);
@@ -207,24 +286,29 @@ export async function runPromptDeliveryClaim(
         return parentWakeValidationReadFailure(claim, error);
       }
     };
-    const validateProjectEventWakeTarget = (): PromptDeliveryResult | null =>
-      invalidProjectEventWakeDeliveryTargetResult(sql, env, hooks.projectId, claim);
+    const validateProjectEventWakeTarget = async (): Promise<PromptDeliveryResult | null> => {
+      const localInvalid = invalidProjectEventWakeDeliveryTargetResult(
+        sql,
+        env,
+        hooks.projectId,
+        claim
+      );
+      if (localInvalid) return localInvalid;
+      try {
+        return await invalidProjectEventWakeSourceTaskResult(env, hooks.projectId, claim);
+      } catch (error) {
+        return projectEventWakeValidationReadFailure(claim, error);
+      }
+    };
     const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> =>
-      (await validateParentWakeTarget()) ?? validateProjectEventWakeTarget();
+      (await validateParentWakeTarget()) ?? (await validateProjectEventWakeTarget());
     const input = {
       projectId: hooks.projectId ?? '',
       claim,
       allowLegacyVm: config.legacyVmCompatEnabled,
       requestTimeoutMs: config.backgroundTimeoutMs,
       beforeSideEffect: validateDeliveryTarget,
-      sourceTaskGuard:
-        claim.message.sourceKind === 'parent_wakeup' && claim.message.sourceTaskId
-          ? {
-              taskId: claim.message.sourceTaskId,
-              projectId: hooks.projectId ?? '',
-              chatSessionId: claim.message.targetSessionId,
-            }
-          : undefined,
+      sourceTaskGuard,
     };
     result =
       (await validateDeliveryTarget()) ??

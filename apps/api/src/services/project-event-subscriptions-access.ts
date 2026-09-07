@@ -33,6 +33,7 @@ type AgentTaskRow = {
   status: string;
   workspace_id: string | null;
   chat_session_id: string | null;
+  recovery_source_task_id: string | null;
 };
 
 type WorkspaceRow = {
@@ -53,6 +54,8 @@ type AgentSessionRow = {
 export type AgentSubscriptionContext = {
   projectId: string;
   owner: ProjectEventSubscriptionOwner;
+  legacyOwners: ProjectEventSubscriptionOwner[];
+  sourceTaskId: string;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
 };
 
@@ -100,6 +103,18 @@ function normalizeTargetObject(
 
 function ownersEqual(a: ProjectEventSubscriptionOwner, b: ProjectEventSubscriptionOwner): boolean {
   return a.type === b.type && a.id === b.id;
+}
+
+function uniqueOwners(owners: ProjectEventSubscriptionOwner[]): ProjectEventSubscriptionOwner[] {
+  const seen = new Set<string>();
+  const result: ProjectEventSubscriptionOwner[] = [];
+  for (const owner of owners) {
+    const key = `${owner.type}:${owner.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(owner);
+  }
+  return result;
 }
 
 function isOwnerScope(value: unknown): value is ProjectEventSubscriptionOwnerScope {
@@ -177,7 +192,7 @@ async function resolveAgentContext(
 
   const task = await firstRow<AgentTaskRow>(
     env,
-    `SELECT id, project_id, user_id, status, workspace_id, chat_session_id
+    `SELECT id, project_id, user_id, status, workspace_id, chat_session_id, recovery_source_task_id
      FROM tasks
      WHERE id = ? AND project_id = ?
      LIMIT 1`,
@@ -259,6 +274,16 @@ async function resolveAgentContext(
     );
   }
   const ownerId = `${projectId}:${sessionId}`;
+  const sourceTaskId = task.recovery_source_task_id ?? task.id;
+  const legacyOwners = uniqueOwners(
+    [agentSessionId, taskId]
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .map((id) => ({
+        type: 'agent' as const,
+        id,
+        name: caller.ownerName ?? agentSessionId ?? taskId,
+      }))
+  );
 
   return {
     projectId,
@@ -267,6 +292,8 @@ async function resolveAgentContext(
       id: ownerId,
       name: caller.ownerName ?? agentSessionId ?? taskId,
     },
+    legacyOwners,
+    sourceTaskId,
     target: {
       sessionId,
       taskId,
@@ -403,11 +430,13 @@ export function requireAgentAccess(
 ): void {
   const target = subscription.deliveryPreference.target;
   if (
-    !ownersEqual(subscription.owner, context.owner) ||
-    target?.sessionId !== context.target.sessionId
+    target?.sessionId === context.target.sessionId &&
+    (ownersEqual(subscription.owner, context.owner) ||
+      context.legacyOwners.some((owner) => ownersEqual(subscription.owner, owner)))
   ) {
-    throw errors.notFound('Event subscription');
+    return;
   }
+  throw errors.notFound('Event subscription');
 }
 
 export function resolveAgentExpiresAt(

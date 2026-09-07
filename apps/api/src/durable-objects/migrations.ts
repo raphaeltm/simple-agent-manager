@@ -1969,6 +1969,55 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '046-project-event-wake-retention-indexes',
+    run: (sql) => {
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_candidates
+        ON project_event_subscriptions(
+          project_id,
+          lifecycle_state,
+          requested_delivery,
+          resolved_delivery,
+          target_session_id,
+          last_matched_at,
+          id
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_expiry
+        ON project_event_subscriptions(project_id, lifecycle_state, expires_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_subscription_due
+        ON project_event_matches(project_id, subscription_id, state, batch_id, matched_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_event_retention
+        ON project_event_matches(project_id, event_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_orphan_retention
+        ON project_event_matches(project_id, state, batch_id, matched_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_retention
+        ON project_event_delivery_attempts(project_id, state, created_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_synthetic_retention
+        ON project_event_delivery_attempts(project_id, attempt_number, state, transport_state, created_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_batches_retention
+        ON project_event_delivery_batches(project_id, state, updated_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_scheduler_attempt
+        ON project_event_wake_scheduler_state(next_attempt_at, project_id)
+      `);
+    },
+  },
 ];
 
 /**

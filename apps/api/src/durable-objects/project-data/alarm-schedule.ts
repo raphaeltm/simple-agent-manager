@@ -14,7 +14,7 @@ import * as mailbox from './mailbox';
 import {
   computeProjectEventMaterializationAlarmTime,
   computeProjectEventRetentionAlarmTime,
-} from './project-events-materialization';
+} from './project-events-scheduler';
 import { computePromptDeliveryAlarmTime } from './prompt-delivery';
 import * as reconciliation from './reconciliation';
 import { parseMetaValue } from './row-schemas';

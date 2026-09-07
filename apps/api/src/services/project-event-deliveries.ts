@@ -44,7 +44,11 @@ export async function getProjectEventForCaller(
   const context = await resolveAgentDeliveryContext(env, caller);
   return projectDataService.getProjectEvent(env, context.projectId, {
     eventId: normalizeNonEmptyString(request.eventId),
-    visibility: { owner: context.owner, target: context.target },
+    visibility: {
+      owner: context.owner,
+      legacyOwners: context.legacyOwners,
+      target: context.target,
+    },
   });
 }
 
@@ -59,7 +63,11 @@ export async function listProjectEventSubscriptionEventsForCaller(
     limit: request.limit ?? null,
     cursor: request.cursor ?? null,
     cursorMaxLength: request.cursorMaxLength ?? null,
-    visibility: { owner: context.owner, target: context.target },
+    visibility: {
+      owner: context.owner,
+      legacyOwners: context.legacyOwners,
+      target: context.target,
+    },
   });
 }
 
@@ -71,7 +79,11 @@ export async function ackProjectEventDeliveryForCaller(
   const context = await resolveAgentDeliveryContext(env, caller);
   return projectDataService.ackProjectEventDelivery(env, context.projectId, {
     deliveryId: normalizeNonEmptyString(request.deliveryId),
-    visibility: { owner: context.owner, target: context.target },
+    visibility: {
+      owner: context.owner,
+      legacyOwners: context.legacyOwners,
+      target: context.target,
+    },
     acknowledgedBy: context.owner,
   });
 }
