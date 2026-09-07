@@ -30,11 +30,11 @@ import {
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
 import {
   normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,
 } from '../../../services/resource-requirements-input';
+import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
