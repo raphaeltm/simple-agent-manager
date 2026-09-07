@@ -1,3 +1,11 @@
+import * as standingWatches from './project-standing-watches-storage';
+import { runStandingWatchAlarm } from './project-standing-watches-runner';
+import * as eventSchedules from './project-event-schedules-storage';
+import { runScheduleAlarm } from './project-event-schedules-runner';
+import { requireScheduleMember, requireScheduleAction } from './project-event-schedules-authority';
+import { normalizeScheduledAction } from './project-event-schedules-validation';
+import { scheduleLimits } from './project-event-schedules-config';
+import { resolveProjectEventLimits } from './project-events-limits';
 // FILE SIZE EXCEPTION: Cloudflare RPC requires the public ProjectData methods to remain on the exported Durable Object class; domain logic is already split across the sibling modules delegated to below. See .claude/rules/18-file-size-limits.md
 /**
  * ProjectData Durable Object — per-project isolated data store.
@@ -50,7 +58,10 @@ import * as policies from './policies';
 import * as projectCommentInbox from './project-comment-inbox';
 import * as projectEvents from './project-events';
 import * as eventChannels from './project-event-channels';
-import { requireChannelActorAuthority, requireChannelActorChat } from './project-event-channels-authority';
+import {
+  requireChannelActorAuthority,
+  requireChannelActorChat,
+} from './project-event-channels-authority';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
@@ -80,8 +91,7 @@ const log = createModuleLogger('project_data');
 
 function isFailSessionIdentityGuardDenial(err: unknown, sessionId: string): boolean {
   return (
-    err instanceof Error &&
-    err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
+    err instanceof Error && err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
   );
 }
 
@@ -1060,7 +1070,193 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
-  async publishProjectEventChannel(input: eventChannels.PublishProjectEventChannelInput): Promise<eventChannels.PublishProjectEventChannelResult> {
+  async createProjectSchedule(input: {
+    projectId: string;
+    userId: string;
+    creatorChatSessionId: string | null;
+    request: unknown;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    const request = expectJsonRecord(input.request, 'schedule request');
+    const action = normalizeScheduledAction(
+      request.action,
+      scheduleLimits(this.env),
+      resolveProjectEventLimits(this.env)
+    );
+    const replay = typeof request.idempotencyKey === 'string' && this.sql.exec(
+      `SELECT id FROM project_schedules WHERE project_id = ? AND creator_user_id = ? AND idempotency_key = ?`,
+      input.projectId, input.userId, request.idempotencyKey.trim()).toArray()[0];
+    if (replay) await requireScheduleMember(this.env, input.projectId, input.userId);
+    else await requireScheduleAction(this.sql, this.env, input.projectId, input.userId, action);
+    const result = this.ctx.storage.transactionSync(() =>
+      eventSchedules.createSchedule(
+        this.sql,
+        this.env,
+        input.projectId,
+        { userId: input.userId, chatSessionId: input.creatorChatSessionId },
+        input.request,
+        Date.now()
+      )
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async getProjectSchedule(input: { projectId: string; userId: string; id: string }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId, true);
+    return eventSchedules.getSchedule(this.sql, input.projectId, input.id);
+  }
+
+  async listProjectSchedules(input: {
+    projectId: string;
+    userId: string;
+    cursor?: string;
+    sessionId?: string;
+    limit?: number;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId, true);
+    return eventSchedules.listSchedules(this.sql, this.env, input.projectId, input);
+  }
+
+  async mutateProjectSchedule(input: {
+    projectId: string;
+    userId: string;
+    id: string;
+    operation: 'reschedule' | 'cancel';
+    request: unknown;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    if (input.operation !== 'reschedule' && input.operation !== 'cancel')
+      throw new projectEvents.ProjectEventValidationError('Invalid schedule mutation');
+    await requireScheduleMember(this.env, input.projectId, input.userId);
+    const result = this.ctx.storage.transactionSync(() =>
+      input.operation === 'reschedule'
+        ? eventSchedules.rescheduleSchedule(
+            this.sql,
+            this.env,
+            input.projectId,
+            input.id,
+            input.request,
+            Date.now()
+          )
+        : eventSchedules.cancelSchedule(
+            this.sql,
+            this.env,
+            input.projectId,
+            input.id,
+            input.request,
+            Date.now()
+          )
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async createProjectStandingWatch(input: { projectId: string; userId: string; request: unknown }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    const request = expectJsonRecord(input.request, 'standing watch request');
+    const action = normalizeScheduledAction(
+      request.action,
+      scheduleLimits(this.env),
+      resolveProjectEventLimits(this.env)
+    );
+    await requireScheduleAction(this.sql, this.env, input.projectId, input.userId, action);
+    const result = this.ctx.storage.transactionSync(() =>
+      standingWatches.createWatch(
+        this.sql,
+        this.env,
+        input.projectId,
+        input.userId,
+        input.request,
+        Date.now()
+      )
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async getProjectStandingWatch(input: { projectId: string; userId: string; id: string }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId, true);
+    return standingWatches.getWatch(this.sql, input.projectId, input.id);
+  }
+
+  async listProjectStandingWatches(input: {
+    projectId: string;
+    userId: string;
+    cursor?: string;
+    sessionId?: string;
+    limit?: number;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId, true);
+    return standingWatches.listWatches(this.sql, this.env, input.projectId, input);
+  }
+
+  async mutateProjectStandingWatch(input: {
+    projectId: string;
+    userId: string;
+    id: string;
+    operation: 'update' | 'pause' | 'revoke';
+    request: unknown;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    if (!['update', 'pause', 'revoke'].includes(input.operation))
+      throw new projectEvents.ProjectEventValidationError('Invalid standing watch mutation');
+    await requireScheduleMember(this.env, input.projectId, input.userId);
+    const result = this.ctx.storage.transactionSync(() =>
+      input.operation === 'update'
+        ? standingWatches.updateWatch(
+            this.sql,
+            this.env,
+            input.projectId,
+            input.id,
+            input.request,
+            Date.now()
+          )
+        : input.operation === 'pause'
+          ? standingWatches.pauseWatch(
+              this.sql,
+              this.env,
+              input.projectId,
+              input.id,
+              input.request,
+              Date.now()
+            )
+          : standingWatches.revokeWatch(
+              this.sql,
+              this.env,
+              input.projectId,
+              input.id,
+              input.request,
+              Date.now()
+            )
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async publishProjectEventChannel(
+    input: eventChannels.PublishProjectEventChannelInput
+  ): Promise<eventChannels.PublishProjectEventChannelResult> {
     this.ensureProjectId(input.projectId);
     const prepared = await eventChannels.prepareChannelPublish(this.env, input);
     await requireChannelActorAuthority(this.env, prepared.projectId, prepared.actor);
@@ -1078,18 +1274,25 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
-  listProjectEventChannels(input: eventChannels.ListProjectEventChannelsInput): eventChannels.ProjectEventChannelList {
+  listProjectEventChannels(
+    input: eventChannels.ListProjectEventChannelsInput
+  ): eventChannels.ProjectEventChannelList {
     this.ensureProjectId(input.projectId);
     return eventChannels.listChannels(this.sql, this.env, this.getProjectId(), input);
   }
 
-  getProjectEventChannelHistory(input: eventChannels.ProjectEventChannelHistoryInput): eventChannels.ProjectEventChannelHistory {
+  getProjectEventChannelHistory(
+    input: eventChannels.ProjectEventChannelHistoryInput
+  ): eventChannels.ProjectEventChannelHistory {
     this.ensureProjectId(input.projectId);
     return this.ctx.storage.transactionSync(() =>
-      eventChannels.channelHistory(this.sql, this.env, this.getProjectId(), input));
+      eventChannels.channelHistory(this.sql, this.env, this.getProjectId(), input)
+    );
   }
 
-  async followProjectEventChannel(input: eventChannels.FollowProjectEventChannelInput): Promise<eventChannels.FollowProjectEventChannelResult> {
+  async followProjectEventChannel(
+    input: eventChannels.FollowProjectEventChannelInput
+  ): Promise<eventChannels.FollowProjectEventChannelResult> {
     this.ensureProjectId(input.projectId);
     await requireChannelActorAuthority(this.env, input.projectId, input.actor);
     const result = this.ctx.storage.transactionSync(() => {
@@ -1100,7 +1303,9 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
-  async catchUpProjectEventChannel(input: eventChannels.CatchUpProjectEventChannelInput): Promise<eventChannels.FollowProjectEventChannelResult> {
+  async catchUpProjectEventChannel(
+    input: eventChannels.CatchUpProjectEventChannelInput
+  ): Promise<eventChannels.FollowProjectEventChannelResult> {
     this.ensureProjectId(input.projectId);
     await requireChannelActorAuthority(this.env, input.projectId, input.actor);
     const result = this.ctx.storage.transactionSync(() => {
@@ -1828,7 +2033,12 @@ export class ProjectData extends DurableObject<Env> {
     if (!projectId) return;
     const now = Date.now();
     const candidates = this.ctx.storage.transactionSync(() =>
-      projectEvents.selectProjectEventWakeMaterializationCandidates(this.sql, this.env, projectId, now)
+      projectEvents.selectProjectEventWakeMaterializationCandidates(
+        this.sql,
+        this.env,
+        projectId,
+        now
+      )
     );
     if (candidates.length === 0) {
       this.ctx.storage.transactionSync(() =>
@@ -1853,21 +2063,17 @@ export class ProjectData extends DurableObject<Env> {
         continue;
       }
       const result = this.ctx.storage.transactionSync(() =>
-        projectEvents.runProjectEventWakeMaterializationBatch(
-          this.sql,
-          this.env,
-          projectId,
-          now,
-          {
-            subscriptionId: candidate.subscriptionId,
-            ignoreSchedulerCheckpoint: true,
-            recordGlobalCapacityDeferral: false,
-          }
-        )
+        projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, projectId, now, {
+          subscriptionId: candidate.subscriptionId,
+          ignoreSchedulerCheckpoint: true,
+          recordGlobalCapacityDeferral: false,
+        })
       );
       if (result.deferredUntil !== undefined && result.deferredUntil !== null) {
         deferredUntil =
-          deferredUntil === null ? result.deferredUntil : Math.min(deferredUntil, result.deferredUntil);
+          deferredUntil === null
+            ? result.deferredUntil
+            : Math.min(deferredUntil, result.deferredUntil);
       }
       for (const item of result.accepted) {
         await durability.finalizeAcceptedPromptDelivery(
@@ -2041,6 +2247,13 @@ export class ProjectData extends DurableObject<Env> {
         });
         this.recordProjectEventSchedulerFailure('materialization', err);
       }
+
+      this.ctx.waitUntil(
+        runStandingWatchAlarm(this.sql, this.env, this.durabilityHooks())
+          .then(() => runScheduleAlarm(this.sql, this.env, this.durabilityHooks()))
+          .catch((err) => log.error('alarm.scheduled_action_failed', { error: String(err) }))
+          .finally(() => this.recalculateAlarm())
+      );
 
       // Resolve due waits before claiming prompt deliveries so a newly enqueued
       // parent wake can be dispatched in this same alarm turn.

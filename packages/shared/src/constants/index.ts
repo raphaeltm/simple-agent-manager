@@ -684,3 +684,5 @@ export {
   selectVmSizeForRequirements,
 } from './resource-defaults';
 export * from './project-event-channels';
+
+export * from './project-event-schedules';

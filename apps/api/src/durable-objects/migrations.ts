@@ -1,3 +1,4 @@
+import { migrateProjectSchedules } from './project-data/project-event-schedules-schema';
 // FILE SIZE EXCEPTION: Append-only migration ledger must preserve one auditable execution order. See .claude/rules/18-file-size-limits.md
 /**
  * Durable Object SQLite migration runner and migration definitions.
@@ -2072,7 +2073,9 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_id TEXT`);
       sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_after_sequence INTEGER`);
       sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_watermark INTEGER`);
-      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_catchup_expires_at INTEGER`);
+      sql.exec(
+        `ALTER TABLE project_event_subscriptions ADD COLUMN channel_catchup_expires_at INTEGER`
+      );
       sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_start_fingerprint TEXT`);
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_channel_catchup_live
         ON project_event_subscriptions(channel_id, channel_catchup_expires_at)
@@ -2085,6 +2088,7 @@ export const MIGRATIONS: Migration[] = [
         ON project_event_subscriptions(project_id, updated_at DESC, id)`);
     },
   },
+  { name: '049-project-schedules-standing-watches', run: migrateProjectSchedules },
   {
     name: '050-project-event-wake-due-index',
     run: (sql) => {

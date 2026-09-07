@@ -8,10 +8,14 @@
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
 import type {
-  PublishProjectEventChannelInput, PublishProjectEventChannelResult,
-  ListProjectEventChannelsInput, ProjectEventChannelList,
-  ProjectEventChannelHistoryInput, ProjectEventChannelHistory,
-  FollowProjectEventChannelInput, FollowProjectEventChannelResult,
+  PublishProjectEventChannelInput,
+  PublishProjectEventChannelResult,
+  ListProjectEventChannelsInput,
+  ProjectEventChannelList,
+  ProjectEventChannelHistoryInput,
+  ProjectEventChannelHistory,
+  FollowProjectEventChannelInput,
+  FollowProjectEventChannelResult,
   CatchUpProjectEventChannelInput,
   AckProjectEventDeliveryInput,
   AdmitProjectEventInput,
@@ -120,9 +124,7 @@ export {
   ProjectEventNotFoundError,
   ProjectEventValidationError,
 } from '../durable-objects/project-data/project-events-contracts';
-import type {
-  ValidateProjectEventWakeRecoveryAuthorityInput,
-} from '../durable-objects/project-data/project-events-wake-delivery';
+import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../durable-objects/project-data/project-events-wake-delivery';
 import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
@@ -337,8 +339,7 @@ function normalizeProjectDataEventRpcError(err: unknown): Error | null {
 
 function isFailSessionIdentityGuardDenial(err: unknown, sessionId: string): boolean {
   return (
-    err instanceof Error &&
-    err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
+    err instanceof Error && err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
   );
 }
 
@@ -473,11 +474,19 @@ function withProjectId<T extends { projectId: string }>(
 }
 
 type ProjectDataEventRpc = {
-  publishProjectEventChannel(input: PublishProjectEventChannelInput): Promise<PublishProjectEventChannelResult>;
+  publishProjectEventChannel(
+    input: PublishProjectEventChannelInput
+  ): Promise<PublishProjectEventChannelResult>;
   listProjectEventChannels(input: ListProjectEventChannelsInput): Promise<ProjectEventChannelList>;
-  getProjectEventChannelHistory(input: ProjectEventChannelHistoryInput): Promise<ProjectEventChannelHistory>;
-  followProjectEventChannel(input: FollowProjectEventChannelInput): Promise<FollowProjectEventChannelResult>;
-  catchUpProjectEventChannel(input: CatchUpProjectEventChannelInput): Promise<FollowProjectEventChannelResult>;
+  getProjectEventChannelHistory(
+    input: ProjectEventChannelHistoryInput
+  ): Promise<ProjectEventChannelHistory>;
+  followProjectEventChannel(
+    input: FollowProjectEventChannelInput
+  ): Promise<FollowProjectEventChannelResult>;
+  catchUpProjectEventChannel(
+    input: CatchUpProjectEventChannelInput
+  ): Promise<FollowProjectEventChannelResult>;
   admitProjectEvent(input: AdmitProjectEventInput): Promise<ProjectEventAdmissionResult>;
   createProjectEventSubscription(
     input: CreateProjectEventSubscriptionInput
@@ -1305,23 +1314,43 @@ export async function listProjectCommentInbox(
 // ProjectData Event Subscription Core
 // =========================================================================
 
-export function publishProjectEventChannel(env: Env, projectId: string, input: ProjectDataEventInput<PublishProjectEventChannelInput>) {
+export function publishProjectEventChannel(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<PublishProjectEventChannelInput>
+) {
   return callProjectDataEvent(env, projectId, 'publishProjectEventChannel', input);
 }
 
-export function listProjectEventChannels(env: Env, projectId: string, input: ProjectDataEventInput<ListProjectEventChannelsInput> = {}) {
+export function listProjectEventChannels(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventChannelsInput> = {}
+) {
   return callProjectDataEvent(env, projectId, 'listProjectEventChannels', input);
 }
 
-export function getProjectEventChannelHistory(env: Env, projectId: string, input: ProjectDataEventInput<ProjectEventChannelHistoryInput>) {
+export function getProjectEventChannelHistory(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ProjectEventChannelHistoryInput>
+) {
   return callProjectDataEvent(env, projectId, 'getProjectEventChannelHistory', input);
 }
 
-export function followProjectEventChannel(env: Env, projectId: string, input: ProjectDataEventInput<FollowProjectEventChannelInput>) {
+export function followProjectEventChannel(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<FollowProjectEventChannelInput>
+) {
   return callProjectDataEvent(env, projectId, 'followProjectEventChannel', input);
 }
 
-export function catchUpProjectEventChannel(env: Env, projectId: string, input: ProjectDataEventInput<CatchUpProjectEventChannelInput>) {
+export function catchUpProjectEventChannel(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<CatchUpProjectEventChannelInput>
+) {
   return callProjectDataEvent(env, projectId, 'catchUpProjectEventChannel', input);
 }
 
@@ -2500,4 +2529,81 @@ export async function resolveSessionAttentionMarkers(
 ): Promise<number> {
   const stub = await getStub(env, projectId);
   return stub.resolveSessionAttentionMarkers(sessionId, resolvedByMessageId, actorType, reason);
+}
+
+export function createProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['createProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'createProjectSchedule', (stub) =>
+    stub.createProjectSchedule({ ...input, projectId })
+  );
+}
+export function getProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['getProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'getProjectSchedule', (stub) =>
+    stub.getProjectSchedule({ ...input, projectId })
+  );
+}
+export function listProjectSchedules(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['listProjectSchedules']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'listProjectSchedules', (stub) =>
+    stub.listProjectSchedules({ ...input, projectId })
+  );
+}
+export function mutateProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['mutateProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'mutateProjectSchedule', (stub) =>
+    stub.mutateProjectSchedule({ ...input, projectId })
+  );
+}
+
+export function createProjectStandingWatch(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['createProjectStandingWatch']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'createProjectStandingWatch', (stub) =>
+    stub.createProjectStandingWatch({ ...input, projectId })
+  );
+}
+
+export function getProjectStandingWatch(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['getProjectStandingWatch']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'getProjectStandingWatch', (stub) =>
+    stub.getProjectStandingWatch({ ...input, projectId })
+  );
+}
+
+export function listProjectStandingWatches(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['listProjectStandingWatches']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'listProjectStandingWatches', (stub) =>
+    stub.listProjectStandingWatches({ ...input, projectId })
+  );
+}
+
+export function mutateProjectStandingWatch(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['mutateProjectStandingWatch']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'mutateProjectStandingWatch', (stub) =>
+    stub.mutateProjectStandingWatch({ ...input, projectId })
+  );
 }

@@ -292,3 +292,26 @@ for resolved same-chat prompt delivery; record-only responses return null.
 MCP names: `publish_channel_event(channel,message,idempotencyKey)`, `list_event_channels(cursor?,limit?)`, `get_channel_history(channel,cursor?,limit?)`, `follow_event_channel(channel,idempotencyKey,cursor?,requestedDelivery?,reason?,expiresAt?)`, `catch_up_event_channel(subscriptionId,limit?)`. Source/type/actor/project/target identity are verified/server-derived; publishing/follow/catch-up require task:write and active agent authority. Channel source is sam.agent_channel, type agent.channel.published, subject type agent_channel with stable channel name. Read text is untrusted evidence. Canonical list/read/ack performs delivery after catch-up.
 
 Follow captures the current canonical sequence watermark and live subscription atomically. Catch-up pages insert unique canonical matches and advance only a contiguous page; capacity or retention gaps roll back without skipping events. Cursor generation/scope/expiry are validated; follow replay preserves immutable start and deadline. Catalog reclamation never changes name-based live routing. Retained event key replays bypass admission quota; changed message conflicts; idempotency ends with canonical retention. Rate limiting is a shared fixed project window, so boundary bursts can consume two windows. Configuration is documented in the public configuration reference.
+
+## Schedules and standing watches
+
+Authenticated project members can inspect `/api/projects/:projectId/schedules` and
+`/standing-watches` with GET, and `/:id` for a single record. Project writers can
+POST to create. Schedule POST `/:id/reschedule` and `/:id/cancel` require
+`expectedVersion`; watch POST `/:id/update`, `/:id/pause` (with `paused` boolean),
+and `/:id/revoke` also require a version. A stale version returns conflict.
+Schedule list cursors are scoped to project and optional `sessionId`, including
+creator and message-target sessions. Watch contextual lists include message targets.
+
+Task-scoped MCP exposes `create_project_schedule`, `list_project_schedules`,
+`get_project_schedule`, `reschedule_project_schedule`, and `cancel_project_schedule`.
+Creator/project identity comes from the verified caller. Human-owned standing-watch
+mutations are deliberately absent from agent tools. Schedule actions are
+`message_session` (sessionId, prompt) or `start_session` (prompt, optional
+agentProfileId/skillId). `dueAt` and optional `expiresAt` are UTC epoch milliseconds;
+`displayTimezone` is IANA. Creation requires a reusable `idempotencyKey`.
+
+Admission is the cancellation boundary. Cancelling after admission reports
+`actionAlreadyAdmitted`; it does not retract a queued prompt or task. Reads report
+resulting event/delivery/task/session IDs, attempts and errors. Busy targets queue;
+expired authority, archive, finite grace or uncertain receipts are visible outcomes.

@@ -1,3 +1,4 @@
+import { handleScheduleTool } from './project-schedule-tools';
 /**
  * MCP Server Route
  *
@@ -329,6 +330,14 @@ mcpRoutes.post('/', async (c) => {
           }
           case 'wait_for_subtasks':
             return c.json(await handleWaitForSubtasks(requestId, toolArgs, tokenData, c.env));
+          case 'create_project_schedule':
+          case 'list_project_schedules':
+          case 'get_project_schedule':
+          case 'reschedule_project_schedule':
+          case 'cancel_project_schedule':
+            return c.json(
+              await handleScheduleTool(toolName, requestId, toolArgs, tokenData, c.env)
+            );
           case 'publish_channel_event':
           case 'list_event_channels':
           case 'get_channel_history':

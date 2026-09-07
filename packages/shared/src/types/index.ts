@@ -810,3 +810,5 @@ export {
   SAM_MCP_SERVER_NAME,
 } from './mcp-connection';
 export * from './project-event-channels';
+
+export * from './project-event-schedules';

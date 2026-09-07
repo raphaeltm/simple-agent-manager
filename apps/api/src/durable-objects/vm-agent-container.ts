@@ -96,6 +96,7 @@ function sameSourceTaskGuard(
     left.taskId === right.taskId &&
     left.projectId === right.projectId &&
     left.chatSessionId === right.chatSessionId &&
+    (left.requiredProjectMemberId ?? null) === (right.requiredProjectMemberId ?? null) &&
     (left.projectEventWake?.batchId ?? null) === (right.projectEventWake?.batchId ?? null) &&
     (left.projectEventWake?.subscriptionId ?? null) ===
       (right.projectEventWake?.subscriptionId ?? null)

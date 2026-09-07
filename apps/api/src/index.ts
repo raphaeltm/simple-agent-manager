@@ -1,3 +1,5 @@
+import { projectStandingWatchRoutes } from './routes/project-standing-watches';
+import { projectScheduleRoutes } from './routes/project-schedules';
 // Re-export Durable Object classes for Cloudflare Workers runtime
 export { AdminLogs } from './durable-objects/admin-logs';
 export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter';
@@ -822,6 +824,8 @@ app.route('/api/projects/:projectId/sessions', chatStartRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/comments', projectCommentRoutes);
 app.route('/api/projects/:projectId/event-subscriptions', projectEventSubscriptionRoutes);
+app.route('/api/projects/:projectId/schedules', projectScheduleRoutes);
+app.route('/api/projects/:projectId/standing-watches', projectStandingWatchRoutes);
 app.route('/api/projects/:projectId/event-channels', projectEventChannelRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);

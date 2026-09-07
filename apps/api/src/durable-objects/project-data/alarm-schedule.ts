@@ -1,3 +1,5 @@
+import { computeStandingWatchAlarmTime } from './project-standing-watches-runner';
+import { computeScheduleAlarmTime } from './project-event-schedules-runner';
 /**
  * Shared ProjectData alarm scheduling.
  *
@@ -77,6 +79,8 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
     storageSafetyTime,
     projectEventMaterializationTime,
     projectEventRetentionTime,
+    computeScheduleAlarmTime(sql, projectId),
+    computeStandingWatchAlarmTime(sql, env, projectId),
   ].filter((time): time is number => time !== null);
 
   return candidates.length > 0 ? Math.min(...candidates) : null;

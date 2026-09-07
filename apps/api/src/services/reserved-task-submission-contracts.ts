@@ -31,6 +31,8 @@ export type ReservedTaskSubmissionSourceKind = 'trigger' | 'schedule' | 'standin
 
 export interface ReservedTaskSubmissionSourceProvenance {
   kind: ReservedTaskSubmissionSourceKind;
+  /** Absolute latest initial start; already-running tasks may continue. */
+  expiresAt?: number;
   sourceId: string;
   sourceExecutionId: string;
   triggeredBy: TriggeredBy;

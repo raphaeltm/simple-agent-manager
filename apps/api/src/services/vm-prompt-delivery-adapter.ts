@@ -78,6 +78,7 @@ export interface VmPromptDeliverySourceTaskGuard {
   projectId: string;
   chatSessionId: string;
   projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+  requiredProjectMemberId?: string | null;
 }
 
 export interface VmPromptDeliveryAdapterInput {

@@ -111,6 +111,12 @@ export function validateReservedTaskSubmissionInput(
         DEFAULT_RESERVED_BRANCH_NAME_SEED_MAX_LENGTH
       )
     );
+    if (
+      input.source.expiresAt !== undefined &&
+      (!Number.isSafeInteger(input.source.expiresAt) || input.source.expiresAt <= 0)
+    ) {
+      throw new Error('source.expiresAt must be a positive UTC timestamp');
+    }
     if (!SOURCE_KINDS.has(input.source.kind)) {
       throw new Error(`source.kind is invalid: ${input.source.kind}`);
     }
@@ -633,6 +639,7 @@ export function reservedSubmissionGuardFromSnapshot(
     userId: snapshot.runner.userId,
     chatSessionId: snapshot.runner.chatSessionId,
     intentFingerprint: snapshot.intentFingerprint,
+    ...(snapshot.source.expiresAt === undefined ? {} : { expiresAt: snapshot.source.expiresAt }),
   };
 }
 

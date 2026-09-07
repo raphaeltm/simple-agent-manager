@@ -14,6 +14,7 @@ export interface SessionRecoverySourceTaskGuard {
   projectId: string;
   chatSessionId: string;
   projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+  requiredProjectMemberId?: string | null;
 }
 
 export class SessionRecoveryAuthorityRevokedError extends Error {
@@ -68,6 +69,16 @@ export async function isSessionRecoverySourceTaskGuardValid(
                  AND owner.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
             )
           )
+          ${
+            guard.requiredProjectMemberId
+              ? `AND EXISTS (
+            SELECT 1 FROM project_members m JOIN users u ON u.id = m.user_id
+            WHERE m.project_id = source.project_id AND m.user_id = ?
+              AND m.status = 'active' AND u.status = 'active'
+              AND m.role IN ('owner','admin','maintainer')
+          )`
+              : ''
+          }
         LIMIT 1`
     )
     .bind(
@@ -75,7 +86,8 @@ export async function isSessionRecoverySourceTaskGuardValid(
       guard.projectId,
       guard.chatSessionId,
       guard.chatSessionId,
-      guard.chatSessionId
+      guard.chatSessionId,
+      ...(guard.requiredProjectMemberId ? [guard.requiredProjectMemberId] : [])
     )
     .first<{ id: string }>();
   return Boolean(row);

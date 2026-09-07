@@ -14,6 +14,7 @@ export interface TaskRunnerReservedSubmissionGuard {
   userId: string;
   chatSessionId: string;
   intentFingerprint: string;
+  expiresAt?: number;
 }
 
 export type TaskRunnerStartGuard = TaskRunnerReservedSubmissionGuard;
@@ -72,6 +73,9 @@ function parseTaskRunnerStartGuard(guard: unknown): TaskRunnerStartGuard {
         userId: nonEmptyString(record.userId, 'userId'),
         chatSessionId: nonEmptyString(record.chatSessionId, 'chatSessionId'),
         intentFingerprint: nonEmptyString(record.intentFingerprint, 'intentFingerprint'),
+        ...(record.expiresAt === undefined
+          ? {}
+          : { expiresAt: positiveDeadline(record.expiresAt) }),
       };
     default:
       revoked(
@@ -80,6 +84,12 @@ function parseTaskRunnerStartGuard(guard: unknown): TaskRunnerStartGuard {
         }`
       );
   }
+}
+
+function positiveDeadline(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)
+    revoked('Invalid task start deadline');
+  return value;
 }
 
 function nonEmptyString(value: unknown, field: string): string {
@@ -199,6 +209,13 @@ function assertReservedSubmissionAuthorityRow(
   }
   if (TERMINAL_TASK_STATUSES.has(task.status)) {
     revoked(`Reserved task submission authority revoked: task ${guard.taskId} is ${task.status}`);
+  }
+  if (
+    guard.expiresAt !== undefined &&
+    task.status !== 'in_progress' &&
+    guard.expiresAt <= Date.now()
+  ) {
+    revoked(`Reserved task submission start deadline expired for ${guard.taskId}`);
   }
   if (task.revocation_reason) {
     revoked(

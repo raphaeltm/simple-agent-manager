@@ -531,7 +531,8 @@ describe('DO Migrations', () => {
       // terminal archive sharding bridge: 3 from migration 043
       // project event wake delivery: 6 from migration 045
       // project event wake retention repair indexes: 9 from migration 046
-      expect(indexes).toHaveLength(105);
+      // Additive audience/channel/schedule/wake-seek indexes (047–052): 18.
+      expect(indexes).toHaveLength(123);
     });
   });
 });

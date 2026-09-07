@@ -1,3 +1,4 @@
+import { invalidScheduledDeliveryTarget } from './project-event-schedules-delivery';
 import {
   MAX_ORCHESTRATOR_WAIT_CHILDREN,
   TASK_TERMINAL_STATUSES,
@@ -188,7 +189,8 @@ function sourceTaskGuardForClaim(
 ): SessionRecoverySourceTaskGuard | undefined {
   if (
     claim.message.sourceKind !== 'parent_wakeup' &&
-    claim.message.sourceKind !== 'project_event_wake'
+    claim.message.sourceKind !== 'project_event_wake' &&
+    claim.message.sourceKind !== 'scheduled_action'
   ) {
     return undefined;
   }
@@ -205,6 +207,10 @@ function sourceTaskGuardForClaim(
     projectId,
     chatSessionId: claim.message.targetSessionId,
     ...(projectEventWake ? { projectEventWake } : {}),
+    ...(claim.message.sourceKind === 'scheduled_action' &&
+    typeof metadata.creatorUserId === 'string'
+      ? { requiredProjectMemberId: metadata.creatorUserId }
+      : {}),
   };
 }
 
@@ -315,7 +321,9 @@ export async function runPromptDeliveryClaim(
       }
     };
     const validateDeliveryTarget = async (): Promise<PromptDeliveryResult | null> =>
-      (await validateParentWakeTarget()) ?? (await validateProjectEventWakeTarget());
+      (await validateParentWakeTarget()) ??
+      (await validateProjectEventWakeTarget()) ??
+      (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim));
     const input = {
       projectId: hooks.projectId ?? '',
       claim,
