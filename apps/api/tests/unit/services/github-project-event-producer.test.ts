@@ -44,11 +44,6 @@ describe('GitHub ProjectData event producer', () => {
         action: 'completed',
         sender: { login: 'octocat', type: 'User' },
         repository: { id: 9001, full_name: 'acme/repo', default_branch: 'main' },
-        pull_request: {
-          number: 42,
-          head: { ref: 'feature/checks', sha: 'abc123def456abc123def456abc123def456abcd' },
-          base: { ref: 'main' },
-        },
         check_run: {
           id: 123456,
           name: 'ci / test',
@@ -56,6 +51,13 @@ describe('GitHub ProjectData event producer', () => {
           conclusion: 'failure',
           head_sha: 'abc123def456abc123def456abc123def456abcd',
           check_suite: { id: 78910 },
+          pull_requests: [
+            {
+              number: 42,
+              head: { ref: 'feature/checks', sha: 'abc123def456abc123def456abc123def456abcd' },
+              base: { ref: 'main' },
+            },
+          ],
           html_url: 'https://github.com/acme/repo/runs/123456',
           completed_at: '2026-08-28T13:00:00.000Z',
         },
@@ -80,10 +82,6 @@ describe('GitHub ProjectData event producer', () => {
         subject: { type: 'commit', id: 'abc123def456abc123def456abc123def456abcd' },
         metadata: expect.objectContaining({
           deliveryId: 'delivery-check-run',
-          pullRequest: expect.objectContaining({
-            number: '42',
-            headSha: 'abc123def456abc123def456abc123def456abcd',
-          }),
           checkRun: expect.objectContaining({
             id: '123456',
             name: 'ci / test',
@@ -91,10 +89,12 @@ describe('GitHub ProjectData event producer', () => {
             conclusion: 'failure',
             headSha: 'abc123def456abc123def456abc123def456abcd',
             checkSuiteId: '78910',
+            pullRequests: ['42'],
           }),
         }),
       })
     );
+    expect(admitProjectEvent.mock.calls[0][2].metadata).not.toHaveProperty('pullRequest');
   });
 
   it('keeps workflow_run results distinct for old and new commit heads', async () => {

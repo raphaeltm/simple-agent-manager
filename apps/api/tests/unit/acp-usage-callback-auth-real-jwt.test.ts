@@ -47,6 +47,10 @@ function createCredentialD1() {
   sqlite.exec(`
     CREATE TABLE users (id TEXT PRIMARY KEY);
     CREATE TABLE projects (id TEXT PRIMARY KEY);
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL
+    );
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY,
       project_id TEXT,
@@ -68,6 +72,9 @@ function createCredentialD1() {
   sqlite.exec(readFileSync(migrationPath('0144_project_event_source_outbox.sql'), 'utf8'));
   sqlite.exec(readFileSync(migrationPath('0145_credential_limit_windows.sql'), 'utf8'));
   sqlite.exec(readFileSync(migrationPath('0146_credential_limit_event_admissions.sql'), 'utf8'));
+  sqlite.exec(
+    readFileSync(migrationPath('0148_project_event_source_outbox_durability.sql'), 'utf8')
+  );
   sqlite.prepare('INSERT INTO users (id) VALUES (?)').run('user-1');
   sqlite.prepare('INSERT INTO projects (id) VALUES (?)').run('project-1');
   sqlite

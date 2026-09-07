@@ -69,8 +69,10 @@ CREATE TABLE project_event_source_outbox (
   event_payload_json TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
   attempt_count INTEGER NOT NULL DEFAULT 0, max_attempts INTEGER NOT NULL,
   next_attempt_at TEXT NOT NULL, processing_lease_expires_at TEXT,
-  expires_at TEXT NOT NULL, admitted_event_id TEXT, admission_outcome TEXT,
-  last_error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  claim_token TEXT, claimed_at TEXT, expires_at TEXT NOT NULL,
+  admitted_event_id TEXT, admission_outcome TEXT, last_error TEXT,
+  credential_limit_window_type TEXT, credential_limit_observed_at INTEGER,
+  terminalized_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX idx_project_event_source_outbox_delivery
   ON project_event_source_outbox(project_id, source, delivery_key);
@@ -281,7 +283,8 @@ describe('generic webhook ingress vertical slice', () => {
       state: 'admitted',
       admission_outcome: 'created',
     });
-    expect(outbox[0]?.event_payload_json).toContain('"token":"[redacted]"');
+    expect(outbox[0]?.event_payload_json).toContain('redactedSensitiveKeyCount');
+    expect(outbox[0]?.event_payload_json).not.toContain('"token"');
     expect(outbox[0]?.event_payload_json).not.toContain('SECURITY_CANARY_DO_NOT_PERSIST');
   });
 

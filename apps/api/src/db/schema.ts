@@ -876,6 +876,7 @@ export const tasks = sqliteTable(
     skillHint: text('skill_hint'),
     startedAt: text('started_at'),
     completedAt: text('completed_at'),
+    terminalTransitionId: text('terminal_transition_id'),
     errorMessage: text('error_message'),
     outputSummary: text('output_summary'),
     outputBranch: text('output_branch'),
@@ -1496,9 +1497,9 @@ export const agentSessions = sqliteTable(
     workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
     userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
     agentProfileIdIdx: index('idx_agent_sessions_agent_profile_id').on(table.agentProfileId),
-    credentialReferenceIdx: index('idx_agent_sessions_credential_reference').on(
-      table.agentCredentialReference
-    ).where(sql`agent_credential_reference IS NOT NULL`),
+    credentialReferenceIdx: index('idx_agent_sessions_credential_reference')
+      .on(table.agentCredentialReference)
+      .where(sql`agent_credential_reference IS NOT NULL`),
     skillIdIdx: index('idx_agent_sessions_skill_id').on(table.skillId),
     // Compound index for filtered session queries (P2 fix).
     workspaceUserStatusIdx: index('idx_agent_sessions_ws_user_status').on(
@@ -1520,7 +1521,9 @@ export const credentialLimitWindows = sqliteTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     credentialReference: text('credential_reference').notNull(),
     windowType: text('window_type').notNull(),
-    credentialSource: text('credential_source', { enum: ['user', 'project', 'platform'] }).notNull(),
+    credentialSource: text('credential_source', {
+      enum: ['user', 'project', 'platform'],
+    }).notNull(),
     provider: text('provider').notNull(),
     providerMode: text('provider_mode').notNull(),
     agentType: text('agent_type'),
@@ -1564,8 +1567,6 @@ export const credentialLimitWindows = sqliteTable(
     observedAtIdx: index('idx_credential_limit_windows_observed_at').on(table.observedAt),
   })
 );
-
-
 
 // =============================================================================
 // Runtime-neutral Session Snapshots
@@ -2587,12 +2588,15 @@ export const projectEventSourceOutbox = sqliteTable(
     maxAttempts: integer('max_attempts').notNull(),
     nextAttemptAt: text('next_attempt_at').notNull(),
     processingLeaseExpiresAt: text('processing_lease_expires_at'),
+    claimToken: text('claim_token'),
+    claimedAt: text('claimed_at'),
     expiresAt: text('expires_at').notNull(),
     admittedEventId: text('admitted_event_id'),
     admissionOutcome: text('admission_outcome'),
     lastError: text('last_error'),
     credentialLimitWindowType: text('credential_limit_window_type'),
     credentialLimitObservedAt: integer('credential_limit_observed_at'),
+    terminalizedAt: text('terminalized_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2614,6 +2618,21 @@ export const projectEventSourceOutbox = sqliteTable(
     processingLeaseIdx: index('idx_project_event_source_outbox_processing_lease').on(
       table.state,
       table.processingLeaseExpiresAt,
+      table.id
+    ),
+    activeExpiryIdx: index('idx_project_event_source_outbox_active_expiry').on(
+      table.state,
+      table.expiresAt,
+      table.id
+    ),
+    activeAttemptsIdx: index('idx_project_event_source_outbox_active_attempts').on(
+      table.state,
+      table.attemptCount,
+      table.id
+    ),
+    terminalRetentionIdx: index('idx_project_event_source_outbox_terminal_retention').on(
+      table.state,
+      table.terminalizedAt,
       table.id
     ),
     projectSubjectIdx: index('idx_project_event_source_outbox_project_subject').on(

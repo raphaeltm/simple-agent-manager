@@ -219,6 +219,8 @@ async function supersedeOlderCredentialLimitSourceIntents(
     `UPDATE project_event_source_outbox
         SET state = 'permanent_failed',
             processing_lease_expires_at = NULL,
+            claim_token = NULL,
+            terminalized_at = ?,
             last_error = 'Superseded by newer credential limit window',
             updated_at = ?
       WHERE id IN (
@@ -237,6 +239,7 @@ async function supersedeOlderCredentialLimitSourceIntents(
       )`
   )
     .bind(
+      new Date(now).toISOString(),
       new Date(now).toISOString(),
       observation.projectId,
       eventSource,
@@ -417,12 +420,14 @@ async function markSourceIntentSuperseded(
     `UPDATE project_event_source_outbox
         SET state = 'permanent_failed',
             processing_lease_expires_at = NULL,
+            claim_token = NULL,
+            terminalized_at = ?,
             last_error = ?,
             updated_at = ?
       WHERE id = ?
         AND state IN (${ACTIVE_SOURCE_OUTBOX_STATES})`
   )
-    .bind(reason, new Date(now).toISOString(), id)
+    .bind(new Date(now).toISOString(), reason, new Date(now).toISOString(), id)
     .run();
 }
 

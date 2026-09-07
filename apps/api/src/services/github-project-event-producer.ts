@@ -4,6 +4,7 @@ import type {
   ProjectEventMetadata,
   ProjectEventSeverity,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
 import { eq, or, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -324,6 +325,7 @@ function buildMetadata(
       externalId: jsonStringOrNull(checkRun?.external_id),
       detailsUrl: stringValue(checkRun?.details_url) ?? null,
       htmlUrl: stringValue(checkRun?.html_url) ?? null,
+      pullRequests: pullRequestNumbers(checkRun?.pull_requests),
     };
   }
 
@@ -518,6 +520,7 @@ function githubHeadSha(payload: Record<string, unknown>): string | null {
 function pullRequestNumbers(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
+    .slice(0, DEFAULT_PROJECT_EVENT_LIMITS.maxMetadataArrayItems)
     .map((item) => jsonStringOrNull(recordValue(item)?.number))
     .filter((item): item is string => item !== null);
 }

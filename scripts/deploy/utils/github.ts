@@ -37,6 +37,7 @@ export interface GitHubAppManifest {
     pull_requests: string;
     checks: string;
     actions: string;
+    issues: string;
   };
 }
 
@@ -64,6 +65,7 @@ export function generateAppManifest(appName: string, baseDomain: string): GitHub
     default_events: [
       'check_run',
       'check_suite',
+      'issues',
       'issue_comment',
       'pull_request',
       'pull_request_review',
@@ -78,6 +80,7 @@ export function generateAppManifest(appName: string, baseDomain: string): GitHub
       contents: 'write',
       metadata: 'read',
       email_addresses: 'read',
+      issues: 'read',
       pull_requests: 'read',
     },
   };
@@ -104,8 +107,10 @@ export function generateAppCreationUrl(baseDomain: string, appName: string = 'SA
   params.set('pull_requests', 'read');
   params.set('checks', 'read');
   params.set('actions', 'read');
+  params.set('issues', 'read');
   params.append('events[]', 'check_run');
   params.append('events[]', 'check_suite');
+  params.append('events[]', 'issues');
   params.append('events[]', 'issue_comment');
   params.append('events[]', 'pull_request_review');
   params.append('events[]', 'pull_request_review_comment');
@@ -272,11 +277,22 @@ Follow these steps:
    - Repository contents: Read and write
    - Repository metadata: Read
    - Email addresses: Read-only
+   - Issues: Read-only
    - Pull requests: Read-only
+   - Checks: Read-only
+   - Actions: Read-only
 
 4. Subscribe to events:
-   - push
+   - check_run
+   - check_suite
+   - issues
+   - issue_comment
    - pull_request
+   - pull_request_review
+   - pull_request_review_comment
+   - push
+   - repository
+   - workflow_run
 
 5. After creating the app, collect these values:
    - App ID (shown on the app settings page)

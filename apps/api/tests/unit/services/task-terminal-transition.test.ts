@@ -8,12 +8,15 @@ import { transitionTaskToTerminal } from '../../../src/services/task-terminal-tr
 import { cancelVmTaskAdmission } from '../../../src/services/vm-admission-control';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-const recordTaskLifecycleEventViaSourceOutbox = vi.hoisted(() => vi.fn(async () => undefined));
+const admitProjectEventSourceIntentById = vi.hoisted(() =>
+  vi.fn(async () => ({ state: 'admitted' }))
+);
 
 vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits: vi.fn() }));
-vi.mock('../../../src/services/project-lifecycle-events', () => ({
-  recordTaskLifecycleEventViaSourceOutbox,
-}));
+vi.mock('../../../src/services/project-event-source-outbox', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, admitProjectEventSourceIntentById };
+});
 vi.mock('../../../src/services/vm-admission-control', () => ({
   cancelVmTaskAdmission: vi.fn().mockResolvedValue(undefined),
 }));
@@ -115,7 +118,8 @@ describe('transitionTaskToTerminal', () => {
   function taskRow(id = 'task-1') {
     return sqlite
       .prepare(
-        `SELECT status, execution_step, error_message, started_at, completed_at
+        `SELECT status, execution_step, error_message, started_at, completed_at,
+                terminal_transition_id
          FROM tasks WHERE id = ?`
       )
       .get(id) as {
@@ -124,6 +128,7 @@ describe('transitionTaskToTerminal', () => {
       error_message: string | null;
       started_at: string | null;
       completed_at: string | null;
+      terminal_transition_id: string | null;
     };
   }
 
@@ -167,6 +172,7 @@ describe('transitionTaskToTerminal', () => {
       error_message: 'Agent became unresponsive after SAM check-in',
       started_at: NOW.toISOString(),
       completed_at: NOW.toISOString(),
+      terminal_transition_id: expect.any(String),
     });
     expect(statusEvents()).toEqual([
       {
@@ -193,28 +199,40 @@ describe('transitionTaskToTerminal', () => {
     expect(cancelVmTaskAdmission).toHaveBeenCalledWith(env, 'task-1', 'task_failed');
     expect(reconcileTaskWaits).toHaveBeenCalledTimes(1);
     expect(reconcileTaskWaits).toHaveBeenCalledWith(env, PROJECT_ID, 'task-1');
-    expect(recordTaskLifecycleEventViaSourceOutbox).toHaveBeenCalledTimes(1);
-    expect(recordTaskLifecycleEventViaSourceOutbox).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({
-        projectId: PROJECT_ID,
+    const outboxRows = sqlite
+      .prepare(
+        `SELECT id, project_id, source, event_type, subject_type, subject_id, delivery_key,
+                state, event_payload_json
+           FROM project_event_source_outbox`
+      )
+      .all() as Array<{
+      id: string;
+      project_id: string;
+      source: string;
+      event_type: string;
+      subject_type: string;
+      subject_id: string;
+      delivery_key: string;
+      state: string;
+      event_payload_json: string;
+    }>;
+    expect(admitProjectEventSourceIntentById).toHaveBeenCalledTimes(1);
+    expect(admitProjectEventSourceIntentById).toHaveBeenCalledWith(env, outboxRows[0]?.id);
+    expect(JSON.parse(outboxRows[0]?.event_payload_json ?? '{}')).toMatchObject({
+      metadata: {
         taskId: 'task-1',
         status: 'failed',
+        fromStatus: 'in_progress',
         parentTaskId: 'parent-task-1',
+        workspaceId: 'workspace-1',
+        sessionId: 'session-1',
         reason: 'Agent became unresponsive after SAM check-in',
-        source: 'test.attention_expiry',
-        occurredAt: NOW.toISOString(),
-      })
-    );
-    expect(
-      sqlite
-        .prepare(
-          `SELECT project_id, source, event_type, subject_type, subject_id, delivery_key, state
-             FROM project_event_source_outbox`
-        )
-        .all()
-    ).toEqual([
+        transitionSource: 'test.attention_expiry',
+      },
+    });
+    expect(outboxRows.map(({ event_payload_json: _eventPayloadJson, ...row }) => row)).toEqual([
       {
+        id: outboxRows[0]?.id,
         project_id: PROJECT_ID,
         source: 'sam.lifecycle',
         event_type: 'task.failed',
@@ -253,7 +271,46 @@ describe('transitionTaskToTerminal', () => {
     ).toBe('running');
     expect(cancelVmTaskAdmission).not.toHaveBeenCalled();
     expect(reconcileTaskWaits).not.toHaveBeenCalled();
-    expect(recordTaskLifecycleEventViaSourceOutbox).not.toHaveBeenCalled();
+    expect(admitProjectEventSourceIntentById).not.toHaveBeenCalled();
+  });
+
+  it('does not capture a source intent when a same-millisecond cancellation wins first', async () => {
+    const database = env.DATABASE;
+    const originalBatch = database.batch.bind(database);
+    env = {
+      ...env,
+      DATABASE: {
+        ...database,
+        batch: vi.fn(async (statements) => {
+          sqlite
+            .prepare(
+              `UPDATE tasks
+                  SET status = 'cancelled', error_message = 'cancelled first',
+                      completed_at = ?, updated_at = ?
+                WHERE id = ?`
+            )
+            .run(NOW.toISOString(), NOW.toISOString(), 'task-1');
+          return originalBatch(statements);
+        }),
+      } as unknown as D1Database,
+    } as Env;
+
+    const outcome = await transitionTaskToTerminal(env, {
+      taskId: 'task-1',
+      projectId: PROJECT_ID,
+      status: 'failed',
+      reason: 'Old observation lost the race',
+      source: 'test.race',
+      expectedWorkspaceId: 'workspace-1',
+      expectedChatSessionId: 'session-1',
+    });
+
+    expect(outcome).toBe('not_terminalizable');
+    expect(statusEvents()).toEqual([]);
+    expect(
+      sqlite.prepare(`SELECT COUNT(*) AS count FROM project_event_source_outbox`).get()
+    ).toEqual({ count: 0 });
+    expect(admitProjectEventSourceIntentById).not.toHaveBeenCalled();
   });
 
   it('terminalizes queued rows for scheduled timeout recovery', async () => {
@@ -303,9 +360,7 @@ describe('transitionTaskToTerminal', () => {
       recoverySourceTaskId: 'task-1',
       createdAt: new Date(NOW.getTime() - 30_000).toISOString(),
     });
-    sqlite
-      .prepare(`UPDATE tasks SET superseded_by_task_id = 'task-2' WHERE id = 'task-1'`)
-      .run();
+    sqlite.prepare(`UPDATE tasks SET superseded_by_task_id = 'task-2' WHERE id = 'task-1'`).run();
 
     const outcome = await transitionTaskToTerminal(env, {
       taskId: 'task-1',
