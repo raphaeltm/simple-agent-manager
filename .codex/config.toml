@@ -25,3 +25,6 @@ bearer_token_env_var = "SAM_MCP_TOKEN"
 type = "command"
 command = ".claude/hooks/verify-test-quality.sh"
 timeout = 30000
+
+[projects."/workspaces/simple-agent-manager"]
+trust_level = "trusted"
