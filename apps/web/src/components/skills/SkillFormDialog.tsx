@@ -8,10 +8,10 @@ import { Button, Dialog, Input } from '@simple-agent-manager/ui';
 import { type FC, useEffect, useState } from 'react';
 
 import {
-  type ResourceRequirementsFormState,
-  EMPTY_RESOURCE_STATE,
-  ResourceRequirementsInput,
   deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
+  type ResourceRequirementsFormState,
+  ResourceRequirementsInput,
   serializeResourceRequirements,
 } from '../resource-requirements';
 import { SkillRuntimeSection } from './SkillRuntimeSection';

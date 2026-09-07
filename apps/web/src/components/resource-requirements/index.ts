@@ -1,11 +1,11 @@
-export { ResourceRequirementsInput } from './ResourceRequirementsInput';
 export {
-  type ResourceRequirementsFormState,
-  EMPTY_RESOURCE_STATE,
   deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
   formatHardwareDisplay,
   formatLegacyVmSize,
   hasAnyResourceValue,
+  type ResourceRequirementsFormState,
   serializeResourceRequirements,
   toResourceRequirements,
 } from './resource-requirements-utils';
+export { ResourceRequirementsInput } from './ResourceRequirementsInput';
