@@ -33,7 +33,11 @@ export async function seedInstallation(
   userId: string,
   opts?: { installationIdValue?: string; accountName?: string }
 ): Promise<void> {
-  const externalInstallationId = opts?.installationIdValue ?? 'inst-12345';
+  // Derived per installation, not a shared literal: github_installations is unique
+  // on external_installation_id, so a shared default made every installation after
+  // the first a silent INSERT OR IGNORE no-op and the next seedProject failed its
+  // installation_id foreign key.
+  const externalInstallationId = opts?.installationIdValue ?? `inst-${installationId}`;
   const accountName = opts?.accountName ?? 'test-user';
 
   await env.DATABASE.prepare(

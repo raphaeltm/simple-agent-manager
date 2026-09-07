@@ -90,7 +90,12 @@ export function buildPlacementAuthoritySqlPredicate(
     `AND ${nodeAlias}.runtime = 'vm'`,
     `AND ${nodeAlias}.node_class = ?`,
     `AND ${nodeAlias}.node_role = ?`,
-    `AND ${nodeAlias}.workload_role = ?`,
+    // nodes.workload_role is nullable: rows provisioned before migration 0125 have
+    // no value, and 'workspace' is the role they were created with. Requiring a
+    // literal match would refuse every pre-0125 node, which is exactly the legacy
+    // work this slice must keep drainable. Matches (node.workloadRole ?? 'workspace')
+    // used by the direct workspace route.
+    `AND COALESCE(${nodeAlias}.workload_role, 'workspace') = ?`,
   ];
   binds.push(input.userId, nodeClass, input.nodeRole, input.workloadRole);
 

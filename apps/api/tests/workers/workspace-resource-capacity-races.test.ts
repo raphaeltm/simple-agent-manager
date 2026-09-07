@@ -224,6 +224,18 @@ async function seedCurrentAuthorityForNode(input: {
     .bind(platformCredentialId, `WRC ${suffix}`, input.userId, updatedAt, updatedAt)
     .run();
 
+  // Only one default pool may exist per project (unique index), and final
+  // admission requires the claimed pool to BE the current default. Retire the
+  // previous default before publishing this one — an INSERT OR IGNORE that lost
+  // that race used to be silently skipped, and the candidate insert then failed
+  // its pool foreign key.
+  await env.DATABASE.prepare(
+    `UPDATE capacity_pools
+        SET is_default = 0
+      WHERE scope = 'project' AND owner_project_id = ? AND id != ?`
+  )
+    .bind(input.projectId, poolId)
+    .run();
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO capacity_pools
        (id, scope, owner_user_id, owner_project_id, name, is_default, revision, status,
@@ -233,6 +245,9 @@ async function seedCurrentAuthorityForNode(input: {
         'queue', 'complete', ?, ?, ?)`
   )
     .bind(poolId, input.projectId, `Pool ${suffix}`, input.userId, updatedAt, updatedAt)
+    .run();
+  await env.DATABASE.prepare(`UPDATE capacity_pools SET is_default = 1 WHERE id = ?`)
+    .bind(poolId)
     .run();
 
   await env.DATABASE.prepare(
@@ -541,6 +556,15 @@ describe('workspace resource capacity final reservation CAS', () => {
   it('accounts for active v1 and v2 reservation snapshots in real D1 final CAS', async () => {
     const nodeId = 'node-wrc-v2-reservations';
     await makeReadyNode(nodeId, USER_ID, 'medium');
+    // Current authority like every other node in this file: a default project pool
+    // exists for PROJECT_ID here, so an unpooled node would be refused before the
+    // reservation arithmetic this case is about.
+    const snapshot = await seedCurrentAuthorityForNode({
+      nodeId,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      label: 'v2-reservations',
+    });
     await seedWorkspace('workspace-wrc-v2-active-v1', nodeId, USER_ID, {
       projectId: PROJECT_ID,
       status: 'running',
@@ -560,6 +584,7 @@ describe('workspace resource capacity final reservation CAS', () => {
       reserveWorkspacePlacement(
         env.DATABASE,
         placement('workspace-wrc-v2-fits', nodeId, {
+          capacityPlacementSnapshot: snapshot,
           resolvedReservation: reservationV2({ cpuMillis: 1000, memoryMb: 1024, diskMb: 1024 }),
         }),
         admissionPolicy()
@@ -569,6 +594,7 @@ describe('workspace resource capacity final reservation CAS', () => {
       reserveWorkspacePlacement(
         env.DATABASE,
         placement('workspace-wrc-v2-overbook', nodeId, {
+          capacityPlacementSnapshot: snapshot,
           resolvedReservation: reservationV2({ cpuMillis: 1100, memoryMb: 1024, diskMb: 1024 }),
         }),
         admissionPolicy()

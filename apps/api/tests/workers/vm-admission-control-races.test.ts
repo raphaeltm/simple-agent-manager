@@ -47,6 +47,15 @@ const USER_ID = 'user-vm-admission-races';
 const OTHER_USER_ID = 'user-vm-admission-races-other';
 const INSTALLATION_ID = 'installation-vm-admission-races';
 const PROJECT_ID = 'project-vm-admission-races';
+/**
+ * Separate project for capacity-pool cases. A default project pool is the
+ * authoritative effective pool for its project, so a pooled fixture sharing
+ * PROJECT_ID would (correctly) refuse every legacy unpooled placement in this
+ * file's shared D1.
+ */
+const POOL_PROJECT_ID = 'project-vm-admission-races-pooled';
+/** Same reasoning as POOL_PROJECT_ID, for user-scope pools. */
+const POOL_USER_ID = 'user-vm-admission-races-pooled';
 const PROVIDER_DOMAIN = 'hetzner:platform:hetzner:vm-admission-races';
 const SCOPE_KEY = `user:${USER_ID}:workspace-vm:${PROVIDER_DOMAIN}`;
 
@@ -55,6 +64,10 @@ beforeAll(async () => {
   await seedUser(OTHER_USER_ID);
   await seedInstallation(INSTALLATION_ID, USER_ID);
   await seedProject(PROJECT_ID, USER_ID, INSTALLATION_ID);
+  await seedProject(POOL_PROJECT_ID, USER_ID, INSTALLATION_ID, {
+    repository: 'test-org/vm-admission-races-pooled',
+  });
+  await seedUser(POOL_USER_ID);
 });
 
 function admission(
@@ -256,6 +269,30 @@ function taskState(
   };
 }
 
+/** Fixed timestamp so credential/source generations are computable and stable. */
+const AUTHORITY_TIMESTAMP = '2026-09-07 06:00:00.123';
+
+function credentialIdForScope(scope: 'project' | 'user' | 'installation'): string {
+  return `capacity-credential-${scope}`;
+}
+
+function credentialReferenceForScope(scope: 'project' | 'user' | 'installation'): string {
+  return scope === 'installation'
+    ? `platform_credentials:${credentialIdForScope(scope)}`
+    : `credentials:${credentialIdForScope(scope)}`;
+}
+
+async function sqliteTimestampVersion(timestamp: string): Promise<number> {
+  const row = await env.DATABASE.prepare(
+    `SELECT (CAST(strftime('%s', ?) AS INTEGER) * 1000
+          + CAST(substr(strftime('%f', ?), 4, 3) AS INTEGER)) AS version`
+  )
+    .bind(timestamp, timestamp)
+    .first<{ version: number }>();
+  if (!row) throw new Error('failed to compute SQLite timestamp version');
+  return row.version;
+}
+
 function capacitySnapshot(input: {
   poolId: string;
   sourceId: string;
@@ -270,8 +307,8 @@ function capacitySnapshot(input: {
     capacitySourceId: input.sourceId,
     capacityPoolCandidateId: input.candidateId,
     placementCredentialSource: input.scope === 'installation' ? 'platform' : input.scope,
-    placementCredentialReference: `test:${input.sourceId}`,
-    placementCredentialVersion: 1,
+    placementCredentialReference: credentialReferenceForScope(input.scope),
+    placementCredentialVersion: 0,
     capacityPoolProjectId: input.scope === 'project' ? (input.projectId ?? PROJECT_ID) : null,
     workloadRole: 'workspace',
     placementExplanationJson: JSON.stringify({
@@ -282,58 +319,218 @@ function capacitySnapshot(input: {
   };
 }
 
+/**
+ * Seed a COMPLETE, currently-valid authority chain for `snapshot`: the underlying
+ * cloud-provider credential, an active cloud-provider-credential source, a matching
+ * available candidate, and the pool as the CURRENT DEFAULT of its scope.
+ *
+ * Final admission verifies every one of those relationships in one statement, so a
+ * fixture that seeds only pool+source rows cannot exercise the pooled path at all —
+ * it models a pool with no candidates, which is correctly refused.
+ */
 async function seedCapacityRecords(
   snapshot: CapacityPlacementSnapshot,
-  ownerUserId = USER_ID
+  ownerUserId = USER_ID,
+  node?: {
+    provider: string;
+    location: string;
+    instanceType: string;
+    vcpu: number;
+    memoryMb: number;
+    diskGb: number;
+  }
 ): Promise<void> {
   if (!snapshot.capacityPoolId || !snapshot.capacityPoolScope || !snapshot.capacitySourceId) {
     throw new Error('snapshot must include pool and source IDs');
   }
+  const scope = snapshot.capacityPoolScope;
+  const ownerProjectId = scope === 'project' ? snapshot.capacityPoolProjectId : null;
+  const poolOwnerUserId = scope === 'user' ? ownerUserId : null;
+  const credentialId = credentialIdForScope(scope);
+  const version = await sqliteTimestampVersion(AUTHORITY_TIMESTAMP);
+  const hardware = node ?? {
+    provider: 'hetzner',
+    location: 'nbg1',
+    instanceType: 'test-large',
+    vcpu: 8,
+    memoryMb: 16_384,
+    diskGb: 160,
+  };
+
+  if (scope === 'installation') {
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO platform_credentials
+         (id, credential_type, provider, credential_kind, label, encrypted_token, iv,
+          is_enabled, created_by, created_at, updated_at)
+       VALUES (?, 'cloud-provider', ?, 'api-key', 'Capacity platform credential',
+          'encrypted-token', 'iv', 1, ?, ?, ?)`
+    )
+      .bind(credentialId, hardware.provider, ownerUserId, AUTHORITY_TIMESTAMP, AUTHORITY_TIMESTAMP)
+      .run();
+  } else {
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO credentials
+         (id, user_id, project_id, provider, credential_type, credential_kind, is_active,
+          encrypted_token, iv, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'cloud-provider', 'api-key', 1, 'encrypted-token', 'iv', ?, ?)`
+    )
+      .bind(
+        credentialId,
+        ownerUserId,
+        scope === 'project' ? ownerProjectId : null,
+        hardware.provider,
+        AUTHORITY_TIMESTAMP,
+        AUTHORITY_TIMESTAMP
+      )
+      .run();
+  }
+
+  // Exactly one default pool may exist per scope owner (unique index), and the
+  // effective-pool fence requires the claimed pool to BE that default. Retire any
+  // previous default for this scope owner before publishing the new one.
+  await env.DATABASE.prepare(
+    `UPDATE capacity_pools
+        SET is_default = 0
+      WHERE scope = ?
+        AND owner_user_id IS ?
+        AND owner_project_id IS ?
+        AND id != ?`
+  )
+    .bind(scope, poolOwnerUserId, ownerProjectId, snapshot.capacityPoolId)
+    .run();
+
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO capacity_pools
-       (id, scope, owner_user_id, owner_project_id, name, is_default, revision, status, strategy,
-        exhaustion_policy, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 0, ?, 'active', 'balanced', 'queue', ?, ?)`
+       (id, scope, owner_user_id, owner_project_id, name, is_default, revision, status,
+        configuration_state, strategy, exhaustion_policy, migration_state, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 1, ?, 'active', 'configured-ready', 'balanced', 'queue', 'complete', ?, ?)`
   )
     .bind(
       snapshot.capacityPoolId,
-      snapshot.capacityPoolScope,
-      snapshot.capacityPoolScope === 'user' ? ownerUserId : null,
-      snapshot.capacityPoolScope === 'project' ? snapshot.capacityPoolProjectId : null,
+      scope,
+      poolOwnerUserId,
+      ownerProjectId,
       `Pool ${snapshot.capacityPoolId}`,
       snapshot.capacityPoolRevision ?? 1,
-      new Date().toISOString(),
-      new Date().toISOString()
+      AUTHORITY_TIMESTAMP,
+      AUTHORITY_TIMESTAMP
     )
     .run();
+  await env.DATABASE.prepare(`UPDATE capacity_pools SET is_default = 1 WHERE id = ?`)
+    .bind(snapshot.capacityPoolId)
+    .run();
+
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO capacity_sources
        (id, scope, owner_user_id, owner_project_id, source_kind, provider, credential_source,
-        credential_id, platform_credential_id, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'registered-runner', NULL, NULL, NULL, NULL, 'active', ?, ?)`
+        credential_id, platform_credential_id, credential_reference, credential_version,
+        external_source_ref, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'cloud-provider-credential', ?, ?, ?, ?, ?, ?, NULL, 'active', ?, ?)`
   )
     .bind(
       snapshot.capacitySourceId,
-      snapshot.capacityPoolScope,
-      snapshot.capacityPoolScope === 'user' ? ownerUserId : null,
-      snapshot.capacityPoolScope === 'project' ? snapshot.capacityPoolProjectId : null,
-      new Date().toISOString(),
-      new Date().toISOString()
+      scope,
+      poolOwnerUserId,
+      ownerProjectId,
+      hardware.provider,
+      snapshot.placementCredentialSource,
+      scope === 'installation' ? null : credentialId,
+      scope === 'installation' ? credentialId : null,
+      credentialReferenceForScope(scope),
+      version,
+      AUTHORITY_TIMESTAMP,
+      AUTHORITY_TIMESTAMP
+    )
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO capacity_pool_candidates
+       (id, pool_id, capacity_source_id, provider, location, workload_role,
+        provider_instance_type, provider_instance_vcpu_count, provider_instance_memory_mb,
+        provider_instance_disk_gb, provider_instance_boot_disk_size_gb, provider_instance_image,
+        provider_instance_architecture, catalog_availability, status, priority, candidate_order,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'workspace', ?, ?, ?, ?, NULL, NULL, NULL, 'available', 'active', 0, 0, ?, ?)`
+  )
+    .bind(
+      snapshot.capacityPoolCandidateId,
+      snapshot.capacityPoolId,
+      snapshot.capacitySourceId,
+      hardware.provider,
+      hardware.location,
+      hardware.instanceType,
+      hardware.vcpu,
+      hardware.memoryMb,
+      hardware.diskGb,
+      AUTHORITY_TIMESTAMP,
+      AUTHORITY_TIMESTAMP
     )
     .run();
 }
 
+/**
+ * Bind a node to `snapshot` and seed the matching authority chain. The node's own
+ * provider-native identity is used as the candidate's, because final admission
+ * compares candidate offering against the node columns.
+ *
+ * Mutates `snapshot` in place with the resolved credential/source generation so
+ * callers pass the same object to reserveWorkspacePlacement.
+ */
 async function assignNodeCapacity(
   nodeId: string,
   snapshot: CapacityPlacementSnapshot
 ): Promise<void> {
-  await seedCapacityRecords(snapshot);
+  const nodeRow = await env.DATABASE.prepare(
+    `SELECT user_id AS userId, cloud_provider AS provider, vm_location AS location,
+            provider_instance_type AS instanceType,
+            observed_provider_instance_vcpu_count AS vcpu,
+            observed_provider_instance_memory_mb AS memoryMb,
+            observed_provider_instance_disk_gb AS diskGb
+       FROM nodes WHERE id = ?`
+  )
+    .bind(nodeId)
+    .first<{
+      userId: string;
+      provider: string | null;
+      location: string;
+      instanceType: string | null;
+      vcpu: number | null;
+      memoryMb: number | null;
+      diskGb: number | null;
+    }>();
+  if (!nodeRow?.provider || !nodeRow.instanceType || nodeRow.vcpu === null) {
+    throw new Error(`node ${nodeId} must be provisioned before capacity assignment`);
+  }
+
+  const version = await sqliteTimestampVersion(AUTHORITY_TIMESTAMP);
+  snapshot.capacitySourceGeneration = version;
+  snapshot.placementCredentialVersion = version;
+  snapshot.providerInstanceType = nodeRow.instanceType;
+  snapshot.providerInstanceVcpuCount = nodeRow.vcpu;
+  snapshot.providerInstanceMemoryMb = nodeRow.memoryMb;
+  snapshot.providerInstanceDiskGb = nodeRow.diskGb;
+
+  // The pool must be owned by the node's own user: a user-scope pool is matched
+  // with `p.owner_user_id = n.user_id`, and owning it with a different user would
+  // both break this node's authority and make that other user's legacy nodes
+  // undrainable in the shared D1.
+  await seedCapacityRecords(snapshot, nodeRow.userId, {
+    provider: nodeRow.provider,
+    location: nodeRow.location,
+    instanceType: nodeRow.instanceType,
+    vcpu: nodeRow.vcpu,
+    memoryMb: nodeRow.memoryMb ?? 0,
+    diskGb: nodeRow.diskGb ?? 0,
+  });
+
   await env.DATABASE.prepare(
     `UPDATE nodes
      SET capacity_pool_id = ?,
          capacity_pool_scope = ?,
          capacity_pool_revision = ?,
          capacity_source_id = ?,
+         capacity_source_generation = ?,
+         capacity_source_external_ref = NULL,
          capacity_pool_candidate_id = ?,
          placement_credential_source = ?,
          placement_credential_reference = ?,
@@ -348,10 +545,11 @@ async function assignNodeCapacity(
       snapshot.capacityPoolScope,
       snapshot.capacityPoolRevision,
       snapshot.capacitySourceId,
+      version,
       snapshot.capacityPoolCandidateId,
       snapshot.placementCredentialSource,
       snapshot.placementCredentialReference,
-      snapshot.placementCredentialVersion,
+      version,
       snapshot.capacityPoolProjectId,
       snapshot.workloadRole,
       snapshot.placementExplanationJson,
@@ -391,6 +589,10 @@ async function makeReadyNode(
     status: 'running',
     nodeClass: opts.nodeClass ?? 'managed',
   });
+  // A provisioned node has a provider runtime identity AND provider-observed
+  // hardware. Both advisory selection and the final admission SQL derive usable
+  // capacity from the observed columns only, so a fixture that sets just the
+  // planned columns models a node with no trusted capacity and is refused.
   await env.DATABASE.prepare(
     `UPDATE nodes
      SET health_status = 'healthy',
@@ -399,17 +601,30 @@ async function makeReadyNode(
        agent_version = 'current-sha',
        runtime = 'vm',
        node_role = 'workspace',
+       workload_role = 'workspace',
+       cloud_provider = 'hetzner',
        last_metrics = ?,
+       provider_instance_id = ?,
        provider_instance_type = ?,
        provider_instance_vcpu_count = ?,
        provider_instance_memory_mb = ?,
-       provider_instance_disk_gb = ?
+       provider_instance_disk_gb = ?,
+       observed_provider_instance_type = ?,
+       observed_provider_instance_vcpu_count = ?,
+       observed_provider_instance_memory_mb = ?,
+       observed_provider_instance_disk_gb = ?,
+       observed_hardware_source = 'observed'
      WHERE id = ?`
   )
     .bind(
       now,
       now,
       JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+      `server-${nodeId}`,
+      `test-${vmSize}`,
+      capacity.vcpu,
+      capacity.memoryMb,
+      capacity.diskGb,
       `test-${vmSize}`,
       capacity.vcpu,
       capacity.memoryMb,
@@ -584,15 +799,22 @@ describe('VM admission control D1 races', () => {
       otherUserNode
     );
 
-    await reserveWorkspacePlacement(
+    // Explicit policy with no host memory reserve: this case is about packing,
+    // same-user isolation and size compatibility. The 512 MB default reserve is
+    // exercised by the dedicated host-reserve test, and applying it here would
+    // make an 8 GB medium node refuse its second 4 GB workspace for an unrelated
+    // reason.
+    const packingPolicy = admissionPolicy({ maxWorkspaces: 2 });
+    const firstPlacement = await reserveWorkspacePlacement(
       env.DATABASE,
       placement('workspace-vm-admission-medium-first', mediumNode),
-      2
+      packingPolicy
     );
+    expect(firstPlacement).toBe(true);
     const mediumPlacement = await reserveWorkspacePlacement(
       env.DATABASE,
       placement('workspace-vm-admission-medium-second', mediumNode),
-      2
+      packingPolicy
     );
     expect(mediumPlacement).toBe(true);
     expect((await findNodeWithCapacity(taskState(USER_ID, 'medium'), rc))?.nodeId).toBe(largeNode);
@@ -719,12 +941,21 @@ describe('VM admission control D1 races', () => {
           runtime: 'vm',
           machineClass: 'shared-vm',
           machineSize: 'medium',
+          // The node carries a concrete provider-native offering, so the candidate
+          // must name the same one — legacy machineSize matching only applies to
+          // nodes with no provider_instance_type.
+          providerInstanceType: snapshot.providerInstanceType,
+          providerInstanceVcpuCount: snapshot.providerInstanceVcpuCount,
+          providerInstanceMemoryMb: snapshot.providerInstanceMemoryMb,
+          providerInstanceDiskGb: snapshot.providerInstanceDiskGb,
           priority: 1,
           candidateOrder: 0,
           credentialAttributionSource: 'user',
           placementCredentialSource: 'user',
           placementCredentialReference: snapshot.placementCredentialReference,
-          placementCredentialVersion: 1,
+          // Resolved by assignNodeCapacity from the seeded credential's timestamp;
+          // a literal here would not match the node's persisted authority.
+          placementCredentialVersion: snapshot.placementCredentialVersion,
           capacityPoolProjectId: null,
           snapshot,
         },
@@ -781,7 +1012,7 @@ describe('VM admission control D1 races', () => {
       sourceId: 'source-vm-admission-project',
       candidateId: 'candidate-vm-admission-project',
       scope: 'project',
-      projectId: PROJECT_ID,
+      projectId: POOL_PROJECT_ID,
     });
     await makeReadyNode(nodeId, USER_ID, 'large');
     await assignNodeCapacity(nodeId, snapshot);
@@ -790,7 +1021,7 @@ describe('VM admission control D1 races', () => {
       reserveWorkspacePlacement(
         env.DATABASE,
         {
-          ...placement(workspaceId, nodeId, { vmSize: 'large' }),
+          ...placement(workspaceId, nodeId, { vmSize: 'large', projectId: POOL_PROJECT_ID }),
           capacityPlacementSnapshot: snapshot,
         },
         2
@@ -820,7 +1051,7 @@ describe('VM admission control D1 races', () => {
       capacity_pool_scope: 'project',
       capacity_source_id: snapshot.capacitySourceId,
       capacity_pool_candidate_id: snapshot.capacityPoolCandidateId,
-      capacity_pool_project_id: PROJECT_ID,
+      capacity_pool_project_id: POOL_PROJECT_ID,
       workload_role: 'workspace',
       placement_explanation_json: snapshot.placementExplanationJson,
     });
@@ -829,7 +1060,7 @@ describe('VM admission control D1 races', () => {
   it('handles source-less capacity pool snapshots without SQL truthiness binds', async () => {
     const userLegacyNodeId = 'node-vm-admission-source-less-user';
     const projectLegacyNodeId = 'node-vm-admission-source-less-project';
-    await makeReadyNode(userLegacyNodeId, USER_ID, 'medium');
+    await makeReadyNode(userLegacyNodeId, POOL_USER_ID, 'medium');
     await makeReadyNode(projectLegacyNodeId, USER_ID, 'medium');
 
     const userBaseSnapshot = capacitySnapshot({
@@ -843,9 +1074,9 @@ describe('VM admission control D1 races', () => {
       sourceId: 'source-vm-admission-source-less-project',
       candidateId: 'candidate-vm-admission-source-less-project',
       scope: 'project',
-      projectId: PROJECT_ID,
+      projectId: POOL_PROJECT_ID,
     });
-    await seedCapacityRecords(userBaseSnapshot);
+    await seedCapacityRecords(userBaseSnapshot, POOL_USER_ID);
     await seedCapacityRecords(projectBaseSnapshot);
 
     const sourceLessUserSnapshot: CapacityPlacementSnapshot = {
@@ -865,27 +1096,40 @@ describe('VM admission control D1 races', () => {
       placementCredentialVersion: null,
     };
 
+    // A snapshot that names a pool but carries no source or candidate cannot be
+    // verified against anything current, so it is refused at BOTH scopes. It must
+    // be refused cleanly — SQLite treats a NULL bind in an `= ?` comparison as
+    // unknown rather than false, so the guard has to be structural, not truthiness.
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
         {
-          ...placement('workspace-vm-admission-source-less-user', userLegacyNodeId),
+          ...placement('workspace-vm-admission-source-less-user', userLegacyNodeId, {
+            userId: POOL_USER_ID,
+          }),
           capacityPlacementSnapshot: sourceLessUserSnapshot,
         },
         2
       )
-    ).resolves.toBe(true);
+    ).resolves.toBe(false);
 
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
         {
-          ...placement('workspace-vm-admission-source-less-project', projectLegacyNodeId),
+          ...placement('workspace-vm-admission-source-less-project', projectLegacyNodeId, {
+            projectId: POOL_PROJECT_ID,
+          }),
           capacityPlacementSnapshot: sourceLessProjectSnapshot,
         },
         2
       )
     ).resolves.toBe(false);
+
+    const userWorkspace = await env.DATABASE.prepare(`SELECT id FROM workspaces WHERE id = ?`)
+      .bind('workspace-vm-admission-source-less-user')
+      .first<{ id: string }>();
+    expect(userWorkspace).toBeNull();
 
     const projectWorkspace = await env.DATABASE.prepare(`SELECT id FROM workspaces WHERE id = ?`)
       .bind('workspace-vm-admission-source-less-project')
@@ -900,7 +1144,7 @@ describe('VM admission control D1 races', () => {
       sourceId: 'source-vm-admission-project-owned',
       candidateId: 'candidate-vm-admission-project-owned',
       scope: 'project',
-      projectId: PROJECT_ID,
+      projectId: POOL_PROJECT_ID,
     });
     const otherSnapshot = capacitySnapshot({
       poolId: 'pool-vm-admission-project-other',
@@ -937,7 +1181,7 @@ describe('VM admission control D1 races', () => {
       sourceId: 'source-vm-admission-project-no-snapshot',
       candidateId: 'candidate-vm-admission-project-no-snapshot',
       scope: 'project',
-      projectId: PROJECT_ID,
+      projectId: POOL_PROJECT_ID,
     });
     await makeReadyNode(nodeId, USER_ID, 'large');
     await assignNodeCapacity(nodeId, nodeSnapshot);
@@ -1146,6 +1390,32 @@ describe('VM admission control D1 races', () => {
         admissionPolicy()
       )
     ).resolves.toBe(false);
+    // A node with no provider runtime identity and no provider-observed hardware
+    // has no TRUSTED capacity, so final admission refuses it even when it is empty:
+    // planned estimates never become observations, and such a node drains rather
+    // than taking new work. It becomes admissible once the agent reports hardware.
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-unknown-empty-denied', emptyUnknownNode, {
+          resolvedReservation: reservation({ memoryMb: 4096, diskMb: 40960 }),
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+
+    await env.DATABASE.prepare(
+      `UPDATE nodes
+       SET provider_instance_id = ?,
+           observed_provider_instance_vcpu_count = 4,
+           observed_provider_instance_memory_mb = 8192,
+           observed_provider_instance_disk_gb = 80,
+           observed_hardware_source = 'observed'
+       WHERE id = ?`
+    )
+      .bind(`server-${emptyUnknownNode}`, emptyUnknownNode)
+      .run();
+
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
