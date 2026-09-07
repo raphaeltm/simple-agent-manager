@@ -107,7 +107,7 @@ The source report deferred broad email integration, arbitrary workflow DAG editi
 
 ## Validation record
 
-Pending implementation. Baseline lint/typecheck running; no feature verification claimed.
+Pending implementation. Baseline at `a82e1adbb`: frozen-lockfile install passed; `pnpm lint` passed all 13 packages with existing warnings; `pnpm exec turbo run typecheck --concurrency=1` passed all 19 tasks. An initial concurrent typecheck/build process exited 137; serialized execution passed. No feature verification claimed.
 
 ## References
 
