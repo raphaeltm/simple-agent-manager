@@ -88,6 +88,22 @@ export {
   isCapacityWorkloadRole,
 } from './capacity-pool';
 
+// Placement diagnostics (why-this-node / why-queued / why-rejected)
+export type {
+  PlacementAttemptDiagnostic,
+  PlacementAuthorityDiagnostic,
+  PlacementDecisionDiagnostics,
+  PlacementHostDiagnostic,
+  PlacementQueueDiagnostic,
+  PlacementResourceEvidence,
+  PlacementResourceFacts,
+} from './placement-diagnostics';
+export {
+  assertPlacementDiagnosticsAreUserSafe,
+  PLACEMENT_DIAGNOSTICS_FORBIDDEN_KEYS,
+  PLACEMENT_DIAGNOSTICS_VERSION,
+} from './placement-diagnostics';
+
 // GitHub
 export type {
   AccountType,
