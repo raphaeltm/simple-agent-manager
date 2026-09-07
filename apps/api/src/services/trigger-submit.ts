@@ -23,8 +23,13 @@ import {
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from './placement-resolver';
 import * as projectDataService from './project-data';
-import { parseStoredResourceRequirementsJson } from './resource-requirements-input';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
+import {
+  collectStoredResourceRequirementLayers,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  ResourceRequirementsValidationError,
+} from './resource-requirements-input';
+import { resolveSkillProfile } from './skills';
 import { markQueuedTaskFailed } from './task-failure';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
@@ -93,16 +98,32 @@ export async function submitTriggeredTask(
           env
         )
       : null;
-  const triggerResourceRequirements = parseStoredResourceRequirementsJson(
-    input.resourceRequirementsJson
-  );
-  const profileResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.agentProfileResourceRequirementsJson ??
-      (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson)
-  );
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null
-  );
+  const {
+    resourceRequirementLayers,
+    persistedResourceRequirementsJson,
+    taskRunnerResourceRequirements,
+  } = (() => {
+    try {
+      const layers = collectStoredResourceRequirementLayers({
+        trigger: input.resourceRequirementsJson,
+        skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null,
+        agentProfile:
+          resolvedProfile?.agentProfileResourceRequirementsJson ??
+          (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson),
+        project: project.resourceRequirementsJson,
+      });
+      return {
+        resourceRequirementLayers: layers,
+        persistedResourceRequirementsJson: firstResourceRequirementLayerJson(layers),
+        taskRunnerResourceRequirements: firstResourceRequirementLayer(layers),
+      };
+    } catch (err) {
+      if (err instanceof ResourceRequirementsValidationError) {
+        throw new Error(err.message);
+      }
+      throw err;
+    }
+  })();
 
   const taskId = ulid();
   const placement = (() => {
@@ -122,11 +143,7 @@ export async function submitTriggeredTask(
         },
         credentialProjectPolicy: 'current-project',
         taskModeDefault: 'workspace-profile',
-        resourceRequirements: {
-          trigger: triggerResourceRequirements,
-          skill: skillResourceRequirements,
-          agentProfile: profileResourceRequirements,
-        },
+        resourceRequirements: resourceRequirementLayers,
       });
     } catch (err) {
       if (err instanceof PlacementResolutionError) {
@@ -200,11 +217,7 @@ export async function submitTriggeredTask(
     triggerExecutionId: input.triggerExecutionId,
     requestedVmSize: vmSize,
     requestedVmSizeSource: vmSizeSource,
-    resourceRequirementsJson:
-      input.resourceRequirementsJson ??
-      resolvedProfile?.resourceRequirementsJson ??
-      resolvedProfile?.agentProfileResourceRequirementsJson ??
-      null,
+    resourceRequirementsJson: persistedResourceRequirementsJson,
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
     credentialAttributionUserId,
@@ -313,11 +326,7 @@ export async function submitTriggeredTask(
         opencodeBaseUrl: null,
         systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
         agentProfileHint: resolvedProfile?.profileId ?? null,
-        resourceRequirements:
-          triggerResourceRequirements ??
-          skillResourceRequirements ??
-          profileResourceRequirements ??
-          null,
+        resourceRequirements: taskRunnerResourceRequirements,
         projectScaling: {
           taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
           maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,

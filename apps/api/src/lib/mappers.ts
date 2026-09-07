@@ -129,6 +129,7 @@ export function toProjectResponse(project: schema.Project): Project {
     repoProvider: (project.repoProvider as RepoProvider) || 'github',
     artifactsRepoId: project.artifactsRepoId ?? null,
     defaultVmSize: (project.defaultVmSize as Project['defaultVmSize']) ?? null,
+    resourceRequirementsJson: project.resourceRequirementsJson ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
     defaultWorkspaceProfile:
       (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
