@@ -14,8 +14,7 @@ const DEFAULT_SNIPPET_LENGTH = 200;
 
 export const findRelatedIdeasDef: AnthropicToolDef = {
   name: 'find_related_ideas',
-  description:
-    'Search ideas in a project by keyword. Matches against title and description.',
+  description: 'Search ideas in a project by keyword. Matches against title and description.',
   input_schema: {
     type: 'object',
     properties: {
@@ -38,7 +37,7 @@ export const findRelatedIdeasDef: AnthropicToolDef = {
 
 export async function findRelatedIdeas(
   input: { projectId: string; query: string; limit?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -61,12 +60,7 @@ export async function findRelatedIdeas(
   const [project] = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   if (!project) {
@@ -83,8 +77,9 @@ export async function findRelatedIdeas(
      WHERE project_id = ? AND status = 'draft'
        AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')
      ORDER BY updated_at DESC
-     LIMIT ?`,
-  ).bind(project.id, searchPattern, searchPattern, limit)
+     LIMIT ?`
+  )
+    .bind(project.id, searchPattern, searchPattern, limit)
     .all<{
       id: string;
       title: string;

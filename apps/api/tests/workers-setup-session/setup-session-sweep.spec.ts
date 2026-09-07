@@ -53,7 +53,9 @@ async function seedSetupSession(opts: {
     .run();
 }
 
-async function getSessionStatus(id: string): Promise<{ status: string; error_code: string | null } | null> {
+async function getSessionStatus(
+  id: string
+): Promise<{ status: string; error_code: string | null } | null> {
   return env.DATABASE.prepare(
     `SELECT status, error_code FROM agent_credential_setup_sessions WHERE id = ?`
   )

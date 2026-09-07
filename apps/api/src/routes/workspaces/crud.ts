@@ -47,7 +47,10 @@ import {
   createNodeRecord,
   provisionNode,
 } from '../../services/nodes';
-import { PlacementResolutionError, resolveTaskStartPlacement } from '../../services/placement-resolver';
+import {
+  PlacementResolutionError,
+  resolveTaskStartPlacement,
+} from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
 import {
   assertDirectWorkspaceProvisioningAuthority,
@@ -86,10 +89,7 @@ function optionalTrimmedString(value: string | undefined): string | undefined {
 }
 
 function normalizeCredentialSource(value: string | null | undefined): CredentialSource | null {
-  return value === 'user' ||
-    value === 'project' ||
-    value === 'platform' ||
-    value === 'self-hosted'
+  return value === 'user' || value === 'project' || value === 'platform' || value === 'self-hosted'
     ? value
     : null;
 }
@@ -446,8 +446,7 @@ crudRoutes.post(
     let workspaceProviderInstanceBootDiskSizeGb: number | null =
       providerInstanceBootDiskSizeGb ?? null;
     let workspaceProviderInstanceImage: string | null = providerInstanceImage;
-    let workspaceProviderInstanceArchitecture: string | null =
-      providerInstanceArchitecture ?? null;
+    let workspaceProviderInstanceArchitecture: string | null = providerInstanceArchitecture ?? null;
     let requestedVmSizeSource: string | null = null;
     let resolvedReservation: ResolvedResourceReservation;
     let freshAllocation: CanonicalVmAllocationPlan | null = null;

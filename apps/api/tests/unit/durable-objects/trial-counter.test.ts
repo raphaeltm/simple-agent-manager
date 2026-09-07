@@ -28,9 +28,7 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-const { TrialCounter } = await import(
-  '../../../src/durable-objects/trial-counter'
-);
+const { TrialCounter } = await import('../../../src/durable-objects/trial-counter');
 
 // ---------------------------------------------------------------------------
 // In-memory SQL stub
@@ -112,10 +110,8 @@ describe('TrialCounter DO', () => {
     const { ctx } = createDO();
     // Allow the blockConcurrencyWhile callback to run.
     await Promise.resolve();
-    const execCalls = ctx._sql.exec.mock.calls.map((c: unknown[]) => (c[0] as string));
-    expect(
-      execCalls.some((q) => /create table if not exists trial_counter/i.test(q))
-    ).toBe(true);
+    const execCalls = ctx._sql.exec.mock.calls.map((c: unknown[]) => c[0] as string);
+    expect(execCalls.some((q) => /create table if not exists trial_counter/i.test(q))).toBe(true);
   });
 
   it('increments from 0 up to the cap', async () => {
@@ -269,9 +265,7 @@ describe('TrialCounter DO', () => {
     it('GET /state returns current counter', async () => {
       const { instance } = createDO();
       await instance.increment('2026-04', 10);
-      const res = await instance.fetch(
-        new Request('https://do/state?monthKey=2026-04')
-      );
+      const res = await instance.fetch(new Request('https://do/state?monthKey=2026-04'));
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ monthKey: '2026-04', count: 1 });
     });

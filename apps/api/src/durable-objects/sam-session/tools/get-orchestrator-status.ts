@@ -32,7 +32,7 @@ export const getOrchestratorStatusDef: AnthropicToolDef = {
 
 export async function getOrchestratorStatus(
   input: { projectId: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -45,12 +45,7 @@ export async function getOrchestratorStatus(
   const [project] = await db
     .select({ id: schema.projects.id, name: schema.projects.name })
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   if (!project) {

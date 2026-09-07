@@ -38,9 +38,12 @@ export function assertDefaultCapacityPoolUpdateResult(
     });
   }
   if (result.unavailableCandidateIds.length > 0) {
-    throw errors.badRequest('Candidate updates must be currently available in the provider catalog', {
-      unavailableCandidateIds: result.unavailableCandidateIds,
-    });
+    throw errors.badRequest(
+      'Candidate updates must be currently available in the provider catalog',
+      {
+        unavailableCandidateIds: result.unavailableCandidateIds,
+      }
+    );
   }
   if (result.missingCatalogAdditions.length > 0) {
     throw errors.badRequest('Catalog additions must belong to the default capacity pool', {
@@ -48,9 +51,12 @@ export function assertDefaultCapacityPoolUpdateResult(
     });
   }
   if (result.unavailableCatalogAdditions.length > 0) {
-    throw errors.badRequest('Catalog additions must be currently available in the provider catalog', {
-      unavailableCatalogAdditions: result.unavailableCatalogAdditions,
-    });
+    throw errors.badRequest(
+      'Catalog additions must be currently available in the provider catalog',
+      {
+        unavailableCatalogAdditions: result.unavailableCatalogAdditions,
+      }
+    );
   }
 
   return;

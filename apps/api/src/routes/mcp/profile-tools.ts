@@ -94,9 +94,7 @@ export function extractProfileFields(
     } else if (isAgentProfileRuntime(params.runtime)) {
       fields.runtime = params.runtime;
     } else {
-      throw new McpProfileFieldValidationError(
-        'runtime must be one of vm, cf-container, or null'
-      );
+      throw new McpProfileFieldValidationError('runtime must be one of vm, cf-container, or null');
     }
   }
   if (typeof params.devcontainerConfigName === 'string')

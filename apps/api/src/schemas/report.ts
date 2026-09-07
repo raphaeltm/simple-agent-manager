@@ -14,7 +14,11 @@ export const ReportIssueRefsSchema = v.object({
 
 export const ReportIssueSchema = v.object({
   title: v.pipe(v.string(), v.minLength(1), v.maxLength(DEFAULT_REPORT_ISSUE_TITLE_MAX_LENGTH)),
-  description: v.pipe(v.string(), v.minLength(1), v.maxLength(DEFAULT_REPORT_ISSUE_DESCRIPTION_MAX_LENGTH)),
+  description: v.pipe(
+    v.string(),
+    v.minLength(1),
+    v.maxLength(DEFAULT_REPORT_ISSUE_DESCRIPTION_MAX_LENGTH)
+  ),
   consentToAttachRefs: v.boolean(),
   refs: v.optional(ReportIssueRefsSchema),
 });

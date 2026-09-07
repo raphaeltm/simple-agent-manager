@@ -243,7 +243,11 @@ describe('policy routes', () => {
     async function post(body: unknown) {
       return app.request(
         BASE,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
         makeEnv()
       );
     }
@@ -251,7 +255,11 @@ describe('policy routes', () => {
     async function patch(policyId: string, body: unknown) {
       return app.request(
         `${BASE}/${policyId}`,
-        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
         makeEnv()
       );
     }

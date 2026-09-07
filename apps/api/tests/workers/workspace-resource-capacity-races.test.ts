@@ -123,9 +123,7 @@ async function makeReadyNode(
         ? { vcpu: 2, memoryMb: 4096, diskGb: 40 }
         : { vcpu: 4, memoryMb: 8192, diskGb: 80 };
   const providerInstanceVcpuCount =
-    'providerInstanceVcpuCount' in overrides
-      ? overrides.providerInstanceVcpuCount
-      : capacity.vcpu;
+    'providerInstanceVcpuCount' in overrides ? overrides.providerInstanceVcpuCount : capacity.vcpu;
   const providerInstanceMemoryMb =
     'providerInstanceMemoryMb' in overrides
       ? overrides.providerInstanceMemoryMb

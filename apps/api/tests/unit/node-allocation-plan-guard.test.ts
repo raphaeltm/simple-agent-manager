@@ -148,32 +148,68 @@ describe('node allocation plan guard', () => {
   });
 
   it.each([
-    ['membership removed', `UPDATE project_members SET status = 'removed', removed_at = '${AUTHORITY_TIMESTAMP}'`],
+    [
+      'membership removed',
+      `UPDATE project_members SET status = 'removed', removed_at = '${AUTHORITY_TIMESTAMP}'`,
+    ],
     ['project membership missing', `DELETE FROM project_members`],
     ['underlying credential missing', `DELETE FROM credentials WHERE id = 'cred-1'`],
     ['credential disabled', `UPDATE credentials SET is_active = 0 WHERE id = 'cred-1'`],
-    ['credential generation rotated', `UPDATE credentials SET updated_at = '2023-11-14T22:13:21.000Z' WHERE id = 'cred-1'`],
+    [
+      'credential generation rotated',
+      `UPDATE credentials SET updated_at = '2023-11-14T22:13:21.000Z' WHERE id = 'cred-1'`,
+    ],
     ['pool revision changed', `UPDATE capacity_pools SET revision = 8`],
     ['pool disabled', `UPDATE capacity_pools SET status = 'disabled'`],
-    ['pool configuration empty', `UPDATE capacity_pools SET configuration_state = 'configured-empty'`],
+    [
+      'pool configuration empty',
+      `UPDATE capacity_pools SET configuration_state = 'configured-empty'`,
+    ],
     ['pool owned by another project', `UPDATE capacity_pools SET owner_project_id = 'project-2'`],
     ['source disabled', `UPDATE capacity_sources SET status = 'disabled'`],
-    ['source generation changed', `UPDATE capacity_sources SET updated_at = '2023-11-14T22:13:21.000Z'`],
-    ['source credential reference cleared', `UPDATE capacity_sources SET credential_reference = NULL`],
+    [
+      'source generation changed',
+      `UPDATE capacity_sources SET updated_at = '2023-11-14T22:13:21.000Z'`,
+    ],
+    [
+      'source credential reference cleared',
+      `UPDATE capacity_sources SET credential_reference = NULL`,
+    ],
     ['source credential version cleared', `UPDATE capacity_sources SET credential_version = NULL`],
     ['source credential detached', `UPDATE capacity_sources SET credential_id = NULL`],
-    ['source owned by another project', `UPDATE capacity_sources SET owner_project_id = 'project-2'`],
+    [
+      'source owned by another project',
+      `UPDATE capacity_sources SET owner_project_id = 'project-2'`,
+    ],
     ['candidate disabled', `UPDATE capacity_pool_candidates SET status = 'disabled'`],
-    ['candidate unavailable', `UPDATE capacity_pool_candidates SET catalog_availability = 'last-known-unavailable'`],
-    ['candidate attached to another pool', `UPDATE capacity_pool_candidates SET pool_id = 'pool-2'`],
-    ['candidate attached to another source', `UPDATE capacity_pool_candidates SET capacity_source_id = 'source-2'`],
+    [
+      'candidate unavailable',
+      `UPDATE capacity_pool_candidates SET catalog_availability = 'last-known-unavailable'`,
+    ],
+    [
+      'candidate attached to another pool',
+      `UPDATE capacity_pool_candidates SET pool_id = 'pool-2'`,
+    ],
+    [
+      'candidate attached to another source',
+      `UPDATE capacity_pool_candidates SET capacity_source_id = 'source-2'`,
+    ],
     ['candidate provider changed', `UPDATE capacity_pool_candidates SET provider = 'gcp'`],
     ['candidate location changed', `UPDATE capacity_pool_candidates SET location = 'nbg1'`],
     ['candidate role changed', `UPDATE capacity_pool_candidates SET workload_role = 'deployment'`],
-    ['candidate native type changed', `UPDATE capacity_pool_candidates SET provider_instance_type = 'cx22'`],
-    ['candidate native image changed', `UPDATE capacity_pool_candidates SET provider_instance_image = 'debian-12'`],
+    [
+      'candidate native type changed',
+      `UPDATE capacity_pool_candidates SET provider_instance_type = 'cx22'`,
+    ],
+    [
+      'candidate native image changed',
+      `UPDATE capacity_pool_candidates SET provider_instance_image = 'debian-12'`,
+    ],
     ['node source id cleared', `UPDATE nodes SET capacity_source_id = NULL WHERE id = 'node-1'`],
-    ['node credential version cleared', `UPDATE nodes SET placement_credential_version = NULL WHERE id = 'node-1'`],
+    [
+      'node credential version cleared',
+      `UPDATE nodes SET placement_credential_version = NULL WHERE id = 'node-1'`,
+    ],
     ['node provider mismatch', `UPDATE nodes SET cloud_provider = 'gcp' WHERE id = 'node-1'`],
     ['node location mismatch', `UPDATE nodes SET vm_location = 'nbg1' WHERE id = 'node-1'`],
     ['node role mismatch', `UPDATE nodes SET workload_role = 'deployment' WHERE id = 'node-1'`],

@@ -5,9 +5,14 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { applyCacheHeaders } from '../lib/cache-headers';
 import { requireRouteParam } from '../lib/route-helpers';
-import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
-import { CreateAgentProfileSchema, jsonValidator, SetProjectDefaultProfileSchema,UpdateAgentProfileSchema } from '../schemas';
+import {
+  CreateAgentProfileSchema,
+  jsonValidator,
+  SetProjectDefaultProfileSchema,
+  UpdateAgentProfileSchema,
+} from '../schemas';
 import * as agentProfileService from '../services/agent-profiles';
 import { clearCredentialAttributionHealthCache } from '../services/credential-attribution-health';
 

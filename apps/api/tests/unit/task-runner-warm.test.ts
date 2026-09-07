@@ -10,7 +10,10 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('task runner warm node marking source contract', () => {
-  const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
+  const taskRunnerFile = readFileSync(
+    resolve(process.cwd(), 'src/services/task-runner.ts'),
+    'utf8'
+  );
 
   describe('warm pooling integration', () => {
     it('imports nodeLifecycleService', () => {
@@ -22,7 +25,9 @@ describe('task runner warm node marking source contract', () => {
       const cleanupSection = taskRunnerFile.slice(
         taskRunnerFile.indexOf('cleanupAutoProvisionedNode')
       );
-      expect(cleanupSection).toContain('nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs)');
+      expect(cleanupSection).toContain(
+        'nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs)'
+      );
     });
 
     it('still checks for active workspaces before marking idle', () => {

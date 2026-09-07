@@ -46,7 +46,11 @@ export interface AiProviderUsageEntry extends AiProviderUsageAttribution {
 
 interface AiTokenBudgetCounterStub extends DurableObjectStub {
   get(dateKey: string): Promise<TokenBudget>;
-  consumeTotal(dateKey: string, tokenLimit: number, tokens: number): Promise<{ allowed: boolean; usedTokens: number }>;
+  consumeTotal(
+    dateKey: string,
+    tokenLimit: number,
+    tokens: number
+  ): Promise<{ allowed: boolean; usedTokens: number }>;
   releaseTotal(dateKey: string, tokens: number): Promise<number>;
   increment(dateKey: string, inputTokens: number, outputTokens: number): Promise<TokenBudget>;
   incrementProviderUsage(
@@ -162,8 +166,6 @@ export async function getTokenUsage(
   return existing ?? { inputTokens: 0, outputTokens: 0 };
 }
 
-
-
 export interface FeatureTokenBudgetResult {
   allowed: boolean;
   usedTokens: number;
@@ -181,7 +183,7 @@ export async function consumeFeatureTokenBudget(
   feature: string,
   tokens: number,
   tokenLimit: number,
-  env?: Env,
+  env?: Env
 ): Promise<FeatureTokenBudgetResult> {
   const normalizedTokens = Math.max(0, Math.floor(tokens));
   const counter = getBudgetCounter(env, `feature:${feature}`);
@@ -196,7 +198,8 @@ export async function consumeFeatureTokenBudget(
     return { allowed: false, usedTokens: existing, tokenLimit };
   }
   const usedTokens = existing + normalizedTokens;
-  const ttl = parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  const ttl =
+    parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
   await kv.put(key, String(usedTokens), { expirationTtl: ttl });
   return { allowed: true, usedTokens, tokenLimit };
 }
@@ -207,7 +210,7 @@ export async function releaseFeatureTokenBudget(
   feature: string,
   tokens: number,
   tokenLimit: number,
-  env?: Env,
+  env?: Env
 ): Promise<FeatureTokenBudgetResult> {
   const normalizedTokens = Math.max(0, Math.floor(tokens));
   const counter = getBudgetCounter(env, `feature:${feature}`);
@@ -219,7 +222,8 @@ export async function releaseFeatureTokenBudget(
   const key = buildFeatureBudgetKey(feature);
   const existing = Number(await kv.get(key)) || 0;
   const usedTokens = Math.max(0, existing - normalizedTokens);
-  const ttl = parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  const ttl =
+    parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
   await kv.put(key, String(usedTokens), { expirationTtl: ttl });
   return { allowed: usedTokens < tokenLimit, usedTokens, tokenLimit };
 }
@@ -228,7 +232,7 @@ export async function getFeatureTokenBudget(
   kv: KVNamespace,
   feature: string,
   tokenLimit: number,
-  env?: Env,
+  env?: Env
 ): Promise<FeatureTokenBudgetResult> {
   const counter = getBudgetCounter(env, `feature:${feature}`);
   const usedTokens = counter

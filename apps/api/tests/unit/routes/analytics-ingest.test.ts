@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { analyticsIngestRoutes } from '../../../src/routes/analytics-ingest';
 
@@ -98,24 +98,24 @@ describe('analytics-ingest routes', () => {
     await mockWaitUntil.mock.calls[0][0];
 
     expect(mockWriteDataPoint).toHaveBeenCalledWith({
-      indexes: ['anon-unknown'],  // unauthenticated: server-side IP fallback (visitorId ignored)
+      indexes: ['anon-unknown'], // unauthenticated: server-side IP fallback (visitorId ignored)
       blobs: [
-        'page_view',        // blob1: event name
-        '',                 // blob2: projectId (empty for client events)
-        '/projects/abc',    // blob3: page
+        'page_view', // blob1: event name
+        '', // blob2: projectId (empty for client events)
+        '/projects/abc', // blob3: page
         'https://google.com', // blob4: referrer
-        'twitter',          // blob5: utm_source
-        'social',           // blob6: utm_medium
-        'launch',           // blob7: utm_campaign
-        'sess-456',         // blob8: session ID
+        'twitter', // blob5: utm_source
+        'social', // blob6: utm_medium
+        'launch', // blob7: utm_campaign
+        'sess-456', // blob8: session ID
         expect.any(String), // blob9: user-agent bucket (server-derived)
-        '',                 // blob10: country
-        'proj-abc',         // blob11: entity ID
+        '', // blob10: country
+        'proj-abc', // blob11: entity ID
       ],
       doubles: [
-        1500,               // double1: duration
-        0,                  // double2: status code (N/A)
-        0,                  // double3: reserved
+        1500, // double1: duration
+        0, // double2: status code (N/A)
+        0, // double3: reserved
       ],
     });
   });
@@ -155,12 +155,7 @@ describe('analytics-ingest routes', () => {
     const { makeRequest } = createApp({ MAX_ANALYTICS_INGEST_BATCH_SIZE: '3' });
     const res = await makeRequest({
       body: JSON.stringify({
-        events: [
-          { event: 'e1' },
-          { event: 'e2' },
-          { event: 'e3' },
-          { event: 'e4' },
-        ],
+        events: [{ event: 'e1' }, { event: 'e2' }, { event: 'e3' }, { event: 'e4' }],
       }),
     });
 
@@ -274,8 +269,6 @@ describe('analytics-ingest routes', () => {
     expect(writtenDoubles[0]).toBe(3_600_000); // clamped to 1 hour
   });
 
-
-
   it('uses MAX_ANALYTICS_DURATION_MS to clamp durationMs', async () => {
     const { makeRequest } = createApp({ MAX_ANALYTICS_DURATION_MS: '2000' });
     await makeRequest({
@@ -304,7 +297,9 @@ describe('analytics-ingest routes', () => {
   });
 
   it('handles Analytics Engine write failure gracefully', async () => {
-    const failingWrite = vi.fn(() => { throw new Error('AE unavailable'); });
+    const failingWrite = vi.fn(() => {
+      throw new Error('AE unavailable');
+    });
     const { makeRequest } = createApp({ ANALYTICS: { writeDataPoint: failingWrite } });
 
     const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

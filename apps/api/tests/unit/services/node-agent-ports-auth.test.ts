@@ -19,9 +19,8 @@ vi.mock('../../../src/services/telemetry', () => ({
   recordNodeRoutingMetric: mockRecordNodeRoutingMetric,
 }));
 
-const { getWorkspacePortsOnNode, NodeAgentFetchError, NodeAgentHttpError } = await import(
-  '../../../src/services/node-agent'
-);
+const { getWorkspacePortsOnNode, NodeAgentFetchError, NodeAgentHttpError } =
+  await import('../../../src/services/node-agent');
 
 describe('getWorkspacePortsOnNode', () => {
   beforeEach(() => {
@@ -43,17 +42,26 @@ describe('getWorkspacePortsOnNode', () => {
   });
 
   it('uses a workspace terminal token for the VM agent ports endpoint', async () => {
-    const result = await getWorkspacePortsOnNode('NODE-ABC', 'ws-123', {
-      BASE_DOMAIN: 'example.com',
-      NODE_AGENT_REQUEST_TIMEOUT_MS: '30000',
-    } as never, 'user-1');
+    const result = await getWorkspacePortsOnNode(
+      'NODE-ABC',
+      'ws-123',
+      {
+        BASE_DOMAIN: 'example.com',
+        NODE_AGENT_REQUEST_TIMEOUT_MS: '30000',
+      } as never,
+      'user-1'
+    );
 
     expect(result).toEqual({ ports: [{ port: 3000 }], diagnostics: {} });
     expect(mockSignTerminalToken).toHaveBeenCalledWith('user-1', 'ws-123', expect.any(Object));
     expect(mockSignNodeManagementToken).not.toHaveBeenCalled();
     expect(mockFetchWithTimeout).toHaveBeenCalledTimes(1);
 
-    const [url, init, timeout] = mockFetchWithTimeout.mock.calls[0] as [string, RequestInit, number];
+    const [url, init, timeout] = mockFetchWithTimeout.mock.calls[0] as [
+      string,
+      RequestInit,
+      number,
+    ];
     expect(url).toBe('https://node-abc.vm.example.com:8443/workspaces/ws-123/ports');
     expect(timeout).toBe(30000);
     expect(init.method).toBe('GET');
@@ -67,17 +75,22 @@ describe('getWorkspacePortsOnNode', () => {
   it('classifies upstream 503 responses with the node-agent HTTP status', async () => {
     mockFetchWithTimeout.mockImplementation(() =>
       Promise.resolve(
-      new Response('runtime not ready', {
-        status: 503,
-      })
+        new Response('runtime not ready', {
+          status: 503,
+        })
       )
     );
 
     let thrown: unknown;
     try {
-      await getWorkspacePortsOnNode('NODE-ABC', 'ws-123', {
-        BASE_DOMAIN: 'example.com',
-      } as never, 'user-1');
+      await getWorkspacePortsOnNode(
+        'NODE-ABC',
+        'ws-123',
+        {
+          BASE_DOMAIN: 'example.com',
+        } as never,
+        'user-1'
+      );
     } catch (err) {
       thrown = err;
     }
@@ -92,9 +105,14 @@ describe('getWorkspacePortsOnNode', () => {
     );
 
     await expect(
-      getWorkspacePortsOnNode('NODE-ABC', 'ws-123', {
-        BASE_DOMAIN: 'example.com',
-      } as never, 'user-1')
+      getWorkspacePortsOnNode(
+        'NODE-ABC',
+        'ws-123',
+        {
+          BASE_DOMAIN: 'example.com',
+        } as never,
+        'user-1'
+      )
     ).rejects.toBeInstanceOf(NodeAgentFetchError);
   });
 
@@ -102,15 +120,25 @@ describe('getWorkspacePortsOnNode', () => {
     mockSignTerminalToken.mockRejectedValue(new Error('signing failed'));
 
     await expect(
-      getWorkspacePortsOnNode('NODE-ABC', 'ws-123', {
-        BASE_DOMAIN: 'example.com',
-      } as never, 'user-1')
+      getWorkspacePortsOnNode(
+        'NODE-ABC',
+        'ws-123',
+        {
+          BASE_DOMAIN: 'example.com',
+        } as never,
+        'user-1'
+      )
     ).rejects.toThrow('signing failed');
 
     await expect(
-      getWorkspacePortsOnNode('NODE-ABC', 'ws-123', {
-        BASE_DOMAIN: 'example.com',
-      } as never, 'user-1')
+      getWorkspacePortsOnNode(
+        'NODE-ABC',
+        'ws-123',
+        {
+          BASE_DOMAIN: 'example.com',
+        } as never,
+        'user-1'
+      )
     ).rejects.not.toBeInstanceOf(NodeAgentFetchError);
   });
 
@@ -118,15 +146,25 @@ describe('getWorkspacePortsOnNode', () => {
     mockFetchWithTimeout.mockRejectedValue(new Error('Container workspace runtime is disabled'));
 
     await expect(
-      getWorkspacePortsOnNode('NODE-ABC', 'ws-123', {
-        BASE_DOMAIN: 'example.com',
-      } as never, 'user-1')
+      getWorkspacePortsOnNode(
+        'NODE-ABC',
+        'ws-123',
+        {
+          BASE_DOMAIN: 'example.com',
+        } as never,
+        'user-1'
+      )
     ).rejects.toThrow('Container workspace runtime is disabled');
 
     await expect(
-      getWorkspacePortsOnNode('NODE-ABC', 'ws-123', {
-        BASE_DOMAIN: 'example.com',
-      } as never, 'user-1')
+      getWorkspacePortsOnNode(
+        'NODE-ABC',
+        'ws-123',
+        {
+          BASE_DOMAIN: 'example.com',
+        } as never,
+        'user-1'
+      )
     ).rejects.not.toBeInstanceOf(NodeAgentFetchError);
   });
 });

@@ -90,7 +90,10 @@ async function requireAuthority(
   binds: unknown[],
   message: string
 ): Promise<void> {
-  const ok = await requireD1(env).prepare(sql).bind(...binds).first<{ ok: number }>();
+  const ok = await requireD1(env)
+    .prepare(sql)
+    .bind(...binds)
+    .first<{ ok: number }>();
   if (!ok) throw new ProvisioningAuthorityError(message);
 }
 

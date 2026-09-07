@@ -83,7 +83,6 @@ describe('mergeRuntimeAssetRows', () => {
   });
 });
 
-
 describe('project-scoped profile and skill runtime asset rows', () => {
   function createRuntimeDb() {
     const sqlite = new Database(':memory:');

@@ -54,7 +54,7 @@ function hasRemainingCoverage(
   const computeCoverage = Array.from(coverage.values()).filter(
     (item) => item.consumerKind === 'compute'
   );
-  return computeCoverage.length === 1 ? computeCoverage[0] ?? null : null;
+  return computeCoverage.length === 1 ? (computeCoverage[0] ?? null) : null;
 }
 
 function sourceBefore(source: string | null | undefined): ProjectMemberOffboardingCredentialSource {
@@ -110,7 +110,10 @@ async function loadRemainingProjectCoverage(input: {
       schema.ccConfigurations,
       eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id)
     )
-    .leftJoin(schema.ccCredentials, eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id))
+    .leftJoin(
+      schema.ccCredentials,
+      eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id)
+    )
     .where(
       and(
         eq(schema.ccAttachments.projectId, input.projectId),
@@ -176,8 +179,10 @@ async function addTriggerResources(input: {
 
   for (const trigger of triggers) {
     const profile = trigger.agentProfileId ? profileById.get(trigger.agentProfileId) : null;
-    const agentTarget = profile?.agentType ?? input.project.defaultAgentType ?? input.defaultAgentType;
-    const computeTarget = profile?.provider ?? input.project.defaultProvider ?? INHERITED_COMPUTE_TARGET;
+    const agentTarget =
+      profile?.agentType ?? input.project.defaultAgentType ?? input.defaultAgentType;
+    const computeTarget =
+      profile?.provider ?? input.project.defaultProvider ?? INHERITED_COMPUTE_TARGET;
     const agentCoverage = hasRemainingCoverage(input.remainingCoverage, 'agent', agentTarget);
     const computeCoverage = hasRemainingCoverage(input.remainingCoverage, 'compute', computeTarget);
     const actions = buildActions(Boolean(agentCoverage && computeCoverage));
@@ -201,10 +206,16 @@ async function addTriggerResources(input: {
         computeTarget,
         remainingProjectCoverage: {
           agent: agentCoverage
-            ? { attachmentId: agentCoverage.attachmentId, configurationId: agentCoverage.configurationId }
+            ? {
+                attachmentId: agentCoverage.attachmentId,
+                configurationId: agentCoverage.configurationId,
+              }
             : null,
           compute: computeCoverage
-            ? { attachmentId: computeCoverage.attachmentId, configurationId: computeCoverage.configurationId }
+            ? {
+                attachmentId: computeCoverage.attachmentId,
+                configurationId: computeCoverage.configurationId,
+              }
             : null,
         },
       },
@@ -298,7 +309,10 @@ async function addNodeAndDeploymentResources(input: {
         cloudProvider: node.cloudProvider,
         workspaceId: row.workspaceId,
         remainingProjectCoverage: computeCoverage
-          ? { attachmentId: computeCoverage.attachmentId, configurationId: computeCoverage.configurationId }
+          ? {
+              attachmentId: computeCoverage.attachmentId,
+              configurationId: computeCoverage.configurationId,
+            }
           : null,
       },
     });
@@ -340,7 +354,10 @@ async function addNodeAndDeploymentResources(input: {
         nodeStatus: row.node.status,
         requiresVolumes: row.environment.requiresVolumes,
         remainingProjectCoverage: computeCoverage
-          ? { attachmentId: computeCoverage.attachmentId, configurationId: computeCoverage.configurationId }
+          ? {
+              attachmentId: computeCoverage.attachmentId,
+              configurationId: computeCoverage.configurationId,
+            }
           : null,
       },
     });
@@ -366,7 +383,10 @@ async function addProjectAttachmentResources(input: {
       schema.ccConfigurations,
       eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id)
     )
-    .leftJoin(schema.ccCredentials, eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id))
+    .leftJoin(
+      schema.ccCredentials,
+      eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id)
+    )
     .where(
       and(
         eq(schema.ccAttachments.projectId, input.projectId),

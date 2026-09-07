@@ -1,4 +1,8 @@
-import { TASK_EXECUTION_STEPS, type TaskExecutionStep, type TaskStatus } from '@simple-agent-manager/shared';
+import {
+  TASK_EXECUTION_STEPS,
+  type TaskExecutionStep,
+  type TaskStatus,
+} from '@simple-agent-manager/shared';
 
 export const TASK_STATUSES: TaskStatus[] = [
   'draft',
@@ -11,7 +15,11 @@ export const TASK_STATUSES: TaskStatus[] = [
   'cancelled',
 ];
 
-export const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set(['completed', 'failed', 'cancelled']);
+export const TERMINAL_STATUSES: ReadonlySet<TaskStatus> = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+]);
 
 export const TASK_EXECUTION_STATUSES: TaskStatus[] = ['queued', 'delegated', 'in_progress'];
 
@@ -73,7 +81,7 @@ export function getExecutionStepIndex(step: TaskExecutionStep): number {
  */
 export function canProgressExecutionStep(
   from: TaskExecutionStep | null,
-  to: TaskExecutionStep,
+  to: TaskExecutionStep
 ): boolean {
   if (from === null) {
     return true; // Any step is valid from unset

@@ -35,5 +35,9 @@ export function resolveMaxTriggersPerProject(
   perProjectOverride: number | null | undefined,
   envValue: string | undefined
 ): number {
-  return resolveProjectScalingConfig(perProjectOverride, envValue, DEFAULT_MAX_TRIGGERS_PER_PROJECT);
+  return resolveProjectScalingConfig(
+    perProjectOverride,
+    envValue,
+    DEFAULT_MAX_TRIGGERS_PER_PROJECT
+  );
 }

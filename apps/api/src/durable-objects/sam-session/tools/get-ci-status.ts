@@ -16,14 +16,18 @@ const DEFAULT_CI_RUNS_LIMIT = 5;
 const DEFAULT_GITHUB_TIMEOUT_MS = 10_000;
 
 const workflowRunsSchema = v.object({
-  workflow_runs: v.optional(v.array(v.object({
-    id: v.number(),
-    name: v.string(),
-    status: v.string(),
-    conclusion: v.nullable(v.string()),
-    html_url: v.string(),
-    created_at: v.string(),
-  }))),
+  workflow_runs: v.optional(
+    v.array(
+      v.object({
+        id: v.number(),
+        name: v.string(),
+        status: v.string(),
+        conclusion: v.nullable(v.string()),
+        html_url: v.string(),
+        created_at: v.string(),
+      })
+    )
+  ),
 });
 
 export const getCiStatusDef: AnthropicToolDef = {
@@ -45,7 +49,7 @@ export const getCiStatusDef: AnthropicToolDef = {
 
 export async function getCiStatus(
   input: { projectId: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
 

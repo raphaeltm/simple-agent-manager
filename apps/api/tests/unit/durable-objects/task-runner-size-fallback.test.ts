@@ -289,7 +289,8 @@ describe('TaskRunner size-fallback descent', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: 'No active compute pool offerings in the selected user pool satisfy the requested resources.',
+      message:
+        'No active compute pool offerings in the selected user pool satisfy the requested resources.',
       permanent: true,
     });
 

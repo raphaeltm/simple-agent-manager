@@ -143,12 +143,9 @@ describe('resolveGatewayPagination', () => {
   });
 
   it('clamps page size to the Cloudflare API bounds', () => {
-    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '500' } as never).pageSize)
-      .toBe(50);
-    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '0' } as never).pageSize)
-      .toBe(50);
-    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '-5' } as never).pageSize)
-      .toBe(50);
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '500' } as never).pageSize).toBe(50);
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '0' } as never).pageSize).toBe(50);
+    expect(resolveGatewayPagination({ AI_USAGE_PAGE_SIZE: '-5' } as never).pageSize).toBe(50);
   });
 
   it('floors fractional page size overrides', () => {
@@ -205,7 +202,6 @@ describe('resolveGatewayPagination', () => {
   });
 });
 
-
 // ---------------------------------------------------------------------------
 // iterateGatewayLogs
 // ---------------------------------------------------------------------------
@@ -221,19 +217,23 @@ describe('iterateGatewayLogs', () => {
       makeEntry({ id: 'log-1', metadata: { userId: 'user-1', messageCount: 3 } as never }),
       makeEntry({ id: 'log-2', metadata: { userId: 'user-2', hasTools: false } as never }),
     ];
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
-      result: entries,
-      result_info: { page: 1, per_page: 3, count: 2, total_count: 2 },
-      success: true,
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: entries,
+            result_info: { page: 1, per_page: 3, count: 2, total_count: 2 },
+            success: true,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     const visited: AIGatewayLogEntry[] = [];
-    await iterateGatewayLogs(
-      env,
-      'gateway-1',
-      '2026-05-01T00:00:00.000Z',
-      (entry) => visited.push(entry),
+    await iterateGatewayLogs(env, 'gateway-1', '2026-05-01T00:00:00.000Z', (entry) =>
+      visited.push(entry)
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -251,25 +251,28 @@ describe('iterateGatewayLogs', () => {
     const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = new URL(input.toString());
       const page = Number(url.searchParams.get('page') ?? '1');
-      const entries = page === 1
-        ? [makeEntry({ id: 'log-1' }), makeEntry({ id: 'log-2' })]
-        : [makeEntry({ id: 'log-3' })];
+      const entries =
+        page === 1
+          ? [makeEntry({ id: 'log-1' }), makeEntry({ id: 'log-2' })]
+          : [makeEntry({ id: 'log-3' })];
 
-      return Promise.resolve(new Response(JSON.stringify({
-        result: entries,
-        result_info: { page, per_page: 2, count: entries.length, total_count: 3 },
-        success: true,
-        errors: null,
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: entries,
+            result_info: { page, per_page: 2, count: entries.length, total_count: 3 },
+            success: true,
+            errors: null,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
     });
     vi.stubGlobal('fetch', fetchMock);
 
     const visited: AIGatewayLogEntry[] = [];
-    await iterateGatewayLogs(
-      env,
-      'gateway-1',
-      '2026-05-01T00:00:00.000Z',
-      (entry) => visited.push(entry),
+    await iterateGatewayLogs(env, 'gateway-1', '2026-05-01T00:00:00.000Z', (entry) =>
+      visited.push(entry)
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -283,12 +286,19 @@ describe('iterateGatewayLogs', () => {
       AI_USAGE_PAGE_SIZE: '1',
     } as never;
     const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
-      result: [makeEntry()],
-      result_info: { page: 1, per_page: 1, count: 1, total_count: 3, total_pages: 3 },
-      success: true,
-      errors: [],
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            result: [makeEntry()],
+            result_info: { page: 1, per_page: 1, count: 1, total_count: 3, total_pages: 3 },
+            success: true,
+            errors: [],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await iterateGatewayLogs(env, 'gateway-1', '2026-05-01T00:00:00.000Z', () => undefined, {
@@ -372,15 +382,18 @@ describe('aggregateByModel', () => {
 describe('aggregateByProvider', () => {
   it('uses explicit provider metadata when present', () => {
     const map = new Map<string, UsageByProvider>();
-    aggregateByProvider(map, makeEntry({
-      provider: 'openai',
-      metadata: {
-        userId: 'user-1',
-        providerId: 'groq',
-        providerName: 'Groq',
-        providerDialect: 'openai-compatible',
-      },
-    }));
+    aggregateByProvider(
+      map,
+      makeEntry({
+        provider: 'openai',
+        metadata: {
+          userId: 'user-1',
+          providerId: 'groq',
+          providerName: 'Groq',
+          providerDialect: 'openai-compatible',
+        },
+      })
+    );
 
     const entry = map.get('groq:openai-compatible')!;
     expect(entry).toMatchObject({
@@ -398,20 +411,36 @@ describe('aggregateByProvider', () => {
 
   it('accumulates multiple models for the same provider and dialect', () => {
     const map = new Map<string, UsageByProvider>();
-    aggregateByProvider(map, makeEntry({
-      model: 'model-a',
-      cost: 0.02,
-      metadata: { userId: 'user-1', providerId: 'openai', providerName: 'OpenAI', providerDialect: 'openai-compatible' },
-    }));
-    aggregateByProvider(map, makeEntry({
-      model: 'model-b',
-      tokens_in: 200,
-      tokens_out: 75,
-      cost: 0.03,
-      cached: true,
-      success: false,
-      metadata: { userId: 'user-1', providerId: 'openai', providerName: 'OpenAI', providerDialect: 'openai-compatible' },
-    }));
+    aggregateByProvider(
+      map,
+      makeEntry({
+        model: 'model-a',
+        cost: 0.02,
+        metadata: {
+          userId: 'user-1',
+          providerId: 'openai',
+          providerName: 'OpenAI',
+          providerDialect: 'openai-compatible',
+        },
+      })
+    );
+    aggregateByProvider(
+      map,
+      makeEntry({
+        model: 'model-b',
+        tokens_in: 200,
+        tokens_out: 75,
+        cost: 0.03,
+        cached: true,
+        success: false,
+        metadata: {
+          userId: 'user-1',
+          providerId: 'openai',
+          providerName: 'OpenAI',
+          providerDialect: 'openai-compatible',
+        },
+      })
+    );
 
     const entry = map.get('openai:openai-compatible')!;
     expect(entry.requests).toBe(2);

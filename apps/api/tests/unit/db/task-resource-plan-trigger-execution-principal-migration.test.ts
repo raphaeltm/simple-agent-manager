@@ -68,9 +68,9 @@ describe('0151 task resource plan and trigger execution principal migration', ()
     db.exec(migrationSql);
 
     const taskColumns = db.prepare('PRAGMA table_info(tasks)').all() as Array<{ name: string }>;
-    const triggerColumns = db
-      .prepare('PRAGMA table_info(triggers)')
-      .all() as Array<{ name: string }>;
+    const triggerColumns = db.prepare('PRAGMA table_info(triggers)').all() as Array<{
+      name: string;
+    }>;
     expect(taskColumns.map((column) => column.name)).toContain('resource_requirement_plan_json');
     expect(triggerColumns.map((column) => column.name)).toEqual(
       expect.arrayContaining([
@@ -80,7 +80,9 @@ describe('0151 task resource plan and trigger execution principal migration', ()
       ])
     );
     expect(
-      db.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_triggers_execution_user_id'").get()
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE name = 'idx_triggers_execution_user_id'")
+        .get()
     ).toEqual({ name: 'idx_triggers_execution_user_id' });
   });
 

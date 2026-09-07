@@ -19,7 +19,7 @@ export interface CachedCommand {
 export function saveCachedCommands(
   sql: SqlStorage,
   agentType: string,
-  commands: Array<{ name: string; description: string }>,
+  commands: Array<{ name: string; description: string }>
 ): void {
   sql.exec('DELETE FROM cached_commands WHERE agent_type = ?', agentType);
   const now = Date.now();
@@ -29,7 +29,7 @@ export function saveCachedCommands(
       agentType,
       cmd.name,
       cmd.description,
-      now,
+      now
     );
   }
 }
@@ -37,12 +37,16 @@ export function saveCachedCommands(
 /**
  * Get all cached commands, optionally filtered by agent type.
  */
-export function getCachedCommands(
-  sql: SqlStorage,
-  agentType?: string,
-): CachedCommand[] {
+export function getCachedCommands(sql: SqlStorage, agentType?: string): CachedCommand[] {
   const rows = agentType
-    ? sql.exec('SELECT agent_type, name, description, updated_at FROM cached_commands WHERE agent_type = ? ORDER BY name', agentType).toArray()
-    : sql.exec('SELECT agent_type, name, description, updated_at FROM cached_commands ORDER BY name').toArray();
+    ? sql
+        .exec(
+          'SELECT agent_type, name, description, updated_at FROM cached_commands WHERE agent_type = ? ORDER BY name',
+          agentType
+        )
+        .toArray()
+    : sql
+        .exec('SELECT agent_type, name, description, updated_at FROM cached_commands ORDER BY name')
+        .toArray();
   return rows.map((row) => parseCachedCommandRow(row));
 }

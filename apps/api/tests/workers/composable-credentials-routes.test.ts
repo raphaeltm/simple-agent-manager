@@ -21,7 +21,7 @@ beforeAll(async () => {
   // Seed test user for resolver tests
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(USER_ID, `gh-${TEST_PREFIX}`, `${TEST_PREFIX}@test.com`, 'CC Test User')
     .run();
@@ -71,7 +71,7 @@ describe('cc_* tables schema wiring', () => {
   it('can insert into cc_credentials', async () => {
     const result = await env.DATABASE.prepare(
       `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`
     )
       .bind(CRED_ID, USER_ID, 'Test API Key', 'api-key', 'encrypted-data', 'iv-data')
       .run();
@@ -81,7 +81,7 @@ describe('cc_* tables schema wiring', () => {
   it('can insert into cc_configurations', async () => {
     const result = await env.DATABASE.prepare(
       `INSERT INTO cc_configurations (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`
     )
       .bind(CFG_ID, USER_ID, 'Claude Code config', 'agent', 'claude-code', CRED_ID, null)
       .run();
@@ -91,7 +91,7 @@ describe('cc_* tables schema wiring', () => {
   it('can insert into cc_attachments', async () => {
     const result = await env.DATABASE.prepare(
       `INSERT INTO cc_attachments (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`
     )
       .bind(ATT_ID, CFG_ID, 'agent', 'claude-code', USER_ID, null)
       .run();
@@ -100,7 +100,7 @@ describe('cc_* tables schema wiring', () => {
 
   it('can query cc_credentials by owner_id', async () => {
     const { results } = await env.DATABASE.prepare(
-      `SELECT id, name, kind, is_active FROM cc_credentials WHERE owner_id = ?`,
+      `SELECT id, name, kind, is_active FROM cc_credentials WHERE owner_id = ?`
     )
       .bind(USER_ID)
       .all();
@@ -113,7 +113,7 @@ describe('cc_* tables schema wiring', () => {
 
   it('can query cc_configurations by owner_id', async () => {
     const { results } = await env.DATABASE.prepare(
-      `SELECT id, name, consumer_kind, consumer_target, credential_id FROM cc_configurations WHERE owner_id = ?`,
+      `SELECT id, name, consumer_kind, consumer_target, credential_id FROM cc_configurations WHERE owner_id = ?`
     )
       .bind(USER_ID)
       .all();
@@ -127,7 +127,7 @@ describe('cc_* tables schema wiring', () => {
   it('can query cc_attachments by user_id with project scope', async () => {
     const { results } = await env.DATABASE.prepare(
       `SELECT id, configuration_id, consumer_kind, consumer_target, project_id, is_active
-       FROM cc_attachments WHERE user_id = ?`,
+       FROM cc_attachments WHERE user_id = ?`
     )
       .bind(USER_ID)
       .all();
@@ -140,22 +140,20 @@ describe('cc_* tables schema wiring', () => {
 
   it('can update cc_credentials isActive', async () => {
     await env.DATABASE.prepare(
-      `UPDATE cc_credentials SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND owner_id = ?`,
+      `UPDATE cc_credentials SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND owner_id = ?`
     )
       .bind(CRED_ID, USER_ID)
       .run();
 
     const { results } = await env.DATABASE.prepare(
-      `SELECT is_active FROM cc_credentials WHERE id = ?`,
+      `SELECT is_active FROM cc_credentials WHERE id = ?`
     )
       .bind(CRED_ID)
       .all();
     expect(results[0]?.is_active).toBe(0);
 
     // Restore for subsequent tests
-    await env.DATABASE.prepare(
-      `UPDATE cc_credentials SET is_active = 1 WHERE id = ?`,
-    )
+    await env.DATABASE.prepare(`UPDATE cc_credentials SET is_active = 1 WHERE id = ?`)
       .bind(CRED_ID)
       .run();
   });
@@ -164,32 +162,34 @@ describe('cc_* tables schema wiring', () => {
     const deleteId = `${TEST_PREFIX}-att-del`;
     await env.DATABASE.prepare(
       `INSERT INTO cc_attachments (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`
     )
       .bind(deleteId, CFG_ID, 'agent', 'claude-code', USER_ID, null)
       .run();
 
     const { results: before } = await env.DATABASE.prepare(
-      `SELECT id FROM cc_attachments WHERE id = ?`,
-    ).bind(deleteId).all();
+      `SELECT id FROM cc_attachments WHERE id = ?`
+    )
+      .bind(deleteId)
+      .all();
     expect(before).toHaveLength(1);
 
-    await env.DATABASE.prepare(
-      `DELETE FROM cc_attachments WHERE id = ? AND user_id = ?`,
-    )
+    await env.DATABASE.prepare(`DELETE FROM cc_attachments WHERE id = ? AND user_id = ?`)
       .bind(deleteId, USER_ID)
       .run();
 
     const { results: after } = await env.DATABASE.prepare(
-      `SELECT id FROM cc_attachments WHERE id = ?`,
-    ).bind(deleteId).all();
+      `SELECT id FROM cc_attachments WHERE id = ?`
+    )
+      .bind(deleteId)
+      .all();
     expect(after).toHaveLength(0);
   });
 
   it('IDOR: cannot query another user credentials', async () => {
     const otherUser = `${TEST_PREFIX}-other-user`;
     const { results } = await env.DATABASE.prepare(
-      `SELECT id FROM cc_credentials WHERE owner_id = ?`,
+      `SELECT id FROM cc_credentials WHERE owner_id = ?`
     )
       .bind(otherUser)
       .all();

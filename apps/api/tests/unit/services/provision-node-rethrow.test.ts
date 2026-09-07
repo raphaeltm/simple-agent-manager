@@ -279,7 +279,7 @@ describe('provisionNode backend DNS records', () => {
           env: 'production',
           installation: '0123456789abcdef0123456789abcdef',
         },
-      }),
+      })
     );
   });
 
@@ -303,7 +303,7 @@ describe('provisionNode backend DNS records', () => {
     expect(createVM).toHaveBeenCalledWith(
       expect.objectContaining({
         labels: expect.not.objectContaining({ installation: expect.anything() }),
-      }),
+      })
     );
   });
 
@@ -418,7 +418,11 @@ describe('provisionNode backend DNS records', () => {
       credentialSource: 'project',
     });
 
-    await provisionNode('node-project-pool', ENV, { projectId: 'project-1', chatSessionId: '', taskId: 'task-1' });
+    await provisionNode('node-project-pool', ENV, {
+      projectId: 'project-1',
+      chatSessionId: '',
+      taskId: 'task-1',
+    });
 
     expect(createProviderForUser).toHaveBeenCalledWith(
       expect.anything(),
@@ -549,7 +553,10 @@ describe('provisionNode rethrowProviderError', () => {
     [
       'terminal awaiting-IP write',
       '',
-      { status: 'creating', errorMessage: 'Awaiting IP allocation — will be set on first heartbeat' },
+      {
+        status: 'creating',
+        errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
+      },
     ],
   ])('preserves cancellation during the %s', async (_boundary, vmIp, expectedTerminalSet) => {
     const controller = new AbortController();

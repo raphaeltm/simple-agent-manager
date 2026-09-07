@@ -16,7 +16,7 @@ beforeAll(async () => {
   // Seed test user
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at, role, status)
-     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), 'user', 'approved')`,
+     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), 'user', 'approved')`
   )
     .bind(USER_ID, `gh-${TEST_PREFIX}`, `${TEST_PREFIX}@test.com`, 'ResStatus Test User')
     .run();
@@ -59,12 +59,37 @@ describe('resolution-status route mounting', () => {
 
 describe('resolution-status D1 integration', () => {
   it('uses the migrated composable credential schema', async () => {
-    const credentialColumns = await env.DATABASE.prepare('PRAGMA table_info(cc_credentials)').all<{ name: string }>();
+    const credentialColumns = await env.DATABASE.prepare('PRAGMA table_info(cc_credentials)').all<{
+      name: string;
+    }>();
     const credentialColumnNames = credentialColumns.results.map((row) => row.name);
-    expect(credentialColumnNames).toEqual(expect.arrayContaining(['id', 'owner_id', 'name', 'kind', 'encrypted_token', 'iv', 'is_active']));
+    expect(credentialColumnNames).toEqual(
+      expect.arrayContaining([
+        'id',
+        'owner_id',
+        'name',
+        'kind',
+        'encrypted_token',
+        'iv',
+        'is_active',
+      ])
+    );
 
-    const configurationColumns = await env.DATABASE.prepare('PRAGMA table_info(cc_configurations)').all<{ name: string }>();
+    const configurationColumns = await env.DATABASE.prepare(
+      'PRAGMA table_info(cc_configurations)'
+    ).all<{ name: string }>();
     const configurationColumnNames = configurationColumns.results.map((row) => row.name);
-    expect(configurationColumnNames).toEqual(expect.arrayContaining(['id', 'owner_id', 'name', 'consumer_kind', 'consumer_target', 'credential_id', 'settings_json', 'is_active']));
+    expect(configurationColumnNames).toEqual(
+      expect.arrayContaining([
+        'id',
+        'owner_id',
+        'name',
+        'consumer_kind',
+        'consumer_target',
+        'credential_id',
+        'settings_json',
+        'is_active',
+      ])
+    );
   });
 });

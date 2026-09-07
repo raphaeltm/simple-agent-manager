@@ -81,7 +81,9 @@ function createMockWebSocket(tags: string[] = []): MockWebSocket {
 
 function createMockCtx(queryHandler: QueryHandler) {
   const sockets: MockWebSocket[] = [];
-  const sqlExec = vi.fn((query: string, ...args: unknown[]) => sqlResult(queryHandler(query, args)));
+  const sqlExec = vi.fn((query: string, ...args: unknown[]) =>
+    sqlResult(queryHandler(query, args))
+  );
 
   return {
     storage: {
@@ -112,7 +114,15 @@ function createProjectData(queryHandler: QueryHandler) {
 }
 
 function parseSent(socket: MockWebSocket) {
-  return socket.sent.map((message) => JSON.parse(message) as { type: string; message?: string; messageId?: string; sessionId?: string });
+  return socket.sent.map(
+    (message) =>
+      JSON.parse(message) as {
+        type: string;
+        message?: string;
+        messageId?: string;
+        sessionId?: string;
+      }
+  );
 }
 
 async function expectMessageSendRejected(input: {
@@ -128,13 +138,13 @@ async function expectMessageSendRejected(input: {
 
   expect(ctx.sqlExec).not.toHaveBeenCalledWith(
     expect.stringContaining('INSERT INTO chat_messages'),
-    expect.anything(),
+    expect.anything()
   );
   expect(parseSent(socket)).toContainEqual(
     expect.objectContaining({
       type: 'error',
       message: expect.stringContaining(input.error),
-    }),
+    })
   );
 }
 
@@ -147,14 +157,24 @@ describe('ProjectData DO session validation behavior', () => {
     {
       name: 'a different session than the socket tag',
       socketTags: ['session:session-a'],
-      payload: { type: 'message.send' as const, sessionId: 'session-b', role: 'user', content: 'hello' },
+      payload: {
+        type: 'message.send' as const,
+        sessionId: 'session-b',
+        role: 'user',
+        content: 'hello',
+      },
       queryHandler: () => [],
       error: 'Session mismatch',
     },
     {
       name: 'missing sessions before persistence',
       socketTags: ['session:missing-session'],
-      payload: { type: 'message.send' as const, sessionId: 'missing-session', role: 'user', content: 'hello' },
+      payload: {
+        type: 'message.send' as const,
+        sessionId: 'missing-session',
+        role: 'user',
+        content: 'hello',
+      },
       queryHandler: (query: string) => {
         if (query.includes('SELECT id, status FROM chat_sessions')) return [];
         return [];
@@ -164,7 +184,12 @@ describe('ProjectData DO session validation behavior', () => {
     {
       name: 'non-active sessions before persistence',
       socketTags: ['session:session-a'],
-      payload: { type: 'message.send' as const, sessionId: 'session-a', role: 'user', content: 'hello' },
+      payload: {
+        type: 'message.send' as const,
+        sessionId: 'session-a',
+        role: 'user',
+        content: 'hello',
+      },
       queryHandler: (query: string) => {
         if (query.includes('SELECT id, status FROM chat_sessions')) {
           return [{ id: 'session-a', status: 'stopped' }];
@@ -173,13 +198,17 @@ describe('ProjectData DO session validation behavior', () => {
       },
       error: 'not active',
     },
-  ])('rejects WebSocket messages for $name', async ({ socketTags, payload, queryHandler, error }) => {
-    await expectMessageSendRejected({ socketTags, payload, queryHandler, error });
-  });
+  ])(
+    'rejects WebSocket messages for $name',
+    async ({ socketTags, payload, queryHandler, error }) => {
+      await expectMessageSendRejected({ socketTags, payload, queryHandler, error });
+    }
+  );
 
   it('persists and acknowledges valid WebSocket user messages', async () => {
     const { ctx, projectData } = createProjectData((query) => {
-      if (query.includes('SELECT id, status FROM chat_sessions')) return [{ id: 'session-a', status: 'active' }];
+      if (query.includes('SELECT id, status FROM chat_sessions'))
+        return [{ id: 'session-a', status: 'active' }];
       if (query.includes('SELECT message_count FROM chat_sessions')) return [{ message_count: 0 }];
       if (query.includes('SELECT id FROM chat_messages')) return [];
       if (query.includes('COALESCE(MAX(sequence), 0)')) return [{ max_seq: 0 }];
@@ -192,7 +221,12 @@ describe('ProjectData DO session validation behavior', () => {
 
     await projectData.webSocketMessage(
       socket,
-      JSON.stringify({ type: 'message.send', sessionId: 'session-a', role: 'assistant', content: '  hello  ' }),
+      JSON.stringify({
+        type: 'message.send',
+        sessionId: 'session-a',
+        role: 'assistant',
+        content: '  hello  ',
+      })
     );
 
     expect(ctx.sqlExec).toHaveBeenCalledWith(
@@ -203,14 +237,14 @@ describe('ProjectData DO session validation behavior', () => {
       'hello',
       null,
       expect.any(Number),
-      1,
+      1
     );
     expect(parseSent(socket)).toContainEqual(
       expect.objectContaining({
         type: 'message.ack',
         sessionId: 'session-a',
         messageId: expect.any(String),
-      }),
+      })
     );
   });
 
@@ -231,7 +265,7 @@ describe('ProjectData DO session validation behavior', () => {
           toolMetadata: null,
           timestamp: new Date(0).toISOString(),
         },
-      ]),
+      ])
     ).rejects.toThrow('Session session-a is stopped and cannot accept messages');
   });
 });

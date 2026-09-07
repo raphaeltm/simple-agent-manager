@@ -7,9 +7,7 @@ import {
 
 function configuredLimit(env: Env): number {
   const parsed = Number.parseInt(env.RATE_LIMIT_CREDENTIAL_UPDATE ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_RATE_LIMITS.CREDENTIAL_UPDATE;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RATE_LIMITS.CREDENTIAL_UPDATE;
 }
 
 async function stableHash(value: string): Promise<string> {
@@ -27,7 +25,7 @@ async function stableHash(value: string): Promise<string> {
 export async function enforceCredentialMutationRateLimit(
   env: Env,
   principalId: string,
-  scope: 'gcp-service-account' | 'google-infra-oauth',
+  scope: 'gcp-service-account' | 'google-infra-oauth'
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const windowSeconds = DEFAULT_WINDOW_SECONDS;
@@ -37,8 +35,10 @@ export async function enforceCredentialMutationRateLimit(
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO platform_settings (key, value, updated_at, updated_by)
-     VALUES (?, json_object('windowStart', ?, 'count', 0), CURRENT_TIMESTAMP, ?)`,
-  ).bind(key, now, principalId).run();
+     VALUES (?, json_object('windowStart', ?, 'count', 0), CURRENT_TIMESTAMP, ?)`
+  )
+    .bind(key, now, principalId)
+    .run();
 
   const result = await env.DATABASE.prepare(
     `UPDATE platform_settings
@@ -56,8 +56,10 @@ export async function enforceCredentialMutationRateLimit(
        AND (
          CAST(json_extract(value, '$.windowStart') AS INTEGER) < ?
          OR CAST(json_extract(value, '$.count') AS INTEGER) < ?
-       )`,
-  ).bind(windowStart, now, principalId, key, windowStart, limit).run();
+       )`
+  )
+    .bind(windowStart, now, principalId, key, windowStart, limit)
+    .run();
 
   if (!result.meta.changes) {
     throw new RateLimitError(windowSeconds);

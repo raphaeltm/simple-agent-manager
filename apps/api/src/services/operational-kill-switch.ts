@@ -36,7 +36,10 @@ export function __resetOperationalKillSwitchCacheForTest(): void {
   delete cache.alarms;
 }
 
-export function resolveOperationalLoopKvKey(env: OperationalKillSwitchEnv, loop: OperationalLoop): string {
+export function resolveOperationalLoopKvKey(
+  env: OperationalKillSwitchEnv,
+  loop: OperationalLoop
+): string {
   return loop === 'cron'
     ? (env.CRON_SWEEPS_ENABLED_KV_KEY ?? DEFAULT_CRON_SWEEPS_ENABLED_KV_KEY)
     : (env.DO_ALARMS_ENABLED_KV_KEY ?? DEFAULT_DO_ALARMS_ENABLED_KV_KEY);
@@ -59,7 +62,7 @@ export function resolveDisabledAlarmRetryMs(env: OperationalKillSwitchEnv): numb
 export async function isOperationalLoopEnabled(
   env: OperationalKillSwitchEnv,
   loop: OperationalLoop,
-  now: number = Date.now(),
+  now: number = Date.now()
 ): Promise<boolean> {
   const cached = cache[loop];
   if (cached && now < cached.expiresAt) return cached.enabled;
@@ -89,7 +92,7 @@ export async function setOperationalLoopEnabled(
   env: OperationalKillSwitchEnv,
   loop: OperationalLoop,
   enabled: boolean,
-  now: number = Date.now(),
+  now: number = Date.now()
 ): Promise<{ enabled: boolean; kvKey: string; cacheTtlMs: number }> {
   const kvKey = resolveOperationalLoopKvKey(env, loop);
   const cacheTtlMs = resolveOperationalKillSwitchCacheMs(env);
@@ -103,7 +106,7 @@ export async function deferAlarmWhenDisabled(
   env: OperationalKillSwitchEnv,
   storage: DurableObjectStorage,
   durableObject: string,
-  now: number = Date.now(),
+  now: number = Date.now()
 ): Promise<boolean> {
   if (await isOperationalLoopEnabled(env, 'alarms', now)) return false;
 

@@ -27,9 +27,8 @@ vi.mock('../../../src/lib/logger', () => ({
   },
 }));
 
-const { GitHubUserAccessTokenLock } = await import(
-  '../../../src/durable-objects/github-user-access-token-lock'
-);
+const { GitHubUserAccessTokenLock } =
+  await import('../../../src/durable-objects/github-user-access-token-lock');
 
 function makeRequest(userId = 'user-1'): Request {
   return new Request('https://do-internal/token', {

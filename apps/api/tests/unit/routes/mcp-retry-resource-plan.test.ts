@@ -9,11 +9,7 @@ import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { createPersistedTaskResourcePlanJson } from '../../../src/services/resource-requirements-input';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
-import {
-  seedCloudCredential,
-  seedProjectWithMember,
-  seedUser,
-} from './capacity-pool-test-seeds';
+import { seedCloudCredential, seedProjectWithMember, seedUser } from './capacity-pool-test-seeds';
 
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),

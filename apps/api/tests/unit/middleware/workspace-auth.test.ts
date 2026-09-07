@@ -1,4 +1,4 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Workspace Ownership Middleware Tests
@@ -51,4 +51,3 @@ describe('Workspace Ownership Middleware', () => {
     });
   });
 });
-

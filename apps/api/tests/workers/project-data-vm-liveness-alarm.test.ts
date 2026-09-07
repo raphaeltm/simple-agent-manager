@@ -125,7 +125,6 @@ describe('ProjectData alarm VM liveness safety', () => {
       .bind(workspaceId)
       .first<{ status: string }>();
     expect(workspace?.status).toBe('running');
-
   });
 
   it('replays 01M1M75WA3V528VYZCWQGGM3NT through the stale-mirror alarm', async () => {

@@ -32,7 +32,7 @@ describe('hydrateMissingCloudProviderSecretProviders', () => {
   it('hydrates a raw migrated cloud-provider credential from its compute configuration', () => {
     const [credential] = hydrateMissingCloudProviderSecretProviders(
       [cloudCredential()],
-      [computeConfiguration()],
+      [computeConfiguration()]
     );
 
     expect(credential.secret).toEqual({
@@ -49,7 +49,7 @@ describe('hydrateMissingCloudProviderSecretProviders', () => {
           secret: { kind: 'cloud-provider', provider: 'scaleway', token: 'scw-token' },
         }),
       ],
-      [computeConfiguration()],
+      [computeConfiguration()]
     );
 
     expect(credential.secret).toEqual({
@@ -68,7 +68,7 @@ describe('hydrateMissingCloudProviderSecretProviders', () => {
           id: 'cfg-scaleway',
           consumer: { kind: 'compute', provider: 'scaleway' },
         }),
-      ],
+      ]
     );
 
     expect(credential.secret).toEqual({

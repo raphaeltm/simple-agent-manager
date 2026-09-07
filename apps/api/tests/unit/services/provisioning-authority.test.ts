@@ -11,7 +11,9 @@ vi.mock('../../../src/services/strict-node-deletion', () => ({
 
 vi.mock('../../../src/lib/logger', () => ({
   log: { error: mocks.logError },
-  serializeError: vi.fn((err: unknown) => ({ error: err instanceof Error ? err.message : String(err) })),
+  serializeError: vi.fn((err: unknown) => ({
+    error: err instanceof Error ? err.message : String(err),
+  })),
 }));
 
 import type { Env } from '../../../src/env';
@@ -195,7 +197,9 @@ describe('provisioning authority helpers', () => {
     expect(statement.sql).toContain('FROM project_members pm');
     expect(statement.sql).toContain('AND NOT EXISTS');
     expect(statement.sql).toContain("duplicate.status IN ('creating', 'running')");
-    expect(statement.sql).toContain('duplicate.provider_instance_type IS relay.provider_instance_type');
+    expect(statement.sql).toContain(
+      'duplicate.provider_instance_type IS relay.provider_instance_type'
+    );
     expect(statement.binds).toEqual([
       'relay-node',
       'user-1',
@@ -240,7 +244,11 @@ describe('provisioning authority helpers', () => {
   });
 
   it('strictly deletes a provisioned fresh node and reports cleanup failure without hiding it', async () => {
-    const { env } = makeEnv(() => ({ id: 'node-1', status: 'running', providerInstanceId: 'vm-1' }));
+    const { env } = makeEnv(() => ({
+      id: 'node-1',
+      status: 'running',
+      providerInstanceId: 'vm-1',
+    }));
 
     await expect(
       cleanupFreshProvisioningNode(env, {

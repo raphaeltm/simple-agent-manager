@@ -31,9 +31,10 @@ export async function getLatestAssistantMessageForTask(
     }
 
     const CONTENT_CAP = 2000;
-    const content = message.content.length > CONTENT_CAP
-      ? message.content.slice(0, CONTENT_CAP) + '...'
-      : message.content;
+    const content =
+      message.content.length > CONTENT_CAP
+        ? message.content.slice(0, CONTENT_CAP) + '...'
+        : message.content;
 
     return {
       id: typeof message.id === 'string' ? message.id : '',

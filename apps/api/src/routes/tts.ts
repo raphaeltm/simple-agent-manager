@@ -2,10 +2,10 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getAuth, requireApproved,requireAuth } from '../middleware/auth';
+import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { parseOptionalBody, TtsRequestSchema } from '../schemas';
-import { getAudioFromR2, getTTSConfig,synthesizeSpeech } from '../services/tts';
+import { getAudioFromR2, getTTSConfig, synthesizeSpeech } from '../services/tts';
 
 const ttsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -50,7 +50,15 @@ ttsRoutes.post('/synthesize', async (c) => {
   }
 
   try {
-    const result = await synthesizeSpeech(text, storageId, c.env.AI, c.env.R2, config, userId, mode);
+    const result = await synthesizeSpeech(
+      text,
+      storageId,
+      c.env.AI,
+      c.env.R2,
+      config,
+      userId,
+      mode
+    );
 
     // Return the audio URL for the client to fetch
     return c.json({

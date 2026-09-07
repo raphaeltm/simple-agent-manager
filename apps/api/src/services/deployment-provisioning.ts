@@ -343,7 +343,9 @@ async function failIfFreshDeploymentNodeNotProvisionable(
     throw new Error('Deployment node disappeared during provisioning');
   }
   if (row.status === 'error' || row.status === 'deleted' || row.status === 'stopped') {
-    throw new Error(row.errorMessage || `Deployment node provisioning ended with status ${row.status}`);
+    throw new Error(
+      row.errorMessage || `Deployment node provisioning ended with status ${row.status}`
+    );
   }
 }
 

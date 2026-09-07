@@ -183,8 +183,9 @@ describe('GCP credential atomic store', () => {
     expect(stored.configurations).toHaveLength(1);
     expect(stored.attachments).toHaveLength(1);
 
-    const graph = sqlite.prepare(
-      `SELECT
+    const graph = sqlite
+      .prepare(
+        `SELECT
          legacy.encrypted_token AS legacyCiphertext,
          legacy.iv AS legacyIv,
          composable.id AS credentialId,
@@ -198,7 +199,8 @@ describe('GCP credential atomic store', () => {
        JOIN cc_credentials composable ON composable.id = configuration.credential_id
        JOIN cc_attachments attachment ON attachment.configuration_id = configuration.id
        WHERE legacy.user_id = ?`
-    ).get(USER_ID) as {
+      )
+      .get(USER_ID) as {
       legacyCiphertext: string;
       legacyIv: string;
       credentialId: string;

@@ -75,10 +75,7 @@ export function clearToolPayloadCleanupAttempt(sql: SqlStorage, messageId: strin
   sql.exec('DELETE FROM tool_payload_cleanup_attempts WHERE message_id = ?', messageId);
 }
 
-export function readNextToolPayloadCleanupRetryAt(
-  sql: SqlStorage,
-  afterMs: number
-): number | null {
+export function readNextToolPayloadCleanupRetryAt(sql: SqlStorage, afterMs: number): number | null {
   const rows = sql
     .exec(
       `SELECT MIN(next_attempt_at) AS next_attempt_at

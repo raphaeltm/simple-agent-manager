@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { executeProjectTool, PROJECT_AGENT_TOOLS } from '../../../src/durable-objects/project-agent/tools';
-import { searchTasks, searchTasksDef } from '../../../src/durable-objects/sam-session/tools/search-tasks';
+import {
+  executeProjectTool,
+  PROJECT_AGENT_TOOLS,
+} from '../../../src/durable-objects/project-agent/tools';
+import {
+  searchTasks,
+  searchTasksDef,
+} from '../../../src/durable-objects/sam-session/tools/search-tasks';
 import type { ToolContext } from '../../../src/durable-objects/sam-session/types';
 
 vi.mock('cloudflare:workers', () => ({
@@ -58,12 +64,14 @@ function mockD1(rawResultSets: SearchTaskRow[][] = []) {
   };
 }
 
-function buildCtx(options: {
-  rows?: SearchTaskRow[];
-  userId?: string;
-  projectId?: string;
-  snippetLength?: number;
-} = {}): ToolContext & { _db: ReturnType<typeof mockD1> } {
+function buildCtx(
+  options: {
+    rows?: SearchTaskRow[];
+    userId?: string;
+    projectId?: string;
+    snippetLength?: number;
+  } = {}
+): ToolContext & { _db: ReturnType<typeof mockD1> } {
   const db = mockD1([options.rows ?? []]);
   return {
     env: {
@@ -137,12 +145,13 @@ describe('sam-session search_tasks contract', () => {
   it('rejects invalid statuses and accepts in_progress', async () => {
     const invalidCtx = buildCtx();
     await expect(searchTasks({ query: 'auth', status: 'running' }, invalidCtx)).resolves.toEqual({
-      error: 'status must be one of: draft, queued, in_progress, delegated, awaiting_followup, completed, failed, cancelled',
+      error:
+        'status must be one of: draft, queued, in_progress, delegated, awaiting_followup, completed, failed, cancelled',
     });
     expect(invalidCtx._db.prepare).not.toHaveBeenCalled();
 
     const validCtx = buildCtx({ rows: [matchingRow] });
-    const result = await searchTasks({ query: 'auth', status: 'in_progress' }, validCtx) as {
+    const result = (await searchTasks({ query: 'auth', status: 'in_progress' }, validCtx)) as {
       tasks: Array<{ status: string }>;
     };
 
@@ -153,7 +162,7 @@ describe('sam-session search_tasks contract', () => {
   it('searches both task title and description with bound query parameters', async () => {
     const ctx = buildCtx({ rows: [matchingRow] });
 
-    const result = await searchTasks({ query: 'oauth' }, ctx) as { count: number };
+    const result = (await searchTasks({ query: 'oauth' }, ctx)) as { count: number };
 
     expect(result.count).toBe(1);
     expect(preparedSql(ctx)).toContain('"tasks"."title" like ?');
@@ -178,7 +187,7 @@ describe('sam-session search_tasks contract', () => {
   it('returns canonical investigation fields with bounded snippets', async () => {
     const ctx = buildCtx({ rows: [matchingRow], snippetLength: 10 });
 
-    const result = await searchTasks({ query: 'auth' }, ctx) as {
+    const result = (await searchTasks({ query: 'auth' }, ctx)) as {
       tasks: Array<Record<string, unknown>>;
       count: number;
       query: string;
@@ -216,7 +225,10 @@ describe('sam-session search_tasks contract', () => {
   it('supports keyword as a deprecated alias for query', async () => {
     const ctx = buildCtx({ rows: [matchingRow] });
 
-    const result = await searchTasks({ keyword: 'oauth' }, ctx) as { query: string; count: number };
+    const result = (await searchTasks({ keyword: 'oauth' }, ctx)) as {
+      query: string;
+      count: number;
+    };
 
     expect(result.query).toBe('oauth');
     expect(result.count).toBe(1);
@@ -244,7 +256,7 @@ describe('project-agent search_tasks wrapper', () => {
         name: 'search_tasks',
         input: { query: 'auth', projectId: 'attacker-project' },
       },
-      ctx,
+      ctx
     );
 
     expect(bindArgs(ctx)).toContain('ctx-project');

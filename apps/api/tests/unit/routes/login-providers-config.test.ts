@@ -11,7 +11,11 @@ import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } from '../../../src/services/platform-config';
+import {
+  getGitHubOAuthConfig,
+  getGitLabOAuthConfig,
+  getGoogleLoginOAuthConfig,
+} from '../../../src/services/platform-config';
 
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -39,9 +43,11 @@ describe('GET /api/config/login-providers', () => {
   });
 
   it('reports github true when GitHub OAuth is configured', async () => {
-    expect(
-      await get({ GITHUB_CLIENT_ID: 'gh-id', GITHUB_CLIENT_SECRET: 'gh-secret' })
-    ).toEqual({ github: true, google: false, gitlab: false });
+    expect(await get({ GITHUB_CLIENT_ID: 'gh-id', GITHUB_CLIENT_SECRET: 'gh-secret' })).toEqual({
+      github: true,
+      google: false,
+      gitlab: false,
+    });
   });
 
   it('reports google true from the LOGIN client env vars', async () => {

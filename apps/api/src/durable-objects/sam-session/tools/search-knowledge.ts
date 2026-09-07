@@ -17,7 +17,7 @@ export const searchKnowledgeDef: AnthropicToolDef = {
   name: 'search_knowledge',
   description:
     'Search the knowledge graph for stored observations and facts. ' +
-    'If projectId is omitted, searches across ALL of the user\'s projects. ' +
+    "If projectId is omitted, searches across ALL of the user's projects. " +
     'Use this to recall preferences, context, expertise, and past decisions.',
   input_schema: {
     type: 'object',
@@ -28,7 +28,8 @@ export const searchKnowledgeDef: AnthropicToolDef = {
       },
       projectId: {
         type: 'string',
-        description: 'Optional. Limit search to a specific project. If omitted, searches all projects.',
+        description:
+          'Optional. Limit search to a specific project. If omitted, searches all projects.',
       },
       entityType: {
         type: 'string',
@@ -46,7 +47,7 @@ export const searchKnowledgeDef: AnthropicToolDef = {
 
 export async function searchKnowledge(
   input: { query: string; projectId?: string; entityType?: string; limit?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const query = input.query?.trim();
   if (!query) {
@@ -54,9 +55,11 @@ export async function searchKnowledge(
   }
 
   const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
-  const entityType = input.entityType && KNOWLEDGE_ENTITY_TYPES.includes(input.entityType as (typeof KNOWLEDGE_ENTITY_TYPES)[number])
-    ? input.entityType
-    : null;
+  const entityType =
+    input.entityType &&
+    KNOWLEDGE_ENTITY_TYPES.includes(input.entityType as (typeof KNOWLEDGE_ENTITY_TYPES)[number])
+      ? input.entityType
+      : null;
 
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -66,12 +69,7 @@ export async function searchKnowledge(
     const project = await db
       .select({ id: schema.projects.id })
       .from(schema.projects)
-      .where(
-        and(
-          eq(schema.projects.id, input.projectId),
-          eq(schema.projects.userId, ctx.userId),
-        ),
-      )
+      .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
       .get();
 
     if (!project) {
@@ -79,7 +77,12 @@ export async function searchKnowledge(
     }
 
     const results = await projectDataService.searchKnowledgeObservations(
-      env, input.projectId, query, entityType, null, limit,
+      env,
+      input.projectId,
+      query,
+      entityType,
+      null,
+      limit
     );
 
     return {
@@ -106,7 +109,12 @@ export async function searchKnowledge(
   const searchPromises = userProjects.map(async (p) => {
     try {
       const results = await projectDataService.searchKnowledgeObservations(
-        env, p.id, query, entityType, null, perProjectLimit,
+        env,
+        p.id,
+        query,
+        entityType,
+        null,
+        perProjectLimit
       );
       return results.map((r: Record<string, unknown>) => ({
         ...r,
@@ -121,8 +129,10 @@ export async function searchKnowledge(
   const allResults = (await Promise.all(searchPromises)).flat();
 
   // Sort by confidence descending, take top `limit`
-  allResults.sort((a: Record<string, unknown>, b: Record<string, unknown>) =>
-    ((b.confidence as number) ?? 0) - ((a.confidence as number) ?? 0));
+  allResults.sort(
+    (a: Record<string, unknown>, b: Record<string, unknown>) =>
+      ((b.confidence as number) ?? 0) - ((a.confidence as number) ?? 0)
+  );
   const trimmed = allResults.slice(0, limit);
 
   return {

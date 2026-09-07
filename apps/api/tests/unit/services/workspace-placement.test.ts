@@ -421,7 +421,9 @@ describe('reserveWorkspacePlacement', () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode();
-    sqlite?.prepare(`UPDATE project_members SET role = 'viewer' WHERE project_id = 'project-1'`).run();
+    sqlite
+      ?.prepare(`UPDATE project_members SET role = 'viewer' WHERE project_id = 'project-1'`)
+      .run();
 
     await expect(
       reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())

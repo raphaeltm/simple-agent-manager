@@ -67,7 +67,12 @@ describe('workspace resource capacity accounting', () => {
 
   it('rejects nodes without trusted observed hardware capacity', () => {
     const request = reservation({ memoryMb: 4096, diskMb: 40960 });
-    const empty = evaluateWorkspaceReservationCapacity({ id: 'empty' }, emptyUsage(), request, policy());
+    const empty = evaluateWorkspaceReservationCapacity(
+      { id: 'empty' },
+      emptyUsage(),
+      request,
+      policy()
+    );
     expect(empty.admitted).toBe(false);
     expect(empty.reasons).toContain('managed node has no provider runtime identity');
 
@@ -98,10 +103,7 @@ describe('workspace resource capacity accounting', () => {
       lastHeartbeatAt: now,
       lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 95 }),
     };
-    const metrics = parseWorkspaceAdmissionMetrics(
-      node,
-      policy()
-    );
+    const metrics = parseWorkspaceAdmissionMetrics(node, policy());
     const result = evaluateWorkspaceReservationCapacity(
       node,
       usage({

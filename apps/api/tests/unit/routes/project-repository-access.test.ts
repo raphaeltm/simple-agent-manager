@@ -29,17 +29,12 @@ describe('isValidRepositoryFormat', () => {
     }
   );
 
-  it.each([
-    'no-slash',
-    'too/many/segments',
-    'owner/',
-    '/repo',
-    'owner repo',
-    'owner /repo',
-    '',
-  ])('rejects malformed repository: %s', (value) => {
-    expect(isValidRepositoryFormat(value)).toBe(false);
-  });
+  it.each(['no-slash', 'too/many/segments', 'owner/', '/repo', 'owner repo', 'owner /repo', ''])(
+    'rejects malformed repository: %s',
+    (value) => {
+      expect(isValidRepositoryFormat(value)).toBe(false);
+    }
+  );
 });
 
 describe('assertRepositoryAccess', () => {
@@ -59,7 +54,13 @@ describe('assertRepositoryAccess', () => {
 
   it('authorizes repositories visible to the authenticated GitHub user for the installation', async () => {
     mocks.getUserInstallationRepositories.mockResolvedValue([
-      { id: 1, nodeId: 'MDEwOlJlcG8x', fullName: 'acme/private-repo', private: true, defaultBranch: 'main' },
+      {
+        id: 1,
+        nodeId: 'MDEwOlJlcG8x',
+        fullName: 'acme/private-repo',
+        private: true,
+        defaultBranch: 'main',
+      },
     ]);
 
     await expect(
@@ -72,16 +73,12 @@ describe('assertRepositoryAccess', () => {
       defaultBranch: 'main',
     });
 
-    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
-      'github-user-token',
-      '120081765',
-      {
-        flow: 'project-access',
-        userId: 'user-1',
-        installationId: '120081765',
-        repository: 'acme/private-repo',
-      }
-    );
+    expect(getUserInstallationRepositories).toHaveBeenCalledWith('github-user-token', '120081765', {
+      flow: 'project-access',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: 'acme/private-repo',
+    });
   });
 
   it('matches case-insensitively against the user-visible repository set', async () => {
@@ -99,7 +96,13 @@ describe('assertRepositoryAccess', () => {
       { id: 1, nodeId: null, fullName: 'acme/repo', private: false, defaultBranch: 'main' },
     ]);
 
-    await assertRepositoryAccess('github-user-token', '120081765', 'acme/repo', 'user-1', 'branches');
+    await assertRepositoryAccess(
+      'github-user-token',
+      '120081765',
+      'acme/repo',
+      'user-1',
+      'branches'
+    );
 
     expect(getUserInstallationRepositories).toHaveBeenCalledWith(
       'github-user-token',
@@ -150,7 +153,13 @@ describe('assertRepositoryAccess', () => {
 
     expect(env.KV.put).toHaveBeenCalledWith(
       'github-repo-access:v1:user-1:120081765:acme/repo',
-      JSON.stringify({ id: 7, nodeId: null, fullName: 'acme/repo', private: false, defaultBranch: 'main' }),
+      JSON.stringify({
+        id: 7,
+        nodeId: null,
+        fullName: 'acme/repo',
+        private: false,
+        defaultBranch: 'main',
+      }),
       { expirationTtl: 42 }
     );
   });

@@ -19,10 +19,7 @@ export const listProjectsDef: AnthropicToolDef = {
   },
 };
 
-export async function listProjects(
-  input: { status?: string },
-  ctx: ToolContext,
-): Promise<unknown> {
+export async function listProjects(input: { status?: string }, ctx: ToolContext): Promise<unknown> {
   const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
   const filterStatus = input.status || 'active';
 
@@ -50,12 +47,7 @@ export async function listProjects(
         createdAt: schema.projects.createdAt,
       })
       .from(schema.projects)
-      .where(
-        and(
-          eq(schema.projects.userId, ctx.userId),
-          eq(schema.projects.status, filterStatus),
-        ),
-      );
+      .where(and(eq(schema.projects.userId, ctx.userId), eq(schema.projects.status, filterStatus)));
   }
 
   return {

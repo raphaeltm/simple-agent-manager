@@ -34,9 +34,18 @@ describe('Orchestrator Constants', () => {
 
   it('defines 12 decision actions', () => {
     expect(DECISION_ACTIONS).toEqual([
-      'dispatch', 'block', 'unblock', 'stall_detected',
-      'interrupt_sent', 'handoff_routed', 'pause', 'resume',
-      'cancel', 'override', 'retry', 'skip',
+      'dispatch',
+      'block',
+      'unblock',
+      'stall_detected',
+      'interrupt_sent',
+      'handoff_routed',
+      'pause',
+      'resume',
+      'cancel',
+      'override',
+      'retry',
+      'skip',
     ]);
   });
 
@@ -131,9 +140,8 @@ describe('Orchestrator Migrations', () => {
 
 describe('Orchestrator MCP Tool Definitions', () => {
   it('defines 6 orchestrator lifecycle tools', async () => {
-    const { ORCHESTRATOR_LIFECYCLE_TOOLS } = await import(
-      '../../../src/routes/mcp/tool-definitions-orchestrator-tools'
-    );
+    const { ORCHESTRATOR_LIFECYCLE_TOOLS } =
+      await import('../../../src/routes/mcp/tool-definitions-orchestrator-tools');
     expect(ORCHESTRATOR_LIFECYCLE_TOOLS).toHaveLength(6);
     const names = ORCHESTRATOR_LIFECYCLE_TOOLS.map((t: { name: string }) => t.name);
     expect(names).toContain('get_orchestrator_status');
@@ -145,9 +153,8 @@ describe('Orchestrator MCP Tool Definitions', () => {
   });
 
   it('all tools have required inputSchema', async () => {
-    const { ORCHESTRATOR_LIFECYCLE_TOOLS } = await import(
-      '../../../src/routes/mcp/tool-definitions-orchestrator-tools'
-    );
+    const { ORCHESTRATOR_LIFECYCLE_TOOLS } =
+      await import('../../../src/routes/mcp/tool-definitions-orchestrator-tools');
     for (const tool of ORCHESTRATOR_LIFECYCLE_TOOLS) {
       expect(tool.inputSchema).toBeDefined();
       expect(tool.inputSchema.type).toBe('object');

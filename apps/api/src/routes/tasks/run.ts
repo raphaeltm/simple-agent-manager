@@ -197,9 +197,11 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
           layers.task = nextTaskResourceRequirements;
         }
       }
-      const storedRequestedVmSize = storedPlan.requestedVmSize ?? parseLegacyVmSize(task.requestedVmSize);
+      const storedRequestedVmSize =
+        storedPlan.requestedVmSize ?? parseLegacyVmSize(task.requestedVmSize);
       const storedRequestedVmSizeSource =
-        storedPlan.requestedVmSizeSource ?? parseResourceRequirementsSource(task.requestedVmSizeSource);
+        storedPlan.requestedVmSizeSource ??
+        parseResourceRequirementsSource(task.requestedVmSizeSource);
       const requestedVmSize = body.vmSize ?? storedRequestedVmSize;
       const requestedVmSizeSource = body.vmSize ? 'task' : storedRequestedVmSizeSource;
       return {

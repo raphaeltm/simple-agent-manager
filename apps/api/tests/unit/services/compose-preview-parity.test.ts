@@ -44,9 +44,7 @@ function makeManifestWithSecrets(overrides?: Partial<DeploymentManifest>): Deplo
       },
     },
     volumes: {},
-    routes: [
-      { service: 'web', port: 3000, mode: 'public' as const },
-    ],
+    routes: [{ service: 'web', port: 3000, mode: 'public' as const }],
     ...overrides,
   };
 }
@@ -115,7 +113,10 @@ describe('compose preview ↔ apply parity (Gap 4)', () => {
     const applyYaml = renderCompose(manifest, {
       environmentId: ENV_ID,
       releaseId: RELEASE_ID,
-      resolvedSecrets: { DB_URL: REAL_SECRETS.DB_URL, EXTERNAL_API_KEY: REAL_SECRETS.EXTERNAL_API_KEY },
+      resolvedSecrets: {
+        DB_URL: REAL_SECRETS.DB_URL,
+        EXTERNAL_API_KEY: REAL_SECRETS.EXTERNAL_API_KEY,
+      },
       routeTargets: routes,
     });
 
@@ -371,7 +372,7 @@ describe('secret-resolution render coverage (Gap 6)', () => {
           releaseId: RELEASE_ID,
           resolvedSecrets: {},
           routeTargets: buildDeploymentRouteTargets(manifest, ROUTE_OPTS),
-        }),
+        })
       ).toThrow(/Missing secrets.*DB_URL.*EXTERNAL_API_KEY/);
     });
 
@@ -385,7 +386,7 @@ describe('secret-resolution render coverage (Gap 6)', () => {
           releaseId: RELEASE_ID,
           resolvedSecrets: { DB_URL: 'value' },
           routeTargets: [],
-        }),
+        })
       ).toThrow(/Missing secrets.*EXTERNAL_API_KEY/);
     });
 
@@ -401,7 +402,7 @@ describe('secret-resolution render coverage (Gap 6)', () => {
             EXTERNAL_API_KEY: 'test-key',
           },
           routeTargets: [],
-        }),
+        })
       ).not.toThrow();
     });
 
@@ -437,7 +438,10 @@ describe('compose structural integrity with routes + secrets', () => {
     const yaml = renderCompose(manifest, {
       environmentId: ENV_ID,
       releaseId: RELEASE_ID,
-      resolvedSecrets: { DB_URL: REAL_SECRETS.DB_URL, EXTERNAL_API_KEY: REAL_SECRETS.EXTERNAL_API_KEY },
+      resolvedSecrets: {
+        DB_URL: REAL_SECRETS.DB_URL,
+        EXTERNAL_API_KEY: REAL_SECRETS.EXTERNAL_API_KEY,
+      },
       routeTargets: routes,
     });
 

@@ -67,11 +67,15 @@ describe('Client Errors Routes', () => {
 
   describe('POST /api/client-errors', () => {
     it('should accept a valid batch and return 204', async () => {
-      const res = await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody([validEntry()]),
-      }, createEnv());
+      const res = await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody([validEntry()]),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(204);
     });
@@ -83,11 +87,15 @@ describe('Client Errors Routes', () => {
         validEntry({ message: 'Error 3', level: 'warn' }),
       ];
 
-      const res = await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      const res = await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(204);
     });
@@ -95,16 +103,17 @@ describe('Client Errors Routes', () => {
     it('should log each entry via console.error', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      const entries = [
-        validEntry({ message: 'Error A' }),
-        validEntry({ message: 'Error B' }),
-      ];
+      const entries = [validEntry({ message: 'Error A' }), validEntry({ message: 'Error B' })];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       expect(spy).toHaveBeenCalledTimes(2);
 
@@ -126,21 +135,25 @@ describe('Client Errors Routes', () => {
     it('should honor configured field limits in structured client-error logs', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody([
-          validEntry({
-            message: 'abcdefgh',
-            stack: '12345678',
-            userAgent: 'ABCDEFGH',
-          }),
-        ]),
-      }, createEnv({
-        OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '3',
-        OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '4',
-        OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH: '5',
-      }));
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody([
+            validEntry({
+              message: 'abcdefgh',
+              stack: '12345678',
+              userAgent: 'ABCDEFGH',
+            }),
+          ]),
+        },
+        createEnv({
+          OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '3',
+          OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '4',
+          OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH: '5',
+        })
+      );
 
       const logged = JSON.parse(spy.mock.calls[0][0] as string);
       expect(logged.message).toBe('abc...');
@@ -151,21 +164,29 @@ describe('Client Errors Routes', () => {
     });
 
     it('should return 204 for empty batch', async () => {
-      const res = await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody([]),
-      }, createEnv());
+      const res = await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody([]),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(204);
     });
 
     it('should return 400 for invalid JSON body', async () => {
-      const res = await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: 'not-json',
-      }, createEnv());
+      const res = await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: 'not-json',
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -174,11 +195,15 @@ describe('Client Errors Routes', () => {
     });
 
     it('should return 400 when body lacks errors array', async () => {
-      const res = await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: [] }),
-      }, createEnv());
+      const res = await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ data: [] }),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -186,11 +211,15 @@ describe('Client Errors Routes', () => {
     });
 
     it('should return 400 when errors is not an array', async () => {
-      const res = await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ errors: 'not-array' }),
-      }, createEnv());
+      const res = await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ errors: 'not-array' }),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -198,15 +227,17 @@ describe('Client Errors Routes', () => {
     });
 
     it('should return 400 when batch exceeds max size', async () => {
-      const entries = Array.from({ length: 30 }, (_, i) =>
-        validEntry({ message: `Error ${i}` })
-      );
+      const entries = Array.from({ length: 30 }, (_, i) => validEntry({ message: `Error ${i}` }));
 
-      const res = await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      const res = await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -214,15 +245,17 @@ describe('Client Errors Routes', () => {
     });
 
     it('should respect configurable MAX_CLIENT_ERROR_BATCH_SIZE', async () => {
-      const entries = Array.from({ length: 5 }, (_, i) =>
-        validEntry({ message: `Error ${i}` })
-      );
+      const entries = Array.from({ length: 5 }, (_, i) => validEntry({ message: `Error ${i}` }));
 
-      const res = await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv({ MAX_CLIENT_ERROR_BATCH_SIZE: '3' }));
+      const res = await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv({ MAX_CLIENT_ERROR_BATCH_SIZE: '3' })
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -237,11 +270,15 @@ describe('Client Errors Routes', () => {
         validEntry({ message: 'Valid one' }),
       ];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       // Only the valid entry should be logged
       expect(spy).toHaveBeenCalledTimes(1);
@@ -260,11 +297,15 @@ describe('Client Errors Routes', () => {
         validEntry({ message: 'Has source' }),
       ];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       expect(spy).toHaveBeenCalledTimes(1);
       const loggedHasSource = JSON.parse(spy.mock.calls[0][0] as string);
@@ -280,11 +321,15 @@ describe('Client Errors Routes', () => {
       const longMessage = 'x'.repeat(3000);
       const entries = [validEntry({ message: longMessage })];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const loggedEntry = JSON.parse(spy.mock.calls[0][0] as string);
       const loggedMessage = loggedEntry.message as string;
@@ -298,11 +343,15 @@ describe('Client Errors Routes', () => {
 
       const entries = [validEntry({ level: 'critical' })]; // invalid level
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const loggedEntry = JSON.parse(spy.mock.calls[0][0] as string);
       expect(loggedEntry.level).toBe('error');
@@ -313,16 +362,17 @@ describe('Client Errors Routes', () => {
     it('should pass through valid levels (warn, info)', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      const entries = [
-        validEntry({ level: 'warn' }),
-        validEntry({ level: 'info' }),
-      ];
+      const entries = [validEntry({ level: 'warn' }), validEntry({ level: 'info' })];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const warnEntry = JSON.parse(spy.mock.calls[0][0] as string);
       const infoEntry = JSON.parse(spy.mock.calls[1][0] as string);
@@ -338,11 +388,15 @@ describe('Client Errors Routes', () => {
       const ctx = { phase: 'transcription', retries: 3 };
       const entries = [validEntry({ context: ctx })];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const loggedEntry = JSON.parse(spy.mock.calls[0][0] as string);
       expect(loggedEntry.context).toEqual(ctx);
@@ -355,11 +409,15 @@ describe('Client Errors Routes', () => {
 
       const entries = [null, 'string-entry', 42, validEntry()];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       // Only the valid entry should be logged
       expect(spy).toHaveBeenCalledTimes(1);
@@ -377,11 +435,15 @@ describe('Client Errors Routes', () => {
       const entries = [validEntry({ message: 'D1 test error' })];
       const mockObsDb = {} as D1Database;
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv({ OBSERVABILITY_DATABASE: mockObsDb })
+      );
 
       // persistErrorBatch should have been called
       expect(mockPersistErrorBatch).toHaveBeenCalledTimes(1);
@@ -404,11 +466,15 @@ describe('Client Errors Routes', () => {
 
       const entries = [validEntry()];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv()); // No OBSERVABILITY_DATABASE
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv()
+      ); // No OBSERVABILITY_DATABASE
 
       // persistErrorBatch should NOT be called
       expect(mockPersistErrorBatch).not.toHaveBeenCalled();
@@ -426,11 +492,15 @@ describe('Client Errors Routes', () => {
         validEntry({ message: 'Error 2' }),
       ];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv({ OBSERVABILITY_DATABASE: mockObsDb })
+      );
 
       // Only 2 valid entries should be persisted
       expect(mockPersistErrorBatch).toHaveBeenCalledTimes(1);
@@ -448,11 +518,15 @@ describe('Client Errors Routes', () => {
       mockPersistErrorBatch.mockImplementationOnce(() => Promise.reject(new Error('D1 down')));
       const mockObsDb = {} as D1Database;
 
-      const res = await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody([validEntry()]),
-      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+      const res = await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody([validEntry()]),
+        },
+        createEnv({ OBSERVABILITY_DATABASE: mockObsDb })
+      );
 
       // Response should still be 204 (fire-and-forget)
       expect(res.status).toBe(204);
@@ -464,20 +538,26 @@ describe('Client Errors Routes', () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const mockObsDb = {} as D1Database;
 
-      const entries = [validEntry({
-        level: 'warn',
-        message: 'A warning',
-        stack: 'Stack trace here',
-        context: { phase: 'upload' },
-        userAgent: 'TestBrowser/1.0',
-        timestamp: '2026-02-14T12:00:00Z',
-      })];
+      const entries = [
+        validEntry({
+          level: 'warn',
+          message: 'A warning',
+          stack: 'Stack trace here',
+          context: { phase: 'upload' },
+          userAgent: 'TestBrowser/1.0',
+          timestamp: '2026-02-14T12:00:00Z',
+        }),
+      ];
 
-      await app.request('/api/client-errors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: makeBody(entries),
-      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+      await app.request(
+        '/api/client-errors',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: makeBody(entries),
+        },
+        createEnv({ OBSERVABILITY_DATABASE: mockObsDb })
+      );
 
       const persistedInput = mockPersistErrorBatch.mock.calls[0][1][0];
       expect(persistedInput.source).toBe('client');

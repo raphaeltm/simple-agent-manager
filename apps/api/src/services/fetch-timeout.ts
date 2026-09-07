@@ -10,7 +10,10 @@ const DEFAULT_API_TIMEOUT_MS = 30_000;
 /**
  * Parse a timeout from env or return the default.
  */
-export function getTimeoutMs(envValue: string | undefined, defaultMs: number = DEFAULT_API_TIMEOUT_MS): number {
+export function getTimeoutMs(
+  envValue: string | undefined,
+  defaultMs: number = DEFAULT_API_TIMEOUT_MS
+): number {
   if (!envValue) return defaultMs;
   const parsed = Number.parseInt(envValue, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return defaultMs;

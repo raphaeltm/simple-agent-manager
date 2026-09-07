@@ -34,7 +34,9 @@ function priceDisplay(offering: ProviderInstanceOffering): string | null {
   return null;
 }
 
-export function providerInstanceOfferingDbValues(offering: ProviderInstanceOffering): Pick<
+export function providerInstanceOfferingDbValues(
+  offering: ProviderInstanceOffering
+): Pick<
   schema.NewCapacityPoolCandidate,
   | 'providerInstanceType'
   | 'providerInstanceSku'

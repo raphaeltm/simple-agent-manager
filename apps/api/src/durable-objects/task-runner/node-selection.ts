@@ -28,6 +28,8 @@ import {
   loadActiveWorkspaceReservationUsage,
   parseWorkspaceAdmissionMetrics,
   resolveWorkspaceAdmissionPolicy,
+  type TrustedWorkspaceNodeCapacityRow,
+  trustedWorkspaceNodeCapacityColumnsSql,
   scoreWorkspaceAdmissionMetrics,
 } from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
@@ -67,7 +69,7 @@ export type NodePlacementFields = {
   placementExplanationJson?: string | null;
   lastMetrics?: string | null;
   lastHeartbeatAt?: string | null;
-};
+} & Partial<TrustedWorkspaceNodeCapacityRow>;
 
 function recoverySourceTaskGuard(
   state: TaskRunnerState
@@ -199,6 +201,7 @@ export async function tryClaimWarmNode(
        n.placement_credential_version AS placementCredentialVersion,
        n.capacity_pool_project_id AS capacityPoolProjectId,
        n.workload_role AS workloadRole,
+       ${trustedWorkspaceNodeCapacityColumnsSql('n')},
        n.provider_instance_type AS providerInstanceType,
        n.provider_instance_vcpu_count AS providerInstanceVcpuCount,
        n.provider_instance_memory_mb AS providerInstanceMemoryMb,
@@ -257,6 +260,7 @@ export async function tryClaimWarmNode(
        placement_credential_version AS placementCredentialVersion,
        capacity_pool_project_id AS capacityPoolProjectId,
        workload_role AS workloadRole,
+       ${trustedWorkspaceNodeCapacityColumnsSql()},
        provider_instance_type AS providerInstanceType,
        provider_instance_vcpu_count AS providerInstanceVcpuCount,
        provider_instance_memory_mb AS providerInstanceMemoryMb,
@@ -321,6 +325,7 @@ export async function tryClaimWarmNode(
            placement_credential_version AS placementCredentialVersion,
            capacity_pool_project_id AS capacityPoolProjectId,
            workload_role AS workloadRole,
+           ${trustedWorkspaceNodeCapacityColumnsSql()},
            provider_instance_type AS providerInstanceType,
            provider_instance_vcpu_count AS providerInstanceVcpuCount,
            provider_instance_memory_mb AS providerInstanceMemoryMb,
@@ -408,6 +413,7 @@ export async function findNodeWithCapacity(
        placement_credential_version AS placementCredentialVersion,
        capacity_pool_project_id AS capacityPoolProjectId,
        workload_role AS workloadRole,
+       ${trustedWorkspaceNodeCapacityColumnsSql()},
        provider_instance_type AS providerInstanceType,
        provider_instance_vcpu_count AS providerInstanceVcpuCount,
        provider_instance_memory_mb AS providerInstanceMemoryMb,
@@ -444,6 +450,13 @@ export async function findNodeWithCapacity(
       placementCredentialVersion: number | null;
       capacityPoolProjectId: string | null;
       workloadRole: string | null;
+      nodeClass: string | null;
+      providerInstanceId: string | null;
+      observedProviderInstanceType: string | null;
+      observedProviderInstanceVcpuCount: number | null;
+      observedProviderInstanceMemoryMb: number | null;
+      observedProviderInstanceDiskGb: number | null;
+      observedHardwareSource: string | null;
       providerInstanceType: string | null;
       providerInstanceVcpuCount: number | null;
       providerInstanceMemoryMb: number | null;

@@ -40,7 +40,10 @@ interface LegacyCredentialRow {
   agent_type: string;
 }
 
-async function getLegacyCredentials(userId: string, agentType: string): Promise<LegacyCredentialRow[]> {
+async function getLegacyCredentials(
+  userId: string,
+  agentType: string
+): Promise<LegacyCredentialRow[]> {
   const { results } = await env.DATABASE.prepare(
     `SELECT id, is_active, encrypted_token, iv, project_id, credential_kind, agent_type
      FROM credentials WHERE user_id = ? AND agent_type = ? AND credential_type = 'agent-api-key'`
@@ -111,7 +114,11 @@ describe('saveAgentCredentialForUser — autoActivate:true dual-write', () => {
     expect(legacyRows[0]!.project_id).toBeNull();
     expect(legacyRows[0]!.credential_kind).toBe('oauth-token');
 
-    const decryptedLegacy = await decrypt(legacyRows[0]!.encrypted_token, legacyRows[0]!.iv, ENCRYPTION_KEY);
+    const decryptedLegacy = await decrypt(
+      legacyRows[0]!.encrypted_token,
+      legacyRows[0]!.iv,
+      ENCRYPTION_KEY
+    );
     expect(decryptedLegacy).toBe(authJson);
 
     const ccAttachments = await getCcAttachments(userId, 'openai-codex');
@@ -122,7 +129,11 @@ describe('saveAgentCredentialForUser — autoActivate:true dual-write', () => {
     // (see ccKindForAgentCredential in composable-credentials/agent-sync.ts).
     expect(ccAttachments[0]!.credential_kind).toBe('auth-json');
 
-    const decryptedCc = await decrypt(ccAttachments[0]!.encrypted_token, ccAttachments[0]!.iv, ENCRYPTION_KEY);
+    const decryptedCc = await decrypt(
+      ccAttachments[0]!.encrypted_token,
+      ccAttachments[0]!.iv,
+      ENCRYPTION_KEY
+    );
     expect(decryptedCc).toBe(authJson);
   });
 
@@ -149,7 +160,11 @@ describe('saveAgentCredentialForUser — autoActivate:true dual-write', () => {
     const legacyRows = await getLegacyCredentials(userId, 'openai-codex');
     expect(legacyRows).toHaveLength(1);
     expect(legacyRows[0]!.is_active).toBe(1);
-    const decryptedLegacy = await decrypt(legacyRows[0]!.encrypted_token, legacyRows[0]!.iv, ENCRYPTION_KEY);
+    const decryptedLegacy = await decrypt(
+      legacyRows[0]!.encrypted_token,
+      legacyRows[0]!.iv,
+      ENCRYPTION_KEY
+    );
     expect(decryptedLegacy).toBe(newAuthJson);
 
     // syncAgentCredentialToCC deletes-then-recreates attachments for this
@@ -157,7 +172,11 @@ describe('saveAgentCredentialForUser — autoActivate:true dual-write', () => {
     const ccAttachments = await getCcAttachments(userId, 'openai-codex');
     expect(ccAttachments).toHaveLength(1);
     expect(ccAttachments[0]!.attachment_is_active).toBe(1);
-    const decryptedCc = await decrypt(ccAttachments[0]!.encrypted_token, ccAttachments[0]!.iv, ENCRYPTION_KEY);
+    const decryptedCc = await decrypt(
+      ccAttachments[0]!.encrypted_token,
+      ccAttachments[0]!.iv,
+      ENCRYPTION_KEY
+    );
     expect(decryptedCc).toBe(newAuthJson);
   });
 });
@@ -203,7 +222,9 @@ describe('saveAgentCredentialForUser — project-scoped override is isolated fro
   beforeAll(async () => {
     await seedUser(userId);
     await seedInstallation(`${projectId}-install`, userId);
-    await seedProject(projectId, userId, `${projectId}-install`, { name: 'Dual Write Test Project' });
+    await seedProject(projectId, userId, `${projectId}-install`, {
+      name: 'Dual Write Test Project',
+    });
   });
 
   it('creates independent active rows for the user scope and the project scope', async () => {

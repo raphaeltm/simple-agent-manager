@@ -10,7 +10,7 @@
  * Uses an in-memory SqlStorage mock that faithfully implements the SQL
  * operations used by the DO, allowing us to test the logic without Miniflare.
  */
-import { beforeEach,describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { runMigrations } from '../../src/durable-objects/migrations';
 
@@ -429,14 +429,9 @@ function createMockProjectDataDO(projectId: string) {
     sql,
     d1Writes,
 
-    async createSession(
-      workspaceId: string | null,
-      topic: string | null
-    ): Promise<string> {
+    async createSession(workspaceId: string | null, topic: string | null): Promise<string> {
       const maxSessions = parseInt(env.MAX_SESSIONS_PER_PROJECT, 10);
-      const countRow = sql
-        .exec('SELECT COUNT(*) as cnt FROM chat_sessions')
-        .toArray()[0];
+      const countRow = sql.exec('SELECT COUNT(*) as cnt FROM chat_sessions').toArray()[0];
       if ((countRow?.cnt as number) >= maxSessions) {
         throw new Error(`Maximum ${maxSessions} sessions per project exceeded`);
       }
@@ -465,10 +460,7 @@ function createMockProjectDataDO(projectId: string) {
         sessionId
       );
       const session = sql
-        .exec(
-          'SELECT workspace_id, message_count FROM chat_sessions WHERE id = ?',
-          sessionId
-        )
+        .exec('SELECT workspace_id, message_count FROM chat_sessions WHERE id = ?', sessionId)
         .toArray()[0];
       if (session) {
         recordActivityEventInternal(
@@ -535,9 +527,7 @@ function createMockProjectDataDO(projectId: string) {
           )
           .toArray();
       } else {
-        totalRow = sql
-          .exec('SELECT COUNT(*) as cnt FROM chat_sessions')
-          .toArray()[0];
+        totalRow = sql.exec('SELECT COUNT(*) as cnt FROM chat_sessions').toArray()[0];
         rows = sql
           .exec(
             'SELECT id, workspace_id, topic, status, message_count, started_at, ended_at, created_at, updated_at FROM chat_sessions ORDER BY started_at DESC LIMIT ? OFFSET ?',
@@ -924,9 +914,7 @@ describe('ProjectData integration — data isolation', () => {
       await limitedA.createSession('ws-3', 'S3');
 
       // 4th should fail
-      await expect(limitedA.createSession('ws-4', 'S4')).rejects.toThrow(
-        /Maximum 3 sessions/
-      );
+      await expect(limitedA.createSession('ws-4', 'S4')).rejects.toThrow(/Maximum 3 sessions/);
 
       // Project B should still be able to create sessions freely
       await projectB.createSession('ws-1', 'B1');
@@ -1025,12 +1013,8 @@ describe('ProjectData integration — data isolation', () => {
       expect(eventsB.events).toHaveLength(2);
 
       // Verify no cross-contamination of actor IDs
-      const actorIdsA = eventsA.events
-        .map((e) => e.actor_id)
-        .filter(Boolean);
-      const actorIdsB = eventsB.events
-        .map((e) => e.actor_id)
-        .filter(Boolean);
+      const actorIdsA = eventsA.events.map((e) => e.actor_id).filter(Boolean);
+      const actorIdsB = eventsB.events.map((e) => e.actor_id).filter(Boolean);
 
       for (const id of actorIdsA) {
         expect(id).toBe('user-1');

@@ -41,8 +41,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
+  const actual = await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
 
   return {
     ...actual,
@@ -483,36 +482,28 @@ describe('project capacity pool routes', () => {
     );
     expect(source).toBeTruthy();
 
-    const remove = await requestProjectDefaults(
-      env,
-      '/capacity-pools/defaults',
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          candidates: [{ id: candidate.id, status: 'deleted' }],
-        }),
-      }
-    );
+    const remove = await requestProjectDefaults(env, '/capacity-pools/defaults', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        candidates: [{ id: candidate.id, status: 'deleted' }],
+      }),
+    });
     expect(remove.status).toBe(200);
 
-    const addBack = await requestProjectDefaults(
-      env,
-      '/capacity-pools/defaults',
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          catalogAdditions: [
-            {
-              sourceId: source.id,
-              provider: candidate.provider,
-              location: candidate.location,
-              providerInstanceType: candidate.providerInstanceType,
-              providerInstanceSku: candidate.providerInstanceSku ?? null,
-            },
-          ],
-        }),
-      }
-    );
+    const addBack = await requestProjectDefaults(env, '/capacity-pools/defaults', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        catalogAdditions: [
+          {
+            sourceId: source.id,
+            provider: candidate.provider,
+            location: candidate.location,
+            providerInstanceType: candidate.providerInstanceType,
+            providerInstanceSku: candidate.providerInstanceSku ?? null,
+          },
+        ],
+      }),
+    });
 
     expect(addBack.status).toBe(200);
     const body = await addBack.json();

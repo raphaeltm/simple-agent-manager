@@ -134,7 +134,7 @@ describe('Migration 025 mailbox TTL backfill', () => {
 
     expect(exec).toHaveBeenCalledWith(
       expect.stringMatching(/UPDATE session_inbox[\s\S]*WHERE expires_at IS NULL/i),
-      MAILBOX_DEFAULTS.TTL_MS,
+      MAILBOX_DEFAULTS.TTL_MS
     );
   });
 });

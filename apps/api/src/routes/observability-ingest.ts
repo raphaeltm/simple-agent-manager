@@ -63,11 +63,13 @@ observabilityIngestRoutes.post('/', async (c) => {
     return c.json({ error: 'PAYLOAD_TOO_LARGE', message: 'Body exceeds 1 MB limit' }, 413);
   }
 
-  const response = await doStub.fetch(new Request(doUrl.toString(), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body,
-  }));
+  const response = await doStub.fetch(
+    new Request(doUrl.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    })
+  );
 
   // Buffer the DO response body rather than re-streaming it. The Tail Worker
   // awaits this fetch but does not consume a streamed body, so re-streaming

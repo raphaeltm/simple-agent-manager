@@ -46,7 +46,7 @@ export const createMissionDef: AnthropicToolDef = {
 
 export async function createMission(
   input: { projectId: string; title: string; description?: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -68,12 +68,7 @@ export async function createMission(
   const [project] = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   if (!project) {
@@ -83,8 +78,10 @@ export async function createMission(
   // ── Enforce per-project limit ─────────────────────────────────────────
   const maxPerProject = Number(env.MISSION_MAX_PER_PROJECT) || DEFAULT_MISSION_MAX_PER_PROJECT;
   const countRow = await env.DATABASE.prepare(
-    'SELECT COUNT(*) as cnt FROM missions WHERE project_id = ?',
-  ).bind(input.projectId).first<{ cnt: number }>();
+    'SELECT COUNT(*) as cnt FROM missions WHERE project_id = ?'
+  )
+    .bind(input.projectId)
+    .first<{ cnt: number }>();
   if (countRow && countRow.cnt >= maxPerProject) {
     return { error: `Maximum missions per project (${maxPerProject}) reached.` };
   }
@@ -94,8 +91,10 @@ export async function createMission(
   const now = new Date().toISOString();
   await env.DATABASE.prepare(
     `INSERT INTO missions (id, project_id, user_id, title, description, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'planning', ?, ?)`,
-  ).bind(id, input.projectId, ctx.userId, title, description, now, now).run();
+     VALUES (?, ?, ?, ?, ?, 'planning', ?, ?)`
+  )
+    .bind(id, input.projectId, ctx.userId, title, description, now, now)
+    .run();
 
   // Register with orchestrator for scheduling (best-effort)
   try {

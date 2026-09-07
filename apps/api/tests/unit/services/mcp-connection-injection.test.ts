@@ -293,9 +293,7 @@ describe('resolveMcpServersForSession', () => {
       { userId: 'user-1', projectId: null },
       ENCRYPTION_KEY
     );
-    expect(resolved).toEqual([
-      expect.objectContaining({ name: 'composio', token: '' }),
-    ]);
+    expect(resolved).toEqual([expect.objectContaining({ name: 'composio', token: '' })]);
   });
 });
 

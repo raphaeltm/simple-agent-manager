@@ -8,7 +8,11 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import type { ProjectCapability } from '../middleware/project-auth';
-import { jsonValidator, UpsertProjectRuntimeEnvVarSchema, UpsertProjectRuntimeFileSchema } from '../schemas';
+import {
+  jsonValidator,
+  UpsertProjectRuntimeEnvVarSchema,
+  UpsertProjectRuntimeFileSchema,
+} from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
 import {
   buildSkillRuntimeConfigResponse,
@@ -36,9 +40,12 @@ skillRuntimeRoutes.post('/env-vars', jsonValidator(UpsertProjectRuntimeEnvVarSch
   const limits = getRuntimeLimits(c.env);
   const { db, skillId, userId } = await requireSkillRuntimeAccess(c, 'secret:write');
   const envKey = body.key.trim();
-  if (!PROJECT_ENV_KEY_PATTERN.test(envKey)) throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
+  if (!PROJECT_ENV_KEY_PATTERN.test(envKey))
+    throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
   if (byteLength(body.value) > limits.maxProjectRuntimeEnvValueBytes) {
-    throw errors.badRequest(`value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`);
+    throw errors.badRequest(
+      `value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`
+    );
   }
   await upsertSkillRuntimeEnvVar(db, {
     skillId,
@@ -54,7 +61,8 @@ skillRuntimeRoutes.post('/env-vars', jsonValidator(UpsertProjectRuntimeEnvVarSch
 
 skillRuntimeRoutes.delete('/env-vars/:envKey', async (c) => {
   const envKey = requireRouteParam(c, 'envKey').trim();
-  if (!PROJECT_ENV_KEY_PATTERN.test(envKey)) throw errors.badRequest('envKey must match [A-Za-z_][A-Za-z0-9_]*');
+  if (!PROJECT_ENV_KEY_PATTERN.test(envKey))
+    throw errors.badRequest('envKey must match [A-Za-z_][A-Za-z0-9_]*');
   const { db, skillId, userId } = await requireSkillRuntimeAccess(c, 'secret:write');
   await deleteSkillRuntimeEnvVar(db, skillId, userId, envKey);
   return c.json(await buildSkillRuntimeConfigResponse(db, skillId, userId));
@@ -72,10 +80,14 @@ skillRuntimeRoutes.post('/files', jsonValidator(UpsertProjectRuntimeFileSchema),
   const { db, skillId, userId } = await requireSkillRuntimeAccess(c, 'secret:write');
   const path = normalizeProjectFilePath(body.path);
   if (path.length > limits.maxProjectRuntimeFilePathLength) {
-    throw errors.badRequest(`path exceeds max length of ${limits.maxProjectRuntimeFilePathLength} characters`);
+    throw errors.badRequest(
+      `path exceeds max length of ${limits.maxProjectRuntimeFilePathLength} characters`
+    );
   }
   if (byteLength(body.content) > limits.maxProjectRuntimeFileContentBytes) {
-    throw errors.badRequest(`content exceeds max size of ${limits.maxProjectRuntimeFileContentBytes} bytes`);
+    throw errors.badRequest(
+      `content exceeds max size of ${limits.maxProjectRuntimeFileContentBytes} bytes`
+    );
   }
   await upsertSkillRuntimeFile(db, {
     skillId,

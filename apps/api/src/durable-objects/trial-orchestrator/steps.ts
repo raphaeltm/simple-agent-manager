@@ -150,7 +150,9 @@ async function failIfTrialNodeProvisioningTerminal(
     .bind(nodeId)
     .first<{ status: string; errorMessage: string | null }>();
   if (!node) {
-    throw Object.assign(new Error('Trial node disappeared during provisioning'), { permanent: true });
+    throw Object.assign(new Error('Trial node disappeared during provisioning'), {
+      permanent: true,
+    });
   }
   if (node.status === 'error' || node.status === 'stopped' || node.status === 'deleted') {
     throw Object.assign(

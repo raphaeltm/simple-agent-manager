@@ -79,7 +79,11 @@ describe('collectSecretNames', () => {
           volumes: [],
         },
         worker: {
-          image: { registry: 'docker.io', repository: 'app/worker', digest: 'sha256:' + 'b'.repeat(64) },
+          image: {
+            registry: 'docker.io',
+            repository: 'app/worker',
+            digest: 'sha256:' + 'b'.repeat(64),
+          },
           env: {
             QUEUE_URL: { secret: 'QUEUE_SECRET' },
             SHARED_KEY: { secret: 'SHARED_SECRET' }, // same secret referenced in both services
@@ -132,12 +136,12 @@ describe('renderCompose with secrets', () => {
     expect(() => renderCompose(manifest, { ...CTX, resolvedSecrets: {} })).toThrow(
       expect.objectContaining({
         message: expect.stringContaining('SECRET_A'),
-      }),
+      })
     );
     expect(() => renderCompose(manifest, { ...CTX, resolvedSecrets: {} })).toThrow(
       expect.objectContaining({
         message: expect.stringContaining('SECRET_B'),
-      }),
+      })
     );
   });
 

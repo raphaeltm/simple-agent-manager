@@ -104,7 +104,11 @@ describe('MCP trigger resourceRequirements field validation', () => {
 
     expect(compatibility.error).toBeUndefined();
     expect(
-      sqlite.prepare("SELECT resource_requirements_json FROM triggers WHERE name = 'Compatibility trigger'").get()
+      sqlite
+        .prepare(
+          "SELECT resource_requirements_json FROM triggers WHERE name = 'Compatibility trigger'"
+        )
+        .get()
     ).toEqual({ resource_requirements_json: '{"minDiskGb":0,"exclusiveNode":false}' });
 
     const precedence = await handleCreateTrigger(
@@ -122,7 +126,11 @@ describe('MCP trigger resourceRequirements field validation', () => {
 
     expect(precedence.error).toBeUndefined();
     expect(
-      sqlite.prepare("SELECT resource_requirements_json FROM triggers WHERE name = 'Precedence trigger'").get()
+      sqlite
+        .prepare(
+          "SELECT resource_requirements_json FROM triggers WHERE name = 'Precedence trigger'"
+        )
+        .get()
     ).toEqual({ resource_requirements_json: '{"minVcpu":2}' });
   });
 

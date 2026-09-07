@@ -9,7 +9,7 @@ import {
   DEFAULT_GCP_SA_IMPERSONATION_SCOPES,
   DEFAULT_GCP_STS_SCOPE,
 } from '@simple-agent-manager/shared';
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 describe('GCP scope constants', () => {
   it('DEFAULT_GCP_STS_SCOPE is cloud-platform', () => {
@@ -26,7 +26,10 @@ describe('GCP SA impersonation scopes parsing', () => {
   // Test the same parsing logic to ensure multi-scope support works correctly.
 
   function parseScopes(envValue: string | undefined, defaultValue: string): string[] {
-    return (envValue || defaultValue).split(',').map((s) => s.trim()).filter(Boolean);
+    return (envValue || defaultValue)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
 
   it('returns default scope as single-element array when env var is not set', () => {
@@ -37,7 +40,7 @@ describe('GCP SA impersonation scopes parsing', () => {
   it('supports a single custom scope', () => {
     const scopes = parseScopes(
       'https://www.googleapis.com/auth/cloud-platform',
-      DEFAULT_GCP_SA_IMPERSONATION_SCOPES,
+      DEFAULT_GCP_SA_IMPERSONATION_SCOPES
     );
     expect(scopes).toEqual(['https://www.googleapis.com/auth/cloud-platform']);
   });
@@ -45,7 +48,7 @@ describe('GCP SA impersonation scopes parsing', () => {
   it('supports multiple comma-separated scopes', () => {
     const scopes = parseScopes(
       'https://www.googleapis.com/auth/compute,https://www.googleapis.com/auth/devstorage.read_only',
-      DEFAULT_GCP_SA_IMPERSONATION_SCOPES,
+      DEFAULT_GCP_SA_IMPERSONATION_SCOPES
     );
     expect(scopes).toEqual([
       'https://www.googleapis.com/auth/compute',
@@ -56,7 +59,7 @@ describe('GCP SA impersonation scopes parsing', () => {
   it('trims whitespace around comma-separated scopes', () => {
     const scopes = parseScopes(
       'https://www.googleapis.com/auth/compute , https://www.googleapis.com/auth/devstorage.read_only',
-      DEFAULT_GCP_SA_IMPERSONATION_SCOPES,
+      DEFAULT_GCP_SA_IMPERSONATION_SCOPES
     );
     expect(scopes).toEqual([
       'https://www.googleapis.com/auth/compute',
@@ -82,7 +85,7 @@ describe('GCP STS scope selection', () => {
 
   it('returns default scope when env var is not set', () => {
     expect(selectStsScope(undefined, DEFAULT_GCP_STS_SCOPE)).toBe(
-      'https://www.googleapis.com/auth/cloud-platform',
+      'https://www.googleapis.com/auth/cloud-platform'
     );
   });
 
@@ -93,7 +96,7 @@ describe('GCP STS scope selection', () => {
 
   it('returns default when env var is empty string', () => {
     expect(selectStsScope('', DEFAULT_GCP_STS_SCOPE)).toBe(
-      'https://www.googleapis.com/auth/cloud-platform',
+      'https://www.googleapis.com/auth/cloud-platform'
     );
   });
 });

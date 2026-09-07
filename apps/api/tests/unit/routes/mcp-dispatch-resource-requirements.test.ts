@@ -422,7 +422,9 @@ describe('MCP dispatch_task resource requirements input', () => {
       expect(mocks.requireRepositoryOwnerAccess).not.toHaveBeenCalled();
       expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
       expect(
-        sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE parent_task_id = 'parent-task-1'").get()
+        sqlite
+          .prepare("SELECT COUNT(*) AS count FROM tasks WHERE parent_task_id = 'parent-task-1'")
+          .get()
       ).toEqual({ count: 0 });
       expect(sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 1 });
     } finally {

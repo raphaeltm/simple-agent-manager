@@ -15,9 +15,10 @@ export const RESOURCE_REQUIREMENTS_FIELD_PROPERTIES = {
   maxCoTenants: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
 } as const;
 
-export function resourceRequirementsMcpProperty(
-  options: { nullable: boolean; description: string }
-) {
+export function resourceRequirementsMcpProperty(options: {
+  nullable: boolean;
+  description: string;
+}) {
   return {
     type: options.nullable ? (['object', 'null'] as const) : ('object' as const),
     description: options.description,

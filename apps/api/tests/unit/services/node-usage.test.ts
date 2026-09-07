@@ -17,7 +17,7 @@ describe('node usage calculations', () => {
       ],
       new Date('2026-05-01T00:00:00.000Z'),
       new Date('2026-05-01T04:00:00.000Z'),
-      new Date('2026-05-01T04:00:00.000Z'),
+      new Date('2026-05-01T04:00:00.000Z')
     );
 
     expect(totals.platformNodeHours).toBe(4);
@@ -40,7 +40,7 @@ describe('node usage calculations', () => {
       ],
       new Date('2026-05-01T00:00:00.000Z'),
       new Date('2026-05-01T04:00:00.000Z'),
-      new Date('2026-05-01T04:00:00.000Z'),
+      new Date('2026-05-01T04:00:00.000Z')
     );
 
     expect(totals.platformVcpuHours).toBe(0);
@@ -62,7 +62,7 @@ describe('node usage calculations', () => {
       ],
       new Date('2026-05-01T00:00:00.000Z'),
       new Date('2026-05-01T04:00:00.000Z'),
-      new Date('2026-05-01T04:00:00.000Z'),
+      new Date('2026-05-01T04:00:00.000Z')
     );
 
     expect(totals.platformNodeHours).toBe(2);
@@ -85,7 +85,7 @@ describe('node usage calculations', () => {
       ],
       new Date('2026-05-01T00:00:00.000Z'),
       new Date('2026-05-01T04:00:00.000Z'),
-      new Date('2026-05-01T04:00:00.000Z'),
+      new Date('2026-05-01T04:00:00.000Z')
     );
 
     expect(totals.platformNodeHours).toBe(4);

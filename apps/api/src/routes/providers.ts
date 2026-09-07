@@ -1,6 +1,6 @@
 import type { ProviderCatalogResponse } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context,Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';

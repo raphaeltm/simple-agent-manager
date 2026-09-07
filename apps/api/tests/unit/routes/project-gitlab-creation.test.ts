@@ -76,7 +76,11 @@ describe('POST /api/projects — GitLab provider', () => {
   const mockEnv = { DATABASE: {} as D1Database } as Env;
 
   const createGitLabProject = (
-    body: Record<string, unknown> = { name: 'GitLab Project', repoProvider: 'gitlab', gitlabProjectId: 123 }
+    body: Record<string, unknown> = {
+      name: 'GitLab Project',
+      repoProvider: 'gitlab',
+      gitlabProjectId: 123,
+    }
   ) =>
     app.request(
       '/api/projects',

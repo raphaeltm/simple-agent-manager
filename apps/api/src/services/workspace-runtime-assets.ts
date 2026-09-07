@@ -143,12 +143,7 @@ async function validateSkillId(
   const rows = await db
     .select({ id: schema.skills.id })
     .from(schema.skills)
-    .where(
-      and(
-        eq(schema.skills.id, skillId),
-        eq(schema.skills.projectId, workspace.projectId)
-      )
-    )
+    .where(and(eq(schema.skills.id, skillId), eq(schema.skills.projectId, workspace.projectId)))
     .limit(1);
   if (!rows[0]) {
     throw errors.forbidden('Skill is not valid for workspace');

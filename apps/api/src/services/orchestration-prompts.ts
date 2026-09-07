@@ -17,7 +17,7 @@ type PersistOrchestrationPromptInput = {
 };
 
 export async function persistOrchestrationPrompt(
-  input: PersistOrchestrationPromptInput,
+  input: PersistOrchestrationPromptInput
 ): Promise<string> {
   const messageId = input.messageId ?? ulid();
   await projectDataService.persistMessage(
@@ -34,7 +34,7 @@ export async function persistOrchestrationPrompt(
       mailboxMessageId: input.mailboxMessageId ?? null,
       senderId: input.senderId ?? null,
     },
-    messageId,
+    messageId
   );
   return messageId;
 }

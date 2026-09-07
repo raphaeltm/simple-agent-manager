@@ -108,8 +108,8 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
             eq(schema.triggers.sourceType, 'cron'),
             eq(schema.triggers.status, 'active'),
             isNotNull(schema.triggers.nextFireAt),
-            lte(schema.triggers.nextFireAt, nowIso),
-          ),
+            lte(schema.triggers.nextFireAt, nowIso)
+          )
         );
 
       const dueIds = dueTriggers.map((t) => t.id);
@@ -148,8 +148,8 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
         .where(
           and(
             eq(schema.triggerExecutions.triggerId, 'trigger-skip-001'),
-            inArray(schema.triggerExecutions.status, ['queued', 'running']),
-          ),
+            inArray(schema.triggerExecutions.status, ['queued', 'running'])
+          )
         );
 
       expect(activeCount?.count).toBe(1);
@@ -178,8 +178,8 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
         .where(
           and(
             eq(schema.triggerExecutions.triggerId, 'trigger-conc-001'),
-            inArray(schema.triggerExecutions.status, ['queued', 'running']),
-          ),
+            inArray(schema.triggerExecutions.status, ['queued', 'running'])
+          )
         );
 
       // At maxConcurrent=2, the sweep would skip
@@ -193,7 +193,8 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
   // -------------------------------------------------------------------------
   describe('template rendering with real project data', () => {
     it('renders template with trigger and project context', async () => {
-      const template = 'Review PRs for {{trigger.name}} in {{project.name}} (fire #{{trigger.fireCount}})';
+      const template =
+        'Review PRs for {{trigger.name}} in {{project.name}} (fire #{{trigger.fireCount}})';
       const now = new Date('2026-05-15T09:00:00Z');
 
       const context = buildCronContext(
@@ -208,14 +209,12 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
         now,
         PROJECT_NAME,
         'exec-tpl-001',
-        5,
+        5
       );
 
       const result = renderTemplate(template, context as unknown as Record<string, unknown>);
 
-      expect(result.rendered).toBe(
-        `Review PRs for Daily PR Review in ${PROJECT_NAME} (fire #5)`,
-      );
+      expect(result.rendered).toBe(`Review PRs for Daily PR Review in ${PROJECT_NAME} (fire #5)`);
       expect(result.warnings).toHaveLength(0);
     });
 
@@ -234,7 +233,7 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
         now,
         PROJECT_NAME,
         'exec-tz-001',
-        1,
+        1
       );
 
       expect(context.schedule.timezone).toBe('America/New_York');
@@ -257,7 +256,7 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
         new Date(),
         PROJECT_NAME,
         'exec-miss-001',
-        1,
+        1
       );
 
       const result = renderTemplate(template, context as unknown as Record<string, unknown>);
@@ -602,7 +601,8 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
         cronExpression,
         cronTimezone: 'UTC',
         triggerCount: 10,
-        promptTemplate: 'Run sweep for {{project.name}} — trigger: {{trigger.name}} (fire #{{trigger.fireCount}})',
+        promptTemplate:
+          'Run sweep for {{project.name}} — trigger: {{trigger.name}} (fire #{{trigger.fireCount}})',
         nextFireAt: new Date(Date.now() - 60_000).toISOString(),
       });
 
@@ -616,8 +616,8 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
             eq(schema.triggers.sourceType, 'cron'),
             eq(schema.triggers.status, 'active'),
             isNotNull(schema.triggers.nextFireAt),
-            lte(schema.triggers.nextFireAt, nowIso),
-          ),
+            lte(schema.triggers.nextFireAt, nowIso)
+          )
         );
 
       const trigger = dueTriggers.find((t) => t.id === 'trigger-e2e-001');
@@ -640,12 +640,12 @@ describe('cron trigger sweep operations (vertical slice, real D1)', () => {
         now,
         PROJECT_NAME,
         executionId,
-        sequenceNumber,
+        sequenceNumber
       );
 
       const rendered = renderTemplate(
         trigger!.promptTemplate,
-        context as unknown as Record<string, unknown>,
+        context as unknown as Record<string, unknown>
       );
 
       expect(rendered.rendered).toContain('E2E Daily Sweep');

@@ -11,7 +11,7 @@ import {
   type CCSourcePlatformRow,
   mapKind,
 } from '@simple-agent-manager/shared';
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 function makeSourceRow(overrides: Partial<CCSourceCredentialRow>): CCSourceCredentialRow {
   return {

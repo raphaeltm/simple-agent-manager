@@ -90,17 +90,14 @@ export async function probeGithubRepo(
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), opts.timeoutMs);
   try {
-    const resp = await fetchFn(
-      `https://api.github.com/repos/${owner}/${name}`,
-      {
-        // GitHub REST API requires a UA on unauthenticated requests.
-        headers: {
-          accept: 'application/vnd.github+json',
-          'user-agent': 'sam-trial-onboarding',
-        },
-        signal: ac.signal,
-      }
-    );
+    const resp = await fetchFn(`https://api.github.com/repos/${owner}/${name}`, {
+      // GitHub REST API requires a UA on unauthenticated requests.
+      headers: {
+        accept: 'application/vnd.github+json',
+        'user-agent': 'sam-trial-onboarding',
+      },
+      signal: ac.signal,
+    });
     if (resp.status === 404) return { ok: false, reason: 'repo_not_found' };
     if (!resp.ok) return { ok: false, reason: 'repo_not_found' };
     const body = expectJsonRecord(await resp.json(), 'github.repo_probe');
@@ -174,32 +171,20 @@ createRoutes.post('/create', async (c) => {
 
   const repo = parseGithubRepoUrl(parsed.output.repoUrl);
   if (!repo) {
-    return errorResponse(
-      'invalid_url',
-      'Must be a public GitHub repository URL',
-      400
-    );
+    return errorResponse('invalid_url', 'Must be a public GitHub repository URL', 400);
   }
 
   // -- 2. Kill switch --------------------------------------------------------
   const enabled = await isTrialsEnabled(env, now);
   if (!enabled) {
-    return errorResponse(
-      'trials_disabled',
-      'Trial onboarding is currently disabled',
-      503
-    );
+    return errorResponse('trials_disabled', 'Trial onboarding is currently disabled', 503);
   }
 
   // Secret must be present whenever trials are enabled.
   const secret = env.TRIAL_CLAIM_TOKEN_SECRET;
   if (!secret) {
     log.error('trial.create.missing_secret', {});
-    return errorResponse(
-      'trials_disabled',
-      'Trial onboarding is misconfigured',
-      503
-    );
+    return errorResponse('trials_disabled', 'Trial onboarding is misconfigured', 503);
   }
 
   // -- 3. GitHub repo probe --------------------------------------------------
@@ -209,11 +194,7 @@ createRoutes.post('/create', async (c) => {
   });
   if (!probe.ok) {
     const status =
-      probe.reason === 'repo_not_found'
-        ? 404
-        : probe.reason === 'repo_private'
-          ? 403
-          : 413;
+      probe.reason === 'repo_not_found' ? 404 : probe.reason === 'repo_private' ? 403 : 413;
     return errorResponse(
       probe.reason,
       {
@@ -234,10 +215,7 @@ createRoutes.post('/create', async (c) => {
     // RPC path — typed method call on the DO stub.
     slot = await (
       counter as unknown as {
-        tryIncrement(
-          monthKey: string,
-          cap: number
-        ): Promise<TrialCounterTryIncrementResult>;
+        tryIncrement(monthKey: string, cap: number): Promise<TrialCounterTryIncrementResult>;
       }
     ).tryIncrement(monthKey, cap);
   } catch (err) {
@@ -278,10 +256,7 @@ createRoutes.post('/create', async (c) => {
   // their own trial — the next OAuth-hook lookup then redirects the victim to
   // the attacker's trial. Always call verifyFingerprint() and fall back to a
   // fresh UUID on invalid/missing signature.
-  const existingFp = readCookie(
-    c.req.header('cookie') ?? null,
-    TRIAL_COOKIE_FINGERPRINT_NAME
-  );
+  const existingFp = readCookie(c.req.header('cookie') ?? null, TRIAL_COOKIE_FINGERPRINT_NAME);
   let fingerprintUuid: string | null = null;
   if (existingFp) {
     fingerprintUuid = await verifyFingerprint(existingFp, secret);
@@ -314,20 +289,16 @@ createRoutes.post('/create', async (c) => {
     // Release the allocated counter slot so a failed insert doesn't burn
     // a monthly slot for the user.
     try {
-      await (
-        counter as unknown as { decrement(monthKey: string): Promise<number> }
-      ).decrement(monthKey);
+      await (counter as unknown as { decrement(monthKey: string): Promise<number> }).decrement(
+        monthKey
+      );
     } catch (decErr) {
       log.error('trial.create.counter_decrement_failed', {
         trialId,
         error: decErr instanceof Error ? decErr.message : String(decErr),
       });
     }
-    return errorResponse(
-      'trials_disabled',
-      'Trial creation failed — please retry shortly',
-      500
-    );
+    return errorResponse('trials_disabled', 'Trial creation failed — please retry shortly', 500);
   }
 
   // Mirror the trial record into KV so Track B readers (SSE events, claim,
@@ -358,17 +329,13 @@ createRoutes.post('/create', async (c) => {
       // will eventually expire it via expiresAt.
     }
     try {
-      await (
-        counter as unknown as { decrement(monthKey: string): Promise<number> }
-      ).decrement(monthKey);
+      await (counter as unknown as { decrement(monthKey: string): Promise<number> }).decrement(
+        monthKey
+      );
     } catch {
       // best-effort
     }
-    return errorResponse(
-      'trials_disabled',
-      'Trial creation failed — please retry shortly',
-      500
-    );
+    return errorResponse('trials_disabled', 'Trial creation failed — please retry shortly', 500);
   }
 
   // -- 6. Issue cookies + return --------------------------------------------
@@ -402,10 +369,7 @@ createRoutes.post('/create', async (c) => {
       domain: cookieDomain,
     })
   );
-  headers.append(
-    'set-cookie',
-    buildClaimCookie(claimSigned, { secure, domain: cookieDomain })
-  );
+  headers.append('set-cookie', buildClaimCookie(claimSigned, { secure, domain: cookieDomain }));
 
   log.info('trial.create.ok', {
     trialId,

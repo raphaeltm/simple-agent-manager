@@ -93,8 +93,9 @@ describe('0147_profile_trigger_resource_requirements migration', () => {
     expect(
       db.prepare('SELECT COUNT(*) AS count FROM agent_profiles').get() as { count: number }
     ).toEqual({ count: 1 });
-    expect(db.prepare('SELECT COUNT(*) AS count FROM triggers').get() as { count: number })
-      .toEqual({ count: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM triggers').get() as { count: number }).toEqual(
+      { count: 1 }
+    );
     expect(
       db
         .prepare(

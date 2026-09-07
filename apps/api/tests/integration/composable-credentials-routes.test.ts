@@ -15,11 +15,23 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
-const routeFile = readFileSync(resolve(process.cwd(), 'src/routes/composable-credentials.ts'), 'utf8');
+const routeFile = readFileSync(
+  resolve(process.cwd(), 'src/routes/composable-credentials.ts'),
+  'utf8'
+);
 const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
-const resolveFile = readFileSync(resolve(process.cwd(), 'src/services/composable-credentials/resolve.ts'), 'utf8');
-const snapshotFile = readFileSync(resolve(process.cwd(), 'src/services/composable-credentials/snapshot.ts'), 'utf8');
-const backfillFile = readFileSync(resolve(process.cwd(), 'src/services/composable-credentials/backfill-service.ts'), 'utf8');
+const resolveFile = readFileSync(
+  resolve(process.cwd(), 'src/services/composable-credentials/resolve.ts'),
+  'utf8'
+);
+const snapshotFile = readFileSync(
+  resolve(process.cwd(), 'src/services/composable-credentials/snapshot.ts'),
+  'utf8'
+);
+const backfillFile = readFileSync(
+  resolve(process.cwd(), 'src/services/composable-credentials/backfill-service.ts'),
+  'utf8'
+);
 
 describe('composable-credentials route registration', () => {
   it('mounts ccRoutes under /api/cc', () => {
@@ -27,7 +39,7 @@ describe('composable-credentials route registration', () => {
   });
 
   it('imports ccRoutes from composable-credentials module', () => {
-    expect(indexFile).toContain("import { ccRoutes }");
+    expect(indexFile).toContain('import { ccRoutes }');
   });
 });
 
@@ -112,17 +124,23 @@ describe('composable-credentials credential validation', () => {
   });
 
   it.each([
-    ['credential HTTPS validation', [
-      'validateOpenAICompatibleSecret(secret)',
-      'HTTPS baseUrl is required',
-      'openai-compatible credentials require apiKey, baseUrl, and dialect',
-      'openai-compatible credentials require dialect openai-compatible',
-    ]],
-    ['configuration dialect compatibility', [
-      'validateConfigurationSettings({ consumerKind, consumerTarget, settings })',
-      'resolveHarnessDialect(input.consumerTarget, dialect)',
-      'does not support provider dialect',
-    ]],
+    [
+      'credential HTTPS validation',
+      [
+        'validateOpenAICompatibleSecret(secret)',
+        'HTTPS baseUrl is required',
+        'openai-compatible credentials require apiKey, baseUrl, and dialect',
+        'openai-compatible credentials require dialect openai-compatible',
+      ],
+    ],
+    [
+      'configuration dialect compatibility',
+      [
+        'validateConfigurationSettings({ consumerKind, consumerTarget, settings })',
+        'resolveHarnessDialect(input.consumerTarget, dialect)',
+        'does not support provider dialect',
+      ],
+    ],
   ])('%s', (_label, snippets) => {
     for (const snippet of snippets) expect(routeFile).toContain(snippet);
   });

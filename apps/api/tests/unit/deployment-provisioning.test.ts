@@ -315,7 +315,10 @@ describe('provisionDeploymentNode', () => {
     expect(update?.sql).toContain('node_id IS NULL');
     expect(update?.sql).toContain('AND EXISTS');
     expect(update?.sql).toContain("n.runtime = 'vm'");
-    expect(update?.sql).toContain("n.node_class = 'managed'");
+    // node_class is a bound parameter, not an inlined literal; assert both the
+    // predicate and the value that is actually bound to it.
+    expect(update?.sql).toContain('n.node_class = ?');
+    expect(update?.binds).toEqual(expect.arrayContaining(['managed']));
     expect(update?.sql).toContain('project_members current_project_member');
     expect(update?.sql).toContain('capacity_pool_id IS NULL');
     expect(update?.binds).toEqual(

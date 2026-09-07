@@ -4,7 +4,7 @@
  * These tests call the actual exported functions and verify their return
  * values — not string matching against source code.
  */
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   computeBackoffMs,
@@ -218,10 +218,9 @@ describe('isTransientError', () => {
   });
 
   it('classifies "Maximum 10 nodes allowed" with permanent flag', () => {
-    const err = Object.assign(
-      new Error('Maximum 10 nodes allowed. Cannot auto-provision.'),
-      { permanent: true },
-    );
+    const err = Object.assign(new Error('Maximum 10 nodes allowed. Cannot auto-provision.'), {
+      permanent: true,
+    });
     expect(isTransientError(err)).toBe(false);
   });
 

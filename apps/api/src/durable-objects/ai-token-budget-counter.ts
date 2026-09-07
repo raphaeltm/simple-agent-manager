@@ -46,7 +46,7 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
   async consumeTotal(
     dateKey: string,
     tokenLimit: number,
-    tokens: number,
+    tokens: number
   ): Promise<{ allowed: boolean; usedTokens: number }> {
     return this.ctx.storage.transactionSync(() => {
       const current = this.readBudget(dateKey).inputTokens;
@@ -60,7 +60,7 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
            updated_at = excluded.updated_at`,
         dateKey,
         usedTokens,
-        Date.now(),
+        Date.now()
       );
       return { allowed: true, usedTokens };
     });
@@ -77,7 +77,7 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
            updated_at = excluded.updated_at`,
         dateKey,
         usedTokens,
-        Date.now(),
+        Date.now()
       );
       return usedTokens;
     });
@@ -86,7 +86,7 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
   async increment(
     dateKey: string,
     inputTokens: number,
-    outputTokens: number,
+    outputTokens: number
   ): Promise<TokenBudget> {
     return this.ctx.storage.transactionSync(() => {
       const current = this.readBudget(dateKey);
@@ -105,7 +105,7 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
         dateKey,
         updated.inputTokens,
         updated.outputTokens,
-        Date.now(),
+        Date.now()
       );
 
       return updated;
@@ -117,7 +117,7 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
     attribution: AiProviderUsageAttribution,
     inputTokens: number,
     outputTokens: number,
-    estimatedCostUsd: number,
+    estimatedCostUsd: number
   ): Promise<void> {
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
@@ -140,7 +140,7 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
         inputTokens,
         outputTokens,
         estimatedCostUsd,
-        Date.now(),
+        Date.now()
       );
     });
   }
@@ -167,7 +167,7 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
          FROM ai_provider_usage
          WHERE budget_date >= ?
          GROUP BY provider_id, provider_dialect`,
-        startDateKey,
+        startDateKey
       )
       .toArray()
       .map((row) => ({
@@ -187,7 +187,7 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
         `SELECT input_tokens, output_tokens
          FROM ai_token_budget
          WHERE budget_date = ?`,
-        dateKey,
+        dateKey
       )
       .toArray()[0];
 

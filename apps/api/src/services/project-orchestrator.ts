@@ -22,25 +22,41 @@ function getStub(env: Env, projectId: string): DurableObjectStub<ProjectOrchestr
 }
 
 /** Register a mission and arm the scheduling alarm. */
-export async function startOrchestration(env: Env, projectId: string, missionId: string): Promise<void> {
+export async function startOrchestration(
+  env: Env,
+  projectId: string,
+  missionId: string
+): Promise<void> {
   const stub = getStub(env, projectId);
   return stub.startOrchestration(projectId, missionId);
 }
 
 /** Pause a mission (running tasks continue, new dispatches stop). */
-export async function pauseMission(env: Env, projectId: string, missionId: string): Promise<boolean> {
+export async function pauseMission(
+  env: Env,
+  projectId: string,
+  missionId: string
+): Promise<boolean> {
   const stub = getStub(env, projectId);
   return stub.pauseMission(projectId, missionId);
 }
 
 /** Resume a paused mission. */
-export async function resumeMission(env: Env, projectId: string, missionId: string): Promise<boolean> {
+export async function resumeMission(
+  env: Env,
+  projectId: string,
+  missionId: string
+): Promise<boolean> {
   const stub = getStub(env, projectId);
   return stub.resumeMission(projectId, missionId);
 }
 
 /** Cancel a mission and all non-terminal tasks. */
-export async function cancelMission(env: Env, projectId: string, missionId: string): Promise<boolean> {
+export async function cancelMission(
+  env: Env,
+  projectId: string,
+  missionId: string
+): Promise<boolean> {
   const stub = getStub(env, projectId);
   return stub.cancelMission(projectId, missionId);
 }
@@ -52,26 +68,36 @@ export async function overrideTaskState(
   missionId: string,
   taskId: string,
   newState: SchedulerState,
-  reason: string,
+  reason: string
 ): Promise<boolean> {
   const stub = getStub(env, projectId);
   return stub.overrideTaskState(projectId, missionId, taskId, newState, reason);
 }
 
 /** Notify the orchestrator of a task event (completion, failure, etc.). */
-export async function notifyTaskEvent(env: Env, projectId: string, notification: TaskEventNotification): Promise<void> {
+export async function notifyTaskEvent(
+  env: Env,
+  projectId: string,
+  notification: TaskEventNotification
+): Promise<void> {
   const stub = getStub(env, projectId);
   return stub.notifyTaskEvent(projectId, notification);
 }
 
 /** Get orchestrator status (active missions, queue, recent decisions). */
-export async function getOrchestratorStatus(env: Env, projectId: string): Promise<OrchestratorStatus> {
+export async function getOrchestratorStatus(
+  env: Env,
+  projectId: string
+): Promise<OrchestratorStatus> {
   const stub = getStub(env, projectId);
   return stub.getStatus(projectId);
 }
 
 /** Get the scheduling queue (pending dispatches). */
-export async function getSchedulingQueue(env: Env, projectId: string): Promise<SchedulingQueueEntry[]> {
+export async function getSchedulingQueue(
+  env: Env,
+  projectId: string
+): Promise<SchedulingQueueEntry[]> {
   const stub = getStub(env, projectId);
   return stub.getSchedulingQueue(projectId);
 }

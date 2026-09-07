@@ -22,7 +22,7 @@ export const getProjectStatusDef: AnthropicToolDef = {
 
 export async function getProjectStatus(
   input: { projectId: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
 
@@ -30,12 +30,7 @@ export async function getProjectStatus(
   const project = await db
     .select()
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .get();
 
   if (!project) {

@@ -361,10 +361,7 @@ export function parseGcpCredential(decryptedToken: string): GcpCredential {
  * consumed by provider constructors. Legacy rows store raw provider tokens;
  * composable credentials may store `{ provider, token }` wrapper JSON.
  */
-export function extractCloudProviderToken(
-  provider: string,
-  decryptedToken: string
-): string {
+export function extractCloudProviderToken(provider: string, decryptedToken: string): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(decryptedToken);

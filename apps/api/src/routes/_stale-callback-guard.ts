@@ -37,9 +37,7 @@ export const DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS = 60_000;
 export function getInstantStaleCallbackMarginMs(env: Env): number {
   const raw = env.INSTANT_STALE_CALLBACK_MARGIN_MS;
   const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  return Number.isFinite(parsed) && parsed >= 0
-    ? parsed
-    : DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS;
 }
 
 /**

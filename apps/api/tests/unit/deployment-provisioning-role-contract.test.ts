@@ -211,7 +211,13 @@ describe('deployment default-pool role eligibility contract', () => {
 
     expect(allocation).toMatchObject({
       errorKind: 'placement',
-      error: expect.stringContaining('No active compute pool offerings'),
+      // Deployment-only candidates are not eligible for a workspace allocation,
+      // and the refusal names the requested role rather than falling back to
+      // another pool.
+      error: expect.stringContaining('No eligible compute-pool offering'),
+    });
+    expect(allocation).toMatchObject({
+      error: expect.stringContaining('workspace allocation'),
     });
   });
 });

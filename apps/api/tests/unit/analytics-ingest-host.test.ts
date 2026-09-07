@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { analyticsIngestRoutes } from '../../src/routes/analytics-ingest';
 
@@ -55,11 +55,13 @@ describe('analytics ingest — host field via route handler', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        events: [{
-          event: 'page_view',
-          page: '/blog/post-1',
-          host: 'www.simple-agent-manager.org',
-        }],
+        events: [
+          {
+            event: 'page_view',
+            page: '/blog/post-1',
+            host: 'www.simple-agent-manager.org',
+          },
+        ],
       }),
     });
 
@@ -77,13 +79,15 @@ describe('analytics ingest — host field via route handler', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Origin': 'https://www.example.com',
+        Origin: 'https://www.example.com',
       },
       body: JSON.stringify({
-        events: [{
-          event: 'page_view',
-          page: '/',
-        }],
+        events: [
+          {
+            event: 'page_view',
+            page: '/',
+          },
+        ],
       }),
     });
 
@@ -101,13 +105,15 @@ describe('analytics ingest — host field via route handler', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Referer': 'https://docs.example.com/guide',
+        Referer: 'https://docs.example.com/guide',
       },
       body: JSON.stringify({
-        events: [{
-          event: 'page_view',
-          page: '/docs/overview',
-        }],
+        events: [
+          {
+            event: 'page_view',
+            page: '/docs/overview',
+          },
+        ],
       }),
     });
 
@@ -125,14 +131,16 @@ describe('analytics ingest — host field via route handler', () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Origin': 'https://www.origin-host.com',
+        Origin: 'https://www.origin-host.com',
       },
       body: JSON.stringify({
-        events: [{
-          event: 'page_view',
-          page: '/',
-          host: 'www.client-host.com',
-        }],
+        events: [
+          {
+            event: 'page_view',
+            page: '/',
+            host: 'www.client-host.com',
+          },
+        ],
       }),
     });
 
@@ -151,11 +159,13 @@ describe('analytics ingest — host field via route handler', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        events: [{
-          event: 'page_view',
-          page: '/',
-          host: 'www.fallback-host.com',
-        }],
+        events: [
+          {
+            event: 'page_view',
+            page: '/',
+            host: 'www.fallback-host.com',
+          },
+        ],
       }),
     });
 
@@ -173,10 +183,12 @@ describe('analytics ingest — host field via route handler', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        events: [{
-          event: 'page_view',
-          page: '/',
-        }],
+        events: [
+          {
+            event: 'page_view',
+            page: '/',
+          },
+        ],
       }),
     });
 
@@ -248,17 +260,19 @@ describe('analytics ingest — host field via route handler', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        events: [{
-          event: 'page_view',
-          page: '/blog/post-1',
-          referrer: 'https://google.com',
-          host: 'www.sam.org',
-          utmSource: 'twitter',
-          utmMedium: 'social',
-          utmCampaign: 'launch',
-          sessionId: 'sess-123',
-          entityId: 'ent-456',
-        }],
+        events: [
+          {
+            event: 'page_view',
+            page: '/blog/post-1',
+            referrer: 'https://google.com',
+            host: 'www.sam.org',
+            utmSource: 'twitter',
+            utmMedium: 'social',
+            utmCampaign: 'launch',
+            sessionId: 'sess-123',
+            entityId: 'ent-456',
+          },
+        ],
       }),
     });
 
@@ -266,13 +280,13 @@ describe('analytics ingest — host field via route handler', () => {
     await flush();
 
     const args = mockWriteDataPoint.mock.calls[0][0];
-    expect(args.blobs[0]).toBe('page_view');     // blob1: event
-    expect(args.blobs[1]).toBe('www.sam.org');    // blob2: host
-    expect(args.blobs[2]).toBe('/blog/post-1');   // blob3: page
+    expect(args.blobs[0]).toBe('page_view'); // blob1: event
+    expect(args.blobs[1]).toBe('www.sam.org'); // blob2: host
+    expect(args.blobs[2]).toBe('/blog/post-1'); // blob3: page
     expect(args.blobs[3]).toBe('https://google.com'); // blob4: referrer
-    expect(args.blobs[4]).toBe('twitter');        // blob5: utmSource
-    expect(args.blobs[5]).toBe('social');         // blob6: utmMedium
-    expect(args.blobs[6]).toBe('launch');         // blob7: utmCampaign
-    expect(args.blobs[7]).toBe('sess-123');       // blob8: sessionId
+    expect(args.blobs[4]).toBe('twitter'); // blob5: utmSource
+    expect(args.blobs[5]).toBe('social'); // blob6: utmMedium
+    expect(args.blobs[6]).toBe('launch'); // blob7: utmCampaign
+    expect(args.blobs[7]).toBe('sess-123'); // blob8: sessionId
   });
 });

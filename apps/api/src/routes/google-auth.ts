@@ -4,7 +4,7 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
-import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { getGoogleInfraOAuthConfig } from '../services/platform-config';
 
@@ -78,19 +78,25 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
   }
 
   if (!code || !state) {
-    return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Missing authorization code or state')}`);
+    return c.redirect(
+      `${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Missing authorization code or state')}`
+    );
   }
 
   // Validate state format before KV lookup (state is always a UUID)
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!UUID_RE.test(state)) {
-    return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid OAuth state')}`);
+    return c.redirect(
+      `${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid OAuth state')}`
+    );
   }
 
   // Validate CSRF state and extract userId
   const storedStateRaw = await c.env.KV.get(`google-oauth-state:${state}`);
   if (!storedStateRaw) {
-    return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid or expired OAuth state')}`);
+    return c.redirect(
+      `${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid or expired OAuth state')}`
+    );
   }
 
   let storedState: { userId: string };
@@ -100,13 +106,17 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
     storedState = { userId: parsed.userId };
   } catch {
     await c.env.KV.delete(`google-oauth-state:${state}`);
-    return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid OAuth state format')}`);
+    return c.redirect(
+      `${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('Invalid OAuth state format')}`
+    );
   }
 
   // Verify the session user matches the user who initiated the flow
   if (storedState.userId !== sessionUserId) {
     // Don't delete state — the legitimate user can still retry
-    return c.redirect(`${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('OAuth state user mismatch')}`);
+    return c.redirect(
+      `${appBaseUrl}/settings/cloud-provider?gcp_error=${encodeURIComponent('OAuth state user mismatch')}`
+    );
   }
 
   // All validation passed — consume the state token (one-time use)
@@ -141,7 +151,7 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
   const tokenData = await readResponseJson(
     tokenResponse,
     googleTokenResponseSchema,
-    'google_oauth.token_response',
+    'google_oauth.token_response'
   );
 
   // Store the OAuth token server-side in KV with a short-lived opaque handle.
@@ -170,7 +180,9 @@ googleAuthRoutes.get('/oauth-result', requireAuth(), requireApproved(), async (c
   const kvKey = `gcp-oauth-result:${userId}`;
   const handle = await c.env.KV.get(kvKey);
   if (!handle) {
-    throw errors.notFound('No pending OAuth result — it may have expired or already been retrieved');
+    throw errors.notFound(
+      'No pending OAuth result — it may have expired or already been retrieved'
+    );
   }
 
   // One-time use: delete after retrieval.

@@ -13,7 +13,9 @@ import {
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
 
-function reservation(overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}) {
+function reservation(
+  overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}
+) {
   return {
     cpuMillis: 2000,
     memoryMb: 4096,

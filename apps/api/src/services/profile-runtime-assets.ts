@@ -74,10 +74,7 @@ export async function requireProjectScopedProfile(
     .select()
     .from(schema.agentProfiles)
     .where(
-      and(
-        eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId)
-      )
+      and(eq(schema.agentProfiles.id, profileId), eq(schema.agentProfiles.projectId, projectId))
     )
     .limit(1);
 
@@ -172,12 +169,7 @@ export async function requireProjectScopedSkill(
   const rows = await db
     .select()
     .from(schema.skills)
-    .where(
-      and(
-        eq(schema.skills.id, skillId),
-        eq(schema.skills.projectId, projectId)
-      )
-    )
+    .where(and(eq(schema.skills.id, skillId), eq(schema.skills.projectId, projectId)))
     .limit(1);
 
   const skill = rows[0];
@@ -192,26 +184,30 @@ export async function resolveRuntimeEnvRows(
   rows: Array<{ key: string; storedValue: string; valueIv: string | null; isSecret: boolean }>,
   encryptionKey: string
 ): Promise<WorkspaceRuntimeEnvVar[]> {
-  return Promise.all(rows.map(async (row) => ({
-    key: row.key,
-    value: row.isSecret
-      ? await decrypt(row.storedValue, row.valueIv ?? '', encryptionKey)
-      : row.storedValue,
-    isSecret: row.isSecret,
-  })));
+  return Promise.all(
+    rows.map(async (row) => ({
+      key: row.key,
+      value: row.isSecret
+        ? await decrypt(row.storedValue, row.valueIv ?? '', encryptionKey)
+        : row.storedValue,
+      isSecret: row.isSecret,
+    }))
+  );
 }
 
 export async function resolveRuntimeFileRows(
   rows: Array<{ path: string; storedContent: string; contentIv: string | null; isSecret: boolean }>,
   encryptionKey: string
 ): Promise<WorkspaceRuntimeFile[]> {
-  return Promise.all(rows.map(async (row) => ({
-    path: row.path,
-    content: row.isSecret
-      ? await decrypt(row.storedContent, row.contentIv ?? '', encryptionKey)
-      : row.storedContent,
-    isSecret: row.isSecret,
-  })));
+  return Promise.all(
+    rows.map(async (row) => ({
+      path: row.path,
+      content: row.isSecret
+        ? await decrypt(row.storedContent, row.contentIv ?? '', encryptionKey)
+        : row.storedContent,
+      isSecret: row.isSecret,
+    }))
+  );
 }
 
 export async function getProfileRuntimeAssets(
@@ -312,7 +308,12 @@ export async function upsertProfileRuntimeEnvVar(
   if (existingRows[0]) {
     await db
       .update(schema.profileRuntimeEnvVars)
-      .set({ storedValue: stored.ciphertext, valueIv: stored.iv, isSecret: input.isSecret, updatedAt: now })
+      .set({
+        storedValue: stored.ciphertext,
+        valueIv: stored.iv,
+        isSecret: input.isSecret,
+        updatedAt: now,
+      })
       .where(eq(schema.profileRuntimeEnvVars.id, existingRows[0].id));
     return;
   }
@@ -378,7 +379,12 @@ export async function upsertSkillRuntimeEnvVar(
   if (existingRows[0]) {
     await db
       .update(schema.skillRuntimeEnvVars)
-      .set({ storedValue: stored.ciphertext, valueIv: stored.iv, isSecret: input.isSecret, updatedAt: now })
+      .set({
+        storedValue: stored.ciphertext,
+        valueIv: stored.iv,
+        isSecret: input.isSecret,
+        updatedAt: now,
+      })
       .where(eq(schema.skillRuntimeEnvVars.id, existingRows[0].id));
     return;
   }
@@ -444,7 +450,12 @@ export async function upsertProfileRuntimeFile(
   if (existingRows[0]) {
     await db
       .update(schema.profileRuntimeFiles)
-      .set({ storedContent: stored.ciphertext, contentIv: stored.iv, isSecret: input.isSecret, updatedAt: now })
+      .set({
+        storedContent: stored.ciphertext,
+        contentIv: stored.iv,
+        isSecret: input.isSecret,
+        updatedAt: now,
+      })
       .where(eq(schema.profileRuntimeFiles.id, existingRows[0].id));
     return;
   }
@@ -510,7 +521,12 @@ export async function upsertSkillRuntimeFile(
   if (existingRows[0]) {
     await db
       .update(schema.skillRuntimeFiles)
-      .set({ storedContent: stored.ciphertext, contentIv: stored.iv, isSecret: input.isSecret, updatedAt: now })
+      .set({
+        storedContent: stored.ciphertext,
+        contentIv: stored.iv,
+        isSecret: input.isSecret,
+        updatedAt: now,
+      })
       .where(eq(schema.skillRuntimeFiles.id, existingRows[0].id));
     return;
   }

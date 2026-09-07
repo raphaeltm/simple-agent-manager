@@ -45,7 +45,6 @@ interface LogEntry {
   [key: string]: unknown;
 }
 
-
 const REDACTED = '[REDACTED]';
 const REDACTED_MESSAGE = '[REDACTED_ERROR_MESSAGE]';
 const SENSITIVE_KEY_RE =
@@ -90,7 +89,8 @@ export function serializeError(err: unknown): Record<string, unknown> {
       errorName: err.name,
     };
     if (err.cause) {
-      result.cause = err.cause instanceof Error ? REDACTED_MESSAGE : sanitizeString(String(err.cause), false);
+      result.cause =
+        err.cause instanceof Error ? REDACTED_MESSAGE : sanitizeString(String(err.cause), false);
     }
     return result;
   }
@@ -131,10 +131,14 @@ export const log: Logger = {
 /** Create a logger that prefixes all event names with `module.` */
 export function createModuleLogger(module: string): Logger {
   return {
-    debug: (event: string, details?: Record<string, unknown>) => emit('debug', `${module}.${event}`, details),
-    info: (event: string, details?: Record<string, unknown>) => emit('info', `${module}.${event}`, details),
-    warn: (event: string, details?: Record<string, unknown>) => emit('warn', `${module}.${event}`, details),
-    error: (event: string, details?: Record<string, unknown>) => emit('error', `${module}.${event}`, details),
+    debug: (event: string, details?: Record<string, unknown>) =>
+      emit('debug', `${module}.${event}`, details),
+    info: (event: string, details?: Record<string, unknown>) =>
+      emit('info', `${module}.${event}`, details),
+    warn: (event: string, details?: Record<string, unknown>) =>
+      emit('warn', `${module}.${event}`, details),
+    error: (event: string, details?: Record<string, unknown>) =>
+      emit('error', `${module}.${event}`, details),
   };
 }
 

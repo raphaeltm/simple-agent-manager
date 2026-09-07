@@ -35,7 +35,8 @@ export class AdminLogs extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.bufferMaxSize = parseInt(env.OBSERVABILITY_STREAM_BUFFER_SIZE || '', 10) || DEFAULT_BUFFER_SIZE;
+    this.bufferMaxSize =
+      parseInt(env.OBSERVABILITY_STREAM_BUFFER_SIZE || '', 10) || DEFAULT_BUFFER_SIZE;
   }
 
   // =========================================================================
@@ -83,7 +84,9 @@ export class AdminLogs extends DurableObject<Env> {
         if (Array.isArray(parsed.levels)) {
           // Cap array to avoid processing unbounded input; invalid entries filtered by ALL_LEVELS
           const levels = parsed.levels.slice(0, 10);
-          state.levels = new Set(levels.filter((l: unknown) => typeof l === 'string' && ALL_LEVELS.has(l)));
+          state.levels = new Set(
+            levels.filter((l: unknown) => typeof l === 'string' && ALL_LEVELS.has(l))
+          );
         }
         if (typeof parsed.search === 'string') {
           state.search = parsed.search.slice(0, 200);
@@ -107,7 +110,7 @@ export class AdminLogs extends DurableObject<Env> {
     ws: WebSocket,
     _code: number,
     _reason: string,
-    _wasClean: boolean,
+    _wasClean: boolean
   ): Promise<void> {
     ws.close();
   }
@@ -138,11 +141,13 @@ export class AdminLogs extends DurableObject<Env> {
     });
 
     // Send connection status
-    serverWs.send(JSON.stringify({
-      type: 'status',
-      connected: true,
-      clientCount: this.ctx.getWebSockets().length,
-    }));
+    serverWs.send(
+      JSON.stringify({
+        type: 'status',
+        connected: true,
+        clientCount: this.ctx.getWebSockets().length,
+      })
+    );
 
     // Replay recent buffer entries to the new client
     for (const entry of this.buffer) {
@@ -161,7 +166,9 @@ export class AdminLogs extends DurableObject<Env> {
     try {
       const body = await readRequestJsonRecord(request, 'admin-logs.ingest');
       logs = Array.isArray(body.logs)
-        ? body.logs.map((log, index) => parseLogBufferEntry(log, `admin-logs.ingest.logs[${index}]`))
+        ? body.logs.map((log, index) =>
+            parseLogBufferEntry(log, `admin-logs.ingest.logs[${index}]`)
+          )
         : [];
     } catch {
       return new Response('Invalid JSON', { status: 400 });

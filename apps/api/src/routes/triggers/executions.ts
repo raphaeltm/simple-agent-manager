@@ -4,7 +4,11 @@
  * GET /:triggerId/executions               — List executions (paginated)
  * GET /:triggerId/executions/:executionId   — Get single execution detail
  */
-import type { ListTriggerExecutionsResponse, TriggerExecutionResponse, TriggerExecutionStatus } from '@simple-agent-manager/shared';
+import type {
+  ListTriggerExecutionsResponse,
+  TriggerExecutionResponse,
+  TriggerExecutionStatus,
+} from '@simple-agent-manager/shared';
 import { TRIGGER_EXECUTION_STATUSES } from '@simple-agent-manager/shared';
 import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -63,12 +67,7 @@ executionRoutes.get('/:triggerId/executions', async (c) => {
   const [trigger] = await db
     .select({ id: schema.triggers.id })
     .from(schema.triggers)
-    .where(
-      and(
-        eq(schema.triggers.id, triggerId),
-        eq(schema.triggers.projectId, projectId)
-      )
-    )
+    .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)))
     .limit(1);
 
   if (!trigger) {
@@ -85,7 +84,9 @@ executionRoutes.get('/:triggerId/executions', async (c) => {
   // Optional status filter
   const statusFilter = c.req.query('status') as TriggerExecutionStatus | undefined;
   if (statusFilter && !(TRIGGER_EXECUTION_STATUSES as readonly string[]).includes(statusFilter)) {
-    throw errors.badRequest(`Invalid status filter. Must be one of: ${TRIGGER_EXECUTION_STATUSES.join(', ')}`);
+    throw errors.badRequest(
+      `Invalid status filter. Must be one of: ${TRIGGER_EXECUTION_STATUSES.join(', ')}`
+    );
   }
 
   const conditions = [eq(schema.triggerExecutions.triggerId, triggerId)];

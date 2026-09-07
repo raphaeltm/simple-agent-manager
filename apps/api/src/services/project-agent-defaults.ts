@@ -10,7 +10,11 @@
  *   task explicit > agent profile > project.agentDefaults[agentType] >
  *   user agent_settings > platform default
  */
-import type { AgentPermissionMode, AgentType, ProjectAgentDefaults } from '@simple-agent-manager/shared';
+import type {
+  AgentPermissionMode,
+  AgentType,
+  ProjectAgentDefaults,
+} from '@simple-agent-manager/shared';
 import { VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
 
 export interface ResolvedProjectAgentDefault {

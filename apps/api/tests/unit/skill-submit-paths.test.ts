@@ -39,7 +39,9 @@ describe('skill submit path source contracts', () => {
     expect(dispatchTask).toContain('resolveSkillProfile');
     expect(dispatchTask).toContain('input.skillId');
     expect(dispatchTask).toContain('skill_id, skill_hint');
-    expect(dispatchTask).toMatch(/resolvedProfile\?\.skillId \?\? null,\s+input\.skillId \?\? null/);
+    expect(dispatchTask).toMatch(
+      /resolvedProfile\?\.skillId \?\? null,\s+input\.skillId \?\? null/
+    );
   });
 
   it('retry_subtask preserves original skill id and hint when creating the retry task', () => {

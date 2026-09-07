@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { analyticsMiddleware } from '../../src/middleware/analytics';
-import { bucketUserAgent,getEventName } from '../../src/middleware/analytics';
+import { bucketUserAgent, getEventName } from '../../src/middleware/analytics';
 
 // ---------------------------------------------------------------------------
 // Event name mapping tests
@@ -39,25 +39,31 @@ describe('bucketUserAgent', () => {
   });
 
   it('detects Chrome desktop', () => {
-    expect(bucketUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
-    )).toBe('chrome-desktop');
+    expect(
+      bucketUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0'
+      )
+    ).toBe('chrome-desktop');
   });
 
   it('detects Chrome mobile', () => {
-    expect(bucketUserAgent(
-      'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Mobile',
-    )).toBe('chrome-mobile');
+    expect(
+      bucketUserAgent('Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120.0 Mobile')
+    ).toBe('chrome-mobile');
   });
 
   it('detects Firefox', () => {
-    expect(bucketUserAgent('Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0')).toBe('firefox-desktop');
+    expect(
+      bucketUserAgent('Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0')
+    ).toBe('firefox-desktop');
   });
 
   it('detects Safari', () => {
-    expect(bucketUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15',
-    )).toBe('safari-desktop');
+    expect(
+      bucketUserAgent(
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15'
+      )
+    ).toBe('safari-desktop');
   });
 
   it('detects curl', () => {
@@ -65,9 +71,11 @@ describe('bucketUserAgent', () => {
   });
 
   it('detects Edge', () => {
-    expect(bucketUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Edg/120.0',
-    )).toBe('edge-desktop');
+    expect(
+      bucketUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Edg/120.0'
+      )
+    ).toBe('edge-desktop');
   });
 
   it('returns other-desktop for unknown desktop browser', () => {
