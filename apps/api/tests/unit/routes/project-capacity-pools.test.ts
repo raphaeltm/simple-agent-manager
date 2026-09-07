@@ -41,20 +41,28 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
+  const actual = await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
 
   return {
     ...actual,
     buildProviderCatalogForCredential: vi.fn(
       async (input: { seed: { provider: CredentialProvider } }) => ({
         offerings: actual.getStaticProviderCatalogOfferings(input.seed.provider),
+        refreshStatus: {
+          succeeded: true,
+          origin: 'static',
+          complete: false,
+          reason: 'static-catalog',
+        },
       })
     ),
   };
 });
 
+const { drizzle } = await import('drizzle-orm/d1');
 const { capacityPoolRoutes } = await import('../../../src/routes/projects/capacity-pools');
+const { readDefaultCapacityPoolSummaries } =
+  await import('../../../src/services/default-capacity-pools');
 
 const CATALOG_ADDITION_BIND_LIMIT_TEST_TIMEOUT_MS = 15_000;
 
@@ -81,6 +89,7 @@ function createEnv(options: { bindLimit?: number } = {}) {
     schema.ccCredentials,
     schema.ccConfigurations,
     schema.ccAttachments,
+    schema.platformSettings,
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
@@ -123,6 +132,24 @@ function requestProjectDefaults(
   init: RequestInit = { method: 'POST' }
 ) {
   return createApp().request(`/api/projects/project-1${pathSuffix}`, init, env);
+}
+
+async function reconcileExistingDefaults(
+  env: Env,
+  input: {
+    userId?: string;
+    projectId?: string;
+    includeInstallation?: boolean;
+  } = {}
+) {
+  await readDefaultCapacityPoolSummaries(drizzle(env.DATABASE, { schema }), {
+    userId: input.userId ?? 'user-1',
+    projectId: input.projectId ?? 'project-1',
+    includeInstallation: input.includeInstallation ?? false,
+    ensure: true,
+    includeDisabled: true,
+    env,
+  });
 }
 
 describe('project capacity pool routes', () => {
@@ -357,13 +384,133 @@ describe('project capacity pool routes', () => {
     );
   });
 
-  it('requires project secret-read capability', async () => {
+  it('lets project readers see only the safe effective summary without secret-read', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');
     seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'viewer' });
     seedCloudCredential(sqlite, {
       id: 'project-cloud-1',
       userId: 'user-1',
+      projectId: 'project-1',
+    });
+    await reconcileExistingDefaults(env);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('project-cloud-1');
+    expect(text).not.toContain('encrypted-token-for-project-cloud-1');
+    const body = JSON.parse(text);
+    expect(body).toMatchObject({
+      effective: null,
+      effectiveScope: null,
+      effectiveSummary: {
+        scope: 'project',
+        state: 'configured-ready',
+        strategy: 'balanced',
+        exhaustionPolicy: 'queue',
+      },
+      defaults: expect.arrayContaining([
+        expect.objectContaining({ scope: 'project', visibility: 'hidden', summary: null }),
+        expect.objectContaining({ scope: 'user', visibility: 'hidden', summary: null }),
+        expect.objectContaining({ scope: 'installation', visibility: 'hidden', summary: null }),
+      ]),
+    });
+    expect(body.effectiveSummary.availableCandidateCount).toBeGreaterThan(0);
+  });
+
+  it('returns installation-funded safe summary to ordinary project members without admin metadata', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'viewer' });
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+    await reconcileExistingDefaults(env, { includeInstallation: true });
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('platform-cloud-canary');
+    expect(text).not.toContain('platform-encrypted-token-for-platform-cloud-canary');
+    const body = JSON.parse(text);
+    expect(body).toMatchObject({
+      effective: null,
+      effectiveScope: null,
+      effectiveSummary: {
+        scope: 'installation',
+        state: 'configured-ready',
+        strategy: 'balanced',
+        exhaustionPolicy: 'queue',
+      },
+    });
+    expect(body.effectiveSummary.availableCandidateCount).toBeGreaterThan(0);
+  });
+
+  it('does not widen safe summary to installation when the project pool is configured-empty', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'viewer' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-canary',
+      userId: 'user-1',
+      projectId: 'project-1',
+      provider: 'vultr',
+    });
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+    await reconcileExistingDefaults(env, { includeInstallation: true });
+    sqlite
+      .prepare(
+        `UPDATE capacity_pool_candidates
+         SET status = 'deleted'
+         WHERE pool_id = 'cap-pool-default:project:project-1'`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `UPDATE capacity_pools
+         SET configuration_state = 'configured-empty'
+         WHERE id = 'cap-pool-default:project:project-1'`
+      )
+      .run();
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('project-cloud-canary');
+    expect(text).not.toContain('platform-cloud-canary');
+    const body = JSON.parse(text);
+    expect(body.effectiveSummary).toEqual({
+      scope: 'project',
+      state: 'configured-empty',
+      strategy: 'balanced',
+      exhaustionPolicy: 'queue',
+      availableCandidateCount: 0,
+      reason: 'configured-default-pool-has-no-active-candidates',
+    });
+  });
+
+  it('still requires project read capability for safe effective summaries', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedUser(sqlite, 'user-2');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-2', role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-2',
       projectId: 'project-1',
     });
 
@@ -373,10 +520,8 @@ describe('project capacity pool routes', () => {
       env
     );
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toMatchObject({
-      error: 'FORBIDDEN',
-    });
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ error: 'NOT_FOUND' });
   });
 
   it('reconciles idempotently through the explicit POST path', async () => {
@@ -483,36 +628,28 @@ describe('project capacity pool routes', () => {
     );
     expect(source).toBeTruthy();
 
-    const remove = await requestProjectDefaults(
-      env,
-      '/capacity-pools/defaults',
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          candidates: [{ id: candidate.id, status: 'deleted' }],
-        }),
-      }
-    );
+    const remove = await requestProjectDefaults(env, '/capacity-pools/defaults', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        candidates: [{ id: candidate.id, status: 'deleted' }],
+      }),
+    });
     expect(remove.status).toBe(200);
 
-    const addBack = await requestProjectDefaults(
-      env,
-      '/capacity-pools/defaults',
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          catalogAdditions: [
-            {
-              sourceId: source.id,
-              provider: candidate.provider,
-              location: candidate.location,
-              providerInstanceType: candidate.providerInstanceType,
-              providerInstanceSku: candidate.providerInstanceSku ?? null,
-            },
-          ],
-        }),
-      }
-    );
+    const addBack = await requestProjectDefaults(env, '/capacity-pools/defaults', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        catalogAdditions: [
+          {
+            sourceId: source.id,
+            provider: candidate.provider,
+            location: candidate.location,
+            providerInstanceType: candidate.providerInstanceType,
+            providerInstanceSku: candidate.providerInstanceSku ?? null,
+          },
+        ],
+      }),
+    });
 
     expect(addBack.status).toBe(200);
     const body = await addBack.json();

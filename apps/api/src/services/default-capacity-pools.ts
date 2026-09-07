@@ -6,8 +6,8 @@ import type {
   CapacityPoolScope,
   CapacitySourceIdentity,
   CredentialProvider,
-  DefaultCapacityPoolSummary,
   DefaultCapacityPoolEffectiveState,
+  DefaultCapacityPoolSummary,
   ProviderInstanceOffering,
   SafeEffectiveCapacityPoolReason,
   SafeEffectiveCapacityPoolSummary,
@@ -17,12 +17,12 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
 } from './capacity-pools';
-import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { ensureCandidatesForSource } from './default-capacity-pool-candidates';
 import {
   defaultCapacitySourceId,
@@ -138,6 +138,10 @@ export interface DefaultCapacityPoolsBackfillOptions {
   env?: Env;
   offeringResolver?: DefaultCapacityPoolOfferingResolver;
   scopeBatchSize?: number;
+  beforeSourcePublication?: (input: {
+    seed: CredentialCapacitySeed;
+    existingSource: schema.CapacitySource | null;
+  }) => Promise<void>;
 }
 
 export async function ensureDefaultCapacityPoolsForExistingCredentials(
@@ -635,6 +639,7 @@ async function ensureDefaultPoolForCredentialSeeds(
       if (existingSource) await disableCapacitySourceAvailability(db, scope, existingSource);
       continue;
     }
+    await options.beforeSourcePublication?.({ seed: materializedSeed, existingSource });
 
     const publication = existingSource
       ? await updateCapacitySourceForSeed(db, existingSource, materializedSeed, scope)
@@ -656,12 +661,7 @@ async function ensureDefaultPoolForCredentialSeeds(
     }
   }
 
-  await disableCapacitySourcesMissingFromSeeds(
-    db,
-    scope,
-    activeSeedKeys,
-    seedSnapshotGeneration
-  );
+  await disableCapacitySourcesMissingFromSeeds(db, scope, activeSeedKeys, seedSnapshotGeneration);
   await reconcileDefaultPoolStatus(db, pool.id, poolGuard);
   return readDefaultPoolSummary(db, scope, { includeDisabled: true });
 }
@@ -967,11 +967,13 @@ async function disableDefaultPoolAvailability(db: Db, poolId: string): Promise<v
       sourceGeneration: schema.capacitySources.sourceGeneration,
     })
     .from(schema.capacitySources)
-    .innerJoin(
-      schema.capacityPoolCandidates,
-      eq(schema.capacityPoolCandidates.capacitySourceId, schema.capacitySources.id)
-    )
-    .where(eq(schema.capacityPoolCandidates.poolId, poolId));
+    .where(
+      and(
+        eq(schema.capacitySources.sourceKind, SOURCE_KIND_CLOUD_PROVIDER),
+        eq(schema.capacitySources.status, ACTIVE_STATUS),
+        ...sourceScopePredicates(scope)
+      )
+    );
 
   const sourcesById = new Map(sourceRows.map((row) => [row.id, row]));
   for (const source of sourcesById.values()) {
@@ -986,6 +988,30 @@ export async function reconcileDefaultPoolStatus(
   poolId: string,
   guard?: PoolPublicationGuard
 ): Promise<void> {
+  const [pool] = await db
+    .select({
+      scope: schema.capacityPools.scope,
+      ownerUserId: schema.capacityPools.ownerUserId,
+      ownerProjectId: schema.capacityPools.ownerProjectId,
+    })
+    .from(schema.capacityPools)
+    .where(eq(schema.capacityPools.id, poolId))
+    .limit(1);
+  const sourceRows = pool
+    ? await db
+        .select({ status: schema.capacitySources.status })
+        .from(schema.capacitySources)
+        .where(
+          and(
+            eq(schema.capacitySources.sourceKind, SOURCE_KIND_CLOUD_PROVIDER),
+            ...sourceScopePredicates({
+              scope: pool.scope as CapacityPoolScope,
+              ownerUserId: pool.ownerUserId,
+              ownerProjectId: pool.ownerProjectId,
+            })
+          )
+        )
+    : [];
   const rows = await db
     .select({
       sourceStatus: schema.capacitySources.status,
@@ -1000,7 +1026,7 @@ export async function reconcileDefaultPoolStatus(
     )
     .where(eq(schema.capacityPoolCandidates.poolId, poolId));
 
-  const activeSourceCount = rows.filter((row) => row.sourceStatus === ACTIVE_STATUS).length;
+  const activeSourceCount = sourceRows.filter((row) => row.status === ACTIVE_STATUS).length;
   const activeCandidateCount = rows.filter(
     (row) => row.sourceStatus === ACTIVE_STATUS && row.candidateStatus === ACTIVE_STATUS
   ).length;
@@ -1013,7 +1039,7 @@ export async function reconcileDefaultPoolStatus(
   ).length;
 
   let configurationState: CapacityPoolConfigurationState;
-  if (rows.length === 0) {
+  if (sourceRows.length === 0 && rows.length === 0) {
     configurationState = 'configured-empty';
   } else if (activeSourceCount === 0) {
     configurationState = 'source-disabled';

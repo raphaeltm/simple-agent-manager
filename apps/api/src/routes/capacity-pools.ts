@@ -66,9 +66,35 @@ function buildUserDefaultPoolResponse(
       },
     ],
     precedence: PRECEDENCE,
-    reconciledScopes: ensure ? ['user', 'installation'] : [],
+    reconciledScopes: ensure ? ['user'] : [],
     policyMutationSupported: true,
   };
+}
+
+async function readUserDefaultPoolSummaries(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  input: {
+    userId: string;
+    ensure: boolean;
+    env: Env;
+  }
+): Promise<DefaultCapacityPoolsEnsureResult> {
+  const summaries = await readDefaultCapacityPoolSummaries(db, {
+    userId: input.userId,
+    includeInstallation: false,
+    ensure: input.ensure,
+    includeDisabled: true,
+    env: input.env,
+  });
+  const fallback = await readDefaultCapacityPoolSummaries(db, {
+    userId: input.userId,
+    includeInstallation: true,
+    ensure: false,
+    includeDisabled: true,
+    env: input.env,
+  });
+
+  return { ...summaries, installation: fallback.installation };
 }
 
 /**
@@ -81,11 +107,9 @@ capacityPoolsRoutes.get('/defaults', async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
   const ensure = parseEnsureQuery(c.req.query('ensure'));
-  const summaries = await readDefaultCapacityPoolSummaries(db, {
+  const summaries = await readUserDefaultPoolSummaries(db, {
     userId,
-    includeInstallation: true,
     ensure,
-    includeDisabled: true,
     env: c.env,
   });
 
@@ -102,11 +126,9 @@ capacityPoolsRoutes.get('/defaults', async (c) => {
 capacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
-  const summaries = await readDefaultCapacityPoolSummaries(db, {
+  const summaries = await readUserDefaultPoolSummaries(db, {
     userId,
-    includeInstallation: true,
     ensure: true,
-    includeDisabled: true,
     env: c.env,
   });
 
@@ -143,10 +165,9 @@ capacityPoolsRoutes.patch('/defaults', async (c) => {
     'Candidate updates must belong to the default capacity pool'
   );
 
-  const summaries = await readDefaultCapacityPoolSummaries(db, {
+  const summaries = await readUserDefaultPoolSummaries(db, {
     userId,
-    includeInstallation: true,
-    includeDisabled: true,
+    ensure: false,
     env: c.env,
   });
   c.header('Cache-Control', 'private, no-store');

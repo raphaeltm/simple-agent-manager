@@ -1,3 +1,4 @@
+import type { CredentialProvider } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,6 +30,25 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => authState.userId,
 }));
 
+vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
+
+  return {
+    ...actual,
+    buildProviderCatalogForCredential: vi.fn(
+      async (input: { seed: { provider: CredentialProvider } }) => ({
+        offerings: actual.getStaticProviderCatalogOfferings(input.seed.provider),
+        refreshStatus: {
+          succeeded: true,
+          origin: 'static',
+          complete: false,
+          reason: 'static-catalog',
+        },
+      })
+    ),
+  };
+});
+
 const { capacityPoolsRoutes } = await import('../../../src/routes/capacity-pools');
 const { adminCapacityPoolsRoutes } = await import('../../../src/routes/admin-capacity-pools');
 
@@ -54,6 +74,7 @@ function createEnv(options: { bindLimit?: number } = {}) {
     schema.ccCredentials,
     schema.ccConfigurations,
     schema.ccAttachments,
+    schema.platformSettings,
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
@@ -315,6 +336,47 @@ describe('default capacity pool routes', () => {
       error: 'FORBIDDEN',
       message: 'Superadmin access required',
     });
+  });
+
+  it('returns installation-funded safe summary to ordinary users without installation metadata', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedUser(sqlite, 'superadmin-1', 'superadmin');
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+
+    authState.userId = 'superadmin-1';
+    authState.role = 'superadmin';
+    const reconcile = await createApp().request(
+      '/api/admin/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconcile.status).toBe(200);
+
+    authState.userId = 'user-1';
+    authState.role = 'user';
+    const res = await createApp().request('/api/capacity-pools/defaults', {}, env);
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('platform-cloud-canary');
+    expect(text).not.toContain('platform-encrypted-token-for-platform-cloud-canary');
+    const body = JSON.parse(text);
+    expect(body).toMatchObject({
+      effective: null,
+      effectiveScope: null,
+      effectiveSummary: {
+        scope: 'installation',
+        state: 'configured-ready',
+        strategy: 'balanced',
+        exhaustionPolicy: 'queue',
+      },
+      defaults: expect.arrayContaining([
+        expect.objectContaining({ scope: 'user', visibility: 'visible', summary: null }),
+        expect.objectContaining({ scope: 'installation', visibility: 'hidden', summary: null }),
+      ]),
+    });
+    expect(body.effectiveSummary.availableCandidateCount).toBeGreaterThan(0);
   });
 
   it('reconciles installation defaults from platform cloud credentials for superadmins', async () => {
