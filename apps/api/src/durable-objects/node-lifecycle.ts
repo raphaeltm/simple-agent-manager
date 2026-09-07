@@ -106,7 +106,13 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
                 SELECT 1 FROM tasks source
                  WHERE source.id = ?
                    AND source.project_id = recovery.project_id
-                   AND source.status NOT IN ('completed', 'failed', 'cancelled')
+                   AND (
+                     source.status NOT IN ('completed', 'failed', 'cancelled')
+                     OR (
+                       source.status = 'cancelled'
+                       AND source.superseded_by_task_id = recovery.id
+                     )
+                   )
               )
               AND EXISTS (
                 SELECT 1 FROM session_snapshots snapshot

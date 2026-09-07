@@ -47,7 +47,7 @@ import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { capacityPlacementSnapshotForTaskStart } from '../../services/placement-resolver';
 import { assertReplacementDeletionConfirmed } from '../../services/replacement-deletion-fence';
 import {
-  isSessionRecoveryTaskAuthorized,
+  isSessionRecoveryTaskAndEventAuthorized,
   SessionRecoveryAuthorityRevokedError,
 } from '../../services/session-recovery-authority';
 import { assertTaskRunnerStartGuard } from '../../services/task-runner-start-guard';
@@ -471,25 +471,30 @@ export class TaskRunner extends DurableObject<Env> {
     // recoverySourceTaskId and require revocable authorization.
     if (!sourceTaskId) return true;
     if (!chatSessionId) return false;
-    const d1Authorized = await isSessionRecoveryTaskAuthorized(this.env.DATABASE, {
-      recoveryTaskId: input.taskId,
-      sourceTaskId,
-      projectId: input.projectId,
-      chatSessionId,
-    });
-    if (!d1Authorized) return false;
     const eventGuard = input.config.projectEventWakeGuard ?? null;
-    if (!eventGuard) return true;
-    const projectDataService = await import('../../services/project-data');
-    return projectDataService.validateProjectEventWakeRecoveryAuthority(
-      this.env as unknown as Env,
-      input.projectId,
+    const projectDataService = eventGuard ? await import('../../services/project-data') : null;
+    return isSessionRecoveryTaskAndEventAuthorized(
+      this.env.DATABASE,
       {
-        chatSessionId,
+        recoveryTaskId: input.taskId,
         sourceTaskId,
-        batchId: eventGuard.batchId,
-        subscriptionId: eventGuard.subscriptionId,
-      }
+        projectId: input.projectId,
+        chatSessionId,
+        projectEventWake: eventGuard,
+      },
+      projectDataService
+        ? (eventInput) =>
+            projectDataService.validateProjectEventWakeRecoveryAuthority(
+              this.env as unknown as Env,
+              eventInput.projectId,
+              {
+                chatSessionId: eventInput.chatSessionId,
+                sourceTaskId: eventInput.sourceTaskId,
+                batchId: eventInput.batchId,
+                subscriptionId: eventInput.subscriptionId,
+              }
+            )
+        : undefined
     );
   }
 
