@@ -13,13 +13,15 @@ import type {
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import { isValidAgentType } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
+import { AppError } from '../../../middleware/error';
+import { requireProjectCapability } from '../../../middleware/project-auth';
 import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
 import { generateBranchName } from '../../../services/branch-name';
 import {
@@ -31,10 +33,15 @@ import { resolveTaskStartPlacementCredentialAttribution } from '../../../service
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
 import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
   normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,
 } from '../../../services/resource-requirements-input';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
+import { resolveSkillProfile } from '../../../services/skills';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -81,13 +88,13 @@ export const dispatchTaskDef: AnthropicToolDef = {
       resourceRequirements: {
         type: 'object',
         description:
-          'Modern workload requirements for this task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. Omitted fields inherit; explicit false is preserved.',
+          'Modern workload requirements for this task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved.',
         properties: {
-          minVcpu: { type: 'number', minimum: 0 },
-          minMemoryGb: { type: 'number', minimum: 0 },
+          minVcpu: { type: 'number', exclusiveMinimum: 0 },
+          minMemoryGb: { type: 'number', exclusiveMinimum: 0 },
           minDiskGb: { type: 'number', minimum: 0 },
           exclusiveNode: { type: 'boolean' },
-          maxCoTenants: { type: 'number', minimum: 0 },
+          maxCoTenants: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
         },
         additionalProperties: true,
       },
@@ -204,15 +211,15 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
   const priority =
     typeof input.priority === 'number' ? Math.min(Math.max(0, Math.round(input.priority)), 10) : 0;
 
-  // ── Verify ownership ──────────────────────────────────────────────────
-  const [project] = await db
-    .select()
-    .from(schema.projects)
-    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
-    .limit(1);
-
-  if (!project) {
-    return { error: 'Project not found or not owned by you.' };
+  // ── Verify current task execution authority ───────────────────────────
+  let project: typeof schema.projects.$inferSelect;
+  try {
+    project = await requireProjectCapability(db, input.projectId, ctx.userId, 'task:write');
+  } catch (err) {
+    if (err instanceof AppError) {
+      return { error: err.message };
+    }
+    throw err;
   }
 
   // ── Resolve parent task lineage ────────────────────────────────────────
@@ -277,13 +284,29 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
           env
         )
       : null;
-  const profileResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.agentProfileResourceRequirementsJson ??
-      (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson)
-  );
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null
-  );
+  let resourceRequirementLayers: ReturnType<typeof collectStoredResourceRequirementLayers>;
+  try {
+    resourceRequirementLayers = mergeResourceRequirementLayers(
+      collectStoredResourceRequirementLayers({
+        skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null,
+        agentProfile:
+          resolvedProfile?.agentProfileResourceRequirementsJson ??
+          (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson),
+        project: project.resourceRequirementsJson,
+      }),
+      {
+        task: resourceRequirements,
+      }
+    );
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      return { error: err.message };
+    }
+    throw err;
+  }
+  const persistedResourceRequirementsJson =
+    firstResourceRequirementLayerJson(resourceRequirementLayers);
+  const taskRunnerResourceRequirements = firstResourceRequirementLayer(resourceRequirementLayers);
 
   const explicitBranch = input.branch?.trim();
   const taskId = ulid();
@@ -311,11 +334,7 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       },
       credentialProjectPolicy: 'current-project-unless-inherited',
       taskModeDefault: 'task',
-      resourceRequirements: {
-        task: resourceRequirements,
-        skill: skillResourceRequirements,
-        agentProfile: profileResourceRequirements,
-      },
+      resourceRequirements: resourceRequirementLayers,
     },
     { env: ctx.env as unknown as Env }
   );
@@ -341,6 +360,12 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
     agentType: resolvedAgentType,
     resolvedReservation,
   } = placement;
+  const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+    layers: resourceRequirementLayers,
+    resolvedReservation,
+    requestedVmSize: resolvedVmSize,
+    requestedVmSizeSource: vmSizeSource,
+  });
 
   // ── Generate title and branch name ────────────────────────────────────
   const titleConfig = getTaskTitleConfig(env);
@@ -364,13 +389,13 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
-     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
+     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
      credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
      created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, ?, ?, 'mcp',
-     ?, ?, ?, ?, ?,
+     ?, ?, ?, ?, ?, ?,
      ?, ?, ?,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
      ?, ?)`
@@ -393,11 +418,8 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       input.missionId?.trim() || null,
       resolvedVmSize,
       vmSizeSource,
-      resourceRequirements
-        ? JSON.stringify(resourceRequirements)
-        : (resolvedProfile?.resourceRequirementsJson ??
-            resolvedProfile?.agentProfileResourceRequirementsJson ??
-            null),
+      persistedResourceRequirementsJson,
+      persistedResourceRequirementPlanJson,
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -511,8 +533,7 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       resolvedReservation,
       capacityPoolSelection,
       vmSizeSource,
-      resourceRequirements:
-        resourceRequirements ?? skillResourceRequirements ?? profileResourceRequirements ?? null,
+      resourceRequirements: taskRunnerResourceRequirements,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

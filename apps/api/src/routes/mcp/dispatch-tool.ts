@@ -16,6 +16,8 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import { AppError } from '../../middleware/error';
+import { requireProjectCapability } from '../../middleware/project-auth';
 import { generateBranchName } from '../../services/branch-name';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
@@ -32,8 +34,16 @@ import {
 } from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  ResourceRequirementsValidationError,
+} from '../../services/resource-requirements-input';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
+import { resolveSkillProfile } from '../../services/skills';
 import { markQueuedTaskFailed } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
@@ -58,6 +68,22 @@ import { buildDispatchTaskSuccessResponse } from './dispatch-task-response';
 import { parseDispatchTaskParams } from './dispatch-tool-params';
 
 export { getConversationTaskModeWarning } from './dispatch-task-response';
+
+async function requireMcpTaskWriteProject(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  projectId: string,
+  userId: string,
+  requestId: string | number | null
+): Promise<typeof schema.projects.$inferSelect | JsonRpcResponse> {
+  try {
+    return await requireProjectCapability(db, projectId, userId, 'task:write');
+  } catch (err) {
+    if (err instanceof AppError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
+}
 
 export async function handleDispatchTask(
   requestId: string | number | null,
@@ -92,6 +118,15 @@ export async function handleDispatchTask(
     resourceRequirements,
   } = parsedParams.parsed;
 
+  const projectOrError = await requireMcpTaskWriteProject(
+    db,
+    tokenData.projectId,
+    tokenData.userId,
+    requestId
+  );
+  if ('jsonrpc' in projectOrError) return projectOrError;
+  const project = projectOrError;
+
   // ── Look up current task to get dispatch depth ──────────────────────────
   const [currentTask] = await db
     .select({
@@ -124,9 +159,9 @@ export async function handleDispatchTask(
   // ── Compute new depth (enforcement deferred until project overrides are resolved) ──
   const newDepth = currentTask.dispatchDepth + 1;
 
-  // ── Parallel: pre-flight checks, project fetch, and AI title ────────────
+  // ── Parallel: pre-flight checks and AI title ────────────────────────────
   const titleConfig = getTaskTitleConfig(env);
-  const [[childCountResult], [activeDispatchedResult], [project], taskTitle] = await Promise.all([
+  const [[childCountResult], [activeDispatchedResult], taskTitle] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)` })
       .from(schema.tasks)
@@ -147,7 +182,6 @@ export async function handleDispatchTask(
           sql`${schema.tasks.dispatchDepth} > 0`
         )
       ),
-    db.select().from(schema.projects).where(eq(schema.projects.id, tokenData.projectId)).limit(1),
     generateTaskTitle(env, description, titleConfig),
   ]);
 
@@ -204,11 +238,6 @@ export async function handleDispatchTask(
     );
   }
 
-  // ── Verify project exists ──────────────────────────────────────────────
-  if (!project) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
-  }
-
   const inheritedAttributionUserId = currentTask.credentialAttributionUserId ?? tokenData.userId;
   const inheritedAttributionSource = (currentTask.credentialAttributionSource ??
     'user') as import('@simple-agent-manager/shared').CredentialSource;
@@ -231,13 +260,29 @@ export async function handleDispatchTask(
           env
         )
       : null;
-  const profileResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.agentProfileResourceRequirementsJson ??
-      (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson)
-  );
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null
-  );
+  let resourceRequirementLayers: ReturnType<typeof collectStoredResourceRequirementLayers>;
+  try {
+    resourceRequirementLayers = mergeResourceRequirementLayers(
+      collectStoredResourceRequirementLayers({
+        skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null,
+        agentProfile:
+          resolvedProfile?.agentProfileResourceRequirementsJson ??
+          (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson),
+        project: project.resourceRequirementsJson,
+      }),
+      {
+        task: resourceRequirements,
+      }
+    );
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
+  const persistedResourceRequirementsJson =
+    firstResourceRequirementLayerJson(resourceRequirementLayers);
+  const taskRunnerResourceRequirements = firstResourceRequirementLayer(resourceRequirementLayers);
 
   // ── Build the task description with references ──────────────────────────
   let fullDescription = description;
@@ -314,11 +359,7 @@ export async function handleDispatchTask(
     },
     credentialProjectPolicy: 'inherited-or-none',
     taskModeDefault: 'task',
-    resourceRequirements: {
-      task: resourceRequirements,
-      skill: skillResourceRequirements,
-      agentProfile: profileResourceRequirements,
-    },
+    resourceRequirements: resourceRequirementLayers,
   };
 
   let preliminaryPlacement: TaskStartPlacement;
@@ -370,6 +411,12 @@ export async function handleDispatchTask(
     agentType: resolvedAgentType,
     resolvedReservation,
   } = placement;
+  const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+    layers: resourceRequirementLayers,
+    resolvedReservation,
+    requestedVmSize: resolvedVmSize,
+    requestedVmSizeSource: vmSizeSource,
+  });
   const isInstantRuntime = placement.runtime.isInstantRuntime;
   const executionRuntime = placement.runtime.executionRuntime;
 
@@ -440,13 +487,13 @@ export async function handleDispatchTask(
     `INSERT INTO tasks (id, project_id, user_id, parent_task_id, title, description,
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
-     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
+     requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
      credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, ?, ?, 'mcp',
-     ?, ?, ?, ?, ?,
+     ?, ?, ?, ?, ?, ?,
      ?, ?, ?,
      ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
      ?, ?
@@ -480,11 +527,8 @@ export async function handleDispatchTask(
       explicitMissionId ?? currentTask.missionId ?? null,
       resolvedVmSize,
       vmSizeSource,
-      resourceRequirements
-        ? JSON.stringify(resourceRequirements)
-        : (resolvedProfile?.resourceRequirementsJson ??
-            resolvedProfile?.agentProfileResourceRequirementsJson ??
-            null),
+      persistedResourceRequirementsJson,
+      persistedResourceRequirementPlanJson,
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -691,8 +735,7 @@ export async function handleDispatchTask(
         resolvedReservation,
         capacityPoolSelection,
         vmSizeSource,
-        resourceRequirements:
-          resourceRequirements ?? skillResourceRequirements ?? profileResourceRequirements ?? null,
+        resourceRequirements: taskRunnerResourceRequirements,
       });
     } catch (err) {
       // TaskRunner DO startup failed — mark task as failed

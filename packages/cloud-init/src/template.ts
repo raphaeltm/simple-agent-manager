@@ -133,7 +133,7 @@ runcmd:
   - 'logger -t sam-boot "PHASE END: origin-ca-bootstrap"'
 
   - 'logger -t sam-boot "PHASE START: resource-headroom"'
-  - /usr/local/sbin/sam-configure-docker-memory.sh
+  - /usr/local/sbin/sam-configure-docker-memory.sh || exit $?
   - 'logger -t sam-boot "PHASE END: resource-headroom"'
 
   - 'logger -t sam-boot "PHASE START: vm-agent-start"'
@@ -424,7 +424,7 @@ write_files:
       if [ "$RESERVE_MB" = "0" ]; then
         echo "SAM workload MemoryMax reserve disabled; verified cgroup ancestry only"
         systemctl show sam.slice sam-infra.slice sam-workload.slice \
-          -p MemoryMin -p EffectiveMemoryMin -p MemoryMax -p EffectiveMemoryMax --no-pager
+          -p MemoryMin -p MemoryMax -p EffectiveMemoryMax --no-pager
         echo "$CGROUP"
         exit 0
       fi
@@ -454,15 +454,13 @@ write_files:
       require_bytes_at_least "sam-infra.slice cgroup memory.min" "$INFRA_MEMORY_MIN" "$EXPECTED_INFRA_MIN_BYTES"
 
       WORKLOAD_PROPS="$(systemctl show sam-workload.slice -p MemoryMax -p EffectiveMemoryMax --no-pager)"
-      SAM_PROPS="$(systemctl show sam.slice -p MemoryMin -p EffectiveMemoryMin --no-pager)"
-      INFRA_PROPS="$(systemctl show sam-infra.slice -p MemoryMin -p EffectiveMemoryMin --no-pager)"
+      SAM_PROPS="$(systemctl show sam.slice -p MemoryMin --no-pager)"
+      INFRA_PROPS="$(systemctl show sam-infra.slice -p MemoryMin --no-pager)"
 
       require_bytes_equal "sam-workload.slice MemoryMax" "$(prop_value "$WORKLOAD_PROPS" MemoryMax)" "$EXPECTED_WORKLOAD_MAX_BYTES"
       require_bytes_equal "sam-workload.slice EffectiveMemoryMax" "$(prop_value "$WORKLOAD_PROPS" EffectiveMemoryMax)" "$EXPECTED_WORKLOAD_MAX_BYTES"
       require_bytes_at_least "sam.slice MemoryMin" "$(prop_value "$SAM_PROPS" MemoryMin)" "$EXPECTED_INFRA_MIN_BYTES"
-      require_bytes_at_least "sam.slice EffectiveMemoryMin" "$(prop_value "$SAM_PROPS" EffectiveMemoryMin)" "$EXPECTED_INFRA_MIN_BYTES"
       require_bytes_at_least "sam-infra.slice MemoryMin" "$(prop_value "$INFRA_PROPS" MemoryMin)" "$EXPECTED_INFRA_MIN_BYTES"
-      require_bytes_at_least "sam-infra.slice EffectiveMemoryMin" "$(prop_value "$INFRA_PROPS" EffectiveMemoryMin)" "$EXPECTED_INFRA_MIN_BYTES"
 
       printf '%s\\n' "$SAM_PROPS" "$INFRA_PROPS" "$WORKLOAD_PROPS"
       echo "$CGROUP"

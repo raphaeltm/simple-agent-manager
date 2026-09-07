@@ -220,3 +220,22 @@ price comparison, and settings provenance gaps. Corrective implementation and
 discriminating regressions are required before these items can be checked off.
 The narrow legacy-boundary test is an initial guard; the complete allocation-writer
 inventory and cross-boundary no-leakage gate remain part of section E.
+
+## Recovery checkpoint — 2026-09-07
+
+The original coordinator runtime was lost before release validation. Its pushed
+integration head `2e6978a8c` was recovered with current main `bef83db2d` onto
+`sam/use-sam-mcp-tools-n1hapw`. Completed resource-form changes through
+`4aa0c61a4` were integrated at `cb374d6f7`; integration is not acceptance.
+
+The original current-authority/direct-allocation, request-persistence, and
+pool-reconciliation agents continue their existing assignments. Their subsequent
+checkpoints require inspection and integrated validation. Form browser validation
+has a dedicated completion assignment because the prior handoff did not exercise
+the actual profile dialog, skill, trigger, task-submit, or profile-wizard surfaces.
+
+Remaining dependent work includes runtime strategy/exhaustion/backpressure and
+recovery integration, native resource/effective-pool diagnostics, comprehensive
+compatibility/upgrade gates, documentation, final specialist reviews, and one
+coordinated staging sweep. Every original criterion remains required. The final
+deliverable is one green **open** PR; no merge is authorized by this request.

@@ -7,6 +7,7 @@ import {
   RESOURCE_RESERVATION_VERSION,
   selectVmSizeForRequirements,
 } from '../../src/constants/resource-defaults';
+import type { ResourceRequirements } from '../../src/types/resource';
 
 describe('resolveResourceReservation', () => {
   it('returns platform defaults when no layers provide requirements', () => {
@@ -157,6 +158,23 @@ describe('resolveResourceReservation', () => {
     ).toThrow('resourceRequirements.maxCoTenants must be a positive safe integer');
   });
 
+  it('requires complete platform defaults', () => {
+    expect(() =>
+      resolveResourceReservation(
+        {},
+        {},
+        {
+          platformDefaults: {
+            minVcpu: 2,
+            minMemoryGb: 4,
+            minDiskGb: 40,
+            exclusiveNode: false,
+          } as Required<ResourceRequirements>,
+        }
+      )
+    ).toThrow('resourceRequirements.maxCoTenants is required');
+  });
+
   it('maps legacy sizes to distinct workload slices with per-field provenance', () => {
     const small = resolveResourceReservation({}, {}, { legacyVmSizes: { task: 'small' } });
     const medium = resolveResourceReservation({}, {}, { legacyVmSizes: { task: 'medium' } });
@@ -279,6 +297,56 @@ describe('resolveResourceReservation', () => {
     expect(result.fieldProvenance?.minDiskGb?.source).toBe('task');
     expect(result.fieldProvenance?.exclusiveNode?.source).toBe('task');
     expect(result.fieldProvenance?.maxCoTenants?.source).toBe('task');
+  });
+
+  it('fills missing fields from the same layer legacy VM size before lower modern layers', () => {
+    const result = resolveResourceReservation(
+      {
+        skill: { minVcpu: 4 },
+        agentProfile: { minMemoryGb: 64, minDiskGb: 500 },
+        project: { exclusiveNode: true },
+      },
+      {
+        skillId: 'skill-id',
+        agentProfileId: 'profile-id',
+        projectId: 'project-id',
+      },
+      {
+        legacyVmSizes: {
+          skill: 'large',
+          'agent-profile': 'small',
+        },
+      }
+    );
+
+    expect(result).toMatchObject({
+      cpuMillis: 4000,
+      memoryMb: 8 * 1024,
+      diskMb: 80 * 1024,
+      exclusiveNode: false,
+      maxCoTenants: 2,
+      source: 'skill',
+      sourceId: 'skill-id',
+    });
+    expect(result.fieldProvenance?.minVcpu).toMatchObject({
+      source: 'skill',
+      value: 4,
+    });
+    expect(result.fieldProvenance?.minMemoryGb).toMatchObject({
+      source: 'skill',
+      value: 8,
+      compatibility: { legacyVmSize: 'large' },
+    });
+    expect(result.fieldProvenance?.minDiskGb).toMatchObject({
+      source: 'skill',
+      value: 80,
+      compatibility: { legacyVmSize: 'large' },
+    });
+    expect(result.fieldProvenance?.exclusiveNode).toMatchObject({
+      source: 'skill',
+      value: false,
+      compatibility: { legacyVmSize: 'large' },
+    });
   });
 
   it('emits bounded integer reservation units with conservative rounding', () => {

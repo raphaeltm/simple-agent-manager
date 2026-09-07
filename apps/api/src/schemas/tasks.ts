@@ -5,6 +5,8 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { ResourceRequirementsSchema } from './resource-requirements';
+
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const VMLocationSchema = v.string();
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
@@ -60,15 +62,6 @@ const DevcontainerConfigNameSchema = v.pipe(
   )
 );
 
-/** Resource requirements — all optional, unset fields inherit from precedence chain. */
-const ResourceRequirementsSchema = v.object({
-  minVcpu: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minMemoryGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minDiskGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  exclusiveNode: v.optional(v.boolean()),
-  maxCoTenants: v.optional(v.pipe(v.number(), v.minValue(0))),
-});
-
 export const SubmitTaskSchema = v.object({
   message: v.string(),
   vmSize: v.optional(VMSizeSchema),
@@ -84,7 +77,7 @@ export const SubmitTaskSchema = v.object({
   agentProfileId: v.optional(v.string()),
   skillId: v.optional(v.string()),
   attachments: v.optional(v.array(TaskAttachmentSchema)),
-  resourceRequirements: v.optional(ResourceRequirementsSchema),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
 });
 
 export const CreateTaskSchema = v.object({
@@ -128,7 +121,7 @@ export const RunTaskSchema = v.object({
   devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
   nodeId: v.optional(v.string()),
   branch: v.optional(v.string()),
-  resourceRequirements: v.optional(ResourceRequirementsSchema),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
 });
 
 export const RequestAttachmentUploadSchema = v.object({

@@ -8,6 +8,9 @@ type SchemaObject = {
   format?: string;
   description?: string;
   enum?: string[];
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number;
   items?: SchemaObject | ReferenceObject;
   properties?: Record<string, SchemaObject | ReferenceObject>;
   required?: string[];
@@ -528,13 +531,28 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       ),
       ResourceRequirements: objectSchema(
         {
-          minVcpu: numberSchema('Minimum vCPU count requested by the workload.'),
-          minMemoryGb: numberSchema('Minimum memory in GiB requested by the workload.'),
-          minDiskGb: numberSchema('Minimum boot disk size in GiB requested by the workload.'),
+          minVcpu: {
+            ...numberSchema('Minimum positive vCPU count requested by the workload.'),
+            exclusiveMinimum: 0,
+          },
+          minMemoryGb: {
+            ...numberSchema('Minimum positive memory in GiB requested by the workload.'),
+            exclusiveMinimum: 0,
+          },
+          minDiskGb: {
+            ...numberSchema(
+              'Minimum boot disk size in GiB requested by the workload. Zero is allowed.'
+            ),
+            minimum: 0,
+          },
           exclusiveNode: booleanSchema('Whether the workload requests exclusive use of its node.'),
-          maxCoTenants: numberSchema(
-            'Compatibility safety metadata preserved for older callers; not a new scheduling control.'
-          ),
+          maxCoTenants: {
+            ...integerSchema(
+              'Compatibility safety metadata preserved for older callers; must be a positive safe integer.'
+            ),
+            minimum: 1,
+            maximum: Number.MAX_SAFE_INTEGER,
+          },
         },
         [],
         true

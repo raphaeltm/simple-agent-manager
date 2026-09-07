@@ -19,6 +19,12 @@ type AdmissionSkipReason = Extract<TriggerSkipReason, 'still_running' | 'concurr
 const TERMINAL_TASK_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
 const TERMINAL_TASK_STATUS_SQL = TASK_TERMINAL_STATUSES.map((status) => `'${status}'`).join(', ');
 
+function resolveTriggerExecutionUserId(
+  trigger: Pick<schema.TriggerRow, 'executionUserId' | 'userId'>
+): string {
+  return trigger.executionUserId ?? trigger.userId;
+}
+
 export type TriggerAdmissionResult =
   | {
       outcome: 'submitted';
@@ -252,11 +258,12 @@ export async function admitAndSubmitTriggerExecution(
 
     await input.beforeSubmit?.(executionId);
 
+    const executionUserId = resolveTriggerExecutionUserId(trigger);
     const submitted = await submitter(env, {
       triggerId: trigger.id,
       triggerExecutionId: executionId,
       projectId: trigger.projectId,
-      userId: trigger.userId,
+      userId: executionUserId,
       renderedPrompt,
       triggeredBy: input.triggeredBy,
       agentProfileId: trigger.agentProfileId,

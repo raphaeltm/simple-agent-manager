@@ -40,6 +40,7 @@ function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
     githubRepoId: 42,
     githubRepoNodeId: 'R_repo',
     defaultVmSize: null,
+    resourceRequirementsJson: null,
     defaultAgentType: 'claude-code',
     defaultWorkspaceProfile: null,
     defaultDevcontainerConfigName: null,
@@ -111,10 +112,14 @@ function makeTrigger(overrides: Partial<schema.TriggerRow> = {}): schema.Trigger
     cronTimezone: 'UTC',
     skipIfRunning: true,
     promptTemplate: 'Check the repo',
+    executionUserId: null,
+    executionUserAuthorizedAt: null,
+    executionUserAuthorizedBy: null,
     agentProfileId: null,
     skillId: null,
     taskMode: 'task',
     vmSizeOverride: null,
+    resourceRequirementsJson: null,
     maxConcurrent: 1,
     lastTriggeredAt: null,
     triggerCount: 0,
@@ -169,6 +174,7 @@ function makeTask(overrides: Partial<schema.Task> = {}): schema.Task {
     requestedVmSizeSource: null,
     provisionedVmSize: null,
     resourceRequirementsJson: null,
+    resourceRequirementPlanJson: null,
     resourceRequirementsSource: null,
     resolvedReservationJson: null,
     placementExplanationJson: null,
@@ -551,7 +557,7 @@ describe('project member offboarding apply', () => {
       [],
       [],
     ];
-    updateReturningRows = [[{ userId: 'departing-user' }]];
+    updateReturningRows = [[{ id: 'trigger-personal' }], [{ userId: 'departing-user' }]];
 
     const response = await apply([
       { resourceKind: 'trigger', resourceId: 'trigger-personal', action: 'reattach_to_project' },
@@ -566,9 +572,18 @@ describe('project member offboarding apply', () => {
         blocksRemoval: false,
       }),
     ]);
-    expect(updatedRows.some((row) => row.table === schema.triggers)).toBe(false);
     expect(updatedRows).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          table: schema.triggers,
+          values: expect.objectContaining({
+            executionUserId: 'owner-user',
+            executionUserAuthorizedBy: 'owner-user',
+            credentialBlockedReason: null,
+            credentialBlockedAt: null,
+            credentialBlockedBy: null,
+          }),
+        }),
         expect.objectContaining({
           table: schema.projectMembers,
           values: expect.objectContaining({ status: 'removed' }),

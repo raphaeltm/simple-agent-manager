@@ -64,6 +64,8 @@ export interface PlacementProfileDefaults {
   skillId?: string | null;
   agentType?: string | null;
   vmSizeOverride?: string | null;
+  skillVmSizeOverride?: string | null;
+  agentProfileVmSizeOverride?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
@@ -76,7 +78,7 @@ export interface PlacementProfileDefaults {
 
 export interface PlacementExplicitOverrides {
   vmSize?: VMSize | null;
-  vmSizeSource?: Extract<ResourceRequirementsSource, 'task' | 'trigger'>;
+  vmSizeSource?: ResourceRequirementsSource;
   provider?: CredentialProvider | string | null;
   vmLocation?: string | null;
   workspaceProfile?: WorkspaceProfile | null;
@@ -112,6 +114,7 @@ export interface TaskStartPlacementInput {
   profileVmSizeSource?: PlacementProfileVmSizeSource;
   resourceRequirements?: ResourceResolutionInput;
   workloadRole?: CapacityWorkloadRole;
+  resolvedReservationOverride?: ResolvedResourceReservation | null;
   placementSettings?: CapacityPoolPlacementSettings | null;
   legacyWorkloadMapping?: Record<VMSize, Required<ResourceRequirements>>;
   validateLocation?: boolean;
@@ -255,4 +258,5 @@ export type PlacementResolutionErrorCode =
   | 'invalid-provider'
   | 'invalid-location'
   | 'invalid-resource-requirements'
+  | 'invalid-credential-attribution'
   | 'no-eligible-capacity-candidate';

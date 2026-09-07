@@ -165,7 +165,7 @@ describe('placement resolver parity', () => {
       taskMode: 'conversation',
       agentType: 'openai-codex',
       credentialLookup: {
-        userId: 'parent-attribution-user',
+        userId: 'submit-user',
         projectId: PROJECT.id,
         provider: 'scaleway',
       },
@@ -178,7 +178,7 @@ describe('placement resolver parity', () => {
     });
     expect(placement.resolvedReservation).toMatchObject({
       cpuMillis: 4000,
-      memoryMb: 16 * 1024,
+      memoryMb: 2048,
       source: 'task',
       sourceId: 'task-submit-1',
     });
@@ -190,7 +190,7 @@ describe('placement resolver parity', () => {
       })
     ).toEqual({
       effectiveProvider: 'scaleway',
-      credentialAttributionUserId: 'parent-attribution-user',
+      credentialAttributionUserId: 'submit-user',
       credentialAttributionProjectId: PROJECT.id,
       credentialAttributionSource: 'project',
     });
@@ -238,7 +238,7 @@ describe('placement resolver parity', () => {
       taskMode: 'task',
       agentType: 'claude-code',
       credentialLookup: {
-        userId: 'root-attribution-user',
+        userId: 'dispatching-user',
         projectId: null,
         provider: 'hetzner',
       },
@@ -248,6 +248,34 @@ describe('placement resolver parity', () => {
         isInstantRuntime: true,
         reason: 'explicit-cf-container',
       },
+    });
+  });
+
+  it('keeps skill legacy vm-size provenance independent from profile vm-size labels', () => {
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'task-submit-1',
+      projectId: PROJECT.id,
+      userId: 'submit-user',
+      project: PROJECT,
+      profile: {
+        ...PROFILE,
+        vmSizeOverride: 'large',
+        skillVmSizeOverride: 'large',
+        agentProfileVmSizeOverride: 'medium',
+      },
+      credentialProjectPolicy: 'current-project',
+      taskModeDefault: 'task',
+      profileVmSizeSource: 'agent-profile',
+      resourceRequirements: {},
+    });
+
+    expect(placement.vmSize).toBe('large');
+    expect(placement.vmSizeSource).toBe('skill');
+    expect(placement.resolvedReservation.source).toBe('skill');
+    expect(placement.resolvedReservation.fieldProvenance?.minVcpu).toMatchObject({
+      source: 'skill',
+      compatibility: expect.objectContaining({ legacyVmSize: 'large' }),
     });
   });
 
@@ -381,7 +409,7 @@ describe('placement resolver parity', () => {
       },
     });
     expect(placement.resolvedReservation).toMatchObject({
-      cpuMillis: 8000,
+      cpuMillis: 1000,
       diskMb: 100 * 1024,
       source: 'trigger',
       sourceId: 'trigger-1',
@@ -472,7 +500,7 @@ describe('placement resolver parity', () => {
       taskMode: 'task',
       agentType: 'openai-codex',
       credentialLookup: {
-        userId: 'child-attribution-user',
+        userId: 'parent-agent-user',
         projectId: PROJECT.id,
         provider: 'hetzner',
       },
@@ -485,7 +513,7 @@ describe('placement resolver parity', () => {
       })
     ).toEqual({
       effectiveProvider: 'hetzner',
-      credentialAttributionUserId: 'child-attribution-user',
+      credentialAttributionUserId: 'parent-agent-user',
       credentialAttributionProjectId: PROJECT.id,
       credentialAttributionSource: 'project',
     });

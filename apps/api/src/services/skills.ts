@@ -2,8 +2,8 @@ import type {
   AgentEffort,
   AgentSkill,
   CreateSkillRequest,
-  ResourceRequirements,
   ResolvedSkillProfile,
+  ResourceRequirements,
   UpdateSkillRequest,
 } from '@simple-agent-manager/shared';
 import {
@@ -302,6 +302,8 @@ export async function resolveSkillProfile(
     [profile.systemPromptAppend, skill?.systemPromptAppend]
       .filter((value): value is string => Boolean(value?.trim()))
       .join('\n\n') || null;
+  const skillEffort = skill?.effort ?? null;
+  const skillRuntime = skill?.runtime ?? null;
 
   return {
     ...profile,
@@ -310,16 +312,18 @@ export async function resolveSkillProfile(
     skillHint: skillNameOrId ?? null,
     agentType: skill?.agentType ?? profile.agentType,
     model: skill?.model ?? profile.model,
-    effort: isAgentEffort(skill?.effort) ? skill.effort : profile.effort,
+    effort: isAgentEffort(skillEffort) ? skillEffort : profile.effort,
     permissionMode: skill?.permissionMode ?? profile.permissionMode,
     systemPromptAppend: promptAppend,
     maxTurns: skill?.maxTurns ?? profile.maxTurns,
     timeoutMinutes: skill?.timeoutMinutes ?? profile.timeoutMinutes,
     vmSizeOverride: skill?.vmSizeOverride ?? profile.vmSizeOverride,
+    skillVmSizeOverride: skill?.vmSizeOverride ?? null,
+    agentProfileVmSizeOverride: profile.vmSizeOverride ?? null,
     provider: skill?.provider ?? profile.provider,
     vmLocation: skill?.vmLocation ?? profile.vmLocation,
     workspaceProfile: skill?.workspaceProfile ?? profile.workspaceProfile,
-    runtime: isAgentProfileRuntime(skill?.runtime) ? skill.runtime : profile.runtime,
+    runtime: isAgentProfileRuntime(skillRuntime) ? skillRuntime : profile.runtime,
     devcontainerConfigName: skill?.devcontainerConfigName ?? profile.devcontainerConfigName,
     taskMode: skill?.taskMode ?? profile.taskMode,
     resourceRequirementsJson: skill

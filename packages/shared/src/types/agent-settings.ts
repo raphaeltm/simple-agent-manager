@@ -309,6 +309,8 @@ export interface ResolvedSkillProfile extends ResolvedAgentProfile {
   skillId: string | null;
   skillName: string | null;
   skillHint: string | null;
+  skillVmSizeOverride?: string | null;
+  agentProfileVmSizeOverride?: string | null;
   resourceRequirementsJson: string | null;
   agentProfileResourceRequirementsJson: string | null;
   defaultProfileId: string | null;

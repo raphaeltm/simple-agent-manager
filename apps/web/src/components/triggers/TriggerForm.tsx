@@ -24,9 +24,11 @@ import { useProjectContext } from '../../pages/ProjectContext';
 import {
   deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
-  hasAnyResourceValue,
+  hasValidationErrors,
   type ResourceRequirementsFormState,
+  type ResourceValidationErrors,
   serializeResourceRequirements,
+  validateResourceState,
 } from '../resource-requirements';
 import { GitHubTriggerFields } from './GitHubTriggerFields';
 import { SchedulePicker } from './SchedulePicker';
@@ -103,6 +105,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
   const [agentProfileId, setAgentProfileId] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
   const [, setCronDescription] = useState('');
 
   // Agent profiles for the dropdown. Shared with the profiles page, both task forms
@@ -256,6 +259,13 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
       return;
     }
 
+    const resErrors = validateResourceState(resourceReqs);
+    setResourceErrors(resErrors);
+    if (hasValidationErrors(resErrors)) {
+      toast.error('Fix resource requirement errors before saving');
+      return;
+    }
+
     setSaving(true);
     try {
       let credential: WebhookCredential | undefined;
@@ -268,7 +278,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
           promptTemplate,
           skipIfRunning,
           maxConcurrent,
-          vmSizeOverride: hasAnyResourceValue(resourceReqs) ? null : vmSizeOverride || null,
+          vmSizeOverride: vmSizeOverride || null,
           resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
           taskMode,
           agentProfileId: agentProfileId || null,
@@ -294,7 +304,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
           promptTemplate,
           skipIfRunning,
           maxConcurrent,
-          vmSizeOverride: hasAnyResourceValue(resourceReqs) ? undefined : vmSizeOverride || undefined,
+          vmSizeOverride: vmSizeOverride || undefined,
           resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
           taskMode,
           agentProfileId: agentProfileId || undefined,
@@ -525,11 +535,12 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
             onOpenChange={setAdvancedOpen}
             onSkipIfRunningChange={setSkipIfRunning}
             onTaskModeChange={setTaskMode}
-            onResourceReqsChange={setResourceReqs}
+            onResourceReqsChange={(next) => { setResourceReqs(next); setResourceErrors({}); }}
             onClearLegacy={() => setVmSizeOverride('')}
             open={advancedOpen}
             profiles={profiles}
             resourceReqs={resourceReqs}
+            resourceErrors={resourceErrors}
             skipIfRunning={skipIfRunning}
             sourceType={sourceType}
             taskMode={taskMode}

@@ -22,6 +22,13 @@ import {
   assertReplacementDeletionConfirmed,
   WorkspaceDeletionUnconfirmedError,
 } from '../../services/replacement-deletion-fence';
+import {
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from '../../services/resource-requirements-input';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
@@ -206,6 +213,32 @@ export async function handleRetrySubtask(
     inheritedCredentialAttributionSource === 'project'
       ? (childTask.credentialAttributionProjectId ?? childTask.projectId)
       : null;
+  const childResourcePlan = (() => {
+    try {
+      return readPersistedTaskResourcePlan({
+        taskId: childTask.id,
+        triggerId: childTask.triggerId,
+        skillId: childTask.skillId,
+        agentProfileId: childTask.agentProfileHint,
+        projectId: childTask.projectId,
+        userId: childTask.userId,
+        resourceRequirementPlanJson: childTask.resourceRequirementPlanJson,
+        resourceRequirementsJson: childTask.resourceRequirementsJson,
+        resourceRequirementsSource: childTask.resourceRequirementsSource,
+        resolvedReservationJson: childTask.resolvedReservationJson,
+        requestedVmSize: childTask.requestedVmSize,
+        requestedVmSizeSource: childTask.requestedVmSizeSource,
+      });
+    } catch (err) {
+      if (err instanceof ResourceRequirementsValidationError) {
+        return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+      }
+      throw err;
+    }
+  })();
+  if ('jsonrpc' in childResourcePlan) {
+    return childResourcePlan;
+  }
 
   const placement = (() => {
     try {
@@ -223,7 +256,14 @@ export async function handleRetrySubtask(
         },
         credentialProjectPolicy: 'inherited-or-none',
         taskModeDefault: 'task',
-        resourceRequirements: {},
+        explicit: childResourcePlan.requestedVmSize
+          ? {
+              vmSize: childResourcePlan.requestedVmSize,
+              vmSizeSource: childResourcePlan.requestedVmSizeSource ?? 'task',
+            }
+          : undefined,
+        resourceRequirements: childResourcePlan.layers,
+        resolvedReservationOverride: childResourcePlan.resolvedReservation,
       });
     } catch (err) {
       if (err instanceof PlacementResolutionError) {
@@ -283,6 +323,16 @@ export async function handleRetrySubtask(
     agentType: resolvedAgentType,
     resolvedReservation,
   } = placement;
+  const persistedResourceRequirementsJson = firstResourceRequirementLayerJson(
+    childResourcePlan.layers
+  );
+  const taskRunnerResourceRequirements = firstResourceRequirementLayer(childResourcePlan.layers);
+  const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+    layers: childResourcePlan.layers,
+    resolvedReservation,
+    requestedVmSize: resolvedVmSize,
+    requestedVmSizeSource: vmSizeSource,
+  });
 
   const titleConfig = getTaskTitleConfig(env);
   const taskTitle = await generateTaskTitle(env, replacementDescription, titleConfig);
@@ -316,6 +366,9 @@ export async function handleRetrySubtask(
     requestedVmSize: resolvedVmSize,
     requestedVmSizeSource: vmSizeSource,
     agentProfileHint: childTask.agentProfileHint,
+    skillId: childTask.skillId,
+    resourceRequirementsJson: persistedResourceRequirementsJson,
+    resourceRequirementPlanJson: persistedResourceRequirementPlanJson,
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
     credentialAttributionUserId,
@@ -422,6 +475,7 @@ export async function handleRetrySubtask(
       resolvedReservation,
       capacityPoolSelection,
       vmSizeSource,
+      resourceRequirements: taskRunnerResourceRequirements,
       retrySourceTaskId: childTaskId,
     });
   } catch (err) {

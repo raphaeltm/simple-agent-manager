@@ -42,10 +42,15 @@ import {
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
 import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
   normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
+import { resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import type { TaskTitleConfig } from '../../services/task-title';
 import { generateTaskTitle, getTaskTitleConfig, truncateTitle } from '../../services/task-title';
@@ -145,7 +150,7 @@ submitRoutes.post(
     const body = c.req.valid('json');
     const taskResourceRequirements = (() => {
       try {
-        return body.resourceRequirements === undefined
+        return body.resourceRequirements === undefined || body.resourceRequirements === null
           ? undefined
           : normalizeResourceRequirementsInput(body.resourceRequirements);
       } catch (err) {
@@ -300,13 +305,36 @@ submitRoutes.post(
       body.agentProfileId || body.skillId
         ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
         : null;
-    const profileResourceRequirements = parseSkillResourceRequirementsJson(
-      resolvedProfile?.agentProfileResourceRequirementsJson ??
-        (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson)
-    );
-    const skillResourceRequirements = parseSkillResourceRequirementsJson(
-      resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null
-    );
+    const {
+      resourceRequirementLayers,
+      persistedResourceRequirementsJson,
+      taskRunnerResourceRequirements,
+    } = (() => {
+      try {
+        const layers = mergeResourceRequirementLayers(
+          collectStoredResourceRequirementLayers({
+            skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null,
+            agentProfile:
+              resolvedProfile?.agentProfileResourceRequirementsJson ??
+              (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson),
+            project: project.resourceRequirementsJson,
+          }),
+          {
+            task: taskResourceRequirements,
+          }
+        );
+        return {
+          resourceRequirementLayers: layers,
+          persistedResourceRequirementsJson: firstResourceRequirementLayerJson(layers),
+          taskRunnerResourceRequirements: firstResourceRequirementLayer(layers),
+        };
+      } catch (err) {
+        if (err instanceof ResourceRequirementsValidationError) {
+          throw errors.badRequest(err.message);
+        }
+        throw err;
+      }
+    })();
 
     const placement = (() => {
       try {
@@ -334,11 +362,7 @@ submitRoutes.post(
           },
           credentialProjectPolicy: 'current-project-unless-inherited',
           taskModeDefault: 'workspace-profile',
-          resourceRequirements: {
-            task: taskResourceRequirements,
-            skill: skillResourceRequirements,
-            agentProfile: profileResourceRequirements,
-          },
+          resourceRequirements: resourceRequirementLayers,
         });
       } catch (err) {
         if (err instanceof PlacementResolutionError) {
@@ -397,6 +421,12 @@ submitRoutes.post(
       resolvedReservation,
       agentType,
     } = placement;
+    const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+      layers: resourceRequirementLayers,
+      resolvedReservation,
+      requestedVmSize: vmSize,
+      requestedVmSizeSource: vmSizeSource,
+    });
     const projectAgentDefaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
 
     // Start new task work on its generated output branch so VM-agent completion
@@ -437,11 +467,8 @@ submitRoutes.post(
       outputBranch: branchName,
       requestedVmSize: vmSize,
       requestedVmSizeSource: vmSizeSource,
-      resourceRequirementsJson: taskResourceRequirements
-        ? JSON.stringify(taskResourceRequirements)
-        : (resolvedProfile?.resourceRequirementsJson ??
-          resolvedProfile?.agentProfileResourceRequirementsJson ??
-          null),
+      resourceRequirementsJson: persistedResourceRequirementsJson,
+      resourceRequirementPlanJson: persistedResourceRequirementPlanJson,
       resourceRequirementsSource: resolvedReservation.source,
       resolvedReservationJson: JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -629,11 +656,7 @@ submitRoutes.post(
           nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
           warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
         },
-        resourceRequirements:
-          taskResourceRequirements ??
-          skillResourceRequirements ??
-          profileResourceRequirements ??
-          null,
+        resourceRequirements: taskRunnerResourceRequirements,
         resolvedReservation,
         capacityPoolSelection,
         vmSizeSource,
