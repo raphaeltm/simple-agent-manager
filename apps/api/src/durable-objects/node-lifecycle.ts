@@ -167,7 +167,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   ): Promise<NodeLifecycleState> {
     // Resolve node class FIRST, before reading DO state. isUserOwnedNode does a D1 fetch (external
     // I/O), which opens the DO input gate. If it ran BETWEEN the state read and the storage.put
-    // below, a concurrent tryClaim (fired by node-selector's warm-node claim on every new task)
+    // below, a concurrent tryClaim (fired by the TaskRunner's warm-node claim on every new task)
     // could interleave during that fetch and then be silently stomped by our blind overwrite —
     // leaving the node stuck 'stopped' while serving a live workspace. Fetching it before the read
     // keeps the read→put critical section free of external I/O so the input gate serializes it,

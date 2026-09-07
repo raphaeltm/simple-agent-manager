@@ -18,10 +18,6 @@ describe('warm node pooling lifecycle integration', () => {
     resolve(process.cwd(), 'src/services/task-runner.ts'),
     'utf8'
   );
-  const selectorFile = readFileSync(
-    resolve(process.cwd(), 'src/services/node-selector.ts'),
-    'utf8'
-  );
   const doFile = readFileSync(
     resolve(process.cwd(), 'src/durable-objects/node-lifecycle.ts'),
     'utf8'
@@ -65,14 +61,6 @@ describe('warm node pooling lifecycle integration', () => {
   });
 
   describe('flow: new task → claim warm node → fast startup', () => {
-    it('selectNodeForTaskRun queries warm nodes in D1', () => {
-      expect(selectorFile).toContain('isNotNull(schema.nodes.warmSince)');
-    });
-
-    it('selectNodeForTaskRun calls nodeLifecycle.tryClaim', () => {
-      expect(selectorFile).toContain('nodeLifecycle.tryClaim');
-    });
-
     it('service.tryClaim calls DO.tryClaim via stub', () => {
       expect(serviceFile).toContain('stub.tryClaim(taskId)');
     });
