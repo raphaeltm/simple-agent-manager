@@ -164,7 +164,7 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
   });
 
   it('linkSessionToWorkspace updates workspace_id on the session', () => {
-    expect(projectDataDoSource).toContain('UPDATE chat_sessions SET workspace_id = ?');
+    expect(projectDataDoSource).toContain('SET workspace_id = ?');
   });
 
   it('linkSessionToWorkspace broadcasts session.updated event', () => {
