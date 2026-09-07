@@ -61,6 +61,50 @@ describe('runtime allocation native plan reader', () => {
     ).toEqual({ instanceType: 'cx42' });
   });
 
+  it('carries the installation image default inside native payloads when the candidate omits image', () => {
+    const legacyConfig: VMConfig = {
+      name: 'sam-node',
+      size: 'medium',
+      instanceType: 'legacy-medium-alias',
+      location: 'nbg1',
+      userData: '#cloud-config',
+      image: 'docker-ce',
+    };
+
+    const config = applyNativePlanToVmConfig(legacyConfig, {
+      providerInstanceType: 'cx42',
+      providerInstanceVcpuCount: 8,
+      providerInstanceMemoryMb: 16384,
+      providerInstanceDiskGb: 160,
+    });
+
+    expect(config.native).toMatchObject({
+      instanceType: 'cx42',
+      image: 'docker-ce',
+      resources: { vcpuCount: 8, memoryMb: 16384, diskGb: 160 },
+    });
+    expect(config.image).toBeUndefined();
+  });
+
+  it('keeps an explicit candidate image ahead of the installation image default', () => {
+    const config = applyNativePlanToVmConfig(
+      {
+        name: 'sam-node',
+        size: 'medium',
+        location: 'nbg1',
+        userData: '#cloud-config',
+        image: 'docker-ce',
+      },
+      {
+        providerInstanceType: 'cx42',
+        providerInstanceImage: 'ubuntu-24.04',
+      }
+    );
+
+    expect(config.native?.image).toBe('ubuntu-24.04');
+    expect(config.image).toBeUndefined();
+  });
+
   it('rejects invalid concrete native plan fields before paid provider calls', () => {
     expect(() =>
       assertNativePlanConcrete('hetzner', {

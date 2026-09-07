@@ -3,9 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { provisionNode } from '../../../src/services/nodes';
 
-const { logError, persistError } = vi.hoisted(() => ({
+const { logError, persistError, deleteNodeResourcesStrict } = vi.hoisted(() => ({
   logError: vi.fn(),
   persistError: vi.fn(),
+  deleteNodeResourcesStrict: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
@@ -25,6 +26,25 @@ interface RecordedOp {
 const ops: RecordedOp[] = [];
 const nodeRows: unknown[] = [];
 let updateBarrier: Promise<void> | undefined;
+let nextWriteChanges: number[] = [];
+
+function d1Result(changes = 1) {
+  return { meta: { changes } };
+}
+
+function writeResultFor(val?: Record<string, unknown>) {
+  const result = d1Result(nextWriteChanges.shift() ?? 1);
+  const run = () => {
+    const waitsForTerminalBoundary =
+      !!val && 'status' in val && 'providerInstanceId' in val && updateBarrier;
+    return waitsForTerminalBoundary ? updateBarrier.then(() => result) : Promise.resolve(result);
+  };
+  return {
+    run,
+    then: (resolve: (value: unknown) => unknown, reject: (reason?: unknown) => unknown) =>
+      run().then(resolve, reject),
+  };
+}
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -40,27 +60,21 @@ vi.mock('drizzle-orm/d1', () => ({
       set: (val: Record<string, unknown>) => ({
         where: () => {
           ops.push({ kind: 'update', set: val });
-          // The provider-identity persistence write lands between createVM and
-          // the terminal write and must NOT consume the barrier: the
-          // cancellation tests below target the TERMINAL write boundary.
-          // Only the terminal writes persist credential attribution, so
-          // `cloudProvider` is the discriminator (the identity write sets just
-          // providerInstanceId/ipAddress/status/updatedAt).
-          if (!('cloudProvider' in val)) return Promise.resolve();
-          return updateBarrier ?? Promise.resolve();
+          return writeResultFor(val);
         },
       }),
     }),
     delete: () => ({
       where: () => {
         ops.push({ kind: 'delete' });
-        return Promise.resolve();
+        return writeResultFor();
       },
     }),
   }),
 }));
 
 const createVM = vi.fn();
+const deleteVM = vi.fn();
 const createProviderForUser = vi.fn();
 vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: (...args: unknown[]) => createProviderForUser(...args),
@@ -113,6 +127,10 @@ vi.mock('../../../src/services/observability', () => ({
   persistError: (...args: unknown[]) => persistError(...args),
 }));
 
+vi.mock('../../../src/services/strict-node-deletion', () => ({
+  deleteNodeResourcesStrict: (...args: unknown[]) => deleteNodeResourcesStrict(...args),
+}));
+
 function capacityError(): ProviderError {
   return new ProviderError('hetzner', 503, 'No large capacity', {
     providerCode: 'resource_unavailable',
@@ -128,7 +146,16 @@ function invalidConfigError(): ProviderError {
 }
 
 const ENV = {
-  DATABASE: {},
+  DATABASE: {
+    prepare: (query: string) => ({
+      bind: (..._params: unknown[]) => ({
+        first: async () => {
+          if (query.includes('SELECT 1 AS ok')) return { ok: 1 };
+          return nodeRowForAuthorityGuard(nodeRows[0]);
+        },
+      }),
+    }),
+  },
   OBSERVABILITY_DATABASE: {},
   BASE_DOMAIN: 'example.com',
   ENVIRONMENT: 'production',
@@ -141,35 +168,100 @@ const ENV = {
   SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT: '750ms',
 } as unknown as Parameters<typeof provisionNode>[1];
 
+function observedHardware() {
+  return {
+    serverType: { source: 'observed' as const, value: 'cx22' },
+    resources: {
+      source: 'observed' as const,
+      value: { vcpuCount: 2, memoryMb: 4096, diskGb: 80 },
+    },
+  };
+}
+
+function vmResult(ip: string | null = '203.0.113.10') {
+  return {
+    id: 'provider-vm-1',
+    name: 'workspace-node',
+    ip,
+    status: 'running',
+    serverType: 'cx22',
+    createdAt: '2026-08-12T00:00:00.000Z',
+    labels: {},
+    observedHardware: observedHardware(),
+  };
+}
+
+function nodeRowForAuthorityGuard(row: unknown) {
+  if (!row || typeof row !== 'object') return null;
+  const value = row as Record<string, unknown>;
+  return {
+    id: value.id,
+    user_id: value.userId,
+    status: value.status,
+    runtime: value.runtime ?? 'vm',
+    node_class: value.nodeClass ?? 'managed',
+    node_role: value.nodeRole ?? 'workspace',
+    workload_role: value.workloadRole ?? 'workspace',
+    cloud_provider: value.cloudProvider ?? null,
+    vm_location: value.vmLocation ?? null,
+    capacity_pool_id: value.capacityPoolId ?? null,
+    capacity_pool_scope: value.capacityPoolScope ?? null,
+    capacity_pool_revision: value.capacityPoolRevision ?? null,
+    capacity_source_id: value.capacitySourceId ?? null,
+    capacity_source_generation: value.capacitySourceGeneration ?? null,
+    capacity_source_external_ref: value.capacitySourceExternalRef ?? null,
+    capacity_pool_candidate_id: value.capacityPoolCandidateId ?? null,
+    capacity_pool_project_id: value.capacityPoolProjectId ?? null,
+    placement_credential_source: value.placementCredentialSource ?? null,
+    placement_credential_reference: value.placementCredentialReference ?? null,
+    placement_credential_version: value.placementCredentialVersion ?? null,
+    provider_instance_type: value.providerInstanceType ?? null,
+    provider_instance_vcpu_count: value.providerInstanceVcpuCount ?? null,
+    provider_instance_memory_mb: value.providerInstanceMemoryMb ?? null,
+    provider_instance_disk_gb: value.providerInstanceDiskGb ?? null,
+    provider_instance_boot_disk_size_gb: value.providerInstanceBootDiskSizeGb ?? null,
+    provider_instance_image: value.providerInstanceImage ?? null,
+    provider_instance_architecture: value.providerInstanceArchitecture ?? null,
+    provider_instance_price_display: value.providerInstancePriceDisplay ?? null,
+    provider_instance_price_currency: value.providerInstancePriceCurrency ?? null,
+    provider_instance_price_monthly_cents: value.providerInstancePriceMonthlyCents ?? null,
+    provider_instance_price_hourly_micros: value.providerInstancePriceHourlyMicros ?? null,
+    placement_explanation_json: value.placementExplanationJson ?? null,
+  };
+}
+
 beforeEach(() => {
   ops.length = 0;
   nodeRows.length = 0;
   updateBarrier = undefined;
+  nextWriteChanges = [];
   vi.clearAllMocks();
   nodeRows.push({
     id: 'node-1',
     userId: 'user-1',
     name: 'workspace-node',
-    status: 'pending',
+    status: 'creating',
     nodeRole: 'workspace',
     nodeClass: 'managed',
+    runtime: 'vm',
+    runtimeIncarnationId: 'runtime-1',
     vmSize: 'large',
     vmLocation: 'fsn1',
     cloudProvider: 'hetzner',
+    providerInstanceId: null,
   });
   createProviderForUser.mockResolvedValue({
-    provider: { createVM },
+    provider: { createVM, deleteVM },
     providerName: 'hetzner',
     credentialSource: 'user',
   });
-  createVM.mockResolvedValue({
-    id: 'provider-vm-1',
-    name: 'workspace-node',
-    ip: '203.0.113.10',
-    status: 'running',
-    serverType: 'cx22',
-    createdAt: '2026-08-12T00:00:00.000Z',
-    labels: {},
+  createVM.mockResolvedValue(vmResult());
+  deleteVM.mockResolvedValue(undefined);
+  deleteNodeResourcesStrict.mockResolvedValue({
+    providerVm: 'deleted',
+    runtimeTerminationConfirmedAt: new Date().toISOString(),
+    runtimeIncarnationId: 'runtime-2',
+    providerInstanceId: 'provider-vm-1',
   });
   createNodeBackendDNSRecord.mockResolvedValue('dns-record-id');
 });
@@ -198,8 +290,9 @@ describe('provisionNode backend DNS records', () => {
 
     expect(createVM).toHaveBeenCalledWith(
       expect.objectContaining({
-        size: 'large',
-        instanceType: 'cx42',
+        size: undefined,
+        instanceType: undefined,
+        native: { instanceType: 'cx42' },
       })
     );
   });
@@ -466,21 +559,27 @@ describe('provisionNode rethrowProviderError', () => {
       updateBarrier = new Promise<void>((resolve) => {
         releaseUpdate = resolve;
       });
-      return { id: 'provider-vm-1', ip: vmIp };
+      return vmResult(vmIp);
     });
 
     const provisioning = provisionNode('node-1', ENV, undefined, {
       signal: controller.signal,
     });
-    // ops[1] is the provider-identity persistence write added alongside the
-    // recovery-authority boundary; ops[2] is the terminal write under test.
+    // ops[0] claims the provider identity before the paid call, ops[1] records
+    // the returned provider instance without lifecycle mutation, and ops[2] is
+    // the terminal write under test.
     await vi.waitFor(() => expect(ops).toHaveLength(3));
     expect(createVM).toHaveBeenCalledTimes(1);
+    expect(ops[0]).toEqual({
+      kind: 'update',
+      set: expect.objectContaining({ cloudProvider: 'hetzner' }),
+    });
     expect(ops[1]).toEqual({
       kind: 'update',
-      set: expect.objectContaining({ providerInstanceId: 'provider-vm-1', status: 'creating' }),
+      set: expect.objectContaining({ providerInstanceId: 'provider-vm-1' }),
     });
     expect(ops[1].set).not.toHaveProperty('cloudProvider');
+    expect(ops[1].set).not.toHaveProperty('status');
     expect(ops[2]).toEqual({
       kind: 'update',
       set: expect.objectContaining(expectedTerminalSet),
@@ -528,6 +627,67 @@ describe('provisionNode rethrowProviderError', () => {
         kind: 'update',
         set: expect.objectContaining({ providerInstanceId: 'provider-vm-1' }),
       })
+    );
+  });
+
+  it('cleans the exact created VM when lifecycle changes before provider identity can be recorded', async () => {
+    nextWriteChanges = [1, 0, 0];
+
+    await expect(
+      provisionNode('node-1', ENV, undefined, { rethrowProviderError: true })
+    ).rejects.toThrow('Node lifecycle changed before provider identity could be recorded');
+
+    expect(createVM).toHaveBeenCalledOnce();
+    expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-1', 'user-1', ENV, {
+      cleanupDns: false,
+      expectedRuntime: {
+        userId: 'user-1',
+        runtime: 'vm',
+        providerInstanceId: 'provider-vm-1',
+        runtimeIncarnationId: expect.any(String),
+      },
+    });
+    expect(deleteVM).not.toHaveBeenCalled();
+    expect(ops.some((op) => op.set?.status === 'running')).toBe(false);
+    expect(ops[1]).toEqual({
+      kind: 'update',
+      set: expect.objectContaining({ providerInstanceId: 'provider-vm-1' }),
+    });
+    expect(ops[1].set).not.toHaveProperty('status');
+  });
+
+  it('surfaces cleanup failure after authority is revoked after provider allocation', async () => {
+    const authority = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('source revoked'));
+    deleteNodeResourcesStrict.mockRejectedValueOnce(new Error('strict cleanup failed'));
+    deleteVM.mockRejectedValueOnce(new Error('direct cleanup failed'));
+
+    await expect(
+      provisionNode('node-1', ENV, undefined, {
+        rethrowProviderError: true,
+        assertExternalMutationAuthority: authority,
+      })
+    ).rejects.toThrow('source revoked');
+
+    expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-1', 'user-1', ENV, {
+      cleanupDns: false,
+      expectedRuntime: {
+        userId: 'user-1',
+        runtime: 'vm',
+        providerInstanceId: 'provider-vm-1',
+        runtimeIncarnationId: expect.any(String),
+      },
+    });
+    expect(deleteVM).toHaveBeenCalledWith('provider-vm-1');
+    expect(logError).toHaveBeenCalledWith(
+      'node_provisioning.authority_revoked_cleanup_failed',
+      expect.objectContaining({ nodeId: 'node-1', providerInstanceId: 'provider-vm-1' })
+    );
+    expect(logError).toHaveBeenCalledWith(
+      'node_provisioning.created_vm_direct_cleanup_failed',
+      expect.objectContaining({ nodeId: 'node-1', providerInstanceId: 'provider-vm-1' })
     );
   });
 

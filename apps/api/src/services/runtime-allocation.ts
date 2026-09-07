@@ -48,9 +48,11 @@ export function nativePlanFromRow(row: NativePlanRow): NativeVMConfig | undefine
 export function applyNativePlanToVmConfig<T extends VMConfig>(config: T, row: NativePlanRow): T {
   const native = nativePlanFromRow(row);
   if (!native) return config;
+  const nativeWithDefaults =
+    config.image && !native.image ? { ...native, image: config.image } : native;
   return {
     ...config,
-    native,
+    native: nativeWithDefaults,
     instanceType: undefined,
     size: undefined,
     image: undefined,

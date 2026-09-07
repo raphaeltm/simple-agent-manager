@@ -12,6 +12,7 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
+import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
   ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
   DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT,
@@ -73,8 +74,16 @@ export async function reserveWorkspacePlacement(
     typeof policyOrMaxWorkspaces === 'number'
       ? legacyWorkspaceAdmissionPolicy(policyOrMaxWorkspaces)
       : policyOrMaxWorkspaces;
-  const capacityPredicate = buildCapacityPlacementPredicate(input);
+  const capacityPredicate = buildPlacementAuthoritySqlPredicate({
+    userId: input.userId,
+    projectId: input.projectId,
+    nodeRole: 'workspace',
+    workloadRole: 'workspace',
+    capacityPlacementSnapshot: input.capacityPlacementSnapshot ?? null,
+    requireProjectMembership: true,
+  });
   const requestedReservationJson = JSON.stringify(resolvedReservation);
+  const admissionNow = new Date().toISOString();
   const result = await database
     .prepare(
       `WITH
@@ -87,10 +96,36 @@ export async function reserveWorkspacePlacement(
              ELSE NULL
            END AS metrics_json,
            CASE
+             WHEN n.last_metrics IS NOT NULL AND NOT json_valid(n.last_metrics)
+             THEN 1
+             ELSE 0
+           END AS metrics_malformed,
+           CASE
              WHEN n.last_heartbeat_at IS NOT NULL
              THEN CAST((julianday(?) - julianday(n.last_heartbeat_at)) * 86400000 AS INTEGER)
              ELSE NULL
-           END AS metrics_age_ms
+           END AS metrics_age_ms,
+           CASE
+             WHEN n.provider_instance_id IS NOT NULL
+              AND typeof(n.observed_provider_instance_vcpu_count) = 'integer'
+              AND n.observed_provider_instance_vcpu_count > 0
+             THEN n.observed_provider_instance_vcpu_count
+             ELSE NULL
+           END AS trusted_provider_instance_vcpu_count,
+           CASE
+             WHEN n.provider_instance_id IS NOT NULL
+              AND typeof(n.observed_provider_instance_memory_mb) = 'integer'
+              AND n.observed_provider_instance_memory_mb > 0
+             THEN n.observed_provider_instance_memory_mb
+             ELSE NULL
+           END AS trusted_provider_instance_memory_mb,
+           CASE
+             WHEN n.provider_instance_id IS NOT NULL
+              AND typeof(n.observed_provider_instance_disk_gb) = 'integer'
+              AND n.observed_provider_instance_disk_gb > 0
+             THEN n.observed_provider_instance_disk_gb
+             ELSE NULL
+           END AS trusted_provider_instance_disk_gb
          FROM nodes n
          WHERE n.id = ?
            AND n.user_id = ?
@@ -166,35 +201,30 @@ export async function reserveWorkspacePlacement(
          AND (active.min_max_co_tenants IS NULL OR active.active_count < active.min_max_co_tenants)
          AND active.exclusive_count = 0
          AND (requested.exclusive_node = 0 OR active.active_count = 0)
-         AND ${validOrUnknownHardwareCapacitySql()}
+         AND ${trustedHardwareCapacitySql()}
          AND ${finalMeasuredPressurePredicateSql()}
          AND (
            (
              active.active_count = 0
-             AND (n.provider_instance_vcpu_count IS NULL
-               OR (n.provider_instance_vcpu_count * 1000 * policy.cpu_share_budget_percent) / 100
-                 >= requested.cpu_millis)
-             AND (n.provider_instance_memory_mb IS NULL
-               OR n.provider_instance_memory_mb - policy.host_memory_reserve_mb >= requested.memory_mb)
-             AND (n.provider_instance_disk_gb IS NULL
-               OR n.provider_instance_disk_gb * 1024 >= requested.disk_mb)
+             AND (n.trusted_provider_instance_vcpu_count * 1000 * policy.cpu_share_budget_percent) / 100
+               >= requested.cpu_millis
+             AND n.trusted_provider_instance_memory_mb - policy.host_memory_reserve_mb
+               >= requested.memory_mb
+             AND n.trusted_provider_instance_disk_gb * 1024 >= requested.disk_mb
            )
            OR (
              active.active_count > 0
              AND active.invalid_count = 0
-             AND n.provider_instance_vcpu_count IS NOT NULL
-             AND n.provider_instance_memory_mb IS NOT NULL
-             AND n.provider_instance_disk_gb IS NOT NULL
              AND ((active.cpu_millis + requested.cpu_millis)
-               <= (n.provider_instance_vcpu_count * 1000 * policy.cpu_share_budget_percent) / 100)
+               <= (n.trusted_provider_instance_vcpu_count * 1000 * policy.cpu_share_budget_percent) / 100)
              AND ((active.memory_mb + requested.memory_mb)
-               <= n.provider_instance_memory_mb - policy.host_memory_reserve_mb)
-             AND ((active.disk_mb + requested.disk_mb) <= n.provider_instance_disk_gb * 1024)
+               <= n.trusted_provider_instance_memory_mb - policy.host_memory_reserve_mb)
+             AND ((active.disk_mb + requested.disk_mb) <= n.trusted_provider_instance_disk_gb * 1024)
            )
          )`
     )
     .bind(
-      input.createdAt,
+      admissionNow,
       input.nodeId,
       input.userId,
       ...capacityPredicate.binds,
@@ -258,7 +288,7 @@ function validReservationJsonSql(expression: string): string {
     AND json_type(${expression}, '$.memoryMb') = 'integer'
     AND json_extract(${expression}, '$.memoryMb') > 0
     AND json_type(${expression}, '$.diskMb') = 'integer'
-    AND json_extract(${expression}, '$.diskMb') > 0
+    AND json_extract(${expression}, '$.diskMb') >= 0
     AND json_type(${expression}, '$.maxCoTenants') = 'integer'
     AND json_extract(${expression}, '$.maxCoTenants') > 0
     AND json_type(${expression}, '$.exclusiveNode') IN ('true', 'false')
@@ -303,7 +333,7 @@ function supportedMetricsVersionSql(): string {
       json_type(n.metrics_json, '$.version') IS NULL
       OR (
         json_type(n.metrics_json, '$.version') = 'integer'
-        AND CAST(json_extract(n.metrics_json, '$.version') AS INTEGER) <= 1
+        AND CAST(json_extract(n.metrics_json, '$.version') AS INTEGER) = 1
       )
     ))`;
 }
@@ -314,20 +344,18 @@ function freshMetricsSql(): string {
     AND n.metrics_age_ms <= policy.metrics_ttl_ms)`;
 }
 
-function validOrUnknownHardwareCapacitySql(): string {
-  return `((n.provider_instance_vcpu_count IS NULL
-      OR (typeof(n.provider_instance_vcpu_count) = 'integer' AND n.provider_instance_vcpu_count > 0))
-    AND (n.provider_instance_memory_mb IS NULL
-      OR (typeof(n.provider_instance_memory_mb) = 'integer' AND n.provider_instance_memory_mb > 0))
-    AND (n.provider_instance_disk_gb IS NULL
-      OR (typeof(n.provider_instance_disk_gb) = 'integer' AND n.provider_instance_disk_gb > 0)))`;
+function trustedHardwareCapacitySql(): string {
+  return `(n.trusted_provider_instance_vcpu_count IS NOT NULL
+    AND n.trusted_provider_instance_memory_mb IS NOT NULL
+    AND n.trusted_provider_instance_disk_gb IS NOT NULL)`;
 }
 
 function finalMeasuredPressurePredicateSql(): string {
   return `(
-    (active.active_count = 0 AND n.metrics_json IS NULL)
+    (active.active_count = 0 AND n.metrics_json IS NULL AND n.metrics_malformed = 0)
     OR (
       n.metrics_json IS NOT NULL
+      AND n.metrics_malformed = 0
       AND ${supportedMetricsVersionSql()}
       AND ${freshMetricsSql()}
       AND ${validCpuLoadAvg1Sql()}
@@ -336,13 +364,8 @@ function finalMeasuredPressurePredicateSql(): string {
       AND ${validCreatingWorkspacesSql()}
       AND COALESCE(CAST(json_extract(n.metrics_json, '$.creatingWorkspaces') AS INTEGER), 0) = 0
       AND (
-        (active.active_count = 0 AND n.provider_instance_vcpu_count IS NULL)
-        OR (
-          n.provider_instance_vcpu_count IS NOT NULL
-          AND n.provider_instance_vcpu_count > 0
-          AND ((CAST(json_extract(n.metrics_json, '$.cpuLoadAvg1') AS REAL) / n.provider_instance_vcpu_count) * 100)
-            < policy.cpu_threshold_percent
-        )
+        ((CAST(json_extract(n.metrics_json, '$.cpuLoadAvg1') AS REAL) / n.trusted_provider_instance_vcpu_count) * 100)
+          < policy.cpu_threshold_percent
       )
       AND CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL)
         < policy.memory_threshold_percent
@@ -350,80 +373,4 @@ function finalMeasuredPressurePredicateSql(): string {
         < policy.disk_pressure_threshold_percent
     )
   )`;
-}
-
-function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
-  sql: string;
-  binds: Array<string | number | null>;
-} {
-  const snapshot = input.capacityPlacementSnapshot ?? null;
-  const concretePredicate = snapshot ? buildConcretePlacementPredicate(snapshot) : null;
-  if (!snapshot?.capacityPoolId) {
-    return {
-      sql: `AND (
-        n.capacity_pool_scope IS NULL
-        OR n.capacity_pool_scope != 'project'
-      )`,
-      binds: [],
-    };
-  }
-
-  if (!snapshot.capacitySourceId) {
-    const canUseLegacyNode = snapshot.capacityPoolScope !== 'project';
-    return {
-      sql: canUseLegacyNode ? `AND n.capacity_pool_id IS NULL` : `AND 0 = 1`,
-      binds: [],
-    };
-  }
-
-  if (snapshot.capacityPoolScope === 'project') {
-    return {
-      sql: `AND n.capacity_pool_scope = 'project'
-        AND n.capacity_pool_id = ?
-        AND n.capacity_source_id = ?
-        AND n.capacity_pool_project_id = ?
-        ${concretePredicate?.sql ?? ''}`,
-      binds: [
-        snapshot.capacityPoolId,
-        snapshot.capacitySourceId,
-        input.projectId,
-        ...(concretePredicate?.binds ?? []),
-      ],
-    };
-  }
-
-  return {
-    sql: `AND (n.capacity_pool_scope IS NULL OR n.capacity_pool_scope != 'project')
-      AND n.capacity_pool_id = ?
-      AND n.capacity_source_id = ?
-      ${concretePredicate?.sql ?? ''}`,
-    binds: [
-      snapshot.capacityPoolId,
-      snapshot.capacitySourceId,
-      ...(concretePredicate?.binds ?? []),
-    ],
-  };
-}
-
-function buildConcretePlacementPredicate(snapshot: CapacityPlacementSnapshot): {
-  sql: string;
-  binds: Array<string | number | null>;
-} {
-  const clauses: string[] = [];
-  const binds: Array<string | number | null> = [];
-
-  if (snapshot.capacityPoolCandidateId) {
-    clauses.push('(n.capacity_pool_candidate_id IS NULL OR n.capacity_pool_candidate_id = ?)');
-    binds.push(snapshot.capacityPoolCandidateId);
-  }
-
-  if (snapshot.providerInstanceType) {
-    clauses.push('(n.provider_instance_type IS NULL OR n.provider_instance_type = ?)');
-    binds.push(snapshot.providerInstanceType);
-  }
-
-  return {
-    sql: clauses.length ? `AND ${clauses.join('\n        AND ')}` : '',
-    binds,
-  };
 }

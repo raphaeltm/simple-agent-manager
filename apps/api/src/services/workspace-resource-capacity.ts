@@ -53,11 +53,24 @@ export interface WorkspaceReservationCapacityResult {
 
 export interface WorkspaceResourceNode {
   id: string;
+  providerInstanceId?: string | null;
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareSource?: string | null;
   lastMetrics?: string | null;
   lastHeartbeatAt?: string | null;
+}
+
+export interface TrustedWorkspaceNodeCapacity {
+  vcpuCount: number | null;
+  memoryMb: number | null;
+  diskGb: number | null;
+  source: 'observed' | 'planned' | null;
+  reasons: string[];
 }
 
 export function resolveWorkspaceAdmissionPolicy(
@@ -175,7 +188,7 @@ export function isResolvedResourceReservation(
     (record.version === 1 || record.version === 2) &&
     positiveInteger(record.cpuMillis) !== null &&
     positiveInteger(record.memoryMb) !== null &&
-    positiveInteger(record.diskMb) !== null &&
+    nonNegativeInteger(record.diskMb) !== null &&
     positiveInteger(record.maxCoTenants) !== null &&
     typeof record.exclusiveNode === 'boolean' &&
     typeof record.source === 'string' &&
@@ -244,7 +257,10 @@ export function parseWorkspaceAdmissionMetrics(
 
   return {
     cpuLoadAvg1,
-    cpuPercent: normalizeLoadAverageToCpuPercent(cpuLoadAvg1, node.providerInstanceVcpuCount),
+    cpuPercent: normalizeLoadAverageToCpuPercent(
+      cpuLoadAvg1,
+      resolveTrustedWorkspaceNodeCapacity(node).vcpuCount
+    ),
     memoryPercent,
     diskPercent,
     creatingWorkspaces,
@@ -261,6 +277,47 @@ export function normalizeLoadAverageToCpuPercent(
   const vcpu = positiveInteger(vcpuCount);
   if (loadAvg1 === null || vcpu === null) return null;
   return (loadAvg1 / vcpu) * 100;
+}
+
+export function resolveTrustedWorkspaceNodeCapacity(
+  node: WorkspaceResourceNode
+): TrustedWorkspaceNodeCapacity {
+  const reasons: string[] = [];
+  const observedVcpu = positiveInteger(node.observedProviderInstanceVcpuCount);
+  const observedMemoryMb = positiveInteger(node.observedProviderInstanceMemoryMb);
+  const observedDiskGb = positiveInteger(node.observedProviderInstanceDiskGb);
+  const plannedVcpu = positiveInteger(node.providerInstanceVcpuCount);
+  const plannedMemoryMb = positiveInteger(node.providerInstanceMemoryMb);
+  const plannedDiskGb = positiveInteger(node.providerInstanceDiskGb);
+  const hasProviderInstance =
+    typeof node.providerInstanceId === 'string' && node.providerInstanceId.trim().length > 0;
+
+  if (hasProviderInstance) {
+    if (observedVcpu !== null && observedMemoryMb !== null && observedDiskGb !== null) {
+      return {
+        vcpuCount: observedVcpu,
+        memoryMb: observedMemoryMb,
+        diskGb: observedDiskGb,
+        source: 'observed',
+        reasons,
+      };
+    }
+    reasons.push('node has no trusted observed hardware capacity');
+    return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
+  }
+
+  if (plannedVcpu !== null && plannedMemoryMb !== null && plannedDiskGb !== null) {
+    return {
+      vcpuCount: plannedVcpu,
+      memoryMb: plannedMemoryMb,
+      diskGb: plannedDiskGb,
+      source: 'planned',
+      reasons,
+    };
+  }
+
+  reasons.push('node has no planned capacity before provider allocation');
+  return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
 }
 
 export function scoreWorkspaceAdmissionMetrics(
@@ -354,34 +411,12 @@ export function evaluateWorkspaceReservationCapacity(
     reasons.push('active reservation snapshot is missing or malformed');
   }
 
-  const vcpu = positiveInteger(node.providerInstanceVcpuCount);
-  const memoryMb = positiveInteger(node.providerInstanceMemoryMb);
-  const diskGb = positiveInteger(node.providerInstanceDiskGb);
-  if (
-    node.providerInstanceVcpuCount !== null &&
-    node.providerInstanceVcpuCount !== undefined &&
-    vcpu === null
-  ) {
-    reasons.push('node CPU capacity shape is invalid');
-  }
-  if (
-    node.providerInstanceMemoryMb !== null &&
-    node.providerInstanceMemoryMb !== undefined &&
-    memoryMb === null
-  ) {
-    reasons.push('node memory capacity shape is invalid');
-  }
-  if (
-    node.providerInstanceDiskGb !== null &&
-    node.providerInstanceDiskGb !== undefined &&
-    diskGb === null
-  ) {
-    reasons.push('node disk capacity shape is invalid');
-  }
-  if (active.activeCount > 0) {
-    if (vcpu === null) reasons.push('occupied node has unknown CPU capacity');
-    if (memoryMb === null) reasons.push('occupied node has unknown memory capacity');
-    if (diskGb === null) reasons.push('occupied node has unknown disk capacity');
+  const trustedCapacity = resolveTrustedWorkspaceNodeCapacity(node);
+  const vcpu = trustedCapacity.vcpuCount;
+  const memoryMb = trustedCapacity.memoryMb;
+  const diskGb = trustedCapacity.diskGb;
+  if (trustedCapacity.source === null) {
+    reasons.push(...trustedCapacity.reasons);
   }
 
   const measuredAdmissionReason = measuredAdmissionDiagnostic(
