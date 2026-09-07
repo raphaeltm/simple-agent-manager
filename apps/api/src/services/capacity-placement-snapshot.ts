@@ -5,6 +5,8 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS = `
   capacity_pool_scope,
   capacity_pool_revision,
   capacity_source_id,
+  capacity_source_generation,
+  capacity_source_external_ref,
   capacity_pool_candidate_id,
   placement_credential_source,
   placement_credential_reference,
@@ -25,13 +27,15 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS = `
   placement_explanation_json
 `;
 
-export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
+export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
 
 export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS = `
   capacity_pool_id = ?,
   capacity_pool_scope = ?,
   capacity_pool_revision = ?,
   capacity_source_id = ?,
+  capacity_source_generation = ?,
+  capacity_source_external_ref = ?,
   capacity_pool_candidate_id = ?,
   placement_credential_source = ?,
   placement_credential_reference = ?,
@@ -60,6 +64,8 @@ export function capacityPlacementSnapshotSqlValues(
     snapshot?.capacityPoolScope ?? null,
     snapshot?.capacityPoolRevision ?? null,
     snapshot?.capacitySourceId ?? null,
+    snapshot?.capacitySourceGeneration ?? null,
+    snapshot?.capacitySourceExternalRef ?? null,
     snapshot?.capacityPoolCandidateId ?? null,
     snapshot?.placementCredentialSource ?? null,
     snapshot?.placementCredentialReference ?? null,
@@ -88,6 +94,8 @@ export function capacityPlacementSnapshotDbValues(
   capacityPoolScope: string | null;
   capacityPoolRevision: number | null;
   capacitySourceId: string | null;
+  capacitySourceGeneration: number | null;
+  capacitySourceExternalRef: string | null;
   capacityPoolCandidateId: string | null;
   placementCredentialSource: string | null;
   placementCredentialReference: string | null;
@@ -112,6 +120,8 @@ export function capacityPlacementSnapshotDbValues(
     capacityPoolScope: snapshot?.capacityPoolScope ?? null,
     capacityPoolRevision: snapshot?.capacityPoolRevision ?? null,
     capacitySourceId: snapshot?.capacitySourceId ?? null,
+    capacitySourceGeneration: snapshot?.capacitySourceGeneration ?? null,
+    capacitySourceExternalRef: snapshot?.capacitySourceExternalRef ?? null,
     capacityPoolCandidateId: snapshot?.capacityPoolCandidateId ?? null,
     placementCredentialSource: snapshot?.placementCredentialSource ?? null,
     placementCredentialReference: snapshot?.placementCredentialReference ?? null,

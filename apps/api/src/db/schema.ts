@@ -69,6 +69,10 @@ const capacityPlacementColumns = () => ({
   capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
     onDelete: 'set null',
   }),
+  /** Capacity source row generation used for final authority checks. */
+  capacitySourceGeneration: integer('capacity_source_generation'),
+  /** Non-secret capacity source external reference snapshot used for attachment fencing. */
+  capacitySourceExternalRef: text('capacity_source_external_ref'),
   /** Capacity pool candidate selected for placement/provisioning. Snapshot only. */
   capacityPoolCandidateId: text('capacity_pool_candidate_id'),
   /** Credential provenance snapshot used for placement/provisioning, without secret material. */

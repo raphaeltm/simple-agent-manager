@@ -19,6 +19,7 @@ import {
 
 import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
 import type { CapacityPoolSummary } from './default-capacity-pools';
+import { timestampVersion } from './default-capacity-pool-helpers';
 import {
   legacyReusableNodeMatches,
   normalizeLegacyPoolSize,
@@ -53,6 +54,8 @@ export function capacityPoolSnapshotForPool(
     capacityPoolScope: selection.scope,
     capacityPoolRevision: selection.revision,
     capacitySourceId: null,
+    capacitySourceGeneration: null,
+    capacitySourceExternalRef: null,
     capacityPoolCandidateId: null,
     placementCredentialSource: null,
     placementCredentialReference: null,
@@ -160,6 +163,8 @@ export function capacityPlacementSnapshotForCandidate(
       capacityPoolScope: selection.scope,
       capacityPoolRevision: selection.revision,
       capacitySourceId: candidate.capacitySourceId,
+      capacitySourceGeneration: candidate.capacitySourceGeneration,
+      capacitySourceExternalRef: candidate.capacitySourceExternalRef,
       capacityPoolCandidateId: candidate.id,
       placementCredentialSource: candidate.placementCredentialSource,
       placementCredentialReference: candidate.placementCredentialReference,
@@ -287,10 +292,13 @@ function normalizeCapacityCandidate(
 
   const capacityPoolProjectId =
     pool.scope === 'project' ? (pool.ownerProjectId ?? placement.projectId) : null;
+  const capacitySourceGeneration = timestampVersion(source.updatedAt ?? source.createdAt);
   const normalized: Omit<TaskStartCapacityCandidate, 'snapshot'> = {
     id: candidate.id,
     poolId: candidate.poolId,
     capacitySourceId: candidate.capacitySourceId,
+    capacitySourceGeneration,
+    capacitySourceExternalRef: source.externalSourceRef,
     provider: candidate.provider,
     location: candidate.location as VMLocation,
     workloadRole: candidate.workloadRole,
@@ -328,6 +336,8 @@ function normalizeCapacityCandidate(
       capacityPoolScope: pool.scope,
       capacityPoolRevision: pool.revision,
       capacitySourceId: source.id,
+      capacitySourceGeneration,
+      capacitySourceExternalRef: source.externalSourceRef,
       capacityPoolCandidateId: candidate.id,
       placementCredentialSource: source.credentialSource,
       placementCredentialReference: source.credentialReference,

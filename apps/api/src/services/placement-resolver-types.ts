@@ -151,6 +151,8 @@ export interface TaskStartCapacityCandidate {
   id: string;
   poolId: string;
   capacitySourceId: string;
+  capacitySourceGeneration: number | null;
+  capacitySourceExternalRef: string | null;
   provider: CredentialProvider;
   location: VMLocation;
   workloadRole: CapacityWorkloadRole;
@@ -205,6 +207,8 @@ export interface CapacityAwareNodePlacementRow {
   capacityPoolScope: string | null;
   capacityPoolRevision?: number | null;
   capacitySourceId: string | null;
+  capacitySourceGeneration?: number | null;
+  capacitySourceExternalRef?: string | null;
   capacityPoolCandidateId?: string | null;
   placementCredentialSource?: string | null;
   placementCredentialReference?: string | null;
