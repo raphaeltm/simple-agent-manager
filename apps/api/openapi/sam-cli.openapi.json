@@ -1443,23 +1443,28 @@
         "properties": {
           "minVcpu": {
             "type": "number",
-            "description": "Minimum vCPU count requested by the workload."
+            "description": "Minimum positive vCPU count requested by the workload.",
+            "exclusiveMinimum": 0
           },
           "minMemoryGb": {
             "type": "number",
-            "description": "Minimum memory in GiB requested by the workload."
+            "description": "Minimum positive memory in GiB requested by the workload.",
+            "exclusiveMinimum": 0
           },
           "minDiskGb": {
             "type": "number",
-            "description": "Minimum boot disk size in GiB requested by the workload."
+            "description": "Minimum boot disk size in GiB requested by the workload. Zero is allowed.",
+            "minimum": 0
           },
           "exclusiveNode": {
             "type": "boolean",
             "description": "Whether the workload requests exclusive use of its node."
           },
           "maxCoTenants": {
-            "type": "number",
-            "description": "Compatibility safety metadata preserved for older callers; not a new scheduling control."
+            "type": "integer",
+            "description": "Compatibility safety metadata preserved for older callers; must be a positive safe integer.",
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [],

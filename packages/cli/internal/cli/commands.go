@@ -203,11 +203,7 @@ func runChatNew(ctx context.Context, runtime Runtime, parsed parsedArgs, args []
 		return fail(runtime.Stderr, err)
 	}
 	options.Mode = "conversation"
-	response, err := client.SubmitTask(ctx, projectID, message, options)
-	if err != nil {
-		return fail(runtime.Stderr, err)
-	}
-	return writeOrFail(runtime, parsed.Globals.JSON, formatSubmitResponse(response), response)
+	return submitTaskWithClient(ctx, runtime, parsed, client, projectID, message, options)
 }
 
 func runChatView(ctx context.Context, runtime Runtime, parsed parsedArgs, sessionID string) int {

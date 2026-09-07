@@ -7,6 +7,7 @@ import {
   RESOURCE_RESERVATION_VERSION,
   selectVmSizeForRequirements,
 } from '../../src/constants/resource-defaults';
+import type { ResourceRequirements } from '../../src/types/resource';
 
 describe('resolveResourceReservation', () => {
   it('returns platform defaults when no layers provide requirements', () => {
@@ -155,6 +156,23 @@ describe('resolveResourceReservation', () => {
         project: { maxCoTenants: 4 },
       })
     ).toThrow('resourceRequirements.maxCoTenants must be a positive safe integer');
+  });
+
+  it('requires complete platform defaults', () => {
+    expect(() =>
+      resolveResourceReservation(
+        {},
+        {},
+        {
+          platformDefaults: {
+            minVcpu: 2,
+            minMemoryGb: 4,
+            minDiskGb: 40,
+            exclusiveNode: false,
+          } as Required<ResourceRequirements>,
+        }
+      )
+    ).toThrow('resourceRequirements.maxCoTenants is required');
   });
 
   it('maps legacy sizes to distinct workload slices with per-field provenance', () => {

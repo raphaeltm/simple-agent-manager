@@ -7,7 +7,7 @@ import type {
   CreateAgentProfileRequest,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
-import { isAgentEffort } from '@simple-agent-manager/shared';
+import { isAgentEffort, isAgentProfileRuntime } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -34,6 +34,17 @@ import {
   type McpTokenData,
 } from './_helpers';
 
+export class McpProfileFieldValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'McpProfileFieldValidationError';
+  }
+}
+
+function hasSuppliedParam(params: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(params, key) && params[key] !== undefined;
+}
+
 /** Extract optional profile fields from MCP params — shared by create and update handlers. */
 export function extractProfileFields(
   params: Record<string, unknown>
@@ -49,25 +60,44 @@ export function extractProfileFields(
   if (typeof params.maxTurns === 'number') fields.maxTurns = params.maxTurns;
   if (typeof params.timeoutMinutes === 'number') fields.timeoutMinutes = params.timeoutMinutes;
   if (typeof params.vmSizeOverride === 'string') fields.vmSizeOverride = params.vmSizeOverride;
-  if (
-    params.resourceRequirements === null ||
-    (typeof params.resourceRequirements === 'object' && !Array.isArray(params.resourceRequirements))
-  ) {
-    fields.resourceRequirements =
-      params.resourceRequirements as UpdateAgentProfileRequest['resourceRequirements'];
+  if (hasSuppliedParam(params, 'resourceRequirements')) {
+    if (
+      params.resourceRequirements === null ||
+      (typeof params.resourceRequirements === 'object' &&
+        !Array.isArray(params.resourceRequirements))
+    ) {
+      fields.resourceRequirements =
+        params.resourceRequirements as UpdateAgentProfileRequest['resourceRequirements'];
+    } else {
+      throw new McpProfileFieldValidationError('resourceRequirements must be an object or null');
+    }
   }
-  if (
-    typeof params.resourceRequirementsJson === 'string' ||
-    params.resourceRequirementsJson === null
-  ) {
-    fields.resourceRequirementsJson = params.resourceRequirementsJson;
+  if (hasSuppliedParam(params, 'resourceRequirementsJson')) {
+    if (
+      typeof params.resourceRequirementsJson === 'string' ||
+      params.resourceRequirementsJson === null
+    ) {
+      fields.resourceRequirementsJson = params.resourceRequirementsJson;
+    } else {
+      throw new McpProfileFieldValidationError(
+        'resourceRequirementsJson must be a JSON string or null'
+      );
+    }
   }
   if (typeof params.provider === 'string') fields.provider = params.provider;
   if (typeof params.vmLocation === 'string') fields.vmLocation = params.vmLocation;
   if (typeof params.workspaceProfile === 'string')
     fields.workspaceProfile = params.workspaceProfile;
-  if (typeof params.runtime === 'string' || params.runtime === null) {
-    fields.runtime = params.runtime as UpdateAgentProfileRequest['runtime'];
+  if (hasSuppliedParam(params, 'runtime')) {
+    if (params.runtime === null) {
+      fields.runtime = null;
+    } else if (isAgentProfileRuntime(params.runtime)) {
+      fields.runtime = params.runtime;
+    } else {
+      throw new McpProfileFieldValidationError(
+        'runtime must be one of vm, cf-container, or null'
+      );
+    }
   }
   if (typeof params.devcontainerConfigName === 'string')
     fields.devcontainerConfigName = params.devcontainerConfigName;
@@ -202,9 +232,8 @@ export async function handleCreateAgentProfile(
     );
   }
 
-  const body: CreateAgentProfileRequest = { name, ...extractProfileFields(params) };
-
   try {
+    const body: CreateAgentProfileRequest = { name, ...extractProfileFields(params) };
     const db = drizzle(env.DATABASE, { schema });
     await requireProjectCapability(db, tokenData.projectId, tokenData.userId, 'project:update');
     const profile = await agentProfileService.createProfile(
@@ -245,6 +274,9 @@ export async function handleCreateAgentProfile(
       ],
     });
   } catch (err) {
+    if (err instanceof McpProfileFieldValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
     return mapServiceError(requestId, err, {
       fallbackPrefix: 'Failed to create profile',
       logTag: 'mcp.create_agent_profile_failed',
@@ -265,19 +297,19 @@ export async function handleUpdateAgentProfile(
     return jsonRpcError(requestId, INVALID_PARAMS, 'profileId is required');
   }
 
-  const body: UpdateAgentProfileRequest = {};
-  if (typeof params.name === 'string') body.name = params.name;
-  Object.assign(body, extractProfileFields(params));
-
-  if (Object.keys(body).length === 0) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'No fields to update. Provide at least one field to change.'
-    );
-  }
-
   try {
+    const body: UpdateAgentProfileRequest = {};
+    if (typeof params.name === 'string') body.name = params.name;
+    Object.assign(body, extractProfileFields(params));
+
+    if (Object.keys(body).length === 0) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'No fields to update. Provide at least one field to change.'
+      );
+    }
+
     const db = drizzle(env.DATABASE, { schema });
     await requireProjectCapability(db, tokenData.projectId, tokenData.userId, 'project:update');
     const profile = await agentProfileService.updateProfile(
@@ -312,6 +344,9 @@ export async function handleUpdateAgentProfile(
       ],
     });
   } catch (err) {
+    if (err instanceof McpProfileFieldValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
     return mapServiceError(requestId, err, {
       notFoundMessage: `Agent profile not found: ${profileId}`,
       fallbackPrefix: 'Failed to update profile',

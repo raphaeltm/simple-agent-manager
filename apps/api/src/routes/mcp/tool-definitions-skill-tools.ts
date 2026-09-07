@@ -15,7 +15,7 @@ const SKILL_FIELD_PROPERTIES = {
   resourceRequirementsJson: {
     type: ['string', 'null'],
     description:
-      'Compatibility JSON string describing workload requirements for this skill. Prefer resourceRequirements; known modern fields are validated and unknown object metadata is preserved.',
+      'Compatibility JSON string describing workload requirements for this skill. Prefer resourceRequirements; only supported modern fields are persisted.',
   },
   defaultProfileId: {
     type: 'string',

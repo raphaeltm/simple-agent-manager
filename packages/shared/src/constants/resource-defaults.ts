@@ -196,7 +196,8 @@ export function resolveResourceReservation(
   const platformDefaults = validateResourceRequirementsLayer(
     'platform',
     'platform',
-    options.platformDefaults ?? PLATFORM_RESOURCE_DEFAULTS
+    options.platformDefaults ?? PLATFORM_RESOURCE_DEFAULTS,
+    { requireAllFields: true }
   ) as Required<ResourceRequirements>;
   const legacyWorkloadMapping = options.legacyWorkloadMapping
     ? validateLegacyWorkloadMapping(options.legacyWorkloadMapping)

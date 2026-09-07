@@ -235,6 +235,7 @@ describe('MCP Skill Tools', () => {
           provider: 'hetzner',
           vmLocation: 'fsn1',
           workspaceProfile: 'full',
+          runtime: 'vm',
           devcontainerConfigName: 'python-dev',
           taskMode: 'task',
           resourceRequirements: { minVcpu: 4, exclusiveNode: false },
@@ -333,6 +334,19 @@ describe('MCP Skill Tools', () => {
       const result = await handleCreateSkill(1, { name: 'my-skill' }, tokenData, mockEnv);
       expect(result.error!.code).toBe(-32603);
       expect(result.error!.message).toContain('Failed to create skill');
+    });
+
+    it('rejects malformed supplied resourceRequirements before service call', async () => {
+      const result = await handleCreateSkill(
+        1,
+        { name: 'bad-resources', resourceRequirements: [] },
+        tokenData,
+        mockEnv
+      );
+
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('resourceRequirements must be an object or null');
+      expect(skillService.createSkill).not.toHaveBeenCalled();
     });
   });
 
@@ -484,6 +498,19 @@ describe('MCP Skill Tools', () => {
       expect(result.error!.code).toBe(-32603);
       expect(result.error!.message).toContain('Failed to update skill');
     });
+
+    it('rejects unsupported runtime before service call', async () => {
+      const result = await handleUpdateSkill(
+        1,
+        { skillId: 'skill-1', runtime: 'worker-thread' },
+        tokenData,
+        mockEnv
+      );
+
+      expect(result.error!.code).toBe(-32602);
+      expect(result.error!.message).toContain('runtime must be one of');
+      expect(skillService.updateSkill).not.toHaveBeenCalled();
+    });
   });
 
   // ─── delete_skill ─────────────────────────────────────────────────
@@ -571,6 +598,7 @@ describe('MCP Skill Tools', () => {
         provider: 'hetzner',
         vmLocation: 'fsn1',
         workspaceProfile: 'full',
+        runtime: 'cf-container',
         devcontainerConfigName: 'python-dev',
         taskMode: 'task',
         resourceRequirements: { minVcpu: 4, exclusiveNode: false },
@@ -586,10 +614,27 @@ describe('MCP Skill Tools', () => {
         description: 123, // wrong type
         maxTurns: 'not-a-number', // wrong type
         model: null, // wrong type
-        resourceRequirements: 'bad', // wrong type
-        resourceRequirementsJson: 42, // wrong type
       });
       expect(fields).toEqual({});
+    });
+
+    it('rejects wrong-typed supplied resource requirement fields', () => {
+      expect(() => extractSkillFields({ resourceRequirements: 'bad' })).toThrow(
+        /resourceRequirements must be an object or null/
+      );
+      expect(() => extractSkillFields({ resourceRequirements: [] })).toThrow(
+        /resourceRequirements must be an object or null/
+      );
+      expect(() => extractSkillFields({ resourceRequirementsJson: 42 })).toThrow(
+        /resourceRequirementsJson must be a JSON string or null/
+      );
+    });
+
+    it('rejects runtime values outside the REST enum', () => {
+      expect(() => extractSkillFields({ runtime: 'worker-thread' })).toThrow(
+        /runtime must be one of/
+      );
+      expect(extractSkillFields({ runtime: null })).toEqual({ runtime: null });
     });
 
     it('ignores unknown fields', () => {
