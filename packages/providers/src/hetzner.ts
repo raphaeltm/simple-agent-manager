@@ -477,9 +477,14 @@ export class HetznerProvider implements Provider {
       );
     } catch (error) {
       rethrowIfProviderRequestAborted(error, context);
-      this.logger.warn('hetzner catalog API unavailable; using static instance offerings', {
+      const message =
+        options.allowStaticFallback === false
+          ? 'hetzner catalog API unavailable'
+          : 'hetzner catalog API unavailable; using static instance offerings';
+      this.logger.warn(message, {
         error: error instanceof Error ? error.message : String(error),
       });
+      if (options.allowStaticFallback === false) throw error;
       return getProviderCatalogOfferings(
         this.name as CredentialProvider,
         this.locations,

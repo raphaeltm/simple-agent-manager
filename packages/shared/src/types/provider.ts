@@ -31,6 +31,15 @@ export interface SizeInfo {
 
 export const PROVIDER_INSTANCE_CATALOG_SOURCES = ['api', 'static'] as const;
 export type ProviderInstanceCatalogSource = (typeof PROVIDER_INSTANCE_CATALOG_SOURCES)[number];
+export const PROVIDER_CATALOG_REFRESH_ORIGINS = ['api', 'static', 'unavailable'] as const;
+export type ProviderCatalogRefreshOrigin = (typeof PROVIDER_CATALOG_REFRESH_ORIGINS)[number];
+
+export interface ProviderCatalogRefreshStatus {
+  succeeded: boolean;
+  origin: ProviderCatalogRefreshOrigin;
+  complete: boolean;
+  reason?: 'provider-unavailable' | 'static-catalog';
+}
 
 /** Provider-native instance offering metadata. */
 export interface ProviderCatalogOfferingInfo {
@@ -129,12 +138,18 @@ export interface ProviderCatalog {
   sizes: Record<VMSize, SizeInfo>;
   /** Provider-native instance offerings for compute-pool setup. */
   offerings?: ProviderInstanceOffering[];
+  refreshStatus?: ProviderCatalogRefreshStatus;
   defaultLocation: string;
 }
 
 /** Response from GET /api/providers/catalog */
 export interface ProviderCatalogResponse {
   catalogs: ProviderCatalog[];
+  refreshFailures?: Array<{
+    provider: CredentialProvider;
+    credentialSource?: 'user' | 'project' | 'platform';
+    reason: 'provider-unavailable';
+  }>;
   credentialSetupRequired?: boolean;
   credentialSetupMessage?: string;
 }

@@ -10,6 +10,7 @@ import {
 import type {
   CredentialProvider,
   ProviderCatalog,
+  ProviderCatalogRefreshStatus,
   ProviderInstanceOffering,
   SizeInfo,
   VMSize,
@@ -59,14 +60,31 @@ export interface ProviderCatalogCredentialSeed {
 export interface ProviderCatalogListResult {
   catalogs: ProviderCatalog[];
   credentialCount: number;
+  refreshFailures: Array<{
+    provider: CredentialProvider;
+    credentialSource: ProviderCatalogCredentialSource;
+    reason: 'provider-unavailable';
+  }>;
+}
+
+export interface ProviderCatalogOfferingResolution {
+  offerings: ProviderInstanceOffering[];
+  refreshStatus: ProviderCatalogRefreshStatus;
 }
 
 export async function listProviderCatalogOfferings(
   providerName: CredentialProvider,
   provider: CloudProvider
-): Promise<ProviderInstanceOffering[]> {
+): Promise<ProviderCatalogOfferingResolution> {
   try {
-    return await provider.listInstanceOfferings({ preferApi: true });
+    const offerings = await provider.listInstanceOfferings({
+      preferApi: true,
+      allowStaticFallback: false,
+    });
+    return {
+      offerings,
+      refreshStatus: refreshStatusForOfferings(offerings),
+    };
   } catch (error) {
     log.warn('catalog.live_offerings_failed', {
       provider: providerName,
@@ -102,12 +120,13 @@ export async function buildProviderCatalogForCredential(input: {
   );
   const providerToken = extractCloudProviderToken(providerName, decryptedToken);
   const provider = createCatalogProvider(providerName, providerToken, input.env);
-  const offerings = await listProviderCatalogOfferings(providerName, provider);
+  const resolved = await listProviderCatalogOfferings(providerName, provider);
   return buildProviderCatalog({
     seed: input.seed,
     providerName,
     provider,
-    offerings,
+    offerings: resolved.offerings,
+    refreshStatus: resolved.refreshStatus,
   });
 }
 
@@ -494,6 +513,7 @@ function buildProviderCatalog(input: {
   providerName: CredentialProvider;
   provider: CloudProvider;
   offerings: ProviderInstanceOffering[];
+  refreshStatus: ProviderCatalogRefreshStatus;
 }): ProviderCatalog {
   const locationIds = [
     ...input.provider.locations,
@@ -524,6 +544,7 @@ function buildProviderCatalog(input: {
       ])
     ) as Record<VMSize, SizeInfo>,
     offerings: input.offerings,
+    refreshStatus: input.refreshStatus,
     defaultLocation: input.provider.defaultLocation,
   };
 }
@@ -537,13 +558,38 @@ async function buildCatalogsFromCredentialRows(
   );
 
   const catalogs: ProviderCatalog[] = [];
-  for (const result of results) {
+  const refreshFailures: ProviderCatalogListResult['refreshFailures'] = [];
+  for (const [index, result] of results.entries()) {
     if (result.status === 'fulfilled') {
       catalogs.push(result.value);
     } else {
       log.warn('catalog.build_failed', serializeError(result.reason));
+      const seed = seeds[index];
+      if (seed) {
+        refreshFailures.push({
+          provider: seed.provider,
+          credentialSource: seed.credentialSource,
+          reason: 'provider-unavailable',
+        });
+      }
     }
   }
 
-  return { catalogs, credentialCount: seeds.length };
+  return { catalogs, credentialCount: seeds.length, refreshFailures };
+}
+
+function refreshStatusForOfferings(
+  offerings: ProviderInstanceOffering[]
+): ProviderCatalogRefreshStatus {
+  const hasApiOfferings = offerings.some((offering) => offering.catalogSource === 'api');
+  const hasStaticOfferings = offerings.some((offering) => offering.catalogSource === 'static');
+  if (hasApiOfferings && !hasStaticOfferings) {
+    return { succeeded: true, origin: 'api', complete: true };
+  }
+  return {
+    succeeded: true,
+    origin: hasApiOfferings ? 'api' : 'static',
+    complete: false,
+    reason: 'static-catalog',
+  };
 }

@@ -8,6 +8,8 @@ import {
   DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
   isJsonRecord,
   LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
+  normalizeResourceRequirements,
+  PLATFORM_RESOURCE_DEFAULTS,
 } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -20,6 +22,9 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
 export const CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_SETTING_KEY =
   'capacityPools.legacyWorkloadMapping.v1';
 export const CAPACITY_POOL_SELECTION_SETTINGS_SETTING_KEY = 'capacityPools.selectionSettings.v1';
+export const CAPACITY_POOL_PLATFORM_DEFAULTS_SETTING_KEY = 'capacityPools.platformDefaults.v1';
+
+type PlacementSettingsSource = 'persisted' | 'environment' | 'default';
 
 export const DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS: Pick<
   CapacityPoolPlacementSettings,
@@ -45,6 +50,7 @@ export const DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS: Pick<
 export interface ResolvedCapacityPoolPlacementSettings {
   resourceDefaults: {
     legacyWorkloadMapping: Record<VMSize, Required<ResourceRequirements>>;
+    platformDefaults: Required<ResourceRequirements>;
   };
   placementSettings: CapacityPoolPlacementSettings;
 }
@@ -53,7 +59,9 @@ export async function resolveCapacityPoolPlacementSettings(
   db: Db,
   env?: Pick<
     Env,
-    'CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON' | 'CAPACITY_POOL_SELECTION_SETTINGS_JSON'
+    | 'CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON'
+    | 'CAPACITY_POOL_SELECTION_SETTINGS_JSON'
+    | 'CAPACITY_POOL_PLATFORM_DEFAULTS_JSON'
   >
 ): Promise<ResolvedCapacityPoolPlacementSettings> {
   const rows = await db
@@ -72,6 +80,14 @@ export async function resolveCapacityPoolPlacementSettings(
     })
     .from(schema.platformSettings)
     .where(eq(schema.platformSettings.key, CAPACITY_POOL_SELECTION_SETTINGS_SETTING_KEY));
+  const platformDefaultRows = await db
+    .select({
+      key: schema.platformSettings.key,
+      value: schema.platformSettings.value,
+      updatedAt: schema.platformSettings.updatedAt,
+    })
+    .from(schema.platformSettings)
+    .where(eq(schema.platformSettings.key, CAPACITY_POOL_PLATFORM_DEFAULTS_SETTING_KEY));
 
   const diagnostics: string[] = [];
   const persistedMapping = rows[0] ?? null;
@@ -87,34 +103,39 @@ export async function resolveCapacityPoolPlacementSettings(
     parseSelectionSettings(persistedSelection?.value, 'persisted', diagnostics) ??
     parseSelectionSettings(envSelection, 'environment', diagnostics);
   const selectionSource = selectionResult?.source ?? 'default';
-  const selectionRaw =
-    selectionSource === 'persisted'
-      ? persistedSelection?.value
-      : selectionSource === 'environment'
-        ? envSelection
-        : stableStringify(DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS);
+  const selectionWeights =
+    selectionResult?.selectionWeights ?? DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.selectionWeights;
+  const rolloutCohortPercent =
+    selectionResult?.rolloutCohortPercent ??
+    DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.rolloutCohortPercent;
+
+  const persistedPlatformDefaults = platformDefaultRows[0] ?? null;
+  const envPlatformDefaults = env?.CAPACITY_POOL_PLATFORM_DEFAULTS_JSON ?? null;
+  const platformDefaultsResult =
+    parsePlatformDefaults(persistedPlatformDefaults?.value, 'persisted', diagnostics) ??
+    parsePlatformDefaults(envPlatformDefaults, 'environment', diagnostics) ??
+    defaultPlatformDefaultsResult();
 
   return {
     resourceDefaults: {
       legacyWorkloadMapping: legacyMappingResult.mapping,
+      platformDefaults: platformDefaultsResult.defaults,
     },
     placementSettings: {
       version: DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.version,
       sourceGeneration: sourceGenerationForSelectedSettings({
-        source: selectionSource,
-        raw: selectionRaw,
-        updatedAt: selectionSource === 'persisted' ? persistedSelection?.updatedAt : null,
+        legacyWorkloadMapping: legacyMappingResult.mapping,
+        platformDefaults: platformDefaultsResult.defaults,
+        selectionWeights,
+        rolloutCohortPercent,
       }),
       legacyWorkloadAdapterVersion:
         DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.legacyWorkloadAdapterVersion,
-      selectionWeights:
-        selectionResult?.selectionWeights ??
-        DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.selectionWeights,
-      rolloutCohortPercent:
-        selectionResult?.rolloutCohortPercent ??
-        DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.rolloutCohortPercent,
+      selectionWeights,
+      rolloutCohortPercent,
       source: {
         legacyWorkloadMapping: legacyMappingResult.source,
+        platformDefaults: platformDefaultsResult.source,
         selection: selectionSource,
       },
       diagnostics,
@@ -124,10 +145,10 @@ export async function resolveCapacityPoolPlacementSettings(
 
 function parseLegacyWorkloadMapping(
   raw: string | null | undefined,
-  source: 'persisted' | 'environment',
+  source: Exclude<PlacementSettingsSource, 'default'>,
   diagnostics: string[]
 ): {
-  source: 'persisted' | 'environment';
+  source: Exclude<PlacementSettingsSource, 'default'>;
   mapping: Record<VMSize, Required<ResourceRequirements>>;
 } | null {
   const parsed = parseJsonRecord(raw, `${source}:legacyWorkloadMapping`, diagnostics);
@@ -140,12 +161,14 @@ function parseLegacyWorkloadMapping(
       diagnostics.push(`${source}:legacyWorkloadMapping.${size}:invalid`);
       return null;
     }
-    const requirements = normalizeRequirements(value);
-    if (!requirements) {
+    try {
+      mapping[size] = normalizeResourceRequirements(value, {
+        requireAllFields: true,
+      }) as Required<ResourceRequirements>;
+    } catch {
       diagnostics.push(`${source}:legacyWorkloadMapping.${size}:invalid`);
       return null;
     }
-    mapping[size] = requirements;
   }
 
   return { source, mapping: mapping as Record<VMSize, Required<ResourceRequirements>> };
@@ -156,6 +179,36 @@ function defaultLegacyWorkloadMappingResult(): {
   mapping: Record<VMSize, Required<ResourceRequirements>>;
 } {
   return { source: 'default', mapping: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS };
+}
+
+function parsePlatformDefaults(
+  raw: string | null | undefined,
+  source: Exclude<PlacementSettingsSource, 'default'>,
+  diagnostics: string[]
+): {
+  source: Exclude<PlacementSettingsSource, 'default'>;
+  defaults: Required<ResourceRequirements>;
+} | null {
+  const parsed = parseJsonRecord(raw, `${source}:platformDefaults`, diagnostics);
+  if (!parsed) return null;
+  try {
+    return {
+      source,
+      defaults: normalizeResourceRequirements(parsed, {
+        requireAllFields: true,
+      }) as Required<ResourceRequirements>,
+    };
+  } catch {
+    diagnostics.push(`${source}:platformDefaults:invalid`);
+    return null;
+  }
+}
+
+function defaultPlatformDefaultsResult(): {
+  source: 'default';
+  defaults: Required<ResourceRequirements>;
+} {
+  return { source: 'default', defaults: PLATFORM_RESOURCE_DEFAULTS };
 }
 
 function parseSelectionSettings(
@@ -209,26 +262,6 @@ function parseJsonRecord(
   }
 }
 
-function normalizeRequirements(
-  value: Record<string, unknown>
-): Required<ResourceRequirements> | null {
-  const minVcpu = positiveFiniteNumber(value.minVcpu);
-  const minMemoryGb = positiveFiniteNumber(value.minMemoryGb);
-  const minDiskGb = nonNegativeFiniteNumber(value.minDiskGb);
-  const maxCoTenants = positiveInteger(value.maxCoTenants);
-  const exclusiveNode = typeof value.exclusiveNode === 'boolean' ? value.exclusiveNode : null;
-  if (
-    minVcpu === null ||
-    minMemoryGb === null ||
-    minDiskGb === null ||
-    maxCoTenants === null ||
-    exclusiveNode === null
-  ) {
-    return null;
-  }
-  return { minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants };
-}
-
 function normalizeSelectionWeights(
   value: Record<string, unknown>
 ): CapacityPoolSelectionWeights | null {
@@ -250,15 +283,22 @@ function normalizeSelectionWeights(
 }
 
 function sourceGenerationForSelectedSettings(input: {
-  source: 'persisted' | 'environment' | 'default';
-  raw: string | null | undefined;
-  updatedAt: string | null | undefined;
+  legacyWorkloadMapping: Record<VMSize, Required<ResourceRequirements>>;
+  platformDefaults: Required<ResourceRequirements>;
+  selectionWeights: CapacityPoolSelectionWeights;
+  rolloutCohortPercent: number;
 }): number {
-  if (input.source === 'persisted') {
-    const timestamp = Date.parse(input.updatedAt ?? '');
-    if (Number.isFinite(timestamp) && timestamp > 0) return timestamp;
-  }
-  return stablePositiveHash(`${input.source}:${input.raw ?? ''}`);
+  return stablePositiveHash(
+    stableStringify({
+      version: DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.version,
+      legacyWorkloadAdapterVersion:
+        DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.legacyWorkloadAdapterVersion,
+      legacyWorkloadMapping: input.legacyWorkloadMapping,
+      platformDefaults: input.platformDefaults,
+      selectionWeights: input.selectionWeights,
+      rolloutCohortPercent: input.rolloutCohortPercent,
+    })
+  );
 }
 
 function stableStringify(value: unknown): string {
@@ -281,14 +321,6 @@ function stablePositiveHash(value: string): number {
   return hash >>> 0 || DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.sourceGeneration;
 }
 
-function positiveFiniteNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
-}
-
 function nonNegativeFiniteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
-}
-
-function positiveInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
 }
