@@ -294,6 +294,7 @@ type SessionHost struct {
 	usageReportCancel       context.CancelFunc
 	usageReportFailureCount int
 	usageReportLastError    string
+	usageReportClosed       bool
 
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
@@ -865,6 +866,7 @@ func (h *SessionHost) Stop() {
 		h.mu.Unlock()
 		return
 	}
+	h.closeUsageReportIngress()
 	h.setStatusLocked(HostStopped)
 	h.statusErr = ""
 	h.stopCurrentAgentLocked()
@@ -1058,7 +1060,7 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 func (h *SessionHost) monitorStderr(process agentProcess) {
 	scanner := bufio.NewScanner(process.Stderr())
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := redactAgentDiagnosticText(scanner.Text())
 		slog.Warn("Agent stderr", "line", line)
 		h.stderrMu.Lock()
 		if h.stderrBuf.Len() < h.config.StderrBufferBytes {

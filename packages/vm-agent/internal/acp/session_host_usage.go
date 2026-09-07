@@ -302,6 +302,12 @@ func safeUsageIdentifier(value string) string {
 
 func (h *SessionHost) enqueueUsageReport(request usageReportRequest) {
 	h.usageReportMu.Lock()
+	if h.usageReportClosed {
+		h.recordUsageReportFailureLocked("usage report ingress closed")
+		h.usageReportMu.Unlock()
+		slog.Warn("usageReport: dropped report after ingress closed")
+		return
+	}
 	if h.usageReportPending == nil {
 		h.usageReportPending = make(map[string]usageReportRequest)
 	}
@@ -310,17 +316,21 @@ func (h *SessionHost) enqueueUsageReport(request usageReportRequest) {
 		h.usageReportLastError = ""
 	}
 	key := usageReportCoalesceKey(request)
-	if _, exists := h.usageReportPending[key]; !exists {
-		h.usageReportOrder = append(h.usageReportOrder, key)
+	if _, exists := h.usageReportPending[key]; exists {
+		h.usageReportOrder = removeUsageReportOrderKey(h.usageReportOrder, key)
 	}
+	h.usageReportOrder = append(h.usageReportOrder, key)
+	h.usageReportPending[key] = request
 	limit := h.usageReportPendingLimit()
 	for len(h.usageReportOrder) > limit {
 		evicted := h.usageReportOrder[0]
 		h.usageReportOrder = h.usageReportOrder[1:]
-		delete(h.usageReportPending, evicted)
-		slog.Warn("usageReport: pending report evicted due to capacity", "pendingLimit", limit)
+		if _, exists := h.usageReportPending[evicted]; exists {
+			delete(h.usageReportPending, evicted)
+			h.recordUsageReportFailureLocked("usage report pending capacity exceeded")
+			slog.Warn("usageReport: pending report evicted due to capacity", "pendingLimit", limit)
+		}
 	}
-	h.usageReportPending[key] = request
 	if h.usageReportRunning {
 		h.usageReportMu.Unlock()
 		return
@@ -333,6 +343,16 @@ func (h *SessionHost) enqueueUsageReport(request usageReportRequest) {
 	h.usageReportMu.Unlock()
 
 	go h.runUsageReporter(reporterCtx, done)
+}
+
+func removeUsageReportOrderKey(order []string, key string) []string {
+	next := order[:0]
+	for _, existing := range order {
+		if existing != key {
+			next = append(next, existing)
+		}
+	}
+	return next
 }
 
 func (h *SessionHost) runUsageReporter(ctx context.Context, done chan struct{}) {
@@ -369,8 +389,18 @@ func (h *SessionHost) nextUsageReport() (usageReportRequest, bool) {
 
 func (h *SessionHost) recordUsageReportFailure(message string) {
 	h.usageReportMu.Lock()
+	h.recordUsageReportFailureLocked(message)
+	h.usageReportMu.Unlock()
+}
+
+func (h *SessionHost) recordUsageReportFailureLocked(message string) {
 	h.usageReportFailureCount++
 	h.usageReportLastError = message
+}
+
+func (h *SessionHost) closeUsageReportIngress() {
+	h.usageReportMu.Lock()
+	h.usageReportClosed = true
 	h.usageReportMu.Unlock()
 }
 
@@ -393,7 +423,7 @@ func (h *SessionHost) flushUsageReports(timeout time.Duration) error {
 		h.usageReportMu.Unlock()
 
 		if done == nil {
-			return nil
+			return fmt.Errorf("usage report flush missing completion signal")
 		}
 		select {
 		case <-done:
@@ -436,8 +466,19 @@ func usageReportCoalesceKey(request usageReportRequest) string {
 		limit.Source,
 		limit.WindowType,
 		limit.Status,
+		float64PointerKey(limit.UtilizationPercent),
+		int64PointerKey(limit.LimitAmount),
+		int64PointerKey(limit.RemainingAmount),
+		int64PointerKey(limit.WindowMinutes),
 		int64PointerKey(limit.ResetsAt),
 	}, "\x1f")
+}
+
+func float64PointerKey(value *float64) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.17g", *value)
 }
 
 func int64PointerKey(value *int64) string {

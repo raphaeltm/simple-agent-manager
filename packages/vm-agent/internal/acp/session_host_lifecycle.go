@@ -102,6 +102,7 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 		h.mu.Unlock()
 		return "", ""
 	}
+	h.closeUsageReportIngress()
 
 	// Capture the session state we need to preserve before stopping.
 	acpSessionID = string(h.sessionID)

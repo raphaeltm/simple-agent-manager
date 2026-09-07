@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -468,6 +469,142 @@ func TestUsageReporterCoalescesEquivalentPendingReportsToLatest(t *testing.T) {
 	}
 }
 
+func TestSessionUpdateUsageReporterMovesReplacementAfterInterveningTransitionAndRetries(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	received := make(chan usageReportPayload, 4)
+	var allowedResetAttempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload usageReportPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode usage report: %v", err)
+		}
+		received <- payload
+		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		if len(payload.RateLimits) > 0 &&
+			payload.RateLimits[0].WindowType == "claude.five_hour" &&
+			payload.RateLimits[0].Status == "allowed" &&
+			payload.RateLimits[0].ObservedAt == 3 &&
+			allowedResetAttempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	var nowMs atomic.Int64
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			ControlPlaneURL:                server.URL,
+			ProjectID:                      "project-1",
+			NodeID:                         "node-1",
+			WorkspaceID:                    "workspace-1",
+			SessionID:                      "session-1",
+			CallbackToken:                  "callback-token",
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 2,
+			TerminalActivityReportBackoff:  time.Millisecond,
+			ActivityReportTimeout:          time.Second,
+			Now: func() time.Time {
+				return time.UnixMilli(nowMs.Add(1))
+			},
+		},
+	})
+	client := usageSessionClientForTest(host)
+
+	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "blocker", "allowed", 0, nil))
+	<-firstStarted
+	if err := client.SessionUpdate(context.Background(), claudeRateLimitNotification("allowed", "five_hour", 0.5)); err != nil {
+		t.Fatalf("SessionUpdate allowed1: %v", err)
+	}
+	if err := client.SessionUpdate(context.Background(), claudeRateLimitNotification("rejected", "five_hour", 0.5)); err != nil {
+		t.Fatalf("SessionUpdate rejected2: %v", err)
+	}
+	if err := client.SessionUpdate(context.Background(), claudeRateLimitNotification("allowed", "five_hour", 0.5)); err != nil {
+		t.Fatalf("SessionUpdate allowed3: %v", err)
+	}
+	close(releaseFirst)
+
+	if err := host.flushUsageReports(time.Second); err != nil {
+		t.Fatalf("flushUsageReports: %v", err)
+	}
+	got := []usageLimitPayload{
+		readUsagePayload(t, received).RateLimits[0],
+		readUsagePayload(t, received).RateLimits[0],
+		readUsagePayload(t, received).RateLimits[0],
+		readUsagePayload(t, received).RateLimits[0],
+	}
+	if got[0].WindowType != "blocker" {
+		t.Fatalf("first window = %q, want blocker", got[0].WindowType)
+	}
+	if got[1].Status != "rejected" || got[1].ObservedAt != 2 {
+		t.Fatalf("second report = %#v, want rejected observation at 2 before reset", got[1])
+	}
+	if got[2].Status != "allowed" || got[2].ObservedAt != 3 {
+		t.Fatalf("third report = %#v, want latest allowed reset at 3", got[2])
+	}
+	if got[3].Status != "allowed" || got[3].ObservedAt != 3 {
+		t.Fatalf("retry report = %#v, want same latest allowed reset at 3", got[3])
+	}
+	select {
+	case extra := <-received:
+		t.Fatalf("unexpected extra report: %#v", extra)
+	default:
+	}
+}
+
+func TestUsageReporterKeepsSameStatusThresholdChangesDistinct(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	received := make(chan usageReportPayload, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload usageReportPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode usage report: %v", err)
+		}
+		received <- payload
+		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 1,
+			ActivityReportTimeout:          time.Second,
+		},
+	})
+
+	util80 := 80.0
+	util95 := 95.0
+	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "blocker", "allowed", 0, nil))
+	<-firstStarted
+	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "claude.five_hour", "allowed_warning", 1, &util80))
+	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "claude.five_hour", "allowed_warning", 2, &util95))
+	close(releaseFirst)
+
+	if err := host.flushUsageReports(time.Second); err != nil {
+		t.Fatalf("flushUsageReports: %v", err)
+	}
+	_ = readUsagePayload(t, received)
+	first := readUsagePayload(t, received).RateLimits[0]
+	second := readUsagePayload(t, received).RateLimits[0]
+	if first.UtilizationPercent == nil || *first.UtilizationPercent != 80 {
+		t.Fatalf("first warning utilization = %v, want 80", first.UtilizationPercent)
+	}
+	if second.UtilizationPercent == nil || *second.UtilizationPercent != 95 {
+		t.Fatalf("second warning utilization = %v, want 95", second.UtilizationPercent)
+	}
+}
+
 func TestUsageReporterFlushReportsDeliveryFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -492,6 +629,58 @@ func TestUsageReporterFlushReportsDeliveryFailure(t *testing.T) {
 
 	if err := host.flushUsageReports(time.Second); err == nil {
 		t.Fatal("flushUsageReports returned nil after failed delivery")
+	}
+}
+
+func TestUsageReporterOverflowMakesDrainFail(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	received := make(chan usageReportPayload, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload usageReportPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode usage report: %v", err)
+		}
+		received <- payload
+		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 1,
+			ActivityReportTimeout:          time.Second,
+		},
+		UsageReportPendingLimit: 1,
+	})
+	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "blocker", "allowed", 0, nil))
+	<-firstStarted
+	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "claude.five_hour", "allowed_warning", 1, nil))
+	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "claude.seven_day", "allowed_warning", 2, nil))
+	close(releaseFirst)
+
+	if err := host.flushUsageReports(time.Second); err == nil {
+		t.Fatal("flushUsageReports returned nil after queue capacity eviction")
+	}
+	got := []string{
+		readUsagePayload(t, received).RateLimits[0].WindowType,
+		readUsagePayload(t, received).RateLimits[0].WindowType,
+	}
+	want := []string{"blocker", "claude.seven_day"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("received reports = %#v, want %#v", got, want)
+		}
+	}
+	select {
+	case extra := <-received:
+		t.Fatalf("unexpected extra report after overflow eviction: %#v", extra)
+	default:
 	}
 }
 
@@ -556,6 +745,66 @@ func TestSessionHostSuspendLogsUsageDrainFailure(t *testing.T) {
 	assertLifecycleDeliveredActivity(t, events, "idle")
 	if !strings.Contains(logs.String(), "usageReport: suspend flush failed") {
 		t.Fatalf("Suspend did not log usage drain failure; logs=%s", logs.String())
+	}
+}
+
+func TestSessionHostStopAndSuspendCloseUsageIngressBeforeLateACPUsageCallback(t *testing.T) {
+	cases := []struct {
+		name     string
+		shutdown func(*SessionHost)
+	}{
+		{name: "stop", shutdown: func(host *SessionHost) { host.Stop() }},
+		{name: "suspend", shutdown: func(host *SessionHost) { host.Suspend() }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			usageReceived := make(chan usageReportPayload, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/projects/project-1/acp-sessions/session-1/usage":
+					var payload usageReportPayload
+					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+						t.Errorf("decode usage report: %v", err)
+					}
+					usageReceived <- payload
+					w.WriteHeader(http.StatusNoContent)
+				case "/api/projects/project-1/acp-sessions/session-1/activity":
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			host := newLifecycleUsageHost(server)
+			tc.shutdown(host)
+
+			client := &sessionHostClient{
+				host: host,
+				usageAttribution: credentialAttribution{
+					AgentType:           "claude-code",
+					CredentialSource:    "user",
+					CredentialReference: "cc_credentials:cred-1",
+					CredentialProvider:  "anthropic",
+					ProviderMode:        "direct",
+				},
+				hasUsageAttribution: true,
+			}
+			if err := client.SessionUpdate(context.Background(), claudeRateLimitNotification("allowed_warning", "five_hour", 0.82)); err != nil {
+				t.Fatalf("SessionUpdate: %v", err)
+			}
+			host.usageReportMu.Lock()
+			running := host.usageReportRunning
+			pending := len(host.usageReportPending)
+			host.usageReportMu.Unlock()
+			if running || pending != 0 {
+				t.Fatalf("late usage callback restarted reporter=%v pending=%d", running, pending)
+			}
+			select {
+			case payload := <-usageReceived:
+				t.Fatalf("late usage callback reached control plane: %#v", payload)
+			case <-time.After(50 * time.Millisecond):
+			}
+		})
 	}
 }
 
@@ -816,6 +1065,62 @@ func readUsagePayload(t *testing.T, received <-chan usageReportPayload) usageRep
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for usage report")
 		return usageReportPayload{}
+	}
+}
+
+func usageReportRequestForTest(url, window, status string, observedAt int64, utilization *float64) usageReportRequest {
+	return usageReportRequest{
+		url:           url,
+		callbackToken: "callback-token",
+		payload: usageReportPayload{
+			NodeID:              "node-1",
+			AgentType:           "claude-code",
+			CredentialSource:    "user",
+			CredentialReference: "cc_credentials:cred-1",
+			Source:              "claude-acp.usage_update",
+			ObservedAt:          observedAt,
+			RateLimits: []usageLimitPayload{{
+				Provider:           "anthropic",
+				Source:             "claude-acp.rate_limit",
+				WindowType:         window,
+				Status:             status,
+				UtilizationPercent: utilization,
+				ObservedAt:         observedAt,
+			}},
+		},
+	}
+}
+
+func usageSessionClientForTest(host *SessionHost) *sessionHostClient {
+	return &sessionHostClient{
+		host: host,
+		usageAttribution: credentialAttribution{
+			AgentType:           "claude-code",
+			CredentialSource:    "user",
+			CredentialReference: "cc_credentials:cred-1",
+			CredentialProvider:  "anthropic",
+			ProviderMode:        "direct",
+		},
+		hasUsageAttribution: true,
+	}
+}
+
+func claudeRateLimitNotification(status, window string, utilization float64) acpsdk.SessionNotification {
+	return acpsdk.SessionNotification{
+		Update: acpsdk.SessionUpdate{
+			UsageUpdate: &acpsdk.SessionUsageUpdate{
+				SessionUpdate: "usage_update",
+				Used:          50,
+				Size:          100,
+				Meta: map[string]any{
+					"_claude/rateLimit": map[string]any{
+						"status":        status,
+						"rateLimitType": window,
+						"utilization":   utilization,
+					},
+				},
+			},
+		},
 	}
 }
 
