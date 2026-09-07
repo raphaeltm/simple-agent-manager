@@ -203,3 +203,52 @@ Fixing the 60 application violations. They belong to the current-authority /
 direct-allocation slices (A5 `01M1XFJSHZV180T9WTWDQZJGQC`, C3a
 `01M1XFH3SHTKP79YDJ0DMC4CQ2`) and to the future C3b2 runtime-leak work. Section E
 acceptance remains parent-owned.
+
+## Discrimination evidence
+
+Each guard was deleted in turn and the fixture suite re-run. Every mutation
+turned exactly the intended fixtures red; the suite is 50/50 green with the guard
+restored.
+
+| Guard removed                                            |                Result |
+| -------------------------------------------------------- | --------------------: |
+| import-alias resolution (`getVcpuCount as count`)        |  1 failed / 49 passed |
+| namespace member-call resolution (`legacy.getVcpuCount`) |  1 failed / 49 passed |
+| destructured legacy-size aliasing                        |  1 failed / 49 passed |
+| canonical family-token scope                             |  1 failed / 49 passed |
+| type-position exemption                                  |  2 failed / 48 passed |
+| persisted-transport exemption                            |  2 failed / 48 passed |
+| presence-check exemption                                 |  3 failed / 47 passed |
+| reviewed-validator exception                             |  2 failed / 48 passed |
+| drizzle table-alias resolution                           |  2 failed / 48 passed |
+| SQL execution-boundary gate                              |  1 failed / 49 passed |
+| per-function writer ownership                            |  1 failed / 49 passed |
+| allocation-entrypoint scan                               |  6 failed / 44 passed |
+| AST evidence replaced with text `includes`               |  2 failed / 48 passed |
+| SQL table-name greedy capture made lazy                  | 11 failed / 39 passed |
+
+One candidate guard was **not** discriminating and was therefore removed rather
+than kept as decoration: the `(?![a-z0-9_])` lookahead on the SQL table-name
+pattern. The greedy full-identifier capture already provides the word boundary
+(`nodes_history` captures `nodes_history`, matching no tracked table), so
+deleting the lookahead changed nothing. The boundary property is instead proven
+by the lazy-quantifier mutation in the last row above, which is the natural wrong
+implementation this class of bug takes.
+
+## Test-count reconciliation
+
+`apps/api` unit suite on this branch: **652 files, 8747 tests, 8674 passed, 73
+failed, 0 files failed to collect** (JSON reporter, `success: false` read from
+the report rather than from a piped exit code).
+
+The 73 failures are pre-existing WIP application failures owned by other slices,
+across 18 files (`deployment-provisioning`, `node-selector-flow`,
+`placement-resolver`, `capacity-pools-defaults`, `task-run-capacity-pools`,
+`session-snapshot-upload-relay`, `trigger-submit`, and others). Verified by
+running exactly those 18 files against the base commit `93bfa4246` with this
+branch stashed: **18 failed files / 73 failed / 272 passed**, identical.
+
+Baseline reconciliation: the only files this branch changes are the scanner
+modules, `package.json`, this branch's task docs and the boundary test file. The
+boundary test file went from 7 tests to 50, so the expected total is
+`8704 + 43 = 8747`, which matches. No test file lost its collection.

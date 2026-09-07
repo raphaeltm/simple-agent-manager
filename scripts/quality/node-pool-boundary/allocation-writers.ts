@@ -1,7 +1,6 @@
 import ts from 'typescript';
 
 import {
-  enclosingFunctionBody,
   enclosingFunctionName,
   parseSourceFile,
   pathStartsWithAny,
@@ -271,5 +270,3 @@ function literalOrTemplateText(node: ts.Node): string | null {
   }
   return null;
 }
-
-export { enclosingFunctionBody };
