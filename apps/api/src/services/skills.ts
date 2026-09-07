@@ -322,9 +322,9 @@ export async function resolveSkillProfile(
     devcontainerConfigName: skill?.devcontainerConfigName ?? profile.devcontainerConfigName,
     taskMode: skill?.taskMode ?? profile.taskMode,
     resourceRequirementsJson: skill
-      ? skill.resourceRequirementsJson
-      : profile.resourceRequirementsJson,
-    agentProfileResourceRequirementsJson: profile.resourceRequirementsJson,
+      ? (skill.resourceRequirementsJson ?? null)
+      : (profile.resourceRequirementsJson ?? null),
+    agentProfileResourceRequirementsJson: profile.resourceRequirementsJson ?? null,
     defaultProfileId: skill?.defaultProfileId ?? null,
   };
 }

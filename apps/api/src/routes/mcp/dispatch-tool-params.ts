@@ -11,12 +11,12 @@ import {
   isValidAgentType,
 } from '@simple-agent-manager/shared';
 
-import { INVALID_PARAMS, jsonRpcError, type JsonRpcResponse } from './_helpers';
-import { parseDispatchRuntime } from './dispatch-instant';
 import {
   normalizeResourceRequirementsInput,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
+import { INVALID_PARAMS, jsonRpcError, type JsonRpcResponse } from './_helpers';
+import { parseDispatchRuntime } from './dispatch-instant';
 
 const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
 const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
