@@ -72,7 +72,21 @@ export async function listProviderCatalogOfferings(
       provider: providerName,
       ...serializeError(error),
     });
-    throw error;
+    // A transient live-enumeration failure must not delete the whole provider
+    // from the catalog: rethrowing here drops the credential's catalog in
+    // buildCatalogsFromCredentialRows, which empties the UI picker and starves
+    // default-pool candidate materialisation. Fall back to the provider's own
+    // static offerings, which are the same shape and are what preferApi:false
+    // returns. Only a failure of BOTH is fatal.
+    try {
+      return await provider.listInstanceOfferings({ preferApi: false });
+    } catch (staticError) {
+      log.warn('catalog.static_offerings_failed', {
+        provider: providerName,
+        ...serializeError(staticError),
+      });
+      throw error;
+    }
   }
 }
 
