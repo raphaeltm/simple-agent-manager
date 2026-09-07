@@ -4,7 +4,7 @@
  * ProfileFormDialog, ChatInput resource override, and ProjectSettings
  * infrastructure.
  */
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, screenshot } from './audit-helpers';
 
