@@ -14,7 +14,7 @@ project_doc_fallback_filenames = ["CLAUDE.md"]
 # Added by SAM vm-agent for Codex ACP sessions.
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
-model_reasoning_effort = "xhigh"
+model_reasoning_effort = "high"
 [mcp_servers.sam-mcp]
 url = "https://api.simple-agent-manager.org/mcp"
 bearer_token_env_var = "SAM_MCP_TOKEN"
@@ -25,3 +25,6 @@ bearer_token_env_var = "SAM_MCP_TOKEN"
 type = "command"
 command = ".claude/hooks/verify-test-quality.sh"
 timeout = 30000
+
+[projects."/workspaces/simple-agent-manager"]
+trust_level = "trusted"
