@@ -50,6 +50,7 @@ import * as policies from './policies';
 import * as projectCommentInbox from './project-comment-inbox';
 import * as projectEvents from './project-events';
 import * as eventChannels from './project-event-channels';
+import { requireChannelActorAuthority, requireChannelActorChat } from './project-event-channels-authority';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
@@ -1031,8 +1032,17 @@ export class ProjectData extends DurableObject<Env> {
   async publishProjectEventChannel(input: eventChannels.PublishProjectEventChannelInput): Promise<eventChannels.PublishProjectEventChannelResult> {
     this.ensureProjectId(input.projectId);
     const prepared = await eventChannels.prepareChannelPublish(this.env, input);
-    const result = this.ctx.storage.transactionSync(() =>
-      eventChannels.publishChannel(this.sql, this.env, this.getProjectId(), prepared));
+    await requireChannelActorAuthority(this.env, prepared.projectId, prepared.actor);
+    // Commit bounded maintenance progress independently; a capacity rejection in
+    // the following admission transaction must not rewind the catalog walk.
+    this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, prepared.actor);
+      eventChannels.cleanupEmptyChannels(this.sql, this.env, prepared.projectId, Date.now());
+    });
+    const result = this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, prepared.actor);
+      return eventChannels.publishChannel(this.sql, this.env, this.getProjectId(), prepared);
+    });
     await this.recalculateAlarm();
     return result;
   }
@@ -1050,16 +1060,22 @@ export class ProjectData extends DurableObject<Env> {
 
   async followProjectEventChannel(input: eventChannels.FollowProjectEventChannelInput): Promise<eventChannels.FollowProjectEventChannelResult> {
     this.ensureProjectId(input.projectId);
-    const result = this.ctx.storage.transactionSync(() =>
-      eventChannels.followChannel(this.sql, this.env, this.getProjectId(), input));
+    await requireChannelActorAuthority(this.env, input.projectId, input.actor);
+    const result = this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, input.actor);
+      return eventChannels.followChannel(this.sql, this.env, this.getProjectId(), input);
+    });
     await this.recalculateAlarm();
     return result;
   }
 
   async catchUpProjectEventChannel(input: eventChannels.CatchUpProjectEventChannelInput): Promise<eventChannels.FollowProjectEventChannelResult> {
     this.ensureProjectId(input.projectId);
-    const result = this.ctx.storage.transactionSync(() =>
-      eventChannels.catchUpChannel(this.sql, this.env, this.getProjectId(), input));
+    await requireChannelActorAuthority(this.env, input.projectId, input.actor);
+    const result = this.ctx.storage.transactionSync(() => {
+      requireChannelActorChat(this.sql, input.actor);
+      return eventChannels.catchUpChannel(this.sql, this.env, this.getProjectId(), input);
+    });
     await this.recalculateAlarm();
     return result;
   }

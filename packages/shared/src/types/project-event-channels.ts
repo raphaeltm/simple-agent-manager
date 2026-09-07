@@ -15,6 +15,7 @@ export type ProjectEventChannelActor = {
   taskId: string;
   chatSessionId: string;
   workspaceId: string;
+  agentSessionId?: string | null;
 };
 
 export type ProjectEventChannel = {
@@ -68,6 +69,9 @@ export type ProjectEventChannelHistory = {
 
 export type FollowProjectEventChannelInput = Omit<CreateProjectEventSubscriptionInput, 'filter'> & {
   channel: string;
+  /** Server-resolved default, used only on first creation when expiresAt is omitted. */
+  defaultExpiresAt?: number;
+  actor: ProjectEventChannelActor;
   /** Omit to follow only future events. A history cursor resumes after consumed history. */
   cursor?: string | null;
 };
@@ -82,5 +86,6 @@ export type CatchUpProjectEventChannelInput = {
   projectId: string;
   subscriptionId: string;
   visibility: ProjectEventAgentVisibility;
+  actor: ProjectEventChannelActor;
   limit?: number | null;
 };

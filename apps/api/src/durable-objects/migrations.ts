@@ -2038,7 +2038,9 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`CREATE TABLE IF NOT EXISTS project_event_channel_publish_rate (
         project_id TEXT PRIMARY KEY,
         window_started_at INTEGER NOT NULL,
-        publish_count INTEGER NOT NULL
+        publish_count INTEGER NOT NULL,
+        catalog_after_time INTEGER NOT NULL DEFAULT 0,
+        catalog_after_id TEXT NOT NULL DEFAULT ''
       )`);
       sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_id TEXT`);
       sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_after_sequence INTEGER`);

@@ -1,10 +1,18 @@
-export { publishChannel, prepareChannelPublish } from './project-event-channels-publish';
-export { listChannels, channelHistory } from './project-event-channels-storage';
-export { followChannel, catchUpChannel } from './project-event-channels-follow';
+export { catchUpChannel, followChannel } from './project-event-channels-follow';
+export { prepareChannelPublish, publishChannel } from './project-event-channels-publish';
+export {
+  channelHistory,
+  cleanupEmptyChannels,
+  listChannels,
+} from './project-event-channels-storage';
 export type {
-  PublishProjectEventChannelInput, PublishProjectEventChannelResult,
-  ListProjectEventChannelsInput, ProjectEventChannelList,
-  ProjectEventChannelHistoryInput, ProjectEventChannelHistory,
-  FollowProjectEventChannelInput, FollowProjectEventChannelResult,
   CatchUpProjectEventChannelInput,
+  FollowProjectEventChannelInput,
+  FollowProjectEventChannelResult,
+  ListProjectEventChannelsInput,
+  ProjectEventChannelHistory,
+  ProjectEventChannelHistoryInput,
+  ProjectEventChannelList,
+  PublishProjectEventChannelInput,
+  PublishProjectEventChannelResult,
 } from '@simple-agent-manager/shared';

@@ -33,20 +33,50 @@ function positive(value: string | undefined, fallback: number, field: string): n
 
 export function channelLimits(env: ProjectEventChannelEnv) {
   return {
-    maxChannels: positive(env.PROJECT_EVENT_CHANNEL_MAX_CHANNELS, DEFAULT_PROJECT_EVENT_CHANNEL_MAX_CHANNELS, 'PROJECT_EVENT_CHANNEL_MAX_CHANNELS'),
-    messageBytes: positive(env.PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES, DEFAULT_PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES, 'PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES'),
-    nameBytes: positive(env.PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES, DEFAULT_PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES, 'PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES'),
-    publishWindowMs: positive(env.PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS, DEFAULT_PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS, 'PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS'),
-    publishMax: positive(env.PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW, DEFAULT_PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW, 'PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW'),
-    cursorTtlMs: positive(env.PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS, DEFAULT_PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS, 'PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS'),
-    catalogIdleTtlMs: positive(env.PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS, DEFAULT_PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS, 'PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS'),
+    maxChannels: positive(
+      env.PROJECT_EVENT_CHANNEL_MAX_CHANNELS,
+      DEFAULT_PROJECT_EVENT_CHANNEL_MAX_CHANNELS,
+      'PROJECT_EVENT_CHANNEL_MAX_CHANNELS'
+    ),
+    messageBytes: positive(
+      env.PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES,
+      DEFAULT_PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES,
+      'PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES'
+    ),
+    nameBytes: positive(
+      env.PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES,
+      DEFAULT_PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES,
+      'PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES'
+    ),
+    publishWindowMs: positive(
+      env.PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS,
+      DEFAULT_PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS,
+      'PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS'
+    ),
+    publishMax: positive(
+      env.PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW,
+      DEFAULT_PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW,
+      'PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW'
+    ),
+    cursorTtlMs: positive(
+      env.PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS,
+      DEFAULT_PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS,
+      'PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS'
+    ),
+    catalogIdleTtlMs: positive(
+      env.PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS,
+      DEFAULT_PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS,
+      'PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS'
+    ),
   };
 }
 
 export function channelName(value: string, env: ProjectEventChannelEnv): string {
   const name = normalizeText(value, 'channel', channelLimits(env).nameBytes);
   if (!/^[a-z0-9][a-z0-9_.-]*$/.test(name)) {
-    throw new ProjectEventValidationError('channel must contain lowercase letters, digits, dots, underscores or hyphens');
+    throw new ProjectEventValidationError(
+      'channel must contain lowercase letters, digits, dots, underscores or hyphens'
+    );
   }
   return name;
 }
