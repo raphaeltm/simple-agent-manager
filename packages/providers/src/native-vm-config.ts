@@ -118,6 +118,8 @@ export function assertIncludedBootDiskCapacity(
 ): void {
   if (config.bootDiskSizeGb === undefined) return;
 
+  // Workload requirements are not proof of fixed-root provider capacity; only
+  // catalog/provider metadata carried in resources.diskGb can validate this.
   const includedDiskGb = resolveIncludedDiskGb(config);
   if (includedDiskGb === undefined) {
     throw new ProviderError(
