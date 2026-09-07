@@ -349,3 +349,15 @@ fixture tests.
 
 Scanner regression suite: **67/67 PASS** (was 50). Modules were re-split so no
 file exceeds the 500-line ceiling (largest: `inventory-data.ts` at 440).
+
+### Round-2 test-count reconciliation
+
+`apps/api` unit suite at `b6870cecb`: **652 files, 8764 tests, 8691 passed, 73
+failed, 0 files failed to collect.** Expected total `8747 - 50 + 67 = 8764`,
+which matches — the boundary suite grew from 50 to 67 tests and nothing else
+changed. The same 73 failures across the same 18 pre-existing files remain; they
+were shown identical against base `93bfa4246` in the round-1 reconciliation and
+no application source has been touched since.
+
+`pnpm --filter @simple-agent-manager/api typecheck` exits 0; ESLint is clean on
+every changed file; the Prettier format ratchet passes.
