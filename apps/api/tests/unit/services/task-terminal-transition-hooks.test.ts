@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { admitProjectEventSourceIntentById, reconcileTaskWaits } = vi.hoisted(() => ({
+const { admitProjectEventSourceIntentById, reconcileTaskWaits, recordTaskLifecycleEventViaSourceOutbox } = vi.hoisted(() => ({
   admitProjectEventSourceIntentById: vi.fn(async () => ({ state: 'admitted' })),
   reconcileTaskWaits: vi.fn(async () => ({ checked: 1 })),
+  recordTaskLifecycleEventViaSourceOutbox: vi.fn(async () => ({ state: 'admitted' })),
 }));
+
+vi.mock('../../../src/services/project-lifecycle-events', () => ({ recordTaskLifecycleEventViaSourceOutbox }));
 
 vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits }));
 vi.mock('../../../src/services/project-event-source-outbox', () => ({
@@ -73,6 +76,17 @@ describe('task terminal transition hooks', () => {
     expect(admitProjectEventSourceIntentById).toHaveBeenCalledWith(env, 'intent-1');
   });
 
+  it('captures only explicitly opted-in legacy terminal writers and never rebuilds captured intents', async () => {
+    const event = { taskId: 'task-1', projectId: 'project-1', parentTaskId: null,
+      status: 'failed' as const, reason: 'Failed task', occurredAt: '2026-09-07T00:00:00Z', source: 'task_runner.fail_task' };
+    const hook = createProjectEventTaskTerminalTransitionHook({} as never, { captureAtHook: true });
+    await hook.handle(event);
+    expect(recordTaskLifecycleEventViaSourceOutbox).toHaveBeenCalledExactlyOnceWith({}, event);
+    await hook.handle({ ...event, projectEventSourceIntentId: 'captured' });
+    expect(recordTaskLifecycleEventViaSourceOutbox).toHaveBeenCalledTimes(1);
+    expect(admitProjectEventSourceIntentById).toHaveBeenCalledWith({}, 'captured');
+  });
+
   it('does not rebuild a lifecycle event when the captured intent id is missing', async () => {
     const event = {
       taskId: 'child-1',
@@ -87,5 +101,6 @@ describe('task terminal transition hooks', () => {
     await createProjectEventTaskTerminalTransitionHook({} as never).handle(event);
 
     expect(admitProjectEventSourceIntentById).not.toHaveBeenCalled();
+    expect(recordTaskLifecycleEventViaSourceOutbox).not.toHaveBeenCalled();
   });
 });

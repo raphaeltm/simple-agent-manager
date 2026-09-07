@@ -158,6 +158,7 @@ vi.mock('../../../src/services/deployment-routing', () => ({
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
+  createModuleLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 

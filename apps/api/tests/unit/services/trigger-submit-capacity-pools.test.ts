@@ -10,6 +10,8 @@ import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helper
 const mocks = vi.hoisted(() => ({
   createReservedTaskSessionWithInitialMessage: vi.fn(),
   stopSession: vi.fn(),
+  getSession: vi.fn(),
+  resolveSkillProfile: vi.fn(),
   requireRepositoryOwnerAccess: vi.fn(),
   startTaskRunnerDO: vi.fn(),
   ensureTaskRunnerStarted: vi.fn(),
@@ -19,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/services/project-data', () => ({
   createReservedTaskSessionWithInitialMessage: mocks.createReservedTaskSessionWithInitialMessage,
   stopSession: mocks.stopSession,
+  getSession: mocks.getSession,
 }));
 
 vi.mock('../../../src/routes/projects/_helpers', () => ({
@@ -40,7 +43,7 @@ vi.mock('../../../src/services/agent-profiles', () => ({
 }));
 
 vi.mock('../../../src/services/skills', () => ({
-  resolveSkillProfile: vi.fn().mockResolvedValue(null),
+  resolveSkillProfile: mocks.resolveSkillProfile,
   parseSkillResourceRequirementsJson: vi.fn(() => ({})),
 }));
 
@@ -134,16 +137,21 @@ describe('submitTriggeredTask capacity-pool integration', () => {
       initialMessageInserted: true,
     });
     mocks.stopSession.mockResolvedValue(undefined);
+    mocks.getSession.mockResolvedValue({ id: 'chat_exec-1', taskId: 'exec-1', createdByUserId: 'user-1', status: 'active' });
+    mocks.resolveSkillProfile.mockResolvedValue(null);
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);
     mocks.ensureTaskRunnerStarted.mockResolvedValue(false);
     mocks.generateTaskTitle.mockResolvedValue('Triggered capacity task');
   });
 
-  it('uses centralized placement to persist concrete pool snapshots and start TaskRunner', async () => {
+  it.each([null, 'skill-1'])('uses centralized placement and persists selected skill %s through reserved task submission', async (skillId) => {
     const { sqlite, env } = createEnv();
     seedTriggerRows(sqlite);
     await seedProjectDefaultPool(env);
+    if (skillId) mocks.resolveSkillProfile.mockResolvedValue({
+      skillId, skillHint: skillId, profileId: null, agentType: 'opencode', resourceRequirementsJson: null,
+    });
 
     await submitTriggeredTask(env, {
       triggerId: 'trigger-1',
@@ -153,7 +161,7 @@ describe('submitTriggeredTask capacity-pool integration', () => {
       renderedPrompt: 'Run the scheduled job',
       triggeredBy: 'cron',
       agentProfileId: null,
-      skillId: null,
+      skillId,
       taskMode: 'task',
       vmSizeOverride: null,
       triggerName: 'Scheduled Capacity',
@@ -162,6 +170,7 @@ describe('submitTriggeredTask capacity-pool integration', () => {
     const taskRow = sqlite
       .prepare(
         `SELECT
+           skill_id, skill_hint,
            capacity_pool_id,
            capacity_pool_scope,
            capacity_source_id,
@@ -178,6 +187,7 @@ describe('submitTriggeredTask capacity-pool integration', () => {
       .get() as Record<string, unknown>;
 
     expect(taskRow).toMatchObject({
+      skill_id: skillId, skill_hint: skillId,
       capacity_pool_id: 'cap-pool-default:project:project-1',
       capacity_pool_scope: 'project',
       capacity_source_id: 'cap-source-default:project:project-cloud-1',
@@ -188,6 +198,9 @@ describe('submitTriggeredTask capacity-pool integration', () => {
       provider_instance_memory_mb: 4096,
       provider_instance_disk_gb: 40,
     });
+    if (skillId) expect(mocks.resolveSkillProfile).toHaveBeenCalledWith(
+      expect.anything(), 'project-1', null, skillId, 'user-1', env
+    );
     expect(String(taskRow.capacity_pool_candidate_id)).toContain(':hetzner:nbg1:cx23');
     expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
       env,

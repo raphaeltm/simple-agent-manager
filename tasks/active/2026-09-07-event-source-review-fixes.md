@@ -28,7 +28,6 @@ Reserve D1 migration **0148** for these fixes. B owns 0144, credential initial w
 
 Use real migrated D1 and canonical ProjectData admission for losing transitions, same-intent replay/conflict, claim replacement, expiry/exhaustion, retention, and admission-success/acknowledgement-loss recovery. Stubbing the external network at declared seams is appropriate; handwritten SQLite facsimiles and mocked always-created admission are not sufficient final evidence. Record measured bounded candidate/mutation work. Preserve existing webhook trigger behavior and source-label semantics. Run shared build, API lint/typecheck, relevant focused and workerd suites, migration safety, file-size checks, and setup-generation tests. Push a recoverable checkpoint before expensive checks. Complete local independent Cloudflare/security review and return exact commits, commands/results, interfaces and remaining concerns. The full parent feature and final review/staging/CI remain pending.
 
-
 ## Parent checkpoint review of B2 `26772e077`
 
 The checkpoint is fetched and preserved but not integrated or accepted. These findings are from the exact committed source; they supplement the original required fixes while B2 is still implementing and testing.
@@ -40,8 +39,8 @@ The checkpoint is fetched and preserved but not integrated or accepted. These fi
 
 The configured sweep row and wall budget still needs actual accounting at claim and settlement boundaries, not only maintenance row updates. Keep the original final runtime, webhook safety, manifest parity and attention-fixture requirements open until demonstrated.
 
-
 Follow-up checkpoint `3bfb8a15a` was pushed/fetched during review. It removes the stale result override and replaces the partial maintenance indexes with full state-prefixed indexes. By inspection, the claim-result defect above is addressed; final integrated runtime validation remains required. Root reran the exact healthy-prefix queries against the new migration: expiry is now constant-work (17 SQLite VM instructions at both 1,000 and 20,000 rows), but exhaustion still grows from 6,013 to 120,013 instructions because its row-to-row attempt comparison scans the whole state prefix. The active-final-attempt revocation and credential capture extension remain unresolved in this checkpoint. Do not reimplement the already-removed result override; finish and test the remaining cases.
+
 ## B2 author-reported implementation notes
 
 - Added D1 migration `0148_project_event_source_outbox_durability.sql` for `tasks.terminal_transition_id`, outbox `claim_token`, `claimed_at`, `terminalized_at`, and state-prefixed indexes for active expiry, active attempts, and terminal retention. The index definitions are full `(state, ..., id)` indexes because SQLite did not use the partial-index variant with bound state parameters.
@@ -79,7 +78,6 @@ These child checklist results are historical claims. Independent parent review r
 - Doc sync validation: PASS. Public configuration, self-hosting guide, setup component, deploy utility, and architecture overview reflect the implemented outbox durability and GitHub App setup behavior. The parent acceptance document remains open by design.
 - Constitution validation: PASS. New wall/admission/retention durations and row limits are configurable with shared defaults and Worker overrides. No new internal hardcoded URLs or deployment-specific identifiers were introduced.
 - Task completion validation: PASS for B2 checklist-to-diff and criteria-to-test coverage, with one reported limitation: the global file-size quality command is blocked by the unrelated C2-owned credential telemetry file noted above.
-
 
 ## Final B2 integration review and B3 repair contract
 

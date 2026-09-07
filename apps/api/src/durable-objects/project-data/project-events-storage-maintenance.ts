@@ -135,6 +135,26 @@ export function deleteRowsByIds(
   return rowsWritten;
 }
 
+/** Retention reports logical rows, while its shared budget includes physical index writes. */
+export function deleteRetentionRowsByIds(
+  sql: SqlStorage,
+  table: ProjectEventTable,
+  projectId: string,
+  ids: string[]
+): { count: number; mutated: number } {
+  let count = 0;
+  let mutated = 0;
+  for (const chunk of chunkIdsForBindBudget(ids, 1)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    const result = sql.exec(
+      `${deleteRowsByIdsSql(table, placeholders)} RETURNING id`, projectId, ...chunk
+    );
+    count += result.toArray().length;
+    mutated += result.rowsWritten;
+  }
+  return { count, mutated };
+}
+
 export function accountingFor(
   sql: SqlStorage,
   projectId: string,

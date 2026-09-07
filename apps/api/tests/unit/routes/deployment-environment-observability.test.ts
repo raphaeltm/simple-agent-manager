@@ -125,6 +125,7 @@ vi.mock('../../../src/services/nodes', () => ({
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
+  createModuleLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
 

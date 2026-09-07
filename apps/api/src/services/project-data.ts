@@ -2568,6 +2568,16 @@ export function mutateProjectSchedule(
   );
 }
 
+export function reconcileProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['reconcileProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'reconcileProjectSchedule', (stub) =>
+    stub.reconcileProjectSchedule({ ...input, projectId })
+  );
+}
+
 export function createProjectStandingWatch(
   env: Env,
   projectId: string,

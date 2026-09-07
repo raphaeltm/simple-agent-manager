@@ -238,10 +238,36 @@ describe('transitionTaskToTerminal', () => {
         event_type: 'task.failed',
         subject_type: 'task',
         subject_id: 'task-1',
-        delivery_key: 'task:task-1:status:failed',
+        delivery_key: expect.stringMatching(/^task:task-1:status:failed:transition:/),
         state: 'pending',
       },
     ]);
+  });
+
+  it('captures distinct terminal events when the same task fails again after requeue', async () => {
+    const fail = (reason: string) => transitionTaskToTerminal(env, {
+      taskId: 'task-1', projectId: PROJECT_ID, status: 'failed', reason,
+      source: 'test.requeued_failure',
+    });
+    expect(await fail('First attempt failed')).toBe('transitioned');
+    const firstTransitionId = taskRow().terminal_transition_id;
+    sqlite.prepare(`UPDATE tasks SET status = 'in_progress', completed_at = NULL,
+      error_message = NULL WHERE id = 'task-1'`).run();
+    expect(await fail('Second attempt failed')).toBe('transitioned');
+    const secondTransitionId = taskRow().terminal_transition_id;
+    expect(secondTransitionId).not.toBe(firstTransitionId);
+    const rows = sqlite.prepare(`SELECT delivery_key, state, event_payload_json
+      FROM project_event_source_outbox ORDER BY rowid`).all() as Array<{
+        delivery_key: string; state: string; event_payload_json: string;
+      }>;
+    expect(rows.map(row => row.delivery_key)).toEqual([
+      `task:task-1:status:failed:transition:${firstTransitionId}`,
+      `task:task-1:status:failed:transition:${secondTransitionId}`,
+    ]);
+    expect(rows.map(row => row.state)).toEqual(['pending', 'pending']);
+    expect(rows.map(row => JSON.parse(row.event_payload_json).metadata.reason))
+      .toEqual(['First attempt failed', 'Second attempt failed']);
+    expect(admitProjectEventSourceIntentById).toHaveBeenCalledTimes(2);
   });
 
   it('rejects stale terminal evidence after workspace node ownership changes', async () => {

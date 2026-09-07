@@ -6,14 +6,14 @@ import type {
 import { PROJECT_EVENT_SEVERITIES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-import { type ProjectEventScheduleEnv,scheduleLimits } from './project-event-schedules-config';
+import { type ProjectEventScheduleEnv, scheduleLimits } from './project-event-schedules-config';
 import { ScheduledActionSchema } from './project-event-schedules-storage';
 import {
   normalizeCreateProjectStandingWatch,
   normalizeScheduleVersion,
   normalizeUpdateProjectStandingWatch,
 } from './project-event-schedules-validation';
-import { cancelProjectEventSubscription,createProjectEventSubscription } from './project-events';
+import { cancelProjectEventSubscription, createProjectEventSubscription } from './project-events';
 import {
   ProjectEventCursorError,
   ProjectEventLimitExceededError,

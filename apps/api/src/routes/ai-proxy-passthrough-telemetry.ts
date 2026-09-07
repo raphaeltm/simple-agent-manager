@@ -70,7 +70,7 @@ async function recordPassthroughLimitHeaders(input: PassthroughLimitHeadersInput
 
 export function schedulePassthroughLimitHeaders(
   c: TelemetryContext,
-  input: PassthroughLimitHeadersInput,
+  input: PassthroughLimitHeadersInput
 ): void {
   const telemetry = recordPassthroughLimitHeaders(input).catch((error) => {
     log.warn('ai_proxy_passthrough.credential_limit_telemetry_failed', {

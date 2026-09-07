@@ -315,8 +315,51 @@ describe('recovery event authority at final asynchronous boundaries', () => {
 });
 
 describe('atomic warm-node claim for the current recovery generation', () => {
+  it('fences the distinct scheduled creator atomically without adding a source-owner rule to human recovery', async () => {
+    const f = fixture();
+    f.sqlite.exec(`INSERT INTO users (id, status) VALUES ('creator', 'active');
+      INSERT INTO project_members (project_id, user_id, role, status)
+      VALUES ('project', 'creator', 'maintainer', 'active');`);
+    const lifecycle = Object.assign(Object.create(NodeLifecycle.prototype), { env: f.env }) as {
+      persistWarmClaim(
+        nodeId: string,
+        taskId: string,
+        source: SessionRecoverySourceTaskGuard
+      ): Promise<string>;
+    };
+    const scheduledGuard = { ...guard, projectEventWake: null, requiredProjectMemberId: 'creator' };
+    f.sqlite.exec("UPDATE project_members SET status = 'removed' WHERE user_id = 'creator'");
+    await expect(lifecycle.persistWarmClaim('warm-node', 'T2', scheduledGuard)).resolves.toBe(
+      'source_task_revoked'
+    );
+    expect(
+      f.sqlite.prepare("SELECT claimed_warm_node_id FROM tasks WHERE id = 'T2'").get()
+    ).toEqual({ claimed_warm_node_id: null });
+    await expect(
+      lifecycle.persistWarmClaim('warm-node', 'T2', {
+        ...scheduledGuard,
+        requiredProjectMemberId: null,
+      })
+    ).resolves.toBe('claimed');
+  });
+
   it.each([
     ['exact queued successor', undefined, 'claimed'],
+    [
+      'removed event owner',
+      "DELETE FROM project_members WHERE user_id = 'user'",
+      'source_task_revoked',
+    ],
+    [
+      'viewer event owner',
+      "UPDATE project_members SET role = 'viewer' WHERE user_id = 'user'",
+      'source_task_revoked',
+    ],
+    [
+      'disabled event owner',
+      "UPDATE users SET status = 'suspended' WHERE id = 'user'",
+      'source_task_revoked',
+    ],
     [
       'cancelled without supersession',
       "UPDATE tasks SET superseded_by_task_id = NULL WHERE id = 'root'",

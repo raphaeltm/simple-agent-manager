@@ -33,6 +33,19 @@ message to a new conversation. Expired schedules do not start new work. An
 submission. Inspect the linked task or delivery before taking another action;
 agent side effects are not guaranteed to happen exactly once.
 
+The execution receipt shows the canonical task or delivery state separately from
+schedule admission. **Refresh receipt** can reconcile exhausted retries without
+waking compute or replaying a message. Known running tasks resume monitoring;
+only a terminal task or delivery receipt frees a standing watch's concurrency slot.
+Missing or ambiguous receipts remain unresolved.
+
+For an eligible queued task checkpoint, **Retry task submission** starts another
+finite retry budget using the original task/session identities, prompt, and deadline.
+Current creator authority is checked again. This option is unavailable after the
+original deadline or when task identity cannot be confirmed. It never resends a
+scheduled message. Agents use `reconcile_project_schedule` with `expectedVersion`
+and optional `retrySubmission: true` for the same operation.
+
 ## Standing watches
 
 A standing watch is a human-managed project policy that acts on matching events.

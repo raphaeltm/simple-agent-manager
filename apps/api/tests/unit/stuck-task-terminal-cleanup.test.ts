@@ -145,6 +145,7 @@ beforeEach(() => {
     schema.workspaces,
     schema.tasks,
     schema.taskStatusEvents,
+    schema.projectEventSourceOutbox,
     schema.triggerExecutions,
     schema.agentSessions,
     schema.computeUsage,

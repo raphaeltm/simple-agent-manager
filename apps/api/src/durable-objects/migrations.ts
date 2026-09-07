@@ -2159,6 +2159,26 @@ export const MIGRATIONS: Migration[] = [
         WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`);
     },
   },
+  {
+    name: '054-project-event-orphan-retention-cursor',
+    run: (sql) => {
+      for (const [column, type] of [
+        ['orphan_scan_lifecycle_at', 'INTEGER'],
+        ['orphan_scan_match_id', 'TEXT'],
+      ] as const) {
+        try {
+          sql.exec(`ALTER TABLE project_event_wake_scheduler_state ADD COLUMN ${column} ${type}`);
+        } catch (error) {
+          if (
+            !(error instanceof Error) ||
+            !error.message.toLowerCase().includes(`duplicate column name: ${column}`)
+          )
+            throw error;
+        }
+        sql.exec(`SELECT ${column} FROM project_event_wake_scheduler_state LIMIT 0`);
+      }
+    },
+  },
 ];
 
 /**

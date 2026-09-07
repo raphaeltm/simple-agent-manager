@@ -550,7 +550,8 @@ describe('credential limit producer', () => {
     const eventStore = createProjectEventStore();
     vi.mocked(projectDataService.admitProjectEvent)
       .mockImplementation(async (_env, projectId, input) =>
-        admitProjectDataEvent(eventStore.sql, eventStore.env, projectId, { projectId, ...input }))
+        admitProjectDataEvent(eventStore.sql, eventStore.env, projectId, { projectId, ...input })
+      )
       .mockRejectedValueOnce(new Error('ProjectData unavailable'));
 
     const critical = await recordCredentialLimitObservation(
@@ -600,8 +601,10 @@ describe('credential limit producer', () => {
   it('does not emit an older reset after a newer critical edge is current', async () => {
     const { sqlite, env } = createCredentialD1();
     const eventStore = createProjectEventStore();
-    vi.mocked(projectDataService.admitProjectEvent).mockImplementation(async (_env, projectId, input) =>
-      admitProjectDataEvent(eventStore.sql, eventStore.env, projectId, { projectId, ...input }));
+    vi.mocked(projectDataService.admitProjectEvent).mockImplementation(
+      async (_env, projectId, input) =>
+        admitProjectDataEvent(eventStore.sql, eventStore.env, projectId, { projectId, ...input })
+    );
     await recordCredentialLimitObservation(
       env as never,
       baseObservation({ observedAt: 100_000, utilizationPercent: 80 })

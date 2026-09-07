@@ -5,6 +5,7 @@ import { runScheduleAlarm } from './project-event-schedules-runner';
 import { requireScheduleMember, requireScheduleAction } from './project-event-schedules-authority';
 import { normalizeScheduledAction } from './project-event-schedules-validation';
 import { scheduleLimits } from './project-event-schedules-config';
+import { reconcileSchedule, withScheduleExecution } from './project-event-schedules-recovery';
 import { resolveProjectEventLimits } from './project-events-limits';
 // FILE SIZE EXCEPTION: Cloudflare RPC requires the public ProjectData methods to remain on the exported Durable Object class; domain logic is already split across the sibling modules delegated to below. See .claude/rules/18-file-size-limits.md
 /**
@@ -1085,9 +1086,16 @@ export class ProjectData extends DurableObject<Env> {
       scheduleLimits(this.env),
       resolveProjectEventLimits(this.env)
     );
-    const replay = typeof request.idempotencyKey === 'string' && this.sql.exec(
-      `SELECT id FROM project_schedules WHERE project_id = ? AND creator_user_id = ? AND idempotency_key = ?`,
-      input.projectId, input.userId, request.idempotencyKey.trim()).toArray()[0];
+    const replay =
+      typeof request.idempotencyKey === 'string' &&
+      this.sql
+        .exec(
+          `SELECT id FROM project_schedules WHERE project_id = ? AND creator_user_id = ? AND idempotency_key = ?`,
+          input.projectId,
+          input.userId,
+          request.idempotencyKey.trim()
+        )
+        .toArray()[0];
     if (replay) await requireScheduleMember(this.env, input.projectId, input.userId);
     else await requireScheduleAction(this.sql, this.env, input.projectId, input.userId, action);
     const result = this.ctx.storage.transactionSync(() =>
@@ -1101,7 +1109,7 @@ export class ProjectData extends DurableObject<Env> {
       )
     );
     await this.recalculateAlarm();
-    return result;
+    return { ...result, schedule: (await withScheduleExecution(this.sql, this.env, [result.schedule]))[0]! };
   }
 
   async getProjectSchedule(input: { projectId: string; userId: string; id: string }) {
@@ -1109,7 +1117,8 @@ export class ProjectData extends DurableObject<Env> {
     if (this.getProjectId() !== input.projectId)
       throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
     await requireScheduleMember(this.env, input.projectId, input.userId, true);
-    return eventSchedules.getSchedule(this.sql, input.projectId, input.id);
+    const schedule = eventSchedules.getSchedule(this.sql, input.projectId, input.id);
+    return schedule ? (await withScheduleExecution(this.sql, this.env, [schedule]))[0]! : null;
   }
 
   async listProjectSchedules(input: {
@@ -1123,7 +1132,8 @@ export class ProjectData extends DurableObject<Env> {
     if (this.getProjectId() !== input.projectId)
       throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
     await requireScheduleMember(this.env, input.projectId, input.userId, true);
-    return eventSchedules.listSchedules(this.sql, this.env, input.projectId, input);
+    const result = eventSchedules.listSchedules(this.sql, this.env, input.projectId, input);
+    return { ...result, schedules: await withScheduleExecution(this.sql, this.env, result.schedules) };
   }
 
   async mutateProjectSchedule(input: {
@@ -1158,6 +1168,21 @@ export class ProjectData extends DurableObject<Env> {
             Date.now()
           )
     );
+    await this.recalculateAlarm();
+    return { ...result, schedule: (await withScheduleExecution(this.sql, this.env, [result.schedule]))[0]! };
+  }
+
+  async reconcileProjectSchedule(input: {
+    projectId: string;
+    userId: string;
+    id: string;
+    request: unknown;
+  }) {
+    this.ensureProjectId(input.projectId);
+    if (this.getProjectId() !== input.projectId)
+      throw new projectEvents.ProjectEventValidationError('Project binding mismatch');
+    await requireScheduleMember(this.env, input.projectId, input.userId);
+    const result = await reconcileSchedule(this.sql, this.env, input.projectId, input.id, input.request);
     await this.recalculateAlarm();
     return result;
   }

@@ -602,7 +602,7 @@ describe('internal ProjectData event subscription surface', () => {
         owner: { type: 'agent', id: 'project-1:session-1', name: 'agent-session-1' },
         legacyOwners: [
           { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
-          { type: 'agent', id: 'task-1', name: 'agent-session-1' },
+          { type: 'agent', id: 'task-1:session-1', name: 'agent-session-1' },
         ],
         limit: null,
       }

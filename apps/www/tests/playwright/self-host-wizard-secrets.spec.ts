@@ -174,14 +174,14 @@ test.describe('self-host wizard visual review', () => {
     await generateWebhookSecret(page);
     await expectNoHorizontalOverflow(page);
     await page.screenshot({
-      path: `.codex/tmp/playwright-screenshots/self-host-wizard-github-app-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
+      path: `../../.codex/tmp/playwright-screenshots/self-host-wizard-github-app-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
       fullPage: true,
     });
 
     await generatePassphrase(page);
     await expectNoHorizontalOverflow(page);
     await page.screenshot({
-      path: `.codex/tmp/playwright-screenshots/self-host-wizard-passphrase-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
+      path: `../../.codex/tmp/playwright-screenshots/self-host-wizard-passphrase-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
       fullPage: true,
     });
   });

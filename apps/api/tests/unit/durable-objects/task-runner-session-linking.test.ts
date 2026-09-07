@@ -83,6 +83,7 @@ describe('ensureSessionLinked', () => {
       'project-1',
       'session-1',
       'ws-1',
+      null,
     );
     expect(scheduleIdleCleanupMock).toHaveBeenCalledWith(
       env,

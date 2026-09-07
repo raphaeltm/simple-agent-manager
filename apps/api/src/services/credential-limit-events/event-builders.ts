@@ -134,7 +134,9 @@ function displayForObservation(
     reset: 'Credential limit reset',
   };
   const utilization =
-    observation.utilizationPercent === null ? null : `${Math.round(observation.utilizationPercent)}%`;
+    observation.utilizationPercent === null
+      ? null
+      : `${Math.round(observation.utilizationPercent)}%`;
   const summaryParts = [
     observation.provider,
     observation.windowType,

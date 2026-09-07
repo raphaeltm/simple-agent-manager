@@ -1,7 +1,5 @@
 import { Hono } from 'hono';
-import {
-  DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES,
-} from '@simple-agent-manager/shared';
+import { DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_MAX_BODY_BYTES } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { RequestBodyTooLargeError, readRequestJsonWithSchema } from '../../lib/runtime-validation';
@@ -45,14 +43,11 @@ agentUsageCallbackRoute.post('/:id/acp-sessions/:sessionId/usage', async (c) => 
         413
       );
     }
-    return c.json(
-      { error: 'BAD_REQUEST', message: 'Invalid usage callback request body' },
-      400
-    );
+    return c.json({ error: 'BAD_REQUEST', message: 'Invalid usage callback request body' }, 400);
   }
   return handleAcpUsageCallback(c, {
-      projectId: c.req.param('id'),
-      sessionId: c.req.param('sessionId'),
+    projectId: c.req.param('id'),
+    sessionId: c.req.param('sessionId'),
     body,
   });
 });

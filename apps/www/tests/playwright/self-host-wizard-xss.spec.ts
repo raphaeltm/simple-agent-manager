@@ -311,7 +311,7 @@ test.describe('self-host wizard XSS — visual audit', () => {
 
     await expectNoHorizontalOverflow(page);
     await page.screenshot({
-      path: `.codex/tmp/playwright-screenshots/self-host-xss-github-app-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
+      path: `../../.codex/tmp/playwright-screenshots/self-host-xss-github-app-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
       fullPage: true,
     });
 
@@ -326,7 +326,7 @@ test.describe('self-host wizard XSS — visual audit', () => {
     await expectNoHorizontalOverflow(page);
     await expectNoXssExecution(page);
     await page.screenshot({
-      path: `.codex/tmp/playwright-screenshots/self-host-xss-env-output-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
+      path: `../../.codex/tmp/playwright-screenshots/self-host-xss-env-output-${testInfo.project.name.toLowerCase().replace(/\W+/g, '-')}.png`,
       fullPage: true,
     });
 

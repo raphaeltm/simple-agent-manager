@@ -1341,3 +1341,66 @@ func TestMissingReplacementCredentialClearsUsageAttribution(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageReporterPreservesCredentialGenerationsWhileBlocked(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseFirst) }) }
+	received := make(chan usageReportPayload, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload usageReportPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode usage report: %v", err)
+		}
+		received <- payload
+		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	defer release()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 1,
+			ActivityReportTimeout:          time.Second,
+		},
+	})
+	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "blocker", "allowed", 1, nil))
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocked reporter")
+	}
+
+	// A replacement ACP connection has the same credential identity, but a new
+	// generation. A late old-connection callback must not replace its valid report.
+	current := usageReportRequestForTest(server.URL, "claude.five_hour", "allowed_warning", 2, nil)
+	current.payload.CredentialGeneration = 2
+	stale := usageReportRequestForTest(server.URL, "claude.five_hour", "allowed_warning", 3, nil)
+	stale.payload.CredentialGeneration = 1
+	host.enqueueUsageReport(current)
+	host.enqueueUsageReport(stale)
+	release()
+
+	if err := host.flushUsageReports(time.Second); err != nil {
+		t.Fatalf("flushUsageReports: %v", err)
+	}
+	blocker := readUsagePayload(t, received)
+	if blocker.RateLimits[0].WindowType != "blocker" {
+		t.Fatalf("first window = %q, want blocker", blocker.RateLimits[0].WindowType)
+	}
+	for _, want := range []int64{2, 1} {
+		payload := readUsagePayload(t, received)
+		if payload.CredentialGeneration != want {
+			t.Fatalf("credential generation = %d, want %d", payload.CredentialGeneration, want)
+		}
+		if payload.CredentialReference != current.payload.CredentialReference || payload.CredentialSource != current.payload.CredentialSource {
+			t.Fatal("credential identity changed while preserving generations")
+		}
+	}
+}

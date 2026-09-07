@@ -30,17 +30,7 @@ function sectionAfter(source: string, marker: string): string {
   return source.slice(start);
 }
 
-function sectionBetween(source: string, startMarker: string, endMarker: string): string {
-  const start = source.indexOf(startMarker);
-  if (start === -1) {
-    throw new Error(`Missing start marker: ${startMarker}`);
-  }
-  const end = source.indexOf(endMarker, start);
-  if (end === -1) {
-    throw new Error(`Missing end marker: ${endMarker}`);
-  }
-  return source.slice(start, end);
-}
+
 
 describe('workspace dispatch race prevention', () => {
   it('adds nullable dispatched_at to the workspaces table', () => {
@@ -79,16 +69,7 @@ describe('workspace dispatch race prevention', () => {
     expect(markerIndex).toBeGreaterThan(dispatchIndex);
   });
 
-  it('task runner routes workspace creation through a durable dispatch step', () => {
-    const creationSection = sectionBetween(
-      taskRunnerWorkspaceSource,
-      'export async function handleWorkspaceCreation',
-      'async function recoverWorkspaceFromD1',
-    );
-
-    expect(creationSection).toContain("advanceToStep(state, 'workspace_dispatch')");
-    expect(creationSection).not.toContain("advanceToStep(state, 'workspace_ready')");
-  });
+  // Runtime transition coverage: task-runner-workspace-recovery.test.ts invokes handleWorkspaceCreation.
 
   it('task runner sets dispatched_at after successful VM agent dispatch acknowledgement', () => {
     const dispatchSection = sectionAfter(taskRunnerWorkspaceSource, 'export async function handleWorkspaceDispatch');

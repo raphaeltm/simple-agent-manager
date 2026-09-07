@@ -335,6 +335,7 @@ mcpRoutes.post('/', async (c) => {
           case 'get_project_schedule':
           case 'reschedule_project_schedule':
           case 'cancel_project_schedule':
+          case 'reconcile_project_schedule':
             return c.json(
               await handleScheduleTool(toolName, requestId, toolArgs, tokenData, c.env)
             );

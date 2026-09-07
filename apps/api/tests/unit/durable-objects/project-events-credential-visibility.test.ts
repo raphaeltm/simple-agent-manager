@@ -148,31 +148,52 @@ describe('ProjectData credential event visibility', () => {
 
   it('seeks the same credential window through unrelated history and preserves accepted retries', () => {
     const newest = admitCredentialEvent(sql, env, {
-      credentialSource: 'project', deliveryKey: 'newest', observedAt: 10_000,
+      credentialSource: 'project',
+      deliveryKey: 'newest',
+      observedAt: 10_000,
     });
     for (let index = 0; index < 250; index++) {
       admitCredentialEvent(sql, env, {
-        credentialSource: 'project', deliveryKey: `noise-${index}`,
-        windowType: `other-${index}`, observedAt: 20_000 + index,
+        credentialSource: 'project',
+        deliveryKey: `noise-${index}`,
+        windowType: `other-${index}`,
+        observedAt: 20_000 + index,
       });
     }
     const stale = admitCredentialEvent(sql, env, {
-      credentialSource: 'project', deliveryKey: 'stale-reset', observedAt: 3_000,
+      credentialSource: 'project',
+      deliveryKey: 'stale-reset',
+      observedAt: 3_000,
     });
     expect(stale.outcome).toBe('conflict');
     expect(stale.event?.id).toBe(newest.event?.id);
-    expect(admitCredentialEvent(sql, env, {
-      credentialSource: 'project', deliveryKey: 'newest', observedAt: 10_000,
-    }).outcome).toBe('duplicate_replay');
-    const plan = db.prepare(`EXPLAIN QUERY PLAN SELECT * FROM project_events
+    expect(
+      admitCredentialEvent(sql, env, {
+        credentialSource: 'project',
+        deliveryKey: 'newest',
+        observedAt: 10_000,
+      }).outcome
+    ).toBe('duplicate_replay');
+    const plan = db
+      .prepare(
+        `EXPLAIN QUERY PLAN SELECT * FROM project_events
       WHERE project_id = ? AND source = ? AND subject_type = ? AND subject_id = ?
       AND state = 'recorded' AND json_extract(metadata_json, '$.windowType') = ?
       AND json_extract(metadata_json, '$.observedAt') > ?
-      ORDER BY json_extract(metadata_json, '$.observedAt') DESC, id DESC LIMIT 1`)
-      .all(PROJECT_ID, CREDENTIAL_LIMIT_EVENT_SOURCE, 'credential', 'project:cred-1',
-        'claude.five_hour', 3_000) as { detail: string }[];
-    expect(plan.some(row => row.detail.includes('idx_project_events_credential_window'))).toBe(true);
-    expect(plan.some(row => row.detail.includes('TEMP B-TREE'))).toBe(false);
+      ORDER BY json_extract(metadata_json, '$.observedAt') DESC, id DESC LIMIT 1`
+      )
+      .all(
+        PROJECT_ID,
+        CREDENTIAL_LIMIT_EVENT_SOURCE,
+        'credential',
+        'project:cred-1',
+        'claude.five_hour',
+        3_000
+      ) as { detail: string }[];
+    expect(plan.some((row) => row.detail.includes('idx_project_events_credential_window'))).toBe(
+      true
+    );
+    expect(plan.some((row) => row.detail.includes('TEMP B-TREE'))).toBe(false);
   });
 
   it('matches personal credential events only to the affected session target', () => {

@@ -46,9 +46,7 @@ test.describe('self-host wizard generateAppLink regression', () => {
     expect(url.pathname).toBe('/settings/apps/new');
     expect(url.searchParams.get('name')).toBe('My SAM Instance');
     expect(url.searchParams.get('url')).toBe('https://app.example.com');
-    expect(url.searchParams.get('webhook_url')).toBe(
-      'https://api.example.com/api/github/webhook'
-    );
+    expect(url.searchParams.get('webhook_url')).toBe('https://api.example.com/api/github/webhook');
     expect(url.searchParams.get('contents')).toBe('write');
     expect(url.searchParams.get('issues')).toBe('read');
     expect(url.searchParams.get('checks')).toBe('read');

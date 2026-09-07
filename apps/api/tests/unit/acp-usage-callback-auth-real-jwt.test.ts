@@ -180,6 +180,7 @@ describe('ACP usage callback real JWT authorization', () => {
         body: {
           nodeId: 'node-1',
           agentType: 'claude-code',
+          credentialGeneration: 1,
           rateLimits: [
             {
               windowType: 'claude.five_hour',
@@ -202,6 +203,7 @@ describe('ACP usage callback real JWT authorization', () => {
         body: {
           nodeId: 'node-1',
           agentType: 'claude-code',
+          credentialGeneration: 1,
           rateLimits: [
             {
               windowType: 'claude.five_hour',

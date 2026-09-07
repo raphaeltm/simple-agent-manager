@@ -258,7 +258,13 @@ export function admitProjectEvent(
   );
 
   const event = readEventById(sql, eventInput.projectId, eventId);
-  const matches = createMatchesForEvent(sql, event, eventInput.receivedAt, limits, requireCompleteFanout);
+  const matches = createMatchesForEvent(
+    sql,
+    event,
+    eventInput.receivedAt,
+    limits,
+    requireCompleteFanout
+  );
   ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
   return { outcome: 'created', event, matches };
 }
@@ -392,7 +398,9 @@ export function listProjectEventSubscriptions(
   let where = 'WHERE project_id = ?';
   if (input.targetSessionId !== undefined && input.targetSessionId !== null) {
     where += ' AND target_session_id = ?';
-    params.push(normalizeText(input.targetSessionId, 'targetSessionId', limits.maxFilterStringBytes));
+    params.push(
+      normalizeText(input.targetSessionId, 'targetSessionId', limits.maxFilterStringBytes)
+    );
   }
   if (state !== 'any') {
     where += ' AND lifecycle_state = ?';
@@ -402,9 +410,7 @@ export function listProjectEventSubscriptions(
     const ownerPredicates = ['(owner_type = ? AND owner_id = ?)'];
     params.push(owner.type, owner.id);
     for (const legacyOwner of legacyOwners) {
-      ownerPredicates.push(
-        '(owner_version = 1 AND owner_type = ? AND owner_id = ?)'
-      );
+      ownerPredicates.push('(owner_version = 1 AND owner_type = ? AND owner_id = ?)');
       params.push(legacyOwner.type, legacyOwner.id);
     }
     where += ` AND (${ownerPredicates.join(' OR ')})`;

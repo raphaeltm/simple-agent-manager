@@ -29,6 +29,7 @@ import {
   timezone,
   useEventAction,
 } from './EventUi';
+import { ScheduleExecution } from './ScheduleExecution';
 
 function ScheduleForm({
   projectId,
@@ -188,15 +189,20 @@ function ScheduleCard({
         <h3 className="m-0 text-base font-semibold break-words">
           {dateLabel(schedule.dueAt, schedule.displayTimezone)}
         </h3>
-        <StateBadge state={schedule.state} />
+        <span className="flex flex-wrap items-center gap-2 text-xs text-fg-muted">
+          Schedule state <StateBadge state={schedule.state} />
+        </span>
       </div>
       <p className="m-0 text-xs text-fg-muted break-words">
         {schedule.displayTimezone} · Created by {creatorName} · {dateLabel(schedule.createdAt)}
       </p>
       <ActionSummary action={schedule.action} projectId={projectId} />
-      {schedule.watchId && <p className="m-0 text-xs text-fg-muted break-words">
-        Standing watch {schedule.watchId}{schedule.sourceEventId ? ` · Event ${schedule.sourceEventId}` : ''}
-      </p>}
+      {schedule.watchId && (
+        <p className="m-0 text-xs text-fg-muted break-words">
+          Standing watch {schedule.watchId}
+          {schedule.sourceEventId ? ` · Event ${schedule.sourceEventId}` : ''}
+        </p>
+      )}
       {schedule.reason && <p className="m-0 text-sm break-words">Reason: {schedule.reason}</p>}
       <p className="m-0 text-xs text-fg-muted">
         Expires {dateLabel(schedule.expiresAt)} · Attempts {schedule.attemptCount}
@@ -228,6 +234,12 @@ function ScheduleCard({
         </Link>
       )}
       <Feedback error={operation.error} message={operation.message} />
+      <ScheduleExecution
+        schedule={schedule}
+        projectId={projectId}
+        canWrite={canWrite}
+        onChanged={onChanged}
+      />
       {canWrite && mutable && (
         <div className="space-y-3">
           {confirmCancel ? (
@@ -363,7 +375,7 @@ export function SchedulesPanel({
         <div className="grid gap-4">
           {query.data?.schedules.map((schedule) => (
             <ScheduleCard
-              key={`${schedule.id}:${schedule.version}`}
+              key={schedule.id}
               schedule={schedule}
               projectId={projectId}
               canWrite={canWrite}

@@ -440,6 +440,15 @@ export type ProjectEventDeliveryBatchRecord = {
   terminalReason: string | null;
 };
 
+/** Member-visible transport outcomes; deliberately excludes event payloads and match identities. */
+export type ProjectEventDeliveryOutcome = Pick<ProjectEventDeliveryBatchRecord,
+  'id' | 'state' | 'deliveryChannel' | 'deliveredVia' | 'requestedDelivery' | 'resolvedDelivery' |
+  'createdAt' | 'updatedAt' | 'deliveredAt' | 'ackedAt' | 'terminalAt' | 'terminalReason'>;
+export type ProjectEventDeliveryOutcomeList = {
+  deliveries: ProjectEventDeliveryOutcome[];
+  hasMore: boolean;
+};
+
 export type ProjectEventDeliveryBatchMutationResult = {
   batch: ProjectEventDeliveryBatchRecord;
   idempotent: boolean;
@@ -649,6 +658,8 @@ export type ProjectEventRetentionResult = {
   deletedAttempts: number;
   expiredSubscriptions: number;
   repairedOrphanMatches: number;
+  /** Observed eligible backlog. A bounded orphan scan may have an uninspected suffix;
+   * its durable cursor continues at normal maintenance cadence without a hot loop. */
   hasMore: boolean;
   accounting: ProjectEventStorageAccountingRecord[];
 };

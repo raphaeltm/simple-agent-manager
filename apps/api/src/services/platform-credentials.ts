@@ -64,7 +64,11 @@ export async function getPlatformAgentCredential(
   db: ReturnType<typeof drizzle>,
   agentType: string,
   encryptionKey: string
-): Promise<{ credential: string; credentialKind: 'api-key' | 'oauth-token'; credentialId: string } | null> {
+): Promise<{
+  credential: string;
+  credentialKind: 'api-key' | 'oauth-token';
+  credentialId: string;
+} | null> {
   const rows = await db
     .select()
     .from(schema.platformCredentials)

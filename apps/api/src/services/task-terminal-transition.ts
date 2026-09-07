@@ -163,6 +163,7 @@ export async function transitionTaskToTerminal(
   const terminalTransitionId = ulid();
   const lifecycleEventIntentId = ulid();
   const lifecycleEventIntent = await buildTaskLifecycleEventInput({
+    transitionId: terminalTransitionId,
     projectId: options.projectId,
     taskId: options.taskId,
     status: options.status,

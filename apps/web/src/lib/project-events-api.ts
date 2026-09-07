@@ -5,6 +5,7 @@ import type {
   PauseProjectStandingWatchRequest,
   ProjectEventChannelHistory,
   ProjectEventChannelList,
+  ProjectEventDeliveryOutcomeList,
   ProjectEventSubscriptionListResult,
   ProjectEventSubscriptionMutationResult,
   ProjectEventSubscriptionState,
@@ -12,6 +13,7 @@ import type {
   ProjectScheduleMutationResult,
   ProjectStandingWatchList,
   ProjectStandingWatchMutationResult,
+  ReconcileProjectScheduleRequest,
   RescheduleProjectScheduleRequest,
   RevokeProjectStandingWatchRequest,
   UpdateProjectStandingWatchRequest,
@@ -75,8 +77,23 @@ export const cancelSchedule = (projectId: string, id: string, body: CancelProjec
     `${base(projectId)}/schedules/${encodeURIComponent(id)}/cancel`,
     body
   );
-export const listStandingWatches = (projectId: string, cursor?: string | null, sessionId?: string) =>
-  request<ProjectStandingWatchList>(`${base(projectId)}/standing-watches?${query(cursor, sessionId)}`);
+export const reconcileSchedule = (
+  projectId: string,
+  id: string,
+  body: ReconcileProjectScheduleRequest
+) =>
+  post<ProjectScheduleMutationResult>(
+    `${base(projectId)}/schedules/${encodeURIComponent(id)}/reconcile`,
+    body
+  );
+export const listStandingWatches = (
+  projectId: string,
+  cursor?: string | null,
+  sessionId?: string
+) =>
+  request<ProjectStandingWatchList>(
+    `${base(projectId)}/standing-watches?${query(cursor, sessionId)}`
+  );
 export const createStandingWatch = (projectId: string, body: CreateProjectStandingWatchRequest) =>
   post<ProjectStandingWatchMutationResult>(`${base(projectId)}/standing-watches`, body);
 export const updateStandingWatch = (
@@ -105,4 +122,9 @@ export const revokeStandingWatch = (
   post<ProjectStandingWatchMutationResult>(
     `${base(projectId)}/standing-watches/${encodeURIComponent(id)}/revoke`,
     body
+  );
+
+export const listEventSubscriptionDeliveries = (projectId: string, subscriptionId: string) =>
+  request<ProjectEventDeliveryOutcomeList>(
+    `${base(projectId)}/event-subscriptions/${encodeURIComponent(subscriptionId)}/deliveries?${query()}`
   );

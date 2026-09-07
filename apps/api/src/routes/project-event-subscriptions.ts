@@ -66,6 +66,39 @@ projectEventSubscriptionRoutes.get('/', async (c) => {
   }
 });
 
+projectEventSubscriptionRoutes.get('/:subscriptionId/deliveries', async (c) => {
+  const projectId = requireRouteParam(c, 'projectId');
+  const userId = getUserId(c);
+  const db = drizzle(c.env.DATABASE, { schema });
+  await requireProjectCapability(db, projectId, userId, 'task:read');
+  if (Object.keys(c.req.query()).some((key) => key !== 'limit')) {
+    throw errors.badRequest('Only limit may be supplied for delivery inspection');
+  }
+  const rawLimit = c.req.query('limit');
+  const limit = rawLimit === undefined ? undefined : Number(rawLimit);
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit <= 0)) {
+    throw errors.badRequest('limit must be a positive integer');
+  }
+  try {
+    const subscriptionId = requireRouteParam(c, 'subscriptionId');
+    const subscription = await projectData.getProjectEventSubscription(c.env, projectId, { subscriptionId });
+    if (!subscription) throw errors.notFound('Event subscription');
+    const result = await projectData.listProjectEventDeliveryBatches(c.env, projectId, { subscriptionId, limit });
+    await requireProjectCapability(db, projectId, userId, 'task:read');
+    return c.json({
+      deliveries: result.batches.map(({ id, state, deliveryChannel, deliveredVia,
+        requestedDelivery, resolvedDelivery, createdAt, updatedAt, deliveredAt,
+        ackedAt, terminalAt, terminalReason }) => ({
+        id, state, deliveryChannel, deliveredVia, requestedDelivery, resolvedDelivery,
+        createdAt, updatedAt, deliveredAt, ackedAt, terminalAt, terminalReason,
+      })),
+      hasMore: result.hasMore,
+    });
+  } catch (error) {
+    rethrowEventError(error);
+  }
+});
+
 projectEventSubscriptionRoutes.get('/:subscriptionId', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });

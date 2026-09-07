@@ -4,7 +4,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Link } from 'react-router';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
@@ -21,6 +21,7 @@ import {
   StateBadge,
   useEventAction,
 } from './EventUi';
+import { SubscriptionDeliveryHistory } from './SubscriptionDeliveryHistory';
 
 function SubscriptionCard({
   subscription,
@@ -36,6 +37,8 @@ function SubscriptionCard({
   const operation = useEventAction();
   const [confirm, setConfirm] = useState(false);
   const [reason, setReason] = useState('');
+  const [inspectDelivery, setInspectDelivery] = useState(false);
+  const deliveryPanelId = useId();
   const target = subscription.deliveryPreference.target;
   const managed = subscription.owner.type !== 'human' && subscription.owner.type !== 'agent';
   return (
@@ -94,6 +97,21 @@ function SubscriptionCard({
             </Link>
           )}
         </p>
+      )}
+      <Button
+        variant="secondary"
+        aria-expanded={inspectDelivery}
+        aria-controls={inspectDelivery ? deliveryPanelId : undefined}
+        onClick={() => setInspectDelivery((previous) => !previous)}
+      >
+        {inspectDelivery ? 'Hide delivery outcomes' : 'Inspect delivery'}
+      </Button>
+      {inspectDelivery && (
+        <SubscriptionDeliveryHistory
+          projectId={projectId}
+          subscriptionId={subscription.id}
+          id={deliveryPanelId}
+        />
       )}
       <Feedback error={operation.error} message={operation.message} />
       {canWrite &&
@@ -220,8 +238,8 @@ export function SubscriptionsPanel({
       </QueryState>
       {query.data?.hasMore && (
         <p role="status" className="text-sm text-fg-muted">
-          Showing a bounded set of subscriptions. Open Events from a session to narrow the results.
-          The subscription API does not provide a next-page cursor.
+          Showing a limited set of subscriptions. Filter by state or open Events from a session to
+          narrow the results.
         </p>
       )}
     </section>

@@ -274,7 +274,8 @@ function credentialAttributionFromData(
   return {
     credentialSource: credentialData.credentialSource,
     credentialReference: credentialData.credentialReference,
-    credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(agentType),
+    credentialProvider:
+      credentialData.credentialProvider ?? agentCredentialProviderFallback(agentType),
     providerMode,
   };
 }
@@ -937,7 +938,8 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       credentialKind: credentialData.credentialKind,
       credentialSource: credentialData.credentialSource,
       credentialReference: credentialData.credentialReference,
-      credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
+      credentialProvider:
+        credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
       providerMode: credentialProviderMode,
       credentialGeneration: persistedAttribution?.credentialGeneration,
     });
@@ -1051,7 +1053,11 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         workspaceId,
         agentSessionId: body.agentSessionId,
         agentType: body.agentType,
-        attribution: credentialAttributionFromData(credentialData, body.agentType, 'proxy-passthrough'),
+        attribution: credentialAttributionFromData(
+          credentialData,
+          body.agentType,
+          'proxy-passthrough'
+        ),
       });
 
       return callbackJsonWithJit(c, workspace, 'agent_key', {
@@ -1059,7 +1065,10 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         credentialKind: credentialData.credentialKind,
         credentialSource: credentialData.credentialSource,
         credentialReference: credentialData.credentialReference,
-        credentialProvider: credentialData.credentialProvider ?? credentialData.providerDialect ?? agentCredentialProviderFallback(body.agentType),
+        credentialProvider:
+          credentialData.credentialProvider ??
+          credentialData.providerDialect ??
+          agentCredentialProviderFallback(body.agentType),
         providerMode: 'proxy-passthrough',
         credentialGeneration: persistedAttribution?.credentialGeneration,
         inferenceConfig,
@@ -1092,7 +1101,8 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         credentialKind: credentialData.credentialKind,
         credentialSource: credentialData.credentialSource,
         credentialReference: credentialData.credentialReference,
-        credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
+        credentialProvider:
+          credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
         providerMode: credentialProviderMode,
         credentialGeneration: persistedAttribution?.credentialGeneration,
       });
@@ -1193,7 +1203,11 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     workspaceId,
     agentSessionId: body.agentSessionId,
     agentType: body.agentType,
-    attribution: credentialAttributionFromData(credentialData, body.agentType, credentialProviderMode),
+    attribution: credentialAttributionFromData(
+      credentialData,
+      body.agentType,
+      credentialProviderMode
+    ),
   });
 
   return callbackJsonWithJit(c, workspace, 'agent_key', {
@@ -1201,7 +1215,8 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     credentialKind: credentialData.credentialKind,
     credentialSource: credentialData.credentialSource,
     credentialReference: credentialData.credentialReference,
-    credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
+    credentialProvider:
+      credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
     providerMode: credentialProviderMode,
     credentialGeneration: persistedAttribution?.credentialGeneration,
   });

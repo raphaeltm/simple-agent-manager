@@ -105,9 +105,7 @@ function guardFieldValue(
   if (!guardHasField(guard, field)) return undefined;
   const value = guard[field];
   if (typeof value === 'string' || value === null) return value;
-  throw new Error(
-    `Session ${sessionId} ${operation} guard has invalid ${field}: ${typeof value}`
-  );
+  throw new Error(`Session ${sessionId} ${operation} guard has invalid ${field}: ${typeof value}`);
 }
 
 function assertGuardField(

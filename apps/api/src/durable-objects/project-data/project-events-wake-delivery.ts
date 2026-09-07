@@ -5,14 +5,9 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { isProjectEventWakeEnabled } from './project-events-scheduler';
-import {
-  nextPhysicalAttemptNumber,
-} from './project-events-storage-helpers';
+import { nextPhysicalAttemptNumber } from './project-events-storage-helpers';
 import { stableStringify } from './project-events-values';
-import {
-  type PromptDeliveryClaim,
-  type PromptDeliveryResult,
-} from './prompt-delivery';
+import { type PromptDeliveryClaim, type PromptDeliveryResult } from './prompt-delivery';
 import type { Env } from './types';
 import { generateId } from './types';
 
@@ -97,7 +92,6 @@ export function hasProjectEventWakeLease(
   return readProjectEventWakeLeaseUntil(sql, sessionId, now) !== null;
 }
 
-
 export interface ValidateProjectEventWakeRecoveryAuthorityInput {
   projectId: string;
   chatSessionId: string;
@@ -150,7 +144,9 @@ export function validateProjectEventWakeRecoveryAuthority(
       now
     )
     .toArray()[0];
-  return Boolean(row) && isProjectEventWakeBatchAudienceAuthorized(sql, input.projectId, input.batchId);
+  return (
+    Boolean(row) && isProjectEventWakeBatchAudienceAuthorized(sql, input.projectId, input.batchId)
+  );
 }
 
 export function invalidProjectEventWakeDeliveryTargetResult(
@@ -228,11 +224,11 @@ export function invalidProjectEventWakeDeliveryTargetResult(
           ? 'Project event wake target session binding changed'
           : ownerTaskId !== claim.message.sourceTaskId
             ? 'Project event wake source task binding changed'
-          : row.lifecycle_state !== 'active'
-            ? 'Project event wake subscription is no longer active'
-            : chatStatus !== 'active' && chatStatus !== 'sleeping'
-              ? 'Project event wake target session is no longer active'
-              : 'Project event wake delivery lease expired',
+            : row.lifecycle_state !== 'active'
+              ? 'Project event wake subscription is no longer active'
+              : chatStatus !== 'active' && chatStatus !== 'sleeping'
+                ? 'Project event wake target session is no longer active'
+                : 'Project event wake delivery lease expired',
       runtimeIdentity: claim.message.runtimeIdentity,
       capabilities: null,
     };

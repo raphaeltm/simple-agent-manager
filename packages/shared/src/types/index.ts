@@ -812,3 +812,5 @@ export {
 export * from './project-event-channels';
 
 export * from './project-event-schedules';
+
+export type { ProjectEventDeliveryOutcome, ProjectEventDeliveryOutcomeList } from './project-events';

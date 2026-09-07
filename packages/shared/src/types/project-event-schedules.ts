@@ -18,6 +18,20 @@ export type ProjectScheduleState =
   | 'failed'
   | 'ambiguous';
 
+/** A read-only observation of canonical task/inbox state, separate from admission. */
+export type ProjectScheduleExecution = {
+  kind: ProjectScheduledAction['kind'];
+  status: string;
+  checkedAt: number;
+  deliveryId: string | null;
+  taskId: string | null;
+  sessionId: string | null;
+  receiptState: string | null;
+  error: string | null;
+  retrySubmissionAllowed: boolean;
+  submissionDeadline: number | null;
+};
+
 /** All timestamps are UTC epoch milliseconds; version is a positive integer. */
 export type ProjectSchedule = {
   id: string;
@@ -43,6 +57,7 @@ export type ProjectSchedule = {
   resultSessionId: string | null;
   watchId: string | null;
   sourceEventId: string | null;
+  execution?: ProjectScheduleExecution;
 };
 
 export type CreateProjectScheduleRequest = {
@@ -66,6 +81,12 @@ export type CancelProjectScheduleRequest = {
   reason?: string | null;
 };
 
+export type ReconcileProjectScheduleRequest = {
+  expectedVersion: number;
+  /** Explicitly reopen bounded task submission retries before the original deadline. */
+  retrySubmission?: boolean;
+};
+
 export type ProjectScheduleList = {
   schedules: ProjectSchedule[];
   nextCursor: string | null;
@@ -77,6 +98,10 @@ export type ProjectScheduleMutationResult = {
   idempotent: boolean;
   /** Cancellation cannot retract an action that has already been admitted. */
   actionAlreadyAdmitted: boolean;
+  recovery?: {
+    outcome: 'observed' | 'retry_scheduled' | 'unresolved' | 'not_admitted';
+    message: string;
+  };
 };
 
 export type ProjectStandingWatchState = 'active' | 'paused' | 'revoked';

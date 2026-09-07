@@ -12,9 +12,7 @@ import { expect, type Page } from './fixtures';
 export async function expectNoHorizontalOverflow(page: Page) {
   const cssViewportWidth = page.viewportSize()!.width;
 
-  const scrollWidth = await page.evaluate(
-    () => document.documentElement.scrollWidth
-  );
+  const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
 
   expect(
     scrollWidth,
@@ -33,7 +31,13 @@ export async function assertPreviewValuesWithinViewport(page: Page) {
   const rects = await page.locator('#sh-app-preview dd').evaluateAll((dds) =>
     dds.map((dd) => {
       const r = dd.getBoundingClientRect();
-      return { right: r.right, width: r.width, text: dd.textContent?.slice(0, 40) ?? '' };
+      return {
+        right: r.right,
+        width: r.width,
+        client: dd.clientWidth,
+        scroll: dd.scrollWidth,
+        text: dd.textContent?.slice(0, 40) ?? '',
+      };
     })
   );
 
@@ -44,5 +48,8 @@ export async function assertPreviewValuesWithinViewport(page: Page) {
       rect.right,
       `preview dd "${rect.text}" right edge ${rect.right}px exceeds viewport ${cssViewportWidth}px`
     ).toBeLessThanOrEqual(cssViewportWidth);
+    expect(rect.scroll, `preview dd "${rect.text}" must not hide clipped text`).toBeLessThanOrEqual(
+      rect.client + 1
+    );
   }
 }

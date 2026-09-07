@@ -4,6 +4,7 @@ import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import * as projectDataService from './project-data';
 import { admitProjectEventSourceIntentById } from './project-event-source-outbox';
+import { recordTaskLifecycleEventViaSourceOutbox } from './project-lifecycle-events';
 
 const log = createModuleLogger('task_terminal_transition_hooks');
 
@@ -36,12 +37,23 @@ export function createTaskWaitTerminalTransitionHook(env: Env): TaskTerminalTran
  * ProjectData lifecycle event producer for terminal task status changes. The
  * producer intent is captured in the winning D1 transition batch. The hook only
  * nudges that immutable intent toward ProjectData so hook execution cannot
- * rebuild a poorer or conflicting envelope.
+ * rebuild a poorer or conflicting envelope. Explicit legacy writers may instead
+ * capture at the hook boundary, with no atomic task-write capture guarantee.
  */
-export function createProjectEventTaskTerminalTransitionHook(env: Env): TaskTerminalTransitionHook {
+export function createProjectEventTaskTerminalTransitionHook(
+  env: Env,
+  options: { captureAtHook?: boolean } = {}
+): TaskTerminalTransitionHook {
   return {
     name: 'project-lifecycle-task-terminal',
     async handle(event) {
+      if (!event.projectEventSourceIntentId && options.captureAtHook) {
+        // Explicit legacy terminal writers have already won their status CAS.
+        // Capture at this hook boundary; unlike transitionTaskToTerminal this is
+        // not atomic with their authoritative write. Never rebuild a captured intent.
+        await recordTaskLifecycleEventViaSourceOutbox(env, event);
+        return;
+      }
       if (!event.projectEventSourceIntentId) {
         log.warn('project_lifecycle_task_terminal.intent_missing', {
           taskId: event.taskId,

@@ -559,12 +559,16 @@ describe('ProjectData event subscription core', () => {
 
     const snapshot = await runInDurableObject(stub, async (_instance, state) => ({
       inbox: state.storage.sql
-        .exec(`SELECT target_session_id, COUNT(*) AS cnt FROM session_inbox GROUP BY target_session_id`)
+        .exec(
+          `SELECT target_session_id, COUNT(*) AS cnt FROM session_inbox GROUP BY target_session_id`
+        )
         .toArray(),
       matches: state.storage.sql
         .exec(`SELECT state, batch_id FROM project_event_matches`)
         .toArray(),
-      batches: state.storage.sql.exec(`SELECT COUNT(*) AS cnt FROM project_event_delivery_batches`).toArray()[0],
+      batches: state.storage.sql
+        .exec(`SELECT COUNT(*) AS cnt FROM project_event_delivery_batches`)
+        .toArray()[0],
       transcripts: state.storage.sql
         .exec(`SELECT COUNT(*) AS cnt FROM chat_messages WHERE session_id = ?`, readySessionId)
         .toArray()[0],
@@ -777,7 +781,11 @@ describe('ProjectData event subscription core', () => {
     const stub = getStub(projectId);
     await stub.ensureProjectId(projectId);
     await disableProjectEventWakeOnStub(projectId);
-    const blockedSessionId = await stub.createSession(null, 'Blocked wake target', 'task-blocked-a');
+    const blockedSessionId = await stub.createSession(
+      null,
+      'Blocked wake target',
+      'task-blocked-a'
+    );
     const readySessionId = await stub.createSession(null, 'Ready wake target', 'task-ready-b');
     const fairEnv = {
       PROJECT_EVENT_WAKE_ENABLED: 'false',
@@ -1207,8 +1215,9 @@ describe('ProjectData event subscription core', () => {
     });
 
     await runInDurableObject(stub, async (instance) => {
-      (instance as unknown as { env: Env & Record<string, string | undefined> }).env
-        .PROJECT_EVENT_WAKE_ENABLED = 'true';
+      (
+        instance as unknown as { env: Env & Record<string, string | undefined> }
+      ).env.PROJECT_EVENT_WAKE_ENABLED = 'true';
       await instance.alarm();
     });
 
@@ -1457,35 +1466,43 @@ describe('ProjectData event subscription core', () => {
         )
         .toArray()
         .map((row) => String((row as { detail?: unknown }).detail ?? ''));
-      return { wake, expiry, attempts, syntheticAttempts, batches, terminalizeInactiveTarget, orphanRepair };
+      return {
+        wake,
+        expiry,
+        attempts,
+        syntheticAttempts,
+        batches,
+        terminalizeInactiveTarget,
+        orphanRepair,
+      };
     });
 
-    expect(plans.wake.some((detail) => detail.includes('idx_project_event_subscriptions_wake_due'))).toBe(
-      true
-    );
+    expect(
+      plans.wake.some((detail) => detail.includes('idx_project_event_subscriptions_wake_due'))
+    ).toBe(true);
     expect(plans.wake.some((detail) => detail.includes('project_event_matches'))).toBe(false);
-    expect(plans.expiry.some((detail) => detail.includes('idx_project_event_subscriptions_wake_expiry'))).toBe(
-      true
-    );
-    expect(plans.attempts.some((detail) => detail.includes('idx_project_event_attempts_retention'))).toBe(
-      true
-    );
+    expect(
+      plans.expiry.some((detail) => detail.includes('idx_project_event_subscriptions_wake_expiry'))
+    ).toBe(true);
+    expect(
+      plans.attempts.some((detail) => detail.includes('idx_project_event_attempts_retention'))
+    ).toBe(true);
     expect(
       plans.syntheticAttempts.some((detail) =>
         detail.includes('idx_project_event_attempts_synthetic_retention')
       )
     ).toBe(true);
-    expect(plans.batches.some((detail) => detail.includes('idx_project_event_batches_retention'))).toBe(
-      true
-    );
+    expect(
+      plans.batches.some((detail) => detail.includes('idx_project_event_batches_retention'))
+    ).toBe(true);
     expect(
       plans.terminalizeInactiveTarget.some((detail) =>
         detail.includes('idx_project_event_subscriptions_wake_due')
       )
     ).toBe(true);
-    expect(plans.terminalizeInactiveTarget.some((detail) => detail.includes('USE TEMP B-TREE'))).toBe(
-      false
-    );
+    expect(
+      plans.terminalizeInactiveTarget.some((detail) => detail.includes('USE TEMP B-TREE'))
+    ).toBe(false);
     expect(
       plans.orphanRepair.some((detail) =>
         detail.includes('idx_project_event_matches_orphan_lifecycle')
@@ -2183,7 +2200,10 @@ describe('ProjectData event subscription core', () => {
       });
 
       const helperResult = await runInDurableObject(stub, async (_instance, state) => {
-        const matchIds = Array.from({ length: count }, (_value, index) => `match-helper-bind-${index}`);
+        const matchIds = Array.from(
+          { length: count },
+          (_value, index) => `match-helper-bind-${index}`
+        );
         const matches = readMatchesByIds(state.storage.sql, projectId, 'sub-helper-bind', matchIds);
         const events = readEventsForMatches(state.storage.sql, projectId, matchIds, count);
         updateMatchesForBatch(
@@ -2795,10 +2815,12 @@ describe('ProjectData event subscription core', () => {
       limit: 5,
     });
 
-    const row = await runInDurableObject(stub, async (_instance, state) =>
-      state.storage.sql
-        .exec('SELECT wake_due_at FROM project_event_subscriptions WHERE id = ?', subscriptionId)
-        .toArray()[0]
+    const row = await runInDurableObject(
+      stub,
+      async (_instance, state) =>
+        state.storage.sql
+          .exec('SELECT wake_due_at FROM project_event_subscriptions WHERE id = ?', subscriptionId)
+          .toArray()[0]
     );
     expect(row).toEqual({ wake_due_at: null });
   });

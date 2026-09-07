@@ -37,7 +37,6 @@ Independent bounded Cloudflare review of WIP `58a202f4a` found the following by 
 
 The reserved ProjectData session and first-message writes share a synchronous transaction with insertion-gated hooks and existing message identity checks; no separate local atomicity defect was found in this bounded inspection. Complete the full final independent review after implementation and tests.
 
-
 ## Parent review of final D0 `3d775a469`
 
 Authored commits `58a202f4a` and `3d775a469` are integrated as `37fe1478f` and `d0a7550f5` for review, not accepted. Root restored frozen dependencies after earlier disk pressure, rebuilt shared, and independently passed 93 focused tests across six files. The reserved ProjectData workerd suite also passed all 3 tests in 27.12 seconds on the integrated branch; the child's earlier 180-second timeout is therefore not an outstanding test-run blocker. These tests do not prove the real TaskRunner lifecycle races below. Final D0 review remains CHANGES REQUIRED.
@@ -58,7 +57,6 @@ The checkpoint is pushed/fetched but not yet integrated or accepted. Independent
 - [ ] **Validate and bind runner guard identity.** An unknown discriminant succeeds with zero reads because the guard switch has no rejecting default. Recognized guard identity is not compared with the enclosing runner's task/project/user/chat identity; a guard for another live task can satisfy allocation checks. Runtime-validate the guard and reject unsupported/mismatched identities. No externally reachable exploit was demonstrated; this is an internal RPC-boundary requirement.
 
 The worker concurrency case stops at `workspace_dispatch` on a preseeded ready node. Its first-prompt assertion counts a stored ProjectData message, not physical agent dispatch. Preserve the original requirement for real runner allocation/recovery and final provider/agent boundary evidence with external provisioning substituted where appropriate. These are checkpoint findings; reviewers ran bounded actual-function/SQLite probes, not workerd or full builds.
-
 
 ## Recovery parent review of D1 checkpoint `a9173a095`
 

@@ -5,6 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import type { DurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
 import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
+import { admitProjectEvent } from '../../../src/durable-objects/project-data/project-events';
+import {
+  insertMatchIfAbsent,
+  readSubscriptionById,
+} from '../../../src/durable-objects/project-data/project-events-storage-helpers';
 import {
   acceptPromptDelivery,
   applyPromptDeliveryResult,
@@ -170,6 +175,26 @@ describe('ProjectData durable prompt delivery', () => {
       `event-wake:${deliveryId}`,
       `fp:event-wake:${deliveryId}`,
       targetTaskId
+    );
+    const event = admitProjectEvent(sql, {}, 'project-1', {
+      projectId: 'project-1',
+      source: 'sam.lifecycle',
+      eventType: 'task.completed',
+      subject: { type: 'task', id: sourceTaskId },
+      deliveryKey: `event:${deliveryId}`,
+      payloadFingerprint: `event-fingerprint:${deliveryId}`,
+    }).event;
+    const subscription = readSubscriptionById(sql, 'project-1', 'sub-event-wake');
+    const match = insertMatchIfAbsent(sql, event, subscription, Date.now());
+    sql.exec(
+      `UPDATE project_event_matches SET batch_id = ?, state = 'batch_created' WHERE id = ?`,
+      deliveryId,
+      match.id
+    );
+    sql.exec(
+      `UPDATE project_event_delivery_batches SET match_ids_json = ? WHERE id = ?`,
+      JSON.stringify([match.id]),
+      deliveryId
     );
     return claimDuePromptDeliveries(sql, config, Date.now())[0];
   }

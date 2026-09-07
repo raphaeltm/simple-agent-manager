@@ -225,9 +225,7 @@ function buildMetadata(
       name: boundedString(input.projectName, limits.maxFilterStringBytes),
     },
     execution: {
-      id: input.executionId
-        ? boundedString(input.executionId, limits.maxFilterStringBytes)
-        : null,
+      id: input.executionId ? boundedString(input.executionId, limits.maxFilterStringBytes) : null,
       sequenceNumber: input.sequenceNumber ?? null,
     },
     request: {

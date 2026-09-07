@@ -21,7 +21,8 @@ function ChannelHistory({
   // Opening history is a user action. Focus on explicit selection so it is visible even
   // below a long catalog; refreshing or paginating must not steal focus again.
   useEffect(() => {
-    historyRef.current?.focus();
+    historyRef.current?.focus({ preventScroll: true });
+    historyRef.current?.scrollIntoView({ block: 'start' });
   }, [focusRequest]);
   const query = useQuery({
     queryKey: ['auth', scope, 'events', projectId, 'channel-history', channel, cursor],

@@ -18,6 +18,7 @@ const {
   persistErrorMock,
   persistMessageMock,
   recordTaskLifecycleEventBestEffortMock,
+  recordTaskLifecycleEventViaSourceOutboxMock,
   revokeMcpTokenMock,
   restoreSessionRecoveryHandoffMock,
   sleepSessionMock,
@@ -33,6 +34,7 @@ const {
   persistErrorMock: vi.fn(async () => undefined),
   persistMessageMock: vi.fn(async () => undefined),
   recordTaskLifecycleEventBestEffortMock: vi.fn(async () => undefined),
+  recordTaskLifecycleEventViaSourceOutboxMock: vi.fn(async () => ({ state: 'admitted' })),
   revokeMcpTokenMock: vi.fn(async () => undefined),
   restoreSessionRecoveryHandoffMock: vi.fn(async () => undefined),
   sleepSessionMock: vi.fn(async () => true),
@@ -65,6 +67,7 @@ vi.mock('../../../src/services/project-data', () => ({
 
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
   recordTaskLifecycleEventBestEffort: recordTaskLifecycleEventBestEffortMock,
+  recordTaskLifecycleEventViaSourceOutbox: recordTaskLifecycleEventViaSourceOutboxMock,
 }));
 
 vi.mock('../../../src/services/session-snapshots', () => ({
@@ -630,7 +633,7 @@ describe('failTask', () => {
       'failed',
       'agent session failed permanently'
     );
-    expect(recordTaskLifecycleEventBestEffortMock).toHaveBeenCalledWith(
+    expect(recordTaskLifecycleEventViaSourceOutboxMock).toHaveBeenCalledWith(
       rc.env,
       expect.objectContaining({
         projectId: 'project-1',

@@ -130,7 +130,8 @@ export async function claimWorkspaceAllocationForTask(
   now: string
 ): Promise<void> {
   const chatSessionId = state.stepResults.chatSessionId ?? state.config.chatSessionId ?? null;
-  const guard = state.config.startGuard?.kind === 'reserved_submission' ? state.config.startGuard : null;
+  const guard =
+    state.config.startGuard?.kind === 'reserved_submission' ? state.config.startGuard : null;
   const reservedIntentFingerprint = guard?.intentFingerprint ?? null;
   const result = await rc.env.DATABASE.prepare(
     `UPDATE tasks

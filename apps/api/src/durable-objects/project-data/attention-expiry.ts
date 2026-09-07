@@ -5,10 +5,7 @@ import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
 import { readProjectEventWakeLeaseUntil } from './project-events-wake-delivery';
-import {
-  activeWorkHardStallMs,
-  reconciliationDeadlineMs,
-} from './reconciliation-thresholds';
+import { activeWorkHardStallMs, reconciliationDeadlineMs } from './reconciliation-thresholds';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.attention_expiry');

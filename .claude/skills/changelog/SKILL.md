@@ -8,6 +8,7 @@ user-invocable: false
 
 For the latest changes, also check `git log --oneline -20`.
 
+- **durable-project-eventing**: Operational same-chat event delivery, persisted one-off schedules and bounded standing watches, agent channels with atomic history/follow, and member project/session Events controls. Canonical source outbox covers configured lifecycle/GitHub CI/review/authenticated-webhook facts; credential-limit events use actual server-selected attribution. Shared mailbox/recovery guards preserve cancellation and membership authority. Retention uses incremental accounting and bounded durable orphan-scan progress. Delivery receipts and schedule admission remain separate from agent action.
 - **session-visibility**: VM Agent enriches session responses with live `hostStatus` and `viewerCount`; shared `AgentHostStatus` type; new `listAgentSessionsLive()` browser API; enhanced status colors in workspace UI
 - **devcontainer-runtime-user-consistency**: VM Agent resolves effective devcontainer execution user when `CONTAINER_USER` is unset; detection order: `devcontainer read-configuration` > `devcontainer.metadata` label > `docker exec id -un` fallback; per-workspace `ContainerUser` stored in runtime
 - **workspace-runtime-identity**: VM Agent derives host workspace identity from canonical `workspaceId`; strict workspace label matching prevents cross-workspace routing

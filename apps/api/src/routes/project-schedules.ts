@@ -22,7 +22,10 @@ export const projectScheduleRoutes = new Hono<{ Bindings: Env }>();
 export function rethrowScheduleError(error: unknown): never {
   const name = error instanceof Error ? error.name : '';
   const message = error instanceof Error ? error.message : '';
-  if (name === 'ProjectStandingWatchNotFoundError' || message.startsWith('ProjectStandingWatchNotFoundError:'))
+  if (
+    name === 'ProjectStandingWatchNotFoundError' ||
+    message.startsWith('ProjectStandingWatchNotFoundError:')
+  )
     throw errors.notFound('Standing watch');
   if (
     error instanceof ProjectScheduleNotFoundError ||
@@ -61,7 +64,9 @@ export async function scheduleRequestBody(request: Request, env: Env): Promise<u
 }
 
 projectScheduleRoutes.onError((error, c) => {
-  try { rethrowScheduleError(error); } catch (mapped) {
+  try {
+    rethrowScheduleError(error);
+  } catch (mapped) {
     if (mapped instanceof AppError) return c.json(mapped.toJSON(), mapped.statusCode as 400);
     throw mapped;
   }
@@ -124,3 +129,11 @@ for (const operation of ['reschedule', 'cancel'] as const) {
     )
   );
 }
+
+projectScheduleRoutes.post('/:id/reconcile', async (c) =>
+  c.json(await projectData.reconcileProjectSchedule(c.env, requireRouteParam(c, 'projectId'), {
+    userId: getUserId(c),
+    id: requireRouteParam(c, 'id'),
+    request: await scheduleRequestBody(c.req.raw, c.env),
+  }))
+);

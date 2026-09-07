@@ -20,7 +20,7 @@ export interface SessionRecoverySourceTaskGuard {
 }
 
 /** Event subscriptions retain source task identity, never a caller-supplied user identity. */
-function sourceProjectMemberAuthoritySql(): string {
+export function sourceProjectMemberAuthoritySql(): string {
   return `AND EXISTS (
     SELECT 1 FROM project_members event_member JOIN users event_user ON event_user.id = event_member.user_id
     WHERE event_member.project_id = source.project_id AND event_member.user_id = source.user_id

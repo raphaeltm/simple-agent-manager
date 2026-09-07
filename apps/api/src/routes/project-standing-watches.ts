@@ -13,7 +13,9 @@ import { rethrowScheduleError, scheduleRequestBody } from './project-schedules';
 /** Human project policies: deliberately absent from agent MCP mutation tools. */
 export const projectStandingWatchRoutes = new Hono<{ Bindings: Env }>();
 projectStandingWatchRoutes.onError((error, c) => {
-  try { rethrowScheduleError(error); } catch (mapped) {
+  try {
+    rethrowScheduleError(error);
+  } catch (mapped) {
     if (mapped instanceof AppError) return c.json(mapped.toJSON(), mapped.statusCode as 400);
     throw mapped;
   }

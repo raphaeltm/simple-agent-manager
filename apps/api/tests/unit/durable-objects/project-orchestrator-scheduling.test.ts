@@ -363,6 +363,7 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
       'Do something',
       null,
       undefined,
+      null,
     ]);
     expect(startTaskRunnerCalls).toHaveLength(1);
     expect(startTaskRunnerCalls[0]).toMatchObject({

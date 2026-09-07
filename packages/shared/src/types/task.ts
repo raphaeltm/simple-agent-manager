@@ -25,6 +25,7 @@ export type TaskTerminalStatus = (typeof TASK_TERMINAL_STATUSES)[number];
 
 /** Stable event contract for subscribers that react after a task wins a terminal transition. */
 export interface TaskTerminalTransitionEvent {
+  transitionId?: string | null;
   taskId: string;
   projectId: string;
   parentTaskId: string | null;

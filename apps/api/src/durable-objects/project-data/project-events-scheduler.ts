@@ -1,3 +1,4 @@
+import type { ProjectEventOrphanScanCursor } from './project-events-orphan-retention';
 import { resolveProjectEventLimits } from './project-events-limits';
 import type { Env } from './types';
 
@@ -14,10 +15,7 @@ export function isProjectEventWakeEnabled(env: Env): boolean {
   return raw === 'true';
 }
 
-export function readSchedulerState(
-  sql: SqlStorage,
-  projectId: string
-): ProjectEventSchedulerState {
+export function readSchedulerState(sql: SqlStorage, projectId: string): ProjectEventSchedulerState {
   const row = sql
     .exec(
       `SELECT next_attempt_at, next_retention_at
@@ -136,7 +134,8 @@ export function markSchedulerSuccess(
   projectId: string,
   now: number,
   phase: ProjectEventSchedulerPhase,
-  nextAt: number | null = null
+  nextAt: number | null = null,
+  orphanCursor?: ProjectEventOrphanScanCursor | null
 ): void {
   const materialization = phase === 'materialization';
   sql.exec(
@@ -144,8 +143,9 @@ export function markSchedulerSuccess(
      (project_id, next_attempt_at, next_retention_at, materialization_failures, retention_failures,
       last_materialization_succeeded_at, last_retention_succeeded_at,
       last_materialization_error_code, last_retention_error_code,
-      last_materialization_failed_at, last_retention_failed_at, updated_at)
-     VALUES (?, ?, ?, 0, 0, ?, ?, NULL, NULL, NULL, NULL, ?)
+      last_materialization_failed_at, last_retention_failed_at, updated_at,
+      orphan_scan_lifecycle_at, orphan_scan_match_id)
+     VALUES (?, ?, ?, 0, 0, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
      ON CONFLICT(project_id) DO UPDATE SET
        next_attempt_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.next_attempt_at END,
        next_retention_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.next_retention_at END,
@@ -157,6 +157,8 @@ export function markSchedulerSuccess(
        last_retention_error_code = CASE WHEN ? THEN NULL ELSE project_event_wake_scheduler_state.last_retention_error_code END,
        last_materialization_failed_at = CASE WHEN ? THEN NULL ELSE project_event_wake_scheduler_state.last_materialization_failed_at END,
        last_retention_failed_at = CASE WHEN ? THEN NULL ELSE project_event_wake_scheduler_state.last_retention_failed_at END,
+       orphan_scan_lifecycle_at = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.orphan_scan_lifecycle_at END,
+       orphan_scan_match_id = CASE WHEN ? THEN ? ELSE project_event_wake_scheduler_state.orphan_scan_match_id END,
        updated_at = ?`,
     projectId,
     materialization ? nextAt : null,
@@ -164,6 +166,8 @@ export function markSchedulerSuccess(
     materialization ? now : null,
     materialization ? null : now,
     now,
+    orphanCursor?.lifecycleAt ?? null,
+    orphanCursor?.matchId ?? null,
     materialization ? 1 : 0,
     nextAt,
     materialization ? 0 : 1,
@@ -178,6 +182,10 @@ export function markSchedulerSuccess(
     materialization ? 0 : 1,
     materialization ? 1 : 0,
     materialization ? 0 : 1,
+    orphanCursor !== undefined ? 1 : 0,
+    orphanCursor?.lifecycleAt ?? null,
+    orphanCursor !== undefined ? 1 : 0,
+    orphanCursor?.matchId ?? null,
     now
   );
 }

@@ -1,11 +1,11 @@
 import type { Env } from '../../env';
 import { recordCredentialLimitObservationsBestEffort } from './producer';
-import type { CredentialLimitObservation, CredentialLimitStatus, ProxyCredentialLimitContext } from './types';
-import {
-  normalizeCredentialSource,
-  normalizeInteger,
-  normalizeTimestamp,
-} from './values';
+import type {
+  CredentialLimitObservation,
+  CredentialLimitStatus,
+  ProxyCredentialLimitContext,
+} from './types';
+import { normalizeCredentialSource, normalizeInteger, normalizeTimestamp } from './values';
 
 export const CREDENTIAL_LIMIT_PROVIDER_HEADERS = [
   'anthropic-ratelimit-requests-limit',
@@ -44,7 +44,10 @@ function parseIntegerHeader(headers: Headers, name: string): number | null {
   return normalizeInteger(Number(value));
 }
 
-function utilizationFromLimitRemaining(limit: number | null, remaining: number | null): number | null {
+function utilizationFromLimitRemaining(
+  limit: number | null,
+  remaining: number | null
+): number | null {
   if (limit === null || remaining === null || limit <= 0 || remaining < 0) return null;
   return Math.max(0, Math.min(100, ((limit - remaining) / limit) * 100));
 }
@@ -121,9 +124,9 @@ function proxyContextIsRecordable(
 } {
   return Boolean(
     context.projectId &&
-      context.userId &&
-      context.credentialReference &&
-      normalizeCredentialSource(context.credentialSource ?? null)
+    context.userId &&
+    context.credentialReference &&
+    normalizeCredentialSource(context.credentialSource ?? null)
   );
 }
 

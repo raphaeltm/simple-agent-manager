@@ -25,7 +25,6 @@ Independent read-only security and Go review found the issues below. Root reprod
 
 Run meaningful real-D1/workerd tests for the migration, signed callback authorization, visibility and producer-to-event path. Preserve existing proxy accounting and event tests. Run shared build before dependent checks, API lint/typecheck, file-size quality, and Go tests with the repository-pinned toolchain. Run concurrency/race tests where applicable. Record actual commands and results; distinguish mocks from real runtime evidence. Independent reviewers must re-check the fixes before final whole-PR review and staging. The full parent release scope remains pending.
 
-
 ## C2 checkpoint evidence before parent review (2026-09-07)
 
 Checkpoint `73ebe5e7e3431ec0365772fe71e067d4c48d4a88` was pushed on branch `sam/fix-credential-event-telemetry-gn45kf` without a separate PR, staging mutation, deploy, merge, or main push. Parent review below reopens the remaining acceptance criteria; this evidence is retained only as historical context for the repair pass.
@@ -103,7 +102,6 @@ Independent narrow actual-function probes confirm bounded stream reading rejects
 - [ ] **Complete the original credential-generation boundary.** The request schema strips a supplied generation, and the handler neither reads nor compares stored generation. Under controlled valid-token/resource seams, an old-generation report omitting its optional credential reference returned 204 and recorded the current replacement credential B. This is an outstanding attribution requirement, not a regression introduced by this ingress patch or a demonstrated VM exploit. Persist and verify originating identity, define missing-identity compatibility explicitly, and test generation changes through the real callback boundary.
 
 The independent reviewer did not run heavy suites or staging. Add actual paid-response accounting assertions with telemetry failure, not only scheduler rejection tests. These findings join the still-open predecessor-CAS, retention/supersession, source composition and Go callback/cycle criteria.
-
 
 ## Recovery parent review of C2 checkpoint `829ced81c`
 

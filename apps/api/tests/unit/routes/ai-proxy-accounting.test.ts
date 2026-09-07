@@ -19,7 +19,10 @@ vi.mock('drizzle-orm/d1', () => ({ drizzle: () => ({}) }));
 vi.mock('../../../src/db/schema', () => ({}));
 vi.mock('../../../src/services/ai-proxy-shared', () => {
   class RouteAccountingAuthError extends Error {
-    constructor(message: string, readonly statusCode = 401) {
+    constructor(
+      message: string,
+      readonly statusCode = 401
+    ) {
       super(message);
       this.name = 'AIProxyAuthError';
     }
@@ -29,20 +32,23 @@ vi.mock('../../../src/services/ai-proxy-shared', () => {
     verifyAIProxyAuth: (...args: unknown[]) => mockVerifyAIProxyAuth(...args),
     updateAIProxyAgentCredentialAttribution: (...args: unknown[]) =>
       mockUpdateAIProxyAgentCredentialAttribution(...args),
-    extractCallbackToken: (authorization?: string, apiKey?: string) => (
-      authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : apiKey ?? null
-    ),
+    extractCallbackToken: (authorization?: string, apiKey?: string) =>
+      authorization?.startsWith('Bearer ')
+        ? authorization.slice('Bearer '.length)
+        : (apiKey ?? null),
     AIProxyAuthError: RouteAccountingAuthError,
     buildAIGatewayMetadata: () => '{"test":"metadata"}',
     buildAnthropicGatewayUrl: () => 'https://gateway.example.com/anthropic/v1/messages',
-    buildAnthropicCountTokensUrl: () => 'https://gateway.example.com/anthropic/v1/messages/count_tokens',
+    buildAnthropicCountTokensUrl: () =>
+      'https://gateway.example.com/anthropic/v1/messages/count_tokens',
     buildWorkersAIGatewayUrl: () => 'https://gateway.example.com/workers-ai/v1/chat/completions',
     isAnthropicModel: (id: string) => id.startsWith('claude-'),
   };
 });
 vi.mock('../../../src/middleware/rate-limit', () => ({
   checkRateLimit: (...args: unknown[]) => mockCheckRateLimit(...args),
-  createRateLimitKey: (prefix: string, userId: string, window: number) => `${prefix}:${userId}:${window}`,
+  createRateLimitKey: (prefix: string, userId: string, window: number) =>
+    `${prefix}:${userId}:${window}`,
   getCurrentWindowStart: () => 1000,
 }));
 vi.mock('../../../src/services/ai-token-budget', () => ({
@@ -94,27 +100,39 @@ function makeEnv(overrides: Partial<TestEnv> = {}): TestEnv {
 }
 
 function postChat(body: Record<string, unknown>, env: Partial<TestEnv> = {}) {
-  return app.request('/ai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ws-token', 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }, makeEnv(env));
+  return app.request(
+    '/ai/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ws-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    makeEnv(env)
+  );
 }
 
 function postResponses(body: Record<string, unknown>, env: Partial<TestEnv> = {}) {
-  return app.request('/ai/v1/responses', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ws-token', 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }, makeEnv({ AI_PROXY_ALLOWED_MODELS: 'gpt-4.1', ...env }));
+  return app.request(
+    '/ai/v1/responses',
+    {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ws-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    makeEnv({ AI_PROXY_ALLOWED_MODELS: 'gpt-4.1', ...env })
+  );
 }
 
 function postAnthropic(path: string, body: Record<string, unknown>, env: Partial<TestEnv> = {}) {
-  return app.request(`/ai/anthropic/v1${path}`, {
-    method: 'POST',
-    headers: { 'x-api-key': 'ws-token', 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }, makeEnv({ AI_PROXY_ALLOWED_MODELS: 'claude-sonnet-5', ...env }));
+  return app.request(
+    `/ai/anthropic/v1${path}`,
+    {
+      method: 'POST',
+      headers: { 'x-api-key': 'ws-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+    makeEnv({ AI_PROXY_ALLOWED_MODELS: 'claude-sonnet-5', ...env })
+  );
 }
 
 function streamFromText(text: string): ReadableStream<Uint8Array> {
@@ -153,7 +171,7 @@ function expectUsageIncrement(inputTokens: number, outputTokens: number) {
     'user1',
     inputTokens,
     outputTokens,
-    expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
+    expect.objectContaining({ AI_PROXY_ENABLED: 'true' })
   );
 }
 
@@ -204,14 +222,19 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
   it('increments token usage after a successful Workers AI response', async () => {
     allowProxyRequest();
     mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 10, outputTokens: 4 });
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
-      id: 'chatcmpl-1',
-      choices: [],
-      usage: { prompt_tokens: 10, completion_tokens: 4 },
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }));
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'chatcmpl-1',
+          choices: [],
+          usage: { prompt_tokens: 10, completion_tokens: 4 },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
 
     const res = await postChat({
       model: '@cf/test/model',
@@ -233,18 +256,25 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
         return Promise.resolve({ inputTokens: 11, outputTokens: 5 });
       });
     });
-    mockFetch.mockResolvedValueOnce(new Response(streamFromText([
-      'data: {"choices":[{"delta":{"content":"hi"}}]}',
-      '',
-      'data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":5}}',
-      '',
-      'data: [DONE]',
-      '',
-      '',
-    ].join('\n')), {
-      status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
-    }));
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        streamFromText(
+          [
+            'data: {"choices":[{"delta":{"content":"hi"}}]}',
+            '',
+            'data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":5}}',
+            '',
+            'data: [DONE]',
+            '',
+            '',
+          ].join('\n')
+        ),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }
+      )
+    );
 
     const res = await postChat({
       model: '@cf/test/model',
@@ -260,10 +290,12 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
 
   it('does not increment token usage for failed upstream responses', async () => {
     allowProxyRequest();
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'upstream failed' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    }));
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'upstream failed' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
 
     const res = await postChat({
       model: '@cf/test/model',
@@ -278,19 +310,24 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
   it('preserves Anthropic 429 limit headers through the translated chat-completions path', async () => {
     allowProxyRequest();
     allowAnthropicPlatformAuth();
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
-      type: 'error',
-      error: { type: 'rate_limit_error', message: 'overloaded' },
-    }), {
-      status: 429,
-      headers: {
-        'Content-Type': 'application/json',
-        'Retry-After': '3',
-        'anthropic-ratelimit-requests-limit': '100',
-        'anthropic-ratelimit-requests-remaining': '0',
-        'anthropic-ratelimit-requests-reset': '2026-09-07T10:00:00Z',
-      },
-    }));
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          type: 'error',
+          error: { type: 'rate_limit_error', message: 'overloaded' },
+        }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': '3',
+            'anthropic-ratelimit-requests-limit': '100',
+            'anthropic-ratelimit-requests-remaining': '0',
+            'anthropic-ratelimit-requests-reset': '2026-09-07T10:00:00Z',
+          },
+        }
+      )
+    );
 
     const res = await postChat(
       {
@@ -304,9 +341,7 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
     expect(res.headers.get('retry-after')).toBe('3');
     expect(res.headers.get('anthropic-ratelimit-requests-limit')).toBe('100');
     expect(res.headers.get('anthropic-ratelimit-requests-remaining')).toBe('0');
-    expect(res.headers.get('anthropic-ratelimit-requests-reset')).toBe(
-      '2026-09-07T10:00:00Z'
-    );
+    expect(res.headers.get('anthropic-ratelimit-requests-reset')).toBe('2026-09-07T10:00:00Z');
     await res.text();
     expect(mockIncrementTokenUsage).not.toHaveBeenCalled();
   });
@@ -314,14 +349,19 @@ describe('OpenAI-compatible AI proxy token accounting', () => {
   it('forwards OpenAI Responses API requests through AI Gateway', async () => {
     allowProxyRequest();
     mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 8, outputTokens: 3 });
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
-      id: 'resp_1',
-      object: 'response',
-      usage: { input_tokens: 8, output_tokens: 3 },
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }));
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'resp_1',
+          object: 'response',
+          usage: { input_tokens: 8, output_tokens: 3 },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
 
     const res = await postResponses({
       model: 'gpt-4.1',
@@ -378,18 +418,23 @@ describe('native Anthropic AI proxy token accounting', () => {
     allowProxyRequest();
     allowAnthropicPlatformAuth();
     mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 18, outputTokens: 5 });
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
-      id: 'msg_1',
-      type: 'message',
-      role: 'assistant',
-      content: [{ type: 'text', text: 'hello' }],
-      model: 'claude-sonnet-5',
-      stop_reason: 'end_turn',
-      usage: { input_tokens: 18, output_tokens: 5 },
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }));
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'msg_1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'hello' }],
+          model: 'claude-sonnet-5',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 18, output_tokens: 5 },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
 
     const res = await postAnthropic('/messages', {
       model: 'claude-sonnet-5',
@@ -408,18 +453,23 @@ describe('native Anthropic AI proxy token accounting', () => {
       new Error('injected telemetry failure')
     );
     mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 18, outputTokens: 5 });
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
-      id: 'msg_1',
-      type: 'message',
-      role: 'assistant',
-      content: [{ type: 'text', text: 'hello' }],
-      model: 'claude-sonnet-5',
-      stop_reason: 'end_turn',
-      usage: { input_tokens: 18, output_tokens: 5 },
-    }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }));
+    mockFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'msg_1',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'hello' }],
+          model: 'claude-sonnet-5',
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 18, output_tokens: 5 },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
 
     const res = await postAnthropic('/messages', {
       model: 'claude-sonnet-5',
@@ -435,10 +485,12 @@ describe('native Anthropic AI proxy token accounting', () => {
   it('does not increment token usage for count_tokens responses', async () => {
     allowProxyRequest();
     allowAnthropicPlatformAuth();
-    mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ input_tokens: 12 }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }));
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ input_tokens: 12 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
 
     const res = await postAnthropic('/messages/count_tokens', {
       model: 'claude-sonnet-5',

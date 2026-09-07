@@ -9,7 +9,11 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
-import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  getCurrentWindowStart,
+} from '../middleware/rate-limit';
 import { type AcpActivityBinding, buildAcpActivityBinding } from './acp-activity-admission';
 import { assertAcpActivityCallbackResourcesActive } from './acp-activity-callback-flush';
 import {
@@ -117,12 +121,7 @@ async function enforceAcpUsageCallbackRateLimit(
     `${input.payload.scope}:${input.payload.workspace}:${input.projectId}:${input.sessionId}`,
     windowStart
   );
-  const { allowed, remaining, resetAt } = await checkRateLimit(
-    c.env.KV,
-    key,
-    limit,
-    windowSeconds
-  );
+  const { allowed, remaining, resetAt } = await checkRateLimit(c.env.KV, key, limit, windowSeconds);
   c.header('X-RateLimit-Limit', limit.toString());
   c.header('X-RateLimit-Remaining', remaining.toString());
   c.header('X-RateLimit-Reset', resetAt.toString());
@@ -261,7 +260,10 @@ function assertServerAttributionMatchesCallback(
     });
     throw errors.forbidden('Agent type mismatch');
   }
-  if (!Number.isSafeInteger(row.agent_credential_generation) || row.agent_credential_generation < 0) {
+  if (
+    !Number.isSafeInteger(row.agent_credential_generation) ||
+    row.agent_credential_generation < 0
+  ) {
     log.warn('acp_usage.invalid_server_credential_generation', {
       sessionId: row.id,
       workspaceId: row.workspace_id,

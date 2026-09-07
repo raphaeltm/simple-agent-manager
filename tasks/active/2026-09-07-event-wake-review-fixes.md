@@ -30,7 +30,6 @@ Read all original sectionA/R6 requirements as well as these defects. Validate re
 
 No child PR, main push, merge, staging/deployment mutation or additional SAM descendants. Return pushed commits, exact reusable interfaces/guards, migrations/config, commands/results and limitations. Parent owns the complete feature, one green PR, final reviews and consolidated staging, and leaves it unmerged.
 
-
 ## Parent checkpoint review of A3 `a4c8700d6`
 
 A3 is still implementing/validating; this pushed checkpoint is fetched but not integrated or accepted. Independent Cloudflare and security reviewers inspected the exact source and executed the bounded probes below. These are remaining code defects, not just requests to add tests. Keep every original R6 and parent acceptance criterion open until the complete behavior is demonstrated.
@@ -46,9 +45,7 @@ A3 is still implementing/validating; this pushed checkpoint is fetched but not i
 
 The currently assigned normal-start repair owner is D1 task `01M1X0NWXR6D0PHAHCK6NZFA49` on `sam/repair-reserved-task-submission-nzfa49`; A3 retains event-specific guard and DO046 ownership. C2 owns authoritative credential audience and DO047. Preserve these boundaries while coordinating common interfaces. Do not rename a full-history scan as bounded or treat a self-checklist as independent acceptance.
 
-
 Review evidence distinctions: the late-cancellation guard and legacy identity construction were executed as extracted production functions with controlled boundaries; second-recovery handoff and retention/query-cost cases used actual committed SQL in SQLite. Event revocation during durable claim/physical start was traced by code inspection without allocating compute. The fairness driver used actual selector/run functions in the wrapper's order while substituting target/capacity boundaries. No full workerd or staging approval is implied. The finite unmatched-subscription lease, MCP checkpoint/end-turn guidance, chunked bind handling, upgrade deadline and secondary-error isolation appear improved by inspection; preserve those fixes while addressing the remaining cases.
-
 
 Additional A3 read-grace regression (code inspection, not executed): `project-events-wake-targets.ts:38-57` takes the minimum of delivery expiry and readable-until. A delivered but unacknowledged batch whose delivery TTL has elapsed therefore stops occupying its target while its read grace is still live. The earlier helper used readable-until for this state. Preserve target occupancy through the applicable delivered/unacked read grace; add a case with delivery TTL shorter than read grace and verify the next wake remains deferred until acknowledgement or grace expiry.
 

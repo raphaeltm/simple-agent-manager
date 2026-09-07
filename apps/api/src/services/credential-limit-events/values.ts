@@ -1,7 +1,4 @@
-import type {
-  ProjectEventJsonValue,
-  ProjectEventMetadata,
-} from '@simple-agent-manager/shared';
+import type { ProjectEventJsonValue, ProjectEventMetadata } from '@simple-agent-manager/shared';
 import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
 
 import type { CredentialLimitStatus, CredentialSource } from './types';
@@ -153,7 +150,9 @@ export function normalizeTimestamp(value: number | null | undefined): number | n
   return normalized;
 }
 
-export function normalizeCredentialSource(value: string | null | undefined): CredentialSource | null {
+export function normalizeCredentialSource(
+  value: string | null | undefined
+): CredentialSource | null {
   return value === 'user' || value === 'project' || value === 'platform' ? value : null;
 }
 

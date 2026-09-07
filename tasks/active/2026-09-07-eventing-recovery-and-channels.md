@@ -1,11 +1,13 @@
 # Eventing recovery and channel backend
 
 ## Context
+
 Resume original task 01M1WH32RPJP2AMK0WARRRSZN5 under replacement task 01M1XCYS20J34FTHZ0AB5G5M8W. Original session fd0d6dbe-e577-48f8-9bd9-bf6a4e92fcaf was read directly before bounded message search. Original user instruction: "Address all of these in one PR and get it green please." The full acceptance contract remains `2026-09-06-eventing-delivery-scheduling-channels.md`, including all D/E work. No merge authorized.
 
 Recovered integration 99b36c364 plus current main bef83db2d and final A3 8f1f537b4 is pushed on `sam/use-sam-mcp-tools-5g5m8w` at c07772fd5. A3 is integrated for review, not yet independently accepted. C2 credential repair, B4 outbox repair and D1 reserved submission remain active. F1 wizard repair and its browser/screenshot evidence are already integrated; do not redo it.
 
 ## E1 bounded backend slice
+
 Implement channel publishing/catalog/history/catch-up and ordinary-member subscription inspection/revocation APIs. UI remains a separate dependent slice; this is not acceptance of full E.
 
 - [ ] Build on canonical `project_events`, subscription/match/batch tables and admission/matching. No parallel event/message queue. Actor/project/chat/task/user identity is server-derived from the verified MCP caller, never arbitrary tool fields. Publishing is same-project and uses a reserved agent namespace with validation against impersonating GitHub/lifecycle/credential/platform sources.
@@ -18,11 +20,13 @@ Implement channel publishing/catalog/history/catch-up and ordinary-member subscr
 - [ ] Sync canonical public docs, API reference and config docs. Run shared build, API lint/typecheck, focused unit/Workers tests, migration safety/order and file-size gates. Independent local Cloudflare/security/test review, fixing confirmed defects before handoff.
 
 ## Ownership and release constraints
+
 E1 owns new channel files/types/tests plus narrow canonical admission hooks and member subscription route adapters. Additive DO migration **048** reserved for E1; do not duplicate or replace A3 DO046 or C2 DO047. Do not modify generic outbox, credential ingestion, recovery/task-runner interfaces, schedules/watches or frontend files. Coordinate narrow overlapping index/barrel/admission changes explicitly. D schedules will use DO049+ after E1 schema is available; migration numbering gaps must not crash migration-order checks in isolated child validation, and final integration must be contiguous.
 
 No PR, main push, staging/deployment mutation, merge, or SAM grandchildren. Use existing explicit Backend Implementation profile, push early checkpoints and serialize heavy tests. Parent owns final all-slice review, one consolidated staging window, screenshots, green CI, CodeRabbit, and one unmerged PR. Return exact authored commits, callable interface contract, test counts, review evidence and limitations.
 
 ## Recovery tracking
+
 - A3 01M1WZ3QMS0KXNGVEQRTPGCTKH: completed, merged for independent review.
 - C2 01M1WSETCWYS4GAQ0WPBGN45KF: active credential/audience repair; extends A3 bodies, does not replace them with older helpers.
 - B4 01M1X9RVXM759TG0NEMQRZTH3P: active canonical source-outbox repair, D10151 if needed.
@@ -40,20 +44,17 @@ Parent verification: frozen-lockfile install and shared/providers/cloud-init bui
 
 Next: consume active C2/D1/A4/E1 handoffs, preserve A4 current helper bodies while composing C2 audience and D1 guards, then implement original D schedules/standing watches and E2 real project/session UI. Do not skip full validation/independent review/consolidated coordinated staging/desktop+mobile screenshots/green CI/iterative CodeRabbit. Deliver one unmerged PR. Parent registers durable wait key `recovery-await-core-credential-submission-channels-v1` for those4active tasks with conditionany and600second deadline so follow-up work resumes without keeping this runtime polling. No PR or staging started at this checkpoint.
 
-
 ## Channel interruption during recovery
 
 E1 task `01M1XDHCVCHBHE6XAP44ENA6WQ` failed with the provider's `usageLimitExceeded` error before a recoverable output-branch checkpoint. At the recovery check, GitHub has no `sam/implement-event-channels-atomic-ena6wq` head. The transcript records initial channel/DTO/migration048/REST/MCP edits and dependency installation, then interruption during API typecheck; no completed test or review evidence exists. Read-only production checks found workspace `01M1XDSQT4QA31E2R8BCM3ZFZY` stopped and its snapshot pending with no WIP or home artifact. Full unpublished source recovery remains unresolved; transcript readbacks are partial and must not be represented as a complete backup.
 
 No workspace/node retry, deletion or host mutation was performed. The concrete preservation issue was sent to the node-pool recovery coordinator. A4/C2/D1 remained active and received checkpoint/check-in messages; do not duplicate their work. Parent is reviewing pushed C2/D1 candidates while preservation is coordinated. The resolved durable wait453a7a36 must be replaced with a new wait key for the next wait. Full E1 scope above remains outstanding.
 
-
 ### Subsequent E1 deletion evidence
 
 A subsequent read-only production query found E1 workspace marked deleted with `runtime_deletion_confirmed_at=2026-09-07T08:28:41.543Z` and `runtime_deletion_proof=vm_agent_confirmed`. The snapshot still has pending status, no WIP/home artifact, and last update08:15:00.691Z. Neither recovery coordinator initiated a lifecycle action. The peer confirms it has no established authorized remote filesystem/snapshot export path; its own recoveries used pushed commits and transcript context only.
 
 The checked source maps successful workspace DELETE or workspace-specific404 to vm_agent_confirmed. The VM deletion handler attempts container and named-volume removal, but logs volume-removal errors and still returns success. Consequently, the persisted proof establishes reported runtime deletion, not an independently verified inventory of surviving host volumes. No verified source backup or accessible restoration path exists; do not claim either successful preservation or proven physical erasure of every residual file. Keep the shared node untouched. Any fresh channel implementation must start from the pushed parent and full acceptance contract, with transcript fragments treated only as context.
-
 
 ### Cross-workflow migration reservation
 
@@ -76,6 +77,7 @@ Fresh E1 now wires the five MCP tools and member catalog/history REST routes to 
 A single fixed-window per-project publish counter bounds rate state independently of retention. Stable chat/channel idempotency uses SHA-256 identities; retained replay bypasses capacity and rate charging, while changed content conflicts. Strict canonical matching rejects candidate/fanout overflow transactionally, including generic subscriptions. Shared default/env/docs and API/MCP contracts added.
 
 Initial four-case real-MCP/D1/DO suite:3passed/1failed because the existing agent identity resolver does not recheck project membership. Channel service now explicitly requires current project task:read/write capability. Two asynchronous expected DO errors also surfaced as workerd unhandled test errors; negative cases now catch inside the real DO invocation, retaining actual operation/storage behavior. Revised suite is still running; this checkpoint is NOT accepted or green. Earlier API typecheck covered the initial storage modules only; complete current source typecheck/lint, fanout/rate/cardinality/expiry/retention scan tests and independent code review remain required.
+
 # Recovery continuation and E1 review fixes (2026-09-07, 10:15 UTC)
 
 ## Parent execution and channel validation (10:48 UTC)
@@ -104,7 +106,6 @@ D2/C3 both reached in-progress with actual assistant output. Read-only productio
 
 Final scoped CF/security re-reviews PASS after whitespace-key normalization. Test-engineer review requested missing browser and five-tool authorization evidence; both have now been added using real D1/DO routes and canonical credential identifiers, with a distinct viewer and before/after canonical state assertions. Shared fixtures were extracted; the channel suite remains below the 800-line gate. Targeted ESLint with all new helper files and DO migration safety pass. The earlier mixed-version worker run loaded the old follow bundle before the normalization edit; its whitespace retry failed and 12 other channel cases passed. The outdated run was deliberately interrupted before accepting any aggregate result. A fresh frozen-tree run of 15 channel cases plus the existing 8 member cases, and updated API typecheck, remain pending at this recoverable checkpoint. This is not a full-green or final-integration claim.
 
-
 ## Parent implementation after subtask shutdown (2026-09-07)
 
 User direction: no further SAM dispatches; parent implements directly, local agents write bounded files only. D2 final a83f7b648 was pushed and clean before stop. Stop returned cleanup warning; read-only records confirmed task cancelled and workspace/agent stopped. A5/C3 failed automatically with Instant checkpoint-restore errors before publishing new changes; failed workspaces untouched. Transcript snippets are context, not verified preservation of unpublished files.
@@ -131,3 +132,15 @@ Local validation recovered two final handoff defects and found adjacent safety g
 Evidence at this checkpoint: first corrected recovery/schedule run96/96 pass; seven new cases fail against saved pre-fix implementation (restored afterward). Reserved creator tests29 pass, and removing guard fails five denial scenarios while three valid-role controls pass. New schedule admission-bound tests5/5 pass. D1/DO migration safety pass before additive053. After consolidating source guards, one fixture required explicitly active users; final verification pending. File-size gate required extraction of materialization batch storage and reserved D1 submission storage, plus removing duplicate recovery guard.
 
 Resource limitation: workspace4GB RAM/2GBswap. Per-agent serial jobs still overloaded it when run concurrently; one API typecheck exited137. All remaining heavyweight validation must be serialized across the WHOLE workspace. No OOM or stale pre-build test run counts as a passing result. Go1.26.6 installed in gitignored `.tmp/eventing/toolchain`; compile stopped to let browser/Worker validation finish. Full final lint/typecheck/unit/Workers/Go/build, independent acceptance review, staging decision/verification, screenshot publication, PR/CI/CodeRabbit remain required.
+
+## Continuation checkpoint: API regressions and outcome controls
+
+- Added member-authorized, payload-free delivery outcome inspection and lazy UI history with truthful transport/ack distinctions. Added canonical schedule execution receipts, versioned reconciliation, and explicit deadline/authority/queued-checkpoint-gated submission retry through REST, MCP and UI. Missing/ambiguous receipts retain watch concurrency.
+- Replaced missing-batch anti-join scanning with an indexed, bounded candidate window and persisted tuple cursor (DO migration 054). Healthy suffixes advance at ordinary maintenance cadence, and `hasMore` only reports observed eligible work. Real workerd 1k/20k healthy-prefix/deep-seek read-cost tests pass; mutation/progress assertions are under repair before final validation.
+- Restored explicit lifecycle source capture for TaskRunner failure and MCP completion. MCP captures before fallible downstream cleanup. Per-transition identifiers distinguish repeated failure of a requeued task; the centralized terminal transition still captures atomically in its D1 batch, while these two hook callers retain documented non-atomic capture.
+- Full API baseline completed: 656/676 files, 9091/9152 tests passed. Repaired stale D1/auth/logger/terminal-proof fixtures and real lifecycle publication regression. Fresh focused rerun of all20 failing suites plus new recovery/terminal tests passed24 files/536 tests (`.tmp/eventing/api-tests-fixed.log`). No claim that full final suite is green yet.
+- UI validation: original14 browser scenarios passed, six new delivery/recovery checks passed, final two delivery regressions repeated successfully. Both375x667 and1280x800;94 screenshots retained and18 new screenshots reviewed. Shared build, Vite build, focused lint and web+service-worker typecheck passed. These browser APIs were mocked. Additional public-site GitHub setup surface evidence is pending.
+- Independent source review found and fixed credential-report coalescing across generations; blocked-reporter regression added, Go execution pending. Source review otherwise confirms current recovery/inspection/retention implementation closes prior gaps.
+- Remaining: final Workers/Go checks, serialized workspace quality/build/type/lint/tests, final specialist evidence, one consolidated staging window and real canaries, one open green PR with durable screenshots and CodeRabbit review. No merge, SAM subtasks, staging deployment or resource mutation has occurred.
+
+Follow-up validation: final focused Workers run passed91/94 tests across7 files. Delivery inspection, schedule receipt/recovery, reserved submission and10k mailbox capacity passed. Three retention assertions exposed physical SQLite index writes leaking into logical result counters; repaired/deleted counts now use RETURNING rows while the shared conservative write budget is retained. Existing orphan drain and a new dependency-safe attempt/match/batch/event budget-one scenario await repeat. Full Go ACP package with `-race` passed (`.tmp/eventing/go-acp-final.log`); full VM coverage run is underway. Public-site wizard/sidebar evidence tests are source-complete; source frozen for final format/build/typecheck/lint.

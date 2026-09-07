@@ -723,7 +723,6 @@ export function insertMatchIfAbsent(
   );
 }
 
-
 export function refreshWakeDueAtForMatches(
   sql: SqlStorage,
   projectId: string,

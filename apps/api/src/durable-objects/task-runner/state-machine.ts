@@ -288,15 +288,17 @@ export async function failTask(
   await syncTriggerExecutionStatus(rc.env.DATABASE, state.taskId, 'failed', errorMessage);
 
   const { ulid } = await import('../../lib/ulid');
+  const failureEventId = ulid();
   await rc.env.DATABASE.prepare(
     `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
      VALUES (?, ?, ?, 'failed', 'system', NULL, ?, ?)`
   )
-    .bind(ulid(), state.taskId, currentStatus || 'queued', errorMessage, now)
+    .bind(failureEventId, state.taskId, currentStatus || 'queued', errorMessage, now)
     .run();
 
   await runTaskTerminalTransitionHooks(
     {
+      transitionId: failureEventId,
       taskId: state.taskId,
       projectId: state.projectId,
       parentTaskId: task?.parent_task_id ?? null,
@@ -307,7 +309,7 @@ export async function failTask(
     },
     [
       createTaskWaitTerminalTransitionHook(rc.env),
-      createProjectEventTaskTerminalTransitionHook(rc.env),
+      createProjectEventTaskTerminalTransitionHook(rc.env, { captureAtHook: true }),
     ]
   );
 
@@ -502,7 +504,9 @@ export async function cleanupOnFailure(
     });
   }
 
-  let workspaceNeedsRuntimeStop = Boolean(state.stepResults.workspaceId && state.stepResults.nodeId);
+  let workspaceNeedsRuntimeStop = Boolean(
+    state.stepResults.workspaceId && state.stepResults.nodeId
+  );
   if (state.stepResults.workspaceId && state.stepResults.nodeId) {
     const workspace = await rc.env.DATABASE.prepare(
       `SELECT status, dispatched_at AS dispatchedAt FROM workspaces WHERE id = ?`
@@ -514,7 +518,11 @@ export async function cleanupOnFailure(
       await rc.env.DATABASE.prepare(
         `UPDATE workspaces SET status = 'stopped', error_message = ?, updated_at = ? WHERE id = ?`
       )
-        .bind(`Task ended before workspace dispatch during ${state.currentStep}`, now, state.stepResults.workspaceId)
+        .bind(
+          `Task ended before workspace dispatch during ${state.currentStep}`,
+          now,
+          state.stepResults.workspaceId
+        )
         .run();
       workspaceNeedsRuntimeStop = false;
     }

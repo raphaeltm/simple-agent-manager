@@ -541,6 +541,7 @@ func usageReportCoalesceKey(request usageReportRequest) string {
 		request.payload.AgentType,
 		request.payload.CredentialSource,
 		request.payload.CredentialReference,
+		fmt.Sprintf("%d", request.payload.CredentialGeneration),
 		request.payload.Source,
 		limit.Provider,
 		limit.Source,
