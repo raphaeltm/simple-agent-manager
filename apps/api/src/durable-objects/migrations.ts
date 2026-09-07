@@ -1835,6 +1835,140 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '045-project-event-wake-delivery',
+    run: (sql) => {
+      const additiveColumns = [
+        [
+          'project_event_subscriptions',
+          'owner_version',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_version INTEGER NOT NULL DEFAULT 1',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_project_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_project_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_chat_session_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_chat_session_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_task_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_task_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'owner_runtime_id',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN owner_runtime_id TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'recovery_lineage_json',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN recovery_lineage_json TEXT',
+        ],
+        [
+          'project_event_subscriptions',
+          'prompt_delivery_count',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN prompt_delivery_count INTEGER NOT NULL DEFAULT 0',
+        ],
+        [
+          'project_event_subscriptions',
+          'prompt_delivery_last_at',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN prompt_delivery_last_at INTEGER',
+        ],
+        [
+          'project_event_subscriptions',
+          'delivery_cooldown_until',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN delivery_cooldown_until INTEGER',
+        ],
+        [
+          'project_event_subscriptions',
+          'delivery_lifetime_expires_at',
+          'ALTER TABLE project_event_subscriptions ADD COLUMN delivery_lifetime_expires_at INTEGER',
+        ],
+        [
+          'project_event_delivery_batches',
+          'delivery_channel',
+          "ALTER TABLE project_event_delivery_batches ADD COLUMN delivery_channel TEXT NOT NULL DEFAULT 'pull'",
+        ],
+        [
+          'project_event_delivery_batches',
+          'delivered_via',
+          'ALTER TABLE project_event_delivery_batches ADD COLUMN delivered_via TEXT',
+        ],
+        [
+          'project_event_delivery_batches',
+          'delivery_expires_at',
+          'ALTER TABLE project_event_delivery_batches ADD COLUMN delivery_expires_at INTEGER',
+        ],
+        [
+          'project_event_delivery_batches',
+          'readable_until',
+          'ALTER TABLE project_event_delivery_batches ADD COLUMN readable_until INTEGER',
+        ],
+        [
+          'project_event_delivery_attempts',
+          'transport_state',
+          'ALTER TABLE project_event_delivery_attempts ADD COLUMN transport_state TEXT',
+        ],
+      ] as const;
+
+      for (const [table, column, statement] of additiveColumns) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
+        }
+        sql.exec(`SELECT ${column} FROM ${table} LIMIT 0`);
+      }
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_event_wake_scheduler_state (
+          project_id TEXT PRIMARY KEY,
+          next_attempt_at INTEGER,
+          next_retention_at INTEGER,
+          materialization_failures INTEGER NOT NULL DEFAULT 0,
+          retention_failures INTEGER NOT NULL DEFAULT 0,
+          last_materialization_error_code TEXT,
+          last_retention_error_code TEXT,
+          last_materialization_failed_at INTEGER,
+          last_retention_failed_at INTEGER,
+          last_materialization_succeeded_at INTEGER,
+          last_retention_succeeded_at INTEGER,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_project_batch
+        ON project_event_matches(project_id, batch_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_matches_materialization
+        ON project_event_matches(project_id, state, matched_at, subscription_id, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_batches_prompt_target
+        ON project_event_delivery_batches(project_id, delivery_channel, target_session_id, state, updated_at, id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_batches_readable
+        ON project_event_delivery_batches(project_id, id, readable_until)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_attempts_transport
+        ON project_event_delivery_attempts(project_id, batch_id, transport_state, attempt_number)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_wake_scheduler_retention
+        ON project_event_wake_scheduler_state(next_retention_at, project_id)
+      `);
+    },
+  },
 ];
 
 /**
