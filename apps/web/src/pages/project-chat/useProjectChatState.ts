@@ -20,6 +20,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
   serializeResourceRequirements,
+  toResourceRequirements,
 } from '../../components/resource-requirements';
 import { useAgentCatalog } from '../../hooks/useAgentCatalog';
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
@@ -227,6 +228,11 @@ export function useProjectChatState() {
       : 'task'
   );
   const userSetTaskModeRef = useRef(false);
+
+  // Per-task resource override — blank fields inherit from profile/project
+  const [taskResourceReqs, setTaskResourceReqs] = useState<
+    import('../../components/resource-requirements').ResourceRequirementsFormState
+  >({ ...EMPTY_RESOURCE_STATE_IMPORT });
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
@@ -710,6 +716,7 @@ export function useProjectChatState() {
         agentProfileId: submitProfileId,
         skillId: selectedSkillId,
         selectedAgentType,
+        selectedResourceRequirements: toResourceRequirements(taskResourceReqs),
         selectedWorkspaceProfile,
         selectedDevcontainerConfigName,
         selectedTaskMode,
@@ -1005,6 +1012,8 @@ export function useProjectChatState() {
     setSelectedDevcontainerConfigName,
     selectedTaskMode,
     handleTaskModeChange,
+    taskResourceReqs,
+    setTaskResourceReqs,
     ...attachments,
     provisioning,
     bootLogs,
