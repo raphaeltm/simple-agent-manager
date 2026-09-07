@@ -238,6 +238,21 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       );
     }
   }
+  if (
+    variables.heartbeatWorkspaceMetricsMaxOutputBytes !== undefined &&
+    variables.heartbeatWorkspaceMetricsMaxOutputBytes !== ''
+  ) {
+    const maxOutputBytes = Number(variables.heartbeatWorkspaceMetricsMaxOutputBytes);
+    if (
+      !NUMERIC_RE.test(variables.heartbeatWorkspaceMetricsMaxOutputBytes) ||
+      maxOutputBytes < 1024 ||
+      maxOutputBytes > 1048576
+    ) {
+      errors.push(
+        `heartbeatWorkspaceMetricsMaxOutputBytes: must be numeric 1024-1048576 (got ${JSON.stringify(variables.heartbeatWorkspaceMetricsMaxOutputBytes)})`
+      );
+    }
+  }
   if (variables.role !== undefined && variables.role !== '') {
     if (variables.role !== 'workspace' && variables.role !== 'deployment') {
       errors.push(
@@ -410,7 +425,7 @@ export interface CloudInitVariables {
   swapSizeMb?: string;
   /** Swap swappiness value 0-100 (default: 60). Only relevant when swap is enabled. */
   swapSwappiness?: string;
-  /** Host memory reserve in MB subtracted from Docker's service cgroup (default: 0). */
+  /** Host memory reserve in MB subtracted from the Docker workload slice (default: 512). */
   vmAgentMemoryReserveMb?: string;
   /** Minimum memory protection for VM agent/system services in MB (default: 256). */
   samInfraSliceMemoryMinMb?: string;
@@ -420,6 +435,8 @@ export interface CloudInitVariables {
   heartbeatDockerStatsTimeout?: string;
   /** Max workspace containers measured by each heartbeat (default: 8). */
   heartbeatWorkspaceMetricsMaxContainers?: string;
+  /** Max bytes read from each heartbeat Docker CLI command (default: 65536). */
+  heartbeatWorkspaceMetricsMaxOutputBytes?: string;
   /** VM agent role: 'workspace' (default) or 'deployment'. */
   role?: string;
   /** Deployment environment ID (required when role='deployment'). */
@@ -511,12 +528,14 @@ export function generateCloudInit(
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
     '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',
     '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
-    '{{ vm_agent_memory_reserve_mb }}': variables.vmAgentMemoryReserveMb ?? '0',
+    '{{ vm_agent_memory_reserve_mb }}': variables.vmAgentMemoryReserveMb ?? '512',
     '{{ sam_infra_slice_memory_min_mb }}': variables.samInfraSliceMemoryMinMb ?? '256',
     '{{ docker_memory_min_mb }}': variables.dockerMemoryMinMb ?? '512',
     '{{ heartbeat_docker_stats_timeout }}': variables.heartbeatDockerStatsTimeout ?? '2s',
     '{{ heartbeat_workspace_metrics_max_containers }}':
       variables.heartbeatWorkspaceMetricsMaxContainers ?? '8',
+    '{{ heartbeat_workspace_metrics_max_output_bytes }}':
+      variables.heartbeatWorkspaceMetricsMaxOutputBytes ?? '65536',
     '{{ role }}': variables.role ?? '',
     '{{ environment_id }}': variables.environmentId ?? '',
     '{{ deploy_signing_pub_key }}': variables.deploySigningPubKey ?? '',

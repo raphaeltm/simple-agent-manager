@@ -113,7 +113,9 @@ export async function reserveWorkspacePlacement(
            ? AS cpu_share_budget_percent,
            ? AS host_memory_reserve_mb,
            ? AS disk_pressure_threshold_percent,
-           ? AS metrics_ttl_ms
+           ? AS metrics_ttl_ms,
+           ? AS cpu_threshold_percent,
+           ? AS memory_threshold_percent
        ),
        active_reservations AS (
          SELECT
@@ -159,12 +161,13 @@ export async function reserveWorkspacePlacement(
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
           ?, ?
        FROM node_scope n, requested_reservation requested, active_reservations active, admission_policy policy
-       WHERE active.active_count < policy.max_workspaces
+         WHERE active.active_count < policy.max_workspaces
          AND active.active_count < requested.max_co_tenants
          AND (active.min_max_co_tenants IS NULL OR active.active_count < active.min_max_co_tenants)
          AND active.exclusive_count = 0
          AND (requested.exclusive_node = 0 OR active.active_count = 0)
-         AND ${finalReservationDiskPredicateSql()}
+         AND ${validOrUnknownHardwareCapacitySql()}
+         AND ${finalMeasuredPressurePredicateSql()}
          AND (
            (
              active.active_count = 0
@@ -179,8 +182,6 @@ export async function reserveWorkspacePlacement(
            OR (
              active.active_count > 0
              AND active.invalid_count = 0
-             AND ${freshMetricsSql()}
-             AND ${validDiskPercentSql()}
              AND n.provider_instance_vcpu_count IS NOT NULL
              AND n.provider_instance_memory_mb IS NOT NULL
              AND n.provider_instance_disk_gb IS NOT NULL
@@ -208,6 +209,8 @@ export async function reserveWorkspacePlacement(
       policy.hostMemoryReserveMb,
       policy.diskPressureThresholdPercent,
       policy.metricsTtlMs,
+      policy.cpuThresholdPercent,
+      policy.memoryThresholdPercent,
       input.id,
       input.nodeId,
       input.projectId,
@@ -249,7 +252,7 @@ function legacyWorkspaceAdmissionPolicy(maxWorkspaces: number): WorkspaceAdmissi
 function validReservationJsonSql(expression: string): string {
   return `(json_valid(${expression})
     AND json_type(${expression}, '$.version') = 'integer'
-    AND json_extract(${expression}, '$.version') = 1
+    AND json_extract(${expression}, '$.version') IN (1, 2)
     AND json_type(${expression}, '$.cpuMillis') = 'integer'
     AND json_extract(${expression}, '$.cpuMillis') > 0
     AND json_type(${expression}, '$.memoryMb') = 'integer'
@@ -270,16 +273,83 @@ function validDiskPercentSql(): string {
     AND CAST(json_extract(n.metrics_json, '$.diskPercent') AS REAL) <= 100)`;
 }
 
+function validCpuLoadAvg1Sql(): string {
+  return `(n.metrics_json IS NOT NULL
+    AND json_type(n.metrics_json, '$.cpuLoadAvg1') IN ('integer', 'real')
+    AND CAST(json_extract(n.metrics_json, '$.cpuLoadAvg1') AS REAL) >= 0)`;
+}
+
+function validMemoryPercentSql(): string {
+  return `(n.metrics_json IS NOT NULL
+    AND json_type(n.metrics_json, '$.memoryPercent') IN ('integer', 'real')
+    AND CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL) >= 0
+    AND CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL) <= 100)`;
+}
+
+function validCreatingWorkspacesSql(): string {
+  return `(n.metrics_json IS NOT NULL
+    AND (
+      json_type(n.metrics_json, '$.creatingWorkspaces') IS NULL
+      OR (
+        json_type(n.metrics_json, '$.creatingWorkspaces') = 'integer'
+        AND CAST(json_extract(n.metrics_json, '$.creatingWorkspaces') AS INTEGER) >= 0
+      )
+    ))`;
+}
+
+function supportedMetricsVersionSql(): string {
+  return `(n.metrics_json IS NOT NULL
+    AND (
+      json_type(n.metrics_json, '$.version') IS NULL
+      OR (
+        json_type(n.metrics_json, '$.version') = 'integer'
+        AND CAST(json_extract(n.metrics_json, '$.version') AS INTEGER) <= 1
+      )
+    ))`;
+}
+
 function freshMetricsSql(): string {
   return `(n.metrics_age_ms IS NOT NULL
     AND n.metrics_age_ms >= 0
     AND n.metrics_age_ms <= policy.metrics_ttl_ms)`;
 }
 
-function finalReservationDiskPredicateSql(): string {
-  return `(NOT ${validDiskPercentSql()}
-    OR CAST(json_extract(n.metrics_json, '$.diskPercent') AS REAL)
-      < policy.disk_pressure_threshold_percent)`;
+function validOrUnknownHardwareCapacitySql(): string {
+  return `((n.provider_instance_vcpu_count IS NULL
+      OR (typeof(n.provider_instance_vcpu_count) = 'integer' AND n.provider_instance_vcpu_count > 0))
+    AND (n.provider_instance_memory_mb IS NULL
+      OR (typeof(n.provider_instance_memory_mb) = 'integer' AND n.provider_instance_memory_mb > 0))
+    AND (n.provider_instance_disk_gb IS NULL
+      OR (typeof(n.provider_instance_disk_gb) = 'integer' AND n.provider_instance_disk_gb > 0)))`;
+}
+
+function finalMeasuredPressurePredicateSql(): string {
+  return `(
+    (active.active_count = 0 AND n.metrics_json IS NULL)
+    OR (
+      n.metrics_json IS NOT NULL
+      AND ${supportedMetricsVersionSql()}
+      AND ${freshMetricsSql()}
+      AND ${validCpuLoadAvg1Sql()}
+      AND ${validMemoryPercentSql()}
+      AND ${validDiskPercentSql()}
+      AND ${validCreatingWorkspacesSql()}
+      AND COALESCE(CAST(json_extract(n.metrics_json, '$.creatingWorkspaces') AS INTEGER), 0) = 0
+      AND (
+        (active.active_count = 0 AND n.provider_instance_vcpu_count IS NULL)
+        OR (
+          n.provider_instance_vcpu_count IS NOT NULL
+          AND n.provider_instance_vcpu_count > 0
+          AND ((CAST(json_extract(n.metrics_json, '$.cpuLoadAvg1') AS REAL) / n.provider_instance_vcpu_count) * 100)
+            < policy.cpu_threshold_percent
+        )
+      )
+      AND CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL)
+        < policy.memory_threshold_percent
+      AND CAST(json_extract(n.metrics_json, '$.diskPercent') AS REAL)
+        < policy.disk_pressure_threshold_percent
+    )
+  )`;
 }
 
 function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {

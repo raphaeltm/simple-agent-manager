@@ -6,9 +6,11 @@ package sysinfo
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"os"
@@ -19,6 +21,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/container"
 )
 
 // Build-time variables injected via ldflags in the Makefile.
@@ -116,6 +120,17 @@ type DockerContainerStats struct {
 	MemoryLimitBytes uint64    `json:"memoryLimitBytes,omitempty"`
 	MemoryPercent    float64   `json:"memoryPercent,omitempty"`
 	CollectedAt      time.Time `json:"collectedAt"`
+}
+
+const (
+	defaultDockerStatsMaxContainers = 8
+	defaultDockerCommandMaxBytes    = 64 * 1024
+)
+
+type DockerContainerStatsOptions struct {
+	Timeout        time.Duration
+	MaxContainers  int
+	MaxOutputBytes int64
 }
 
 // SoftwareInfo holds version strings for installed software.
@@ -490,9 +505,9 @@ type dockerPSEntry struct {
 }
 
 type dockerPSLabelEntry struct {
-	ID     string `json:"id"`
-	Names  string `json:"names"`
-	Labels string `json:"labels"`
+	ID         string `json:"id"`
+	Names      string `json:"names"`
+	LabelValue string `json:"labelValue"`
 }
 
 // dockerStatsEntry represents per-container resource usage from docker stats.
@@ -506,9 +521,17 @@ type dockerStatsEntry struct {
 
 // CollectDockerContainerStats collects Docker stats for a bounded set of container IDs.
 func CollectDockerContainerStats(ctx context.Context, timeout time.Duration, containerIDs []string) (map[string]DockerContainerStats, error) {
+	return collectDockerContainerStats(ctx, DockerContainerStatsOptions{Timeout: timeout}, containerIDs)
+}
+
+func collectDockerContainerStats(ctx context.Context, opts DockerContainerStatsOptions, containerIDs []string) (map[string]DockerContainerStats, error) {
 	if len(containerIDs) == 0 {
 		return map[string]DockerContainerStats{}, nil
 	}
+	if opts.MaxContainers > 0 && len(containerIDs) > opts.MaxContainers {
+		return nil, fmt.Errorf("workspace container stats request exceeded max containers %d", opts.MaxContainers)
+	}
+	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
@@ -518,14 +541,21 @@ func CollectDockerContainerStats(ctx context.Context, timeout time.Duration, con
 	args := append([]string{"stats", "--no-stream", "--format",
 		`{"id":"{{.ID}}","name":"{{.Name}}","cpuPercent":"{{.CPUPerc}}","memUsage":"{{.MemUsage}}","memPercent":"{{.MemPerc}}"}`},
 		containerIDs...)
-	out, err := exec.CommandContext(ctx, "docker", args...).Output()
+	out, err := dockerCommandOutput(ctx, opts.MaxOutputBytes, args...)
 	if err != nil {
 		return nil, err
 	}
 
+	requestedIDs := make(map[string]struct{}, len(containerIDs))
+	for _, id := range containerIDs {
+		requestedIDs[id] = struct{}{}
+	}
 	collectedAt := time.Now().UTC()
 	result := make(map[string]DockerContainerStats)
 	for id, entry := range parseDockerStats(string(out)) {
+		if _, ok := requestedIDs[id]; !ok {
+			continue
+		}
 		used, limit := parseDockerMemUsage(entry.MemUsage)
 		result[id] = DockerContainerStats{
 			ID:               id,
@@ -548,6 +578,20 @@ func CollectDockerContainerStatsForLabels(
 	labelKey string,
 	labelValues []string,
 ) (map[string]DockerContainerStats, error) {
+	return CollectDockerContainerStatsForLabelsBounded(
+		ctx,
+		DockerContainerStatsOptions{Timeout: timeout},
+		labelKey,
+		labelValues,
+	)
+}
+
+func CollectDockerContainerStatsForLabelsBounded(
+	ctx context.Context,
+	opts DockerContainerStatsOptions,
+	labelKey string,
+	labelValues []string,
+) (map[string]DockerContainerStats, error) {
 	desired := make(map[string]struct{}, len(labelValues))
 	for _, value := range labelValues {
 		value = strings.TrimSpace(value)
@@ -561,14 +605,22 @@ func CollectDockerContainerStatsForLabels(
 	if strings.TrimSpace(labelKey) == "" {
 		labelKey = "devcontainer.local_folder"
 	}
+	maxContainers := opts.MaxContainers
+	if maxContainers <= 0 {
+		maxContainers = defaultDockerStatsMaxContainers
+	}
+	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = 2 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "docker", "ps", "--filter", "label="+labelKey, "--format",
-		`{"id":"{{.ID}}","names":"{{.Names}}","labels":"{{.Labels}}"}`).Output()
+	labelTemplate := fmt.Sprintf(
+		`{"id":"{{.ID}}","names":"{{.Names}}","labelValue":{{json (index .Labels %q)}}}`,
+		labelKey,
+	)
+	out, err := dockerCommandOutput(ctx, opts.MaxOutputBytes, "ps", "--filter", "label="+labelKey, "--format", labelTemplate)
 	if err != nil {
 		return nil, err
 	}
@@ -576,21 +628,23 @@ func CollectDockerContainerStatsForLabels(
 	containerIDs := make([]string, 0, len(desired))
 	containerLabelValues := make(map[string]string, len(desired))
 	for _, entry := range parseDockerPSLabelEntries(string(out)) {
-		labels := parseDockerLabelList(entry.Labels)
-		labelValue := labels[labelKey]
+		labelValue := strings.TrimSpace(entry.LabelValue)
 		if _, ok := desired[labelValue]; !ok {
 			continue
 		}
 		if entry.ID != "" {
 			containerIDs = append(containerIDs, entry.ID)
 			containerLabelValues[entry.ID] = labelValue
+			if len(containerIDs) > maxContainers {
+				return nil, fmt.Errorf("workspace container metric discovery exceeded max containers %d", maxContainers)
+			}
 		}
 	}
 	if len(containerIDs) == 0 {
 		return map[string]DockerContainerStats{}, nil
 	}
 
-	stats, err := CollectDockerContainerStats(ctx, timeout, containerIDs)
+	stats, err := collectDockerContainerStats(ctx, opts, containerIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -599,6 +653,42 @@ func CollectDockerContainerStatsForLabels(
 		stats[id] = stat
 	}
 	return stats, nil
+}
+
+func dockerCommandOutput(ctx context.Context, maxOutputBytes int64, args ...string) ([]byte, error) {
+	if maxOutputBytes <= 0 {
+		maxOutputBytes = defaultDockerCommandMaxBytes
+	}
+	cmd := exec.CommandContext(ctx, container.DockerCLIPath(), args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	out, readErr := io.ReadAll(io.LimitReader(stdout, maxOutputBytes+1))
+	if int64(len(out)) > maxOutputBytes {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("docker %s output exceeded %d bytes", strings.Join(args, " "), maxOutputBytes)
+	}
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if waitErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("%w: %s", waitErr, msg)
+		}
+		return nil, waitErr
+	}
+	return out, nil
 }
 
 // collectDocker queries Docker CLI for version and container info.
@@ -736,26 +826,6 @@ func parseDockerPSLabelEntries(output string) []dockerPSLabelEntry {
 		}
 	}
 	return entries
-}
-
-func parseDockerLabelList(value string) map[string]string {
-	labels := map[string]string{}
-	for _, item := range strings.Split(value, ",") {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		key, val, ok := strings.Cut(item, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		labels[key] = strings.TrimSpace(val)
-	}
-	return labels
 }
 
 func parseDockerMemUsage(value string) (uint64, uint64) {

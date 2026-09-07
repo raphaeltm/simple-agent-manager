@@ -5,6 +5,7 @@ import {
   type ActiveWorkspaceReservationUsage,
   emptyUsage,
   evaluateWorkspaceReservationCapacity,
+  isResolvedResourceReservation,
   normalizeLoadAverageToCpuPercent,
   parseWorkspaceAdmissionMetrics,
   type WorkspaceAdmissionPolicy,
@@ -46,6 +47,19 @@ function usage(overrides: Partial<ActiveWorkspaceReservationUsage> = {}) {
 }
 
 describe('workspace resource capacity accounting', () => {
+  it('accepts v1 and v2 reservation snapshots and rejects malformed future snapshots', () => {
+    expect(isResolvedResourceReservation(reservation())).toBe(true);
+    expect(
+      isResolvedResourceReservation({
+        ...reservation({ version: 2 }),
+        fieldProvenance: { minVcpu: { source: 'task', sourceId: 'task-1' } },
+        diagnostics: { resolver: 'canonical-a' },
+      })
+    ).toBe(true);
+    expect(isResolvedResourceReservation(reservation({ version: 3 }))).toBe(false);
+    expect(isResolvedResourceReservation({ ...reservation(), cpuMillis: '1000' })).toBe(false);
+  });
+
   it('normalizes load average to CPU percentage units', () => {
     expect(normalizeLoadAverageToCpuPercent(2, 4)).toBe(50);
     expect(normalizeLoadAverageToCpuPercent(2, null)).toBeNull();
@@ -113,5 +127,116 @@ describe('workspace resource capacity accounting', () => {
     expect(result.reasons).toContain('existing reservation requires an exclusive node');
     expect(result.reasons).toContain('memory budget would be exceeded after host reserve');
     expect(result.reasons).toContain('disk pressure threshold reached');
+  });
+
+  it('vetoes fresh measured CPU, memory, and creating-workspace pressure separately from budgets', () => {
+    const active = usage({
+      activeCount: 1,
+      cpuMillis: 1000,
+      memoryMb: 1024,
+      diskMb: 1024,
+      minMaxCoTenants: 4,
+    });
+    const baseNode = {
+      id: 'occupied',
+      providerInstanceVcpuCount: 4,
+      providerInstanceMemoryMb: 8192,
+      providerInstanceDiskGb: 80,
+      lastHeartbeatAt: new Date().toISOString(),
+    };
+
+    for (const [metrics, reason] of [
+      [{ cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }, 'CPU pressure threshold reached'],
+      [
+        { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 },
+        'memory pressure threshold reached',
+      ],
+      [
+        { cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
+        'node is already creating a workspace',
+      ],
+    ] as const) {
+      const result = evaluateWorkspaceReservationCapacity(
+        { ...baseNode, lastMetrics: JSON.stringify(metrics) },
+        active,
+        reservation(),
+        policy({ cpuThresholdPercent: 90, memoryThresholdPercent: 90 })
+      );
+      expect(result.admitted).toBe(false);
+      expect(result.reasons).toContain(reason);
+      expect(result.reasons).not.toContain('CPU share budget would be exceeded');
+      expect(result.reasons).not.toContain('memory budget would be exceeded after host reserve');
+    }
+  });
+
+  it('rejects malformed, future, stale, and incomplete telemetry when a node reports metrics', () => {
+    const active = usage({
+      activeCount: 1,
+      cpuMillis: 1000,
+      memoryMb: 1024,
+      diskMb: 1024,
+      minMaxCoTenants: 4,
+    });
+    const baseNode = {
+      id: 'occupied',
+      providerInstanceVcpuCount: 4,
+      providerInstanceMemoryMb: 8192,
+      providerInstanceDiskGb: 80,
+      lastHeartbeatAt: new Date().toISOString(),
+    };
+
+    expect(
+      evaluateWorkspaceReservationCapacity(
+        { ...baseNode, lastMetrics: '{"cpuLoadAvg1":"bad"}' },
+        active,
+        reservation(),
+        policy()
+      ).reasons
+    ).toContain('node resource telemetry is malformed');
+    expect(
+      evaluateWorkspaceReservationCapacity(
+        {
+          ...baseNode,
+          lastMetrics: JSON.stringify({
+            version: 2,
+            cpuLoadAvg1: 0.1,
+            memoryPercent: 10,
+            diskPercent: 10,
+          }),
+        },
+        active,
+        reservation(),
+        policy()
+      ).reasons
+    ).toContain('node resource telemetry version is unsupported');
+    expect(
+      evaluateWorkspaceReservationCapacity(
+        {
+          ...baseNode,
+          lastHeartbeatAt: '2026-08-28T00:00:00.000Z',
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+        },
+        active,
+        reservation(),
+        policy(),
+        parseWorkspaceAdmissionMetrics(
+          {
+            ...baseNode,
+            lastHeartbeatAt: '2026-08-28T00:00:00.000Z',
+            lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+          },
+          policy(),
+          new Date('2026-08-28T00:10:00.000Z').getTime()
+        )
+      ).reasons
+    ).toContain('node telemetry is stale');
+    expect(
+      evaluateWorkspaceReservationCapacity(
+        { ...baseNode, lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, diskPercent: 10 }) },
+        active,
+        reservation(),
+        policy()
+      ).reasons
+    ).toContain('node has no memory pressure telemetry');
   });
 });

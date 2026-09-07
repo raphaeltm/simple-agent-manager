@@ -39,6 +39,7 @@ import {
 import { deleteNodeResourcesStrict } from './strict-node-deletion';
 import { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from './workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
+import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-capacity';
 
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
 
@@ -301,11 +302,12 @@ export async function provisionNode(
       dockerDnsServers: env.DOCKER_DNS_SERVERS,
       originCaCertificateUrl: `https://api.${env.BASE_DOMAIN}/api/nodes/${node.id}/origin-ca-certificate`,
       vmAgentPort: env.VM_AGENT_PORT,
-      vmAgentMemoryReserveMb: env.VM_AGENT_MEMORY_RESERVE_MB,
+      vmAgentMemoryReserveMb: String(resolveEffectiveNodeHostMemoryReserveMb(env)),
       samInfraSliceMemoryMinMb: env.SAM_INFRA_SLICE_MEMORY_MIN_MB,
       dockerMemoryMinMb: env.DOCKER_MEMORY_MIN_MB,
       heartbeatDockerStatsTimeout: env.HEARTBEAT_DOCKER_STATS_TIMEOUT,
       heartbeatWorkspaceMetricsMaxContainers: env.HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS,
+      heartbeatWorkspaceMetricsMaxOutputBytes: env.HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES,
       devcontainerCacheEnabled: env.DEVCONTAINER_CACHE_ENABLED,
       swapSizeMb: env.SWAP_SIZE_MB,
       swapSwappiness: env.SWAP_SWAPPINESS,

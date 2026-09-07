@@ -337,6 +337,7 @@ describe('generateCloudInit', () => {
           dockerMemoryMinMb: '768',
           heartbeatDockerStatsTimeout: '1500ms',
           heartbeatWorkspaceMetricsMaxContainers: '4',
+          heartbeatWorkspaceMetricsMaxOutputBytes: '32768',
         })
       );
       const parsed = YAML.parse(config.replace(/^#cloud-config\n/, ''));
@@ -344,10 +345,22 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
       );
       const sliceFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam.slice'
+      );
+      const infraSliceFile = parsed.write_files.find(
         (f: { path: string }) => f.path === '/etc/systemd/system/sam-infra.slice'
+      );
+      const workloadSliceFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam-workload.slice'
       );
       const headroomScript = parsed.write_files.find(
         (f: { path: string }) => f.path === '/usr/local/sbin/sam-configure-docker-memory.sh'
+      );
+      const verifyScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/usr/local/sbin/sam-verify-workload-cgroup.sh'
+      );
+      const dockerDaemon = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/docker/daemon.json'
       );
 
       expect(unitFile.content).toContain('Slice=sam-infra.slice');
@@ -356,17 +369,40 @@ describe('generateCloudInit', () => {
       expect(unitFile.content).toContain(
         'Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS=4'
       );
+      expect(unitFile.content).toContain(
+        'Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES=32768'
+      );
       expect(sliceFile.content).toContain('MemoryMin=256M');
+      expect(infraSliceFile.content).toContain('MemoryMin=256M');
+      expect(workloadSliceFile.content).toContain('MemoryAccounting=yes');
+      expect(workloadSliceFile.content).not.toContain('MemoryMin=');
       expect(headroomScript.permissions).toBe('0755');
       expect(headroomScript.content).toContain('RESERVE_MB="512"');
       expect(headroomScript.content).toContain('MIN_DOCKER_MB="768"');
+      expect(headroomScript.content).toContain('sam-workload.slice.d/50-headroom.conf');
       expect(headroomScript.content).toContain('MemoryMax=${DOCKER_MEMORY_MAX_MB}M');
+      expect(headroomScript.content).not.toContain('docker.service.d/sam-headroom.conf');
+      expect(verifyScript.permissions).toBe('0755');
+      expect(verifyScript.content).toContain('docker inspect -f');
+      expect(verifyScript.content).toContain('sam-workload.slice');
+      expect(dockerDaemon.content).toContain('"cgroup-parent": "sam-workload.slice"');
 
       const runcmd = parsed.runcmd as string[];
       expect(runcmd).toContain('/usr/local/sbin/sam-configure-docker-memory.sh');
       expect(runcmd.indexOf('/usr/local/sbin/sam-configure-docker-memory.sh')).toBeLessThan(
         runcmd.indexOf('systemctl start vm-agent')
       );
+    });
+
+    it('defaults to a nonzero VM agent host memory reserve for new nodes', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config.replace(/^#cloud-config\n/, ''));
+      const headroomScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/usr/local/sbin/sam-configure-docker-memory.sh'
+      );
+
+      expect(headroomScript.content).toContain('RESERVE_MB="512"');
+      expect(headroomScript.content).toContain('sam-workload.slice.d/50-headroom.conf');
     });
   });
 
@@ -1445,6 +1481,24 @@ describe('validateCloudInitVariables', () => {
           })
         )
       ).toThrow('logJournalMaxRetention');
+    });
+
+    it('rejects heartbeat Docker metric output bounds outside the supported range', () => {
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            heartbeatWorkspaceMetricsMaxOutputBytes: '1023',
+          })
+        )
+      ).toThrow('heartbeatWorkspaceMetricsMaxOutputBytes');
+
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            heartbeatWorkspaceMetricsMaxOutputBytes: '1048577',
+          })
+        )
+      ).toThrow('heartbeatWorkspaceMetricsMaxOutputBytes');
     });
   });
 

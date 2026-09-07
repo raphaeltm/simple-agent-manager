@@ -421,9 +421,13 @@ func (s *Server) collectWorkspaceMemoryMetrics() []workspaceMemoryMetric {
 		return nil
 	}
 
-	stats, err := sysinfo.CollectDockerContainerStatsForLabels(
+	stats, err := sysinfo.CollectDockerContainerStatsForLabelsBounded(
 		context.Background(),
-		s.config.HeartbeatDockerStatsTimeout,
+		sysinfo.DockerContainerStatsOptions{
+			Timeout:        s.config.HeartbeatDockerStatsTimeout,
+			MaxContainers:  limit,
+			MaxOutputBytes: s.config.HeartbeatWorkspaceMetricsMaxOutputBytes,
+		},
 		s.config.ContainerLabelKey,
 		labelValues,
 	)

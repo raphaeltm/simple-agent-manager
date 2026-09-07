@@ -117,6 +117,16 @@ function reservation(
   };
 }
 
+function reservationV2(
+  overrides: Partial<ResolvedResourceReservation> = {}
+): ResolvedResourceReservation {
+  return {
+    ...reservation({ version: 2, ...overrides }),
+    fieldProvenance: { minVcpu: { source: 'task', sourceId: 'task-1' } },
+    diagnostics: { resolver: 'canonical-a' },
+  } as ResolvedResourceReservation;
+}
+
 function admissionPolicy(
   overrides: Partial<WorkspaceAdmissionPolicy> = {}
 ): WorkspaceAdmissionPolicy {
@@ -244,6 +254,45 @@ describe('reserveWorkspacePlacement', () => {
     ).resolves.toBe(false);
   });
 
+  it('accounts for active v1 and v2 reservations in the final reservation statement', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode();
+    seedActiveWorkspace(
+      'workspace-existing-v1',
+      JSON.stringify(reservation({ cpuMillis: 1500, memoryMb: 2048, diskMb: 2048 }))
+    );
+    seedActiveWorkspace(
+      'workspace-existing-v2',
+      JSON.stringify(reservationV2({ cpuMillis: 1500, memoryMb: 2048, diskMb: 2048 }))
+    );
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(snapshot),
+          id: 'workspace-v2-fits',
+          resolvedReservation: reservationV2({ cpuMillis: 1000, memoryMb: 1024, diskMb: 1024 }),
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+
+    sqlite?.prepare(`DELETE FROM workspaces WHERE id = 'workspace-v2-fits'`).run();
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(snapshot),
+          id: 'workspace-v2-overbook',
+          resolvedReservation: reservationV2({ cpuMillis: 1100, memoryMb: 1024, diskMb: 1024 }),
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+  });
+
   it('vetoes disk pressure and malformed occupied reservations', async () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
@@ -269,6 +318,112 @@ describe('reserveWorkspacePlacement', () => {
       reserveWorkspacePlacement(
         database,
         { ...reserveInput(snapshot), id: 'workspace-invalid-active' },
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+  });
+
+  it('vetoes final placement when fresh measured pressure changes after selection', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode();
+    seedActiveWorkspace('workspace-existing-pressure');
+
+    for (const [workspaceId, metrics] of [
+      ['workspace-cpu-pressure', { cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }],
+      ['workspace-memory-pressure', { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 }],
+      [
+        'workspace-creating-pressure',
+        { cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
+      ],
+    ] as const) {
+      sqlite
+        ?.prepare(`UPDATE nodes SET last_metrics = ? WHERE id = 'node-1'`)
+        .run(JSON.stringify(metrics));
+      await expect(
+        reserveWorkspacePlacement(
+          database,
+          { ...reserveInput(snapshot), id: workspaceId },
+          admissionPolicy({ cpuThresholdPercent: 90, memoryThresholdPercent: 90 })
+        )
+      ).resolves.toBe(false);
+    }
+  });
+
+  it('rejects malformed, future, stale, and incomplete telemetry in final placement', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode();
+    seedActiveWorkspace('workspace-existing-telemetry');
+
+    for (const [workspaceId, metrics, heartbeat] of [
+      ['workspace-bad-telemetry', '{"cpuLoadAvg1":"bad"}', '2026-08-28T00:00:00.000Z'],
+      [
+        'workspace-future-telemetry',
+        JSON.stringify({ version: 2, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+        '2026-08-28T00:00:00.000Z',
+      ],
+      [
+        'workspace-stale-telemetry',
+        JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+        '2026-08-27T23:00:00.000Z',
+      ],
+      [
+        'workspace-incomplete-telemetry',
+        JSON.stringify({ cpuLoadAvg1: 0.2, diskPercent: 10 }),
+        '2026-08-28T00:00:00.000Z',
+      ],
+    ] as const) {
+      sqlite
+        ?.prepare(`UPDATE nodes SET last_metrics = ?, last_heartbeat_at = ? WHERE id = 'node-1'`)
+        .run(metrics, heartbeat);
+      await expect(
+        reserveWorkspacePlacement(
+          database,
+          { ...reserveInput(snapshot), id: workspaceId },
+          admissionPolicy()
+        )
+      ).resolves.toBe(false);
+    }
+  });
+
+  it('preserves empty no-telemetry unknown-capacity compatibility but rejects invalid hardware shapes', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode({
+      provider_instance_vcpu_count: null,
+      provider_instance_memory_mb: null,
+      provider_instance_disk_gb: null,
+      last_metrics: null,
+    });
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(snapshot),
+          id: 'workspace-empty-unknown-compatible',
+          resolvedReservation: reservation({ memoryMb: 4096, diskMb: 40960 }),
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+
+    sqlite?.prepare(`DELETE FROM workspaces`).run();
+    sqlite
+      ?.prepare(
+        `UPDATE nodes
+         SET provider_instance_vcpu_count = 0,
+             provider_instance_memory_mb = 8192,
+             provider_instance_disk_gb = 80
+         WHERE id = 'node-1'`
+      )
+      .run();
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...reserveInput(snapshot), id: 'workspace-invalid-hardware' },
         admissionPolicy()
       )
     ).resolves.toBe(false);

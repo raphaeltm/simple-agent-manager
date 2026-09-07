@@ -1,7 +1,12 @@
 package sysinfo
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -582,16 +587,188 @@ func TestParseDockerMemUsageBytes(t *testing.T) {
 }
 
 func TestParseDockerPSLabelEntries(t *testing.T) {
-	output := `{"id":"abc123","names":"workspace","labels":"devcontainer.local_folder=/workspace/repo,other=value"}
-{"id":"bad","labels":`
+	output := `{"id":"abc123","names":"workspace","labelValue":"/workspace/repo"}
+{"id":"meta456","names":"metadata","labelValue":"[{\"remoteUser\":\"node\",\"features\":[\"a,b\",\"c\\\\d\"]}]"}
+{"id":"bad","labelValue":`
 	entries := parseDockerPSLabelEntries(output)
-	if len(entries) != 1 {
-		t.Fatalf("entries = %d, want 1", len(entries))
+	if len(entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(entries))
 	}
-	labels := parseDockerLabelList(entries[0].Labels)
-	if labels["devcontainer.local_folder"] != "/workspace/repo" {
-		t.Fatalf("label value = %q, want /workspace/repo", labels["devcontainer.local_folder"])
+	if entries[0].LabelValue != "/workspace/repo" {
+		t.Fatalf("label value = %q, want /workspace/repo", entries[0].LabelValue)
 	}
+	if entries[1].LabelValue != `[{"remoteUser":"node","features":["a,b","c\\d"]}]` {
+		t.Fatalf("metadata label value = %q", entries[1].LabelValue)
+	}
+}
+
+func TestCollectDockerContainerStatsForLabelsUsesStructuredLabelTemplate(t *testing.T) {
+	logPath := installFakeDockerCLI(t, "json-labels")
+
+	stats, err := CollectDockerContainerStatsForLabelsBounded(
+		context.Background(),
+		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 8, MaxOutputBytes: 4096},
+		"devcontainer.local_folder",
+		[]string{"/workspace/repo"},
+	)
+	if err != nil {
+		t.Fatalf("CollectDockerContainerStatsForLabelsBounded() error = %v", err)
+	}
+	stat, ok := stats["abc123"]
+	if !ok {
+		t.Fatalf("missing abc123 stats: %#v", stats)
+	}
+	if stat.LabelValue != "/workspace/repo" || stat.MemoryUsageBytes == 0 || stat.MemoryLimitBytes == 0 {
+		t.Fatalf("unexpected stat: %#v", stat)
+	}
+
+	argsLog, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake docker args: %v", err)
+	}
+	if strings.Contains(string(argsLog), "{{.Labels}}") {
+		t.Fatalf("collector requested raw Labels list: %s", argsLog)
+	}
+	if !strings.Contains(string(argsLog), `{{json (index .Labels "devcontainer.local_folder")}}`) {
+		t.Fatalf("collector did not request structured workspace label: %s", argsLog)
+	}
+}
+
+func TestCollectDockerContainerStatsForLabelsHandlesDuplicateLabelValues(t *testing.T) {
+	installFakeDockerCLI(t, "duplicate")
+
+	stats, err := CollectDockerContainerStatsForLabelsBounded(
+		context.Background(),
+		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 2, MaxOutputBytes: 4096},
+		"devcontainer.local_folder",
+		[]string{"/workspace/repo", "/workspace/repo"},
+	)
+	if err != nil {
+		t.Fatalf("CollectDockerContainerStatsForLabelsBounded() error = %v", err)
+	}
+	if len(stats) != 2 {
+		t.Fatalf("stats = %d, want 2: %#v", len(stats), stats)
+	}
+	for id, stat := range stats {
+		if stat.LabelValue != "/workspace/repo" {
+			t.Fatalf("%s label = %q, want /workspace/repo", id, stat.LabelValue)
+		}
+	}
+}
+
+func TestCollectDockerContainerStatsForLabelsBoundsDiscoveredContainers(t *testing.T) {
+	installFakeDockerCLI(t, "overflow")
+
+	_, err := CollectDockerContainerStatsForLabelsBounded(
+		context.Background(),
+		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 2, MaxOutputBytes: 4096},
+		"devcontainer.local_folder",
+		[]string{"/workspace/repo"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "exceeded max containers 2") {
+		t.Fatalf("error = %v, want max containers error", err)
+	}
+}
+
+func TestCollectDockerContainerStatsBoundsStatRequestedContainers(t *testing.T) {
+	installFakeDockerCLI(t, "json-labels")
+
+	_, err := collectDockerContainerStats(
+		context.Background(),
+		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 1, MaxOutputBytes: 4096},
+		[]string{"abc123", "def456"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "exceeded max containers 1") {
+		t.Fatalf("error = %v, want max containers error", err)
+	}
+}
+
+func TestCollectDockerContainerStatsForLabelsBoundsCommandOutput(t *testing.T) {
+	installFakeDockerCLI(t, "excess")
+
+	_, err := CollectDockerContainerStatsForLabelsBounded(
+		context.Background(),
+		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 8, MaxOutputBytes: 32},
+		"devcontainer.local_folder",
+		[]string{"/workspace/repo"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "output exceeded 32 bytes") {
+		t.Fatalf("error = %v, want output bound error", err)
+	}
+}
+
+func TestCollectDockerContainerStatsForLabelsHonorsTimeoutAndCancellation(t *testing.T) {
+	installFakeDockerCLI(t, "sleep")
+
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := CollectDockerContainerStatsForLabelsBounded(
+		timeoutCtx,
+		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 8, MaxOutputBytes: 4096},
+		"devcontainer.local_folder",
+		[]string{"/workspace/repo"},
+	)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout error = %v, want context deadline exceeded", err)
+	}
+
+	canceledCtx, cancelNow := context.WithCancel(context.Background())
+	cancelNow()
+	_, err = CollectDockerContainerStatsForLabelsBounded(
+		canceledCtx,
+		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 8, MaxOutputBytes: 4096},
+		"devcontainer.local_folder",
+		[]string{"/workspace/repo"},
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation error = %v, want context canceled", err)
+	}
+}
+
+func installFakeDockerCLI(t *testing.T, mode string) string {
+	t.Helper()
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "args.log")
+	path := filepath.Join(dir, "docker")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_DOCKER_ARGS_LOG"
+case "$1" in
+  ps)
+    case "$FAKE_DOCKER_MODE" in
+      json-labels)
+        printf '%s\n' '{"id":"abc123","names":"workspace","labelValue":"/workspace/repo"}'
+        ;;
+      duplicate)
+        printf '%s\n' '{"id":"abc123","names":"workspace-a","labelValue":"/workspace/repo"}'
+        printf '%s\n' '{"id":"def456","names":"workspace-b","labelValue":"/workspace/repo"}'
+        ;;
+      overflow)
+        printf '%s\n' '{"id":"abc123","names":"workspace-a","labelValue":"/workspace/repo"}'
+        printf '%s\n' '{"id":"def456","names":"workspace-b","labelValue":"/workspace/repo"}'
+        printf '%s\n' '{"id":"ghi789","names":"workspace-c","labelValue":"/workspace/repo"}'
+        ;;
+      excess)
+        printf '%s\n' 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+        ;;
+      sleep)
+        sleep 2
+        ;;
+    esac
+    ;;
+  stats)
+    printf '%s\n' '{"id":"abc123","name":"/workspace-a","cpuPercent":"1.00%","memUsage":"10MiB / 1GiB","memPercent":"1.00%"}'
+    printf '%s\n' '{"id":"def456","name":"/workspace-b","cpuPercent":"2.00%","memUsage":"20MiB / 1GiB","memPercent":"2.00%"}'
+    printf '%s\n' '{"id":"ghi789","name":"/workspace-c","cpuPercent":"3.00%","memUsage":"30MiB / 1GiB","memPercent":"3.00%"}'
+    ;;
+esac
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker cli: %v", err)
+	}
+	t.Setenv("SAM_DOCKER_CLI_PATH", path)
+	t.Setenv("FAKE_DOCKER_MODE", mode)
+	t.Setenv("FAKE_DOCKER_ARGS_LOG", logPath)
+	return logPath
 }
 
 func TestDockerInfoErrorField(t *testing.T) {

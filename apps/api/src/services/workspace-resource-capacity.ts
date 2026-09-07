@@ -4,7 +4,7 @@ import type { Env } from '../env';
 
 export const ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL = "'running', 'creating', 'recovery'";
 export const DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT = 100;
-export const DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB = 0;
+export const DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB = 512;
 export const DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT = 90;
 export const DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS = 180_000;
 export const DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT = 40;
@@ -33,6 +33,7 @@ export interface WorkspaceAdmissionMetrics {
   creatingWorkspaces: number;
   fresh: boolean;
   malformed: boolean;
+  unsupportedVersion: boolean;
 }
 
 export interface ActiveWorkspaceReservationUsage {
@@ -67,6 +68,7 @@ export function resolveWorkspaceAdmissionPolicy(
     | 'TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT'
     | 'TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT'
     | 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB'
+    | 'VM_AGENT_MEMORY_RESERVE_MB'
     | 'TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT'
     | 'TASK_RUN_NODE_METRICS_TTL_MS'
     | 'TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT'
@@ -114,13 +116,7 @@ export function resolveWorkspaceAdmissionPolicy(
       1,
       1_000
     ),
-    hostMemoryReserveMb: nonNegativeInt(
-      scaling?.nodeHostMemoryReserveMb,
-      parseEnvInt(
-        env.TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB,
-        DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB
-      )
-    ),
+    hostMemoryReserveMb: resolveEffectiveNodeHostMemoryReserveMb(env, scaling),
     diskPressureThresholdPercent: boundedInt(
       scaling?.nodeDiskPressureThresholdPercent,
       parseEnvInt(
@@ -157,13 +153,26 @@ export function resolveWorkspaceAdmissionPolicy(
   };
 }
 
+export function resolveEffectiveNodeHostMemoryReserveMb(
+  env: Pick<Env, 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB' | 'VM_AGENT_MEMORY_RESERVE_MB'>,
+  scaling?: { nodeHostMemoryReserveMb?: number | null } | null
+): number {
+  return nonNegativeInt(
+    scaling?.nodeHostMemoryReserveMb,
+    parseEnvInt(
+      env.TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB ?? env.VM_AGENT_MEMORY_RESERVE_MB,
+      DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB
+    )
+  );
+}
+
 export function isResolvedResourceReservation(
   value: unknown
 ): value is ResolvedResourceReservation {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
   return (
-    record.version === 1 &&
+    (record.version === 1 || record.version === 2) &&
     positiveInteger(record.cpuMillis) !== null &&
     positiveInteger(record.memoryMb) !== null &&
     positiveInteger(record.diskMb) !== null &&
@@ -195,6 +204,7 @@ export function parseWorkspaceAdmissionMetrics(
       creatingWorkspaces: 0,
       fresh: false,
       malformed: true,
+      unsupportedVersion: false,
     };
   }
 
@@ -207,10 +217,21 @@ export function parseWorkspaceAdmissionMetrics(
       creatingWorkspaces: 0,
       fresh: false,
       malformed: true,
+      unsupportedVersion: false,
     };
   }
 
   const record = parsed as Record<string, unknown>;
+  const version = record.version;
+  const unsupportedVersion =
+    typeof version === 'number' && Number.isInteger(version) && version > 1;
+  const malformed =
+    unsupportedVersion ||
+    malformedOptionalNumber(record, 'cpuLoadAvg1', nonNegativeNumber) ||
+    malformedOptionalNumber(record, 'memoryPercent', percentNumber) ||
+    malformedOptionalNumber(record, 'diskPercent', percentNumber) ||
+    malformedOptionalNumber(record, 'creatingWorkspaces', nonNegativeInteger) ||
+    (version !== undefined && !unsupportedVersion && version !== 1);
   const cpuLoadAvg1 = nonNegativeNumber(record.cpuLoadAvg1);
   const memoryPercent = percentNumber(record.memoryPercent);
   const diskPercent = percentNumber(record.diskPercent);
@@ -228,7 +249,8 @@ export function parseWorkspaceAdmissionMetrics(
     diskPercent,
     creatingWorkspaces,
     fresh,
-    malformed: false,
+    malformed,
+    unsupportedVersion,
   };
 }
 
@@ -332,28 +354,45 @@ export function evaluateWorkspaceReservationCapacity(
     reasons.push('active reservation snapshot is missing or malformed');
   }
 
-  const diskPressureReason = diskPressureDiagnostic(metrics, policy);
-  if (diskPressureReason) reasons.push(diskPressureReason);
-
-  if (active.activeCount > 0) {
-    if (!metrics) {
-      reasons.push('occupied node has no resource telemetry');
-    } else if (!metrics.fresh) {
-      reasons.push(
-        metrics.malformed ? 'node resource telemetry is malformed' : 'node telemetry is stale'
-      );
-    } else if (metrics.diskPercent === null) {
-      reasons.push('occupied node has no disk pressure telemetry');
-    }
-  }
-
   const vcpu = positiveInteger(node.providerInstanceVcpuCount);
   const memoryMb = positiveInteger(node.providerInstanceMemoryMb);
   const diskGb = positiveInteger(node.providerInstanceDiskGb);
+  if (
+    node.providerInstanceVcpuCount !== null &&
+    node.providerInstanceVcpuCount !== undefined &&
+    vcpu === null
+  ) {
+    reasons.push('node CPU capacity shape is invalid');
+  }
+  if (
+    node.providerInstanceMemoryMb !== null &&
+    node.providerInstanceMemoryMb !== undefined &&
+    memoryMb === null
+  ) {
+    reasons.push('node memory capacity shape is invalid');
+  }
+  if (
+    node.providerInstanceDiskGb !== null &&
+    node.providerInstanceDiskGb !== undefined &&
+    diskGb === null
+  ) {
+    reasons.push('node disk capacity shape is invalid');
+  }
   if (active.activeCount > 0) {
     if (vcpu === null) reasons.push('occupied node has unknown CPU capacity');
     if (memoryMb === null) reasons.push('occupied node has unknown memory capacity');
     if (diskGb === null) reasons.push('occupied node has unknown disk capacity');
+  }
+
+  const measuredAdmissionReason = measuredAdmissionDiagnostic(
+    metrics,
+    policy,
+    active.activeCount === 0 && vcpu === null
+  );
+  if (measuredAdmissionReason) {
+    if (active.activeCount > 0 || metrics !== null) {
+      reasons.push(measuredAdmissionReason);
+    }
   }
 
   if (vcpu !== null && active.cpuMillis + request.cpuMillis > cpuBudgetMillis(vcpu, policy)) {
@@ -399,14 +438,31 @@ export function usableMemoryMb(memoryMb: number, policy: WorkspaceAdmissionPolic
   return Math.max(0, memoryMb - policy.hostMemoryReserveMb);
 }
 
-function diskPressureDiagnostic(
+function measuredAdmissionDiagnostic(
   metrics: WorkspaceAdmissionMetrics | null,
-  policy: WorkspaceAdmissionPolicy
+  policy: WorkspaceAdmissionPolicy,
+  allowUnknownCpuPressure: boolean
 ): string | null {
-  if (!metrics || metrics.malformed || metrics.diskPercent === null) return null;
-  return metrics.diskPercent >= policy.diskPressureThresholdPercent
-    ? 'disk pressure threshold reached'
-    : null;
+  if (!metrics) return 'occupied node has no resource telemetry';
+  if (metrics.unsupportedVersion) return 'node resource telemetry version is unsupported';
+  if (metrics.malformed) return 'node resource telemetry is malformed';
+  if (!metrics.fresh) return 'node telemetry is stale';
+  if (metrics.cpuPercent === null && !allowUnknownCpuPressure) {
+    return 'node has no CPU pressure telemetry';
+  }
+  if (metrics.memoryPercent === null) return 'node has no memory pressure telemetry';
+  if (metrics.diskPercent === null) return 'node has no disk pressure telemetry';
+  if (metrics.creatingWorkspaces > 0) return 'node is already creating a workspace';
+  if (metrics.cpuPercent !== null && metrics.cpuPercent >= policy.cpuThresholdPercent) {
+    return 'CPU pressure threshold reached';
+  }
+  if (metrics.memoryPercent >= policy.memoryThresholdPercent) {
+    return 'memory pressure threshold reached';
+  }
+  if (metrics.diskPercent >= policy.diskPressureThresholdPercent) {
+    return 'disk pressure threshold reached';
+  }
+  return null;
 }
 
 function parseReservationJson(value: string | null): ResolvedResourceReservation | null {
@@ -468,4 +524,12 @@ function percentNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
     ? value
     : null;
+}
+
+function malformedOptionalNumber(
+  record: Record<string, unknown>,
+  key: string,
+  parser: (value: unknown) => number | null
+): boolean {
+  return Object.hasOwn(record, key) && parser(record[key]) === null;
 }

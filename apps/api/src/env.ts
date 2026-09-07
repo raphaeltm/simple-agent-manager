@@ -938,6 +938,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   VM_AGENT_MEMORY_RESERVE_MB?: string; // Optional Docker MemoryMax reserve for VM-agent reachability headroom
   SAM_INFRA_SLICE_MEMORY_MIN_MB?: string; // systemd MemoryMin for vm-agent/system services slice
   DOCKER_MEMORY_MIN_MB?: string; // Minimum Docker MemoryMax retained when VM_AGENT_MEMORY_RESERVE_MB is enabled
+  HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES?: string; // Max bytes read from heartbeat Docker metric commands
   HEARTBEAT_DOCKER_STATS_TIMEOUT?: string; // VM-agent heartbeat Docker stats timeout (default: 2s)
   HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS?: string; // Max workspace containers measured per heartbeat (default: 8)
   // Devcontainer image caching

@@ -843,7 +843,7 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `MAX_NODES_PER_USER`                            | `10`               | Max nodes per user                                                                |
 | `MAX_WORKSPACES_PER_NODE`                       | `3`                | Max workspaces packed onto one node                                               |
 | `TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT`        | `100`              | CPU millicore share budget per node for aggregate workspace reservations          |
-| `TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB`          | `0`                | Memory reserved for the host/VM agent before admitting occupied-node packing      |
+| `TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB`          | `512`              | Memory reserved for the host/VM agent before admitting occupied-node packing      |
 | `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT` | `90`               | Fresh node disk telemetry at or above this percent vetoes VM workspace reuse      |
 | `TASK_RUN_NODE_METRICS_TTL_MS`                  | `180000`           | Freshness window for occupied-node resource telemetry                             |
 | `TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT`        | `40`               | CPU weight in existing-node load scoring after load average is normalized by vCPU |
@@ -1158,20 +1158,23 @@ lifecycle bookkeeping.
 
 ## VM TLS
 
-| Variable                                     | Default | Description                                                                      |
-| -------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
-| `VM_AGENT_PROTOCOL`                          | `https` | Protocol for VM agent communication                                              |
-| `VM_AGENT_PORT`                              | `8443`  | VM agent listening port                                                          |
-| `VM_AGENT_MEMORY_RESERVE_MB`                 | `0`     | Optional Docker service cgroup memory reserve for VM-agent reachability headroom |
-| `SAM_INFRA_SLICE_MEMORY_MIN_MB`              | `256`   | systemd `MemoryMin` for the VM-agent/system-services slice                       |
-| `DOCKER_MEMORY_MIN_MB`                       | `512`   | Minimum Docker `MemoryMax` retained when `VM_AGENT_MEMORY_RESERVE_MB` is enabled |
-| `HEARTBEAT_DOCKER_STATS_TIMEOUT`             | `2s`    | VM-agent timeout for heartbeat Docker stats used by workspace memory telemetry   |
-| `HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS` | `8`     | Maximum workspace containers measured by one heartbeat                           |
-| `ORIGIN_CA_CERT_VALIDITY_DAYS`               | `7`     | Validity for per-node Origin CA certificates signed by the API Worker            |
+| Variable                                       | Default | Description                                                                      |
+| ---------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| `VM_AGENT_PROTOCOL`                            | `https` | Protocol for VM agent communication                                              |
+| `VM_AGENT_PORT`                                | `8443`  | VM agent listening port                                                          |
+| `VM_AGENT_MEMORY_RESERVE_MB`                   | `0`     | Optional Docker service cgroup memory reserve for VM-agent reachability headroom |
+| `SAM_INFRA_SLICE_MEMORY_MIN_MB`                | `256`   | systemd `MemoryMin` for the VM-agent/system-services slice                       |
+| `DOCKER_MEMORY_MIN_MB`                         | `512`   | Minimum Docker `MemoryMax` retained when `VM_AGENT_MEMORY_RESERVE_MB` is enabled |
+| `HEARTBEAT_DOCKER_STATS_TIMEOUT`               | `2s`    | VM-agent timeout for heartbeat Docker stats used by workspace memory telemetry   |
+| `HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS`   | `8`     | Maximum workspace containers measured by one heartbeat                           |
+| `HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES` | `65536` | Maximum bytes read from each heartbeat Docker metric command                     |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS`                 | `7`     | Validity for per-node Origin CA certificates signed by the API Worker            |
 
 New nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
 
-VM workspace admission uses persisted `workspaces.resolved_reservation_json` snapshots and provider capacity fields in a final single-statement D1 reservation (`apps/api/src/services/workspace-placement.ts`). Advisory selection applies the same aggregate accounting, host-memory reserve, disk-pressure veto, telemetry TTL, and normalized CPU-load scoring (`apps/api/src/services/workspace-resource-capacity.ts`, `apps/api/src/durable-objects/task-runner/node-selection.ts`). VM agents report optional per-workspace memory telemetry in heartbeat metrics when Docker stats can be collected within the configured bound (`packages/vm-agent/internal/server/health.go`, `packages/vm-agent/internal/sysinfo/sysinfo.go`).
+VM workspace admission uses persisted `workspaces.resolved_reservation_json` snapshots and provider capacity fields in a final single-statement D1 reservation (`apps/api/src/services/workspace-placement.ts`). Advisory selection applies the same aggregate accounting, host-memory reserve, measured CPU/memory/disk pressure vetoes, telemetry TTL, and normalized CPU-load scoring (`apps/api/src/services/workspace-resource-capacity.ts`, `apps/api/src/durable-objects/task-runner/node-selection.ts`). VM agents report optional per-workspace memory telemetry in heartbeat metrics when Docker stats can be collected within the configured bounds (`packages/vm-agent/internal/server/health.go`, `packages/vm-agent/internal/sysinfo/sysinfo.go`).
+
+For managed VM nodes, the effective host-memory reserve contract is shared by admission and cloud-init: project scaling overrides win, then `TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB`, then `VM_AGENT_MEMORY_RESERVE_MB`, then the 512 MB default. Cloud-init applies the cgroup hierarchy only on newly provisioned nodes. Existing nodes need a drain/recreate, a VM-agent/bootstrap upgrade flow, or a manual in-place systemd/Docker reconfiguration before they can be treated as protected by the workload-slice cap; SAM does not destructively evict existing workspaces to retrofit this.
 
 ## Journald Configuration (VM)
 
