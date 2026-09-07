@@ -175,10 +175,11 @@ export function isResolvedResourceReservation(
     (record.version === 1 || record.version === 2) &&
     positiveInteger(record.cpuMillis) !== null &&
     positiveInteger(record.memoryMb) !== null &&
-    positiveInteger(record.diskMb) !== null &&
+    nonNegativeInteger(record.diskMb) !== null &&
     positiveInteger(record.maxCoTenants) !== null &&
     typeof record.exclusiveNode === 'boolean' &&
     typeof record.source === 'string' &&
+    typeof record.sourceId === 'string' &&
     ['task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'].includes(
       record.source
     )

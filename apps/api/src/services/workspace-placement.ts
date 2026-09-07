@@ -258,11 +258,12 @@ function validReservationJsonSql(expression: string): string {
     AND json_type(${expression}, '$.memoryMb') = 'integer'
     AND json_extract(${expression}, '$.memoryMb') > 0
     AND json_type(${expression}, '$.diskMb') = 'integer'
-    AND json_extract(${expression}, '$.diskMb') > 0
+    AND json_extract(${expression}, '$.diskMb') >= 0
     AND json_type(${expression}, '$.maxCoTenants') = 'integer'
     AND json_extract(${expression}, '$.maxCoTenants') > 0
     AND json_type(${expression}, '$.exclusiveNode') IN ('true', 'false')
     AND json_type(${expression}, '$.source') = 'text'
+    AND json_type(${expression}, '$.sourceId') = 'text'
     AND json_extract(${expression}, '$.source') IN (${RESOURCE_REQUIREMENTS_SOURCE_SQL}))`;
 }
 

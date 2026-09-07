@@ -53,11 +53,16 @@ describe('workspace resource capacity accounting', () => {
       isResolvedResourceReservation({
         ...reservation({ version: 2 }),
         fieldProvenance: { minVcpu: { source: 'task', sourceId: 'task-1' } },
-        diagnostics: { resolver: 'canonical-a' },
+        diagnostics: ['canonical-a'],
       })
     ).toBe(true);
+    expect(isResolvedResourceReservation(reservation({ diskMb: 0 }))).toBe(true);
     expect(isResolvedResourceReservation(reservation({ version: 3 }))).toBe(false);
     expect(isResolvedResourceReservation({ ...reservation(), cpuMillis: '1000' })).toBe(false);
+    expect(isResolvedResourceReservation({ ...reservation(), cpuMillis: 0.1 })).toBe(false);
+    expect(isResolvedResourceReservation({ ...reservation(), memoryMb: 102.4 })).toBe(false);
+    expect(isResolvedResourceReservation({ ...reservation(), diskMb: 0.5 })).toBe(false);
+    expect(isResolvedResourceReservation({ ...reservation(), sourceId: undefined })).toBe(false);
   });
 
   it('normalizes load average to CPU percentage units', () => {

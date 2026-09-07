@@ -123,7 +123,7 @@ function reservationV2(
   return {
     ...reservation({ version: 2, ...overrides }),
     fieldProvenance: { minVcpu: { source: 'task', sourceId: 'task-1' } },
-    diagnostics: { resolver: 'canonical-a' },
+    diagnostics: ['canonical-a'],
   } as ResolvedResourceReservation;
 }
 
@@ -264,7 +264,7 @@ describe('reserveWorkspacePlacement', () => {
     );
     seedActiveWorkspace(
       'workspace-existing-v2',
-      JSON.stringify(reservationV2({ cpuMillis: 1500, memoryMb: 2048, diskMb: 2048 }))
+      JSON.stringify(reservationV2({ cpuMillis: 1500, memoryMb: 2048, diskMb: 0 }))
     );
 
     await expect(
@@ -280,6 +280,19 @@ describe('reserveWorkspacePlacement', () => {
     ).resolves.toBe(true);
 
     sqlite?.prepare(`DELETE FROM workspaces WHERE id = 'workspace-v2-fits'`).run();
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(snapshot),
+          id: 'workspace-v2-zero-disk',
+          resolvedReservation: reservationV2({ cpuMillis: 100, memoryMb: 128, diskMb: 0 }),
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+
+    sqlite?.prepare(`DELETE FROM workspaces WHERE id = 'workspace-v2-zero-disk'`).run();
     await expect(
       reserveWorkspacePlacement(
         database,

@@ -55,7 +55,7 @@ function reservationV2(
   return {
     ...reservation({ version: 2, ...overrides }),
     fieldProvenance: { minVcpu: { source: 'task', sourceId: 'task-1' } },
-    diagnostics: { resolver: 'canonical-a' },
+    diagnostics: ['canonical-a'],
   } as ResolvedResourceReservation;
 }
 
@@ -343,9 +343,22 @@ describe('workspace resource capacity final reservation CAS', () => {
       projectId: PROJECT_ID,
       status: 'running',
       resolvedReservationJson: JSON.stringify(
-        reservationV2({ cpuMillis: 1500, memoryMb: 2048, diskMb: 2048 })
+        reservationV2({ cpuMillis: 1500, memoryMb: 2048, diskMb: 0 })
       ),
     });
+
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-wrc-v2-zero-disk', nodeId, {
+          resolvedReservation: reservationV2({ cpuMillis: 100, memoryMb: 128, diskMb: 0 }),
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    await env.DATABASE.prepare(`DELETE FROM workspaces WHERE id = ?`)
+      .bind('workspace-wrc-v2-zero-disk')
+      .run();
 
     await expect(
       reserveWorkspacePlacement(
