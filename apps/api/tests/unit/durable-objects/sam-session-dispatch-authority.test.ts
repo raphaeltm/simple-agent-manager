@@ -3,9 +3,9 @@ import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
 import { dispatchTask } from '../../../src/durable-objects/sam-session/tools/dispatch-task';
 import type { ToolContext } from '../../../src/durable-objects/sam-session/types';
+import type { Env } from '../../../src/env';
 import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 import {

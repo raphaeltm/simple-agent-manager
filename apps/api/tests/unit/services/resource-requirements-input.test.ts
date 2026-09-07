@@ -1,6 +1,6 @@
+import { resolveResourceReservation } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
-import { resolveResourceReservation } from '@simple-agent-manager/shared';
 import {
   createPersistedTaskResourcePlanJson,
   normalizeResourceRequirementsInput,
