@@ -74,10 +74,13 @@ export function projectEventSourceOutboxInsertStatement(
       `INSERT OR IGNORE INTO project_event_source_outbox ${credentialColumns}
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?, ?, ?
         WHERE (
-          SELECT COUNT(*) FROM project_event_source_outbox
-           WHERE project_id = ? AND source = ?
-             AND state IN ('pending', 'processing', 'retryable_failed')
-             AND expires_at > ?
+          SELECT COUNT(*) FROM (
+            SELECT id FROM project_event_source_outbox
+             WHERE project_id = ? AND source = ?
+               AND state IN ('pending', 'processing', 'retryable_failed')
+               AND expires_at > ?
+             LIMIT ?
+          )
         ) < ?
           AND NOT EXISTS (
             SELECT 1 FROM credential_limit_windows
@@ -93,6 +96,7 @@ export function projectEventSourceOutboxInsertStatement(
       input.projectId,
       input.source,
       values[10],
+      guard.maxActiveIntentsPerProject,
       guard.maxActiveIntentsPerProject,
       guard.projectId,
       guard.credentialReference,

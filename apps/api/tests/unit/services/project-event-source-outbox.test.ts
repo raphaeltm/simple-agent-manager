@@ -72,6 +72,8 @@ describe('project event source outbox', () => {
         ON project_event_source_outbox(state, processing_lease_expires_at, id);
       CREATE INDEX idx_project_event_source_outbox_active_expiry
         ON project_event_source_outbox(state, expires_at, id);
+      CREATE INDEX idx_project_event_source_outbox_active_capacity
+        ON project_event_source_outbox(project_id, source, state, expires_at, id);
       CREATE INDEX idx_project_event_source_outbox_active_attempts
         ON project_event_source_outbox(state, attempt_count, id);
       CREATE INDEX idx_project_event_source_outbox_exhausted_ready
@@ -1135,5 +1137,26 @@ describe('project event source outbox', () => {
       'idx_project_event_source_outbox_exhausted_ready'
     );
     expect(plan.map((row) => row.detail).join('\n')).not.toMatch(/\bSCAN\b/);
+  });
+
+  it('uses the active-capacity index for bounded credential capture capacity probes', () => {
+    const plan = sqlite
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT COUNT(*) FROM (
+           SELECT id FROM project_event_source_outbox
+            WHERE project_id = ? AND source = ?
+              AND state IN ('pending', 'processing', 'retryable_failed')
+              AND expires_at > ?
+            LIMIT ?
+         )`
+      )
+      .all('project-1', 'sam.credential_limit', NOW.toISOString(), 10) as Array<{
+      detail: string;
+    }>;
+
+    expect(plan.map((row) => row.detail).join('\n')).toContain(
+      'idx_project_event_source_outbox_active_capacity'
+    );
   });
 });

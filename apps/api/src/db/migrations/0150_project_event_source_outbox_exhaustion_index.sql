@@ -8,3 +8,6 @@
 
 CREATE INDEX idx_project_event_source_outbox_exhausted_ready
   ON project_event_source_outbox(state, (attempt_count >= max_attempts), processing_lease_expires_at, id);
+
+CREATE INDEX idx_project_event_source_outbox_active_capacity
+  ON project_event_source_outbox(project_id, source, state, expires_at, id);
