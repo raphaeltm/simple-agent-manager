@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
-import { type ResourceRequirementsFormState, EMPTY_RESOURCE_STATE, ResourceRequirementsInput } from '../../components/resource-requirements';
+import { EMPTY_RESOURCE_STATE, type ResourceRequirementsFormState, ResourceRequirementsInput } from '../../components/resource-requirements';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { ProfileWizardState, ProfileWizardStep } from './useProjectChatState';
 

@@ -16,16 +16,16 @@ import { ProjectMembersSection } from '../components/project-settings/ProjectMem
 import { ProjectRuntimeConfigSection } from '../components/project-settings/ProjectRuntimeConfigSection';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
-import { ScalingSettings } from '../components/ScalingSettings';
 import {
-  type ResourceRequirementsFormState,
-  EMPTY_RESOURCE_STATE,
-  ResourceRequirementsInput,
   deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
   formatLegacyVmSize,
   hasAnyResourceValue,
+  type ResourceRequirementsFormState,
+  ResourceRequirementsInput,
   serializeResourceRequirements,
 } from '../components/resource-requirements';
+import { ScalingSettings } from '../components/ScalingSettings';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { deleteProject, updateProject } from '../lib/api';

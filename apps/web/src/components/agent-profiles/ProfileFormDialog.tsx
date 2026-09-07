@@ -21,11 +21,11 @@ import { type FC, type ReactNode, useEffect, useState } from 'react';
 
 import { ModelSelect } from '../ModelSelect';
 import {
-  type ResourceRequirementsFormState,
-  EMPTY_RESOURCE_STATE,
-  ResourceRequirementsInput,
   deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
   hasAnyResourceValue,
+  type ResourceRequirementsFormState,
+  ResourceRequirementsInput,
   serializeResourceRequirements,
 } from '../resource-requirements';
 import { ProfileRuntimeSection } from './ProfileRuntimeSection';

@@ -8,13 +8,13 @@ import { type FC, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
-import { formatHardwareDisplay } from './resource-requirements';
 import type { GitStatusData } from '../lib/api';
 import { getPortAccessUrl } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
 import { sanitizeUrl } from '../lib/url-utils';
 import { CollapsibleSection } from './CollapsibleSection';
 import { ResourceBar } from './node/ResourceBar';
+import { formatHardwareDisplay } from './resource-requirements';
 
 // ─── Types ───────────────────────────────────────────────────
 

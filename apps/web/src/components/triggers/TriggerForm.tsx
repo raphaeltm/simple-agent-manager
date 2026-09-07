@@ -20,14 +20,14 @@ import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
 import { createTrigger, updateTrigger } from '../../lib/api';
-import {
-  type ResourceRequirementsFormState,
-  EMPTY_RESOURCE_STATE,
-  deserializeResourceRequirements,
-  serializeResourceRequirements,
-  hasAnyResourceValue,
-} from '../resource-requirements';
 import { useProjectContext } from '../../pages/ProjectContext';
+import {
+  deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
+  hasAnyResourceValue,
+  type ResourceRequirementsFormState,
+  serializeResourceRequirements,
+} from '../resource-requirements';
 import { GitHubTriggerFields } from './GitHubTriggerFields';
 import { SchedulePicker } from './SchedulePicker';
 import {

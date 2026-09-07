@@ -17,6 +17,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
+import {
+  EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
+  serializeResourceRequirements,
+} from '../../components/resource-requirements';
 import { useAgentCatalog } from '../../hooks/useAgentCatalog';
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
@@ -49,10 +53,6 @@ import {
   chatQueryKeys,
 } from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
-import {
-  EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
-  serializeResourceRequirements,
-} from '../../components/resource-requirements';
 import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
 import {

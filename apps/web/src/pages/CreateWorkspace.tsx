@@ -26,13 +26,13 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { BranchSelector } from '../components/BranchSelector';
 import { RepoSelector } from '../components/RepoSelector';
-import { formatVmSizeInline, lookupSizeInfo } from '../components/vm/format-vm-size';
 import {
-  type ResourceRequirementsFormState,
   EMPTY_RESOURCE_STATE,
+  type ResourceRequirementsFormState,
   ResourceRequirementsInput,
   toResourceRequirements,
 } from '../components/resource-requirements';
+import { formatVmSizeInline, lookupSizeInfo } from '../components/vm/format-vm-size';
 import {
   createWorkspace,
   getProject,

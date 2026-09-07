@@ -19,8 +19,8 @@ import { formatFileSize } from '../../lib/file-utils';
 import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import {
-  type ResourceRequirementsFormState,
   EMPTY_RESOURCE_STATE,
+  type ResourceRequirementsFormState,
   ResourceRequirementsInput,
   toResourceRequirements,
 } from '../resource-requirements';

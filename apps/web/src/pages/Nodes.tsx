@@ -16,8 +16,8 @@ import { useNavigate } from 'react-router';
 
 import { NodeCard } from '../components/node/NodeCard';
 import {
-  type ResourceRequirementsFormState,
   EMPTY_RESOURCE_STATE,
+  type ResourceRequirementsFormState,
   ResourceRequirementsInput,
 } from '../components/resource-requirements';
 import { useQueryScope } from '../hooks/useQueryScope';
