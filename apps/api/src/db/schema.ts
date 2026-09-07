@@ -81,6 +81,10 @@ const capacityPlacementColumns = () => ({
   placementCredentialReference: text('placement_credential_reference'),
   /** Optional credential version snapshot for future rotating credential records. */
   placementCredentialVersion: integer('placement_credential_version'),
+  /** Effective placement settings generation used to derive the selected authority. */
+  selectionSettingsVersion: integer('selection_settings_version'),
+  /** Stable semantic authority for the selected pool/source/candidate/settings plan. */
+  capacityAuthorityGeneration: integer('capacity_authority_generation'),
   /** Project scope snapshot for project-scoped pools. */
   capacityPoolProjectId: text('capacity_pool_project_id').references(() => projects.id, {
     onDelete: 'set null',
@@ -2543,6 +2547,8 @@ export const capacitySources = sqliteTable(
     credentialReference: text('credential_reference'),
     credentialVersion: integer('credential_version'),
     externalSourceRef: text('external_source_ref'),
+    authorityGeneration: integer('authority_generation').notNull().default(0),
+    sourceGeneration: integer('source_generation').notNull().default(0),
     status: text('status').notNull().default('active'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: text('created_at')
@@ -2565,6 +2571,15 @@ export const capacitySources = sqliteTable(
     platformCredentialIdx: index('idx_capacity_sources_platform_credential')
       .on(table.platformCredentialId)
       .where(sql`platform_credential_id IS NOT NULL`),
+    scopeGenerationIdx: index('idx_capacity_sources_scope_generation').on(
+      table.scope,
+      table.ownerUserId,
+      table.ownerProjectId,
+      table.sourceGeneration
+    ),
+    authorityGenerationIdx: index('idx_capacity_sources_authority_generation').on(
+      table.authorityGeneration
+    ),
   })
 );
 
@@ -2589,6 +2604,13 @@ export const capacityPools = sqliteTable(
     strategy: text('strategy').notNull().default('balanced'),
     exhaustionPolicy: text('exhaustion_policy').notNull().default('queue'),
     lastReconciledAt: text('last_reconciled_at'),
+    /**
+     * Digest of the pool's selection-affecting candidate state. Reconciliation bumps
+     * `revision` only when this changes, so an identical catalog refresh is stable while a
+     * ranking-affecting change (e.g. two comparable offerings swapping cheapest position)
+     * invalidates prior placement authority. NULL = not yet computed.
+     */
+    selectionDigest: text('selection_digest'),
     migrationVersion: text('migration_version'),
     migrationState: text('migration_state').notNull().default('complete'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
@@ -2653,6 +2675,8 @@ export const capacityPoolCandidates = sqliteTable(
     catalogAvailability: text('catalog_availability').notNull().default('available'),
     catalogUnavailableAt: text('catalog_unavailable_at'),
     catalogReturnedAt: text('catalog_returned_at'),
+    catalogGeneration: integer('catalog_generation').notNull().default(0),
+    authorityGeneration: integer('authority_generation').notNull().default(0),
     priority: integer('priority').notNull().default(0),
     candidateOrder: integer('candidate_order').notNull().default(0),
     status: text('status').notNull().default('active'),
@@ -2673,6 +2697,14 @@ export const capacityPoolCandidates = sqliteTable(
     sourceIdx: index('idx_capacity_pool_candidates_source').on(table.capacitySourceId),
     catalogAvailabilityIdx: index('idx_capacity_pool_candidates_catalog_availability').on(
       table.catalogAvailability
+    ),
+    sourceGenerationIdx: index('idx_capacity_pool_candidates_source_generation').on(
+      table.capacitySourceId,
+      table.catalogGeneration
+    ),
+    authorityGenerationIdx: index('idx_capacity_pool_candidates_authority_generation').on(
+      table.capacitySourceId,
+      table.authorityGeneration
     ),
   })
 );

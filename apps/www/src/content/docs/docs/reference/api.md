@@ -184,13 +184,21 @@ with `credentialSetupRequired: true` and a `credentialSetupMessage` suitable for
 
 Default capacity-pool endpoints expose non-secret pool, source, and concrete candidate metadata.
 Responses have this shape: `effective`, `effectiveScope`, `effectiveState`, `defaults`,
-`precedence`, `reconciledScopes`, and `policyMutationSupported`. Each summary includes
-`activeCandidateCount`, `availableCandidateCount`, `effectiveState`, and non-secret diagnostics.
-Use `ensure=true` on GET endpoints, or call the matching `/reconcile` endpoint, to refresh pool
-metadata from the credential-scoped provider-native catalog. Provider API failures fall back to
-static curated catalog rows for that provider. Provider catalog offerings expose `catalogSource`;
-capacity-pool candidates expose the persisted `providerInstanceCatalogSource` and
-`catalogAvailability` snapshot.
+`precedence`, `reconciledScopes`, `policyMutationSupported`, and `placementSettings`. Each summary
+includes `activeCandidateCount`, `availableCandidateCount`, `effectiveState`, and non-secret
+diagnostics. `placementSettings` is a redacted settings contract containing the effective settings
+fingerprint, selected source labels, selection weights, rollout percent, and normalized
+`resourceDefaults.legacyWorkloadMapping` plus `resourceDefaults.platformDefaults`; it does not
+include internal diagnostics or credential/source identifiers. Use `ensure=true` on GET endpoints,
+or call the matching `/reconcile` endpoint, to refresh pool metadata from the credential-scoped
+provider-native catalog. Provider API failures are reported in catalog refresh metadata and do not
+synthesize static available rows for reconciliation. Provider catalog offerings expose
+`catalogSource`; capacity-pool candidates expose the persisted `providerInstanceCatalogSource` and
+`catalogAvailability` snapshot. `sourceGeneration` and `catalogGeneration` are refresh/fencing
+epochs and may advance on identical reconciliations. `authorityGeneration` on sources and
+candidates is a stable semantic authority value for the selected credential/source/offering state.
+Placement snapshots persist `capacityAuthorityGeneration`; the legacy `sourceGeneration` snapshot
+field is a compatibility alias for that same authority value, not the refresh epoch.
 
 Only an unconfigured scope inherits from the next default-pool scope. A configured project or user
 pool with state `configured-empty`, `source-disabled`, `catalog-unavailable`, or `migration-pending`
@@ -200,9 +208,12 @@ according to its exhaustion policy.
 ### `GET /api/capacity-pools/defaults`
 
 Read the authenticated user's default compute pool. Optional `ensure=true` reconciles it from the
-user's active personal compute credentials. Configured zero-active or catalog-unavailable owned
-pools remain visible and are still selected as `effective` so clients do not infer unsupported
-cross-scope fallback.
+user's active personal compute credentials. The response includes `effectiveSummary`, a redacted
+project/user/installation selection summary with no credential IDs or source metadata. Configured
+zero-active or catalog-unavailable owned pools remain visible and are still selected as `effective`
+so clients do not infer unsupported cross-scope fallback. Ordinary users may receive an
+installation-funded `effectiveSummary` from existing installation metadata, but this endpoint never
+reconciles installation credentials.
 
 ### `POST /api/capacity-pools/defaults/reconcile`
 
@@ -234,9 +245,12 @@ provider/location/instance type; it does not accept secret material:
 
 ### `GET /api/projects/:id/capacity-pools/defaults`
 
-Read a project's default pool context. Requires project `secret:read`. Optional `ensure=true`
-reconciles project credentials plus visible fallback summaries. Non-superadmins do not receive
-installation fallback details.
+Read a project's default pool context. Requires project `project:read`. All members receive
+`effectiveSummary`, a redacted authoritative project → user → installation selection summary with no
+credential IDs or source metadata. Raw project/user summaries require project `secret:read`; raw
+installation details remain superadmin-only. Optional `ensure=true` reconciles only when the caller
+also has project `secret:read`, and non-superadmins never reconcile installation credentials through
+this route.
 
 ### `POST /api/projects/:id/capacity-pools/defaults/reconcile`
 

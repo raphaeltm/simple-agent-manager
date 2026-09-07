@@ -40,7 +40,11 @@ providersRoutes.get('/catalog', async (c) => {
           credentialSetupRequired: true,
           credentialSetupMessage: CLOUD_PROVIDER_CREDENTIAL_SETUP_MESSAGE,
         }
-      : { catalogs: result.catalogs, credentialSetupRequired: false };
+      : {
+          catalogs: result.catalogs,
+          refreshFailures: result.refreshFailures,
+          credentialSetupRequired: false,
+        };
   c.header('Cache-Control', 'private, no-store');
   return c.json(response);
 });

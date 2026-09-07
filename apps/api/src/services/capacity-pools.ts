@@ -74,6 +74,7 @@ export function toCapacitySourceIdentity(row: schema.CapacitySource): CapacitySo
     credentialReference: row.credentialReference,
     credentialVersion: row.credentialVersion,
     externalSourceRef: row.externalSourceRef,
+    authorityGeneration: row.authorityGeneration,
     status: expectPersistedValue<CapacityPoolStatus>(
       'capacity_sources.status',
       row.status,
@@ -164,6 +165,7 @@ export function toCapacityPoolCandidate(
     catalogAvailability: row.catalogAvailability as CapacityPoolCandidateDto['catalogAvailability'],
     catalogUnavailableAt: row.catalogUnavailableAt,
     catalogReturnedAt: row.catalogReturnedAt,
+    authorityGeneration: row.authorityGeneration,
     priority: row.priority,
     candidateOrder: row.candidateOrder,
     status: expectPersistedValue<CapacityPoolStatus>(
@@ -187,6 +189,8 @@ export interface CapacityPlacementSnapshotRow {
   placementCredentialSource: string | null;
   placementCredentialReference: string | null;
   placementCredentialVersion: number | null;
+  selectionSettingsVersion?: number | null;
+  capacityAuthorityGeneration?: number | null;
   capacityPoolProjectId: string | null;
   workloadRole: string | null;
   providerInstanceType?: string | null;
@@ -225,6 +229,9 @@ export function toCapacityPlacementSnapshot(
     ),
     placementCredentialReference: row.placementCredentialReference,
     placementCredentialVersion: row.placementCredentialVersion,
+    selectionSettingsVersion: row.selectionSettingsVersion ?? null,
+    capacityAuthorityGeneration: row.capacityAuthorityGeneration ?? null,
+    sourceGeneration: row.capacityAuthorityGeneration ?? null,
     capacityPoolProjectId: row.capacityPoolProjectId,
     workloadRole: nullablePersistedValue<CapacityWorkloadRole>(
       'workload_role',

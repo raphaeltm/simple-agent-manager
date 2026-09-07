@@ -243,9 +243,17 @@ describe('HetznerProvider', () => {
 
     it('falls back to static offerings when the Hetzner server_types API fails', async () => {
       const logger = mockLogger();
-      provider = new HetznerProvider('test-token', 'fsn1', undefined, undefined, undefined, undefined, {
-        logger,
-      });
+      provider = new HetznerProvider(
+        'test-token',
+        'fsn1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          logger,
+        }
+      );
       globalThis.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ error: { message: 'catalog unavailable' } }), {
           status: 500,
@@ -268,6 +276,34 @@ describe('HetznerProvider', () => {
       expect(logger.warn).toHaveBeenCalledWith(
         'hetzner catalog API unavailable; using static instance offerings',
         expect.objectContaining({ error: expect.stringContaining('500') })
+      );
+    });
+
+    it('surfaces Hetzner server_types API failures when static fallback is disabled', async () => {
+      const logger = mockLogger();
+      provider = new HetznerProvider(
+        'test-token',
+        'fsn1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        {
+          logger,
+        }
+      );
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'catalog unavailable' } }), {
+          status: 503,
+        })
+      );
+
+      await expect(
+        provider.listInstanceOfferings({ preferApi: true, allowStaticFallback: false })
+      ).rejects.toThrow('503');
+      expect(logger.warn).toHaveBeenCalledWith(
+        'hetzner catalog API unavailable',
+        expect.objectContaining({ error: expect.stringContaining('503') })
       );
     });
 
@@ -532,13 +568,11 @@ describe('HetznerProvider', () => {
 
     it('should throw after all locations exhausted on 412', async () => {
       vi.useFakeTimers();
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
-            status: 412,
-          })
-        );
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+          status: 412,
+        })
+      );
 
       const promise = provider.createVM(vmConfig).catch((err) => err);
       await vi.runAllTimersAsync();
@@ -550,13 +584,11 @@ describe('HetznerProvider', () => {
 
     it('should never retry the primary location in the fallback phase', async () => {
       vi.useFakeTimers();
-      const mockFetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
-            status: 412,
-          })
-        );
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+          status: 412,
+        })
+      );
       globalThis.fetch = mockFetch;
 
       const promise = provider.createVM(vmConfig).catch(() => {});
@@ -589,13 +621,11 @@ describe('HetznerProvider', () => {
     });
 
     it('should try primary location first', async () => {
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
-            status: 200,
-          })
-        );
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+          status: 200,
+        })
+      );
 
       await provider.createVM(vmConfig);
 
@@ -606,13 +636,11 @@ describe('HetznerProvider', () => {
 
     it('should use constructor datacenter when config.location is not set', async () => {
       const providerWithDc = new HetznerProvider('test-token', 'hel1');
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
-            status: 200,
-          })
-        );
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+          status: 200,
+        })
+      );
 
       await providerWithDc.createVM({ name: 'test', size: 'small', userData: '' });
 
@@ -623,13 +651,11 @@ describe('HetznerProvider', () => {
     it('should only retry primary when fallback is disabled', async () => {
       vi.useFakeTimers();
       const noFallbackProvider = new HetznerProvider('test-token', 'fsn1', undefined, false);
-      globalThis.fetch = vi
-        .fn()
-        .mockResolvedValue(
-          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
-            status: 412,
-          })
-        );
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+          status: 412,
+        })
+      );
 
       const promise = noFallbackProvider.createVM(vmConfig).catch((err) => err);
       await vi.runAllTimersAsync();

@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   candidateCatalogMetadataMigrationSql,
   candidateSnapshotMigrationSql,
+  capacityPoolAuthorityGenerationMigrationSql,
+  capacityPoolGenerationFencingMigrationSql,
   capacityPoolPolicyContractMigrationSql,
   capacitySourceAuthoritySnapshotsMigrationSql,
   capacitySourceExternalCredentialsMigrationSql,
@@ -861,6 +863,191 @@ describe('0129_capacity_source_external_credentials migration', () => {
   });
 });
 
+describe('0145_capacity_pool_generation_fencing migration', () => {
+  function applyPre0145CapacityPoolMigrations(database: Database.Database): void {
+    database.exec(migrationSql);
+    database.exec(candidateSnapshotMigrationSql);
+    database.exec(concreteOfferingMigrationSql);
+    database.exec(candidateCatalogMetadataMigrationSql);
+    database.exec(capacitySourceExternalCredentialsMigrationSql);
+    database.exec(capacityPoolPolicyContractMigrationSql);
+  }
+
+  it('adds generation fence columns and indexes on a fresh capacity-pool schema', () => {
+    const database = db();
+    applyPre0145CapacityPoolMigrations(database);
+
+    database.exec(capacityPoolGenerationFencingMigrationSql);
+    insertPool({ id: 'pool-fresh', scope: 'user', ownerUserId: 'user-1', isDefault: 1 });
+    run(`
+      INSERT INTO capacity_sources
+        (id, scope, owner_user_id, source_kind, provider, credential_source, credential_id, credential_reference)
+      VALUES
+        ('source-fresh', 'user', 'user-1', 'cloud-provider-credential', 'hetzner', 'user', 'credential-user-1', 'credentials:credential-user-1')
+    `);
+    run(`
+      INSERT INTO capacity_pool_candidates
+        (
+          id, pool_id, capacity_source_id, provider, location, workload_role, runtime,
+          machine_class, machine_size, provider_instance_type
+        )
+      VALUES
+        (
+          'candidate-fresh', 'pool-fresh', 'source-fresh', 'hetzner',
+          'fsn1', 'workspace', 'vm', 'shared-vm', 'small', 'cx23'
+        )
+    `);
+
+    const sourceColumns = database
+      .prepare('PRAGMA table_info(capacity_sources)')
+      .all()
+      .map((row) => (row as { name: string }).name);
+    const candidateColumns = database
+      .prepare('PRAGMA table_info(capacity_pool_candidates)')
+      .all()
+      .map((row) => (row as { name: string }).name);
+    expect(sourceColumns).toContain('source_generation');
+    expect(candidateColumns).toContain('catalog_generation');
+    expect(
+      database
+        .prepare(
+          `
+          SELECT source_generation
+          FROM capacity_sources
+          WHERE id = 'source-fresh'
+        `
+        )
+        .get()
+    ).toEqual({ source_generation: 0 });
+    expect(
+      database
+        .prepare(
+          `
+          SELECT catalog_generation
+          FROM capacity_pool_candidates
+          WHERE id = 'candidate-fresh'
+        `
+        )
+        .get()
+    ).toEqual({ catalog_generation: 0 });
+    expect(() =>
+      database
+        .prepare(
+          `
+          UPDATE capacity_sources
+          SET source_generation = -1
+          WHERE id = 'source-fresh'
+        `
+        )
+        .run()
+    ).toThrow();
+    expect(
+      database
+        .prepare(
+          `
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'index'
+            AND name IN (
+              'idx_capacity_sources_scope_generation',
+              'idx_capacity_pool_candidates_source_generation'
+            )
+          ORDER BY name
+        `
+        )
+        .all()
+        .map((row) => (row as { name: string }).name)
+    ).toEqual([
+      'idx_capacity_pool_candidates_source_generation',
+      'idx_capacity_sources_scope_generation',
+    ]);
+    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('preserves populated rows and existing foreign-key cascades while adding defaults', () => {
+    const database = db();
+    applyPre0145CapacityPoolMigrations(database);
+    insertPool({
+      id: 'pool-populated',
+      scope: 'project',
+      ownerProjectId: 'project-1',
+      isDefault: 1,
+    });
+    run(`
+      INSERT INTO capacity_sources
+        (id, scope, owner_project_id, source_kind, provider, credential_source, credential_id, credential_reference)
+      VALUES
+        ('source-populated', 'project', 'project-1', 'cloud-provider-credential', 'hetzner', 'project', 'credential-project-1', 'credentials:credential-project-1')
+    `);
+    run(`
+      INSERT INTO capacity_pool_candidates
+        (
+          id, pool_id, capacity_source_id, provider, location, workload_role, runtime,
+          machine_class, machine_size, provider_instance_type, catalog_availability
+        )
+      VALUES
+        (
+          'candidate-populated', 'pool-populated', 'source-populated', 'hetzner',
+          'fsn1', 'workspace', 'vm', 'shared-vm', 'medium', 'cx43', 'available'
+        )
+    `);
+
+    database.exec(capacityPoolGenerationFencingMigrationSql);
+
+    expect(
+      database
+        .prepare(
+          `
+          SELECT id, source_generation
+          FROM capacity_sources
+          WHERE id = 'source-populated'
+        `
+        )
+        .get()
+    ).toEqual({ id: 'source-populated', source_generation: 0 });
+    expect(
+      database
+        .prepare(
+          `
+          SELECT id, pool_id, capacity_source_id, catalog_generation
+          FROM capacity_pool_candidates
+          WHERE id = 'candidate-populated'
+        `
+        )
+        .get()
+    ).toEqual({
+      id: 'candidate-populated',
+      pool_id: 'pool-populated',
+      capacity_source_id: 'source-populated',
+      catalog_generation: 0,
+    });
+
+    database.prepare("DELETE FROM capacity_sources WHERE id = 'source-populated'").run();
+
+    expect(
+      database
+        .prepare(
+          `
+          SELECT COUNT(*) AS count
+          FROM capacity_pool_candidates
+          WHERE id = 'candidate-populated'
+        `
+        )
+        .get()
+    ).toEqual({ count: 0 });
+    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('contains no destructive statements', () => {
+    const sql = capacityPoolGenerationFencingMigrationSql.toUpperCase();
+    expect(sql).not.toContain('DROP TABLE');
+    expect(sql).not.toContain('DELETE FROM');
+    expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
+    expect(sql).toContain('ALTER TABLE CAPACITY_SOURCES');
+    expect(sql).toContain('ALTER TABLE CAPACITY_POOL_CANDIDATES');
+  });
+});
+
 describe('0146_runtime_native_observed_metadata migration', () => {
   it('adds nullable native plan and observed hardware columns without fabricating legacy hardware', () => {
     const database = db();
@@ -935,6 +1122,135 @@ describe('0146_runtime_native_observed_metadata migration', () => {
     expect(sql).not.toContain('DELETE FROM');
     expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
     expect(sql).toContain('ALTER TABLE NODES ADD COLUMN OBSERVED_PROVIDER_INSTANCE_TYPE');
+  });
+});
+
+describe('0152_capacity_pool_authority_generation migration', () => {
+  function applyPre0152CapacityPoolMigrations(database: Database.Database): void {
+    database.exec(migrationSql);
+    database.exec(candidateSnapshotMigrationSql);
+    database.exec(concreteOfferingMigrationSql);
+    database.exec(candidateCatalogMetadataMigrationSql);
+    database.exec(capacitySourceExternalCredentialsMigrationSql);
+    database.exec(capacityPoolPolicyContractMigrationSql);
+    database.exec(capacityPoolGenerationFencingMigrationSql);
+    database.exec(runtimeNativeObservedMetadataMigrationSql);
+  }
+
+  it('adds stable authority columns without changing existing rows or cascades', () => {
+    const database = db();
+    applyPre0152CapacityPoolMigrations(database);
+    insertPool({
+      id: 'pool-authority',
+      scope: 'project',
+      ownerProjectId: 'project-1',
+      isDefault: 1,
+    });
+    run(`
+      INSERT INTO capacity_sources
+        (
+          id, scope, owner_project_id, source_kind, provider, credential_source,
+          credential_id, credential_reference, source_generation
+        )
+      VALUES
+        (
+          'source-authority', 'project', 'project-1', 'cloud-provider-credential',
+          'hetzner', 'project', 'credential-project-1', 'credentials:credential-project-1', 7
+        )
+    `);
+    run(`
+      INSERT INTO capacity_pool_candidates
+        (
+          id, pool_id, capacity_source_id, provider, location, workload_role, runtime,
+          machine_class, machine_size, provider_instance_type, catalog_generation
+        )
+      VALUES
+        (
+          'candidate-authority', 'pool-authority', 'source-authority', 'hetzner',
+          'fsn1', 'workspace', 'vm', 'shared-vm', 'medium', 'cx43', 7
+        )
+    `);
+    database.exec(`
+      INSERT INTO nodes (id, user_id, name, status)
+      VALUES ('node-authority', 'user-1', 'Authority node', 'pending');
+
+      INSERT INTO workspaces
+        (id, node_id, project_id, user_id, name, repository, status, vm_size, vm_location)
+      VALUES
+        ('workspace-authority', 'node-authority', 'project-1', 'user-1', 'Authority workspace', 'repo-1', 'pending', 'medium', 'fsn1');
+
+      INSERT INTO tasks
+        (id, project_id, user_id, workspace_id, title, status, created_by)
+      VALUES
+        ('task-authority', 'project-1', 'user-1', 'workspace-authority', 'Authority task', 'queued', 'user-1');
+    `);
+
+    database.exec(capacityPoolAuthorityGenerationMigrationSql);
+
+    expect(
+      database
+        .prepare(
+          `
+          SELECT source_generation, authority_generation
+          FROM capacity_sources
+          WHERE id = 'source-authority'
+        `
+        )
+        .get()
+    ).toEqual({ source_generation: 7, authority_generation: 0 });
+    expect(
+      database
+        .prepare(
+          `
+          SELECT catalog_generation, authority_generation
+          FROM capacity_pool_candidates
+          WHERE id = 'candidate-authority'
+        `
+        )
+        .get()
+    ).toEqual({ catalog_generation: 7, authority_generation: 0 });
+
+    for (const table of ['tasks', 'nodes', 'workspaces']) {
+      const row = database
+        .prepare(
+          `
+          SELECT selection_settings_version, capacity_authority_generation
+          FROM ${table}
+          WHERE id = '${table === 'nodes' ? 'node' : table.slice(0, -1)}-authority'
+        `
+        )
+        .get();
+      expect(row).toEqual({
+        selection_settings_version: null,
+        capacity_authority_generation: null,
+      });
+    }
+
+    database.prepare("DELETE FROM capacity_sources WHERE id = 'source-authority'").run();
+    expect(
+      database
+        .prepare(
+          `
+          SELECT COUNT(*) AS count
+          FROM capacity_pool_candidates
+          WHERE id = 'candidate-authority'
+        `
+        )
+        .get()
+    ).toEqual({ count: 0 });
+    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('contains no destructive statements', () => {
+    const sql = capacityPoolAuthorityGenerationMigrationSql.toUpperCase();
+    expect(sql).not.toContain('DROP TABLE');
+    expect(sql).not.toContain('DELETE FROM');
+    expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
+    expect(sql).toContain('ALTER TABLE CAPACITY_SOURCES');
+    expect(sql).toContain('ALTER TABLE CAPACITY_POOL_CANDIDATES');
+    expect(sql).toContain('ALTER TABLE TASKS');
+    expect(sql).toContain('ALTER TABLE NODES');
+    expect(sql).toContain('ALTER TABLE WORKSPACES');
   });
 });
 

@@ -1,3 +1,4 @@
+import type { CredentialProvider } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,8 +30,29 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => authState.userId,
 }));
 
+vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
+
+  return {
+    ...actual,
+    buildProviderCatalogForCredential: vi.fn(
+      async (input: { seed: { provider: CredentialProvider } }) => ({
+        offerings: actual.getStaticProviderCatalogOfferings(input.seed.provider),
+        refreshStatus: {
+          succeeded: true,
+          origin: 'static',
+          complete: false,
+          reason: 'static-catalog',
+        },
+      })
+    ),
+  };
+});
+
 const { capacityPoolsRoutes } = await import('../../../src/routes/capacity-pools');
 const { adminCapacityPoolsRoutes } = await import('../../../src/routes/admin-capacity-pools');
+import { assertDefaultCapacityPoolUpdateResult } from '../../../src/routes/capacity-pool-update-request';
+const providerCatalogs = await import('../../../src/services/provider-catalogs');
 
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -54,6 +76,7 @@ function createEnv(options: { bindLimit?: number } = {}) {
     schema.ccCredentials,
     schema.ccConfigurations,
     schema.ccAttachments,
+    schema.platformSettings,
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
@@ -75,6 +98,52 @@ function seedUser(sqlite: Database.Database, id: string, role = 'user') {
        VALUES (?, ?, ?, 'active')`
     )
     .run(id, `${id}@example.com`, role);
+}
+
+function expectSafePlacementSettings(body: Record<string, any>) {
+  expect(body.placementSettings).toMatchObject({
+    version: 1,
+    legacyWorkloadAdapterVersion: 1,
+    source: {
+      legacyWorkloadMapping: 'default',
+      platformDefaults: 'default',
+      selection: 'default',
+    },
+    resourceDefaults: {
+      legacyWorkloadMapping: {
+        small: {
+          minVcpu: 1,
+          minMemoryGb: 2,
+          minDiskGb: 20,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+        },
+      },
+      platformDefaults: {
+        minVcpu: 2,
+        minMemoryGb: 4,
+        minDiskGb: 40,
+        exclusiveNode: false,
+        maxCoTenants: 4,
+      },
+    },
+  });
+  expect(body.placementSettings.sourceGeneration).toEqual(expect.any(Number));
+  expect(body.placementSettings).not.toHaveProperty('diagnostics');
+}
+
+function countRows(sqlite: Database.Database, tableName: string, whereSql: string) {
+  return (
+    sqlite.prepare(`SELECT COUNT(*) AS count FROM ${tableName} WHERE ${whereSql}`).get() as {
+      count: number;
+    }
+  ).count;
+}
+
+function catalogCredentialSources() {
+  return vi
+    .mocked(providerCatalogs.buildProviderCatalogForCredential)
+    .mock.calls.map((call) => call[0].seed.credentialSource);
 }
 
 type DefaultsVisibilityExpectation = {
@@ -158,6 +227,7 @@ describe('default capacity pool routes', () => {
   beforeEach(() => {
     authState.userId = 'user-1';
     authState.role = 'user';
+    vi.mocked(providerCatalogs.buildProviderCatalogForCredential).mockClear();
   });
 
   it('reconciles the authenticated user default pool from personal cloud credentials', async () => {
@@ -317,6 +387,158 @@ describe('default capacity pool routes', () => {
     });
   });
 
+  it('returns installation-funded safe summary to ordinary users without installation metadata', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedUser(sqlite, 'superadmin-1', 'superadmin');
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+
+    authState.userId = 'superadmin-1';
+    authState.role = 'superadmin';
+    const reconcile = await createApp().request(
+      '/api/admin/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconcile.status).toBe(200);
+
+    authState.userId = 'user-1';
+    authState.role = 'user';
+    const res = await createApp().request('/api/capacity-pools/defaults', {}, env);
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('platform-cloud-canary');
+    expect(text).not.toContain('platform-encrypted-token-for-platform-cloud-canary');
+    const body = JSON.parse(text);
+    expectSafePlacementSettings(body);
+    expect(body).toMatchObject({
+      effective: null,
+      effectiveScope: null,
+      effectiveSummary: {
+        scope: 'installation',
+        state: 'configured-ready',
+        strategy: 'balanced',
+        exhaustionPolicy: 'queue',
+      },
+      defaults: expect.arrayContaining([
+        expect.objectContaining({ scope: 'user', visibility: 'visible', summary: null }),
+        expect.objectContaining({ scope: 'installation', visibility: 'hidden', summary: null }),
+      ]),
+    });
+    expect(body.effectiveSummary.availableCandidateCount).toBeGreaterThan(0);
+  });
+
+  it('does not reconcile installation defaults for ordinary user reads or reconcile calls', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedUser(sqlite, 'superadmin-1', 'superadmin');
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+
+    authState.userId = 'superadmin-1';
+    authState.role = 'superadmin';
+    const adminReconcile = await createApp().request(
+      '/api/admin/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(adminReconcile.status).toBe(200);
+
+    const installationPoolCountBefore = countRows(
+      sqlite,
+      'capacity_pools',
+      "scope = 'installation'"
+    );
+    const installationSourceCountBefore = countRows(
+      sqlite,
+      'capacity_sources',
+      "scope = 'installation'"
+    );
+    const installationCandidateCountBefore = countRows(
+      sqlite,
+      'capacity_pool_candidates',
+      "pool_id = 'cap-pool-default:installation'"
+    );
+
+    vi.mocked(providerCatalogs.buildProviderCatalogForCredential).mockClear();
+    authState.userId = 'user-1';
+    authState.role = 'user';
+
+    const ensured = await createApp().request(
+      '/api/capacity-pools/defaults?ensure=true',
+      { method: 'GET' },
+      env
+    );
+    expect(ensured.status).toBe(200);
+    const ensuredBody = await ensured.json();
+    expect(ensuredBody).toMatchObject({
+      effective: null,
+      effectiveScope: null,
+      effectiveSummary: {
+        scope: 'installation',
+        state: 'configured-ready',
+      },
+      reconciledScopes: ['user'],
+      defaults: expect.arrayContaining([
+        expect.objectContaining({
+          scope: 'installation',
+          visibility: 'hidden',
+          canReconcile: false,
+          summary: null,
+        }),
+      ]),
+    });
+    expectSafePlacementSettings(ensuredBody);
+
+    const reconciled = await createApp().request(
+      '/api/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconciled.status).toBe(200);
+    const reconciledBody = await reconciled.json();
+    expect(reconciledBody).toMatchObject({
+      effective: null,
+      effectiveScope: null,
+      effectiveSummary: {
+        scope: 'installation',
+        state: 'configured-ready',
+      },
+      reconciledScopes: ['user'],
+    });
+
+    expect(catalogCredentialSources()).toEqual([]);
+    expect(countRows(sqlite, 'capacity_pools', "scope = 'installation'")).toBe(
+      installationPoolCountBefore
+    );
+    expect(countRows(sqlite, 'capacity_sources', "scope = 'installation'")).toBe(
+      installationSourceCountBefore
+    );
+    expect(
+      countRows(sqlite, 'capacity_pool_candidates', "pool_id = 'cap-pool-default:installation'")
+    ).toBe(installationCandidateCountBefore);
+  });
+
+  it('reconciles ordinary user credentials without widening to installation credentials', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1' });
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+
+    const res = await createApp().request(
+      '/api/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.reconciledScopes).toEqual(['user']);
+    expect(catalogCredentialSources()).toEqual(['user']);
+    expect(countRows(sqlite, 'capacity_pools', "scope = 'installation'")).toBe(0);
+    expect(countRows(sqlite, 'capacity_sources', "scope = 'installation'")).toBe(0);
+  });
+
   it('reconciles installation defaults from platform cloud credentials for superadmins', async () => {
     authState.userId = 'superadmin-1';
     authState.role = 'superadmin';
@@ -419,5 +641,32 @@ describe('default capacity pool routes', () => {
     );
 
     expect(forbidden.status).toBe(403);
+  });
+});
+
+describe('default capacity pool update result contract', () => {
+  const emptyResult = {
+    poolFound: true,
+    summary: null,
+    missingCandidateIds: [],
+    unavailableCandidateIds: [],
+    missingCatalogAdditions: [],
+    unavailableCatalogAdditions: [],
+    conflict: false,
+  };
+
+  it('surfaces a lost concurrent edit as 409 instead of reporting success', () => {
+    try {
+      assertDefaultCapacityPoolUpdateResult({ ...emptyResult, conflict: true }, 'missing');
+      throw new Error('expected assertDefaultCapacityPoolUpdateResult to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).statusCode).toBe(409);
+      expect((error as AppError).message).toContain('changed while this edit was in flight');
+    }
+  });
+
+  it('accepts a published edit', () => {
+    expect(() => assertDefaultCapacityPoolUpdateResult(emptyResult, 'missing')).not.toThrow();
   });
 });

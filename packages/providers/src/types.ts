@@ -126,6 +126,8 @@ export interface SizeConfig {
 export interface ProviderOfferingListOptions {
   /** Prefer provider APIs when implemented and credentials are available. */
   preferApi?: boolean;
+  /** When false, API-backed catalog calls must surface provider failures instead of returning static fallback rows. */
+  allowStaticFallback?: boolean;
 }
 
 /** Location metadata for display purposes */
@@ -291,6 +293,14 @@ export interface Provider {
 
   /** Provider volume constraints and SAM lifecycle conventions. */
   readonly volumeCapabilities: VolumeCapabilities;
+
+  /**
+   * True when `listInstanceOfferings({ preferApi: true, allowStaticFallback: false })` is
+   * backed by a live provider catalog API. Providers that only ever return SAM's curated
+   * static offering table leave this unset, so a caller can never mistake a static list —
+   * or an EMPTY static list — for an authoritative provider inventory.
+   */
+  readonly instanceOfferingApiBacked?: boolean;
 
   /** Provision a new VM */
   createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance>;

@@ -35,15 +35,15 @@ user-invocable: false
 - `GET /api/projects` — List user's projects (supports `limit` and `cursor`)
 - `GET /api/projects/:id` — Get project detail (includes task status counts and linked workspace count)
 - `GET /api/projects/:projectId/comments` — List project-wide comment inbox across chat and library threads (supports `status=open|sent|resolved`, `limit`)
-- `GET /api/projects/:id/capacity-pools/defaults` — Read visible default capacity pool summaries for the current project/user context. Read-only by default; pass `?ensure=true` to perform idempotent lazy reconciliation before returning the safe summary payload. Project/user summaries require project `secret:read`, installation summaries are superadmin-only, and encrypted credential material is never returned.
-- `POST /api/projects/:id/capacity-pools/defaults/reconcile` — Explicitly reconcile visible default capacity pool metadata from existing credentials and return the same safe summary payload.
+- `GET /api/projects/:id/capacity-pools/defaults` — Read default capacity pool context for the current project/user context. Requires project `project:read`; every active member receives the redacted `effectiveSummary` plus safe `placementSettings` resource defaults/settings. Raw project/user summaries require project `secret:read`, raw installation summaries are superadmin-only, and encrypted credential material is never returned. `?ensure=true` reconciles only for callers that also have project `secret:read`; non-superadmins never reconcile installation credentials through this route.
+- `POST /api/projects/:id/capacity-pools/defaults/reconcile` — Explicitly reconcile visible default capacity pool metadata from existing credentials and return the same safe summary payload. Non-superadmins reconcile project/user scopes only.
 - `PATCH /api/projects/:id/capacity-pools/defaults` — Update only the project-owned default pool policy, candidate statuses, or provider-native `catalogAdditions`; requires project `secret:write` and never mutates user or installation fallback pools.
 - `PATCH /api/projects/:id` — Update project metadata (`name`, `description`, `defaultBranch`)
 - `DELETE /api/projects/:id` — Delete project (cascades project tasks/dependencies/events)
 
 ## Default Capacity Pools
 
-- `GET /api/capacity-pools/defaults` — Read the authenticated user's default compute pool summaries. Hidden project/installation scopes are represented structurally and are not rendered as user-facing placeholder rows. Pass `?ensure=true` for idempotent reconciliation before returning.
+- `GET /api/capacity-pools/defaults` — Read the authenticated user's default compute pool summaries. Hidden project/installation scopes are represented structurally and are not rendered as user-facing placeholder rows. Pass `?ensure=true` for idempotent user-scope reconciliation before returning. Existing installation metadata may appear only through redacted `effectiveSummary`; this route never reconciles installation credentials.
 - `POST /api/capacity-pools/defaults/reconcile` — Explicitly reconcile the authenticated user's default compute pool metadata from their cloud credentials.
 - `PATCH /api/capacity-pools/defaults` — Update only the authenticated user's owned default pool policy, candidate statuses, or provider-native `catalogAdditions`.
 - `GET /api/admin/capacity-pools/defaults` — Superadmin-only read for the SAM installation default compute pool summaries; reveals non-secret metadata about platform cloud credentials.

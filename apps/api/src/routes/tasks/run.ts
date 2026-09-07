@@ -53,9 +53,12 @@ import { requireRepositoryUserAccess } from '../projects/_helpers';
 import { requireProjectTaskById } from './_helpers';
 
 const runRoutes = new Hono<{ Bindings: Env }>();
-
 type RunTaskBody = Partial<InferOutput<typeof RunTaskSchema>>;
 
+/**
+ * An absent/unparseable body means "no overrides" ({}), but a PRESENT body that fails
+ * the schema is rejected with 400 rather than silently degraded to defaults.
+ */
 async function parseRunTaskBody(req: Request): Promise<RunTaskBody> {
   let raw: unknown;
   try {

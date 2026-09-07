@@ -65,6 +65,9 @@ export type {
   DefaultCapacityPoolSummary,
   DefaultCapacityPoolUpdateRequest,
   ProjectDefaultCapacityPoolsResponse,
+  SafeCapacityPoolPlacementSettingsSummary,
+  SafeEffectiveCapacityPoolReason,
+  SafeEffectiveCapacityPoolSummary,
 } from './capacity-pool';
 export {
   CAPACITY_CREDENTIAL_SOURCES,
@@ -86,6 +89,7 @@ export {
   isCapacityPoolStrategy,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
+  SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
 } from './capacity-pool';
 
 // GitHub
@@ -165,12 +169,18 @@ export type {
   LocationInfo,
   ProviderCatalog,
   ProviderCatalogOfferingInfo,
+  ProviderCatalogRefreshOrigin,
+  ProviderCatalogRefreshStatus,
   ProviderCatalogResponse,
   ProviderInstanceCatalogSource,
   ProviderInstanceOffering,
   SizeInfo,
 } from './provider';
-export { isProviderInstanceCatalogSource, PROVIDER_INSTANCE_CATALOG_SOURCES } from './provider';
+export {
+  isProviderInstanceCatalogSource,
+  PROVIDER_CATALOG_REFRESH_ORIGINS,
+  PROVIDER_INSTANCE_CATALOG_SOURCES,
+} from './provider';
 
 // Project
 export type {
