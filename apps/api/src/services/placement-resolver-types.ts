@@ -109,6 +109,7 @@ export interface TaskStartPlacementInput {
   profileVmSizeSource?: PlacementProfileVmSizeSource;
   resourceRequirements?: ResourceResolutionInput;
   placementSettings?: CapacityPoolPlacementSettings | null;
+  platformDefaults?: Required<ResourceRequirements>;
   legacyWorkloadMapping?: Record<VMSize, Required<ResourceRequirements>>;
   validateLocation?: boolean;
   runtimeDecision?: WorkspaceRuntimeDecision | null;

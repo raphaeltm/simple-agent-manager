@@ -2529,6 +2529,7 @@ export const capacitySources = sqliteTable(
     credentialReference: text('credential_reference'),
     credentialVersion: integer('credential_version'),
     externalSourceRef: text('external_source_ref'),
+    sourceGeneration: integer('source_generation').notNull().default(0),
     status: text('status').notNull().default('active'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: text('created_at')
@@ -2551,6 +2552,12 @@ export const capacitySources = sqliteTable(
     platformCredentialIdx: index('idx_capacity_sources_platform_credential')
       .on(table.platformCredentialId)
       .where(sql`platform_credential_id IS NOT NULL`),
+    scopeGenerationIdx: index('idx_capacity_sources_scope_generation').on(
+      table.scope,
+      table.ownerUserId,
+      table.ownerProjectId,
+      table.sourceGeneration
+    ),
   })
 );
 
@@ -2639,6 +2646,7 @@ export const capacityPoolCandidates = sqliteTable(
     catalogAvailability: text('catalog_availability').notNull().default('available'),
     catalogUnavailableAt: text('catalog_unavailable_at'),
     catalogReturnedAt: text('catalog_returned_at'),
+    catalogGeneration: integer('catalog_generation').notNull().default(0),
     priority: integer('priority').notNull().default(0),
     candidateOrder: integer('candidate_order').notNull().default(0),
     status: text('status').notNull().default('active'),
@@ -2659,6 +2667,10 @@ export const capacityPoolCandidates = sqliteTable(
     sourceIdx: index('idx_capacity_pool_candidates_source').on(table.capacitySourceId),
     catalogAvailabilityIdx: index('idx_capacity_pool_candidates_catalog_availability').on(
       table.catalogAvailability
+    ),
+    sourceGenerationIdx: index('idx_capacity_pool_candidates_source_generation').on(
+      table.capacitySourceId,
+      table.catalogGeneration
     ),
   })
 );

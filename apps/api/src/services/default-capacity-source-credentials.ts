@@ -9,6 +9,7 @@ import {
 } from './default-capacity-pool-helpers';
 import type {
   CredentialCapacitySeed,
+  DefaultCapacityPoolOfferingResolution,
   DefaultCapacityPoolsBackfillOptions,
 } from './default-capacity-pools';
 import {
@@ -29,8 +30,14 @@ export async function materializeCapacitySourceCredential(
     throw new Error(`External capacity source seed ${seed.id} has no owning user`);
   }
 
-  const credentialId = externalCapacitySourceCredentialId(seed.externalSourceRef);
-  const now = new Date().toISOString();
+  const credentialId = externalCapacitySourceCredentialId(
+    seed.externalSourceRef,
+    seed.credentialVersion
+  );
+  const now =
+    typeof seed.credentialVersion === 'number' && Number.isFinite(seed.credentialVersion)
+      ? new Date(seed.credentialVersion).toISOString()
+      : new Date().toISOString();
   await db
     .insert(schema.credentials)
     .values({
@@ -67,9 +74,9 @@ export async function materializeCapacitySourceCredential(
 export async function resolveOfferingsForSeed(
   seed: CredentialCapacitySeed,
   options: DefaultCapacityPoolsBackfillOptions
-): Promise<{ offerings: ProviderInstanceOffering[]; refreshSucceeded: boolean }> {
+): Promise<DefaultCapacityPoolOfferingResolution> {
   if (options.offeringResolver) {
-    return { offerings: await options.offeringResolver(seed), refreshSucceeded: true };
+    return normalizeOfferingResolution(await options.offeringResolver(seed));
   }
 
   if (options.env) {
@@ -92,7 +99,12 @@ export async function resolveOfferingsForSeed(
           createdBy: seed.createdBy,
         },
       });
-      return { offerings: catalog.offerings ?? [], refreshSucceeded: true };
+      const refreshStatus = catalog.refreshStatus;
+      return {
+        offerings: catalog.offerings ?? [],
+        refreshSucceeded: refreshStatus?.succeeded ?? true,
+        catalogComplete: refreshStatus?.complete ?? true,
+      };
     } catch (error) {
       log.warn('default_capacity_pools.catalog_build_failed', {
         provider: seed.provider,
@@ -104,5 +116,18 @@ export async function resolveOfferingsForSeed(
     }
   }
 
-  return { offerings: getStaticProviderCatalogOfferings(seed.provider), refreshSucceeded: true };
+  return {
+    offerings: getStaticProviderCatalogOfferings(seed.provider),
+    refreshSucceeded: true,
+    catalogComplete: false,
+  };
+}
+
+function normalizeOfferingResolution(
+  value: ProviderInstanceOffering[] | DefaultCapacityPoolOfferingResolution
+): DefaultCapacityPoolOfferingResolution {
+  if (Array.isArray(value)) {
+    return { offerings: value, refreshSucceeded: true, catalogComplete: true };
+  }
+  return value;
 }

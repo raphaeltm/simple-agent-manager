@@ -126,6 +126,8 @@ export interface SizeConfig {
 export interface ProviderOfferingListOptions {
   /** Prefer provider APIs when implemented and credentials are available. */
   preferApi?: boolean;
+  /** When false, API-backed catalog calls must surface provider failures instead of returning static fallback rows. */
+  allowStaticFallback?: boolean;
 }
 
 /** Location metadata for display purposes */

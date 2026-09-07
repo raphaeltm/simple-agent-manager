@@ -65,6 +65,8 @@ export type {
   DefaultCapacityPoolSummary,
   DefaultCapacityPoolUpdateRequest,
   ProjectDefaultCapacityPoolsResponse,
+  SafeEffectiveCapacityPoolReason,
+  SafeEffectiveCapacityPoolSummary,
 } from './capacity-pool';
 export {
   CAPACITY_CREDENTIAL_SOURCES,
@@ -77,6 +79,7 @@ export {
   CAPACITY_SOURCE_KINDS,
   CAPACITY_WORKLOAD_ROLES,
   DEFAULT_CAPACITY_POOL_EFFECTIVE_STATES,
+  SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
   isCapacityCredentialSource,
   isCapacityExhaustionPolicy,
   isCapacityPlacementCredentialSource,

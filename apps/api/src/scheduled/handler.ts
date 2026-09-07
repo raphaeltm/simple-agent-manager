@@ -9,6 +9,7 @@ import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runAnalyticsForwardJob } from './analytics-forward';
+import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
@@ -147,6 +148,9 @@ export async function scheduled(
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
     runProviderOrphanReconciliation(env)
   );
+  const capacityPools = await sweeps.isolate('capacity_pool_reconciliation', () =>
+    runScheduledCapacityPoolReconciliation(env)
+  );
   const observabilityPurge = await sweeps.isolate('observability_purge', () =>
     runObservabilityPurge(env)
   );
@@ -259,6 +263,9 @@ export async function scheduled(
     providerOrphansSkippedAmbiguousClaim: providerOrphans?.skippedAmbiguousClaim,
     providerOrphanSkipReason: providerOrphans?.skipReason,
     providerOrphanErrors: providerOrphans?.errors,
+    capacityPoolInstallationEnsured: capacityPools?.installationEnsured,
+    capacityPoolUsersEnsured: capacityPools?.usersEnsured,
+    capacityPoolProjectsEnsured: capacityPools?.projectsEnsured,
     stuckTasksFailedQueued: stuckTasks?.failedQueued,
     stuckTasksFailedDelegated: stuckTasks?.failedDelegated,
     stuckTasksFailedInProgress: stuckTasks?.failedInProgress,

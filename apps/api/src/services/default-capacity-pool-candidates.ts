@@ -16,6 +16,7 @@ import { providerInstanceOfferingDbValues } from './default-capacity-pool-candid
 import { defaultCandidateId, legacyDefaultCandidateId } from './default-capacity-pool-helpers';
 
 type Db = ReturnType<typeof drizzle>;
+type RunnableDb = Db & { run: (query: unknown) => Promise<unknown> };
 
 const DEFAULT_WORKLOAD_ROLE = 'workspace';
 const DEFAULT_RUNTIME = 'vm';
@@ -38,7 +39,7 @@ export async function ensureCandidatesForSource(
   sourceId: string,
   provider: CredentialProvider,
   offerings: ProviderInstanceOffering[],
-  options: { refreshStartedAt?: string } = {}
+  options: { sourceGeneration?: number } = {}
 ): Promise<void> {
   const now = nextCapacityPoolTimestamp();
   const existingStatuses = await readExistingCandidateStatuses(db, poolId, sourceId);
@@ -85,6 +86,7 @@ export async function ensureCandidatesForSource(
       catalogAvailability: 'available',
       catalogUnavailableAt: null,
       catalogReturnedAt: now,
+      catalogGeneration: options.sourceGeneration ?? 0,
       priority: candidateOrder,
       candidateOrder,
       status: initialStatus,
@@ -94,37 +96,47 @@ export async function ensureCandidatesForSource(
     candidateOrder += 1;
   }
 
-  for (let offset = 0; offset < candidateValues.length; offset += CANDIDATE_UPSERT_CHUNK_SIZE) {
-    const chunk = candidateValues.slice(offset, offset + CANDIDATE_UPSERT_CHUNK_SIZE);
-    await db
-      .insert(schema.capacityPoolCandidates)
-      .values(chunk)
-      .onConflictDoUpdate({
-        target: schema.capacityPoolCandidates.id,
-        set: {
-          provider: sql`excluded.provider`,
-          location: sql`excluded.location`,
-          workloadRole: sql`excluded.workload_role`,
-          runtime: sql`excluded.runtime`,
-          machineClass: sql`excluded.machine_class`,
-          machineSize: sql`excluded.machine_size`,
-          providerInstanceType: sql`excluded.provider_instance_type`,
-          providerInstanceSku: sql`excluded.provider_instance_sku`,
-          providerInstanceDisplayName: sql`excluded.provider_instance_display_name`,
-          providerInstanceVcpuCount: sql`excluded.provider_instance_vcpu_count`,
-          providerInstanceMemoryMb: sql`excluded.provider_instance_memory_mb`,
-          providerInstanceDiskGb: sql`excluded.provider_instance_disk_gb`,
-          providerInstancePriceDisplay: sql`excluded.provider_instance_price_display`,
-          providerInstancePriceCurrency: sql`excluded.provider_instance_price_currency`,
-          providerInstancePriceMonthlyCents: sql`excluded.provider_instance_price_monthly_cents`,
-          providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
-          providerInstanceCatalogSource: sql`excluded.provider_instance_catalog_source`,
-          providerInstanceCatalogLastSeenAt: sql`excluded.provider_instance_catalog_last_seen_at`,
-          catalogAvailability: 'available',
-          catalogReturnedAt: now,
-          updatedAt: now,
-        },
-      });
+  if (typeof options.sourceGeneration === 'number') {
+    for (const candidateValue of candidateValues) {
+      await upsertCandidateIfSourceGenerationCurrent(db, candidateValue, options.sourceGeneration);
+    }
+  } else {
+    for (let offset = 0; offset < candidateValues.length; offset += CANDIDATE_UPSERT_CHUNK_SIZE) {
+      const chunk = candidateValues.slice(offset, offset + CANDIDATE_UPSERT_CHUNK_SIZE);
+      await db
+        .insert(schema.capacityPoolCandidates)
+        .values(chunk)
+        .onConflictDoUpdate({
+          target: schema.capacityPoolCandidates.id,
+          set: {
+            provider: sql`excluded.provider`,
+            location: sql`excluded.location`,
+            workloadRole: sql`excluded.workload_role`,
+            runtime: sql`excluded.runtime`,
+            machineClass: sql`excluded.machine_class`,
+            machineSize: sql`excluded.machine_size`,
+            providerInstanceType: sql`excluded.provider_instance_type`,
+            providerInstanceSku: sql`excluded.provider_instance_sku`,
+            providerInstanceDisplayName: sql`excluded.provider_instance_display_name`,
+            providerInstanceVcpuCount: sql`excluded.provider_instance_vcpu_count`,
+            providerInstanceMemoryMb: sql`excluded.provider_instance_memory_mb`,
+            providerInstanceDiskGb: sql`excluded.provider_instance_disk_gb`,
+            providerInstanceBootDiskSizeGb: sql`excluded.provider_instance_boot_disk_size_gb`,
+            providerInstanceImage: sql`excluded.provider_instance_image`,
+            providerInstanceArchitecture: sql`excluded.provider_instance_architecture`,
+            providerInstancePriceDisplay: sql`excluded.provider_instance_price_display`,
+            providerInstancePriceCurrency: sql`excluded.provider_instance_price_currency`,
+            providerInstancePriceMonthlyCents: sql`excluded.provider_instance_price_monthly_cents`,
+            providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
+            providerInstanceCatalogSource: sql`excluded.provider_instance_catalog_source`,
+            providerInstanceCatalogLastSeenAt: sql`excluded.provider_instance_catalog_last_seen_at`,
+            catalogAvailability: 'available',
+            catalogReturnedAt: now,
+            catalogGeneration: sql`excluded.catalog_generation`,
+            updatedAt: now,
+          },
+        });
+    }
   }
 
   await markMissingCandidatesForSource(
@@ -135,6 +147,125 @@ export async function ensureCandidatesForSource(
     candidateIds,
     options
   );
+}
+
+async function upsertCandidateIfSourceGenerationCurrent(
+  db: Db,
+  value: schema.NewCapacityPoolCandidate,
+  sourceGeneration: number
+): Promise<void> {
+  await (db as RunnableDb).run(sql`
+    INSERT INTO capacity_pool_candidates (
+      id,
+      pool_id,
+      capacity_source_id,
+      provider,
+      location,
+      workload_role,
+      runtime,
+      machine_class,
+      machine_size,
+      provider_instance_type,
+      provider_instance_sku,
+      provider_instance_display_name,
+      provider_instance_vcpu_count,
+      provider_instance_memory_mb,
+      provider_instance_disk_gb,
+      provider_instance_boot_disk_size_gb,
+      provider_instance_image,
+      provider_instance_architecture,
+      provider_instance_price_display,
+      provider_instance_price_currency,
+      provider_instance_price_monthly_cents,
+      provider_instance_price_hourly_micros,
+      provider_instance_catalog_source,
+      provider_instance_catalog_last_seen_at,
+      catalog_availability,
+      catalog_unavailable_at,
+      catalog_returned_at,
+      catalog_generation,
+      priority,
+      candidate_order,
+      status,
+      created_at,
+      updated_at
+    )
+    SELECT
+      ${value.id},
+      ${value.poolId},
+      ${value.capacitySourceId},
+      ${value.provider},
+      ${value.location},
+      ${value.workloadRole},
+      ${value.runtime},
+      ${value.machineClass},
+      ${value.machineSize},
+      ${value.providerInstanceType},
+      ${value.providerInstanceSku},
+      ${value.providerInstanceDisplayName},
+      ${value.providerInstanceVcpuCount},
+      ${value.providerInstanceMemoryMb},
+      ${value.providerInstanceDiskGb},
+      ${value.providerInstanceBootDiskSizeGb},
+      ${value.providerInstanceImage},
+      ${value.providerInstanceArchitecture},
+      ${value.providerInstancePriceDisplay},
+      ${value.providerInstancePriceCurrency},
+      ${value.providerInstancePriceMonthlyCents},
+      ${value.providerInstancePriceHourlyMicros},
+      ${value.providerInstanceCatalogSource},
+      ${value.providerInstanceCatalogLastSeenAt},
+      ${value.catalogAvailability},
+      ${value.catalogUnavailableAt},
+      ${value.catalogReturnedAt},
+      ${sourceGeneration},
+      ${value.priority},
+      ${value.candidateOrder},
+      ${value.status},
+      ${value.createdAt},
+      ${value.updatedAt}
+    WHERE EXISTS (
+      SELECT 1
+      FROM capacity_sources
+      WHERE id = ${value.capacitySourceId}
+        AND source_generation = ${sourceGeneration}
+        AND status = ${ACTIVE_STATUS}
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      provider = excluded.provider,
+      location = excluded.location,
+      workload_role = excluded.workload_role,
+      runtime = excluded.runtime,
+      machine_class = excluded.machine_class,
+      machine_size = excluded.machine_size,
+      provider_instance_type = excluded.provider_instance_type,
+      provider_instance_sku = excluded.provider_instance_sku,
+      provider_instance_display_name = excluded.provider_instance_display_name,
+      provider_instance_vcpu_count = excluded.provider_instance_vcpu_count,
+      provider_instance_memory_mb = excluded.provider_instance_memory_mb,
+      provider_instance_disk_gb = excluded.provider_instance_disk_gb,
+      provider_instance_boot_disk_size_gb = excluded.provider_instance_boot_disk_size_gb,
+      provider_instance_image = excluded.provider_instance_image,
+      provider_instance_architecture = excluded.provider_instance_architecture,
+      provider_instance_price_display = excluded.provider_instance_price_display,
+      provider_instance_price_currency = excluded.provider_instance_price_currency,
+      provider_instance_price_monthly_cents = excluded.provider_instance_price_monthly_cents,
+      provider_instance_price_hourly_micros = excluded.provider_instance_price_hourly_micros,
+      provider_instance_catalog_source = excluded.provider_instance_catalog_source,
+      provider_instance_catalog_last_seen_at = excluded.provider_instance_catalog_last_seen_at,
+      catalog_availability = 'available',
+      catalog_returned_at = excluded.catalog_returned_at,
+      catalog_generation = excluded.catalog_generation,
+      updated_at = excluded.updated_at
+    WHERE EXISTS (
+      SELECT 1
+      FROM capacity_sources
+      WHERE id = excluded.capacity_source_id
+        AND source_generation = excluded.catalog_generation
+        AND status = ${ACTIVE_STATUS}
+    )
+      AND capacity_pool_candidates.catalog_generation <= excluded.catalog_generation
+  `);
 }
 
 function isCurrentlySelectableOffering(offering: ProviderInstanceOffering): boolean {
@@ -228,7 +359,7 @@ async function markMissingCandidatesForSource(
   sourceId: string,
   existingStatuses: ReadonlyMap<string, string>,
   activeCandidateIds: string[],
-  options: { refreshStartedAt?: string } = {}
+  options: { sourceGeneration?: number } = {}
 ): Promise<void> {
   const now = nextCapacityPoolTimestamp();
   const nextCandidateIds = new Set(activeCandidateIds);
@@ -247,14 +378,22 @@ async function markMissingCandidatesForSource(
         providerInstanceCatalogLastSeenAt: null,
         catalogAvailability: 'last-known-unavailable',
         catalogUnavailableAt: now,
+        catalogGeneration: options.sourceGeneration ?? sql`${schema.capacityPoolCandidates.catalogGeneration}`,
         updatedAt: now,
       })
       .where(
         and(
           eq(schema.capacityPoolCandidates.poolId, poolId),
           eq(schema.capacityPoolCandidates.capacitySourceId, sourceId),
-          options.refreshStartedAt
-            ? sql`${schema.capacityPoolCandidates.updatedAt} <= ${options.refreshStartedAt}`
+          typeof options.sourceGeneration === 'number'
+            ? sql`${schema.capacityPoolCandidates.catalogGeneration} < ${options.sourceGeneration}
+                AND EXISTS (
+                  SELECT 1
+                  FROM capacity_sources
+                  WHERE id = ${sourceId}
+                    AND source_generation = ${options.sourceGeneration}
+                    AND status = ${ACTIVE_STATUS}
+                )`
             : undefined,
           inArray(schema.capacityPoolCandidates.id, chunk)
         )

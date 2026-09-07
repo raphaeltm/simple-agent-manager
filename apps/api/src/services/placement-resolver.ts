@@ -176,6 +176,7 @@ function resolvePlacementReservation(
         userId: input.userId,
       },
       {
+        platformDefaults: input.platformDefaults,
         legacyVmSizes,
         legacyWorkloadMapping: input.legacyWorkloadMapping,
         compatibilityAdapterVersion:
@@ -392,6 +393,7 @@ export async function resolveTaskStartPlacementCredentialAttribution(
     placement = resolveTaskStartPlacement({
       ...input,
       placementSettings: settings?.placementSettings ?? input.placementSettings,
+      platformDefaults: settings?.resourceDefaults.platformDefaults ?? input.platformDefaults,
       legacyWorkloadMapping:
         settings?.resourceDefaults.legacyWorkloadMapping ?? input.legacyWorkloadMapping,
     });

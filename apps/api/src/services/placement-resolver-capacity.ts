@@ -722,6 +722,7 @@ function defaultPlacementSettings(): CapacityPoolPlacementSettings {
     ...DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS,
     source: {
       legacyWorkloadMapping: 'default',
+      platformDefaults: 'default',
       selection: 'default',
     },
     diagnostics: [],

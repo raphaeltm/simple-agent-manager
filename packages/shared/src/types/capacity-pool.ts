@@ -187,6 +187,7 @@ export interface CapacityPoolPlacementSettings {
   rolloutCohortPercent: number;
   source: {
     legacyWorkloadMapping: 'persisted' | 'environment' | 'default';
+    platformDefaults: 'persisted' | 'environment' | 'default';
     selection: 'persisted' | 'environment' | 'default';
   };
   diagnostics: string[];
@@ -195,6 +196,25 @@ export interface CapacityPoolPlacementSettings {
 // =============================================================================
 // Capacity Pool API Response Types
 // =============================================================================
+
+export const SAFE_EFFECTIVE_CAPACITY_POOL_REASONS = [
+  'no-capacity-pool-configured',
+  'configured-default-pool-has-no-active-candidates',
+  'configured-default-pool-sources-disabled',
+  'configured-default-pool-catalog-last-known-unavailable',
+  'configured-default-pool-migration-pending',
+] as const;
+export type SafeEffectiveCapacityPoolReason =
+  (typeof SAFE_EFFECTIVE_CAPACITY_POOL_REASONS)[number];
+
+export interface SafeEffectiveCapacityPoolSummary {
+  scope: CapacityPoolScope | null;
+  state: DefaultCapacityPoolEffectiveState;
+  strategy: CapacityPoolStrategy | null;
+  exhaustionPolicy: CapacityExhaustionPolicy | null;
+  availableCandidateCount: number;
+  reason?: SafeEffectiveCapacityPoolReason;
+}
 
 export interface DefaultCapacityPoolSummary {
   pool: CapacityPool;
@@ -243,6 +263,7 @@ export interface ProjectDefaultCapacityPoolsResponse {
   effective: DefaultCapacityPoolSummary | null;
   effectiveScope: CapacityPoolScope | null;
   effectiveState?: DefaultCapacityPoolEffectiveState;
+  effectiveSummary?: SafeEffectiveCapacityPoolSummary;
   defaults: DefaultCapacityPoolScopeSummary[];
   precedence: CapacityPoolScope[];
   reconciledScopes: CapacityPoolScope[];
