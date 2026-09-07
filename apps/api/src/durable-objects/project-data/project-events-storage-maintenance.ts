@@ -202,4 +202,3 @@ function accountingSelectSql(
        FROM ${category}
        WHERE project_id = ?`;
 }
-
