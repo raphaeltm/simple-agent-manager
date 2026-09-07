@@ -95,6 +95,7 @@ vi.mock('drizzle-orm/d1', () => ({
   }),
 }));
 
+// Routes import during collection so cold compilation is outside the callback test deadline.
 function createTestApp() {
 
   const app = new Hono<{ Bindings: Env }>();
