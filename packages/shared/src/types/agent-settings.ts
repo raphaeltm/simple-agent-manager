@@ -189,6 +189,7 @@ export interface AgentProfile {
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
+  resourceRequirementsJson: string | null;
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
@@ -216,6 +217,7 @@ export interface CreateAgentProfileRequest {
   maxTurns?: number | null;
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
+  resourceRequirementsJson?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
@@ -240,6 +242,7 @@ export interface UpdateAgentProfileRequest {
   maxTurns?: number | null;
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
+  resourceRequirementsJson?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
@@ -264,6 +267,7 @@ export interface ResolvedAgentProfile {
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
+  resourceRequirementsJson: string | null;
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;

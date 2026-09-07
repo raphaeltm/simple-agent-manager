@@ -1,8 +1,6 @@
 import type {
   AgentSkill,
-  CredentialProvider,
   UpdateAgentProfileRequest,
-  VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
@@ -10,11 +8,9 @@ import { Paperclip, Settings, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
-import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import { useQueryScope } from '../../hooks/useQueryScope';
 import type { TaskAttachmentRef } from '../../lib/api';
 import {
-  getProject,
   listSkills,
   requestAttachmentUpload,
   uploadAttachmentToR2,
@@ -22,13 +18,14 @@ import {
 import { formatFileSize } from '../../lib/file-utils';
 import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
+import {
+  type ResourceRequirementsFormState,
+  EMPTY_RESOURCE_STATE,
+  ResourceRequirementsInput,
+  toResourceRequirements,
+} from '../resource-requirements';
 import { SkillSelector } from '../skills/SkillSelector';
 import { SplitButton } from '../ui/SplitButton';
-import {
-  formatProviderCatalogContext,
-  formatVmSizeOption,
-  selectProviderCatalog,
-} from '../vm/format-vm-size';
 
 export interface TaskSubmitFormProps {
   projectId: string;
@@ -42,7 +39,7 @@ export interface TaskSubmitOptions {
   priority?: number;
   agentProfileId?: string;
   skillId?: string;
-  vmSize?: VMSize;
+  resourceRequirements?: import('@simple-agent-manager/shared').ResourceRequirements;
   workspaceProfile?: WorkspaceProfile;
   devcontainerConfigName?: string | null;
   attachments?: TaskAttachmentRef[];
@@ -64,22 +61,21 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   onSaveToBacklog,
 }) => {
   const queryScope = useQueryScope();
-  const { catalogs } = useProviderCatalog(queryScope);
   const [title, setTitle] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState(0);
   const [agentProfileId, setAgentProfileId] = useState<string | null>(null);
   const [skillId, setSkillId] = useState<string | null>(null);
-  const [vmSize, setVmSize] = useState<VMSize | ''>('');
+  const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
+    ...EMPTY_RESOURCE_STATE,
+  });
   const [workspaceProfile, setWorkspaceProfile] = useState<WorkspaceProfile | ''>('');
   const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { profiles, updateProfile } = useAgentProfiles(projectId, queryScope);
   const [skills, setSkills] = useState<AgentSkill[]>([]);
-  const [projectProvider, setProjectProvider] = useState<CredentialProvider | null>(null);
-  const [projectLocation, setProjectLocation] = useState<string | null>(null);
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [attachments, setAttachments] = useState<AttachmentState[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,10 +87,6 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const selectedProfile = hasProfile
     ? (profiles.find((p) => p.id === agentProfileId) ?? null)
     : null;
-  const displayProvider = selectedProfile?.provider ?? projectProvider;
-  const displayLocation = selectedProfile?.vmLocation ?? projectLocation;
-  const activeCatalog = selectProviderCatalog(catalogs, displayProvider);
-  const providerContext = formatProviderCatalogContext(activeCatalog, displayLocation);
 
   const uploading = attachments.some((a) => a.status === 'uploading' || a.status === 'pending');
   const allUploadsComplete =
@@ -107,24 +99,6 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       .catch(() => {
         /* best-effort */
       });
-  }, [projectId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getProject(projectId)
-      .then((project) => {
-        if (cancelled) return;
-        setProjectProvider(project.defaultProvider ?? null);
-        setProjectLocation(project.defaultLocation ?? null);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setProjectProvider(null);
-        setProjectLocation(null);
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [projectId]);
 
   const handleUpdateProfile = useCallback(
@@ -261,7 +235,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           description: description.trim() || undefined,
           priority: priority || undefined,
           skillId: skillId ?? undefined,
-          vmSize: vmSize || undefined,
+          resourceRequirements: toResourceRequirements(resourceReqs),
           workspaceProfile: workspaceProfile || undefined,
           devcontainerConfigName: devcontainerConfigName.trim() || undefined,
         };
@@ -275,7 +249,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
     setPriority(0);
     setAgentProfileId(null);
     setSkillId(null);
-    setVmSize('');
+    setResourceReqs({ ...EMPTY_RESOURCE_STATE });
     setWorkspaceProfile('');
     setDevcontainerConfigName('');
     setAttachments([]);
@@ -517,30 +491,12 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
 
             {!hasProfile && (
               <>
-                <div>
-                  <label
-                    htmlFor={`${fieldId}-vm-size`}
-                    className="text-xs text-fg-muted block mb-1"
-                  >
-                    VM Size
-                    {providerContext && (
-                      <span className="text-fg-muted font-normal ml-1">({providerContext})</span>
-                    )}
-                  </label>
-                  <select
-                    id={`${fieldId}-vm-size`}
-                    value={vmSize}
-                    onChange={(e) => setVmSize(e.target.value as VMSize | '')}
-                    className="py-1 px-2 rounded-sm text-fg-primary text-sm"
-                  >
-                    <option value="">Project default</option>
-                    {(['small', 'medium', 'large'] as VMSize[]).map((s) => (
-                      <option key={s} value={s}>
-                        {formatVmSizeOption(s, activeCatalog?.sizes[s] ?? null)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <ResourceRequirementsInput
+                  value={resourceReqs}
+                  onChange={setResourceReqs}
+                  inheritLabel="project default"
+                  hideDisk
+                />
 
                 <div>
                   <label
