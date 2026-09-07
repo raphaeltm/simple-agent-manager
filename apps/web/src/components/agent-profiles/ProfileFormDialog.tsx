@@ -24,9 +24,12 @@ import {
   deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
   hasAnyResourceValue,
+  hasValidationErrors,
   type ResourceRequirementsFormState,
   ResourceRequirementsInput,
+  type ResourceValidationErrors,
   serializeResourceRequirements,
+  validateResourceState,
 } from '../resource-requirements';
 import { ProfileRuntimeSection } from './ProfileRuntimeSection';
 
@@ -351,10 +354,19 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     label: EFFORT_LABELS[value],
   }));
 
+  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
+
   const handleSubmit = async () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
       setError('Profile name is required');
+      return;
+    }
+
+    const resErrors = validateResourceState(resourceReqs);
+    setResourceErrors(resErrors);
+    if (hasValidationErrors(resErrors)) {
+      setError('Fix resource requirement errors before saving');
       return;
     }
 
@@ -372,7 +384,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         maxTurns: maxTurns ? parseInt(maxTurns, 10) : null,
         timeoutMinutes: timeoutMinutes ? parseInt(timeoutMinutes, 10) : null,
         runtime: runtime ? (runtime as AgentProfileRuntime) : null,
-        vmSizeOverride: hasAnyResourceValue(resourceReqs) ? null : vmSizeOverride || null,
+        vmSizeOverride: vmSizeOverride || null,
         resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
         workspaceProfile: workspaceProfile || null,
         devcontainerConfigName:
@@ -415,8 +427,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
   const handleResourceReqsChange = (next: ResourceRequirementsFormState) => {
     setResourceReqs(next);
-    if (!hasAnyResourceValue(next)) return;
-    setVmSizeOverride('');
+    setResourceErrors({});
   };
 
   const isInstantRuntime = runtime === 'cf-container';
@@ -637,6 +648,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
                   disabled={saving}
                   legacyVmSize={vmSizeOverride}
                   inheritLabel="default"
+                  errors={resourceErrors}
                 />
               </div>
             )}

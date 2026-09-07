@@ -19,11 +19,12 @@ import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings
 import {
   deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
-  formatLegacyVmSize,
-  hasAnyResourceValue,
+  hasValidationErrors,
   type ResourceRequirementsFormState,
   ResourceRequirementsInput,
+  type ResourceValidationErrors,
   serializeResourceRequirements,
+  validateResourceState,
 } from '../components/resource-requirements';
 import { ScalingSettings } from '../components/ScalingSettings';
 import { useQueryScope } from '../hooks/useQueryScope';
@@ -314,6 +315,8 @@ export function ProjectSettingsInfrastructure() {
     ...EMPTY_RESOURCE_STATE,
   });
   const [savingResources, setSavingResources] = useState(false);
+  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
+  const [legacyCleared, setLegacyCleared] = useState(false);
   const [workspaceIdleTimeoutMs, setWorkspaceIdleTimeoutMs] = useState<number>(
     project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
   );
@@ -329,16 +332,23 @@ export function ProjectSettingsInfrastructure() {
       setWorkspaceIdleTimeoutMs(
         project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
       );
+      setLegacyCleared(false);
     }
   }, [project]);
 
   const handleSaveResources = async () => {
+    const resErrors = validateResourceState(resourceReqs);
+    setResourceErrors(resErrors);
+    if (hasValidationErrors(resErrors)) {
+      toast.error('Fix resource requirement errors before saving');
+      return;
+    }
     setSavingResources(true);
     try {
       const json = serializeResourceRequirements(resourceReqs);
       await updateProject(projectId, {
-        defaultVmSize: hasAnyResourceValue(resourceReqs) ? null : (legacyVmSize ?? undefined),
-        ...(json != null ? { resourceRequirementsJson: json } : {}),
+        defaultVmSize: legacyCleared ? null : (legacyVmSize ?? undefined),
+        resourceRequirementsJson: json,
       });
       await reload();
       toast.success('Default resource requirements saved');
@@ -376,10 +386,12 @@ export function ProjectSettingsInfrastructure() {
         </div>
         <ResourceRequirementsInput
           value={resourceReqs}
-          onChange={setResourceReqs}
+          onChange={(next) => { setResourceReqs(next); setResourceErrors({}); }}
+          onClearLegacy={() => setLegacyCleared(true)}
           disabled={savingResources}
-          legacyVmSize={legacyVmSize}
+          legacyVmSize={legacyCleared ? null : legacyVmSize}
           inheritLabel="platform default"
+          errors={resourceErrors}
         />
         <div className="flex items-center gap-2">
           <Button
@@ -391,11 +403,6 @@ export function ProjectSettingsInfrastructure() {
           >
             Save
           </Button>
-          {legacyVmSize && !hasAnyResourceValue(resourceReqs) && (
-            <span className="text-xs text-fg-muted">
-              Legacy default: {formatLegacyVmSize(legacyVmSize)}
-            </span>
-          )}
         </div>
       </section>
 

@@ -1,4 +1,5 @@
 import type { ResourceRequirements } from '@simple-agent-manager/shared';
+import { normalizeResourceRequirements } from '@simple-agent-manager/shared';
 
 import { expectJsonRecord } from '../../lib/runtime-validation';
 
@@ -8,6 +9,8 @@ export interface ResourceRequirementsFormState {
   minDiskGb: string;
   exclusiveNode: boolean | undefined;
   maxCoTenants: string;
+  /** Set when stored JSON could not be parsed; prevents accidental overwrite on save. */
+  storedJsonError?: string;
 }
 
 export const EMPTY_RESOURCE_STATE: ResourceRequirementsFormState = {
@@ -18,11 +21,54 @@ export const EMPTY_RESOURCE_STATE: ResourceRequirementsFormState = {
   maxCoTenants: '',
 };
 
-function parseFinitePositive(value: string): number | undefined {
-  if (value === '') return undefined;
-  const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) return undefined;
-  return n;
+export interface ResourceValidationErrors {
+  minVcpu?: string;
+  minMemoryGb?: string;
+  minDiskGb?: string;
+  maxCoTenants?: string;
+  form?: string;
+}
+
+export function validateResourceState(state: ResourceRequirementsFormState): ResourceValidationErrors {
+  const errors: ResourceValidationErrors = {};
+
+  if (state.minVcpu !== '') {
+    const n = Number(state.minVcpu);
+    if (!Number.isFinite(n) || n <= 0) {
+      errors.minVcpu = 'Must be a positive number';
+    }
+  }
+
+  if (state.minMemoryGb !== '') {
+    const n = Number(state.minMemoryGb);
+    if (!Number.isFinite(n) || n <= 0) {
+      errors.minMemoryGb = 'Must be a positive number';
+    }
+  }
+
+  if (state.minDiskGb !== '') {
+    const n = Number(state.minDiskGb);
+    if (!Number.isFinite(n) || n < 0) {
+      errors.minDiskGb = 'Must be zero or a positive number';
+    }
+  }
+
+  if (state.maxCoTenants !== '') {
+    const n = Number(state.maxCoTenants);
+    if (!Number.isSafeInteger(n) || n <= 0) {
+      errors.maxCoTenants = 'Must be a positive whole number';
+    }
+  }
+
+  if (state.storedJsonError) {
+    errors.form = state.storedJsonError;
+  }
+
+  return errors;
+}
+
+export function hasValidationErrors(errors: ResourceValidationErrors): boolean {
+  return Object.keys(errors).length > 0;
 }
 
 export function deserializeResourceRequirements(
@@ -38,41 +84,39 @@ export function deserializeResourceRequirements(
       exclusiveNode: typeof req.exclusiveNode === 'boolean' ? req.exclusiveNode : undefined,
       maxCoTenants: typeof req.maxCoTenants === 'number' && Number.isFinite(req.maxCoTenants) ? String(req.maxCoTenants) : '',
     };
-  } catch {
-    return { ...EMPTY_RESOURCE_STATE };
+  } catch (err) {
+    return {
+      ...EMPTY_RESOURCE_STATE,
+      storedJsonError: `Stored resource data is malformed: ${err instanceof Error ? err.message : 'invalid JSON'}`,
+    };
   }
 }
 
 export function serializeResourceRequirements(
   state: ResourceRequirementsFormState
 ): string | null {
-  const req: Record<string, unknown> = {};
-  const vcpu = parseFinitePositive(state.minVcpu);
-  if (vcpu !== undefined) req.minVcpu = vcpu;
-  const mem = parseFinitePositive(state.minMemoryGb);
-  if (mem !== undefined) req.minMemoryGb = mem;
-  const disk = parseFinitePositive(state.minDiskGb);
-  if (disk !== undefined) req.minDiskGb = disk;
-  if (state.exclusiveNode !== undefined) req.exclusiveNode = state.exclusiveNode;
-  const coTenants = parseFinitePositive(state.maxCoTenants);
-  if (coTenants !== undefined) req.maxCoTenants = coTenants;
-  return Object.keys(req).length > 0 ? JSON.stringify(req) : null;
+  const raw = buildRawRequirements(state);
+  if (Object.keys(raw).length === 0) return null;
+  const validated = normalizeResourceRequirements(raw);
+  return Object.keys(validated).length > 0 ? JSON.stringify(validated) : null;
 }
 
 export function toResourceRequirements(
   state: ResourceRequirementsFormState
 ): ResourceRequirements | undefined {
-  const req: ResourceRequirements = {};
-  const vcpu = parseFinitePositive(state.minVcpu);
-  if (vcpu !== undefined) req.minVcpu = vcpu;
-  const mem = parseFinitePositive(state.minMemoryGb);
-  if (mem !== undefined) req.minMemoryGb = mem;
-  const disk = parseFinitePositive(state.minDiskGb);
-  if (disk !== undefined) req.minDiskGb = disk;
-  if (state.exclusiveNode !== undefined) req.exclusiveNode = state.exclusiveNode;
-  const coTenants = parseFinitePositive(state.maxCoTenants);
-  if (coTenants !== undefined) req.maxCoTenants = coTenants;
-  return Object.keys(req).length > 0 ? req : undefined;
+  const raw = buildRawRequirements(state);
+  if (Object.keys(raw).length === 0) return undefined;
+  return normalizeResourceRequirements(raw);
+}
+
+function buildRawRequirements(state: ResourceRequirementsFormState): Record<string, unknown> {
+  const raw: Record<string, unknown> = {};
+  if (state.minVcpu !== '') raw.minVcpu = Number(state.minVcpu);
+  if (state.minMemoryGb !== '') raw.minMemoryGb = Number(state.minMemoryGb);
+  if (state.minDiskGb !== '') raw.minDiskGb = Number(state.minDiskGb);
+  if (state.exclusiveNode !== undefined) raw.exclusiveNode = state.exclusiveNode;
+  if (state.maxCoTenants !== '') raw.maxCoTenants = Number(state.maxCoTenants);
+  return raw;
 }
 
 export function hasAnyResourceValue(state: ResourceRequirementsFormState): boolean {

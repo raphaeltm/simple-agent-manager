@@ -10,9 +10,12 @@ import { type FC, useEffect, useState } from 'react';
 import {
   deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
+  hasValidationErrors,
   type ResourceRequirementsFormState,
   ResourceRequirementsInput,
+  type ResourceValidationErrors,
   serializeResourceRequirements,
+  validateResourceState,
 } from '../resource-requirements';
 import { SkillRuntimeSection } from './SkillRuntimeSection';
 
@@ -48,6 +51,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
 
   useEffect(() => {
     if (!isOpen) return;
@@ -58,6 +62,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
     setVmSizeOverride(skill?.vmSizeOverride ?? '');
     setTaskMode(skill?.taskMode ?? 'task');
     setResourceReqs(deserializeResourceRequirements(skill?.resourceRequirementsJson));
+    setResourceErrors({});
     setError(null);
   }, [isOpen, skill]);
 
@@ -65,6 +70,12 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
     const trimmedName = name.trim();
     if (!trimmedName) {
       setError('Skill name is required');
+      return;
+    }
+    const resErrors = validateResourceState(resourceReqs);
+    setResourceErrors(resErrors);
+    if (hasValidationErrors(resErrors)) {
+      setError('Fix resource requirement errors before saving');
       return;
     }
     setSaving(true);
@@ -182,11 +193,12 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
           </div>
           <ResourceRequirementsInput
             value={resourceReqs}
-            onChange={setResourceReqs}
+            onChange={(next) => { setResourceReqs(next); setResourceErrors({}); }}
             onClearLegacy={() => setVmSizeOverride('')}
             disabled={saving}
             legacyVmSize={vmSizeOverride}
             inheritLabel="profile default"
+            errors={resourceErrors}
           />
         </div>
 
