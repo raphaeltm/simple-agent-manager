@@ -1,4 +1,10 @@
-import type { AgentProfileRuntime, TaskMode, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type {
+  AgentProfileRuntime,
+  ResourceRequirements,
+  TaskMode,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
 import {
   DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
   DEVCONTAINER_CONFIG_NAME_REGEX,
@@ -7,6 +13,10 @@ import {
 
 import { INVALID_PARAMS, jsonRpcError, type JsonRpcResponse } from './_helpers';
 import { parseDispatchRuntime } from './dispatch-instant';
+import {
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '../../services/resource-requirements-input';
 
 const VALID_TASK_MODES: TaskMode[] = ['task', 'conversation'];
 const VALID_WORKSPACE_PROFILES: WorkspaceProfile[] = ['full', 'lightweight'];
@@ -34,6 +44,7 @@ export interface ParsedDispatchTaskParams {
   explicitProvider?: string;
   explicitVmLocation?: string;
   explicitMissionId?: string;
+  resourceRequirements?: ResourceRequirements;
 }
 
 export function parseDispatchTaskParams(
@@ -220,6 +231,18 @@ export function parseDispatchTaskParams(
     explicitMissionId = params.missionId.trim();
   }
 
+  let resourceRequirements: ResourceRequirements | undefined;
+  if (params.resourceRequirements !== undefined) {
+    try {
+      resourceRequirements = normalizeResourceRequirementsInput(params.resourceRequirements);
+    } catch (err) {
+      if (err instanceof ResourceRequirementsValidationError) {
+        return { error: jsonRpcError(requestId, INVALID_PARAMS, err.message) };
+      }
+      throw err;
+    }
+  }
+
   return {
     parsed: {
       description,
@@ -237,6 +260,7 @@ export function parseDispatchTaskParams(
       explicitProvider,
       explicitVmLocation,
       explicitMissionId,
+      resourceRequirements,
     },
   };
 }

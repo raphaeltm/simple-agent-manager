@@ -23,6 +23,7 @@ import {
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from './placement-resolver';
 import * as projectDataService from './project-data';
+import { parseStoredResourceRequirementsJson } from './resource-requirements-input';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
 import { markQueuedTaskFailed } from './task-failure';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
@@ -53,6 +54,8 @@ export interface SubmitTriggeredTaskInput {
   taskMode: TaskMode;
   /** VM size override from trigger config. */
   vmSizeOverride: string | null;
+  /** Modern workload requirements JSON from trigger config. */
+  resourceRequirementsJson?: string | null;
   /** Trigger name (for branch naming). */
   triggerName: string;
 }
@@ -90,8 +93,15 @@ export async function submitTriggeredTask(
           env
         )
       : null;
+  const triggerResourceRequirements = parseStoredResourceRequirementsJson(
+    input.resourceRequirementsJson
+  );
+  const profileResourceRequirements = parseSkillResourceRequirementsJson(
+    resolvedProfile?.agentProfileResourceRequirementsJson ??
+      (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson)
+  );
   const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.resourceRequirementsJson
+    resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null
   );
 
   const taskId = ulid();
@@ -113,7 +123,9 @@ export async function submitTriggeredTask(
         credentialProjectPolicy: 'current-project',
         taskModeDefault: 'workspace-profile',
         resourceRequirements: {
+          trigger: triggerResourceRequirements,
           skill: skillResourceRequirements,
+          agentProfile: profileResourceRequirements,
         },
       });
     } catch (err) {
@@ -188,7 +200,11 @@ export async function submitTriggeredTask(
     triggerExecutionId: input.triggerExecutionId,
     requestedVmSize: vmSize,
     requestedVmSizeSource: vmSizeSource,
-    resourceRequirementsJson: resolvedProfile?.resourceRequirementsJson ?? null,
+    resourceRequirementsJson:
+      input.resourceRequirementsJson ??
+      resolvedProfile?.resourceRequirementsJson ??
+      resolvedProfile?.agentProfileResourceRequirementsJson ??
+      null,
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
     credentialAttributionUserId,
@@ -297,6 +313,11 @@ export async function submitTriggeredTask(
         opencodeBaseUrl: null,
         systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
         agentProfileHint: resolvedProfile?.profileId ?? null,
+        resourceRequirements:
+          triggerResourceRequirements ??
+          skillResourceRequirements ??
+          profileResourceRequirements ??
+          null,
         projectScaling: {
           taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
           maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,

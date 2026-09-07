@@ -263,6 +263,7 @@ export async function admitAndSubmitTriggerExecution(
       skillId: trigger.skillId,
       taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
       vmSizeOverride: trigger.vmSizeOverride,
+      resourceRequirementsJson: trigger.resourceRequirementsJson,
       triggerName: trigger.name,
     });
 

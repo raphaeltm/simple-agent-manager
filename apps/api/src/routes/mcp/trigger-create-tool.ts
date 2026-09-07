@@ -14,7 +14,14 @@ import {
   cronToNextFire,
   validateCronExpression,
 } from '../../services/cron-utils';
-import { loadProjectMaxTriggersOverride,resolveMaxTriggersPerProject } from '../../services/trigger-limits';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../../services/resource-requirements-input';
+import {
+  loadProjectMaxTriggersOverride,
+  resolveMaxTriggersPerProject,
+} from '../../services/trigger-limits';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -96,10 +103,42 @@ export async function handleCreateTrigger(
 
   const agentProfileId =
     typeof params.agentProfileId === 'string' ? params.agentProfileId.trim() : null;
+  if (
+    params.taskMode !== undefined &&
+    params.taskMode !== 'task' &&
+    params.taskMode !== 'conversation'
+  ) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'taskMode must be "task" or "conversation"');
+  }
   const taskMode = params.taskMode === 'conversation' ? 'conversation' : 'task';
-  const vmSizeOverride = ['small', 'medium', 'large'].includes(params.vmSizeOverride as string)
-    ? (params.vmSizeOverride as string)
-    : null;
+  if (
+    params.vmSizeOverride !== undefined &&
+    (typeof params.vmSizeOverride !== 'string' ||
+      !['small', 'medium', 'large'].includes(params.vmSizeOverride))
+  ) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'vmSizeOverride must be "small", "medium", or "large"'
+    );
+  }
+  const vmSizeOverride = typeof params.vmSizeOverride === 'string' ? params.vmSizeOverride : null;
+  let resourceRequirementsJson: string | null = null;
+  try {
+    if (params.resourceRequirements !== undefined) {
+      resourceRequirementsJson = serializeResourceRequirementsInput(params.resourceRequirements);
+    } else if (params.resourceRequirementsJson !== undefined) {
+      resourceRequirementsJson = serializeResourceRequirementsInput(
+        params.resourceRequirementsJson,
+        'resourceRequirementsJson'
+      );
+    }
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
 
   if (agentProfileId) {
     const profileResult = await env.DATABASE.prepare(
@@ -125,7 +164,10 @@ export async function handleCreateTrigger(
     );
   }
 
-  const projectMaxTriggers = await loadProjectMaxTriggersOverride(env.DATABASE, tokenData.projectId);
+  const projectMaxTriggers = await loadProjectMaxTriggersOverride(
+    env.DATABASE,
+    tokenData.projectId
+  );
   const maxTriggers = resolveMaxTriggersPerProject(
     projectMaxTriggers,
     env.MAX_TRIGGERS_PER_PROJECT
@@ -152,9 +194,9 @@ export async function handleCreateTrigger(
     `INSERT INTO triggers (
       id, project_id, user_id, name, description, status, source_type,
       cron_expression, cron_timezone, skip_if_running, prompt_template,
-      agent_profile_id, task_mode, vm_size_override, max_concurrent,
+      agent_profile_id, task_mode, vm_size_override, resource_requirements_json, max_concurrent,
       next_fire_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, NULL, 'active', 'cron', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, NULL, 'active', 'cron', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       triggerId,
@@ -167,6 +209,7 @@ export async function handleCreateTrigger(
       agentProfileId,
       taskMode,
       vmSizeOverride,
+      resourceRequirementsJson,
       DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
       nextFireAt,
       now,
@@ -197,6 +240,7 @@ export async function handleCreateTrigger(
           promptTemplate,
           taskMode,
           vmSizeOverride,
+          resourceRequirementsJson,
         }),
       },
     ],

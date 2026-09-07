@@ -96,6 +96,90 @@ func TestTasksDispatchUsesGlobalProjectAndPrompt(t *testing.T) {
 	}
 }
 
+func TestTasksDispatchSendsModernResourceFlags(t *testing.T) {
+	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
+	runtime, _, stderr := testRuntime(t, []string{
+		"--project=project_1",
+		"tasks",
+		"dispatch",
+		"--prompt=compile",
+		"--min-vcpu=4",
+		"--min-memory-gb", "16",
+		"--min-disk-gb=80",
+		"--exclusive-node=false",
+		"--max-co-tenants=0",
+	}, doer, nil)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	resources, ok := captured.JSON["resourceRequirements"].(map[string]any)
+	if !ok {
+		t.Fatalf("resourceRequirements missing from %#v", captured.JSON)
+	}
+	if resources["minVcpu"] != 4.0 ||
+		resources["minMemoryGb"] != 16.0 ||
+		resources["minDiskGb"] != 80.0 ||
+		resources["exclusiveNode"] != false ||
+		resources["maxCoTenants"] != 0.0 {
+		t.Fatalf("resource requirements = %#v", resources)
+	}
+}
+
+func TestTasksDispatchKeepsDeprecatedVMSizeWithModernFlags(t *testing.T) {
+	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
+	runtime, _, stderr := testRuntime(t, []string{
+		"--project=project_1",
+		"tasks",
+		"dispatch",
+		"--prompt=compile",
+		"--vm-size=small",
+		"--min-vcpu=8",
+	}, doer, nil)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	resources := captured.JSON["resourceRequirements"].(map[string]any)
+	if captured.JSON["vmSize"] != "small" || resources["minVcpu"] != 8.0 {
+		t.Fatalf("payload = %#v", captured.JSON)
+	}
+	if !strings.Contains(stderr.String(), "--vm-size is deprecated") {
+		t.Fatalf("stderr missing deprecation warning: %s", stderr.String())
+	}
+}
+
+func TestTasksDispatchRejectsMalformedResourceFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "negative", args: []string{"--min-vcpu=-1"}, want: "--min-vcpu must be a finite non-negative number"},
+		{name: "nan", args: []string{"--min-memory-gb=NaN"}, want: "--min-memory-gb must be a finite non-negative number"},
+		{name: "infinity", args: []string{"--min-disk-gb=+Inf"}, want: "--min-disk-gb must be a finite non-negative number"},
+		{name: "bool", args: []string{"--exclusive-node=maybe"}, want: "--exclusive-node must be true or false"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"--project=project_1", "tasks", "dispatch", "--prompt=compile"}
+			args = append(args, tt.args...)
+			runtime, _, stderr := testRuntime(t, args, nil, nil)
+
+			code := Run(context.Background(), runtime)
+			if code == 0 {
+				t.Fatal("expected failure")
+			}
+			if !strings.Contains(stderr.String(), tt.want) {
+				t.Fatalf("stderr = %s", stderr.String())
+			}
+		})
+	}
+}
+
 func TestTaskSubmitUsesPromptFlag(t *testing.T) {
 	doer, captured := captureJSONRequest(t, `{"taskId":"task_1","sessionId":"sess_1","status":"queued"}`, http.StatusAccepted)
 	runtime, _, stderr := testRuntime(t, []string{

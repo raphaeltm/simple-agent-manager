@@ -2433,6 +2433,7 @@ describe('MCP Routes', () => {
             description: 'Contradictory runtime',
             runtime: 'cf-container',
             vmSize: 'large',
+            resourceRequirements: { minVcpu: 4, exclusiveNode: false },
           },
         })
       );
@@ -2917,6 +2918,9 @@ describe('MCP Routes', () => {
       expect(props.provider.type).toBe('string');
       expect(props.vmLocation).toBeDefined();
       expect(props.vmLocation.type).toBe('string');
+      expect(props.resourceRequirements).toBeDefined();
+      expect(props.resourceRequirements.type).toContain('object');
+      expect(props.vmSize.description).toContain('Deprecated');
     });
 
     it('should reject invalid taskMode', async () => {
@@ -3155,6 +3159,34 @@ describe('MCP Routes', () => {
       expect(startInput.config.agentType).toBe('claude-code');
       expect(startInput.config.cloudProvider).toBe('hetzner');
       expect(startInput.config.vmLocation).toBe('fsn1');
+    });
+
+    it('should pass modern resource requirements to TaskRunner DO with legacy vmSize kept', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Provision explicit resources',
+            vmSize: 'small',
+            resourceRequirements: { minVcpu: 8, minMemoryGb: 32, exclusiveNode: false },
+          },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
+      expect(startInput.config.vmSize).toBe('small');
+      expect(startInput.config.resourceRequirements).toEqual({
+        minVcpu: 8,
+        minMemoryGb: 32,
+        exclusiveNode: false,
+      });
     });
 
     it('should dispatch with minimal args (backward compatibility)', async () => {

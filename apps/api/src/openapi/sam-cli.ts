@@ -13,11 +13,13 @@ type SchemaObject = {
   required?: string[];
   additionalProperties?: boolean | SchemaObject | ReferenceObject;
   nullable?: boolean;
+  deprecated?: boolean;
 };
 
 type ReferenceObject = {
   $ref: string;
   nullable?: boolean;
+  deprecated?: boolean;
 };
 
 type MediaTypeObject = {
@@ -524,6 +526,19 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         },
         ['session', 'messages', 'hasMore']
       ),
+      ResourceRequirements: objectSchema(
+        {
+          minVcpu: numberSchema('Minimum vCPU count requested by the workload.'),
+          minMemoryGb: numberSchema('Minimum memory in GiB requested by the workload.'),
+          minDiskGb: numberSchema('Minimum boot disk size in GiB requested by the workload.'),
+          exclusiveNode: booleanSchema('Whether the workload requests exclusive use of its node.'),
+          maxCoTenants: numberSchema(
+            'Compatibility safety metadata preserved for older callers; not a new scheduling control.'
+          ),
+        },
+        [],
+        true
+      ),
       SubmitTaskRequest: objectSchema(
         {
           prompt: stringSchema(),
@@ -535,7 +550,13 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           workspaceId: stringSchema(),
           provider: stringSchema(),
           vmLocation: stringSchema(),
-          vmSize: stringSchema(),
+          vmSize: {
+            ...stringSchema(
+              'Deprecated legacy size hint. Prefer resourceRequirements; SAM compatibility policy translates old tiers.'
+            ),
+            deprecated: true,
+          },
+          resourceRequirements: ref('ResourceRequirements'),
           taskMode: stringSchema(),
           devcontainerConfigName: stringSchema(),
         },
@@ -662,7 +683,14 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           promptTemplate: stringSchema(),
           agentProfileId: nullable(stringSchema()),
           taskMode: stringSchema(),
-          vmSizeOverride: nullable(stringSchema()),
+          vmSizeOverride: nullable(
+            stringSchema(
+              'Deprecated legacy size hint. Prefer resourceRequirementsJson/resourceRequirements on write paths.'
+            )
+          ),
+          resourceRequirementsJson: nullable(
+            stringSchema('Persisted modern workload requirements JSON for trigger compatibility.')
+          ),
           maxConcurrent: integerSchema(),
           lastTriggeredAt: nullable(dateTimeSchema()),
           triggerCount: integerSchema(),
@@ -723,7 +751,14 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           systemPromptAppend: nullable(stringSchema()),
           maxTurns: nullable(integerSchema()),
           timeoutMinutes: nullable(integerSchema()),
-          vmSizeOverride: nullable(stringSchema()),
+          vmSizeOverride: nullable(
+            stringSchema(
+              'Deprecated legacy size hint. Prefer modern workload requirements on profiles/skills.'
+            )
+          ),
+          resourceRequirementsJson: nullable(
+            stringSchema('Persisted modern workload requirements JSON for profile compatibility.')
+          ),
           provider: nullable(stringSchema()),
           vmLocation: nullable(stringSchema()),
           workspaceProfile: nullable(stringSchema()),
@@ -770,7 +805,21 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           status: stringSchema(),
           healthStatus: stringSchema(),
           location: stringSchema(),
-          vmSize: stringSchema(),
+          vmSize: stringSchema(
+            'Legacy compatibility size label; may not identify provider-native hardware.'
+          ),
+          providerInstanceType: nullable(
+            stringSchema('Provider-native instance type/SKU when known.')
+          ),
+          providerInstanceVcpuCount: nullable(
+            numberSchema('Provider-native vCPU count when known.')
+          ),
+          providerInstanceMemoryMb: nullable(
+            numberSchema('Provider-native memory in MiB when known.')
+          ),
+          providerInstanceDiskGb: nullable(
+            numberSchema('Provider-native disk size in GiB when known.')
+          ),
           ipAddress: stringSchema(),
           domain: stringSchema(),
           workspaceCount: integerSchema(),

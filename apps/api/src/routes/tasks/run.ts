@@ -33,6 +33,10 @@ import {
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
+import {
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '../../services/resource-requirements-input';
 import { isTaskBlocked } from '../../services/task-graph';
 import { cleanupTaskRun } from '../../services/task-runner';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
@@ -111,6 +115,18 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
 
   // Parse request body (optional — empty body means use defaults)
   const body = await parseOptionalBody(c.req.raw, RunTaskSchema, {} as Record<string, never>);
+  const taskResourceRequirements = (() => {
+    try {
+      return body.resourceRequirements === undefined
+        ? undefined
+        : normalizeResourceRequirementsInput(body.resourceRequirements);
+    } catch (err) {
+      if (err instanceof ResourceRequirementsValidationError) {
+        throw errors.badRequest(err.message);
+      }
+      throw err;
+    }
+  })();
 
   // vmSize, workspaceProfile validated by schema (picklist)
 
@@ -140,7 +156,9 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
         },
         credentialProjectPolicy: 'current-project',
         taskModeDefault: 'task',
-        resourceRequirements: {},
+        resourceRequirements: {
+          task: taskResourceRequirements,
+        },
       });
     } catch (err) {
       if (err instanceof PlacementResolutionError) {
@@ -216,6 +234,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
          execution_step = 'node_selection',
          requested_vm_size = ?,
          requested_vm_size_source = ?,
+         resource_requirements_json = ?,
          resource_requirements_source = ?,
          resolved_reservation_json = ?,
          credential_attribution_user_id = ?,
@@ -228,6 +247,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     .bind(
       vmSize,
       vmSizeSource,
+      taskResourceRequirements ? JSON.stringify(taskResourceRequirements) : null,
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -328,6 +348,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       credentialAttributionSource,
       taskMode,
       agentProfileHint: task.agentProfileHint ?? null,
+      resourceRequirements: taskResourceRequirements ?? null,
       // Full profile resolution is not supported on the kanban Run path, but the
       // persisted profile hint must still reach TaskRunner so workspace
       // GitHub-token minting can enforce profile SAM platform policy.

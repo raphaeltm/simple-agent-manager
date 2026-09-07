@@ -89,6 +89,7 @@ export async function handleDispatchTask(
     explicitProvider,
     explicitVmLocation,
     explicitMissionId,
+    resourceRequirements,
   } = parsedParams.parsed;
 
   // ── Look up current task to get dispatch depth ──────────────────────────
@@ -230,8 +231,12 @@ export async function handleDispatchTask(
           env
         )
       : null;
+  const profileResourceRequirements = parseSkillResourceRequirementsJson(
+    resolvedProfile?.agentProfileResourceRequirementsJson ??
+      (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson)
+  );
   const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.resourceRequirementsJson
+    resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null
   );
 
   // ── Build the task description with references ──────────────────────────
@@ -310,7 +315,9 @@ export async function handleDispatchTask(
     credentialProjectPolicy: 'inherited-or-none',
     taskModeDefault: 'task',
     resourceRequirements: {
+      task: resourceRequirements,
       skill: skillResourceRequirements,
+      agentProfile: profileResourceRequirements,
     },
   };
 
@@ -473,7 +480,11 @@ export async function handleDispatchTask(
       explicitMissionId ?? currentTask.missionId ?? null,
       resolvedVmSize,
       vmSizeSource,
-      resolvedProfile?.resourceRequirementsJson ?? null,
+      resourceRequirements
+        ? JSON.stringify(resourceRequirements)
+        : (resolvedProfile?.resourceRequirementsJson ??
+            resolvedProfile?.agentProfileResourceRequirementsJson ??
+            null),
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -680,6 +691,8 @@ export async function handleDispatchTask(
         resolvedReservation,
         capacityPoolSelection,
         vmSizeSource,
+        resourceRequirements:
+          resourceRequirements ?? skillResourceRequirements ?? profileResourceRequirements ?? null,
       });
     } catch (err) {
       // TaskRunner DO startup failed — mark task as failed

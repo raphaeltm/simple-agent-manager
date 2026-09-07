@@ -6,7 +6,12 @@
  * are set so the UI groups it as a subtask (same semantics as the
  * workspace-MCP dispatch path in `routes/mcp/dispatch-tool.ts`).
  */
-import type { TaskMode, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type {
+  ResourceRequirements,
+  TaskMode,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
 import { isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -26,6 +31,10 @@ import { resolveTaskStartPlacementCredentialAttribution } from '../../../service
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
+import {
+  normalizeResourceRequirementsInput,
+  ResourceRequirementsValidationError,
+} from '../../../services/resource-requirements-input';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
 import type { AnthropicToolDef, ToolContext } from '../types';
@@ -66,7 +75,21 @@ export const dispatchTaskDef: AnthropicToolDef = {
       vmSize: {
         type: 'string',
         enum: ['small', 'medium', 'large'],
-        description: 'VM size for the workspace. Uses project default if omitted.',
+        description:
+          'Deprecated legacy VM size for the workspace. Prefer resourceRequirements; canonical compatibility translates legacy tiers. Uses project default if omitted.',
+      },
+      resourceRequirements: {
+        type: 'object',
+        description:
+          'Modern workload requirements for this task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. Omitted fields inherit; explicit false is preserved.',
+        properties: {
+          minVcpu: { type: 'number', minimum: 0 },
+          minMemoryGb: { type: 'number', minimum: 0 },
+          minDiskGb: { type: 'number', minimum: 0 },
+          exclusiveNode: { type: 'boolean' },
+          maxCoTenants: { type: 'number', minimum: 0 },
+        },
+        additionalProperties: true,
       },
       workspaceProfile: {
         type: 'string',
@@ -116,6 +139,7 @@ interface DispatchTaskInput {
   description: string;
   agentType?: string;
   vmSize?: string;
+  resourceRequirements?: ResourceRequirements;
   workspaceProfile?: string;
   priority?: number;
   branch?: string;
@@ -149,6 +173,17 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       return { error: 'vmSize must be small, medium, or large.' };
     }
     vmSize = input.vmSize as VMSize;
+  }
+  let resourceRequirements: ResourceRequirements | undefined;
+  if (input.resourceRequirements !== undefined) {
+    try {
+      resourceRequirements = normalizeResourceRequirementsInput(input.resourceRequirements);
+    } catch (err) {
+      if (err instanceof ResourceRequirementsValidationError) {
+        return { error: err.message };
+      }
+      throw err;
+    }
   }
 
   if (input.agentType !== undefined && !isValidAgentType(input.agentType)) {
@@ -242,8 +277,12 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
           env
         )
       : null;
+  const profileResourceRequirements = parseSkillResourceRequirementsJson(
+    resolvedProfile?.agentProfileResourceRequirementsJson ??
+      (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson)
+  );
   const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.resourceRequirementsJson
+    resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null
   );
 
   const explicitBranch = input.branch?.trim();
@@ -273,7 +312,9 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       credentialProjectPolicy: 'current-project-unless-inherited',
       taskModeDefault: 'task',
       resourceRequirements: {
+        task: resourceRequirements,
         skill: skillResourceRequirements,
+        agentProfile: profileResourceRequirements,
       },
     },
     { env: ctx.env as unknown as Env }
@@ -352,7 +393,11 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       input.missionId?.trim() || null,
       resolvedVmSize,
       vmSizeSource,
-      resolvedProfile?.resourceRequirementsJson ?? null,
+      resourceRequirements
+        ? JSON.stringify(resourceRequirements)
+        : (resolvedProfile?.resourceRequirementsJson ??
+            resolvedProfile?.agentProfileResourceRequirementsJson ??
+            null),
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -466,6 +511,8 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       resolvedReservation,
       capacityPoolSelection,
       vmSizeSource,
+      resourceRequirements:
+        resourceRequirements ?? skillResourceRequirements ?? profileResourceRequirements ?? null,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

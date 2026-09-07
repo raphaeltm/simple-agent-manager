@@ -4,18 +4,23 @@
  * Lets agents manage reusable, project-scoped skills. Skills are a profile-override
  * layer: skill fields override the resolved agent profile when a task runs the skill.
  */
-import { SHARED_CONFIG_FIELD_PROPERTIES, VALID_VALUES_HINT } from './tool-definitions-shared-fields';
+import {
+  SHARED_CONFIG_FIELD_PROPERTIES,
+  VALID_VALUES_HINT,
+} from './tool-definitions-shared-fields';
 
 /** Skill field properties = shared config fields + skill-specific extras. */
 const SKILL_FIELD_PROPERTIES = {
   ...SHARED_CONFIG_FIELD_PROPERTIES,
   resourceRequirementsJson: {
-    type: 'string',
-    description: 'JSON object string describing resource requirements for this skill. Must parse to a JSON object.',
+    type: ['string', 'null'],
+    description:
+      'Compatibility JSON string describing workload requirements for this skill. Prefer resourceRequirements; known modern fields are validated and unknown object metadata is preserved.',
   },
   defaultProfileId: {
     type: 'string',
-    description: 'Agent profile ID this skill resolves against by default. Must reference an accessible agent profile.',
+    description:
+      'Agent profile ID this skill resolves against by default. Must reference an accessible agent profile.',
   },
 } as const;
 

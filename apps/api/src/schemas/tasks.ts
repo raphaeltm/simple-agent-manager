@@ -62,11 +62,11 @@ const DevcontainerConfigNameSchema = v.pipe(
 
 /** Resource requirements — all optional, unset fields inherit from precedence chain. */
 const ResourceRequirementsSchema = v.object({
-  minVcpu: v.optional(v.number()),
-  minMemoryGb: v.optional(v.number()),
-  minDiskGb: v.optional(v.number()),
+  minVcpu: v.optional(v.pipe(v.number(), v.minValue(0))),
+  minMemoryGb: v.optional(v.pipe(v.number(), v.minValue(0))),
+  minDiskGb: v.optional(v.pipe(v.number(), v.minValue(0))),
   exclusiveNode: v.optional(v.boolean()),
-  maxCoTenants: v.optional(v.number()),
+  maxCoTenants: v.optional(v.pipe(v.number(), v.minValue(0))),
 });
 
 export const SubmitTaskSchema = v.object({
@@ -128,6 +128,7 @@ export const RunTaskSchema = v.object({
   devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
   nodeId: v.optional(v.string()),
   branch: v.optional(v.string()),
+  resourceRequirements: v.optional(ResourceRequirementsSchema),
 });
 
 export const RequestAttachmentUploadSchema = v.object({
