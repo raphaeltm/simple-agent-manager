@@ -2,10 +2,13 @@ package sysinfo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -602,14 +605,18 @@ func TestParseDockerPSLabelEntries(t *testing.T) {
 	}
 }
 
-func TestCollectDockerContainerStatsForLabelsUsesStructuredLabelTemplate(t *testing.T) {
+func TestCollectDockerContainerStatsForLabelsUsesDockerLabelFunctionFormatter(t *testing.T) {
 	logPath := installFakeDockerCLI(t, "json-labels")
+	labelValue := `/workspace/repo "quoted",comma\path`
+	secretLabel := "secret-token=must-not-leak"
+	t.Setenv("FAKE_DOCKER_LABEL_VALUE", labelValue)
+	t.Setenv("FAKE_DOCKER_OTHER_LABEL_VALUE", secretLabel)
 
 	stats, err := CollectDockerContainerStatsForLabelsBounded(
 		context.Background(),
 		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 8, MaxOutputBytes: 4096},
 		"devcontainer.local_folder",
-		[]string{"/workspace/repo"},
+		[]string{labelValue},
 	)
 	if err != nil {
 		t.Fatalf("CollectDockerContainerStatsForLabelsBounded() error = %v", err)
@@ -618,7 +625,7 @@ func TestCollectDockerContainerStatsForLabelsUsesStructuredLabelTemplate(t *test
 	if !ok {
 		t.Fatalf("missing abc123 stats: %#v", stats)
 	}
-	if stat.LabelValue != "/workspace/repo" || stat.MemoryUsageBytes == 0 || stat.MemoryLimitBytes == 0 {
+	if stat.LabelValue != labelValue || stat.MemoryUsageBytes == 0 || stat.MemoryLimitBytes == 0 {
 		t.Fatalf("unexpected stat: %#v", stat)
 	}
 
@@ -626,11 +633,15 @@ func TestCollectDockerContainerStatsForLabelsUsesStructuredLabelTemplate(t *test
 	if err != nil {
 		t.Fatalf("read fake docker args: %v", err)
 	}
-	if strings.Contains(string(argsLog), "{{.Labels}}") {
+	logText := string(argsLog)
+	if strings.Contains(logText, ".Labels") {
 		t.Fatalf("collector requested raw Labels list: %s", argsLog)
 	}
-	if !strings.Contains(string(argsLog), `{{json (index .Labels "devcontainer.local_folder")}}`) {
+	if !strings.Contains(logText, `{{json (.Label "devcontainer.local_folder")}}`) {
 		t.Fatalf("collector did not request structured workspace label: %s", argsLog)
+	}
+	if strings.Contains(logText, secretLabel) || strings.Contains(logText, "com.example.secret") {
+		t.Fatalf("collector exposed unrelated label metadata: %s", argsLog)
 	}
 }
 
@@ -686,13 +697,17 @@ func TestCollectDockerContainerStatsBoundsStatRequestedContainers(t *testing.T) 
 func TestCollectDockerContainerStatsForLabelsBoundsCommandOutput(t *testing.T) {
 	installFakeDockerCLI(t, "excess")
 
+	start := time.Now()
 	_, err := CollectDockerContainerStatsForLabelsBounded(
 		context.Background(),
 		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 8, MaxOutputBytes: 32},
 		"devcontainer.local_folder",
 		[]string{"/workspace/repo"},
 	)
-	if err == nil || !strings.Contains(err.Error(), "output exceeded 32 bytes") {
+	if time.Since(start) > time.Second {
+		t.Fatalf("output-bound command took %s, want under 1s", time.Since(start))
+	}
+	if err == nil || !strings.Contains(err.Error(), "stdout exceeded 32 bytes") {
 		t.Fatalf("error = %v, want output bound error", err)
 	}
 }
@@ -702,6 +717,7 @@ func TestCollectDockerContainerStatsForLabelsHonorsTimeoutAndCancellation(t *tes
 
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
+	start := time.Now()
 	_, err := CollectDockerContainerStatsForLabelsBounded(
 		timeoutCtx,
 		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 8, MaxOutputBytes: 4096},
@@ -711,9 +727,13 @@ func TestCollectDockerContainerStatsForLabelsHonorsTimeoutAndCancellation(t *tes
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("timeout error = %v, want context deadline exceeded", err)
 	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("timeout command took %s, want under 1s", time.Since(start))
+	}
 
 	canceledCtx, cancelNow := context.WithCancel(context.Background())
 	cancelNow()
+	start = time.Now()
 	_, err = CollectDockerContainerStatsForLabelsBounded(
 		canceledCtx,
 		DockerContainerStatsOptions{Timeout: time.Second, MaxContainers: 8, MaxOutputBytes: 4096},
@@ -723,6 +743,93 @@ func TestCollectDockerContainerStatsForLabelsHonorsTimeoutAndCancellation(t *tes
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation error = %v, want context canceled", err)
 	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("canceled command took %s, want under 1s", time.Since(start))
+	}
+}
+
+func TestDockerCommandOutputBoundsBothStreams(t *testing.T) {
+	t.Run("normal output with stderr diagnostic", func(t *testing.T) {
+		installFakeDockerCLI(t, "both-streams")
+
+		out, err := dockerCommandOutput(context.Background(), 4096, "ps")
+		if err != nil {
+			t.Fatalf("dockerCommandOutput() error = %v", err)
+		}
+		if string(out) != "ok\n" {
+			t.Fatalf("stdout = %q, want ok", out)
+		}
+	})
+
+	t.Run("huge stderr is bounded", func(t *testing.T) {
+		installFakeDockerCLI(t, "stderr-excess")
+
+		start := time.Now()
+		_, err := dockerCommandOutput(context.Background(), 32, "ps")
+		if time.Since(start) > time.Second {
+			t.Fatalf("stderr-bound command took %s, want under 1s", time.Since(start))
+		}
+		if err == nil || !strings.Contains(err.Error(), "stderr exceeded 32 bytes") {
+			t.Fatalf("error = %v, want stderr bound error", err)
+		}
+	})
+
+	t.Run("stderr errors are sanitized", func(t *testing.T) {
+		installFakeDockerCLI(t, "error-secret")
+
+		_, err := dockerCommandOutput(context.Background(), 4096, "ps")
+		if err == nil {
+			t.Fatal("expected command error")
+		}
+		msg := err.Error()
+		for _, secret := range []string{"super-secret", "bearer-secret", "bad-password"} {
+			if strings.Contains(msg, secret) {
+				t.Fatalf("error leaked secret %q: %s", secret, msg)
+			}
+		}
+		if !strings.Contains(msg, "[redacted]") {
+			t.Fatalf("error was not redacted: %s", msg)
+		}
+	})
+}
+
+func TestDockerCommandOutputReturnsWhenDescendantRetainsPipes(t *testing.T) {
+	for _, mode := range []string{"retain-stdout", "retain-stderr"} {
+		t.Run(mode, func(t *testing.T) {
+			installFakeDockerCLI(t, mode)
+
+			start := time.Now()
+			_, err := dockerCommandOutput(context.Background(), 4096, "ps")
+			if time.Since(start) > 1500*time.Millisecond {
+				t.Fatalf("retained-pipe command took %s, want under 1.5s", time.Since(start))
+			}
+			if err == nil || !strings.Contains(err.Error(), "output pipes did not close before wait delay") {
+				t.Fatalf("error = %v, want retained pipe error", err)
+			}
+		})
+	}
+}
+
+func TestDockerCommandOutputCancelsProcessGroupWithRetainedPipes(t *testing.T) {
+	installFakeDockerCLI(t, "sleep-retain")
+
+	before := runtime.NumGoroutine()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := dockerCommandOutput(ctx, 4096, "ps")
+	if time.Since(start) > time.Second {
+		t.Fatalf("timeout with retained pipes took %s, want under 1s", time.Since(start))
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %v, want context deadline exceeded", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	if after := runtime.NumGoroutine(); after > before+4 {
+		t.Fatalf("goroutines grew from %d to %d after canceled retained-pipe command", before, after)
+	}
 }
 
 func installFakeDockerCLI(t *testing.T, mode string) string {
@@ -730,45 +837,228 @@ func installFakeDockerCLI(t *testing.T, mode string) string {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "args.log")
 	path := filepath.Join(dir, "docker")
-	script := `#!/bin/sh
-printf '%s\n' "$*" >> "$FAKE_DOCKER_ARGS_LOG"
-case "$1" in
-  ps)
-    case "$FAKE_DOCKER_MODE" in
-      json-labels)
-        printf '%s\n' '{"id":"abc123","names":"workspace","labelValue":"/workspace/repo"}'
-        ;;
-      duplicate)
-        printf '%s\n' '{"id":"abc123","names":"workspace-a","labelValue":"/workspace/repo"}'
-        printf '%s\n' '{"id":"def456","names":"workspace-b","labelValue":"/workspace/repo"}'
-        ;;
-      overflow)
-        printf '%s\n' '{"id":"abc123","names":"workspace-a","labelValue":"/workspace/repo"}'
-        printf '%s\n' '{"id":"def456","names":"workspace-b","labelValue":"/workspace/repo"}'
-        printf '%s\n' '{"id":"ghi789","names":"workspace-c","labelValue":"/workspace/repo"}'
-        ;;
-      excess)
-        printf '%s\n' 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
-        ;;
-      sleep)
-        sleep 2
-        ;;
-    esac
-    ;;
-  stats)
-    printf '%s\n' '{"id":"abc123","name":"/workspace-a","cpuPercent":"1.00%","memUsage":"10MiB / 1GiB","memPercent":"1.00%"}'
-    printf '%s\n' '{"id":"def456","name":"/workspace-b","cpuPercent":"2.00%","memUsage":"20MiB / 1GiB","memPercent":"2.00%"}'
-    printf '%s\n' '{"id":"ghi789","name":"/workspace-c","cpuPercent":"3.00%","memUsage":"30MiB / 1GiB","memPercent":"3.00%"}'
-    ;;
-esac
-`
+	script := fmt.Sprintf("#!/bin/sh\nexec %s -test.run '^TestFakeDockerCLI$' -- \"$@\"\n", shellQuote(os.Args[0]))
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker cli: %v", err)
 	}
+	t.Setenv("FAKE_DOCKER_HELPER", "1")
 	t.Setenv("SAM_DOCKER_CLI_PATH", path)
 	t.Setenv("FAKE_DOCKER_MODE", mode)
 	t.Setenv("FAKE_DOCKER_ARGS_LOG", logPath)
 	return logPath
+}
+
+func TestFakeDockerCLI(t *testing.T) {
+	if os.Getenv("FAKE_DOCKER_HELPER") != "1" {
+		return
+	}
+	os.Exit(runFakeDockerCLI(fakeDockerArgs()))
+}
+
+func fakeDockerArgs() []string {
+	for i, arg := range os.Args {
+		if arg == "--" && i+1 < len(os.Args) {
+			return os.Args[i+1:]
+		}
+	}
+	return nil
+}
+
+func runFakeDockerCLI(args []string) int {
+	if logPath := os.Getenv("FAKE_DOCKER_ARGS_LOG"); logPath != "" {
+		if file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+			_, _ = fmt.Fprintln(file, strings.Join(args, " "))
+			_ = file.Close()
+		}
+	}
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "missing docker command")
+		return 2
+	}
+	mode := os.Getenv("FAKE_DOCKER_MODE")
+	switch args[0] {
+	case "ps":
+		return runFakeDockerPS(args, mode)
+	case "stats":
+		return runFakeDockerStats(args)
+	default:
+		fmt.Fprintf(os.Stderr, "unsupported docker command %q\n", args[0])
+		return 2
+	}
+}
+
+func runFakeDockerPS(args []string, mode string) int {
+	switch mode {
+	case "both-streams":
+		fmt.Fprintln(os.Stderr, "safe diagnostic")
+		fmt.Fprintln(os.Stdout, "ok")
+		return 0
+	case "error-secret":
+		fmt.Fprintln(os.Stderr, "failed token=super-secret Authorization: Bearer bearer-secret password=bad-password")
+		return 17
+	case "excess":
+		fmt.Fprint(os.Stdout, strings.Repeat("x", 1<<20))
+		return 0
+	case "stderr-excess":
+		fmt.Fprint(os.Stderr, strings.Repeat("e", 1<<20))
+		return 18
+	case "sleep":
+		time.Sleep(2 * time.Second)
+		return 0
+	case "retain-stdout":
+		return startRetainedFakeDockerChild(true, false, false)
+	case "retain-stderr":
+		return startRetainedFakeDockerChild(false, true, false)
+	case "sleep-retain":
+		return startRetainedFakeDockerChild(true, true, true)
+	}
+
+	format := dockerFormatArg(args)
+	entries := []fakeDockerPSContainer{
+		{ID: "abc123", Names: "workspace", Labels: fakeDockerLabels()},
+	}
+	switch mode {
+	case "duplicate":
+		entries = []fakeDockerPSContainer{
+			{ID: "abc123", Names: "workspace-a", Labels: fakeDockerLabels()},
+			{ID: "def456", Names: "workspace-b", Labels: fakeDockerLabels()},
+		}
+	case "overflow":
+		entries = []fakeDockerPSContainer{
+			{ID: "abc123", Names: "workspace-a", Labels: fakeDockerLabels()},
+			{ID: "def456", Names: "workspace-b", Labels: fakeDockerLabels()},
+			{ID: "ghi789", Names: "workspace-c", Labels: fakeDockerLabels()},
+		}
+	}
+	if err := renderFakeDockerPS(format, entries); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 64
+	}
+	return 0
+}
+
+func runFakeDockerStats(args []string) int {
+	requested := make(map[string]struct{})
+	if formatIndex := dockerFormatArgIndex(args); formatIndex >= 0 {
+		for _, id := range args[formatIndex+2:] {
+			requested[id] = struct{}{}
+		}
+	}
+	for _, entry := range []dockerStatsEntry{
+		{ID: "abc123", Name: "/workspace-a", CPUPercent: "1.00%", MemUsage: "10MiB / 1GiB", MemPercent: "1.00%"},
+		{ID: "def456", Name: "/workspace-b", CPUPercent: "2.00%", MemUsage: "20MiB / 1GiB", MemPercent: "2.00%"},
+		{ID: "ghi789", Name: "/workspace-c", CPUPercent: "3.00%", MemUsage: "30MiB / 1GiB", MemPercent: "3.00%"},
+	} {
+		if len(requested) > 0 {
+			if _, ok := requested[entry.ID]; !ok {
+				continue
+			}
+		}
+		data, _ := json.Marshal(entry)
+		fmt.Println(string(data))
+	}
+	return 0
+}
+
+type fakeDockerPSContainer struct {
+	ID     string
+	Names  string
+	Labels map[string]string
+}
+
+func renderFakeDockerPS(format string, entries []fakeDockerPSContainer) error {
+	if format == "" {
+		return errors.New("missing --format")
+	}
+	if strings.Contains(format, ".Labels") {
+		return errors.New("template cannot index .Labels because Docker exposes it as a formatted string")
+	}
+	labelMarker, labelKey, ok := fakeDockerLabelMarker(format)
+	if !ok {
+		return fmt.Errorf("unsupported docker ps formatter %q", format)
+	}
+	for _, entry := range entries {
+		labelValue, _ := json.Marshal(entry.Labels[labelKey])
+		line := strings.NewReplacer(
+			"{{.ID}}", entry.ID,
+			"{{.Names}}", entry.Names,
+			labelMarker, string(labelValue),
+		).Replace(format)
+		if strings.Contains(line, "{{") {
+			return fmt.Errorf("unrendered template expression in %q", line)
+		}
+		fmt.Println(line)
+	}
+	return nil
+}
+
+func fakeDockerLabelMarker(format string) (marker string, key string, ok bool) {
+	const prefix = `{{json (.Label "`
+	start := strings.Index(format, prefix)
+	if start < 0 {
+		return "", "", false
+	}
+	keyStart := start + len(prefix)
+	keyEnd := strings.Index(format[keyStart:], `")}}`)
+	if keyEnd < 0 {
+		return "", "", false
+	}
+	key = format[keyStart : keyStart+keyEnd]
+	return format[start : keyStart+keyEnd+len(`")}}`)], key, true
+}
+
+func fakeDockerLabels() map[string]string {
+	labelValue := os.Getenv("FAKE_DOCKER_LABEL_VALUE")
+	if labelValue == "" {
+		labelValue = "/workspace/repo"
+	}
+	otherValue := os.Getenv("FAKE_DOCKER_OTHER_LABEL_VALUE")
+	if otherValue == "" {
+		otherValue = "secret-token=default"
+	}
+	return map[string]string{
+		"devcontainer.local_folder": labelValue,
+		"com.example.secret":        otherValue,
+	}
+}
+
+func dockerFormatArg(args []string) string {
+	if index := dockerFormatArgIndex(args); index >= 0 && index+1 < len(args) {
+		return args[index+1]
+	}
+	return ""
+}
+
+func dockerFormatArgIndex(args []string) int {
+	for i, arg := range args {
+		if arg == "--format" {
+			return i
+		}
+	}
+	return -1
+}
+
+func startRetainedFakeDockerChild(stdout, stderr, sleepParent bool) int {
+	cmd := exec.Command("/bin/sh", "-c", "sleep 5")
+	if stdout {
+		cmd.Stdout = os.Stdout
+	}
+	if stderr {
+		cmd.Stderr = os.Stderr
+	}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "start retained child: %v\n", err)
+		return 19
+	}
+	if sleepParent {
+		time.Sleep(2 * time.Second)
+	}
+	fmt.Fprintln(os.Stdout, "ok")
+	return 0
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func TestDockerInfoErrorField(t *testing.T) {
