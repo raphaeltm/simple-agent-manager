@@ -23,6 +23,11 @@ import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
 export type PlacementEntryPoint =
   | 'task-submit'
+  | 'direct-node'
+  | 'direct-workspace'
+  | 'deployment-provisioning'
+  | 'trial-orchestrator'
+  | 'session-snapshot-relay'
   | 'mcp-dispatch'
   | 'sam-session-dispatch'
   | 'trigger-submit'
@@ -106,6 +111,7 @@ export interface TaskStartPlacementInput {
   taskModeDefault: PlacementTaskModeDefault;
   profileVmSizeSource?: PlacementProfileVmSizeSource;
   resourceRequirements?: ResourceResolutionInput;
+  workloadRole?: CapacityWorkloadRole;
   placementSettings?: CapacityPoolPlacementSettings | null;
   legacyWorkloadMapping?: Record<VMSize, Required<ResourceRequirements>>;
   validateLocation?: boolean;
@@ -141,6 +147,7 @@ export interface TaskStartPlacement {
   taskMode: TaskMode;
   agentType: string | null;
   resolvedReservation: ResolvedResourceReservation;
+  workloadRole: CapacityWorkloadRole;
   placementSettings?: CapacityPoolPlacementSettings | null;
   credentialLookup: PlacementCredentialLookup;
   inheritedCredentialAttribution: Required<PlacementCredentialAttributionInput>;
@@ -164,6 +171,9 @@ export interface TaskStartCapacityCandidate {
   providerInstanceVcpuCount: number;
   providerInstanceMemoryMb: number;
   providerInstanceDiskGb: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay: string | null;
   providerInstancePriceCurrency: string | null;
   providerInstancePriceMonthlyCents: number | null;

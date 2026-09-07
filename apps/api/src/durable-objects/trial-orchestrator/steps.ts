@@ -22,7 +22,9 @@ import {
   DEFAULT_TRIAL_KNOWLEDGE_GITHUB_TIMEOUT_MS,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
+  type VMSize,
 } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -30,6 +32,12 @@ import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { createOwnerProjectMembership } from '../../middleware/project-auth';
+import {
+  type CanonicalVmAllocationPlan,
+  placementProjectDefaultsFromRow,
+  resolveCanonicalVmAllocationPlan,
+} from '../../services/canonical-vm-allocation';
+import { toCapacityPlacementSnapshot } from '../../services/capacity-pools';
 import { signCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import { buildSamMcpEntry } from '../../services/mcp-connection-resolution';
@@ -40,11 +48,14 @@ import {
   startAgentSessionOnNode,
 } from '../../services/node-agent';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
+import { buildPlacementAuthoritySqlPredicate } from '../../services/placement-authority';
 import * as projectDataService from '../../services/project-data';
 import { DISCOVERY_PROMPT } from '../../services/trial/discovery-prompt';
 import { startDiscoveryAgent } from '../../services/trial/trial-runner';
 import { readTrial, writeTrial } from '../../services/trial/trial-store';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
+import { reserveWorkspacePlacement } from '../../services/workspace-placement';
+import { resolveWorkspaceAdmissionPolicy } from '../../services/workspace-resource-capacity';
 import { verifyNodeAgentHealthy } from '../task-runner/node-steps';
 import { isNodeAgentReadyForWorkspaceDispatch } from '../task-runner/readiness';
 import {
@@ -59,6 +70,63 @@ import type { TrialOrchestratorContext, TrialOrchestratorState } from './types';
 const DEFAULT_TRIAL_WORKSPACE_PROFILE = 'lightweight';
 /** Fallback branch when the GitHub default-branch probe fails or times out. */
 const TRIAL_FALLBACK_BRANCH = 'main';
+
+function resolveTrialVmSize(env: TrialOrchestratorContext['env']): VMSize {
+  return env.TRIAL_VM_SIZE === 'small' ||
+    env.TRIAL_VM_SIZE === 'medium' ||
+    env.TRIAL_VM_SIZE === 'large'
+    ? env.TRIAL_VM_SIZE
+    : DEFAULT_VM_SIZE;
+}
+
+function resolveTrialWorkspaceProfile(
+  env: TrialOrchestratorContext['env']
+): 'full' | 'lightweight' {
+  return env.TRIAL_DEFAULT_WORKSPACE_PROFILE === 'full' ? 'full' : DEFAULT_TRIAL_WORKSPACE_PROFILE;
+}
+
+async function resolveTrialVmAllocation(
+  state: TrialOrchestratorState,
+  rc: TrialOrchestratorContext
+): Promise<CanonicalVmAllocationPlan> {
+  const userId = resolveAnonymousUserId(rc.env);
+  const db = drizzle(rc.env.DATABASE, { schema });
+  if (!state.projectId) {
+    throw Object.assign(new Error('Trial project is missing'), { permanent: true });
+  }
+  const [project] = await db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.id, state.projectId))
+    .limit(1);
+  if (!project) {
+    throw Object.assign(new Error('Trial project is missing'), { permanent: true });
+  }
+
+  const allocation = await resolveCanonicalVmAllocationPlan(db, rc.env, {
+    entryPoint: 'trial-orchestrator',
+    taskId: state.trialId,
+    userId,
+    projectId: state.projectId,
+    project: placementProjectDefaultsFromRow(project),
+    explicit: {
+      vmSize: resolveTrialVmSize(rc.env),
+      vmLocation: rc.env.TRIAL_VM_LOCATION ?? DEFAULT_VM_LOCATION,
+    },
+    credentialProjectPolicy: 'current-project',
+    taskModeDefault: 'task',
+    workloadRole: 'workspace',
+    requiredCredentialSource: 'platform',
+    credentialsRequiredMessage:
+      'Platform cloud provider credentials required for trial allocation.',
+  });
+
+  if ('error' in allocation) {
+    throw Object.assign(new Error(allocation.error), { permanent: true });
+  }
+
+  return allocation;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers — trial KV upkeep
@@ -304,14 +372,36 @@ export async function handleNodeSelection(
   // trial fleets always auto-provision on platform credentials. We still try
   // reuse first because warm/multi-trial scenarios benefit from it.
   const userId = resolveAnonymousUserId(rc.env);
+  const allocation = await resolveTrialVmAllocation(state, rc);
+  const authority = buildPlacementAuthoritySqlPredicate({
+    nodeAlias: 'n',
+    userId,
+    projectId: state.projectId,
+    nodeRole: 'workspace',
+    workloadRole: 'workspace',
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
+    requireProjectMembership: true,
+  });
   const requiredAgentVersion = rc.env.VM_AGENT_REQUIRED_VERSION || null;
   const existing = await rc.env.DATABASE.prepare(
-    `SELECT id FROM nodes
-     WHERE user_id = ? AND status = 'running' AND health_status = 'healthy'
-       AND (? IS NULL OR agent_version = ?)
+    `SELECT n.id FROM nodes n
+     WHERE n.user_id = ? AND n.status = 'running' AND n.health_status = 'healthy'
+       AND (? IS NULL OR n.agent_version = ?)
+       AND n.cloud_provider = ?
+       AND n.vm_location = ?
+       AND n.vm_size = ?
+       ${authority.sql}
      LIMIT 1`
   )
-    .bind(userId, requiredAgentVersion, requiredAgentVersion)
+    .bind(
+      userId,
+      requiredAgentVersion,
+      requiredAgentVersion,
+      allocation.effectiveProvider,
+      allocation.vmLocation,
+      allocation.vmSize,
+      ...authority.binds
+    )
     .first<{ id: string }>();
 
   if (existing?.id) {
@@ -369,35 +459,23 @@ export async function handleNodeProvisioning(
 
   const userId = resolveAnonymousUserId(rc.env);
   const limits = getRuntimeLimits(rc.env);
-
-  const vmSize = (rc.env.TRIAL_VM_SIZE as never) ?? DEFAULT_VM_SIZE;
-  const vmLocation = rc.env.TRIAL_VM_LOCATION ?? DEFAULT_VM_LOCATION;
+  const allocation = await resolveTrialVmAllocation(state, rc);
 
   const createdNode = await createNodeRecord(rc.env, {
     userId,
-    credentialAttributionUserId: userId,
-    credentialAttributionSource: 'platform',
+    credentialAttributionUserId: allocation.credentialAttributionUserId,
+    credentialAttributionProjectId: allocation.credentialAttributionProjectId,
+    credentialAttributionSource: allocation.credentialAttributionSource,
     name: `trial-${state.trialId.slice(-8)}`,
-    vmSize,
-    vmLocation,
+    vmSize: allocation.vmSize,
+    vmLocation: allocation.vmLocation,
+    cloudProvider: allocation.effectiveProvider,
+    providerInstanceType: allocation.providerInstanceType,
+    providerInstanceBootDiskSizeGb: allocation.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: allocation.providerInstanceImage,
+    providerInstanceArchitecture: allocation.providerInstanceArchitecture,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
-    capacityPlacementSnapshot: {
-      capacityPoolId: null,
-      capacityPoolScope: null,
-      capacityPoolRevision: null,
-      capacitySourceId: null,
-      capacityPoolCandidateId: null,
-      placementCredentialSource: 'platform',
-      placementCredentialReference: null,
-      placementCredentialVersion: null,
-      capacityPoolProjectId: null,
-      workloadRole: 'workspace',
-      placementExplanationJson: JSON.stringify({
-        kind: 'explicit_trial_runtime_adapter',
-        runtime: 'vm',
-        credentialSource: 'platform',
-      }),
-    },
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
   });
 
   state.nodeId = createdNode.id;
@@ -407,8 +485,8 @@ export async function handleNodeProvisioning(
   log.info('trial_orchestrator.step.node_provisioning_started', {
     trialId: state.trialId,
     nodeId: createdNode.id,
-    vmSize,
-    vmLocation,
+    vmSize: allocation.vmSize,
+    vmLocation: allocation.vmLocation,
   });
 
   // Kick provisioning. We omit taskContext — trial agents don't need the
@@ -420,7 +498,7 @@ export async function handleNodeProvisioning(
   // first heartbeat backfill. Do NOT synchronously require status='running'
   // here; the next step (node_agent_ready) polls heartbeat freshness, which
   // correctly waits for the VM to boot + heartbeat regardless of provider.
-  await provisionNode(createdNode.id, rc.env);
+  await provisionNode(createdNode.id, rc.env, undefined, { authorityProjectId: state.projectId });
 
   await rc.advanceToStep(state, 'node_agent_ready');
 }
@@ -525,29 +603,53 @@ export async function handleWorkspaceCreation(
   const unique = await resolveUniqueWorkspaceDisplayName(db, state.nodeId, displayName);
   const now = new Date().toISOString();
 
-  const profile = rc.env.TRIAL_DEFAULT_WORKSPACE_PROFILE ?? DEFAULT_TRIAL_WORKSPACE_PROFILE;
-  const vmSize = (rc.env.TRIAL_VM_SIZE as never) ?? DEFAULT_VM_SIZE;
-  const vmLocation = rc.env.TRIAL_VM_LOCATION ?? DEFAULT_VM_LOCATION;
+  const profile = resolveTrialWorkspaceProfile(rc.env);
+  const allocation = await resolveTrialVmAllocation(state, rc);
   const branch = state.defaultBranch ?? TRIAL_FALLBACK_BRANCH;
+  const [node] = await db
+    .select()
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, state.nodeId))
+    .limit(1);
+  if (!node) {
+    state.nodeId = null;
+    await rc.ctx.storage.put('state', state);
+    await rc.advanceToStep(state, 'node_selection');
+    return;
+  }
+  const nodeSnapshot = toCapacityPlacementSnapshot(node);
+  const capacityPlacementSnapshot = nodeSnapshot.capacityPoolId ? nodeSnapshot : null;
 
-  await db.insert(schema.workspaces).values({
-    id: workspaceId,
-    nodeId: state.nodeId,
-    projectId: state.projectId,
-    userId,
-    installationId,
-    name: displayName,
-    displayName: unique.displayName,
-    normalizedDisplayName: unique.normalizedDisplayName,
-    repository,
-    branch,
-    status: 'creating',
-    vmSize,
-    vmLocation,
-    workspaceProfile: profile,
-    createdAt: now,
-    updatedAt: now,
-  });
+  const placementReserved = await reserveWorkspacePlacement(
+    rc.env.DATABASE,
+    {
+      id: workspaceId,
+      nodeId: state.nodeId,
+      projectId: state.projectId,
+      userId,
+      installationId,
+      name: displayName,
+      displayName: unique.displayName,
+      normalizedDisplayName: unique.normalizedDisplayName,
+      repository,
+      branch,
+      vmSize: allocation.vmSize,
+      vmLocation: allocation.vmLocation,
+      workspaceProfile: profile,
+      devcontainerConfigName: null,
+      agentProfileHint: null,
+      capacityPlacementSnapshot,
+      resolvedReservation: allocation.placement.resolvedReservation,
+      createdAt: now,
+    },
+    resolveWorkspaceAdmissionPolicy(rc.env)
+  );
+  if (!placementReserved) {
+    state.nodeId = null;
+    await rc.ctx.storage.put('state', state);
+    await rc.advanceToStep(state, 'node_selection');
+    return;
+  }
 
   state.workspaceId = workspaceId;
   await rc.ctx.storage.put('state', state);

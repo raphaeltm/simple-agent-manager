@@ -454,6 +454,7 @@ describe('workspaces session snapshot callback routes', () => {
     expect(mocks.verifySessionSnapshotRelayAuthorization).toHaveBeenCalledWith(
       runtimeBindings,
       'user-1',
+      'project-1',
       undefined,
       undefined
     );
@@ -479,6 +480,7 @@ describe('workspaces session snapshot callback routes', () => {
     expect(mocks.verifySessionSnapshotRelayAuthorization).toHaveBeenCalledWith(
       runtimeBindings,
       'user-1',
+      'project-1',
       'relay-node',
       'Bearer relay-node-token'
     );

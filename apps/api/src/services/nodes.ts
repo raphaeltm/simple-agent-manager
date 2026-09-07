@@ -365,6 +365,7 @@ export interface ProvisionTaskContext {
 /** Deployment node context for cloud-init (sets role=deployment + environmentId). */
 export interface DeploymentProvisionContext {
   environmentId: string;
+  projectId?: string | null;
 }
 
 export interface ProvisionNodeOptions {
@@ -385,6 +386,18 @@ export interface ProvisionNodeOptions {
   signal?: AbortSignal;
   /** Fail-closed recovery-authority check at the provider allocation boundary. */
   assertExternalMutationAuthority?: () => Promise<void>;
+  /** Project context used for placement-authority checks when no taskContext exists. */
+  authorityProjectId?: string | null;
+}
+
+function provisionAuthorityProjectId(
+  taskContext: ProvisionTaskContext | undefined,
+  options: ProvisionNodeOptions | undefined,
+  deploymentContext: DeploymentProvisionContext | undefined
+): string | null {
+  return (
+    taskContext?.projectId ?? options?.authorityProjectId ?? deploymentContext?.projectId ?? null
+  );
 }
 
 function creatingProvisioningPredicate(
@@ -512,14 +525,10 @@ export async function provisionNode(
       ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
       : null;
   const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
+  const authorityProjectId = provisionAuthorityProjectId(taskContext, options, deploymentContext);
 
   try {
-    await assertNodeAllocationPlanCurrent(
-      env,
-      node.id,
-      node.userId,
-      taskContext?.projectId ?? null
-    );
+    await assertNodeAllocationPlanCurrent(env, node.id, node.userId, authorityProjectId);
     const providerResult = await createProviderForUser(
       db,
       attributionUserId,
@@ -653,12 +662,7 @@ export async function provisionNode(
     // Last authority check before the paid provider allocation. A revocation
     // that races createVM is handled by the post-request check below, which can
     // strictly destroy the resource using the persisted provider identity.
-    await assertNodeAllocationPlanCurrent(
-      env,
-      node.id,
-      node.userId,
-      taskContext?.projectId ?? null
-    );
+    await assertNodeAllocationPlanCurrent(env, node.id, node.userId, authorityProjectId);
     await options?.assertExternalMutationAuthority?.();
     const vmConfig = applyNativePlanToVmConfig(
       {
@@ -706,12 +710,7 @@ export async function provisionNode(
       throw new Error('Node lifecycle changed before provider identity could be recorded');
     }
     try {
-      await assertNodeAllocationPlanCurrent(
-        env,
-        node.id,
-        node.userId,
-        taskContext?.projectId ?? null
-      );
+      await assertNodeAllocationPlanCurrent(env, node.id, node.userId, authorityProjectId);
       await options?.assertExternalMutationAuthority?.();
     } catch (authorityErr) {
       log.error('node_provisioning.authority_revoked_after_create', {

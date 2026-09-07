@@ -17,6 +17,10 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('drizzle-orm/d1', () => ({
+  drizzle: vi.fn(),
+}));
+
 vi.mock('../../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -71,15 +75,69 @@ vi.mock('../../../src/services/nodes', () => ({
   provisionNode: provisionNodeMock,
 }));
 
+const { placementProjectDefaultsFromRowMock, resolveCanonicalVmAllocationPlanMock } = vi.hoisted(
+  () => ({
+    placementProjectDefaultsFromRowMock: vi.fn(),
+    resolveCanonicalVmAllocationPlanMock: vi.fn(),
+  })
+);
+vi.mock('../../../src/services/canonical-vm-allocation', () => ({
+  placementProjectDefaultsFromRow: placementProjectDefaultsFromRowMock,
+  resolveCanonicalVmAllocationPlan: resolveCanonicalVmAllocationPlanMock,
+}));
+
 // getRuntimeLimits returns a small fixture — handleNodeProvisioning only reads
 // `nodeHeartbeatStaleSeconds` for the createNodeRecord call.
 vi.mock('../../../src/services/limits', () => ({
   getRuntimeLimits: vi.fn(() => ({ nodeHeartbeatStaleSeconds: 120 })),
 }));
 
-const { handleRunning, handleDiscoveryAgentStart, handleNodeProvisioning, handleNodeAgentReady } = await import(
-  '../../../src/durable-objects/trial-orchestrator/steps'
-);
+import { drizzle } from 'drizzle-orm/d1';
+
+const { handleRunning, handleDiscoveryAgentStart, handleNodeProvisioning, handleNodeAgentReady } =
+  await import('../../../src/durable-objects/trial-orchestrator/steps');
+
+function makeProjectDb() {
+  return {
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn(async () => [
+            {
+              id: 'proj_trial',
+              defaultVmSize: 'medium',
+              defaultProvider: 'hetzner',
+              defaultLocation: 'fsn1',
+              defaultWorkspaceProfile: 'lightweight',
+              defaultDevcontainerConfigName: null,
+              defaultAgentType: null,
+            },
+          ]),
+        }),
+      }),
+    }),
+  };
+}
+
+function trialAllocation() {
+  return {
+    placement: { workloadRole: 'workspace' },
+    credential: { credentialSource: 'platform', providerName: 'hetzner' },
+    quotaCredentialSource: 'platform',
+    credentialAttributionUserId: 'anonymous-user',
+    credentialAttributionProjectId: null,
+    credentialAttributionSource: 'platform',
+    effectiveProvider: 'hetzner',
+    vmSize: 'medium',
+    vmLocation: 'fsn1',
+    providerInstanceType: 'cx22',
+    providerInstanceBootDiskSizeGb: null,
+    providerInstanceImage: null,
+    providerInstanceArchitecture: null,
+    capacityPoolSelection: null,
+    capacityPlacementSnapshot: null,
+  };
+}
 
 type Storage = Map<string, unknown>;
 
@@ -170,6 +228,9 @@ describe('handleRunning', () => {
 describe('handleNodeProvisioning', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(drizzle).mockReturnValue(makeProjectDb() as any);
+    placementProjectDefaultsFromRowMock.mockImplementation((project) => project);
+    resolveCanonicalVmAllocationPlanMock.mockResolvedValue(trialAllocation());
     createNodeRecordMock.mockResolvedValue({ id: 'node_new_123' });
     provisionNodeMock.mockResolvedValue(undefined);
   });
@@ -187,6 +248,7 @@ describe('handleNodeProvisioning', () => {
     const rc = makeRc(ctx, advanced);
     const state = makeState({
       currentStep: 'node_provisioning',
+      projectId: 'proj_trial',
       nodeId: null,
       autoProvisionedNode: false,
     });
@@ -194,7 +256,19 @@ describe('handleNodeProvisioning', () => {
     await handleNodeProvisioning(state, rc);
 
     expect(createNodeRecordMock).toHaveBeenCalledTimes(1);
-    expect(provisionNodeMock).toHaveBeenCalledWith('node_new_123', expect.anything());
+    expect(resolveCanonicalVmAllocationPlanMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        entryPoint: 'trial-orchestrator',
+        projectId: 'proj_trial',
+        workloadRole: 'workspace',
+        requiredCredentialSource: 'platform',
+      })
+    );
+    expect(provisionNodeMock).toHaveBeenCalledWith('node_new_123', expect.anything(), undefined, {
+      authorityProjectId: 'proj_trial',
+    });
     expect(state.nodeId).toBe('node_new_123');
     expect(state.autoProvisionedNode).toBe(true);
     expect(advanced).toEqual(['node_agent_ready']);

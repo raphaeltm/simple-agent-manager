@@ -1,14 +1,20 @@
-import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
+import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
+import {
+  type CanonicalVmAllocationPlan,
+  placementProjectDefaultsFromRow,
+  resolveCanonicalVmAllocationPlan,
+} from './canonical-vm-allocation';
 import { verifyCallbackToken } from './jwt';
 import { getRuntimeLimits } from './limits';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
+import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 
 const RELAY_NODE_NAME_PREFIX = 'Session snapshot relay';
 
@@ -24,27 +30,116 @@ function relayNodeName(requiredVersion: string): string {
   return `${RELAY_NODE_NAME_PREFIX} ${requiredVersion.slice(0, 12)}`;
 }
 
+async function resolveRelayAllocation(
+  env: Env,
+  input: {
+    userId: string;
+    projectId: string | null;
+    source?: {
+      vm_size: string;
+      vm_location: string;
+      cloud_provider: string | null;
+      provider_instance_type: string | null;
+      provider_instance_boot_disk_size_gb: number | null;
+      provider_instance_image: string | null;
+      provider_instance_architecture: string | null;
+    } | null;
+  }
+): Promise<CanonicalVmAllocationPlan | null> {
+  const db = drizzle(env.DATABASE, { schema });
+  const project = input.projectId
+    ? await env.DATABASE.prepare(
+        `SELECT id,
+                default_vm_size AS defaultVmSize,
+                default_provider AS defaultProvider,
+                default_location AS defaultLocation,
+                default_workspace_profile AS defaultWorkspaceProfile,
+                default_devcontainer_config_name AS defaultDevcontainerConfigName,
+                default_agent_type AS defaultAgentType
+           FROM projects
+          WHERE id = ?
+          LIMIT 1`
+      )
+        .bind(input.projectId)
+        .first<Parameters<typeof placementProjectDefaultsFromRow>[0]>()
+    : null;
+  if (input.projectId && !project) return null;
+
+  const allocation = await resolveCanonicalVmAllocationPlan(db, env, {
+    entryPoint: 'session-snapshot-relay',
+    taskId: ulid(),
+    userId: input.userId,
+    projectId: input.projectId,
+    project: project ? placementProjectDefaultsFromRow(project) : null,
+    explicit: {
+      vmSize: input.source?.vm_size ?? undefined,
+      provider: input.source?.cloud_provider ?? null,
+      vmLocation: input.source?.vm_location ?? null,
+      native: input.source
+        ? {
+            providerInstanceType: input.source.provider_instance_type,
+            providerInstanceBootDiskSizeGb: input.source.provider_instance_boot_disk_size_gb,
+            providerInstanceImage: input.source.provider_instance_image,
+            providerInstanceArchitecture: input.source.provider_instance_architecture,
+          }
+        : null,
+    },
+    credentialProjectPolicy: input.projectId ? 'current-project' : 'inherited-or-none',
+    taskModeDefault: 'task',
+    workloadRole: 'workspace',
+    credentialsRequiredMessage: 'Cloud provider credentials required for session snapshot relay.',
+  });
+  return 'error' in allocation ? null : allocation;
+}
+
 export async function findSessionSnapshotUploadRelay(
   env: Env,
-  userId: string
+  userId: string,
+  projectId: string | null = null
 ): Promise<RelayNode | null> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
   if (!requiredVersion) return null;
 
+  const allocation = await resolveRelayAllocation(env, {
+    userId,
+    projectId,
+  });
+  if (!allocation) return null;
+  const authority = buildPlacementAuthoritySqlPredicate({
+    nodeAlias: 'n',
+    userId,
+    projectId,
+    nodeRole: 'workspace',
+    workloadRole: 'workspace',
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
+    requireProjectMembership: projectId !== null,
+  });
+
   const relay = await env.DATABASE.prepare(
-    `SELECT id, name
-       FROM nodes
-      WHERE user_id = ?
-        AND status = 'running'
-        AND health_status = 'healthy'
-        AND agent_version = ?
-        AND node_role = 'workspace'
-        AND node_class != 'user-owned'
-        AND (runtime IS NULL OR runtime = 'vm')
-      ORDER BY CASE WHEN warm_since IS NOT NULL THEN 0 ELSE 1 END, created_at ASC
+    `SELECT n.id, n.name
+       FROM nodes n
+      WHERE n.user_id = ?
+        AND n.status = 'running'
+        AND n.health_status = 'healthy'
+        AND n.agent_version = ?
+        AND n.node_role = 'workspace'
+        AND n.node_class != 'user-owned'
+        AND n.runtime = 'vm'
+        AND n.cloud_provider = ?
+        AND n.vm_location = ?
+        AND n.vm_size = ?
+        ${authority.sql}
+      ORDER BY CASE WHEN n.warm_since IS NOT NULL THEN 0 ELSE 1 END, n.created_at ASC
       LIMIT 1`
   )
-    .bind(userId, requiredVersion)
+    .bind(
+      userId,
+      requiredVersion,
+      allocation.effectiveProvider,
+      allocation.vmLocation,
+      allocation.vmSize,
+      ...authority.binds
+    )
     .first<RelayNode>();
 
   return relay ?? null;
@@ -69,6 +164,7 @@ export function buildSessionSnapshotRelayUploadUrl(
 export async function verifySessionSnapshotRelayAuthorization(
   env: Env,
   workspaceUserId: string,
+  projectId: string | null,
   relayNodeIdHeader: string | undefined,
   relayAuthorizationHeader: string | undefined
 ): Promise<void> {
@@ -99,20 +195,48 @@ export async function verifySessionSnapshotRelayAuthorization(
   if (!requiredVersion) {
     throw errors.forbidden('Invalid snapshot relay authorization');
   }
+  const allocation = await resolveRelayAllocation(env, {
+    userId: workspaceUserId,
+    projectId,
+  });
+  if (!allocation) {
+    throw errors.forbidden('Invalid snapshot relay authorization');
+  }
+  const authority = buildPlacementAuthoritySqlPredicate({
+    nodeAlias: 'n',
+    userId: workspaceUserId,
+    projectId,
+    nodeRole: 'workspace',
+    workloadRole: 'workspace',
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
+    requireProjectMembership: projectId !== null,
+  });
   const relay = await env.DATABASE.prepare(
-    `SELECT id
-       FROM nodes
-      WHERE id = ?
-        AND user_id = ?
-        AND status = 'running'
-        AND health_status = 'healthy'
-        AND agent_version = ?
-        AND node_role = 'workspace'
-        AND node_class != 'user-owned'
-        AND (runtime IS NULL OR runtime = 'vm')
+    `SELECT n.id
+       FROM nodes n
+      WHERE n.id = ?
+        AND n.user_id = ?
+        AND n.status = 'running'
+        AND n.health_status = 'healthy'
+        AND n.agent_version = ?
+        AND n.node_role = 'workspace'
+        AND n.node_class != 'user-owned'
+        AND n.runtime = 'vm'
+        AND n.cloud_provider = ?
+        AND n.vm_location = ?
+        AND n.vm_size = ?
+        ${authority.sql}
       LIMIT 1`
   )
-    .bind(relayNodeId, workspaceUserId, requiredVersion)
+    .bind(
+      relayNodeId,
+      workspaceUserId,
+      requiredVersion,
+      allocation.effectiveProvider,
+      allocation.vmLocation,
+      allocation.vmSize,
+      ...authority.binds
+    )
     .first<{ id: string }>();
   if (!relay) {
     throw errors.forbidden('Invalid snapshot relay authorization');
@@ -133,6 +257,7 @@ export async function resolveSessionSnapshotUploadTargets(
   input: {
     workspaceId: string;
     userId: string;
+    projectId: string | null;
     chatSessionId: string;
     generation: string;
     directUploadAvailable: boolean;
@@ -145,7 +270,7 @@ export async function resolveSessionSnapshotUploadTargets(
 }> {
   const relay =
     input.directUploadAvailable && !input.directUploadSupported
-      ? await findSessionSnapshotUploadRelay(env, input.userId)
+      ? await findSessionSnapshotUploadRelay(env, input.userId, input.projectId)
       : null;
   const target = (artifact: 'home' | 'wip'): string => {
     const authorizationPath = snapshotUploadAuthorizationPath({ ...input, artifact });
@@ -178,7 +303,7 @@ export async function ensureSessionSnapshotUploadRelay(
 ): Promise<void> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
   if (!requiredVersion) return;
-  if (await findSessionSnapshotUploadRelay(env, input.userId)) return;
+  if (await findSessionSnapshotUploadRelay(env, input.userId, input.projectId)) return;
 
   const name = relayNodeName(requiredVersion);
   const existing = await env.DATABASE.prepare(
@@ -193,14 +318,7 @@ export async function ensureSessionSnapshotUploadRelay(
 
   const source = await env.DATABASE.prepare(
     `SELECT id, user_id, vm_size, vm_location, cloud_provider, runtime, node_class,
-            agent_version, credential_attribution_user_id,
-            credential_attribution_project_id, credential_attribution_source,
-            capacity_pool_id, capacity_pool_scope, capacity_pool_revision,
-            capacity_source_id, capacity_pool_candidate_id,
-            placement_credential_source, placement_credential_reference,
-            placement_credential_version, capacity_pool_project_id, workload_role,
-            provider_instance_type, provider_instance_vcpu_count,
-            provider_instance_memory_mb, provider_instance_disk_gb,
+            agent_version, provider_instance_type,
             provider_instance_boot_disk_size_gb, provider_instance_image,
             provider_instance_architecture
        FROM nodes
@@ -217,23 +335,7 @@ export async function ensureSessionSnapshotUploadRelay(
       runtime: string | null;
       node_class: string;
       agent_version: string | null;
-      credential_attribution_user_id: string | null;
-      credential_attribution_project_id: string | null;
-      credential_attribution_source: string | null;
-      capacity_pool_id: string | null;
-      capacity_pool_scope: string | null;
-      capacity_pool_revision: number | null;
-      capacity_source_id: string | null;
-      capacity_pool_candidate_id: string | null;
-      placement_credential_source: string | null;
-      placement_credential_reference: string | null;
-      placement_credential_version: number | null;
-      capacity_pool_project_id: string | null;
-      workload_role: string | null;
       provider_instance_type: string | null;
-      provider_instance_vcpu_count: number | null;
-      provider_instance_memory_mb: number | null;
-      provider_instance_disk_gb: number | null;
       provider_instance_boot_disk_size_gb: number | null;
       provider_instance_image: string | null;
       provider_instance_architecture: string | null;
@@ -251,33 +353,14 @@ export async function ensureSessionSnapshotUploadRelay(
   // intentionally allowed beyond the normal node count: incompatible nodes
   // cannot accept work and counting them would deadlock their own drain.
   const limits = getRuntimeLimits(env);
-  const attributionUserId = source.credential_attribution_user_id ?? input.userId;
-  const attributionSource: CredentialSource =
-    source.credential_attribution_source === 'project'
-      ? 'project'
-      : source.credential_attribution_source === 'platform'
-        ? 'platform'
-        : 'user';
-  const attributionProjectId =
-    attributionSource === 'project' ? source.credential_attribution_project_id : null;
-  if (!source.placement_credential_reference || !source.placement_credential_source) {
-    log.warn('session_snapshot.relay_provision_skipped_missing_exact_credential', {
-      userId: input.userId,
-      sourceNodeId: input.sourceNodeId,
-      provider: source.cloud_provider,
-    });
-    return;
-  }
   const db = drizzle(env.DATABASE, { schema });
-  const { resolveCredentialSource } = await import('./provider-credentials');
-  const credential = await resolveCredentialSource(
-    db,
-    attributionUserId,
-    (source.cloud_provider as CredentialProvider | null) ?? undefined,
-    attributionProjectId
-  );
-  if (!credential) {
-    log.warn('session_snapshot.relay_provision_skipped_no_credential', {
+  const allocation = await resolveRelayAllocation(env, {
+    userId: input.userId,
+    projectId: input.projectId,
+    source,
+  });
+  if (!allocation) {
+    log.warn('session_snapshot.relay_provision_skipped_no_current_plan', {
       userId: input.userId,
       sourceNodeId: input.sourceNodeId,
       provider: source.cloud_provider,
@@ -285,21 +368,7 @@ export async function ensureSessionSnapshotUploadRelay(
     return;
   }
   if (
-    credential.credentialSource !== attributionSource ||
-    credential.providerName !== source.cloud_provider
-  ) {
-    log.warn('session_snapshot.relay_provision_skipped_credential_changed', {
-      userId: input.userId,
-      sourceNodeId: input.sourceNodeId,
-      expectedProvider: source.cloud_provider,
-      resolvedProvider: credential.providerName,
-      expectedCredentialSource: attributionSource,
-      resolvedCredentialSource: credential.credentialSource,
-    });
-    return;
-  }
-  if (
-    credential.credentialSource === 'platform' &&
+    allocation.quotaCredentialSource === 'platform' &&
     env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false'
   ) {
     const { checkQuotaForUser } = await import('./compute-quotas');
@@ -316,51 +385,19 @@ export async function ensureSessionSnapshotUploadRelay(
   const { createNodeRecord, provisionNode } = await import('./nodes');
   const created = await createNodeRecord(env, {
     userId: input.userId,
-    credentialAttributionUserId: attributionUserId,
-    credentialAttributionProjectId: attributionProjectId,
-    credentialAttributionSource: attributionSource,
+    credentialAttributionUserId: allocation.credentialAttributionUserId,
+    credentialAttributionProjectId: allocation.credentialAttributionProjectId,
+    credentialAttributionSource: allocation.credentialAttributionSource,
     name,
-    vmSize: source.vm_size as 'small' | 'medium' | 'large',
-    vmLocation: source.vm_location,
-    cloudProvider: (source.cloud_provider as CredentialProvider | null) ?? undefined,
-    providerInstanceType: source.provider_instance_type,
-    providerInstanceBootDiskSizeGb: source.provider_instance_boot_disk_size_gb,
-    providerInstanceImage: source.provider_instance_image,
-    providerInstanceArchitecture:
-      source.provider_instance_architecture === 'x86_64' ||
-      source.provider_instance_architecture === 'arm64'
-        ? source.provider_instance_architecture
-        : null,
+    vmSize: allocation.vmSize,
+    vmLocation: allocation.vmLocation,
+    cloudProvider: allocation.effectiveProvider,
+    providerInstanceType: allocation.providerInstanceType,
+    providerInstanceBootDiskSizeGb: allocation.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: allocation.providerInstanceImage,
+    providerInstanceArchitecture: allocation.providerInstanceArchitecture,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
-    capacityPlacementSnapshot: {
-      capacityPoolId: source.capacity_pool_id,
-      capacityPoolScope:
-        source.capacity_pool_scope === 'installation' ||
-        source.capacity_pool_scope === 'user' ||
-        source.capacity_pool_scope === 'project'
-          ? source.capacity_pool_scope
-          : null,
-      capacityPoolRevision: source.capacity_pool_revision,
-      capacitySourceId: source.capacity_source_id,
-      capacityPoolCandidateId: source.capacity_pool_candidate_id,
-      placementCredentialSource:
-        source.placement_credential_source === 'user' ||
-        source.placement_credential_source === 'project' ||
-        source.placement_credential_source === 'platform'
-          ? source.placement_credential_source
-          : null,
-      placementCredentialReference: source.placement_credential_reference,
-      placementCredentialVersion: source.placement_credential_version,
-      capacityPoolProjectId: source.capacity_pool_project_id,
-      workloadRole: 'workspace',
-      providerInstanceType: source.provider_instance_type,
-      providerInstanceVcpuCount: source.provider_instance_vcpu_count,
-      providerInstanceMemoryMb: source.provider_instance_memory_mb,
-      providerInstanceDiskGb: source.provider_instance_disk_gb,
-      providerInstanceBootDiskSizeGb: source.provider_instance_boot_disk_size_gb,
-      providerInstanceImage: source.provider_instance_image,
-      providerInstanceArchitecture: source.provider_instance_architecture,
-    },
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
   });
 
   log.warn('session_snapshot.relay_provision_started', {
@@ -369,7 +406,7 @@ export async function ensureSessionSnapshotUploadRelay(
     relayNodeId: created.id,
     requiredVersion,
   });
-  await provisionNode(created.id, env);
+  await provisionNode(created.id, env, undefined, { authorityProjectId: input.projectId });
 
   const provisioned = await env.DATABASE.prepare(`SELECT status FROM nodes WHERE id = ? LIMIT 1`)
     .bind(created.id)

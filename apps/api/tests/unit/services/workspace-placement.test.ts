@@ -6,7 +6,10 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
+import {
+  attachPrecreatedWorkspacePlacement,
+  reserveWorkspacePlacement,
+} from '../../../src/services/workspace-placement';
 import type { WorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -132,7 +135,12 @@ function seedNode(overrides: Record<string, unknown> = {}): void {
     observed_provider_instance_disk_gb: 240,
     observed_hardware_source: 'provider-create',
     last_heartbeat_at: new Date().toISOString(),
-    last_metrics: JSON.stringify({ version: 1, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+    last_metrics: JSON.stringify({
+      version: 1,
+      cpuLoadAvg1: 0.2,
+      memoryPercent: 10,
+      diskPercent: 10,
+    }),
     ...overrides,
   };
   const columns = Object.keys(row);
@@ -225,6 +233,20 @@ function seedActiveWorkspace(
     .run(workspaceId, workspaceId, reservationJson);
 }
 
+function seedPlaceholderWorkspace(workspaceId = 'workspace-attach'): void {
+  sqlite
+    ?.prepare(
+      `INSERT INTO workspaces
+       (id, node_id, user_id, project_id, installation_id, name, display_name,
+        normalized_display_name, repository, branch, status, vm_size, vm_location,
+        created_at, updated_at)
+       VALUES (?, NULL, 'user-1', 'project-1', 'installation-1', 'Attach workspace',
+        'Attach workspace', 'attach-workspace', 'acme/repo', 'main', 'creating', 'large', 'fsn1',
+        '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z')`
+    )
+    .run(workspaceId);
+}
+
 function countWorkspace(id = 'workspace-1'): number {
   return (
     sqlite?.prepare('SELECT COUNT(*) AS count FROM workspaces WHERE id = ?').get(id) as {
@@ -277,16 +299,28 @@ describe('reserveWorkspacePlacement', () => {
   });
 
   it.each([
-    ['removed membership', `UPDATE project_members SET status = 'removed', removed_at = '${new Date().toISOString()}'`],
+    [
+      'removed membership',
+      `UPDATE project_members SET status = 'removed', removed_at = '${new Date().toISOString()}'`,
+    ],
     ['pool revision changed', `UPDATE capacity_pools SET revision = 99`],
     ['pool disabled', `UPDATE capacity_pools SET status = 'disabled'`],
     ['pool owned by another project', `UPDATE capacity_pools SET owner_project_id = 'project-2'`],
     ['source disabled', `UPDATE capacity_sources SET status = 'disabled'`],
-    ['source generation changed', `UPDATE capacity_sources SET updated_at = '2023-11-14T22:13:21.000Z'`],
-    ['source owned by another project', `UPDATE capacity_sources SET owner_project_id = 'project-2'`],
+    [
+      'source generation changed',
+      `UPDATE capacity_sources SET updated_at = '2023-11-14T22:13:21.000Z'`,
+    ],
+    [
+      'source owned by another project',
+      `UPDATE capacity_sources SET owner_project_id = 'project-2'`,
+    ],
     ['source credential detached', `UPDATE capacity_sources SET credential_id = NULL`],
     ['credential disabled', `UPDATE credentials SET is_active = 0 WHERE id = 'project-cloud'`],
-    ['credential rotated', `UPDATE credentials SET updated_at = '2023-11-14T22:13:21.000Z' WHERE id = 'project-cloud'`],
+    [
+      'credential rotated',
+      `UPDATE credentials SET updated_at = '2023-11-14T22:13:21.000Z' WHERE id = 'project-cloud'`,
+    ],
     ['candidate deleted', `UPDATE capacity_pool_candidates SET status = 'deleted'`],
     [
       'candidate unavailable',
@@ -296,7 +330,10 @@ describe('reserveWorkspacePlacement', () => {
     ['candidate location changed', `UPDATE capacity_pool_candidates SET location = 'nbg1'`],
     ['candidate role changed', `UPDATE capacity_pool_candidates SET workload_role = 'deployment'`],
     ['node lifecycle changed', `UPDATE nodes SET status = 'destroying' WHERE id = 'node-1'`],
-    ['node native image changed', `UPDATE nodes SET provider_instance_image = 'other-image' WHERE id = 'node-1'`],
+    [
+      'node native image changed',
+      `UPDATE nodes SET provider_instance_image = 'other-image' WHERE id = 'node-1'`,
+    ],
   ])('rejects non-current final authority: %s', async (_name, mutation) => {
     const database = createDb();
     seedNode();
@@ -351,8 +388,14 @@ describe('reserveWorkspacePlacement', () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode();
-    seedActiveWorkspace('workspace-existing-cpu-a', JSON.stringify(reservation({ cpuMillis: 4000 })));
-    seedActiveWorkspace('workspace-existing-cpu-b', JSON.stringify(reservation({ cpuMillis: 4000 })));
+    seedActiveWorkspace(
+      'workspace-existing-cpu-a',
+      JSON.stringify(reservation({ cpuMillis: 4000 }))
+    );
+    seedActiveWorkspace(
+      'workspace-existing-cpu-b',
+      JSON.stringify(reservation({ cpuMillis: 4000 }))
+    );
 
     await expect(
       reserveWorkspacePlacement(
@@ -432,10 +475,7 @@ describe('reserveWorkspacePlacement', () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode();
-    seedActiveWorkspace(
-      'workspace-existing-zero-disk',
-      JSON.stringify(reservation({ diskMb: 0 }))
-    );
+    seedActiveWorkspace('workspace-existing-zero-disk', JSON.stringify(reservation({ diskMb: 0 })));
 
     await expect(
       reserveWorkspacePlacement(
@@ -454,7 +494,12 @@ describe('reserveWorkspacePlacement', () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode({
-      last_metrics: JSON.stringify({ version: 1, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 95 }),
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0.2,
+        memoryPercent: 10,
+        diskPercent: 95,
+      }),
     });
 
     await expect(
@@ -487,8 +532,14 @@ describe('reserveWorkspacePlacement', () => {
 
     for (const [workspaceId, metrics] of [
       ['workspace-invalid-json', '{"cpuLoadAvg1":'],
-      ['workspace-version-zero', JSON.stringify({ version: 0, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 })],
-      ['workspace-version-minus-one', JSON.stringify({ version: -1, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 })],
+      [
+        'workspace-version-zero',
+        JSON.stringify({ version: 0, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+      ],
+      [
+        'workspace-version-minus-one',
+        JSON.stringify({ version: -1, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+      ],
     ] as const) {
       sqlite?.prepare(`UPDATE nodes SET last_metrics = ? WHERE id = 'node-1'`).run(metrics);
       await expect(
@@ -509,8 +560,14 @@ describe('reserveWorkspacePlacement', () => {
     seedActiveWorkspace('workspace-existing-pressure');
 
     for (const [workspaceId, metrics] of [
-      ['workspace-cpu-pressure', { version: 1, cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }],
-      ['workspace-memory-pressure', { version: 1, cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 }],
+      [
+        'workspace-cpu-pressure',
+        { version: 1, cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 },
+      ],
+      [
+        'workspace-memory-pressure',
+        { version: 1, cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 },
+      ],
       [
         'workspace-creating-pressure',
         { version: 1, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
@@ -605,5 +662,118 @@ describe('reserveWorkspacePlacement', () => {
         admissionPolicy()
       )
     ).resolves.toBe(false);
+  });
+});
+
+describe('attachPrecreatedWorkspacePlacement', () => {
+  it('atomically attaches a placeholder workspace and writes final authority metadata', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode();
+    seedPlaceholderWorkspace();
+
+    await expect(
+      attachPrecreatedWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(snapshot),
+          id: 'workspace-attach',
+          resourceRequirementsJson: '{"minDiskGb":0}',
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+
+    expect(
+      sqlite
+        ?.prepare(
+          `SELECT node_id, status, resource_requirements_json, resolved_reservation_json,
+                  capacity_pool_id, capacity_source_generation, capacity_pool_candidate_id,
+                  provider_instance_type
+             FROM workspaces
+            WHERE id = 'workspace-attach'`
+        )
+        .get()
+    ).toMatchObject({
+      node_id: 'node-1',
+      status: 'creating',
+      resource_requirements_json: '{"minDiskGb":0}',
+      capacity_pool_id: 'pool-project',
+      capacity_source_generation: AUTHORITY_VERSION,
+      capacity_pool_candidate_id: 'candidate-cx42',
+      provider_instance_type: 'cx42',
+    });
+  });
+
+  it('rejects a placeholder attach when current project membership was removed', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode();
+    seedPlaceholderWorkspace();
+    sqlite?.exec(
+      `UPDATE project_members SET status = 'removed', removed_at = '${new Date().toISOString()}'`
+    );
+
+    await expect(
+      attachPrecreatedWorkspacePlacement(
+        database,
+        { ...reserveInput(snapshot), id: 'workspace-attach' },
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+
+    expect(
+      sqlite?.prepare(`SELECT node_id FROM workspaces WHERE id = 'workspace-attach'`).get()
+    ).toMatchObject({ node_id: null });
+  });
+
+  it('rejects a placeholder attach when observed hardware is smaller than planned', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode({
+      provider_instance_vcpu_count: 8,
+      provider_instance_memory_mb: 16 * 1024,
+      provider_instance_disk_gb: 240,
+      observed_provider_instance_vcpu_count: 1,
+      observed_provider_instance_memory_mb: 1024,
+      observed_provider_instance_disk_gb: 10,
+    });
+    seedPlaceholderWorkspace();
+
+    await expect(
+      attachPrecreatedWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(snapshot),
+          id: 'workspace-attach',
+          resolvedReservation: reservation({ cpuMillis: 4000, memoryMb: 8192, diskMb: 8192 }),
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+
+    expect(
+      sqlite?.prepare(`SELECT node_id FROM workspaces WHERE id = 'workspace-attach'`).get()
+    ).toMatchObject({ node_id: null });
+  });
+
+  it('rejects a placeholder attach when another reservation consumed the last slot', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode();
+    seedPlaceholderWorkspace();
+    seedActiveWorkspace('workspace-existing-slot');
+
+    await expect(
+      attachPrecreatedWorkspacePlacement(
+        database,
+        { ...reserveInput(snapshot), id: 'workspace-attach' },
+        admissionPolicy({ maxWorkspaces: 1 })
+      )
+    ).resolves.toBe(false);
+
+    expect(
+      sqlite?.prepare(`SELECT node_id FROM workspaces WHERE id = 'workspace-attach'`).get()
+    ).toMatchObject({ node_id: null });
   });
 });

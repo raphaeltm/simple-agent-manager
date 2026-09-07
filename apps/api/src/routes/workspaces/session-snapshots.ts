@@ -219,6 +219,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/prepare', async (c) => {
   const uploadTargets = await resolveSessionSnapshotUploadTargets(c.env, {
     workspaceId,
     userId: workspace.userId,
+    projectId: workspace.projectId,
     chatSessionId,
     generation: prepared.generation,
     directUploadAvailable,
@@ -295,6 +296,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/artifacts/:artifact/upload-url
   await verifySessionSnapshotRelayAuthorization(
     c.env,
     workspace.userId,
+    workspace.projectId,
     c.req.header(SESSION_SNAPSHOT_RELAY_NODE_ID_HEADER),
     c.req.header(SESSION_SNAPSHOT_RELAY_AUTHORIZATION_HEADER)
   );

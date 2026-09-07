@@ -1,27 +1,32 @@
 /**
  * Behavioral tests for deployment node provisioning.
  *
- * Tests the provisionDeploymentNode() service function which:
- * 1. Resolves cloud provider credentials (user → platform fallback)
- * 2. Creates a node record with nodeRole='deployment'
- * 3. Links the environment to the node with placement constraints (conditional on nodeId IS NULL)
- * 4. Returns a provisioning promise for waitUntil()
+ * The service resolves a canonical deployment allocation, reuses only current
+ * deployment nodes that still satisfy authority predicates, or creates and
+ * provisions a new deployment node with the same placement contract.
  */
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock the dependencies before importing the module under test
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(),
 }));
 
-vi.mock('../../src/services/nodes', () => ({
+const mocks = vi.hoisted(() => ({
   createNodeRecord: vi.fn(),
+  placementProjectDefaultsFromRow: vi.fn(),
   provisionNode: vi.fn(),
+  resolveCanonicalVmAllocationPlan: vi.fn(),
 }));
 
-vi.mock('../../src/services/provider-credentials', () => ({
-  resolveCredentialSource: vi.fn(),
+vi.mock('../../src/services/canonical-vm-allocation', () => ({
+  placementProjectDefaultsFromRow: mocks.placementProjectDefaultsFromRow,
+  resolveCanonicalVmAllocationPlan: mocks.resolveCanonicalVmAllocationPlan,
+}));
+
+vi.mock('../../src/services/nodes', () => ({
+  createNodeRecord: mocks.createNodeRecord,
+  provisionNode: mocks.provisionNode,
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -29,16 +34,12 @@ vi.mock('../../src/lib/logger', () => ({
   serializeError: vi.fn((e: unknown) => ({ error: String(e) })),
 }));
 
-// Structurally mock the drizzle SQL operators so we can assert WHERE-clause
-// *content* (which column, which value) rather than just "a WHERE exists".
-// Safe because all SQL execution is mocked in this test — the operator return
-// values are never handed to a real query engine.
 vi.mock('drizzle-orm', async (importOriginal) => {
   const actual = await importOriginal<typeof import('drizzle-orm')>();
   return {
     ...actual,
     eq: vi.fn((col: unknown, val: unknown) => ({ op: 'eq', col, val })),
-    isNull: vi.fn((col: unknown) => ({ op: 'isNull', col })),
+    ne: vi.fn((col: unknown, val: unknown) => ({ op: 'ne', col, val })),
     and: vi.fn((...conds: unknown[]) => ({ op: 'and', conds })),
   };
 });
@@ -51,98 +52,96 @@ import {
   provisionDeploymentNode,
 } from '../../src/services/deployment-provisioning';
 import { createNodeRecord, provisionNode } from '../../src/services/nodes';
-import { resolveCredentialSource } from '../../src/services/provider-credentials';
 
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
-
-/** Tracks which queries and updates the mock DB received. */
 interface MockDbTracker {
-  selectCalls: number;
   updateSetValues: Record<string, unknown>[];
   updateWhereArgs: unknown[][];
+  deleteWhereArgs: unknown[][];
 }
 
-function createMockDb(options: {
-  userCredProvider?: string | null;
-  platformCredProvider?: string | null;
-  projectCredProvider?: string | null;
-}) {
-  const mockedCredentialSource =
-    options.projectCredProvider != null
-      ? {
-          credentialSource: 'project' as const,
-          providerName: options.projectCredProvider as CredentialProvider,
-        }
-      : options.userCredProvider != null
-        ? {
-            credentialSource: 'user' as const,
-            providerName: options.userCredProvider as CredentialProvider,
-          }
-        : options.platformCredProvider != null
-          ? {
-              credentialSource: 'platform' as const,
-              providerName: options.platformCredProvider as CredentialProvider,
-            }
-          : null;
-  vi.mocked(resolveCredentialSource).mockResolvedValue(mockedCredentialSource);
+function projectRow() {
+  return {
+    id: 'proj-1',
+    defaultVmSize: 'medium',
+    defaultProvider: 'hetzner',
+    defaultLocation: 'fsn1',
+    defaultWorkspaceProfile: 'lightweight',
+    defaultDevcontainerConfigName: null,
+    defaultAgentType: null,
+  };
+}
 
+function canonicalAllocation(
+  overrides: Partial<{
+    effectiveProvider: CredentialProvider;
+    vmSize: string;
+    vmLocation: string;
+    credentialAttributionSource: 'user' | 'project' | 'platform';
+    credentialAttributionProjectId: string | null;
+    providerInstanceType: string | null;
+  }> = {}
+) {
+  return {
+    placement: { workloadRole: 'deployment' },
+    credential: {
+      credentialSource: overrides.credentialAttributionSource ?? 'user',
+      providerName: overrides.effectiveProvider ?? 'hetzner',
+    },
+    quotaCredentialSource: overrides.credentialAttributionSource ?? 'user',
+    credentialAttributionUserId: 'user-1',
+    credentialAttributionProjectId: overrides.credentialAttributionProjectId ?? null,
+    credentialAttributionSource: overrides.credentialAttributionSource ?? 'user',
+    effectiveProvider: overrides.effectiveProvider ?? 'hetzner',
+    vmSize: overrides.vmSize ?? 'small',
+    vmLocation: overrides.vmLocation ?? 'fsn1',
+    providerInstanceType: overrides.providerInstanceType ?? 'cx22',
+    providerInstanceBootDiskSizeGb: null,
+    providerInstanceImage: null,
+    providerInstanceArchitecture: null,
+    capacityPoolSelection: null,
+    capacityPlacementSnapshot: null,
+  };
+}
+
+function createMockDb(options: { currentNodeId?: string | null; rollbackFails?: boolean } = {}) {
   const tracker: MockDbTracker = {
-    selectCalls: 0,
     updateSetValues: [],
     updateWhereArgs: [],
+    deleteWhereArgs: [],
   };
 
-  // Build credential rows
-  const userCredRows = options.userCredProvider ? [{ provider: options.userCredProvider }] : [];
-  const platformCredRows = options.platformCredProvider
-    ? [{ provider: options.platformCredProvider }]
-    : [];
-  const projectCredRows = options.projectCredProvider
-    ? [
-        {
-          attachmentActive: true,
-          consumerTarget: options.projectCredProvider,
-          configurationActive: true,
-          credentialId: 'cc-cred-1',
-          credentialActive: true,
-        },
-      ]
-    : [];
-  let legacySelectCalls = 0;
-
   const mockDb = {
-    select: vi.fn().mockImplementation(() => {
-      tracker.selectCalls++;
-      return {
-        from: vi.fn().mockReturnValue({
-          innerJoin: vi.fn().mockReturnValue({
-            leftJoin: vi.fn().mockReturnValue({
-              where: vi.fn().mockReturnValue({
-                limit: vi.fn().mockResolvedValue(projectCredRows),
-              }),
-            }),
-          }),
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockImplementation(() => {
-              legacySelectCalls++;
-              if (legacySelectCalls <= 1) return Promise.resolve(userCredRows);
-              return Promise.resolve(platformCredRows);
-            }),
+    select: vi.fn().mockImplementation((projection?: Record<string, unknown>) => ({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockImplementation(() => {
+            if (projection && Object.prototype.hasOwnProperty.call(projection, 'nodeId')) {
+              return Promise.resolve(
+                options.currentNodeId ? [{ nodeId: options.currentNodeId }] : []
+              );
+            }
+            return Promise.resolve([projectRow()]);
           }),
         }),
-      };
-    }),
+      }),
+    })),
     update: vi.fn().mockImplementation(() => ({
       set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
         tracker.updateSetValues.push(values);
         return {
           where: vi.fn().mockImplementation((...args: unknown[]) => {
             tracker.updateWhereArgs.push(args);
-            return Promise.resolve();
+            return options.rollbackFails
+              ? Promise.reject(new Error('DB write failed'))
+              : Promise.resolve();
           }),
         };
+      }),
+    })),
+    delete: vi.fn().mockImplementation(() => ({
+      where: vi.fn().mockImplementation((...args: unknown[]) => {
+        tracker.deleteWhereArgs.push(args);
+        return Promise.resolve();
       }),
     })),
     _tracker: tracker,
@@ -178,171 +177,184 @@ function makeNodeResult(
   };
 }
 
-function createMockEnv(overrides: Record<string, unknown> = {}) {
-  return {
-    DATABASE: {} as D1Database,
-    ...overrides,
-  } as any;
-}
+type RawMethod = 'all' | 'run' | 'first';
+type RawResolver = (sql: string, binds: unknown[], method: RawMethod) => unknown | Promise<unknown>;
 
-function createRawMockEnv(steps: Array<{ all?: unknown; run?: unknown }>) {
-  const statements: Array<{ sql: string; binds: unknown[] }> = [];
+function createRawMockEnv(resolver?: RawResolver, overrides: Record<string, unknown> = {}) {
+  const statements: Array<{ method: RawMethod; sql: string; binds: unknown[] }> = [];
+  const defaultResolver: RawResolver = (_sql, _binds, method) => {
+    if (method === 'all') return { results: [] };
+    if (method === 'run') return { meta: { changes: 1 } };
+    return null;
+  };
+
   return {
     env: {
       DATABASE: {
         prepare: vi.fn().mockImplementation((sql: string) => {
-          const step = steps.shift();
           const statement = {
-            sql,
             binds: [] as unknown[],
             bind: vi.fn().mockImplementation((...binds: unknown[]) => {
               statement.binds = binds;
-              statements.push({ sql, binds });
               return statement;
             }),
-            all: vi.fn().mockResolvedValue(step?.all ?? { results: [] }),
-            run: vi.fn().mockResolvedValue(step?.run ?? { meta: { changes: 0 } }),
+            all: vi.fn().mockImplementation(async () => {
+              statements.push({ method: 'all', sql, binds: statement.binds });
+              return (resolver ?? defaultResolver)(sql, statement.binds, 'all');
+            }),
+            run: vi.fn().mockImplementation(async () => {
+              statements.push({ method: 'run', sql, binds: statement.binds });
+              return (resolver ?? defaultResolver)(sql, statement.binds, 'run');
+            }),
+            first: vi.fn().mockImplementation(async () => {
+              statements.push({ method: 'first', sql, binds: statement.binds });
+              return (resolver ?? defaultResolver)(sql, statement.binds, 'first');
+            }),
           };
           return statement;
         }),
       } as unknown as D1Database,
+      ...overrides,
     } as any,
     statements,
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('provisionDeploymentNode', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('creates a node with nodeRole=deployment using user cloud credential', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
-    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    mocks.placementProjectDefaultsFromRow.mockImplementation((project) => project);
+    mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue(canonicalAllocation());
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult());
     vi.mocked(provisionNode).mockResolvedValue();
+  });
 
-    const result = await provisionDeploymentNode(
-      'env-12345678-abcd',
-      'proj-1',
-      'user-1',
-      createMockEnv()
-    );
+  it('creates a node with nodeRole=deployment from the canonical allocation', async () => {
+    const mockDb = createMockDb();
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    const { env } = createRawMockEnv();
+
+    const result = await provisionDeploymentNode('env-12345678-abcd', 'proj-1', 'user-1', env);
 
     expect(result).not.toBeNull();
     expect(result!.nodeId).toBe('node-deploy-1');
     expect(result!.provisioningPromise).toBeInstanceOf(Promise);
-
-    // Verify createNodeRecord was called with deployment role
+    expect(mocks.resolveCanonicalVmAllocationPlan).toHaveBeenCalledWith(
+      mockDb,
+      env,
+      expect.objectContaining({
+        entryPoint: 'deployment-provisioning',
+        userId: 'user-1',
+        projectId: 'proj-1',
+        project: projectRow(),
+        workloadRole: 'deployment',
+        credentialProjectPolicy: 'current-project',
+      })
+    );
     expect(createNodeRecord).toHaveBeenCalledWith(
-      expect.anything(),
+      env,
       expect.objectContaining({
         nodeRole: 'deployment',
         vmSize: DEPLOYMENT_DEFAULT_VM_SIZE,
         cloudProvider: 'hetzner',
+        credentialAttributionSource: 'user',
+        providerInstanceType: 'cx22',
         heartbeatStaleAfterSeconds: 300,
       })
     );
-
-    // Verify provisionNode was called with deployment context
     expect(provisionNode).toHaveBeenCalledWith(
       'node-deploy-1',
-      expect.anything(),
-      undefined, // no taskContext
-      { rethrowProviderError: true },
-      { environmentId: 'env-12345678-abcd' } // deployment context
+      env,
+      undefined,
+      { rethrowProviderError: true, authorityProjectId: 'proj-1' },
+      { environmentId: 'env-12345678-abcd', projectId: 'proj-1' }
     );
   });
 
-  it('links environment to node via conditional UPDATE', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+  it('links environment to a fresh node with authority-aware raw SQL', async () => {
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
-    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult());
-    vi.mocked(provisionNode).mockResolvedValue();
+    const { env, statements } = createRawMockEnv();
 
-    await provisionDeploymentNode('env-link-test', 'proj-1', 'user-1', createMockEnv());
+    await provisionDeploymentNode('env-link-test', 'proj-1', 'user-1', env);
 
-    // The environment should be linked to the node
-    expect(mockDb.update).toHaveBeenCalled();
-    expect(mockDb._tracker.updateSetValues.length).toBe(1);
-
-    const setValues = mockDb._tracker.updateSetValues[0]!;
-    expect(setValues).toHaveProperty('nodeId', 'node-deploy-1');
-    expect(setValues).toHaveProperty('provider', 'hetzner');
-    expect(setValues).toHaveProperty('location', 'fsn1');
-    expect(setValues).toHaveProperty('updatedAt');
+    const update = statements.find((statement) =>
+      statement.sql.includes('UPDATE deployment_environments')
+    );
+    expect(update?.sql).toContain('node_id IS NULL');
+    expect(update?.sql).toContain('AND EXISTS');
+    expect(update?.sql).toContain("n.runtime = 'vm'");
+    expect(update?.sql).toContain("n.node_class = 'managed'");
+    expect(update?.sql).toContain('project_members current_project_member');
+    expect(update?.sql).toContain('capacity_pool_id IS NULL');
+    expect(update?.binds).toEqual(
+      expect.arrayContaining([
+        'node-deploy-1',
+        'hetzner',
+        'fsn1',
+        'env-link-test',
+        'creating',
+        'shared',
+        'deployment',
+        'proj-1',
+        'user-1',
+      ])
+    );
   });
 
   it('does not link to a selected existing node unless it is still running', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-fresh-after-race' }));
     vi.mocked(provisionNode).mockResolvedValue();
-
-    const { env, statements } = createRawMockEnv([
-      {
-        all: {
+    let updateCount = 0;
+    const { env, statements } = createRawMockEnv((sql, _binds, method) => {
+      if (method === 'all' && sql.includes('FROM nodes n')) {
+        return {
           results: [
             { id: 'node-existing', vm_size: 'small', vm_location: 'fsn1', last_metrics: null },
           ],
-        },
-      },
-      { all: { results: [] } },
-      { run: { meta: { changes: 0 } } },
-      { run: { meta: { changes: 1 } } },
-    ]);
+        };
+      }
+      if (method === 'all' && sql.includes('FROM deployment_environments')) {
+        return { results: [] };
+      }
+      if (method === 'run' && sql.includes('UPDATE deployment_environments')) {
+        updateCount += 1;
+        return { meta: { changes: updateCount === 1 ? 0 : 1 } };
+      }
+      return method === 'run' ? { meta: { changes: 1 } } : { results: [] };
+    });
 
     const result = await provisionDeploymentNode('env-race', 'proj-1', 'user-1', env);
 
     expect(result?.nodeId).toBe('node-fresh-after-race');
     expect(createNodeRecord).toHaveBeenCalledTimes(1);
-    expect(provisionNode).toHaveBeenCalledWith(
-      'node-fresh-after-race',
-      expect.anything(),
-      undefined,
-      { rethrowProviderError: true },
-      { environmentId: 'env-race' }
-    );
-
-    const updateStatements = statements.filter((statement) =>
+    const updates = statements.filter((statement) =>
       statement.sql.includes('UPDATE deployment_environments')
     );
-    expect(updateStatements).toHaveLength(2);
-    expect(updateStatements[0]!.sql).toContain('AND EXISTS');
-    expect(updateStatements[0]!.binds).toContain('running');
-    expect(updateStatements[1]!.binds).toContain('creating');
+    expect(updates).toHaveLength(2);
+    expect(updates[0]!.binds).toContain('running');
+    expect(updates[1]!.binds).toContain('creating');
   });
 
   it('volume-free placement only reuses shared deployment nodes', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
-    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-shared-fresh' }));
-    vi.mocked(provisionNode).mockResolvedValue();
-
-    const { env, statements } = createRawMockEnv([
-      { all: { results: [] } },
-      { run: { meta: { changes: 1 } } },
-    ]);
+    const { env, statements } = createRawMockEnv();
 
     await provisionDeploymentNode('env-shared-only', 'proj-1', 'user-1', env);
 
-    const candidateQuery = statements.find((statement) =>
-      statement.sql.includes('FROM nodes')
-    );
-    expect(candidateQuery?.sql).toContain("COALESCE(node_mode, 'shared') = 'shared'");
+    const candidateQuery = statements.find((statement) => statement.sql.includes('FROM nodes n'));
+    expect(candidateQuery?.sql).toContain("COALESCE(n.node_mode, 'shared') = 'shared'");
+    expect(candidateQuery?.sql).toContain("n.node_role = 'deployment'");
   });
 
   it('volume placement skips existing-node reuse and creates an exclusive node', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-exclusive-1' }));
-    vi.mocked(provisionNode).mockResolvedValue();
-
-    const { env, statements } = createRawMockEnv([{ run: { meta: { changes: 1 } } }]);
+    const { env, statements } = createRawMockEnv();
 
     const result = await provisionDeploymentNode('env-volume', 'proj-1', 'user-1', env, {
       requiresVolumes: true,
@@ -350,22 +362,19 @@ describe('provisionDeploymentNode', () => {
 
     expect(result?.nodeId).toBe('node-exclusive-1');
     expect(createNodeRecord).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        nodeMode: 'exclusive',
-        nodeRole: 'deployment',
-      })
+      env,
+      expect.objectContaining({ nodeMode: 'exclusive', nodeRole: 'deployment' })
     );
-    expect(statements.some((statement) => statement.sql.includes('SELECT id, vm_size'))).toBe(false);
+    expect(statements.some((statement) => statement.sql.includes('SELECT n.id, n.vm_size'))).toBe(
+      false
+    );
   });
 
   it('exclusive node link asserts the fresh node has no existing environments', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-exclusive-guard' }));
-    vi.mocked(provisionNode).mockResolvedValue();
-
-    const { env, statements } = createRawMockEnv([{ run: { meta: { changes: 1 } } }]);
+    const { env, statements } = createRawMockEnv();
 
     await provisionDeploymentNode('env-exclusive-guard', 'proj-1', 'user-1', env, {
       requiresVolumes: true,
@@ -374,53 +383,51 @@ describe('provisionDeploymentNode', () => {
     const update = statements.find((statement) =>
       statement.sql.includes('UPDATE deployment_environments')
     );
-    expect(update?.sql).toContain("COALESCE(node_mode, 'shared') = ?");
+    expect(update?.sql).toContain("COALESCE(n.node_mode, 'shared') = ?");
     expect(update?.sql).toContain('NOT EXISTS');
-    expect(update?.sql).toContain('existing.node_id = nodes.id');
+    expect(update?.sql).toContain('existing.node_id = n.id');
     expect(update?.binds).toContain('exclusive');
   });
 
-  it('falls back to platform credentials when user has none', async () => {
-    const mockDb = createMockDb({
-      userCredProvider: null,
-      platformCredProvider: 'scaleway',
-    });
+  it('uses platform allocation when canonical placement selected platform credentials', async () => {
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue(
+      canonicalAllocation({
+        effectiveProvider: 'scaleway',
+        vmLocation: 'par1',
+        credentialAttributionSource: 'platform',
+      })
+    );
     vi.mocked(createNodeRecord).mockResolvedValue(
       makeNodeResult({ id: 'node-deploy-2', cloudProvider: 'scaleway', vmLocation: 'par1' })
     );
-    vi.mocked(provisionNode).mockResolvedValue();
+    const { env } = createRawMockEnv();
 
-    const result = await provisionDeploymentNode(
-      'env-abcdefgh',
-      'proj-1',
-      'user-1',
-      createMockEnv()
-    );
+    const result = await provisionDeploymentNode('env-abcdefgh', 'proj-1', 'user-1', env);
 
     expect(result).not.toBeNull();
     expect(createNodeRecord).toHaveBeenCalledWith(
-      expect.anything(),
+      env,
       expect.objectContaining({
         cloudProvider: 'scaleway',
+        vmLocation: 'par1',
+        credentialAttributionSource: 'platform',
         nodeRole: 'deployment',
       })
     );
   });
 
-  it('returns null when no cloud credentials exist', async () => {
-    const mockDb = createMockDb({
-      userCredProvider: null,
-      platformCredProvider: null,
-    });
+  it('returns null when canonical allocation has no current credentials', async () => {
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue({
+      error: 'No current deployment credentials',
+      errorKind: 'credentials',
+    });
+    const { env } = createRawMockEnv();
 
-    const result = await provisionDeploymentNode(
-      'env-nocreds',
-      'proj-1',
-      'user-1',
-      createMockEnv()
-    );
+    const result = await provisionDeploymentNode('env-nocreds', 'proj-1', 'user-1', env);
 
     expect(result).toBeNull();
     expect(createNodeRecord).not.toHaveBeenCalled();
@@ -430,95 +437,63 @@ describe('provisionDeploymentNode', () => {
     expect(DEPLOYMENT_DEFAULT_VM_SIZE).toBe('small');
   });
 
-  it('uses DEPLOYMENT_DEFAULT_VM_SIZE env override when creating a deployment node', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+  it('uses DEPLOYMENT_DEFAULT_VM_SIZE env override when resolving deployment allocation', async () => {
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
-    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-deploy-medium' }));
-    vi.mocked(provisionNode).mockResolvedValue();
-
-    await provisionDeploymentNode(
-      'env-medium',
-      'proj-1',
-      'user-1',
-      createMockEnv({ DEPLOYMENT_DEFAULT_VM_SIZE: 'medium' })
+    mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue(
+      canonicalAllocation({ vmSize: 'medium' })
     );
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-deploy-medium' }));
+    const { env } = createRawMockEnv(undefined, { DEPLOYMENT_DEFAULT_VM_SIZE: 'medium' });
 
+    await provisionDeploymentNode('env-medium', 'proj-1', 'user-1', env);
+
+    expect(mocks.resolveCanonicalVmAllocationPlan).toHaveBeenCalledWith(
+      mockDb,
+      env,
+      expect.objectContaining({
+        explicit: expect.objectContaining({ vmSize: 'medium' }),
+      })
+    );
     expect(createNodeRecord).toHaveBeenCalledWith(
-      expect.anything(),
+      env,
       expect.objectContaining({ vmSize: 'medium' })
     );
   });
 
   it('provisioning promise rolls back nodeId and rejects so callers can mark failure', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-deploy-err' }));
     vi.mocked(provisionNode).mockRejectedValue(new Error('VM creation failed'));
+    const { env } = createRawMockEnv();
 
-    const result = await provisionDeploymentNode('env-fail', 'proj-1', 'user-1', createMockEnv());
+    const result = await provisionDeploymentNode('env-fail', 'proj-1', 'user-1', env);
 
     expect(result).not.toBeNull();
     await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
-    expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
+    expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', null);
   });
 
-  it('rolls back nodeId to NULL when provisioning fails (Gap 7)', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+  it('rolls back only the nodeId written by this provisioning attempt', async () => {
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-rollback-1' }));
     vi.mocked(provisionNode).mockRejectedValue(new Error('VM creation failed'));
+    const { env } = createRawMockEnv();
 
-    const result = await provisionDeploymentNode(
-      'env-rollback',
-      'proj-1',
-      'user-1',
-      createMockEnv()
-    );
+    const result = await provisionDeploymentNode('env-rollback', 'proj-1', 'user-1', env);
 
     expect(result).not.toBeNull();
-
-    // Wait for the provisioning promise (catch handler runs the rollback before rejecting)
     await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
+    expect(mockDb._tracker.updateSetValues).toHaveLength(1);
+    expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', null);
 
-    // There should be 2 update calls:
-    // 1. Initial link: set nodeId = 'node-rollback-1'
-    // 2. Rollback: set nodeId = null
-    expect(mockDb._tracker.updateSetValues).toHaveLength(2);
-
-    // First update sets nodeId to the new node
-    expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', 'node-rollback-1');
-
-    // Second update rolls back nodeId to null
-    expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
-    expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('updatedAt');
-
-    // Both updates must have WHERE clauses (tracked via updateWhereArgs)
-    expect(mockDb._tracker.updateWhereArgs).toHaveLength(2);
-
-    // ---- WHERE-clause CONTENT assertions (T4: nodeId-scoped, not just "exists") ----
-
-    // Initial link WHERE: and(eq(id, envId), isNull(nodeId)) — conditional link
-    // only applies when the env is not already bound to a node.
-    const linkWhere = mockDb._tracker.updateWhereArgs[0]![0] as {
-      op: string;
-      conds: Array<{ op: string; col: unknown; val?: unknown }>;
-    };
-    expect(linkWhere.op).toBe('and');
-    expect(linkWhere.conds).toHaveLength(2);
-    const linkIdCond = linkWhere.conds.find((cond) => cond.op === 'eq')!;
-    expect(linkIdCond.col).toBe(schema.deploymentEnvironments.id);
-    expect(linkIdCond.val).toBe('env-rollback');
-    const linkNodeCond = linkWhere.conds.find((cond) => cond.op === 'isNull')!;
-    expect(linkNodeCond.col).toBe(schema.deploymentEnvironments.nodeId);
-
-    // Rollback WHERE: and(eq(id, envId), eq(nodeId, node.id)) — only clears the
-    // nodeId we set, never another concurrent writer's node binding.
-    const rollbackWhere = mockDb._tracker.updateWhereArgs[1]![0] as {
+    const rollbackWhere = mockDb._tracker.updateWhereArgs[0]![0] as {
       op: string;
       conds: Array<{ op: string; col: unknown; val?: unknown }>;
     };
     expect(rollbackWhere.op).toBe('and');
-    expect(rollbackWhere.conds).toHaveLength(2);
     const rollbackIdCond = rollbackWhere.conds.find(
       (cond) => cond.op === 'eq' && cond.col === schema.deploymentEnvironments.id
     )!;
@@ -530,97 +505,37 @@ describe('provisionDeploymentNode', () => {
   });
 
   it('rollback is robust even if the rollback update itself fails', async () => {
-    // Create a DB where the second update call throws
-    const tracker = {
-      selectCalls: 0,
-      updateSetValues: [] as Record<string, unknown>[],
-      updateWhereArgs: [] as unknown[][],
-    };
-    let updateCallCount = 0;
-    const mockDb = {
-      select: vi.fn().mockImplementation(() => {
-        tracker.selectCalls++;
-        return {
-          from: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              leftJoin: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnValue({
-                  limit: vi.fn().mockResolvedValue([]),
-                }),
-              }),
-            }),
-            where: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([{ provider: 'hetzner' }]),
-            }),
-          }),
-        };
-      }),
-      update: vi.fn().mockImplementation(() => ({
-        set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
-          updateCallCount++;
-          tracker.updateSetValues.push(values);
-          return {
-            where: vi.fn().mockImplementation(() => {
-              // Second update (rollback) throws
-              if (updateCallCount >= 2) return Promise.reject(new Error('DB write failed'));
-              return Promise.resolve();
-            }),
-          };
-        }),
-      })),
-      _tracker: tracker,
-    };
-
+    const mockDb = createMockDb({ rollbackFails: true });
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-rollback-fail' }));
     vi.mocked(provisionNode).mockRejectedValue(new Error('VM creation failed'));
+    const { env } = createRawMockEnv();
 
-    const result = await provisionDeploymentNode(
-      'env-rollback-fail',
-      'proj-1',
-      'user-1',
-      createMockEnv()
-    );
+    const result = await provisionDeploymentNode('env-rollback-fail', 'proj-1', 'user-1', env);
 
     expect(result).not.toBeNull();
-
-    // The provisioning promise still rejects with the original provider failure,
-    // even if rollback itself fails after being attempted.
     await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
-
-    // Both updates were attempted
-    expect(tracker.updateSetValues).toHaveLength(2);
-    // The rollback was attempted (nodeId: null)
-    expect(tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
+    expect(mockDb._tracker.updateSetValues[0]).toHaveProperty('nodeId', null);
   });
 });
-
-// ---------------------------------------------------------------------------
-// Cloud-init deployment role and Docker daemon config are tested
-// behaviorally in packages/cloud-init/tests/generate.test.ts
-// (YAML parse + round-trip assertions, not source-contract).
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// DNS skip for deployment nodes (behavioral — spy on provisionNode)
-// ---------------------------------------------------------------------------
 
 describe('deployment node skips DNS record creation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.placementProjectDefaultsFromRow.mockImplementation((project) => project);
+    mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue(canonicalAllocation());
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult());
+    vi.mocked(provisionNode).mockResolvedValue();
   });
 
   it('provisionNode receives deployment context that triggers DNS skip', async () => {
-    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    const mockDb = createMockDb();
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
-    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult());
-    vi.mocked(provisionNode).mockResolvedValue();
+    const { env } = createRawMockEnv();
 
-    await provisionDeploymentNode('env-dns-skip', 'proj-1', 'user-1', createMockEnv());
+    await provisionDeploymentNode('env-dns-skip', 'proj-1', 'user-1', env);
 
-    // provisionNode receives the deploymentContext which triggers the DNS skip
-    // in nodes.ts (isDeploymentNode = !!deploymentContext?.environmentId)
     const callArgs = vi.mocked(provisionNode).mock.calls[0]!;
-    expect(callArgs[4]).toEqual({ environmentId: 'env-dns-skip' });
+    expect(callArgs[4]).toEqual({ environmentId: 'env-dns-skip', projectId: 'proj-1' });
   });
 });

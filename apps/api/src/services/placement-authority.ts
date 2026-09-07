@@ -98,7 +98,10 @@ export function buildPlacementAuthoritySqlPredicate(
   const concrete = normalizeConcreteSnapshot(snapshot);
   if (!concrete) return impossiblePredicate();
   if (concrete.workloadRole !== input.workloadRole) return impossiblePredicate();
-  if (concrete.capacityPoolScope === 'project' && concrete.capacityPoolProjectId !== input.projectId) {
+  if (
+    concrete.capacityPoolScope === 'project' &&
+    concrete.capacityPoolProjectId !== input.projectId
+  ) {
     return impossiblePredicate();
   }
 
@@ -217,7 +220,8 @@ export function evaluateLegacyNodeAdoptionCompatibility(
   if (!snapshot?.capacityPoolId) {
     return {
       kind: 'grandfathered-draining',
-      reason: 'node has no capacity-pool snapshot and requires explicit adoption before new placement',
+      reason:
+        'node has no capacity-pool snapshot and requires explicit adoption before new placement',
     };
   }
   if (!node.capacityPoolId || node.capacityPoolId !== snapshot.capacityPoolId) {
@@ -227,9 +231,15 @@ export function evaluateLegacyNodeAdoptionCompatibility(
     return { kind: 'incompatible', reason: 'node source id does not match the placement snapshot' };
   }
   if (node.capacityPoolCandidateId !== snapshot.capacityPoolCandidateId) {
-    return { kind: 'incompatible', reason: 'node candidate id does not match the placement snapshot' };
+    return {
+      kind: 'incompatible',
+      reason: 'node candidate id does not match the placement snapshot',
+    };
   }
-  if (!snapshot.providerInstanceType || node.providerInstanceType !== snapshot.providerInstanceType) {
+  if (
+    !snapshot.providerInstanceType ||
+    node.providerInstanceType !== snapshot.providerInstanceType
+  ) {
     return {
       kind: 'grandfathered-draining',
       reason: 'node has no verified provider-native instance identity',
@@ -427,7 +437,9 @@ function poolScopeSql(
   }
 }
 
-function normalizeConcreteSnapshot(snapshot: CapacityPlacementSnapshot): ConcreteCapacitySnapshot | null {
+function normalizeConcreteSnapshot(
+  snapshot: CapacityPlacementSnapshot
+): ConcreteCapacitySnapshot | null {
   const capacityPoolId = nonEmptyString(snapshot.capacityPoolId);
   if (!capacityPoolId) return null;
 

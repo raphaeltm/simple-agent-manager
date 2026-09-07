@@ -18,8 +18,8 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
-import type { CapacityPoolSummary } from './default-capacity-pools';
 import { timestampVersion } from './default-capacity-pool-helpers';
+import type { CapacityPoolSummary } from './default-capacity-pools';
 import {
   legacyReusableNodeMatches,
   normalizeLegacyPoolSize,
@@ -309,6 +309,11 @@ function normalizeCapacityCandidate(
     providerInstanceVcpuCount,
     providerInstanceMemoryMb,
     providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: optionalPositiveInteger(
+      candidate.providerInstanceBootDiskSizeGb
+    ),
+    providerInstanceImage: candidate.providerInstanceImage,
+    providerInstanceArchitecture: candidate.providerInstanceArchitecture,
     providerInstancePriceDisplay: candidate.providerInstancePriceDisplay,
     providerInstancePriceCurrency: nonEmptyString(candidate.providerInstancePriceCurrency),
     providerInstancePriceMonthlyCents: nonNegativeInteger(
@@ -348,6 +353,11 @@ function normalizeCapacityCandidate(
       providerInstanceVcpuCount,
       providerInstanceMemoryMb,
       providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: optionalPositiveInteger(
+        candidate.providerInstanceBootDiskSizeGb
+      ),
+      providerInstanceImage: candidate.providerInstanceImage,
+      providerInstanceArchitecture: candidate.providerInstanceArchitecture,
       providerInstancePriceDisplay: candidate.providerInstancePriceDisplay,
       providerInstancePriceCurrency: nonEmptyString(candidate.providerInstancePriceCurrency),
       providerInstancePriceMonthlyCents: nonNegativeInteger(

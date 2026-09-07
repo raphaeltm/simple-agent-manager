@@ -1,5 +1,6 @@
 import type {
   AgentProfileRuntime,
+  CapacityWorkloadRole,
   CredentialProvider,
   CredentialSource,
   ResourceRequirementsSource,
@@ -226,6 +227,7 @@ export function resolveTaskStartPlacement(input: TaskStartPlacementInput): TaskS
     taskMode: resolveTaskMode(explicit.taskMode, profile, workspaceProfile, input.taskModeDefault),
     agentType: explicit.agentType ?? profile?.agentType ?? input.project.defaultAgentType ?? null,
     resolvedReservation,
+    workloadRole: resolveWorkloadRole(input.workloadRole),
     placementSettings: input.placementSettings ?? null,
     credentialLookup: resolveCredentialLookup({
       userId: input.userId,
@@ -283,7 +285,7 @@ export async function resolveTaskStartCapacityPoolSelection(
         ...placement,
         placementSettings: resolvedSettings?.placementSettings ?? placement.placementSettings,
       },
-      'workspace',
+      placement.workloadRole,
       resolvedSettings?.placementSettings ?? placement.placementSettings ?? undefined
     );
   } catch (error) {
@@ -432,6 +434,10 @@ export async function resolveTaskStartPlacementCredentialAttributionFromPlacemen
       ? resolveCapacityPlacementCredentialAttribution(placement, capacityCandidate)
       : resolvePlacementCredentialAttribution(placement, credential)),
   };
+}
+
+function resolveWorkloadRole(value: CapacityWorkloadRole | null | undefined): CapacityWorkloadRole {
+  return value === 'deployment' ? 'deployment' : 'workspace';
 }
 
 function noEligibleCapacityCandidateMessage(
