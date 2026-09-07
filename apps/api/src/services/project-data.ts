@@ -127,6 +127,7 @@ import type {
 import type {
   CreateReservedTaskSessionWithInitialMessageInput,
   CreateReservedTaskSessionWithInitialMessageResult,
+  SessionIdentityGuard as ProjectDataSessionIdentityGuard,
 } from '../durable-objects/project-data/sessions';
 import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
@@ -155,8 +156,11 @@ import {
   buildSessionLifecycleEventInput,
   type SessionLifecycleEventInput,
 } from './project-lifecycle-event-inputs';
+import { recordReservedTaskSessionRevocation } from './reserved-task-session-revocations';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
+
+export type { ProjectDataSessionIdentityGuard };
 
 function rootExactReadOwner(projectId: string, sessionId: string): ProjectDataArchiveLocation {
   return {
@@ -326,6 +330,13 @@ function normalizeProjectDataEventRpcError(err: unknown): Error | null {
     default:
       return null;
   }
+}
+
+function isFailSessionIdentityGuardDenial(err: unknown, sessionId: string): boolean {
+  return (
+    err instanceof Error &&
+    err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
+  );
 }
 
 async function callProjectDataNoRetry<T>(
@@ -622,7 +633,8 @@ export async function linkSessionToWorkspace(
   env: Env,
   projectId: string,
   sessionId: string,
-  workspaceId: string
+  workspaceId: string,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<void> {
   await assertExactWriteAllowedIfArchiveEnabled(
     env,
@@ -631,7 +643,7 @@ export async function linkSessionToWorkspace(
     'linkSessionToWorkspace'
   );
   return callProjectDataWithRetry(env, projectId, 'linkSessionToWorkspace', (stub) =>
-    stub.linkSessionToWorkspace(sessionId, workspaceId)
+    stub.linkSessionToWorkspace(sessionId, workspaceId, guard ?? null)
   );
 }
 
@@ -641,6 +653,12 @@ export async function stopSession(
   sessionId: string
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'stopSession');
+  await recordReservedTaskSessionRevocation(env, {
+    projectId,
+    chatSessionId: sessionId,
+    reason: 'session_stopped',
+    source: 'project_data.stop_session',
+  });
   const stub = await getStub(env, projectId);
   const stopped = await stub.stopSession(sessionId);
   if (stopped) {
@@ -745,12 +763,33 @@ export async function failSession(
   env: Env,
   projectId: string,
   sessionId: string,
-  errorMessage: string | null = null
+  errorMessage: string | null = null,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'failSession');
   const stub = await getStub(env, projectId);
-  const failed = await stub.failSession(sessionId, errorMessage);
+  let failed: boolean;
+  try {
+    failed = await stub.failSession(sessionId, errorMessage, guard ?? null);
+  } catch (error) {
+    if (guard && isFailSessionIdentityGuardDenial(error, sessionId)) {
+      log.info('project_data.fail_session_identity_guard_denied', {
+        projectId,
+        sessionId,
+        taskId: guard.taskId ?? null,
+      });
+      return false;
+    }
+    throw error;
+  }
   if (failed) {
+    await recordReservedTaskSessionRevocation(env, {
+      projectId,
+      chatSessionId: sessionId,
+      taskId: guard?.taskId ?? null,
+      reason: 'session_failed',
+      source: 'project_data.fail_session',
+    });
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
       sessionId,
@@ -792,7 +831,8 @@ export async function persistMessage(
   role: string,
   content: string,
   toolMetadata: Record<string, unknown> | null,
-  messageId?: string
+  messageId?: string,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<string> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'persistMessage');
   return callProjectDataNoRetry(env, projectId, 'persistMessage', (stub) =>
@@ -801,7 +841,8 @@ export async function persistMessage(
       role,
       content,
       toolMetadata ? JSON.stringify(toolMetadata) : null,
-      messageId
+      messageId,
+      guard ?? null
     )
   );
 }

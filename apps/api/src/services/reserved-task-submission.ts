@@ -1,11 +1,3 @@
-/**
- * Retry-safe normal task submission adapter.
- *
- * Callers must durably reserve the immutable task/session/message/status identities
- * and source execution before invoking this adapter. The adapter records the D1
- * task, initial status event, and checkpoint in one batch, then reconciles the
- * ProjectData and TaskRunner boundaries by intent fingerprint on retry.
- */
 import { TASK_TERMINAL_STATUSES, type TaskTerminalStatus } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -41,14 +33,18 @@ import * as projectDataService from './project-data';
 import {
   parseAcceptedSnapshot,
   prepareNewSubmission,
+  reservedSubmissionGuardFromSnapshot,
   reservedTaskSubmissionConflict as conflict,
   revalidateBeforePhysicalStart,
   startInputFromSnapshot,
   submissionFingerprint,
   validateReservedTaskSubmissionInput,
 } from './reserved-task-submission-intent';
-import { markQueuedTaskFailed } from './task-failure';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
+import {
+  assertTaskRunnerStartGuard,
+  TaskRunnerStartGuardRevokedError,
+} from './task-runner-start-guard';
 import { generateTaskTitle } from './task-title';
 
 const TERMINAL_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
@@ -106,13 +102,28 @@ async function readTaskByIdentity(
   input: ReservedTaskSubmissionInput
 ): Promise<{
   id: string;
+  project_id: string;
+  user_id: string;
   status: string;
   chat_session_id: string | null;
+  error_message: string | null;
 } | null> {
   return db
-    .prepare('SELECT id, status, chat_session_id FROM tasks WHERE id = ? LIMIT 1')
+    .prepare(
+      `SELECT id, project_id, user_id, status, chat_session_id, error_message
+         FROM tasks
+        WHERE id = ?
+        LIMIT 1`
+    )
     .bind(input.identities.taskId)
-    .first<{ id: string; status: string; chat_session_id: string | null }>();
+    .first<{
+      id: string;
+      project_id: string;
+      user_id: string;
+      status: string;
+      chat_session_id: string | null;
+      error_message: string | null;
+    }>();
 }
 
 async function readCheckpointByReservedIdentity(
@@ -421,7 +432,7 @@ async function ensureProjectDataBoundary(
   }
 }
 
-async function failUnstartedTask(
+async function classifyUnconfirmedStart(
   env: Env,
   input: ReservedTaskSubmissionInput,
   snapshot: AcceptedSnapshot,
@@ -429,34 +440,80 @@ async function failUnstartedTask(
   now: string,
   reused: boolean
 ): Promise<ReservedTaskSubmissionResult> {
-  const changed = await markQueuedTaskFailed(dbForEnv(env), input.identities.taskId, reason, {
-    env,
-    projectId: input.projectId,
-    source: 'reserved_task_submission.task_runner_startup',
-    sessionId: input.identities.chatSessionId,
-  });
-  if (changed) {
-    await projectDataService
-      .stopSession(env, input.projectId, input.identities.chatSessionId)
-      .catch((error) => {
-        log.warn('reserved_task_submission.orphaned_session_stop_failed', {
-          taskId: input.identities.taskId,
-          projectId: input.projectId,
-          sessionId: input.identities.chatSessionId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
+  const observedOutcome = await classifyPersistedTaskOutcome(env, input, snapshot, now, reused);
+  if (observedOutcome) return observedOutcome;
+
+  try {
+    await assertTaskRunnerStartGuard(env, reservedSubmissionGuardFromSnapshot(snapshot), {
+      requireQueuedTask: true,
+    });
+  } catch (error) {
+    if (error instanceof TaskRunnerStartGuardRevokedError) {
+      const winner = await classifyPersistedTaskOutcome(env, input, snapshot, now, reused);
+      if (winner) return winner;
+      return conflict(input, 'authority_unavailable', error.message, snapshot.task.outputBranch);
+    }
+    return {
+      outcome: 'pending',
+      taskId: input.identities.taskId,
+      sessionId: input.identities.chatSessionId,
+      branchName: snapshot.task.outputBranch,
+      pendingAt: 'task_runner_start',
+      reason: error instanceof Error ? error.message : String(error),
+      reused,
+    };
   }
-  await markTerminalObserved(env, input.identities.taskId, now);
   return {
-    outcome: 'terminal',
+    outcome: 'pending',
     taskId: input.identities.taskId,
     sessionId: input.identities.chatSessionId,
     branchName: snapshot.task.outputBranch,
-    status: 'failed',
+    pendingAt: 'task_runner_start',
     reason,
     reused,
   };
+}
+
+async function classifyPersistedTaskOutcome(
+  env: Env,
+  input: ReservedTaskSubmissionInput,
+  snapshot: AcceptedSnapshot,
+  now: string,
+  reused: boolean
+): Promise<ReservedTaskSubmissionResult | null> {
+  const task = await readTaskByIdentity(env.DATABASE, input);
+  if (
+    task &&
+    (task.project_id !== input.projectId ||
+      task.user_id !== input.userId ||
+      task.chat_session_id !== input.identities.chatSessionId)
+  ) {
+    return null;
+  }
+  if (task && TERMINAL_STATUSES.has(task.status)) {
+    await markTerminalObserved(env, input.identities.taskId, now);
+    return {
+      outcome: 'terminal',
+      taskId: input.identities.taskId,
+      sessionId: input.identities.chatSessionId,
+      branchName: snapshot.task.outputBranch,
+      status: task.status as TaskTerminalStatus,
+      reason: task.error_message,
+      reused,
+    };
+  }
+  if (task && ALREADY_STARTED_STATUSES.has(task.status)) {
+    await markRunnerStarted(env, input.identities.taskId, now);
+    return {
+      outcome: 'admitted',
+      taskId: input.identities.taskId,
+      sessionId: input.identities.chatSessionId,
+      branchName: snapshot.task.outputBranch,
+      startState: 'already_started',
+      reused,
+    };
+  }
+  return null;
 }
 
 async function startOrConfirmRunner(
@@ -545,11 +602,11 @@ async function startOrConfirmRunner(
       };
     }
     const message = startError instanceof Error ? startError.message : String(startError);
-    return failUnstartedTask(
+    return classifyUnconfirmedStart(
       env,
       input,
       snapshot,
-      `Task runner startup failed: ${message}`,
+      `Task runner startup could not be confirmed: ${message}`,
       deps.now(),
       reused
     );
@@ -649,7 +706,14 @@ async function reconcileCheckpoint(
   if (projectDataPending) return projectDataPending;
   await deps.afterProjectDataCommit();
 
-  const revalidationConflict = await revalidateBeforePhysicalStart(env, db, input, snapshot, deps);
+  const revalidationConflict = await revalidateBeforePhysicalStart(
+    env,
+    db,
+    input,
+    snapshot,
+    deps,
+    true
+  );
   if (revalidationConflict) return revalidationConflict;
 
   return runTaskRunnerBoundary(
@@ -706,7 +770,7 @@ export async function submitReservedTask(
   input: ReservedTaskSubmissionInput,
   dependencyOverrides: ReservedTaskSubmissionDependencies = {}
 ): Promise<ReservedTaskSubmissionResult> {
-  const validationError = validateReservedTaskSubmissionInput(input);
+  const validationError = validateReservedTaskSubmissionInput(input, env);
   if (validationError) return conflict(input, 'invalid_input', validationError);
 
   const deps = dependencySet(dependencyOverrides);
@@ -746,7 +810,8 @@ export async function submitReservedTask(
     db,
     input,
     prepared.snapshot,
-    deps
+    deps,
+    false
   );
   if (revalidationConflict) return revalidationConflict;
 

@@ -150,6 +150,7 @@ const TASK_IDS = [
   'task-status-init-001',
   'task-redact-mcp-001',
   'task-deterministic-001',
+  'task-start-guard-001',
   'task-capacity-explicit-guard-001',
   'task-capacity-flexible-location-001',
 ];
@@ -259,6 +260,79 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(config.attachments![0]!.filename).toBe('spec.md');
     expect(config.projectScaling?.taskExecutionTimeoutMs).toBe(7200000);
     expect(config.projectScaling?.maxWorkspacesPerNode).toBe(3);
+  });
+
+  it('startTaskRunnerDO forwards reserved submission startGuard to the DO', async () => {
+    const taskId = 'task-start-guard-001';
+    const chatSessionId = 'chat-start-guard-001';
+    const initialStatusEventId = 'status-start-guard-001';
+    const intentFingerprint = `sha256:${'a'.repeat(64)}`;
+    const now = new Date().toISOString();
+
+    await env.DATABASE.prepare(
+      `UPDATE tasks SET status = 'queued', chat_session_id = ?, updated_at = ? WHERE id = ?`
+    )
+      .bind(chatSessionId, now, taskId)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO task_status_events
+         (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+       VALUES (?, ?, NULL, 'queued', 'system', NULL, 'reserved start guard test', ?)`
+    )
+      .bind(initialStatusEventId, taskId, now)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO task_submission_checkpoints
+         (task_id, project_id, user_id, chat_session_id, initial_message_id,
+          initial_status_event_id, source_kind, source_id, source_execution_id,
+          triggered_by, intent_fingerprint, accepted_snapshot_json, branch_name,
+          task_title, checkpoint_state, project_data_committed_at, created_at, updated_at)
+       VALUES (?, 'proj-tr-001', 'user-tr-001', ?, 'msg-start-guard-001', ?,
+          'trigger', 'trigger-start-guard-001', 'exec-start-guard-001', 'cron',
+          ?, '{}', 'task/start-guard', 'Start guard task', 'project_data_committed', ?, ?, ?)`
+    )
+      .bind(taskId, chatSessionId, initialStatusEventId, intentFingerprint, now, now, now)
+      .run();
+
+    const projectDataStub = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName('proj-tr-001'));
+    await runInDurableObject(projectDataStub, async (_instance, state) => {
+      const timestamp = Date.now();
+      state.storage.sql.exec(
+        `INSERT OR REPLACE INTO chat_sessions
+           (id, workspace_id, task_id, created_by_user_id, topic, status,
+            message_count, started_at, created_at, updated_at)
+         VALUES (?, NULL, ?, ?, 'Start guard task', 'active', 1, ?, ?, ?)`,
+        chatSessionId,
+        taskId,
+        'user-tr-001',
+        timestamp,
+        timestamp,
+        timestamp
+      );
+    });
+
+    await startTaskRunnerDO(env, {
+      ...makeStartInput(taskId),
+      chatSessionId,
+      startGuard: {
+        kind: 'reserved_submission',
+        taskId,
+        projectId: 'proj-tr-001',
+        userId: 'user-tr-001',
+        chatSessionId,
+        intentFingerprint,
+      },
+    });
+
+    const status = (await getStub(taskId).getStatus()) as TaskRunnerState;
+    expect(status.config.startGuard).toEqual({
+      kind: 'reserved_submission',
+      taskId,
+      projectId: 'proj-tr-001',
+      userId: 'user-tr-001',
+      chatSessionId,
+      intentFingerprint,
+    });
   });
 
   it('startTaskRunnerDO defaults optional fields to null', async () => {

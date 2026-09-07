@@ -1233,6 +1233,28 @@ export const taskSubmissionCheckpoints = sqliteTable(
   })
 );
 
+export const reservedTaskSessionRevocations = sqliteTable(
+  'reserved_task_session_revocations',
+  {
+    projectId: text('project_id').notNull(),
+    chatSessionId: text('chat_session_id').notNull(),
+    taskId: text('task_id').notNull(),
+    reason: text('reason').notNull(),
+    source: text('source').notNull(),
+    revokedAt: text('revoked_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.chatSessionId] }),
+    taskIdx: index('idx_reserved_task_session_revocations_task').on(table.taskId),
+  })
+);
+
 // =============================================================================
 // Nodes
 // =============================================================================

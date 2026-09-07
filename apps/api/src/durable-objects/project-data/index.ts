@@ -78,6 +78,13 @@ import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');
 
+function isFailSessionIdentityGuardDenial(err: unknown, sessionId: string): boolean {
+  return (
+    err instanceof Error &&
+    err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
+  );
+}
+
 export type { Env } from './types';
 
 export class ProjectData extends DurableObject<Env> {
@@ -367,8 +374,26 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async failSession(sessionId: string, errorMessage: string | null = null): Promise<boolean> {
-    const result = sessions.failSession(this.sql, sessionId);
+  async failSession(
+    sessionId: string,
+    errorMessage: string | null = null,
+    guard?: sessions.SessionIdentityGuard | null
+  ): Promise<boolean> {
+    let result: { workspaceId: string | null; messageCount: number } | null;
+    try {
+      result = sessions.failSession(this.sql, sessionId, guard);
+    } catch (err) {
+      if (guard && isFailSessionIdentityGuardDenial(err, sessionId)) {
+        log.info('fail_session_identity_guard_denied', {
+          sessionId,
+          taskId: guard.taskId ?? null,
+          createdByUserId: guard.createdByUserId ?? null,
+          workspaceId: guard.workspaceId ?? null,
+        });
+        return false;
+      }
+      throw err;
+    }
     if (result) {
       activity.recordActivityEventInternal(
         this.sql,
@@ -414,7 +439,8 @@ export class ProjectData extends DurableObject<Env> {
     role: string,
     content: string,
     toolMetadata: string | null,
-    messageId?: string
+    messageId?: string,
+    guard?: sessions.SessionIdentityGuard | null
   ): Promise<string> {
     return this.withArchiveTranscriptLock(() =>
       messagePersistence.persistMessageWithSideEffects(
@@ -425,7 +451,8 @@ export class ProjectData extends DurableObject<Env> {
         role,
         content,
         toolMetadata,
-        messageId
+        messageId,
+        guard
       )
     );
   }
@@ -552,8 +579,12 @@ export class ProjectData extends DurableObject<Env> {
     return run;
   }
 
-  async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
-    sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId);
+  async linkSessionToWorkspace(
+    sessionId: string,
+    workspaceId: string,
+    guard?: sessions.SessionIdentityGuard | null
+  ): Promise<void> {
+    sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId, guard);
     this.recalculateAlarm().catch((err) =>
       log.warn('schedule_workspace_idle_alarm_after_link_failed', {
         workspaceId,

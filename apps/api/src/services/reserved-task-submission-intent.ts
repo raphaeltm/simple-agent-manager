@@ -28,11 +28,21 @@ import type {
 } from './reserved-task-submission-contracts';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
 import { type startTaskRunnerDO } from './task-runner-do';
+import {
+  assertTaskRunnerStartGuard,
+  type TaskRunnerReservedSubmissionGuard,
+  TaskRunnerStartGuardRevokedError,
+} from './task-runner-start-guard';
 import { getTaskTitleConfig } from './task-title';
 
 const FINGERPRINT_VERSION = 1;
 const SNAPSHOT_VERSION = 1;
 const MAX_RESERVED_ID_LENGTH = 160;
+const DEFAULT_RESERVED_PROMPT_MAX_LENGTH = 16_000;
+const DEFAULT_RESERVED_BRANCH_NAME_SEED_MAX_LENGTH = 512;
+const DEFAULT_RESERVED_SOURCE_DISPLAY_NAME_MAX_LENGTH = 512;
+const DEFAULT_RESERVED_REPOSITORY_ACCESS_FLOW_MAX_LENGTH = 512;
+const DEFAULT_RESERVED_INITIAL_STATUS_REASON_MAX_LENGTH = 1_024;
 const SOURCE_KINDS = new Set<string>(['trigger', 'schedule', 'standing_watch']);
 const TASK_ACTOR_TYPES = new Set<string>(['user', 'system', 'workspace_callback']);
 const TRIGGERED_BY = new Set<string>(TRIGGERED_BY_VALUES);
@@ -41,28 +51,66 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
 type ResolvedProfile = Awaited<ReturnType<typeof resolveSkillProfile>> | null;
 type TaskRunnerStartInput = Parameters<typeof startTaskRunnerDO>[1];
 
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function nonEmpty(value: string, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new Error(`${field} is required`);
   }
+  return value;
+}
+
+function nonEmptyIdentity(value: string, field: string): string {
+  nonEmpty(value, field);
   if (value.length > MAX_RESERVED_ID_LENGTH) {
     throw new Error(`${field} must be ${MAX_RESERVED_ID_LENGTH} characters or fewer`);
   }
   return value;
 }
 
+function nonEmptyBoundedText(value: string, field: string, maxLength: number): string {
+  nonEmpty(value, field);
+  if (value.length > maxLength) {
+    throw new Error(`${field} must be ${maxLength} characters or fewer`);
+  }
+  return value;
+}
+
 export function validateReservedTaskSubmissionInput(
-  input: ReservedTaskSubmissionInput
+  input: ReservedTaskSubmissionInput,
+  env: Pick<
+    Env,
+    | 'MAX_TASK_MESSAGE_LENGTH'
+    | 'RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH'
+    | 'RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH'
+    | 'RESERVED_TASK_REPOSITORY_ACCESS_FLOW_MAX_LENGTH'
+    | 'RESERVED_TASK_INITIAL_STATUS_REASON_MAX_LENGTH'
+  >
 ): string | null {
   try {
-    nonEmpty(input.identities.taskId, 'identities.taskId');
-    nonEmpty(input.identities.chatSessionId, 'identities.chatSessionId');
-    nonEmpty(input.identities.initialMessageId, 'identities.initialMessageId');
-    nonEmpty(input.identities.initialStatusEventId, 'identities.initialStatusEventId');
-    nonEmpty(input.projectId, 'projectId');
-    nonEmpty(input.userId, 'userId');
-    nonEmpty(input.prompt, 'prompt');
-    nonEmpty(input.branchNameSeed, 'branchNameSeed');
+    nonEmptyIdentity(input.identities.taskId, 'identities.taskId');
+    nonEmptyIdentity(input.identities.chatSessionId, 'identities.chatSessionId');
+    nonEmptyIdentity(input.identities.initialMessageId, 'identities.initialMessageId');
+    nonEmptyIdentity(input.identities.initialStatusEventId, 'identities.initialStatusEventId');
+    nonEmptyIdentity(input.projectId, 'projectId');
+    nonEmptyIdentity(input.userId, 'userId');
+    nonEmptyBoundedText(
+      input.prompt,
+      'prompt',
+      parsePositiveInt(env.MAX_TASK_MESSAGE_LENGTH, DEFAULT_RESERVED_PROMPT_MAX_LENGTH)
+    );
+    nonEmptyBoundedText(
+      input.branchNameSeed,
+      'branchNameSeed',
+      parsePositiveInt(
+        env.RESERVED_TASK_BRANCH_NAME_SEED_MAX_LENGTH,
+        DEFAULT_RESERVED_BRANCH_NAME_SEED_MAX_LENGTH
+      )
+    );
     if (!SOURCE_KINDS.has(input.source.kind)) {
       throw new Error(`source.kind is invalid: ${input.source.kind}`);
     }
@@ -77,11 +125,32 @@ export function validateReservedTaskSubmissionInput(
     if (!isTaskMode(input.taskMode)) {
       throw new Error(`taskMode is invalid: ${input.taskMode}`);
     }
-    nonEmpty(input.source.sourceId, 'source.sourceId');
-    nonEmpty(input.source.sourceExecutionId, 'source.sourceExecutionId');
-    nonEmpty(input.source.displayName, 'source.displayName');
-    nonEmpty(input.source.repositoryAccessFlow, 'source.repositoryAccessFlow');
-    nonEmpty(input.source.initialStatusReason, 'source.initialStatusReason');
+    nonEmptyIdentity(input.source.sourceId, 'source.sourceId');
+    nonEmptyIdentity(input.source.sourceExecutionId, 'source.sourceExecutionId');
+    nonEmptyBoundedText(
+      input.source.displayName,
+      'source.displayName',
+      parsePositiveInt(
+        env.RESERVED_TASK_SOURCE_DISPLAY_NAME_MAX_LENGTH,
+        DEFAULT_RESERVED_SOURCE_DISPLAY_NAME_MAX_LENGTH
+      )
+    );
+    nonEmptyBoundedText(
+      input.source.repositoryAccessFlow,
+      'source.repositoryAccessFlow',
+      parsePositiveInt(
+        env.RESERVED_TASK_REPOSITORY_ACCESS_FLOW_MAX_LENGTH,
+        DEFAULT_RESERVED_REPOSITORY_ACCESS_FLOW_MAX_LENGTH
+      )
+    );
+    nonEmptyBoundedText(
+      input.source.initialStatusReason,
+      'source.initialStatusReason',
+      parsePositiveInt(
+        env.RESERVED_TASK_INITIAL_STATUS_REASON_MAX_LENGTH,
+        DEFAULT_RESERVED_INITIAL_STATUS_REASON_MAX_LENGTH
+      )
+    );
     if (input.source.kind === 'trigger') {
       if (input.source.triggerId !== input.source.sourceId) {
         throw new Error('trigger sourceId must match triggerId');
@@ -463,7 +532,8 @@ export async function revalidateBeforePhysicalStart(
   db: Db,
   input: ReservedTaskSubmissionInput,
   snapshot: AcceptedSnapshot,
-  deps: ResolvedReservedTaskSubmissionDependencies
+  deps: ResolvedReservedTaskSubmissionDependencies,
+  reused: boolean
 ): Promise<ReservedTaskSubmissionResult | null> {
   const project = await loadProject(db, input.projectId);
   if (!project) {
@@ -527,7 +597,43 @@ export async function revalidateBeforePhysicalStart(
       snapshot.task.outputBranch
     );
   }
+  try {
+    await assertTaskRunnerStartGuard(env, reservedSubmissionGuardFromSnapshot(snapshot), {
+      requireQueuedTask: true,
+    });
+  } catch (error) {
+    if (error instanceof TaskRunnerStartGuardRevokedError) {
+      return reservedTaskSubmissionConflict(
+        input,
+        'authority_unavailable',
+        error.message,
+        snapshot.task.outputBranch
+      );
+    }
+    return {
+      outcome: 'pending',
+      taskId: input.identities.taskId,
+      sessionId: input.identities.chatSessionId,
+      branchName: snapshot.task.outputBranch,
+      pendingAt: 'task_runner_start',
+      reason: error instanceof Error ? error.message : String(error),
+      reused,
+    };
+  }
   return null;
+}
+
+export function reservedSubmissionGuardFromSnapshot(
+  snapshot: AcceptedSnapshot
+): TaskRunnerReservedSubmissionGuard {
+  return {
+    kind: 'reserved_submission',
+    taskId: snapshot.runner.taskId,
+    projectId: snapshot.runner.projectId,
+    userId: snapshot.runner.userId,
+    chatSessionId: snapshot.runner.chatSessionId,
+    intentFingerprint: snapshot.intentFingerprint,
+  };
 }
 
 export function startInputFromSnapshot(snapshot: AcceptedSnapshot): TaskRunnerStartInput {
@@ -570,5 +676,6 @@ export function startInputFromSnapshot(snapshot: AcceptedSnapshot): TaskRunnerSt
     resolvedReservation: runner.resolvedReservation,
     capacityPoolSelection: runner.capacityPoolSelection,
     vmSizeSource: runner.vmSizeSource,
+    startGuard: reservedSubmissionGuardFromSnapshot(snapshot),
   };
 }

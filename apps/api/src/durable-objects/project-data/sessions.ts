@@ -41,6 +41,12 @@ export interface CreateReservedTaskSessionResult {
   inserted: boolean;
 }
 
+export interface SessionIdentityGuard {
+  taskId?: string | null;
+  createdByUserId?: string | null;
+  workspaceId?: string | null;
+}
+
 export interface CreateReservedTaskSessionWithInitialMessageInput extends CreateReservedTaskSessionInput {
   initialMessageId: string;
   initialMessageRole: string;
@@ -72,6 +78,90 @@ function readReservedSession(sql: SqlStorage, sessionId: string): Record<string,
       )
       .toArray()[0] ?? null
   );
+}
+
+function readSessionForGuard(sql: SqlStorage, sessionId: string): Record<string, unknown> | null {
+  return (
+    sql
+      .exec(
+        `SELECT id, workspace_id, task_id, created_by_user_id, status, message_count
+           FROM chat_sessions WHERE id = ? LIMIT 1`,
+        sessionId
+      )
+      .toArray()[0] ?? null
+  );
+}
+
+function guardHasField(guard: SessionIdentityGuard, field: keyof SessionIdentityGuard): boolean {
+  return Object.prototype.hasOwnProperty.call(guard, field);
+}
+
+function guardFieldValue(
+  guard: SessionIdentityGuard,
+  field: keyof SessionIdentityGuard,
+  sessionId: string,
+  operation: string
+): string | null | undefined {
+  if (!guardHasField(guard, field)) return undefined;
+  const value = guard[field];
+  if (typeof value === 'string' || value === null) return value;
+  throw new Error(
+    `Session ${sessionId} ${operation} guard has invalid ${field}: ${typeof value}`
+  );
+}
+
+function assertGuardField(
+  row: Record<string, unknown>,
+  field: string,
+  expected: string | null | undefined,
+  sessionId: string,
+  operation: string
+): void {
+  if (expected === undefined) return;
+  if (row[field] === expected) return;
+  throw new Error(
+    `Session ${sessionId} cannot ${operation}: expected ${field} ${expected ?? 'null'}`
+  );
+}
+
+export function assertSessionIdentityGuard(
+  sql: SqlStorage,
+  sessionId: string,
+  operation: string,
+  guard?: SessionIdentityGuard | null,
+  options: { allowNullWorkspace?: boolean } = {}
+): Record<string, unknown> | null {
+  if (!guard) return null;
+  const row = readSessionForGuard(sql, sessionId);
+  if (!row) {
+    throw new Error(`Session ${sessionId} not found`);
+  }
+
+  assertGuardField(
+    row,
+    'task_id',
+    guardFieldValue(guard, 'taskId', sessionId, operation),
+    sessionId,
+    operation
+  );
+  assertGuardField(
+    row,
+    'created_by_user_id',
+    guardFieldValue(guard, 'createdByUserId', sessionId, operation),
+    sessionId,
+    operation
+  );
+  const expectedWorkspaceId = guardFieldValue(guard, 'workspaceId', sessionId, operation);
+  if (
+    expectedWorkspaceId !== undefined &&
+    row.workspace_id !== expectedWorkspaceId &&
+    !(options.allowNullWorkspace && row.workspace_id === null)
+  ) {
+    throw new Error(
+      `Session ${sessionId} cannot ${operation}: expected workspace_id ${expectedWorkspaceId ?? 'null'}`
+    );
+  }
+  return row;
 }
 
 function assertReservedSessionMatches(
@@ -208,9 +298,11 @@ export function linkSessionToTask(sql: SqlStorage, sessionId: string, taskId: st
 function terminateSession(
   sql: SqlStorage,
   sessionId: string,
-  terminalStatus: 'stopped' | 'failed'
+  terminalStatus: 'stopped' | 'failed',
+  guard?: SessionIdentityGuard | null
 ): { workspaceId: string | null; messageCount: number; rowsWritten: number } | null {
   const now = Date.now();
+  assertSessionIdentityGuard(sql, sessionId, terminalStatus, guard);
   const cursor = sql.exec(
     `UPDATE chat_sessions SET status = ?, ended_at = ?, updated_at = ? WHERE id = ? AND status IN ('active', 'sleeping')`,
     terminalStatus,
@@ -270,9 +362,10 @@ export function wakeSession(
 
 export function stopSession(
   sql: SqlStorage,
-  sessionId: string
+  sessionId: string,
+  guard?: SessionIdentityGuard | null
 ): { workspaceId: string | null; messageCount: number } | null {
-  const result = terminateSession(sql, sessionId, 'stopped');
+  const result = terminateSession(sql, sessionId, 'stopped', guard);
   // If no rows were updated, session was already stopped/failed — skip
   if (!result || result.rowsWritten === 0) return null;
   return result;
@@ -284,9 +377,10 @@ export function stopSessionInternal(sql: SqlStorage, sessionId: string): void {
 
 export function failSession(
   sql: SqlStorage,
-  sessionId: string
+  sessionId: string,
+  guard?: SessionIdentityGuard | null
 ): { workspaceId: string | null; messageCount: number } | null {
-  const result = terminateSession(sql, sessionId, 'failed');
+  const result = terminateSession(sql, sessionId, 'failed', guard);
   // If no rows were updated, session was already stopped/failed — skip
   if (!result || result.rowsWritten === 0) return null;
   return result;
@@ -295,19 +389,28 @@ export function failSession(
 export function linkSessionToWorkspace(
   sql: SqlStorage,
   sessionId: string,
-  workspaceId: string
+  workspaceId: string,
+  guard?: SessionIdentityGuard | null
 ): void {
-  const session = sql
-    .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
+  const session =
+    assertSessionIdentityGuard(sql, sessionId, 'link workspace', guard, {
+      allowNullWorkspace: true,
+    }) ?? readSessionForGuard(sql, sessionId);
 
   if (!session) {
     throw new Error(`Session ${sessionId} not found`);
   }
+  const status = typeof session.status === 'string' ? session.status : null;
+  if (status !== 'active' && status !== 'sleeping') {
+    throw new Error(`Session ${sessionId} is ${status ?? 'unknown'} and cannot be linked`);
+  }
 
   const now = Date.now();
   sql.exec(
-    'UPDATE chat_sessions SET workspace_id = ?, updated_at = ? WHERE id = ?',
+    `UPDATE chat_sessions
+        SET workspace_id = ?, updated_at = ?
+      WHERE id = ?
+        AND status IN ('active', 'sleeping')`,
     workspaceId,
     now,
     sessionId

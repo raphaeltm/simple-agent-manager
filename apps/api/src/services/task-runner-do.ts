@@ -27,6 +27,7 @@ import type {
   TaskStartCapacityPoolSelection,
 } from './placement-resolver';
 import { assertReplacementDeletionConfirmed } from './replacement-deletion-fence';
+import type { TaskRunnerStartGuard } from './task-runner-start-guard';
 
 const TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES = 96 * 1024;
 
@@ -198,6 +199,8 @@ export async function startTaskRunnerDO(
     recoverySourceTaskId?: string | null;
     /** Original attempt whose runtime deletion fences this replacement. */
     retrySourceTaskId?: string | null;
+    /** Optional durable lifecycle guard for reserved first-start submissions. */
+    startGuard?: TaskRunnerStartGuard | null;
   }
 ): Promise<void> {
   const deletionSourceTaskId = input.retrySourceTaskId ?? input.recoverySourceTaskId ?? null;
@@ -266,6 +269,7 @@ export async function startTaskRunnerDO(
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
       recoverySourceTaskId: input.recoverySourceTaskId ?? null,
       retrySourceTaskId: input.retrySourceTaskId ?? null,
+      startGuard: input.startGuard ?? null,
     },
   };
 

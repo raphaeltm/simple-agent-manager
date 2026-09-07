@@ -27,6 +27,8 @@ const taskRunnerDoSource = [
   'workspace-steps.ts',
   'agent-session-step.ts',
   'state-machine.ts',
+  'session-linking.ts',
+  'workspace-reserved-allocation.ts',
   'helpers.ts',
 ].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
 const projectDataDoSource = [
@@ -162,7 +164,7 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
   });
 
   it('linkSessionToWorkspace updates workspace_id on the session', () => {
-    expect(projectDataDoSource).toContain('UPDATE chat_sessions SET workspace_id = ?');
+    expect(projectDataDoSource).toContain('SET workspace_id = ?');
   });
 
   it('linkSessionToWorkspace broadcasts session.updated event', () => {
@@ -177,7 +179,7 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
 
   it('service wrapper calls DO stub.linkSessionToWorkspace', () => {
     expect(projectDataServiceSource).toContain(
-      'stub.linkSessionToWorkspace(sessionId, workspaceId)'
+      'stub.linkSessionToWorkspace(sessionId, workspaceId, guard ?? null)'
     );
   });
 

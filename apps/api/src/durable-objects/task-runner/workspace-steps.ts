@@ -10,14 +10,6 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
-import {
-  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
-  capacityPlacementSnapshotSqlValues,
-} from '../../services/capacity-placement-snapshot';
-import {
-  type CapacityPlacementSnapshotRow,
-  toCapacityPlacementSnapshot,
-} from '../../services/capacity-pools';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
 import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import {
@@ -34,6 +26,10 @@ import {
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 import { ensureBranchExistsOnRemote } from './workspace-branch';
+import {
+  claimWorkspaceAllocationForTask,
+  recoverWorkspaceFromD1,
+} from './workspace-reserved-allocation';
 
 export { ensureBranchExistsOnRemote } from './workspace-branch';
 
@@ -54,20 +50,23 @@ export async function handleWorkspaceCreation(
   await recoverWorkspaceFromD1(state, rc);
 
   if (state.stepResults.workspaceId) {
-    if (await isTaskDelegated(state, rc)) {
+    const workspaceId = state.stepResults.workspaceId;
+    if (await isTaskDelegatedToWorkspace(state, rc, workspaceId)) {
       // TDF-6: Ensure session linking on crash recovery — the DO may have crashed
       // after creating the workspace but before linking the session. Dispatch
       // must still be checked separately; D1 workspace linkage is not VM-agent
       // acknowledgement.
-      await ensureWorkspaceBookkeeping(state, rc, state.stepResults.workspaceId);
+      await ensureWorkspaceBookkeeping(state, rc, workspaceId);
       await finalizeVmAdmissionPlacement(state, rc);
       await rc.advanceToStep(state, 'workspace_dispatch');
       return;
     }
     // If still queued, the DO recovered after workspace row creation but before
-    // the task delegation transition. Re-run idempotent bookkeeping before
-    // proceeding with delegation and dispatch.
-    await ensureWorkspaceBookkeeping(state, rc, state.stepResults.workspaceId);
+    // the task-link or delegation transition. Re-run the same guarded task-link
+    // CAS used by the first-start path before any ProjectData link or dispatch
+    // bookkeeping.
+    await claimWorkspaceAllocationForTask(state, rc, workspaceId, new Date().toISOString());
+    await ensureWorkspaceBookkeeping(state, rc, workspaceId);
     await finalizeVmAdmissionPlacement(state, rc);
   } else {
     const created = await createAndProvisionWorkspace(state, rc);
@@ -84,7 +83,10 @@ export async function handleWorkspaceCreation(
     .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
-    // Task was already failed by cron recovery — abort gracefully
+    if (await convergeLostDelegationTransition(state, rc)) {
+      return;
+    }
+    // Task was already failed/cancelled by recovery — abort gracefully
     log.warn('task_runner_do.aborted_by_recovery', {
       taskId: state.taskId,
       step: 'delegated_transition',
@@ -111,72 +113,43 @@ export async function handleWorkspaceCreation(
   await rc.advanceToStep(state, 'workspace_dispatch');
 }
 
-async function recoverWorkspaceFromD1(
+async function isTaskDelegatedToWorkspace(
   state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<void> {
-  // If workspace already created (retry or crash recovery), skip creation.
-  // Check both DO state AND D1 to handle the crash window between D1 insert
-  // and storage.put — if D1 has a workspace_id for this task but the DO
-  // state doesn't, recover it.
-  if (state.stepResults.workspaceId) {
-    return;
-  }
-
-  const existingTask = await rc.env.DATABASE.prepare(
-    `SELECT
-       workspace_id AS workspaceId,
-       status,
-       capacity_pool_id AS capacityPoolId,
-       capacity_pool_scope AS capacityPoolScope,
-       capacity_pool_revision AS capacityPoolRevision,
-       capacity_source_id AS capacitySourceId,
-       capacity_pool_candidate_id AS capacityPoolCandidateId,
-       placement_credential_source AS placementCredentialSource,
-       placement_credential_reference AS placementCredentialReference,
-       placement_credential_version AS placementCredentialVersion,
-       capacity_pool_project_id AS capacityPoolProjectId,
-       workload_role AS workloadRole,
-       provider_instance_type AS providerInstanceType,
-       provider_instance_vcpu_count AS providerInstanceVcpuCount,
-       provider_instance_memory_mb AS providerInstanceMemoryMb,
-       provider_instance_disk_gb AS providerInstanceDiskGb,
-       provider_instance_price_display AS providerInstancePriceDisplay,
-       provider_instance_price_currency AS providerInstancePriceCurrency,
-       provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
-       provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
-       placement_explanation_json AS placementExplanationJson
-     FROM tasks WHERE id = ?`
+  rc: TaskRunnerContext,
+  workspaceId: string
+): Promise<boolean> {
+  const task = await rc.env.DATABASE.prepare(
+    `SELECT status, workspace_id AS workspaceId FROM tasks WHERE id = ?`
   )
     .bind(state.taskId)
-    .first<
-      (CapacityPlacementSnapshotRow & { workspaceId: string | null; status: string }) | null
-    >();
+    .first<{ status: string; workspaceId: string | null }>();
 
-  if (!existingTask?.workspaceId) {
-    return;
-  }
-
-  // D1 has a workspace — recover it into DO state (crash recovery)
-  state.stepResults.workspaceId = existingTask.workspaceId;
-  if (state.stepResults.capacityPlacementSnapshot === undefined) {
-    const snapshot = toCapacityPlacementSnapshot(existingTask);
-    state.stepResults.capacityPlacementSnapshot = snapshot.capacityPoolId ? snapshot : null;
-  }
-  await rc.ctx.storage.put('state', state);
-
-  log.info('task_runner_do.workspace_recovered_from_d1', {
-    taskId: state.taskId,
-    workspaceId: existingTask.workspaceId,
-  });
+  return task?.status === 'delegated' && task.workspaceId === workspaceId;
 }
 
-async function isTaskDelegated(state: TaskRunnerState, rc: TaskRunnerContext): Promise<boolean> {
-  const task = await rc.env.DATABASE.prepare(`SELECT status FROM tasks WHERE id = ?`)
+async function convergeLostDelegationTransition(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<boolean> {
+  const task = await rc.env.DATABASE.prepare(
+    `SELECT status, workspace_id AS workspaceId FROM tasks WHERE id = ?`
+  )
     .bind(state.taskId)
-    .first<{ status: string }>();
+    .first<{ status: string; workspaceId: string | null }>();
+  if (task?.status !== 'delegated' || !task.workspaceId) {
+    return false;
+  }
 
-  return task?.status === 'delegated';
+  state.stepResults.workspaceId = task.workspaceId;
+  await rc.ctx.storage.put('state', state);
+  await ensureWorkspaceBookkeeping(state, rc, task.workspaceId);
+  await finalizeVmAdmissionPlacement(state, rc);
+  await rc.advanceToStep(state, 'workspace_dispatch');
+  log.warn('task_runner_do.delegated_transition_lost_to_winner', {
+    taskId: state.taskId,
+    workspaceId: task.workspaceId,
+  });
+  return true;
 }
 
 async function createAndProvisionWorkspace(
@@ -197,6 +170,7 @@ async function createAndProvisionWorkspace(
   const workspaceName = `Task: ${state.config.taskTitle.slice(0, 50)}`;
   const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
   const now = new Date().toISOString();
+  const chatSessionId = state.stepResults.chatSessionId ?? state.config.chatSessionId ?? null;
 
   // Recovery authority is revalidated immediately before the physical
   // workspace-row allocation (.claude/rules/49): a parent that terminalized
@@ -218,18 +192,31 @@ async function createAndProvisionWorkspace(
       normalizedDisplayName: uniqueName.normalizedDisplayName,
       repository: state.config.repository,
       branch: state.config.branch,
+      chatSessionId,
       vmSize: state.config.vmSize,
       vmLocation: state.config.vmLocation,
       workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
       devcontainerConfigName: state.config.devcontainerConfigName ?? null,
       agentProfileHint: state.config.agentProfileHint ?? null,
       capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
+      taskLifecycleGuard: {
+        taskId: state.taskId,
+        projectId: state.projectId,
+        userId: state.userId,
+        chatSessionId: state.stepResults.chatSessionId ?? state.config.chatSessionId ?? null,
+        requireChatSessionMatch: state.config.startGuard?.kind === 'reserved_submission',
+        reservedIntentFingerprint:
+          state.config.startGuard?.kind === 'reserved_submission'
+            ? state.config.startGuard.intentFingerprint
+            : null,
+      },
       createdAt: now,
     },
     maxWorkspaces
   );
 
   if (!placementReserved) {
+    await rc.assertRecoveryAuthority(state);
     log.warn('task_runner_do.workspace_placement_lost', {
       taskId: state.taskId,
       nodeId,
@@ -259,21 +246,9 @@ async function createAndProvisionWorkspace(
     return false;
   }
 
-  await rc.env.DATABASE.prepare(
-    `UPDATE tasks
-     SET workspace_id = ?, ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS}, updated_at = ?
-     WHERE id = ?`
-  )
-    .bind(
-      workspaceId,
-      ...capacityPlacementSnapshotSqlValues(state.stepResults.capacityPlacementSnapshot),
-      now,
-      state.taskId
-    )
-    .run();
-
   state.stepResults.workspaceId = workspaceId;
   await rc.ctx.storage.put('state', state);
+  await claimWorkspaceAllocationForTask(state, rc, workspaceId, now);
   await finalizeVmAdmissionPlacement(state, rc);
   await startComputeTrackingBestEffort(state, rc, db, workspaceId, nodeId);
   await ensureWorkspaceBookkeeping(state, rc, workspaceId, now);

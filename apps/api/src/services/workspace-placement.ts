@@ -22,13 +22,24 @@ export interface WorkspacePlacementInput {
   normalizedDisplayName: string;
   repository: string;
   branch: string;
+  chatSessionId?: string | null;
   vmSize: VMSize;
   vmLocation: VMLocation;
   workspaceProfile: WorkspaceProfile;
   devcontainerConfigName: string | null;
   agentProfileHint: string | null;
   capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
+  taskLifecycleGuard?: WorkspacePlacementTaskLifecycleGuard | null;
   createdAt: string;
+}
+
+export interface WorkspacePlacementTaskLifecycleGuard {
+  taskId: string;
+  projectId: string;
+  userId: string;
+  chatSessionId: string | null;
+  requireChatSessionMatch?: boolean;
+  reservedIntentFingerprint?: string | null;
 }
 
 /**
@@ -46,15 +57,16 @@ export async function reserveWorkspacePlacement(
   maxWorkspaces: number
 ): Promise<boolean> {
   const capacityPredicate = buildCapacityPlacementPredicate(input);
+  const taskLifecyclePredicate = buildTaskLifecyclePlacementPredicate(input.taskLifecycleGuard);
   const result = await database
     .prepare(
       `INSERT INTO workspaces
          (id, node_id, project_id, user_id, installation_id, name, display_name,
-          normalized_display_name, repository, branch, status, vm_size, vm_location,
+          normalized_display_name, repository, branch, chat_session_id, status, vm_size, vm_location,
           workspace_profile, devcontainer_config_name, agent_profile_hint,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
           created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
           ?, ?
        FROM nodes n
@@ -63,6 +75,7 @@ export async function reserveWorkspacePlacement(
          AND n.status = 'running'
          AND n.node_role = 'workspace'
          ${capacityPredicate.sql}
+         ${taskLifecyclePredicate.sql}
          AND (
            SELECT COUNT(*)
            FROM workspaces active
@@ -81,6 +94,7 @@ export async function reserveWorkspacePlacement(
       input.normalizedDisplayName,
       input.repository,
       input.branch,
+      input.chatSessionId ?? null,
       input.vmSize,
       input.vmLocation,
       input.workspaceProfile,
@@ -92,11 +106,63 @@ export async function reserveWorkspacePlacement(
       input.nodeId,
       input.userId,
       ...capacityPredicate.binds,
+      ...taskLifecyclePredicate.binds,
       maxWorkspaces
     )
     .run();
 
   return (result.meta.changes ?? 0) > 0;
+}
+
+function buildTaskLifecyclePlacementPredicate(
+  guard: WorkspacePlacementTaskLifecycleGuard | null | undefined
+): {
+  sql: string;
+  binds: Array<string | number | null>;
+} {
+  if (!guard) return { sql: '', binds: [] };
+
+  const requireChatSessionMatch = guard.requireChatSessionMatch === true ? 1 : 0;
+  const reservedIntentFingerprint = guard.reservedIntentFingerprint ?? null;
+  return {
+    sql: `AND EXISTS (
+           SELECT 1
+             FROM tasks guarded_task
+            WHERE guarded_task.id = ?
+              AND guarded_task.project_id = ?
+              AND guarded_task.user_id = ?
+              AND guarded_task.status = 'queued'
+              AND guarded_task.workspace_id IS NULL
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM reserved_task_session_revocations guarded_revocation
+                 WHERE guarded_revocation.project_id = guarded_task.project_id
+                   AND guarded_revocation.chat_session_id = guarded_task.chat_session_id
+              )
+              AND (? IS NULL OR ? = 0 OR guarded_task.chat_session_id = ?)
+              AND (
+                ? IS NULL
+                OR EXISTS (
+                  SELECT 1
+                    FROM task_submission_checkpoints guarded_checkpoint
+                   WHERE guarded_checkpoint.task_id = guarded_task.id
+                     AND guarded_checkpoint.intent_fingerprint = ?
+                     AND guarded_checkpoint.chat_session_id = ?
+                )
+              )
+         )`,
+    binds: [
+      guard.taskId,
+      guard.projectId,
+      guard.userId,
+      guard.chatSessionId,
+      requireChatSessionMatch,
+      guard.chatSessionId,
+      reservedIntentFingerprint,
+      reservedIntentFingerprint,
+      guard.chatSessionId,
+    ],
+  };
 }
 
 function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
@@ -144,7 +210,11 @@ function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
       AND n.capacity_pool_id = ?
       AND n.capacity_source_id = ?
       ${concretePredicate?.sql ?? ''}`,
-    binds: [snapshot.capacityPoolId, snapshot.capacitySourceId, ...(concretePredicate?.binds ?? [])],
+    binds: [
+      snapshot.capacityPoolId,
+      snapshot.capacitySourceId,
+      ...(concretePredicate?.binds ?? []),
+    ],
   };
 }
 
