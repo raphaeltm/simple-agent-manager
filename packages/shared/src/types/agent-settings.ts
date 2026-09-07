@@ -1,5 +1,3 @@
-import type { ResourceRequirements } from './resource';
-
 // =============================================================================
 // Agent Settings (per-user, per-agent configuration)
 // =============================================================================
@@ -191,7 +189,7 @@ export interface AgentProfile {
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
-  resourceRequirementsJson?: string | null;
+  resourceRequirementsJson: string | null;
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
@@ -219,7 +217,6 @@ export interface CreateAgentProfileRequest {
   maxTurns?: number | null;
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
-  resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
@@ -245,7 +242,6 @@ export interface UpdateAgentProfileRequest {
   maxTurns?: number | null;
   timeoutMinutes?: number | null;
   vmSizeOverride?: string | null;
-  resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
@@ -271,7 +267,7 @@ export interface ResolvedAgentProfile {
   maxTurns: number | null;
   timeoutMinutes: number | null;
   vmSizeOverride: string | null;
-  resourceRequirementsJson?: string | null;
+  resourceRequirementsJson: string | null;
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;

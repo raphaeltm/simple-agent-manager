@@ -44,10 +44,12 @@ function toSkill(row: schema.SkillRow): AgentSkill {
   };
 }
 
-function serializeSkillResourceRequirements(body: {
+type ResourceRequirementsWriteInput = {
   resourceRequirements?: unknown;
   resourceRequirementsJson?: string | null;
-}): string | null {
+};
+
+function serializeSkillResourceRequirements(body: ResourceRequirementsWriteInput): string | null {
   try {
     if (body.resourceRequirements !== undefined) {
       return serializeResourceRequirementsInput(body.resourceRequirements);
@@ -189,7 +191,7 @@ export async function updateSkill(
   projectId: string,
   skillId: string,
   userId: string,
-  body: UpdateSkillRequest
+  body: UpdateSkillRequest & ResourceRequirementsWriteInput
 ): Promise<AgentSkill> {
   const skill = await getSkill(db, projectId, skillId, userId);
   if (skill.isBuiltin) throw errors.forbidden('Builtin skills cannot be modified');

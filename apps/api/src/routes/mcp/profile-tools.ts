@@ -34,11 +34,12 @@ import {
   type McpTokenData,
 } from './_helpers';
 
+type McpProfileResourceInput = { resourceRequirements?: unknown };
+type McpProfileFields = Omit<UpdateAgentProfileRequest, 'name'> & McpProfileResourceInput;
+
 /** Extract optional profile fields from MCP params — shared by create and update handlers. */
-export function extractProfileFields(
-  params: Record<string, unknown>
-): Omit<UpdateAgentProfileRequest, 'name'> {
-  const fields: Omit<UpdateAgentProfileRequest, 'name'> = {};
+export function extractProfileFields(params: Record<string, unknown>): McpProfileFields {
+  const fields: McpProfileFields = {};
   if (typeof params.description === 'string') fields.description = params.description;
   if (typeof params.agentType === 'string') fields.agentType = params.agentType;
   if (typeof params.model === 'string') fields.model = params.model;
@@ -53,8 +54,7 @@ export function extractProfileFields(
     params.resourceRequirements === null ||
     (typeof params.resourceRequirements === 'object' && !Array.isArray(params.resourceRequirements))
   ) {
-    fields.resourceRequirements =
-      params.resourceRequirements as UpdateAgentProfileRequest['resourceRequirements'];
+    fields.resourceRequirements = params.resourceRequirements;
   }
   if (
     typeof params.resourceRequirementsJson === 'string' ||
@@ -202,7 +202,10 @@ export async function handleCreateAgentProfile(
     );
   }
 
-  const body: CreateAgentProfileRequest = { name, ...extractProfileFields(params) };
+  const body: CreateAgentProfileRequest & McpProfileResourceInput = {
+    name,
+    ...extractProfileFields(params),
+  };
 
   try {
     const db = drizzle(env.DATABASE, { schema });

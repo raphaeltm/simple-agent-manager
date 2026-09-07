@@ -445,7 +445,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   if (body.skillId !== undefined) updates.skillId = body.skillId;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
   if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
-  if (body.resourceRequirements !== undefined || body.resourceRequirementsJson !== undefined) {
+  if (body.resourceRequirementsJson !== undefined) {
     updates.resourceRequirementsJson = triggerResourceRequirementsJson(body);
   }
   if (body.maxConcurrent !== undefined) {

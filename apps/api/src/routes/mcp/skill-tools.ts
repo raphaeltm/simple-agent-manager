@@ -22,15 +22,17 @@ import {
 } from './_helpers';
 import { extractProfileFields } from './profile-tools';
 
+type McpSkillResourceInput = { resourceRequirements?: unknown };
+type McpSkillFields = Omit<UpdateSkillRequest, 'name'> & McpSkillResourceInput;
+
 /** Extract skill-specific fields that go beyond the shared profile fields. */
-function extractSkillExtraFields(params: Record<string, unknown>): Partial<UpdateSkillRequest> {
-  const fields: Partial<UpdateSkillRequest> = {};
+function extractSkillExtraFields(params: Record<string, unknown>): Partial<McpSkillFields> {
+  const fields: Partial<McpSkillFields> = {};
   if (
     params.resourceRequirements === null ||
     (typeof params.resourceRequirements === 'object' && !Array.isArray(params.resourceRequirements))
   ) {
-    fields.resourceRequirements =
-      params.resourceRequirements as UpdateSkillRequest['resourceRequirements'];
+    fields.resourceRequirements = params.resourceRequirements;
   }
   if (typeof params.resourceRequirementsJson === 'string')
     fields.resourceRequirementsJson = params.resourceRequirementsJson;
@@ -42,9 +44,7 @@ function extractSkillExtraFields(params: Record<string, unknown>): Partial<Updat
 }
 
 /** Extract all optional skill fields from MCP params — shared profile fields + skill-specific extras. */
-export function extractSkillFields(
-  params: Record<string, unknown>
-): Omit<UpdateSkillRequest, 'name'> {
+export function extractSkillFields(params: Record<string, unknown>): McpSkillFields {
   return { ...extractProfileFields(params), ...extractSkillExtraFields(params) };
 }
 
@@ -164,7 +164,10 @@ export async function handleCreateSkill(
     );
   }
 
-  const body: CreateSkillRequest = { name, ...extractSkillFields(params) };
+  const body: CreateSkillRequest & McpSkillResourceInput = {
+    name,
+    ...extractSkillFields(params),
+  };
 
   try {
     const db = drizzle(env.DATABASE, { schema });

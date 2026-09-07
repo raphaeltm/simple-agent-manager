@@ -6,14 +6,6 @@ const GitHubCliContentsPermissionLevelSchema = v.picklist(['read', 'write']);
 const AgentEffortSchema = v.picklist([...AGENT_EFFORT_LEVELS]);
 const AgentProfileRuntimeSchema = v.picklist([...AGENT_PROFILE_RUNTIMES]);
 
-const ResourceRequirementsSchema = v.object({
-  minVcpu: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minMemoryGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  minDiskGb: v.optional(v.pipe(v.number(), v.minValue(0))),
-  exclusiveNode: v.optional(v.boolean()),
-  maxCoTenants: v.optional(v.pipe(v.number(), v.minValue(0))),
-});
-
 const GitHubCliPolicySchema = v.object({
   mode: v.picklist(['inherit', 'custom']),
   repositoryScope: v.picklist(['project']),
@@ -37,7 +29,6 @@ export const CreateAgentProfileSchema = v.object({
   maxTurns: v.optional(v.nullable(v.number())),
   timeoutMinutes: v.optional(v.nullable(v.number())),
   vmSizeOverride: v.optional(v.nullable(v.string())),
-  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
   resourceRequirementsJson: v.optional(v.nullable(v.string())),
   provider: v.optional(v.nullable(v.string())),
   vmLocation: v.optional(v.nullable(v.string())),
@@ -59,7 +50,6 @@ export const UpdateAgentProfileSchema = v.object({
   maxTurns: v.optional(v.nullable(v.number())),
   timeoutMinutes: v.optional(v.nullable(v.number())),
   vmSizeOverride: v.optional(v.nullable(v.string())),
-  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
   resourceRequirementsJson: v.optional(v.nullable(v.string())),
   provider: v.optional(v.nullable(v.string())),
   vmLocation: v.optional(v.nullable(v.string())),

@@ -1,5 +1,4 @@
 import type { CredentialAttributionCheck } from './project';
-import type { ResourceRequirements } from './resource';
 import type { TaskMode } from './task';
 
 // =============================================================================
@@ -60,7 +59,7 @@ export interface Trigger {
   skillId: string | null;
   taskMode: TaskMode;
   vmSizeOverride: string | null;
-  resourceRequirementsJson?: string | null;
+  resourceRequirementsJson: string | null;
   maxConcurrent: number;
   lastTriggeredAt: string | null;
   triggerCount: number;
@@ -105,7 +104,6 @@ export interface CreateTriggerRequest {
   skillId?: string;
   taskMode?: TaskMode;
   vmSizeOverride?: string;
-  resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
   maxConcurrent?: number;
   githubConfig?: {
@@ -127,7 +125,6 @@ export interface UpdateTriggerRequest {
   skillId?: string | null;
   taskMode?: TaskMode;
   vmSizeOverride?: string | null;
-  resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
   maxConcurrent?: number;
   githubConfig?: {

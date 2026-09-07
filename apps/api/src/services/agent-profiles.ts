@@ -53,10 +53,12 @@ function serializeGitHubCliPolicy(policy: GitHubCliPolicy | null | undefined): s
   return JSON.stringify(policy);
 }
 
-function serializeProfileResourceRequirements(body: {
+type ResourceRequirementsWriteInput = {
   resourceRequirements?: unknown;
   resourceRequirementsJson?: string | null;
-}): string | null {
+};
+
+function serializeProfileResourceRequirements(body: ResourceRequirementsWriteInput): string | null {
   try {
     if (body.resourceRequirements !== undefined) {
       return serializeResourceRequirementsInput(body.resourceRequirements);
@@ -78,7 +80,7 @@ function serializeProfileResourceRequirements(body: {
 
 function applyProfileResourceRequirementsUpdate(
   updates: Partial<schema.NewAgentProfileRow>,
-  body: UpdateAgentProfileRequest
+  body: UpdateAgentProfileRequest & ResourceRequirementsWriteInput
 ): void {
   try {
     if (body.resourceRequirements !== undefined) {
@@ -221,7 +223,7 @@ export async function updateProfile(
   projectId: string,
   profileId: string,
   userId: string,
-  body: UpdateAgentProfileRequest
+  body: UpdateAgentProfileRequest & ResourceRequirementsWriteInput
 ): Promise<AgentProfile> {
   // Verify profile exists and user has access
   const profile = await getProfile(db, projectId, profileId, userId);
