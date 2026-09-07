@@ -346,6 +346,14 @@ describe('ScalewayProvider', () => {
         ip: '',
         status: 'off',
         serverType: 'DEV1-XL',
+        observedHardware: {
+          serverType: { value: 'DEV1-XL', source: 'observed' },
+          resources: {
+            value: null,
+            source: 'unknown',
+            reason: 'Scaleway server response does not include resource fields',
+          },
+        },
         createdAt: '2024-06-01T00:00:00Z',
         labels: { node: 'n1' },
       });

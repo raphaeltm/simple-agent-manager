@@ -20,6 +20,7 @@ import {
   SIZE_MAP,
 } from './gcp-metadata';
 import { getProviderCatalogOfferings } from './instance-offerings';
+import { observedHardware, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
 import {
   providerDelay,
   providerFetch,
@@ -281,12 +282,15 @@ export class GcpProvider implements Provider {
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const zone = config.location || this.defaultLocation;
-    const sizeConfig = SIZE_MAP[config.size];
-    if (!sizeConfig) {
-      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
-    }
-    const machineType = config.instanceType ?? sizeConfig.type;
+    const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
+      providerName: this.name,
+      defaultLocation: this.defaultLocation,
+      legacySizes: this.sizes,
+      defaultImage: this.imageFamily,
+      defaultBootDiskSizeGb: this.diskSizeGb,
+      minBootDiskSizeGb: 10,
+    });
+    const zone = nativeConfig.location;
     const headers = await this.authHeaders(context);
 
     // Ensure firewall rules exist before creating VM
@@ -294,16 +298,16 @@ export class GcpProvider implements Provider {
     throwIfProviderRequestAborted(context);
 
     const networkTags = [SAM_NETWORK_TAG];
-    if (config.labels?.role === 'deployment') {
+    if (nativeConfig.labels.role === 'deployment') {
       networkTags.push(SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG);
     }
 
     const body = {
       name: config.name,
-      machineType: `zones/${zone}/machineTypes/${machineType}`,
+      machineType: `zones/${zone}/machineTypes/${nativeConfig.instanceType}`,
       labels: {
         'sam-managed': 'true',
-        ...(config.labels || {}),
+        ...nativeConfig.labels,
       },
       tags: {
         items: networkTags,
@@ -313,8 +317,8 @@ export class GcpProvider implements Provider {
           boot: true,
           autoDelete: true,
           initializeParams: {
-            sourceImage: `projects/${this.imageProject}/global/images/family/${this.imageFamily}`,
-            diskSizeGb: String(this.diskSizeGb),
+            sourceImage: `projects/${this.imageProject}/global/images/family/${nativeConfig.image ?? this.imageFamily}`,
+            diskSizeGb: String(nativeConfig.bootDiskSizeGb ?? this.diskSizeGb),
           },
         },
       ],
@@ -334,7 +338,7 @@ export class GcpProvider implements Provider {
         items: [
           {
             key: 'user-data',
-            value: config.userData,
+            value: nativeConfig.userData,
           },
         ],
       },
@@ -767,12 +771,17 @@ export class GcpProvider implements Provider {
   }
 
   private toVMInstance(instance: GcpInstancePayload): VMInstance {
+    const machineType = instance.machineType.split('/').pop() || instance.machineType;
     return {
       id: instance.id || instance.name,
       name: instance.name,
       ip: extractIp(instance.networkInterfaces),
       status: mapGcpStatus(instance.status),
-      serverType: instance.machineType.split('/').pop() || instance.machineType,
+      serverType: machineType,
+      observedHardware: observedHardware({
+        serverType: machineType,
+        unknownResourcesReason: 'GCP instance response does not include machine resources',
+      }),
       createdAt: instance.creationTimestamp,
       labels: instance.labels || {},
     };

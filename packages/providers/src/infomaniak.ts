@@ -1,6 +1,7 @@
 import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 
 import { getProviderCatalogOfferings } from './instance-offerings';
+import { observedHardware, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
 import {
   providerDelay,
   providerFetch,
@@ -79,6 +80,21 @@ export const INFOMANIAK_SIZE_CONFIGS: Readonly<Record<VMSize, SizeConfig>> = {
     storageGb: 20,
   },
 };
+
+function mergeInfomaniakLegacySizes(
+  flavors: Partial<Record<VMSize, string>> | undefined
+): Readonly<Record<VMSize, SizeConfig>> {
+  if (!flavors) return INFOMANIAK_SIZE_CONFIGS;
+  return {
+    small: { ...INFOMANIAK_SIZE_CONFIGS.small, ...(flavors.small ? { type: flavors.small } : {}) },
+    medium: {
+      ...INFOMANIAK_SIZE_CONFIGS.medium,
+      ...(flavors.medium ? { type: flavors.medium } : {}),
+    },
+    large: { ...INFOMANIAK_SIZE_CONFIGS.large, ...(flavors.large ? { type: flavors.large } : {}) },
+  };
+}
+
 export const INFOMANIAK_VOLUME_CAPABILITIES: VolumeCapabilities = {
   supported: true,
   minSizeGb: 1,
@@ -141,6 +157,10 @@ function asNumber(value: unknown, path: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value))
     throw new ProviderError('infomaniak', undefined, `Invalid Infomaniak response at ${path}`);
   return value;
+}
+function optionalNumber(value: unknown, path: string): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  return asNumber(value, path);
 }
 function metadata(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -207,7 +227,7 @@ export class InfomaniakProvider implements Provider {
   readonly name = 'infomaniak';
   readonly locations = INFOMANIAK_LOCATIONS;
   readonly locationMetadata = LOCATIONS;
-  readonly sizes = INFOMANIAK_SIZE_CONFIGS;
+  readonly sizes: Readonly<Record<VMSize, SizeConfig>>;
   readonly volumeCapabilities = INFOMANIAK_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
   private readonly authUrl: string;
@@ -216,7 +236,6 @@ export class InfomaniakProvider implements Provider {
   private readonly networkName: string;
   private readonly imageName: string;
   private readonly volumeType: string;
-  private readonly flavors: Readonly<Record<VMSize, string>>;
   private readonly timeout: number;
   private readonly pollTimeout: number;
   private readonly pollInterval: number;
@@ -235,7 +254,7 @@ export class InfomaniakProvider implements Provider {
     this.networkName = options.networkName ?? DEFAULT_INFOMANIAK_NETWORK_NAME;
     this.imageName = options.imageName ?? DEFAULT_INFOMANIAK_IMAGE_NAME;
     this.volumeType = options.volumeType ?? DEFAULT_INFOMANIAK_VOLUME_TYPE;
-    this.flavors = { ...INFOMANIAK_FLAVORS, ...options.flavors };
+    this.sizes = mergeInfomaniakLegacySizes(options.flavors);
     this.timeout = options.requestTimeoutMs ?? DEFAULT_INFOMANIAK_REQUEST_TIMEOUT_MS;
     this.pollTimeout = options.ipPollTimeoutMs ?? DEFAULT_INFOMANIAK_IP_POLL_TIMEOUT_MS;
     this.pollInterval = options.ipPollIntervalMs ?? DEFAULT_INFOMANIAK_IP_POLL_INTERVAL_MS;
@@ -387,24 +406,35 @@ export class InfomaniakProvider implements Provider {
   }
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    if (config.location !== this.region)
+    const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
+      providerName: this.name,
+      defaultLocation: this.region,
+      legacySizes: this.sizes,
+      defaultImage: this.imageName,
+    });
+    if (nativeConfig.location !== this.region)
       throw new ProviderError(
         'infomaniak',
         400,
-        `VM region ${config.location} does not match credential region ${this.region}`,
+        `VM region ${nativeConfig.location} does not match credential region ${this.region}`,
         { category: 'invalid_config' }
       );
     const session = await this.authenticate(false, context);
-    const flavorName = config.instanceType ?? this.flavors[config.size];
     const [imageRef, flavorRef, networkId] = await Promise.all([
       this.resolve(
         session.endpoints.image,
         'v2/images',
         'images',
-        config.image ?? this.imageName,
+        nativeConfig.image ?? this.imageName,
         context
       ),
-      this.resolve(session.endpoints.compute, 'flavors/detail', 'flavors', flavorName, context),
+      this.resolve(
+        session.endpoints.compute,
+        'flavors/detail',
+        'flavors',
+        nativeConfig.instanceType,
+        context
+      ),
       this.resolve(
         session.endpoints.network,
         'v2.0/networks',
@@ -420,12 +450,12 @@ export class InfomaniakProvider implements Provider {
         method: 'POST',
         body: JSON.stringify({
           server: {
-            name: config.name,
+            name: nativeConfig.name,
             imageRef,
             flavorRef,
             networks: [{ uuid: networkId }],
-            user_data: base64(config.userData),
-            metadata: config.labels ?? {},
+            user_data: base64(nativeConfig.userData),
+            metadata: nativeConfig.labels,
           },
         }),
       },
@@ -461,15 +491,28 @@ export class InfomaniakProvider implements Provider {
       (address) => address.version === 4 && typeof address.addr === 'string'
     );
     const flavor = asRecord(server.flavor, 'server.flavor');
+    const serverType =
+      typeof flavor.original_name === 'string'
+        ? flavor.original_name
+        : asString(flavor.id, 'flavor.id');
+    const vcpus = optionalNumber(flavor.vcpus, 'flavor.vcpus');
+    const ram = optionalNumber(flavor.ram, 'flavor.ram');
+    const disk = optionalNumber(flavor.disk, 'flavor.disk');
+    const resources =
+      vcpus !== undefined && ram !== undefined && disk !== undefined
+        ? { vcpuCount: vcpus, memoryMb: ram, diskGb: disk }
+        : null;
     return {
       id: asString(server.id, 'server.id'),
       name: asString(server.name, 'server.name'),
       ip: typeof ipv4?.addr === 'string' ? ipv4.addr : '',
       status: mapInfomaniakStatus(asString(server.status, 'server.status')),
-      serverType:
-        typeof flavor.original_name === 'string'
-          ? flavor.original_name
-          : asString(flavor.id, 'flavor.id'),
+      serverType,
+      observedHardware: observedHardware({
+        serverType,
+        resources,
+        unknownResourcesReason: 'Infomaniak server flavor omitted resource fields',
+      }),
       createdAt: asString(server.created, 'server.created'),
       labels: metadata(server.metadata),
     };

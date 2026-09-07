@@ -339,6 +339,14 @@ describe('HetznerProvider', () => {
         ip: testIpv4(1, 2, 3, 4),
         status: 'initializing',
         serverType: 'cx33',
+        observedHardware: {
+          serverType: { value: 'cx33', source: 'observed' },
+          resources: {
+            value: null,
+            source: 'unknown',
+            reason: 'Hetzner response omitted server_type resource fields',
+          },
+        },
         createdAt: '2024-01-24T12:00:00Z',
         labels: { node: 'node-123' },
       });

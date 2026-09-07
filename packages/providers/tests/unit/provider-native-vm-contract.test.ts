@@ -1,0 +1,372 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { VMConfig } from '../../src';
+import {
+  DigitalOceanProvider,
+  GcpProvider,
+  HetznerProvider,
+  InfomaniakProvider,
+  ScalewayProvider,
+  UpCloudProvider,
+  VultrProvider,
+} from '../../src';
+
+const originalFetch = globalThis.fetch;
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  vi.restoreAllMocks();
+});
+
+function json(body: unknown, status = 200, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
+}
+
+function nativeConfig(size: string): VMConfig {
+  return {
+    name: 'sam-native-node',
+    size: size as VMConfig['size'],
+    location: 'native-region',
+    userData: '#cloud-config\n',
+    native: {
+      instanceType: 'native-exact-type',
+      bootDiskSizeGb: 96,
+      resources: { vcpuCount: 7, memoryMb: 14_336, diskGb: 96 },
+    },
+  };
+}
+
+function normalizeBody(body: unknown): unknown {
+  const text = String(body);
+  return text ? JSON.parse(text) : undefined;
+}
+
+describe('provider native VM request contracts', () => {
+  it('Hetzner uses native server_type and ignores contradictory legacy size', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (_input, init = {}) => {
+      bodies.push(normalizeBody(init.body));
+      return json({
+        server: {
+          id: 1,
+          name: 'sam-native-node',
+          status: 'running',
+          public_net: { ipv4: { ip: '203.0.113.10' } },
+          server_type: { name: 'native-exact-type', cores: 7, memory: 14, disk: 96 },
+          created: '2026-09-07T00:00:00Z',
+          labels: {},
+        },
+      });
+    }) as typeof fetch;
+
+    const provider = new HetznerProvider('token', 'fsn1', undefined, false);
+    const first = await provider.createVM({ ...nativeConfig('small'), location: 'fsn1' });
+    const second = await provider.createVM({ ...nativeConfig('large'), location: 'fsn1' });
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toEqual(bodies[1]);
+    expect((bodies[0] as Record<string, unknown>).server_type).toBe('native-exact-type');
+    expect(first.observedHardware.resources).toEqual({
+      value: { vcpuCount: 7, memoryMb: 14_336, diskGb: 96 },
+      source: 'observed',
+    });
+    expect(second.serverType).toBe('native-exact-type');
+  });
+
+  it('Scaleway uses native commercial_type and requested architecture for image lookup', async () => {
+    const bodies: unknown[] = [];
+    const urls: string[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes('/images?')) return json({ images: [{ id: 'image-arm', name: 'Ubuntu' }] });
+      if (url.endsWith('/servers') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({
+          server: {
+            id: 'server-1',
+            name: 'sam-native-node',
+            state: 'stopped',
+            public_ip: null,
+            public_ips: [],
+            commercial_type: 'native-exact-type',
+            creation_date: '2026-09-07T00:00:00Z',
+            tags: [],
+          },
+        });
+      }
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+
+    const provider = new ScalewayProvider('secret', 'project', 'fr-par-1');
+    await provider.createVM({
+      ...nativeConfig('small'),
+      location: 'fr-par-1',
+      native: { ...nativeConfig('small').native!, instanceType: 'native-exact-type', architecture: 'arm64' },
+    });
+    await provider.createVM({
+      ...nativeConfig('large'),
+      location: 'fr-par-1',
+      native: { ...nativeConfig('large').native!, instanceType: 'native-exact-type', architecture: 'arm64' },
+    });
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toEqual(bodies[1]);
+    expect((bodies[0] as { commercial_type: string }).commercial_type).toBe('native-exact-type');
+    expect(urls.filter((url) => url.includes('/images?'))).toEqual([
+      expect.stringContaining('arch=arm64'),
+      expect.stringContaining('arch=arm64'),
+    ]);
+  });
+
+  it('DigitalOcean uses native size slug without legacy storage authority', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (_input, init = {}) => {
+      bodies.push(normalizeBody(init.body));
+      return json({
+        droplet: {
+          id: 1,
+          name: 'sam-native-node',
+          status: 'active',
+          size_slug: 'native-exact-type',
+          size: { vcpus: 7, memory: 14_336, disk: 96 },
+          created_at: '2026-09-07T00:00:00Z',
+          networks: { v4: [{ ip_address: '203.0.113.10', type: 'public' }] },
+          tags: [],
+        },
+      });
+    }) as typeof fetch;
+
+    const provider = new DigitalOceanProvider('token', { region: 'fra1', ipPollTimeoutMs: 1 });
+    const first = await provider.createVM({ ...nativeConfig('small'), location: 'fra1' });
+    const second = await provider.createVM({ ...nativeConfig('large'), location: 'fra1' });
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toEqual(bodies[1]);
+    expect((bodies[0] as { size: string }).size).toBe('native-exact-type');
+    expect(first.observedHardware.resources).toEqual({
+      value: { vcpuCount: 7, memoryMb: 14_336, diskGb: 96 },
+      source: 'observed',
+    });
+    expect(second.serverType).toBe('native-exact-type');
+  });
+
+  it('Vultr uses native plan and validates requested OS architecture', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.includes('/os?')) {
+        return json({
+          os: [{ id: 1743, name: 'Ubuntu 24.04 LTS x64', arch: 'x64', family: 'ubuntu' }],
+        });
+      }
+      if (url.endsWith('/instances') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({
+          instance: {
+            id: 'instance-1',
+            main_ip: '203.0.113.10',
+            status: 'active',
+            power_status: 'running',
+            server_status: 'ok',
+            region: 'fra',
+            plan: 'native-exact-type',
+            vcpu_count: 7,
+            ram: 14_336,
+            disk: 96,
+            date_created: '2026-09-07T00:00:00Z',
+            label: 'sam-native-node',
+            tags: [],
+          },
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new VultrProvider('token', { region: 'fra', ipPollTimeoutMs: 1 });
+    await provider.createVM({
+      ...nativeConfig('small'),
+      location: 'fra',
+      native: { ...nativeConfig('small').native!, architecture: 'x86_64' },
+    });
+    await provider.createVM({
+      ...nativeConfig('large'),
+      location: 'fra',
+      native: { ...nativeConfig('large').native!, architecture: 'x86_64' },
+    });
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toEqual(bodies[1]);
+    expect((bodies[0] as { plan: string }).plan).toBe('native-exact-type');
+  });
+
+  it('GCP uses native machineType and requested boot disk size', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith('/global/firewalls') && init.method === 'POST') {
+        return json({ error: { code: 409, message: 'already exists' } }, 409);
+      }
+      if (url.endsWith('/instances') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({ name: 'operation-1', status: 'PENDING' });
+      }
+      if (url.includes('/operations/')) return json({ name: 'operation-1', status: 'DONE' });
+      if (url.includes('/instances/sam-native-node')) {
+        return json({
+          id: 'instance-1',
+          name: 'sam-native-node',
+          status: 'RUNNING',
+          machineType: 'zones/us-central1-a/machineTypes/native-exact-type',
+          creationTimestamp: '2026-09-07T00:00:00Z',
+          networkInterfaces: [{ accessConfigs: [{ natIP: '203.0.113.10' }] }],
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new GcpProvider('project', async () => 'token', 'us-central1-a');
+    const first = await provider.createVM({ ...nativeConfig('small'), location: 'us-central1-a' });
+    const second = await provider.createVM({ ...nativeConfig('large'), location: 'us-central1-a' });
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toEqual(bodies[1]);
+    const body = bodies[0] as { machineType: string; disks: Array<{ initializeParams: { diskSizeGb: string } }> };
+    expect(body.machineType).toContain('/machineTypes/native-exact-type');
+    expect(body.disks[0]?.initializeParams.diskSizeGb).toBe('96');
+    expect(first.observedHardware.resources.source).toBe('unknown');
+    expect(second.serverType).toBe('native-exact-type');
+  });
+
+  it('Infomaniak resolves native flavor names without legacy size authority', async () => {
+    const authUrl = 'https://auth.example/v3';
+    const compute = 'https://compute.example/v2.1/project';
+    const image = 'https://image.example';
+    const network = 'https://network.example';
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith('/auth/tokens')) {
+        return json(
+          {
+            token: {
+              project: { id: 'project' },
+              catalog: [
+                { type: 'compute', endpoints: [{ interface: 'public', region: 'dc4-a', url: compute }] },
+                { type: 'image', endpoints: [{ interface: 'public', region: 'dc4-a', url: image }] },
+                { type: 'network', endpoints: [{ interface: 'public', region: 'dc4-a', url: network }] },
+                { type: 'volumev3', endpoints: [{ interface: 'public', region: 'dc4-a', url: 'v' }] },
+              ],
+            },
+          },
+          201,
+          { 'x-subject-token': 'subject-token' }
+        );
+      }
+      if (url === `${image}/v2/images?name=Ubuntu%2024.04%20noble`) {
+        return json({ images: [{ id: 'image-1', name: 'Ubuntu 24.04 noble' }] });
+      }
+      if (url === `${compute}/flavors/detail?name=native-exact-type`) {
+        return json({ flavors: [{ id: 'flavor-1', name: 'native-exact-type' }] });
+      }
+      if (url === `${network}/v2.0/networks?name=ext-net1`) {
+        return json({ networks: [{ id: 'network-1', name: 'ext-net1' }] });
+      }
+      if (url === `${compute}/servers` && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({ server: { id: 'server-1' } }, 202);
+      }
+      if (url === `${compute}/servers/server-1`) {
+        return json({
+          server: {
+            id: 'server-1',
+            name: 'sam-native-node',
+            status: 'ACTIVE',
+            addresses: { ext: [{ version: 4, addr: '203.0.113.10' }] },
+            flavor: { id: 'flavor-1', original_name: 'native-exact-type', vcpus: 7, ram: 14_336, disk: 96 },
+            created: '2026-09-07T00:00:00Z',
+            metadata: {},
+          },
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl });
+    const first = await provider.createVM({ ...nativeConfig('small'), location: 'dc4-a' });
+    const second = await provider.createVM({ ...nativeConfig('large'), location: 'dc4-a' });
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toEqual(bodies[1]);
+    expect((bodies[0] as { server: { flavorRef: string } }).server.flavorRef).toBe('flavor-1');
+    expect(first.observedHardware.resources).toEqual({
+      value: { vcpuCount: 7, memoryMb: 14_336, diskGb: 96 },
+      source: 'observed',
+    });
+    expect(second.serverType).toBe('native-exact-type');
+  });
+
+  it('UpCloud uses native plan and disk request independent of legacy size', async () => {
+    const bodies: unknown[] = [];
+    globalThis.fetch = vi.fn(async (input, init = {}) => {
+      const url = String(input);
+      if (url.endsWith('/zone')) return json({ zones: { zone: [{ id: 'de-fra1' }] } });
+      if (url.endsWith('/plan')) return json({ plans: { plan: [{ name: 'native-exact-type' }] } });
+      if (url.endsWith('/storage/template')) {
+        return json({
+          storages: {
+            storage: [
+              {
+                uuid: 'template-1',
+                title: 'Ubuntu Server 24.04 LTS',
+                size: 10,
+                zone: '',
+                type: 'template',
+                template_type: 'cloud-init',
+                servers: { server: [] },
+              },
+            ],
+          },
+        });
+      }
+      if (url.endsWith('/server') && init.method === 'POST') {
+        bodies.push(normalizeBody(init.body));
+        return json({
+          server: {
+            uuid: 'server-1',
+            title: 'sam-native-node',
+            hostname: 'sam-native-node',
+            state: 'started',
+            zone: 'de-fra1',
+            plan: 'native-exact-type',
+            core_number: 7,
+            memory_amount: 14_336,
+            created: '2026-09-07T00:00:00Z',
+            labels: { label: [] },
+            ip_addresses: { ip_address: [{ access: 'public', family: 'IPv4', address: '203.0.113.10' }] },
+            storage_devices: { storage_device: [] },
+          },
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    }) as typeof fetch;
+
+    const provider = new UpCloudProvider('user', 'password', { zone: 'de-fra1', ipPollTimeoutMs: 1 });
+    const first = await provider.createVM({ ...nativeConfig('small'), location: 'de-fra1' });
+    const second = await provider.createVM({ ...nativeConfig('large'), location: 'de-fra1' });
+
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toEqual(bodies[1]);
+    const body = bodies[0] as { server: { plan: string; storage_devices: { storage_device: Array<{ size: number }> } } };
+    expect(body.server.plan).toBe('native-exact-type');
+    expect(body.server.storage_devices.storage_device[0]?.size).toBe(96);
+    expect(first.observedHardware.resources).toEqual({
+      value: { vcpuCount: 7, memoryMb: 14_336 },
+      source: 'observed',
+    });
+    expect(second.serverType).toBe('native-exact-type');
+  });
+});

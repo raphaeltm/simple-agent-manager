@@ -2,6 +2,7 @@ import {
   expectObject,
   type JsonObject,
   optionalArray,
+  optionalNumber,
   optionalObject,
   optionalString,
   optionalStringRecord,
@@ -17,7 +18,7 @@ export interface HetznerServerPayload {
   name: string;
   status: string;
   public_net: { ipv4: { ip: string } };
-  server_type: { name: string };
+  server_type: { name: string; cores?: number; memory?: number; disk?: number };
   created: string;
   labels: Record<string, string>;
 }
@@ -379,6 +380,15 @@ function validateHetznerServer(payload: unknown, context: string): HetznerServer
     },
     server_type: {
       name: requireString(serverType, 'name', 'hetzner', `${context}.server_type`),
+      ...(optionalNumber(serverType, 'cores', 'hetzner', `${context}.server_type`) !== undefined
+        ? { cores: optionalNumber(serverType, 'cores', 'hetzner', `${context}.server_type`) }
+        : {}),
+      ...(optionalNumber(serverType, 'memory', 'hetzner', `${context}.server_type`) !== undefined
+        ? { memory: optionalNumber(serverType, 'memory', 'hetzner', `${context}.server_type`) }
+        : {}),
+      ...(optionalNumber(serverType, 'disk', 'hetzner', `${context}.server_type`) !== undefined
+        ? { disk: optionalNumber(serverType, 'disk', 'hetzner', `${context}.server_type`) }
+        : {}),
     },
     created: requireString(server, 'created', 'hetzner', context),
     labels: optionalStringRecord(server, 'labels', 'hetzner', context) ?? {},

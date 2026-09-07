@@ -1,6 +1,7 @@
 import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
 
 import { getProviderCatalogOfferings } from './instance-offerings';
+import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
 import {
   getTimeoutMs,
   providerDelay,
@@ -66,7 +67,6 @@ export const DEFAULT_UPCLOUD_IP_POLL_INTERVAL_MS = 2_000;
 export const DEFAULT_UPCLOUD_STOP_TIMEOUT_SECONDS = 60;
 export const UPCLOUD_VOLUME_MIN_SIZE_GB = 1;
 export const UPCLOUD_VOLUME_MAX_SIZE_GB = 4096;
-const ROOT_DISK_SIZE_GB: Record<VMSize, number> = { small: 50, medium: 80, large: 160 };
 const noLogger: ProviderLogger = noopProviderLogger;
 
 export const UPCLOUD_LOCATIONS = [
@@ -163,32 +163,33 @@ export class UpCloudProvider implements Provider {
   }
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const sizeConfig = this.sizes[config.size];
-    if (!sizeConfig) {
-      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`, {
-        category: 'invalid_config',
-      });
-    }
-    const plan = config.instanceType ?? sizeConfig.type;
-    await this.assertZoneAvailable(config.location, context);
-    await this.assertPlanAvailable(plan, context);
-    const template = config.image ?? (await this.resolveTemplate(context));
+    const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
+      providerName: this.name,
+      defaultLocation: this.defaultLocation,
+      legacySizes: this.sizes,
+      defaultImage: this.imageTitle,
+    });
+    const bootDiskSizeGb = resolveUpCloudBootDiskSize(nativeConfig, this.sizes);
+    assertUpCloudVolumeSize(bootDiskSizeGb, UPCLOUD_VOLUME_MIN_SIZE_GB, UPCLOUD_VOLUME_MAX_SIZE_GB);
+    await this.assertZoneAvailable(nativeConfig.location, context);
+    await this.assertPlanAvailable(nativeConfig.instanceType, context);
+    const template = nativeConfig.image ?? (await this.resolveTemplate(context));
     const body = {
       server: {
-        zone: config.location,
-        title: config.name,
-        hostname: sanitizeUpCloudHostname(config.name),
-        plan,
-        user_data: config.userData,
+        zone: nativeConfig.location,
+        title: nativeConfig.name,
+        hostname: sanitizeUpCloudHostname(nativeConfig.name),
+        plan: nativeConfig.instanceType,
+        user_data: nativeConfig.userData,
         metadata: 'yes',
-        labels: { label: toUpCloudLabels(config.labels) },
+        labels: { label: toUpCloudLabels(nativeConfig.labels) },
         storage_devices: {
           storage_device: [
             {
               action: 'clone',
               storage: template,
-              title: `${config.name} root`,
-              size: ROOT_DISK_SIZE_GB[config.size],
+              title: `${nativeConfig.name} root`,
+              size: bootDiskSizeGb,
               tier: 'maxiops',
               encrypted: 'yes',
             },
@@ -636,5 +637,25 @@ export class UpCloudProvider implements Provider {
       throw error;
     }
   }
+}
+
+function resolveUpCloudBootDiskSize(
+  config: ReturnType<typeof resolveVMConfigWithLegacySizeAdapter>,
+  sizes: Readonly<Record<VMSize, SizeConfig>>
+): number {
+  if (config.bootDiskSizeGb !== undefined) return config.bootDiskSizeGb;
+  if (config.resources?.diskGb !== undefined) return config.resources.diskGb;
+
+  const catalogMatch = Object.values(sizes).find((sizeConfig) => {
+    return sizeConfig.type === config.instanceType;
+  });
+  if (catalogMatch) return catalogMatch.storageGb;
+
+  throw new ProviderError(
+    'upcloud',
+    400,
+    `UpCloud native plan ${config.instanceType} requires native.bootDiskSizeGb or native.resources.diskGb`,
+    { category: 'invalid_config' }
+  );
 }
 export { classifyUpCloudError, mapUpCloudStatus } from './upcloud-utils';

@@ -18,6 +18,8 @@ export interface UpCloudServer {
   state: string;
   zone: string;
   plan: string;
+  coreNumber?: number;
+  memoryAmount?: number;
   created: string;
   labels: UpCloudLabel[];
   ipAddresses: Array<{ access: string; address: string; family: string }>;
@@ -103,6 +105,7 @@ function server(o: Record<string, unknown>, c: string): UpCloudServer {
     state: requireString(o, 'state', 'upcloud', c),
     zone: requireString(o, 'zone', 'upcloud', c),
     plan: optionalString(o, 'plan', 'upcloud', c) ?? 'custom',
+    ...optionalServerResources(o, c),
     created: optionalString(o, 'created', 'upcloud', c) ?? '',
     labels: labels(o.labels, c),
     ipAddresses: (optionalArray(ips, 'ip_address', 'upcloud', c) ?? []).map((x) => {
@@ -123,6 +126,32 @@ function server(o: Record<string, unknown>, c: string): UpCloudServer {
       };
     }),
   };
+}
+
+function optionalServerResources(
+  o: Record<string, unknown>,
+  c: string
+): Pick<UpCloudServer, 'coreNumber' | 'memoryAmount'> {
+  const coreNumber = optionalNumericString(o, 'core_number', c);
+  const memoryAmount = optionalNumericString(o, 'memory_amount', c);
+  return {
+    ...(coreNumber !== undefined ? { coreNumber } : {}),
+    ...(memoryAmount !== undefined ? { memoryAmount } : {}),
+  };
+}
+
+function optionalNumericString(
+  o: Record<string, unknown>,
+  key: string,
+  c: string
+): number | undefined {
+  const value = o[key];
+  if (value === undefined || value === null) return undefined;
+  const parsed = typeof value === 'number' ? value : Number(optionalString(o, key, 'upcloud', c));
+  if (!Number.isFinite(parsed)) {
+    throw validationError('upcloud', `${c}.${key}`, 'expected finite number');
+  }
+  return parsed;
 }
 function storage(o: Record<string, unknown>, c: string): UpCloudStorage {
   const sr = expectObject(o.servers ?? { server: [] }, 'upcloud', c);

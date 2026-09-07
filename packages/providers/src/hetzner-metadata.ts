@@ -1,5 +1,6 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 
+import { observedHardware } from './native-vm-config';
 import type {
   LocationMeta,
   ProviderErrorCategory,
@@ -223,12 +224,28 @@ export const HETZNER_SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
 };
 
 export function mapHetznerServerToVMInstance(server: HetznerServerPayload): VMInstance {
+  const resources =
+    server.server_type.cores !== undefined &&
+    server.server_type.memory !== undefined &&
+    server.server_type.disk !== undefined
+      ? {
+          vcpuCount: server.server_type.cores,
+          memoryMb: server.server_type.memory * 1024,
+          diskGb: server.server_type.disk,
+        }
+      : null;
+
   return {
     id: String(server.id),
     name: server.name,
     ip: server.public_net.ipv4.ip,
     status: mapHetznerStatus(server.status),
     serverType: server.server_type.name,
+    observedHardware: observedHardware({
+      serverType: server.server_type.name,
+      resources,
+      unknownResourcesReason: 'Hetzner response omitted server_type resource fields',
+    }),
     createdAt: server.created,
     labels: server.labels,
   };

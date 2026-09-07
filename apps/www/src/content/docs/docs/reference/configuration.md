@@ -282,7 +282,7 @@ Configuring one family never enables or modifies the other. Users who choose ser
 | `GCP_DEFAULT_ZONE`                   | `us-central1-a`                                  | Default Compute zone                                                                        |
 | `GCP_IMAGE_FAMILY`                   | `ubuntu-2404-lts-amd64`                          | Compute image family                                                                        |
 | `GCP_IMAGE_PROJECT`                  | `ubuntu-os-cloud`                                | Compute image project                                                                       |
-| `GCP_DISK_SIZE_GB`                   | `50`                                             | Boot disk size                                                                              |
+| `GCP_DISK_SIZE_GB`                   | `50`                                             | Default boot disk size. A native VM request with `bootDiskSizeGb` overrides this value before the Compute Engine insert call. |
 | `GCP_TOKEN_CACHE_TTL_SECONDS`        | `3300`                                           | Maximum derivative access-token cache TTL; actual TTL is capped by Google's returned expiry |
 | `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS`  | `600`                                            | SAM identity-token lifetime for WIF                                                         |
 | `GCP_OPERATION_POLL_TIMEOUT_MS`      | `300000`                                         | Maximum wait for GCP asynchronous operations                                                |

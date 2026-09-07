@@ -3,6 +3,7 @@ import { DEFAULT_VULTR_OS_NAME, DEFAULT_VULTR_REGION } from '@simple-agent-manag
 
 import { getProviderCatalogOfferings } from './instance-offerings';
 import { kvTagsToLabels, labelsToKvTags } from './kv-tags';
+import { observedHardware, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
 import {
   providerDelay,
   providerFetch,
@@ -114,15 +115,13 @@ export class VultrProvider implements Provider {
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const sizeConfig = this.sizes[config.size];
-    if (!sizeConfig) {
-      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`, {
-        category: 'invalid_config',
-      });
-    }
-    const region = config.location || this.region;
-    const plan = config.instanceType ?? sizeConfig.type;
-    const osId = await this.resolveOsId(config.image, context);
+    const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
+      providerName: this.name,
+      defaultLocation: this.region,
+      legacySizes: this.sizes,
+      defaultImage: this.osName,
+    });
+    const osId = await this.resolveOsId(nativeConfig.image, nativeConfig.architecture, context);
     throwIfProviderRequestAborted(context);
 
     const response = await this.vultrFetch(
@@ -130,13 +129,13 @@ export class VultrProvider implements Provider {
       {
         method: 'POST',
         body: JSON.stringify({
-          region,
-          plan,
+          region: nativeConfig.location,
+          plan: nativeConfig.instanceType,
           os_id: osId,
-          label: config.name,
-          hostname: sanitizeVultrHostname(config.name),
-          user_data: toVultrBase64(config.userData),
-          tags: labelsToKvTags(config.labels || {}),
+          label: nativeConfig.name,
+          hostname: sanitizeVultrHostname(nativeConfig.name),
+          user_data: toVultrBase64(nativeConfig.userData),
+          tags: labelsToKvTags(nativeConfig.labels),
           backups: 'disabled',
           activation_email: false,
         }),
@@ -278,7 +277,11 @@ export class VultrProvider implements Provider {
     return this.volumeClient.listVolumes(config, context);
   }
 
-  private async resolveOsId(image?: string, context?: ProviderRequestContext): Promise<number> {
+  private async resolveOsId(
+    image?: string,
+    architecture?: 'x86_64' | 'arm64',
+    context?: ProviderRequestContext
+  ): Promise<number> {
     throwIfProviderRequestAborted(context);
     // Explicit numeric os_id override
     if (image && /^\d+$/.test(image.trim())) {
@@ -294,6 +297,14 @@ export class VultrProvider implements Provider {
       throw new ProviderError(this.name, undefined, `No Vultr OS found matching "${targetName}"`, {
         category: 'invalid_config',
       });
+    }
+    if (architecture && !vultrOsMatchesArchitecture(match.arch, architecture)) {
+      throw new ProviderError(
+        this.name,
+        400,
+        `Vultr OS "${targetName}" has architecture "${match.arch}" and cannot satisfy "${architecture}"`,
+        { category: 'invalid_config' }
+      );
     }
     if (!image) this.osIdCache = match.id;
     return match.id;
@@ -433,12 +444,26 @@ export class VultrProvider implements Provider {
   }
 
   private mapInstance(instance: VultrInstancePayload): VMInstance {
+    const resources =
+      instance.vcpu_count !== undefined && instance.ram !== undefined && instance.disk !== undefined
+        ? {
+            vcpuCount: instance.vcpu_count,
+            memoryMb: instance.ram,
+            diskGb: instance.disk,
+          }
+        : null;
+
     return {
       id: instance.id,
       name: instance.label || instance.id,
       ip: normalizeVultrIp(instance.main_ip),
       status: mapVultrStatus(instance.status, instance.power_status, instance.server_status),
       serverType: instance.plan,
+      observedHardware: observedHardware({
+        serverType: instance.plan,
+        resources,
+        unknownResourcesReason: 'Vultr response omitted instance resource fields',
+      }),
       createdAt: instance.date_created,
       labels: kvTagsToLabels(instance.tags),
     };
@@ -481,4 +506,10 @@ export class VultrProvider implements Provider {
       category: classifyVultrError(err.statusCode, err.message),
     });
   }
+}
+
+function vultrOsMatchesArchitecture(providerArch: string, requested: 'x86_64' | 'arm64'): boolean {
+  const normalized = providerArch.toLowerCase();
+  if (requested === 'arm64') return normalized === 'arm64' || normalized === 'aarch64';
+  return normalized === 'x64' || normalized === 'x86_64' || normalized === 'amd64';
 }
