@@ -18,6 +18,11 @@ const testEnv = env as unknown as Env;
 const ENCRYPTION_KEY = 'generic-webhook-worker-test-key';
 const HEADER_CANARY = 'HEADER_BEARER_CANARY_DO_NOT_PERSIST';
 const BODY_CANARY = 'BODY_SECRET_CANARY_DO_NOT_PERSIST';
+const SECRET_KEY_NAME = `${['sk', 'ant', 'api03'].join('-')}-${'A'.repeat(80)}`;
+const LONG_HEADER_NAMES = Array.from(
+  { length: 10 },
+  (_value, index) => `x-${String(index).padStart(2, '0')}-${'a'.repeat(95)}`
+);
 
 function mutableEnv(): Env {
   const mutable = testEnv as Env & Record<string, unknown>;
@@ -30,7 +35,7 @@ function mutableEnv(): Env {
 
 async function seedWebhookTrigger(
   suffix: string,
-  options: { filterMode?: string; filtersJson?: string } = {}
+  options: { filterMode?: string; filtersJson?: string; includedHeadersJson?: string } = {}
 ): Promise<{ token: string; projectId: string; triggerId: string }> {
   const userId = `${TEST_PREFIX}-${suffix}-user`;
   const installationId = `${TEST_PREFIX}-${suffix}-installation`;
@@ -76,7 +81,7 @@ async function seedWebhookTrigger(
     `INSERT INTO webhook_trigger_configs
        (trigger_id, token_hash, token_last_four, token_created_at, source_label,
         filter_mode, filters_json, included_headers_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, '', ?, ?, '["x-event-type"]', ?, ?)`
+     VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, ?)`
   )
     .bind(
       triggerId,
@@ -85,6 +90,7 @@ async function seedWebhookTrigger(
       now,
       options.filterMode ?? 'all',
       options.filtersJson ?? '[]',
+      options.includedHeadersJson ?? '["x-event-type"]',
       now,
       now
     )
@@ -153,7 +159,10 @@ describe('generic webhook ProjectData event producer', () => {
           clientSecret: BODY_CANARY,
           privateKey: BODY_CANARY,
           authToken: BODY_CANARY,
+          [SECRET_KEY_NAME]: BODY_CANARY,
+          session: BODY_CANARY,
           sessionId: BODY_CANARY,
+          passphrase: BODY_CANARY,
           credentials: { apiKey: BODY_CANARY },
           '': BODY_CANARY,
           nested: { one: { two: { three: { token: BODY_CANARY } } } },
@@ -175,8 +184,15 @@ describe('generic webhook ProjectData event producer', () => {
     expect(`${outbox}${event}`).not.toContain('clientSecret');
     expect(`${outbox}${event}`).not.toContain('privateKey');
     expect(`${outbox}${event}`).not.toContain('authToken');
-    expect(`${outbox}${event}`).not.toContain('sessionId');
-    expect(`${outbox}${event}`).toContain('bodyTopLevelKeyCount');
+    const persisted = `${outbox}${event}`;
+    expect(persisted).not.toContain('sessionId');
+    expect(persisted).not.toContain(SECRET_KEY_NAME);
+    expect(persisted).not.toContain('"session"');
+    expect(persisted).not.toContain('"passphrase"');
+    expect(persisted).not.toContain('bodyTopLevelKeys');
+    expect(persisted).not.toContain('includedHeaderNames');
+    expect(persisted).toContain('bodyTopLevelKeyCount');
+    expect(persisted).toContain('includedHeaderCount');
     expect(`${outbox}${event}`).toContain('redactedSensitiveKeyCount');
   });
 
@@ -203,5 +219,57 @@ describe('generic webhook ProjectData event producer', () => {
     expect(`${outbox}${event}`).not.toContain(BODY_CANARY);
     expect(`${outbox}${event}`).not.toContain(HEADER_CANARY);
     expect(`${outbox}${event}`).toContain('webhook.filtered');
+  });
+
+  it('fits long configured header names into a 1024-byte metadata budget without persisting names', async () => {
+    const { token, projectId } = await seedWebhookTrigger('long-headers', {
+      includedHeadersJson: JSON.stringify(LONG_HEADER_NAMES),
+    });
+    const eventEnv = mutableEnv() as Env & Record<string, string | undefined>;
+    const previousLimit = eventEnv.PROJECT_EVENT_METADATA_MAX_BYTES;
+    eventEnv.PROJECT_EVENT_METADATA_MAX_BYTES = '1024';
+    const headers = new Headers({
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'idempotency-key': 'long-header-delivery',
+    });
+    for (const name of LONG_HEADER_NAMES) headers.set(name, 'visible-header-value');
+    const submitted: string[] = [];
+    const submitter: TriggerTaskSubmitter = async (_env, input) => {
+      submitted.push(input.renderedPrompt);
+      return {
+        taskId: `${input.triggerExecutionId}-task`,
+        sessionId: `${input.triggerExecutionId}-session`,
+        branchName: 'sam/webhook-long-header-budget',
+      };
+    };
+
+    try {
+      const response = await webhookApp(submitter).request(
+        new Request('https://api.test.local/api/webhooks/ingest', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ safe: 'small-valid-body' }),
+        }),
+        undefined,
+        eventEnv
+      );
+      const responseBody = await response.json<{ deliveryId: string }>();
+
+      expect(response.status).toBe(202);
+      expect(submitted).toHaveLength(1);
+      const outbox = await persistedOutboxPayload(`delivery:${responseBody.deliveryId}`);
+      const event = await persistedProjectEvent(projectId);
+      const persisted = `${outbox}${event}`;
+
+      expect(persisted).toContain('includedHeaderCount');
+      expect(persisted).toContain('bodyTopLevelKeyCount');
+      for (const name of LONG_HEADER_NAMES) expect(persisted).not.toContain(name);
+      expect(persisted).not.toContain('includedHeaderNames');
+      expect(persisted).not.toContain('visible-header-value');
+    } finally {
+      if (previousLimit === undefined) delete eventEnv.PROJECT_EVENT_METADATA_MAX_BYTES;
+      else eventEnv.PROJECT_EVENT_METADATA_MAX_BYTES = previousLimit;
+    }
   });
 });
