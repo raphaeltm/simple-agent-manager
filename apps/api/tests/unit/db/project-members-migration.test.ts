@@ -53,13 +53,11 @@ describe('project_members migration', () => {
     db.exec(migration);
 
     const rows = db
-      .prepare(
-        `
+      .prepare(`
         SELECT project_id, user_id, role, status, invited_by, created_at, updated_at
         FROM project_members
         ORDER BY project_id
-      `
-      )
+      `)
       .all();
 
     expect(rows).toEqual([

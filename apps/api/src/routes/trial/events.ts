@@ -53,10 +53,9 @@ eventsRoutes.get('/:trialId/events', async (c) => {
   // CF-Connecting-IP is always present on Cloudflare Workers for real traffic;
   // X-Forwarded-For covers reverse-proxy setups. If neither is present, reject
   // rather than sharing a single "unknown" bucket across all headerless clients.
-  const clientIp =
-    c.req.header('CF-Connecting-IP') ??
-    c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
-    null;
+  const clientIp = c.req.header('CF-Connecting-IP')
+    ?? c.req.header('X-Forwarded-For')?.split(',')[0]?.trim()
+    ?? null;
   if (!clientIp) {
     log.warn('trial_events.missing_client_ip', { trialId });
     return c.json({ error: 'Unable to determine client IP for rate limiting.' }, 400);
@@ -69,12 +68,7 @@ eventsRoutes.get('/:trialId/events', async (c) => {
   const sseLimit = getRateLimit(c.env, 'TRIAL_SSE');
   const windowStart = getCurrentWindowStart(SSE_RATE_LIMIT_WINDOW_SECONDS);
   const rateLimitKey = createRateLimitKey('trial-sse', clientIp, windowStart);
-  const { allowed } = await checkRateLimit(
-    c.env.KV,
-    rateLimitKey,
-    sseLimit,
-    SSE_RATE_LIMIT_WINDOW_SECONDS
-  );
+  const { allowed } = await checkRateLimit(c.env.KV, rateLimitKey, sseLimit, SSE_RATE_LIMIT_WINDOW_SECONDS);
   if (!allowed) {
     return c.json({ error: 'Too many SSE connections. Please try again later.' }, 429);
   }
@@ -151,23 +145,19 @@ eventsRoutes.get('/:trialId/events', async (c) => {
           }
 
           if (!pollResp.ok) {
-            enqueue(
-              encoder.encode(
-                formatSse({
-                  type: 'trial.error',
-                  error: 'invalid_url',
-                  message: `Event bus poll failed: ${pollResp.status}`,
-                  at: Date.now(),
-                })
-              )
-            );
+            enqueue(encoder.encode(formatSse({
+              type: 'trial.error',
+              error: 'invalid_url',
+              message: `Event bus poll failed: ${pollResp.status}`,
+              at: Date.now(),
+            })));
             break;
           }
 
           const data = await readResponseJson(
             pollResp,
             trialEventPollResponseSchema,
-            'trial.events.poll_response'
+            'trial.events.poll_response',
           );
 
           for (const { cursor: c2, event } of data.events) {
@@ -221,6 +211,7 @@ function parseCookie(header: string, name: string): string | null {
   }
   return null;
 }
+
 
 export function formatSse(data: unknown): string {
   // Emit as the default ("message") SSE event so that EventSource consumers

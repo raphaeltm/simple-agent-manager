@@ -28,7 +28,7 @@ describe('resolveHostnameTarget', () => {
       dohAnswer([
         { name: 'app.theircompany.com.', type: 5, data: 'R1-Web-3000-Prod.Apps.Example.Com.' },
         { name: 'r1-web-3000-prod.apps.example.com.', type: 1, data: NODE_IP },
-      ])
+      ]),
     );
     vi.stubGlobal('fetch', fetchMock);
 
@@ -51,7 +51,7 @@ describe('resolveHostnameTarget', () => {
   it('returns empty arrays when the resolver reports NXDOMAIN with no answers', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ Status: 3 }), { status: 200 }))
+      vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ Status: 3 }), { status: 200 })),
     );
     const resolved = await resolveHostnameTarget('missing.theircompany.com', env());
     expect(resolved).toEqual({ cnames: [], a: [] });
@@ -61,13 +61,13 @@ describe('resolveHostnameTarget', () => {
 describe('matchesCustomDomainTarget', () => {
   it('verifies when the CNAME chain includes the expected route hostname', () => {
     expect(
-      matchesCustomDomainTarget({ cnames: [ROUTE_TARGET], a: [] }, ROUTE_TARGET, NODE_IP)
+      matchesCustomDomainTarget({ cnames: [ROUTE_TARGET], a: [] }, ROUTE_TARGET, NODE_IP),
     ).toBe(true);
   });
 
   it('verifies via an A record equal to the node IP (flattened CNAME)', () => {
     expect(matchesCustomDomainTarget({ cnames: [], a: [NODE_IP] }, ROUTE_TARGET, NODE_IP)).toBe(
-      true
+      true,
     );
   });
 
@@ -76,14 +76,14 @@ describe('matchesCustomDomainTarget', () => {
       matchesCustomDomainTarget(
         { cnames: ['some-other.apps.example.com'], a: ['198.51.100.99'] },
         ROUTE_TARGET,
-        NODE_IP
-      )
+        NODE_IP,
+      ),
     ).toBe(false);
   });
 
   it('does not verify on an A-record match when no node IP is known', () => {
     expect(matchesCustomDomainTarget({ cnames: [], a: [NODE_IP] }, ROUTE_TARGET, undefined)).toBe(
-      false
+      false,
     );
   });
 });
@@ -100,11 +100,11 @@ describe('verifyCustomDomainTarget', () => {
         dohAnswer([
           { name: 'app.theircompany.com.', type: 5, data: `${ROUTE_TARGET}.` },
           { name: `${ROUTE_TARGET}.`, type: 1, data: NODE_IP },
-        ])
-      )
+        ]),
+      ),
     );
     await expect(
-      verifyCustomDomainTarget('app.theircompany.com', ROUTE_TARGET, NODE_IP, env())
+      verifyCustomDomainTarget('app.theircompany.com', ROUTE_TARGET, NODE_IP, env()),
     ).resolves.toBe(true);
   });
 
@@ -115,25 +115,23 @@ describe('verifyCustomDomainTarget', () => {
         dohAnswer([
           { name: 'app.theircompany.com.', type: 5, data: 'someone-else.example.net.' },
           { name: 'someone-else.example.net.', type: 1, data: '198.51.100.99' },
-        ])
-      )
+        ]),
+      ),
     );
     await expect(
-      verifyCustomDomainTarget('app.theircompany.com', ROUTE_TARGET, NODE_IP, env())
+      verifyCustomDomainTarget('app.theircompany.com', ROUTE_TARGET, NODE_IP, env()),
     ).resolves.toBe(false);
   });
 
   it('returns true when the hostname is flattened to the node A record', async () => {
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(
-          dohAnswer([{ name: 'app.theircompany.com.', type: 1, data: NODE_IP }])
-        )
+      vi.fn().mockResolvedValueOnce(
+        dohAnswer([{ name: 'app.theircompany.com.', type: 1, data: NODE_IP }]),
+      ),
     );
     await expect(
-      verifyCustomDomainTarget('app.theircompany.com', ROUTE_TARGET, NODE_IP, env())
+      verifyCustomDomainTarget('app.theircompany.com', ROUTE_TARGET, NODE_IP, env()),
     ).resolves.toBe(true);
   });
 });

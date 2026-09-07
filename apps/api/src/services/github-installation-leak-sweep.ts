@@ -111,7 +111,9 @@ export async function bulkSweepMismatchedPersonalInstallations(
     })
     .from(schema.githubInstallations)
     .where(
-      afterId ? and(personalFilter, gt(schema.githubInstallations.id, afterId)) : personalFilter
+      afterId
+        ? and(personalFilter, gt(schema.githubInstallations.id, afterId))
+        : personalFilter
     )
     .orderBy(schema.githubInstallations.id)
     .limit(limit);

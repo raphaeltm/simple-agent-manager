@@ -212,8 +212,7 @@ function handleObservePrompt(
   } else {
     recordReconciliationCandidateInconclusive(sql, env, {
       ...candidate,
-      reason:
-        delivery.kind === 'inconclusive' ? (delivery.reason ?? liveness.reason) : liveness.reason,
+      reason: delivery.kind === 'inconclusive' ? (delivery.reason ?? liveness.reason) : liveness.reason,
     });
   }
   return 0;
@@ -270,7 +269,11 @@ async function handleCheckinDelivery(
   env: DOEnv
 ): Promise<number> {
   const { broadcastEvent, deadlineMs, promptDeliveryAdapter } = ctx;
-  const intent = getOrCreateReconciliationCheckinIntent(sql, candidate.sessionId, candidate.taskId);
+  const intent = getOrCreateReconciliationCheckinIntent(
+    sql,
+    candidate.sessionId,
+    candidate.taskId
+  );
   const deliveryResult = await sendCheckinToAgent(
     env,
     candidate,

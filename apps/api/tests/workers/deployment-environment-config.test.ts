@@ -41,7 +41,7 @@ async function makeEnvironment(name: string): Promise<string> {
   const id = `${PREFIX}-env-${name}`;
   await env.DATABASE.prepare(
     `INSERT INTO deployment_environments (id, project_id, name, status, created_at, updated_at)
-     VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
+     VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
   )
     .bind(id, PROJECT_ID, name)
     .run();
@@ -53,21 +53,15 @@ beforeAll(async () => {
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO users (id, email, github_id, name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`
+     VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`,
   )
-    .bind(
-      USER_ID,
-      `decfg-user-${PREFIX}` + '@example.test',
-      '880001',
-      'Cfg User',
-      'https://example.com/a.png'
-    )
+    .bind(USER_ID, `decfg-user-${PREFIX}` + '@example.test', '880001', 'Cfg User', 'https://example.com/a.png')
     .run();
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO github_installation_accounts
        (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
-     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
   )
     .bind(PROJECT_ID + '-inst', 'test-owner', 'test-owner')
     .run();
@@ -75,7 +69,7 @@ beforeAll(async () => {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO github_installations
        (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
   )
     .bind(PROJECT_ID + '-inst', USER_ID, PROJECT_ID + '-inst', PROJECT_ID + '-inst', 'test-owner')
     .run();
@@ -83,17 +77,9 @@ beforeAll(async () => {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO projects
        (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`
+     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`,
   )
-    .bind(
-      PROJECT_ID,
-      USER_ID,
-      'decfg-project',
-      'decfg-project',
-      PROJECT_ID + '-inst',
-      'test-owner/test-repo',
-      USER_ID
-    )
+    .bind(PROJECT_ID, USER_ID, 'decfg-project', 'decfg-project', PROJECT_ID + '-inst', 'test-owner/test-repo', USER_ID)
     .run();
 });
 
@@ -302,13 +288,13 @@ describe('interpolation env resolution (build vs runtime boundary)', () => {
     await env.DATABASE.prepare(
       `INSERT INTO deployment_environment_config_vars
        (id, environment_id, env_key, stored_value, value_iv, is_secret, created_at, updated_at)
-       VALUES (?, ?, 'BROKEN', 'not-real-ciphertext', NULL, 1, datetime('now'), datetime('now'))`
+       VALUES (?, ?, 'BROKEN', 'not-real-ciphertext', NULL, 1, datetime('now'), datetime('now'))`,
     )
       .bind(ulid(), envId)
       .run();
 
     await expect(loadDeploymentInterpolationEnv(db, envId, ENCRYPTION_KEY)).rejects.toThrow(
-      /missing an IV/
+      /missing an IV/,
     );
   });
 });

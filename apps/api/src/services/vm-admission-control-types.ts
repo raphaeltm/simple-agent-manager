@@ -184,7 +184,10 @@ export function getVmAdmissionConfig(env: Env): VmAdmissionConfig {
   );
   return {
     mode: parseAdmissionMode(env.VM_ADMISSION_CONTROL_MODE),
-    leaseTtlMs: parsePositiveInt(env.VM_ADMISSION_LEASE_TTL_MS, DEFAULT_VM_ADMISSION_LEASE_TTL_MS),
+    leaseTtlMs: parsePositiveInt(
+      env.VM_ADMISSION_LEASE_TTL_MS,
+      DEFAULT_VM_ADMISSION_LEASE_TTL_MS
+    ),
     retryMinMs,
     retryMaxMs,
     waitTimeoutMs: parsePositiveInt(
@@ -237,10 +240,7 @@ export async function first<T>(
   query: string,
   binds: unknown[] = []
 ): Promise<T | null> {
-  const row = await database
-    .prepare(query)
-    .bind(...binds)
-    .first<T>();
+  const row = await database.prepare(query).bind(...binds).first<T>();
   return row ?? null;
 }
 

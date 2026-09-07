@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CfApiError, queryCloudflareLogs } from '../../../src/services/observability';
+import { CfApiError,queryCloudflareLogs } from '../../../src/services/observability';
 
 // Mock drizzle-orm for schema import
 vi.mock('drizzle-orm/d1', () => ({
@@ -47,27 +47,22 @@ describe('queryCloudflareLogs()', () => {
   function cfResponse(events: Array<Record<string, unknown>> = [], cursor: string | null = null) {
     return {
       ok: true,
-      json: () =>
-        Promise.resolve({
-          result: {
-            events: { events },
-            run: cursor ? { offset: cursor } : {},
-          },
-        }),
+      json: () => Promise.resolve({
+        result: {
+          events: { events },
+          run: cursor ? { offset: cursor } : {},
+        },
+      }),
     };
   }
 
   /** Helper: build a legacy CF API response (events as a flat array) */
-  function legacyCfResponse(
-    events: Array<Record<string, unknown>> = [],
-    cursor: string | null = null
-  ) {
+  function legacyCfResponse(events: Array<Record<string, unknown>> = [], cursor: string | null = null) {
     return {
       ok: true,
-      json: () =>
-        Promise.resolve({
-          result: { events, cursor },
-        }),
+      json: () => Promise.resolve({
+        result: { events, cursor },
+      }),
     };
   }
 
@@ -252,38 +247,37 @@ describe('queryCloudflareLogs()', () => {
   it('should normalize CF API response with $metadata format', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: () =>
-        Promise.resolve({
-          result: {
-            events: {
-              events: [
-                {
-                  $metadata: {
-                    id: 'evt-1',
-                    level: 'error',
-                    message: 'Something failed',
-                    type: 'http.request',
-                    requestId: 'req-123',
-                  },
-                  $workers: {
-                    scriptName: 'my-worker',
-                    requestId: 'req-123',
-                    eventType: 'fetch',
-                    outcome: 'exception',
-                    event: {
-                      method: 'GET',
-                      path: '/api/health',
-                    },
-                  },
-                  timestamp: 1707912000000,
-                  dataset: 'workers',
-                  source: 'worker',
+      json: () => Promise.resolve({
+        result: {
+          events: {
+            events: [
+              {
+                $metadata: {
+                  id: 'evt-1',
+                  level: 'error',
+                  message: 'Something failed',
+                  type: 'http.request',
+                  requestId: 'req-123',
                 },
-              ],
-            },
-            run: { offset: 'page-2' },
+                $workers: {
+                  scriptName: 'my-worker',
+                  requestId: 'req-123',
+                  eventType: 'fetch',
+                  outcome: 'exception',
+                  event: {
+                    method: 'GET',
+                    path: '/api/health',
+                  },
+                },
+                timestamp: 1707912000000,
+                dataset: 'workers',
+                source: 'worker',
+              },
+            ],
           },
-        }),
+          run: { offset: 'page-2' },
+        },
+      }),
     });
     globalThis.fetch = mockFetch;
 
@@ -299,23 +293,21 @@ describe('queryCloudflareLogs()', () => {
   });
 
   it('should handle legacy CF API response format (flat events array)', async () => {
-    const mockFetch = vi.fn().mockResolvedValue(
-      legacyCfResponse(
-        [
-          {
-            timestamp: '2026-02-14T12:00:00.000Z',
-            event: {
-              type: 'http.request',
-              level: 'error',
-              message: 'Legacy format',
-              method: 'GET',
-            },
-            invocationId: 'inv-legacy',
+    const mockFetch = vi.fn().mockResolvedValue(legacyCfResponse(
+      [
+        {
+          timestamp: '2026-02-14T12:00:00.000Z',
+          event: {
+            type: 'http.request',
+            level: 'error',
+            message: 'Legacy format',
+            method: 'GET',
           },
-        ],
-        'legacy-cursor'
-      )
-    );
+          invocationId: 'inv-legacy',
+        },
+      ],
+      'legacy-cursor',
+    ));
     globalThis.fetch = mockFetch;
 
     const result = await queryCloudflareLogs(baseInput);
@@ -329,24 +321,23 @@ describe('queryCloudflareLogs()', () => {
   it('should strip sensitive fields from details', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: () =>
-        Promise.resolve({
-          result: {
-            events: [
-              {
-                timestamp: '2026-02-14T12:00:00.000Z',
-                event: {
-                  level: 'info',
-                  message: 'test',
-                  authorization: 'Bearer secret',
-                  cookie: 'session=abc',
-                  safeField: 'keep this',
-                },
+      json: () => Promise.resolve({
+        result: {
+          events: [
+            {
+              timestamp: '2026-02-14T12:00:00.000Z',
+              event: {
+                level: 'info',
+                message: 'test',
+                authorization: 'Bearer secret',
+                cookie: 'session=abc',
+                safeField: 'keep this',
               },
-            ],
-            cursor: null,
-          },
-        }),
+            },
+          ],
+          cursor: null,
+        },
+      }),
     });
     globalThis.fetch = mockFetch;
 
@@ -413,10 +404,9 @@ describe('queryCloudflareLogs()', () => {
 
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: () =>
-        Promise.resolve({
-          result: { events, cursor: 'next-page' },
-        }),
+      json: () => Promise.resolve({
+        result: { events, cursor: 'next-page' },
+      }),
     });
 
     const result = await queryCloudflareLogs(baseInput);
@@ -483,22 +473,21 @@ describe('queryCloudflareLogs()', () => {
   it('should convert numeric timestamps to ISO strings in response', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: () =>
-        Promise.resolve({
-          result: {
-            events: {
-              events: [
-                {
-                  $metadata: { id: 'e1', level: 'info', message: 'test' },
-                  timestamp: 1707912000000,
-                  dataset: 'workers',
-                  source: 'worker',
-                },
-              ],
-            },
-            run: {},
+      json: () => Promise.resolve({
+        result: {
+          events: {
+            events: [
+              {
+                $metadata: { id: 'e1', level: 'info', message: 'test' },
+                timestamp: 1707912000000,
+                dataset: 'workers',
+                source: 'worker',
+              },
+            ],
           },
-        }),
+          run: {},
+        },
+      }),
     });
     globalThis.fetch = mockFetch;
 

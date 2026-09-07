@@ -27,7 +27,7 @@ export const searchConversationHistoryDef: AnthropicToolDef = {
 
 export async function searchConversationHistory(
   input: { query: string; limit?: number },
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<unknown> {
   if (!input.query?.trim()) {
     return { error: 'Query is required' };

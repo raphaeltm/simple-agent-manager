@@ -74,21 +74,27 @@ export function createSaveAgentSettingsSchema(
       opencodeBaseUrl: v.optional(v.nullable(BoundedStringSchema(limits.maxBaseUrlLength))),
       providerMode: v.optional(v.nullable(AgentProviderModeSchema)),
     }),
-    v.check((input) => {
-      const provider = input.opencodeProvider;
-      return !provider || !OPENCODE_PROVIDERS[provider].requiresBaseUrl || !!input.opencodeBaseUrl;
-    }, 'opencodeBaseUrl is required for providers that require a base URL'),
-    v.check((input) => {
-      if (input.opencodeBaseUrl) {
-        try {
-          const url = new URL(input.opencodeBaseUrl);
-          return url.protocol === 'https:';
-        } catch {
-          return false;
+    v.check(
+      (input) => {
+        const provider = input.opencodeProvider;
+        return !provider || !OPENCODE_PROVIDERS[provider].requiresBaseUrl || !!input.opencodeBaseUrl;
+      },
+      'opencodeBaseUrl is required for providers that require a base URL'
+    ),
+    v.check(
+      (input) => {
+        if (input.opencodeBaseUrl) {
+          try {
+            const url = new URL(input.opencodeBaseUrl);
+            return url.protocol === 'https:';
+          } catch {
+            return false;
+          }
         }
-      }
-      return true;
-    }, 'opencodeBaseUrl must be a valid HTTPS URL')
+        return true;
+      },
+      'opencodeBaseUrl must be a valid HTTPS URL'
+    ),
   );
 }
 

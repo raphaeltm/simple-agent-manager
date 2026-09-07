@@ -32,8 +32,8 @@ const dohAnswerSchema = v.object({
         name: v.string(),
         type: v.number(),
         data: v.string(),
-      })
-    )
+      }),
+    ),
   ),
 });
 
@@ -58,7 +58,7 @@ function normalizeDnsName(name: string): string {
  */
 export async function resolveHostnameTarget(
   hostname: string,
-  env: Env
+  env: Env,
 ): Promise<ResolvedHostnameTarget> {
   const resolverUrl = env.DOH_RESOLVER_URL ?? DEFAULT_DOH_RESOLVER_URL;
   const timeoutMs = getTimeoutMs(env.DOH_TIMEOUT_MS, DEFAULT_DOH_TIMEOUT_MS);
@@ -67,7 +67,7 @@ export async function resolveHostnameTarget(
   const response = await fetchWithTimeout(
     url,
     { headers: { accept: 'application/dns-json' } },
-    timeoutMs
+    timeoutMs,
   );
 
   if (!response.ok) {
@@ -99,7 +99,7 @@ export async function resolveHostnameTarget(
 export function matchesCustomDomainTarget(
   resolved: ResolvedHostnameTarget,
   expectedCnameTarget: string,
-  expectedNodeIp: string | undefined
+  expectedNodeIp: string | undefined,
 ): boolean {
   const target = normalizeDnsName(expectedCnameTarget);
   if (resolved.cnames.includes(target)) {
@@ -122,7 +122,7 @@ export async function verifyCustomDomainTarget(
   hostname: string,
   expectedCnameTarget: string,
   expectedNodeIp: string | undefined,
-  env: Env
+  env: Env,
 ): Promise<boolean> {
   const resolved = await resolveHostnameTarget(hostname, env);
   return matchesCustomDomainTarget(resolved, expectedCnameTarget, expectedNodeIp);

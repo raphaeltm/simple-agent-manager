@@ -49,7 +49,7 @@ export interface BackfillReport {
  */
 export async function runBackfill(
   db: ReturnType<typeof drizzle>,
-  options: BackfillOptions = {}
+  options: BackfillOptions = {},
 ): Promise<BackfillReport> {
   const { dryRun = false, userId } = options;
 
@@ -120,66 +120,53 @@ export async function runBackfill(
   // directly from the platform_credentials table, not through cc_*.
   const userCreds = ccCreds.filter((c) => c.ownerId !== '__platform__');
   if (userCreds.length > 0) {
-    await db
-      .insert(ccCredentials)
-      .values(
-        userCreds.map((c) => {
-          // Extract fingerprint from the credential ID
-          const fp = c.id.slice(`cred-${c.ownerId}-`.length);
-          const secret = secretByCiphertext.get(fp);
-          if (!secret) throw new Error(`No ciphertext found for credential ${c.id}`);
-          return {
-            id: c.id,
-            ownerId: c.ownerId,
-            name: c.name,
-            kind: c.kind,
-            encryptedToken: secret.encryptedToken,
-            iv: secret.iv,
-            isActive: c.isActive,
-          };
-        })
-      )
-      .onConflictDoNothing();
+    await db.insert(ccCredentials).values(
+      userCreds.map((c) => {
+        // Extract fingerprint from the credential ID
+        const fp = c.id.slice(`cred-${c.ownerId}-`.length);
+        const secret = secretByCiphertext.get(fp);
+        if (!secret) throw new Error(`No ciphertext found for credential ${c.id}`);
+        return {
+          id: c.id,
+          ownerId: c.ownerId,
+          name: c.name,
+          kind: c.kind,
+          encryptedToken: secret.encryptedToken,
+          iv: secret.iv,
+          isActive: c.isActive,
+        };
+      }),
+    ).onConflictDoNothing();
   }
 
   if (ccConfigs.length > 0) {
-    await db
-      .insert(ccConfigurations)
-      .values(
-        ccConfigs.map((cfg) => ({
-          id: cfg.id,
-          ownerId: cfg.ownerId,
-          name: cfg.name,
-          consumerKind: cfg.consumer.kind,
-          consumerTarget:
-            cfg.consumer.kind === 'agent' ? cfg.consumer.agentType : cfg.consumer.provider,
-          credentialId: cfg.credentialId,
-          settingsJson:
-            cfg.settings && Object.keys(cfg.settings).length > 0
-              ? JSON.stringify(cfg.settings)
-              : null,
-          isActive: cfg.isActive,
-        }))
-      )
-      .onConflictDoNothing();
+    await db.insert(ccConfigurations).values(
+      ccConfigs.map((cfg) => ({
+        id: cfg.id,
+        ownerId: cfg.ownerId,
+        name: cfg.name,
+        consumerKind: cfg.consumer.kind,
+        consumerTarget: cfg.consumer.kind === 'agent' ? cfg.consumer.agentType : cfg.consumer.provider,
+        credentialId: cfg.credentialId,
+        settingsJson: cfg.settings && Object.keys(cfg.settings).length > 0
+          ? JSON.stringify(cfg.settings) : null,
+        isActive: cfg.isActive,
+      })),
+    ).onConflictDoNothing();
   }
 
   if (ccAtts.length > 0) {
-    await db
-      .insert(ccAttachments)
-      .values(
-        ccAtts.map((att) => ({
-          id: att.id,
-          configurationId: att.configurationId,
-          consumerKind: att.consumer.kind,
-          consumerTarget:
-            att.consumer.kind === 'agent' ? att.consumer.agentType : att.consumer.provider,
-          userId: att.target.userId,
-          projectId: att.target.scope === 'project' ? att.target.projectId : null,
-          isActive: att.isActive,
-        }))
-      )
-      .onConflictDoNothing();
+    await db.insert(ccAttachments).values(
+      ccAtts.map((att) => ({
+        id: att.id,
+        configurationId: att.configurationId,
+        consumerKind: att.consumer.kind,
+        consumerTarget: att.consumer.kind === 'agent' ? att.consumer.agentType : att.consumer.provider,
+        userId: att.target.userId,
+        projectId: att.target.scope === 'project' ? att.target.projectId : null,
+        isActive: att.isActive,
+      })),
+    ).onConflictDoNothing();
   }
 
   return {

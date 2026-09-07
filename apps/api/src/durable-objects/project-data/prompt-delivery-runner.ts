@@ -119,7 +119,8 @@ async function invalidParentWakeTargetResult(
     ? (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status)
     : false;
   const parentIsWakeable =
-    parent && (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
+    parent &&
+    (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
   if (
     !parent ||
     !parentIsWakeable ||

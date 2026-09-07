@@ -11,7 +11,10 @@ import {
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getGatewayPeriodBounds, iterateGatewayLogs } from './ai-gateway-logs';
+import {
+  getGatewayPeriodBounds,
+  iterateGatewayLogs,
+} from './ai-gateway-logs';
 
 const DEFAULT_MONTHLY_COST_AGGREGATION_MAX_PAGES = 200;
 const MONTHLY_COST_AGGREGATION_MAX_PAGES_HARD_CAP = 500;
@@ -77,7 +80,7 @@ export async function runMonthlyCostAggregation(env: Env): Promise<MonthlyCostCr
         defaultMaxPages: DEFAULT_MONTHLY_COST_AGGREGATION_MAX_PAGES,
         maxPagesHardCap: MONTHLY_COST_AGGREGATION_MAX_PAGES_HARD_CAP,
         maxPagesEnvValue: env.AI_MONTHLY_COST_AGGREGATION_MAX_PAGES,
-      }
+      },
     );
   } catch (err) {
     log.error('cron.monthly_cost.gateway_error', {

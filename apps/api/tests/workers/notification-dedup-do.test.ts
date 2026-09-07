@@ -14,12 +14,10 @@ describe('Notification DO expiring deduplication claims', () => {
     const notification = stub('notification-dedup-user-001');
     const key = 'cron-failure-notification:node_cleanup';
 
-    expect(
-      await Promise.all([
-        notification.claimNotificationDeduplication(key, 61_000, 1_000),
-        notification.claimNotificationDeduplication(key, 61_000, 1_000),
-      ])
-    ).toEqual([true, false]);
+    expect(await Promise.all([
+      notification.claimNotificationDeduplication(key, 61_000, 1_000),
+      notification.claimNotificationDeduplication(key, 61_000, 1_000),
+    ])).toEqual([true, false]);
 
     expect(await notification.claimNotificationDeduplication(key, 121_001, 61_001)).toBe(true);
   });

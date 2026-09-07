@@ -98,9 +98,7 @@ export async function createProjectMemberOffboardingPreview(input: {
     canApply: resources.length === 0,
     requiresHumanDecision: resources.length > 0,
     summary,
-    resources: resources.map(
-      (resource): ProjectMemberOffboardingResourcePreview => ({ ...resource })
-    ),
+    resources: resources.map((resource): ProjectMemberOffboardingResourcePreview => ({ ...resource })),
   };
 }
 

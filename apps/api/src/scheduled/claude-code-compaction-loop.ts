@@ -121,9 +121,7 @@ async function findClaudeCodeAgentSession(
      WHERE workspace_id = ? AND status = 'running' AND agent_type = 'claude-code'
      ORDER BY created_at DESC
      LIMIT 1`
-  )
-    .bind(workspaceId)
-    .first<{ id: string; agent_type: string | null }>();
+  ).bind(workspaceId).first<{ id: string; agent_type: string | null }>();
 }
 
 async function resolveTaskSessionId(
@@ -133,9 +131,7 @@ async function resolveTaskSessionId(
   if (task.workspace_id) {
     const workspace = await env.DATABASE.prepare(
       `SELECT chat_session_id FROM workspaces WHERE id = ?`
-    )
-      .bind(task.workspace_id)
-      .first<{ chat_session_id: string | null }>();
+    ).bind(task.workspace_id).first<{ chat_session_id: string | null }>();
     if (workspace?.chat_session_id) return workspace.chat_session_id;
   }
 

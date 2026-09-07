@@ -6,11 +6,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  resolveBillingMode,
-  resolveUnifiedBillingToken,
-  resolveUpstreamAuth,
-} from '../../../src/services/ai-billing';
+import { resolveBillingMode, resolveUnifiedBillingToken, resolveUpstreamAuth } from '../../../src/services/ai-billing';
 
 // =============================================================================
 // Mock helpers
@@ -24,15 +20,13 @@ function mockKV(overrides: Record<string, string> = {}) {
   } as unknown as KVNamespace;
 }
 
-function mockEnv(
-  overrides: Partial<{
-    CF_AIG_TOKEN: string;
-    CF_API_TOKEN: string;
-    AI_PROXY_BILLING_MODE: string;
-    ENCRYPTION_KEY: string;
-    KV: KVNamespace;
-  }> = {}
-) {
+function mockEnv(overrides: Partial<{
+  CF_AIG_TOKEN: string;
+  CF_API_TOKEN: string;
+  AI_PROXY_BILLING_MODE: string;
+  ENCRYPTION_KEY: string;
+  KV: KVNamespace;
+}> = {}) {
   return {
     CF_AIG_TOKEN: overrides.CF_AIG_TOKEN ?? 'test-cf-token',
     CF_API_TOKEN: overrides.CF_API_TOKEN ?? 'test-cf-api-token',
@@ -153,7 +147,9 @@ describe('resolveUpstreamAuth — unified mode', () => {
     (env as Record<string, unknown>).CF_API_TOKEN = undefined;
     const db = {} as Parameters<typeof resolveUpstreamAuth>[1];
 
-    await expect(resolveUpstreamAuth(env, db)).rejects.toThrow('no CF token is configured');
+    await expect(resolveUpstreamAuth(env, db)).rejects.toThrow(
+      'no CF token is configured',
+    );
   });
 });
 
@@ -184,7 +180,9 @@ describe('resolveUpstreamAuth — platform-key mode', () => {
     const env = mockEnv({ AI_PROXY_BILLING_MODE: 'platform-key' });
     const db = {} as Parameters<typeof resolveUpstreamAuth>[1];
 
-    await expect(resolveUpstreamAuth(env, db)).rejects.toThrow('No Anthropic API key configured');
+    await expect(resolveUpstreamAuth(env, db)).rejects.toThrow(
+      'No Anthropic API key configured',
+    );
   });
 });
 
@@ -242,6 +240,8 @@ describe('resolveUpstreamAuth — auto mode', () => {
     (env as Record<string, unknown>).CF_API_TOKEN = undefined;
     const db = {} as Parameters<typeof resolveUpstreamAuth>[1];
 
-    await expect(resolveUpstreamAuth(env, db)).rejects.toThrow('No Anthropic API key configured');
+    await expect(resolveUpstreamAuth(env, db)).rejects.toThrow(
+      'No Anthropic API key configured',
+    );
   });
 });

@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect,it } from 'vitest';
 
 const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
 const routeFile = readFileSync(resolve(process.cwd(), 'src/routes/agent-profiles.ts'), 'utf8');
@@ -23,7 +23,7 @@ describe('agent profiles integration wiring', () => {
   });
 
   it('imports agent profile routes in index', () => {
-    expect(indexFile).toContain('import { agentProfileRoutes }');
+    expect(indexFile).toContain("import { agentProfileRoutes }");
   });
 
   it('route handler delegates all operations to the service layer', () => {

@@ -140,11 +140,7 @@ export function validateComposeImageArtifactDescriptor(
   const mediaType = requiredString(value.mediaType, 'mediaType');
   const sizeBytesRaw = value.sizeBytes;
 
-  if (
-    typeof sizeBytesRaw !== 'number' ||
-    !Number.isSafeInteger(sizeBytesRaw) ||
-    sizeBytesRaw <= 0
-  ) {
+  if (typeof sizeBytesRaw !== 'number' || !Number.isSafeInteger(sizeBytesRaw) || sizeBytesRaw <= 0) {
     throw new Error(`Artifact ${serviceName} must declare a positive integer sizeBytes`);
   }
   const sizeBytes = sizeBytesRaw;
@@ -163,12 +159,11 @@ export function validateComposeImageArtifactDescriptor(
     throw new Error(`Artifact ${serviceName} mediaType ${mediaType} is not supported`);
   }
 
-  const requiredPrefix =
-    [
-      'compose-image-artifacts',
-      safeKeyPart(expected.projectId),
-      safeKeyPart(expected.environmentId),
-    ].join('/') + '/';
+  const requiredPrefix = [
+    'compose-image-artifacts',
+    safeKeyPart(expected.projectId),
+    safeKeyPart(expected.environmentId),
+  ].join('/') + '/';
   if (!r2Key.startsWith(requiredPrefix)) {
     throw new Error(`Artifact ${serviceName} R2 key is outside the project/environment scope`);
   }
@@ -317,8 +312,6 @@ function safeKeyPart(value: string): string {
 }
 
 function safeDockerPart(value: string): string {
-  const cleaned = cleanString(value)
-    .toLowerCase()
-    .replace(/[^a-z0-9_.-]+/g, '-');
+  const cleaned = cleanString(value).toLowerCase().replace(/[^a-z0-9_.-]+/g, '-');
   return cleaned.replace(/^-+|-+$/g, '') || 'unknown';
 }

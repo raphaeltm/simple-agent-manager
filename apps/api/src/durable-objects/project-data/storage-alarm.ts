@@ -120,7 +120,9 @@ function cleanupHadFailure(
   return (
     (cleanup !== null && (cleanup.rowsFailed > 0 || cleanup.terminationReason === 'error')) ||
     (groupedFtsCleanup !== null &&
-      ['circuit_breaker', 'error', 'weak_reclaim'].includes(groupedFtsCleanup.terminationReason)) ||
+      ['circuit_breaker', 'error', 'weak_reclaim'].includes(
+        groupedFtsCleanup.terminationReason
+      )) ||
     (eventLogCleanup !== null && eventLogCleanup.terminationReason === 'error')
   );
 }

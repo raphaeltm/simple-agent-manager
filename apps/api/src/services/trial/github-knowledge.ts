@@ -125,15 +125,20 @@ export async function emitGithubKnowledgeEvents(
     // bounded by timeoutMs — a hanging readme fetch won't block repo metadata.
     const base = `https://api.github.com/repos/${repo.owner}/${repo.name}`;
     const [repoMeta, languages, readme] = await Promise.all([
-      fetchJson(base, timeoutMs, fetchFn) as Promise<{
-        description?: string | null;
-        language?: string | null;
-        stargazers_count?: number;
-        topics?: string[];
-        license?: { spdx_id?: string | null } | null;
-        default_branch?: string;
-      } | null>,
-      fetchJson(`${base}/languages`, timeoutMs, fetchFn) as Promise<Record<string, number> | null>,
+      fetchJson(base, timeoutMs, fetchFn) as Promise<
+        | {
+            description?: string | null;
+            language?: string | null;
+            stargazers_count?: number;
+            topics?: string[];
+            license?: { spdx_id?: string | null } | null;
+            default_branch?: string;
+          }
+        | null
+      >,
+      fetchJson(`${base}/languages`, timeoutMs, fetchFn) as Promise<
+        Record<string, number> | null
+      >,
       fetchText(`${base}/readme`, timeoutMs, fetchFn),
     ]);
 
@@ -144,7 +149,10 @@ export async function emitGithubKnowledgeEvents(
       if (typeof repoMeta.language === 'string' && repoMeta.language) {
         await emit('repository', `Primary language: ${repoMeta.language}`);
       }
-      if (typeof repoMeta.stargazers_count === 'number' && repoMeta.stargazers_count > 0) {
+      if (
+        typeof repoMeta.stargazers_count === 'number' &&
+        repoMeta.stargazers_count > 0
+      ) {
         await emit('repository', `Stars: ${repoMeta.stargazers_count}`);
       }
       if (Array.isArray(repoMeta.topics) && repoMeta.topics.length > 0) {
@@ -177,7 +185,9 @@ export async function emitGithubKnowledgeEvents(
       );
       if (firstParagraph) {
         const snippet =
-          firstParagraph.length > 280 ? `${firstParagraph.slice(0, 280)}…` : firstParagraph;
+          firstParagraph.length > 280
+            ? `${firstParagraph.slice(0, 280)}…`
+            : firstParagraph;
         await emit('repository', `README: ${snippet}`);
       }
     }

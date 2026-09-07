@@ -6,9 +6,9 @@
  * See: tasks/active/2026-03-03-fix-chat-session-message-leakage.md (Bug 5)
  */
 import { getTableConfig } from 'drizzle-orm/sqlite-core';
-import { readdirSync, readFileSync } from 'fs';
+import { readdirSync,readFileSync } from 'fs';
 import { join } from 'path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect,it } from 'vitest';
 
 import { workspaces } from '../../../src/db/schema';
 

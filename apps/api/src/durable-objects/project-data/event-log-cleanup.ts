@@ -294,10 +294,7 @@ function hasAcpSessionEventCandidatesAfter(sql: SqlStorage, cutoffUpdatedAt: num
   return normalizeCount(row) > 0;
 }
 
-function deleteEventLogBatch(
-  sql: SqlStorage,
-  plan: EventLogCleanupPlan
-): {
+function deleteEventLogBatch(sql: SqlStorage, plan: EventLogCleanupPlan): {
   rowsDeleted: ProjectDataEventLogCleanupResult['rowsDeleted'];
   candidateBytesDeleted: ProjectDataEventLogCleanupResult['candidateBytesDeleted'];
 } {
@@ -380,8 +377,7 @@ function buildEventLogCleanupResult(
   recheckAt: number | null
 ): ProjectDataEventLogCleanupResult {
   const rowsExamined = rowsDeleted.activityEvents + rowsDeleted.acpSessionEvents;
-  const originalBytes =
-    candidateBytesDeleted.activityEvents + candidateBytesDeleted.acpSessionEvents;
+  const originalBytes = candidateBytesDeleted.activityEvents + candidateBytesDeleted.acpSessionEvents;
   return {
     projectId: plan.projectId,
     beforeBytes: plan.beforeBytes,

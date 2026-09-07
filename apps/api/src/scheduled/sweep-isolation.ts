@@ -77,17 +77,13 @@ export function createSweepIsolator(env: IsolatorEnv): SweepIsolator {
         // persistError is internally guarded, but this must not throw under any
         // circumstance — a failure to RECORD a failure must not abort the cron.
         try {
-          await persistError(
-            env.OBSERVABILITY_DATABASE,
-            {
-              source: 'api',
-              level: 'error',
-              message: `Scheduled sweep "${sweep}" failed: ${message}`,
-              stack: err instanceof Error ? err.stack : undefined,
-              context: { recoveryType: 'cron_sweep_failure', sweep },
-            },
-            env
-          );
+          await persistError(env.OBSERVABILITY_DATABASE, {
+            source: 'api',
+            level: 'error',
+            message: `Scheduled sweep "${sweep}" failed: ${message}`,
+            stack: err instanceof Error ? err.stack : undefined,
+            context: { recoveryType: 'cron_sweep_failure', sweep },
+          }, env);
         } catch (persistErr) {
           log.error('cron.sweep_failure_persist_failed', {
             sweep,

@@ -734,9 +734,9 @@ describe('ProjectData library file comments', () => {
     expect(fileComments.getFileCommentThread(sql, 'file-2', messageThread.thread.id)).toBeNull();
 
     // The tables are physically distinct.
-    const messageRows = sql.exec('SELECT COUNT(*) AS c FROM comment_threads').toArray()[0] as {
-      c: number;
-    };
+    const messageRows = sql
+      .exec('SELECT COUNT(*) AS c FROM comment_threads')
+      .toArray()[0] as { c: number };
     const fileRows = sql
       .exec('SELECT COUNT(*) AS c FROM library_file_comment_threads')
       .toArray()[0] as { c: number };
@@ -856,9 +856,7 @@ describe('ProjectData library file comments', () => {
     // Corrupt the middle row the way legacy data or a schema tightening would:
     // SQLite is dynamically typed, so a text value survives the NOT NULL column
     // but fails the valibot v.number(). See rule 50.
-    sql.exec(
-      `UPDATE library_file_comment_threads SET created_at = 'not-a-number' WHERE sequence = 2`
-    );
+    sql.exec(`UPDATE library_file_comment_threads SET created_at = 'not-a-number' WHERE sequence = 2`);
 
     const listed = fileComments.listFileCommentThreads(sql, env, { fileId: 'file-6' });
     expect(listed.threads.map((t) => t.id)).toEqual([good.id, alsoGood.id]);

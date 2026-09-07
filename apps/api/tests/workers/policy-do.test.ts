@@ -18,12 +18,8 @@ describe('ProjectData Policy CRUD', () => {
   it('creates a policy and retrieves it by ID', async () => {
     const stub = getStub('policy-create-test');
     const result = await stub.createPolicy(
-      'rule',
-      'Use conventional commits',
-      'All commit messages must follow conventional commit format.',
-      'explicit',
-      null,
-      0.95
+      'rule', 'Use conventional commits', 'All commit messages must follow conventional commit format.',
+      'explicit', null, 0.95,
     );
     expect(result.id).toBeTruthy();
     expect(typeof result.now).toBe('number');
@@ -43,12 +39,8 @@ describe('ProjectData Policy CRUD', () => {
     const stub = getStub('policy-list-test');
     for (let i = 0; i < 5; i++) {
       await stub.createPolicy(
-        'preference',
-        `Policy ${i}`,
-        `Content for policy ${i}`,
-        'explicit',
-        null,
-        0.8
+        'preference', `Policy ${i}`, `Content for policy ${i}`,
+        'explicit', null, 0.8,
       );
     }
 
@@ -75,12 +67,8 @@ describe('ProjectData Policy CRUD', () => {
   it('updates a policy', async () => {
     const stub = getStub('policy-update-test');
     const { id } = await stub.createPolicy(
-      'preference',
-      'Old title',
-      'Old content',
-      'explicit',
-      null,
-      0.7
+      'preference', 'Old title', 'Old content',
+      'explicit', null, 0.7,
     );
 
     const updated = await stub.updatePolicy(id, {
@@ -99,7 +87,10 @@ describe('ProjectData Policy CRUD', () => {
 
   it('soft-deletes a policy via removePolicy', async () => {
     const stub = getStub('policy-remove-test');
-    const { id } = await stub.createPolicy('rule', 'To remove', 'Content', 'explicit', null, 0.9);
+    const { id } = await stub.createPolicy(
+      'rule', 'To remove', 'Content',
+      'explicit', null, 0.9,
+    );
 
     const removed = await stub.removePolicy(id);
     expect(removed).toBe(true);
@@ -119,14 +110,7 @@ describe('ProjectData Policy CRUD', () => {
     const stub = getStub('policy-active-test');
     await stub.createPolicy('preference', 'Pref 1', 'Content', 'explicit', null, 0.8);
     await stub.createPolicy('rule', 'Rule 1', 'Content', 'explicit', null, 0.9);
-    const { id: toRemove } = await stub.createPolicy(
-      'constraint',
-      'Inactive',
-      'Content',
-      'explicit',
-      null,
-      0.7
-    );
+    const { id: toRemove } = await stub.createPolicy('constraint', 'Inactive', 'Content', 'explicit', null, 0.7);
     await stub.removePolicy(toRemove);
 
     const active = await stub.getActivePolicies();
@@ -171,14 +155,8 @@ describe('ProjectData Policy lifecycle (expiry + scope)', () => {
   it('excludes an expired policy from getActivePolicies but keeps it readable', async () => {
     const stub = getStub('policy-expiry-excluded');
     const { id } = await stub.createPolicy(
-      'constraint',
-      'Finished workflow',
-      'Applied only to the 2026-08-21 wave.',
-      'explicit',
-      null,
-      0.9,
-      'task',
-      Date.now() + HOUR_MS
+      'constraint', 'Finished workflow', 'Applied only to the 2026-08-21 wave.',
+      'explicit', null, 0.9, 'task', Date.now() + HOUR_MS,
     );
     // Move the expiry into the past directly, so the test never sleeps on the clock.
     // Writing through updatePolicy keeps this on the real update path.
@@ -202,14 +180,7 @@ describe('ProjectData Policy lifecycle (expiry + scope)', () => {
     const stub = getStub('policy-expiry-included');
     const expiresAt = Date.now() + HOUR_MS;
     const { id } = await stub.createPolicy(
-      'rule',
-      'Still current',
-      'Content',
-      'explicit',
-      null,
-      0.9,
-      'task',
-      expiresAt
+      'rule', 'Still current', 'Content', 'explicit', null, 0.9, 'task', expiresAt,
     );
 
     const active = await stub.getActivePolicies();
@@ -227,12 +198,7 @@ describe('ProjectData Policy lifecycle (expiry + scope)', () => {
   it('leaves null-expiry policies untouched — the pre-lifecycle default', async () => {
     const stub = getStub('policy-expiry-null-control');
     const { id } = await stub.createPolicy(
-      'rule',
-      'Standing policy',
-      'Content',
-      'explicit',
-      null,
-      0.9
+      'rule', 'Standing policy', 'Content', 'explicit', null, 0.9,
     );
 
     const policy = await stub.getPolicy(id);
@@ -259,18 +225,11 @@ describe('ProjectData Policy lifecycle (expiry + scope)', () => {
       try {
         // Two standing policies fill the cap exactly.
         await instance.createPolicy('rule', 'Standing A', 'Content', 'explicit', null, 0.9);
-        const b = await instance.createPolicy(
-          'rule',
-          'Standing B',
-          'Content',
-          'explicit',
-          null,
-          0.9
-        );
+        const b = await instance.createPolicy('rule', 'Standing B', 'Content', 'explicit', null, 0.9);
 
         // A third is refused — proves the cap is genuinely enforced at 2.
         await expect(
-          instance.createPolicy('rule', 'Overflow', 'Content', 'explicit', null, 0.9)
+          instance.createPolicy('rule', 'Overflow', 'Content', 'explicit', null, 0.9),
         ).rejects.toThrow(/Maximum active policies/);
 
         // Expire one of them. It stays active=1 in the table, so a COUNT that ignores
@@ -290,14 +249,7 @@ describe('ProjectData Policy lifecycle (expiry + scope)', () => {
   it('clears an expiry when updatePolicy is given null, making the policy permanent', async () => {
     const stub = getStub('policy-expiry-clear');
     const { id } = await stub.createPolicy(
-      'rule',
-      'Temporarily scoped',
-      'Content',
-      'explicit',
-      null,
-      0.9,
-      'task',
-      Date.now() + HOUR_MS
+      'rule', 'Temporarily scoped', 'Content', 'explicit', null, 0.9, 'task', Date.now() + HOUR_MS,
     );
 
     // `null` must mean "clear it", not "leave it alone" — the `??` idiom cannot
@@ -314,14 +266,7 @@ describe('ProjectData Policy lifecycle (expiry + scope)', () => {
     const stub = getStub('policy-expiry-preserved');
     const expiresAt = Date.now() + HOUR_MS;
     const { id } = await stub.createPolicy(
-      'rule',
-      'Title',
-      'Content',
-      'explicit',
-      null,
-      0.9,
-      'task',
-      expiresAt
+      'rule', 'Title', 'Content', 'explicit', null, 0.9, 'task', expiresAt,
     );
 
     await stub.updatePolicy(id, { title: 'Renamed' });
@@ -340,7 +285,7 @@ describe('ProjectData Policy lifecycle (expiry + scope)', () => {
     const stub = getStub('policy-scope-guard-create');
     await runInDurableObject(stub, async (instance) => {
       await expect(
-        instance.createPolicy('rule', 'One-shot', 'Content', 'explicit', null, 0.9, 'task', null)
+        instance.createPolicy('rule', 'One-shot', 'Content', 'explicit', null, 0.9, 'task', null),
       ).rejects.toThrow(/task-scoped policy must set expiresAt/);
     });
 
@@ -353,21 +298,14 @@ describe('ProjectData Policy lifecycle (expiry + scope)', () => {
     const stub = getStub('policy-scope-guard-update');
     const expiresAt = Date.now() + HOUR_MS;
     const { id } = await stub.createPolicy(
-      'rule',
-      'One-shot',
-      'Content',
-      'explicit',
-      null,
-      0.9,
-      'task',
-      expiresAt
+      'rule', 'One-shot', 'Content', 'explicit', null, 0.9, 'task', expiresAt,
     );
 
     // Clearing the expiry without also widening the scope would resurrect exactly the
     // permanent one-shot policy this feature exists to prevent.
     await runInDurableObject(stub, async (instance) => {
       await expect(instance.updatePolicy(id, { expiresAt: null })).rejects.toThrow(
-        /task-scoped policy must set expiresAt/
+        /task-scoped policy must set expiresAt/,
       );
     });
 

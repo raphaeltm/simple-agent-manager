@@ -155,12 +155,7 @@ export async function enrichProjectDataStorageTelemetry(
     ? (telemetry.categoryBreakdown ??
       measureProjectDataStorageCategories(sql, config, telemetry.measuredAt))
     : telemetry.categoryBreakdown;
-  const source = await readGrowthTrendSource(
-    env,
-    telemetry.projectId,
-    telemetry.measuredAt,
-    config
-  );
+  const source = await readGrowthTrendSource(env, telemetry.projectId, telemetry.measuredAt, config);
   const forecast = computeGrowthForecast(telemetry, source);
 
   return {

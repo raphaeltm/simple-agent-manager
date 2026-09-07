@@ -16,7 +16,7 @@ const MAX_LIMIT = 200;
 export const getProjectKnowledgeDef: AnthropicToolDef = {
   name: 'get_project_knowledge',
   description:
-    "List knowledge entities stored in a project's knowledge graph. " +
+    'List knowledge entities stored in a project\'s knowledge graph. ' +
     'Returns entities with their observation counts. Use search_knowledge to find specific facts.',
   input_schema: {
     type: 'object',
@@ -41,7 +41,7 @@ export const getProjectKnowledgeDef: AnthropicToolDef = {
 
 export async function getProjectKnowledge(
   input: { projectId: string; entityType?: string; limit?: number },
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
@@ -54,7 +54,12 @@ export async function getProjectKnowledge(
   const project = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
+    .where(
+      and(
+        eq(schema.projects.id, input.projectId),
+        eq(schema.projects.userId, ctx.userId),
+      ),
+    )
     .get();
 
   if (!project) {
@@ -62,18 +67,12 @@ export async function getProjectKnowledge(
   }
 
   const limit = Math.min(Math.max(1, input.limit ?? DEFAULT_LIMIT), MAX_LIMIT);
-  const entityType =
-    input.entityType &&
-    KNOWLEDGE_ENTITY_TYPES.includes(input.entityType as (typeof KNOWLEDGE_ENTITY_TYPES)[number])
-      ? input.entityType
-      : null;
+  const entityType = input.entityType && KNOWLEDGE_ENTITY_TYPES.includes(input.entityType as (typeof KNOWLEDGE_ENTITY_TYPES)[number])
+    ? input.entityType
+    : null;
 
   const result = await projectDataService.listKnowledgeEntities(
-    env,
-    input.projectId,
-    entityType,
-    limit,
-    0
+    env, input.projectId, entityType, limit, 0,
   );
 
   return {

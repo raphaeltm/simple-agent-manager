@@ -30,12 +30,11 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
     const deliveryConfig = resolveDurableExecutionConfig(env);
     if (deliveryConfig.deliveryEnabled) {
       const durableDeliveryTime = computePromptDeliveryAlarmTime(sql, deliveryConfig);
-      mailboxTime =
-        durableDeliveryTime === null
-          ? legacyMailboxTime
-          : legacyMailboxTime === null
-            ? durableDeliveryTime
-            : Math.min(durableDeliveryTime, legacyMailboxTime);
+      mailboxTime = durableDeliveryTime === null
+        ? legacyMailboxTime
+        : legacyMailboxTime === null
+          ? durableDeliveryTime
+          : Math.min(durableDeliveryTime, legacyMailboxTime);
     }
   } catch (error) {
     // Invalid durability configuration fails the new delivery engine closed,

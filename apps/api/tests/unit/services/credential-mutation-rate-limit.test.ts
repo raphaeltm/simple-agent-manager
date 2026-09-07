@@ -52,14 +52,12 @@ describe('enforceCredentialMutationRateLimit', () => {
 
     await enforceCredentialMutationRateLimit(env, 'user-1', 'gcp-service-account');
     await enforceCredentialMutationRateLimit(env, 'user-1', 'gcp-service-account');
-    await expect(
-      enforceCredentialMutationRateLimit(env, 'user-1', 'gcp-service-account')
-    ).rejects.toBeInstanceOf(RateLimitError);
+    await expect(enforceCredentialMutationRateLimit(env, 'user-1', 'gcp-service-account'))
+      .rejects.toBeInstanceOf(RateLimitError);
 
     vi.setSystemTime(new Date('2026-07-16T01:00:01Z'));
-    await expect(
-      enforceCredentialMutationRateLimit(env, 'user-1', 'gcp-service-account')
-    ).resolves.toBeUndefined();
+    await expect(enforceCredentialMutationRateLimit(env, 'user-1', 'gcp-service-account'))
+      .resolves.toBeUndefined();
   });
 
   it('isolates principals and mutation scopes', async () => {
@@ -67,11 +65,9 @@ describe('enforceCredentialMutationRateLimit', () => {
     await enforceCredentialMutationRateLimit(env, 'user-1', 'gcp-service-account');
     await enforceCredentialMutationRateLimit(env, 'user-1', 'gcp-service-account');
 
-    await expect(
-      enforceCredentialMutationRateLimit(env, 'user-2', 'gcp-service-account')
-    ).resolves.toBeUndefined();
-    await expect(
-      enforceCredentialMutationRateLimit(env, 'user-1', 'google-infra-oauth')
-    ).resolves.toBeUndefined();
+    await expect(enforceCredentialMutationRateLimit(env, 'user-2', 'gcp-service-account'))
+      .resolves.toBeUndefined();
+    await expect(enforceCredentialMutationRateLimit(env, 'user-1', 'google-infra-oauth'))
+      .resolves.toBeUndefined();
   });
 });

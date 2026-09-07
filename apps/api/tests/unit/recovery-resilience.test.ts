@@ -313,7 +313,9 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
     // Failed/cancelled work is terminal. Completed conversations remain
     // persistent unless the workspace has no chat to resume.
     expect(nodeCleanupSource).toContain("t.status IN ('failed', 'cancelled')");
-    expect(nodeCleanupSource).toContain("(t.status = 'completed' AND w.chat_session_id IS NULL)");
+    expect(nodeCleanupSource).toContain(
+      "(t.status = 'completed' AND w.chat_session_id IS NULL)"
+    );
     // Must NOT have any active task still referencing it
     expect(nodeCleanupSource).toContain('NOT EXISTS');
     expect(nodeCleanupSource).toContain("t.status IN ('queued', 'delegated', 'in_progress')");

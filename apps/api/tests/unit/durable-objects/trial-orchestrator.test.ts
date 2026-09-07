@@ -70,7 +70,9 @@ const { stepMocks } = vi.hoisted(() => ({
 }));
 vi.mock('../../../src/durable-objects/trial-orchestrator/steps', () => stepMocks);
 
-const { TrialOrchestrator } = await import('../../../src/durable-objects/trial-orchestrator');
+const { TrialOrchestrator } = await import(
+  '../../../src/durable-objects/trial-orchestrator'
+);
 
 type Storage = Map<string, unknown>;
 
@@ -403,7 +405,9 @@ describe('TrialOrchestrator.alarm() — step error retry/backoff', () => {
     const storage: Storage = new Map();
     // Budget exhausted: retryCount already at the default max (5).
     storage.set('state', makeRunningState({ retryCount: 99 }));
-    stepMocks.handleProjectCreation.mockRejectedValueOnce(new Error('fetch failed — upstream 503'));
+    stepMocks.handleProjectCreation.mockRejectedValueOnce(
+      new Error('fetch failed — upstream 503')
+    );
     const ctx = makeCtx(storage);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const orch = new TrialOrchestrator(ctx as any, makeEnv());
@@ -453,10 +457,10 @@ describe('TrialOrchestrator — MCP token security boundary', () => {
         mcpToken: 'tok_live_secret_xyz',
         // Force permanent failure path so failTrial runs synchronously.
         retryCount: 99,
-      })
+      }),
     );
     stepMocks.handleProjectCreation.mockRejectedValueOnce(
-      new Error('invalid configuration — forces failTrial')
+      new Error('invalid configuration — forces failTrial'),
     );
     const ctx = makeCtx(storage);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -479,9 +483,11 @@ describe('TrialOrchestrator — MCP token security boundary', () => {
       makeRunningState({
         mcpToken: 'tok_live_flaky_kv',
         retryCount: 99,
-      })
+      }),
     );
-    stepMocks.handleProjectCreation.mockRejectedValueOnce(new Error('invalid — forces failTrial'));
+    stepMocks.handleProjectCreation.mockRejectedValueOnce(
+      new Error('invalid — forces failTrial'),
+    );
     revokeMcpTokenMock.mockRejectedValueOnce(new Error('KV hiccup'));
 
     const ctx = makeCtx(storage);
@@ -510,7 +516,7 @@ describe('TrialOrchestrator — MCP token security boundary', () => {
         mcpToken: 'tok_should_never_leak',
         currentStep: 'running',
         completed: true,
-      })
+      }),
     );
     const ctx = makeCtx(storage);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

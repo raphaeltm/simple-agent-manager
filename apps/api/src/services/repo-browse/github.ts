@@ -68,10 +68,7 @@ export class GitHubRepoBrowser implements RepoBrowser {
     return this.tokenPromise;
   }
 
-  private async gh(
-    pathAndQuery: string,
-    accept = 'application/vnd.github+json'
-  ): Promise<Response> {
+  private async gh(pathAndQuery: string, accept = 'application/vnd.github+json'): Promise<Response> {
     const token = await this.token();
     return fetch(`https://api.github.com${pathAndQuery}`, {
       headers: {
@@ -128,9 +125,7 @@ export class GitHubRepoBrowser implements RepoBrowser {
     const cached = await this.env.KV?.get<RepoTreeResponse>(cacheKey, 'json');
     if (cached) return { ...cached, ref };
 
-    const res = await this.gh(
-      `${this.repoPath()}/git/trees/${encodeURIComponent(sha)}?recursive=1`
-    );
+    const res = await this.gh(`${this.repoPath()}/git/trees/${encodeURIComponent(sha)}?recursive=1`);
     if (!res.ok) {
       throw new Error(`GitHub tree fetch failed: ${res.status}`);
     }

@@ -36,7 +36,10 @@ waitlistRoutes.post('/waitlist', async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: 'BAD_REQUEST', message: 'Request body must be valid JSON' }, 400);
+    return c.json(
+      { error: 'BAD_REQUEST', message: 'Request body must be valid JSON' },
+      400
+    );
   }
   const parsed = v.safeParse(TrialWaitlistRequestSchema, body);
   if (!parsed.success) {
@@ -72,7 +75,10 @@ waitlistRoutes.post('/waitlist', async (c) => {
     log.error('trial.waitlist.insert_failed', {
       error: err instanceof Error ? err.message : String(err),
     });
-    return c.json({ error: 'INTERNAL_ERROR', message: 'Failed to queue waitlist entry' }, 500);
+    return c.json(
+      { error: 'INTERNAL_ERROR', message: 'Failed to queue waitlist entry' },
+      500
+    );
   }
 
   const resp: TrialWaitlistResponse = { queued: true, resetsAt: resetDate };

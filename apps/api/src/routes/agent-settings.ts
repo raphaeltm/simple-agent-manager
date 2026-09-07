@@ -197,7 +197,10 @@ agentSettingsRoutes.get('/:agentType', async (c) => {
     .select()
     .from(schema.agentSettings)
     .where(
-      and(eq(schema.agentSettings.userId, userId), eq(schema.agentSettings.agentType, agentType))
+      and(
+        eq(schema.agentSettings.userId, userId),
+        eq(schema.agentSettings.agentType, agentType)
+      )
     )
     .limit(1);
 
@@ -247,7 +250,10 @@ agentSettingsRoutes.put('/:agentType', async (c) => {
     .select({ id: schema.agentSettings.id })
     .from(schema.agentSettings)
     .where(
-      and(eq(schema.agentSettings.userId, userId), eq(schema.agentSettings.agentType, agentType))
+      and(
+        eq(schema.agentSettings.userId, userId),
+        eq(schema.agentSettings.agentType, agentType)
+      )
     )
     .limit(1);
 
@@ -262,7 +268,9 @@ agentSettingsRoutes.put('/:agentType', async (c) => {
     deniedTools: body.deniedTools ? JSON.stringify(body.deniedTools) : null,
     additionalEnv: body.additionalEnv ? JSON.stringify(body.additionalEnv) : null,
     opencodeProvider: body.opencodeProvider ?? null,
-    opencodeBaseUrl: requiresBaseUrl(body.opencodeProvider) ? (body.opencodeBaseUrl ?? null) : null,
+    opencodeBaseUrl: requiresBaseUrl(body.opencodeProvider)
+      ? (body.opencodeBaseUrl ?? null)
+      : null,
     providerMode: body.providerMode ?? null,
     updatedAt: now,
   };
@@ -289,7 +297,10 @@ agentSettingsRoutes.put('/:agentType', async (c) => {
     .select()
     .from(schema.agentSettings)
     .where(
-      and(eq(schema.agentSettings.userId, userId), eq(schema.agentSettings.agentType, agentType))
+      and(
+        eq(schema.agentSettings.userId, userId),
+        eq(schema.agentSettings.agentType, agentType)
+      )
     )
     .limit(1);
 
@@ -317,7 +328,10 @@ agentSettingsRoutes.delete('/:agentType', async (c) => {
   await db
     .delete(schema.agentSettings)
     .where(
-      and(eq(schema.agentSettings.userId, userId), eq(schema.agentSettings.agentType, agentType))
+      and(
+        eq(schema.agentSettings.userId, userId),
+        eq(schema.agentSettings.agentType, agentType)
+      )
     );
 
   return c.json({ success: true });

@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
-import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';

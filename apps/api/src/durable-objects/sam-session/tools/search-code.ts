@@ -20,7 +20,7 @@ const DEFAULT_GITHUB_TIMEOUT_MS = 10_000;
 export const searchCodeDef: AnthropicToolDef = {
   name: 'search_code',
   description:
-    "Search for code in a project's GitHub repository. " +
+    'Search for code in a project\'s GitHub repository. ' +
     'Use this to find specific functions, classes, patterns, or configuration in the codebase. ' +
     'Requires GitHub credentials to be configured in Settings.',
   input_schema: {
@@ -60,7 +60,7 @@ export async function searchCode(
     extension?: string;
     limit?: number;
   },
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };

@@ -40,10 +40,7 @@ const codexRefreshRoutes = new Hono<{ Bindings: Env }>();
 codexRefreshRoutes.post('/codex-refresh', async (c) => {
   // Kill switch check.
   if (c.env.CODEX_REFRESH_PROXY_ENABLED === 'false') {
-    return c.json(
-      { error: 'service_unavailable', message: 'Codex refresh proxy is disabled' },
-      503
-    );
+    return c.json({ error: 'service_unavailable', message: 'Codex refresh proxy is disabled' }, 503);
   }
 
   // Auth: extract callback token from query param (Codex can't set headers).
@@ -85,10 +82,7 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   }
 
   if (body.grant_type !== 'refresh_token' || !body.refresh_token) {
-    return c.json(
-      { error: 'invalid_request', message: 'Missing grant_type or refresh_token' },
-      400
-    );
+    return c.json({ error: 'invalid_request', message: 'Missing grant_type or refresh_token' }, 400);
   }
 
   // Look up workspace to get userId and projectId.

@@ -8,7 +8,7 @@ import type { AnthropicToolDef, ToolContext } from '../types';
 export const getAccountSetupStatusDef: AnthropicToolDef = {
   name: 'get_account_setup_status',
   description:
-    "Check the current user's account setup status: cloud credentials, GitHub App installation, and projects. Use this to guide new users through onboarding.",
+    'Check the current user\'s account setup status: cloud credentials, GitHub App installation, and projects. Use this to guide new users through onboarding.',
   input_schema: {
     type: 'object',
     properties: {},
@@ -17,7 +17,7 @@ export const getAccountSetupStatusDef: AnthropicToolDef = {
 
 export async function getAccountSetupStatus(
   _input: Record<string, unknown>,
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<unknown> {
   const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
 
@@ -48,11 +48,20 @@ export async function getAccountSetupStatus(
         status: schema.projects.status,
       })
       .from(schema.projects)
-      .where(and(eq(schema.projects.userId, ctx.userId), eq(schema.projects.status, 'active'))),
+      .where(
+        and(
+          eq(schema.projects.userId, ctx.userId),
+          eq(schema.projects.status, 'active'),
+        ),
+      ),
   ]);
 
-  const hasCloudProvider = creds.some((c) => c.credentialType === 'cloud-provider' && c.isActive);
-  const hasAgentKey = creds.some((c) => c.credentialType === 'agent-api-key' && c.isActive);
+  const hasCloudProvider = creds.some(
+    (c) => c.credentialType === 'cloud-provider' && c.isActive,
+  );
+  const hasAgentKey = creds.some(
+    (c) => c.credentialType === 'agent-api-key' && c.isActive,
+  );
   const hasGitHubApp = installations.length > 0;
   const hasProjects = projects.length > 0;
 

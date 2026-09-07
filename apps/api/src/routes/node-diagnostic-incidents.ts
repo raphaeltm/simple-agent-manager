@@ -255,10 +255,7 @@ nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
         platformErrorId: input.id,
         nodeId,
         workspaceId: input.workspaceId ?? null,
-        signature: await diagnosticIncidentSignature(
-          reportSources[index] ?? 'vm-agent',
-          input.message
-        ),
+        signature: await diagnosticIncidentSignature(reportSources[index] ?? 'vm-agent', input.message),
         deploymentId,
         occurredAt: input.timestamp ?? Date.now(),
       });

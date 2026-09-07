@@ -358,7 +358,9 @@ export function clearPendingAcpActivity(projectId: string, sessionId: string): v
   pendingActivityByKey.delete(activityKey(projectId, sessionId));
 }
 
-export function isPendingAcpActivitySnapshotCurrent(snapshot: AcpActivityPendingSnapshot): boolean {
+export function isPendingAcpActivitySnapshotCurrent(
+  snapshot: AcpActivityPendingSnapshot
+): boolean {
   return pendingActivityByKey.get(snapshot.key)?.version === snapshot.version;
 }
 

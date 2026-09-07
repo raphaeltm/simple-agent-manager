@@ -113,11 +113,7 @@ export async function getGitHubUserAccessTokenWithHeaders(
       return null;
     }
 
-    const token = await readResponseJson(
-      response,
-      lockedTokenResponseSchema,
-      'github.user_access_token.locked'
-    );
+    const token = await readResponseJson(response, lockedTokenResponseSchema, 'github.user_access_token.locked');
     log.info('github.user_access_token.lookup', {
       flow,
       userId,

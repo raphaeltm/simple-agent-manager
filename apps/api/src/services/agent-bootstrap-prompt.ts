@@ -23,7 +23,9 @@ export function buildVisibleInitialPrompt(input: BuildVisibleInitialPromptInput)
       `\nThese files are available at the paths listed above. Read them to understand the task context.\n`;
   }
 
-  const systemPromptSuffix = input.systemPromptAppend ? `\n\n${input.systemPromptAppend}` : '';
+  const systemPromptSuffix = input.systemPromptAppend
+    ? `\n\n${input.systemPromptAppend}`
+    : '';
 
   return `${input.message}${attachmentContext}${systemPromptSuffix}`;
 }

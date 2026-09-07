@@ -7,7 +7,10 @@ import {
 
 import { createModuleLogger } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { parseCheckpointEpisodeRow, parseCheckpointProgressEnvelope } from './row-schemas';
+import {
+  parseCheckpointEpisodeRow,
+  parseCheckpointProgressEnvelope,
+} from './row-schemas';
 
 const log = createModuleLogger('project_data.checkpoint_episodes');
 const MAX_CHECKPOINT_REASON_LENGTH = 512;
@@ -29,7 +32,7 @@ function bounded(value: string | null | undefined, max: number): string | null {
 export function createCheckpointEpisode(
   sql: SqlStorage,
   input: CreateCheckpointEpisodeInput,
-  now = Date.now()
+  now = Date.now(),
 ): { episode: CheckpointEpisode; created: boolean } {
   const sessionId = requireIdentifier(input.sessionId, 'sessionId');
   const acpSessionId = requireIdentifier(input.acpSessionId, 'acpSessionId');
@@ -58,17 +61,15 @@ export function createCheckpointEpisode(
     reason,
     envelope ? JSON.stringify(envelope) : null,
     now,
-    now
+    now,
   );
 
-  const row = sql
-    .exec(
-      `SELECT * FROM checkpoint_episodes
+  const row = sql.exec(
+    `SELECT * FROM checkpoint_episodes
      WHERE acp_session_id = ? AND prompt_epoch = ?`,
-      acpSessionId,
-      input.promptEpoch
-    )
-    .toArray()[0];
+    acpSessionId,
+    input.promptEpoch,
+  ).toArray()[0];
   if (!row) throw new Error('checkpoint episode insert did not produce a row');
 
   return {
@@ -77,8 +78,14 @@ export function createCheckpointEpisode(
   };
 }
 
-export function getCheckpointEpisode(sql: SqlStorage, episodeId: string): CheckpointEpisode | null {
-  const row = sql.exec('SELECT * FROM checkpoint_episodes WHERE id = ?', episodeId).toArray()[0];
+export function getCheckpointEpisode(
+  sql: SqlStorage,
+  episodeId: string,
+): CheckpointEpisode | null {
+  const row = sql.exec(
+    'SELECT * FROM checkpoint_episodes WHERE id = ?',
+    episodeId,
+  ).toArray()[0];
   if (!row) return null;
   try {
     return parseCheckpointEpisodeRow(row);
@@ -94,16 +101,14 @@ export function getCheckpointEpisode(sql: SqlStorage, episodeId: string): Checkp
 export function getCheckpointEpisodeByPrompt(
   sql: SqlStorage,
   acpSessionId: string,
-  promptEpoch: number
+  promptEpoch: number,
 ): CheckpointEpisode | null {
-  const row = sql
-    .exec(
-      `SELECT * FROM checkpoint_episodes
+  const row = sql.exec(
+    `SELECT * FROM checkpoint_episodes
      WHERE acp_session_id = ? AND prompt_epoch = ?`,
-      acpSessionId,
-      promptEpoch
-    )
-    .toArray()[0];
+    acpSessionId,
+    promptEpoch,
+  ).toArray()[0];
   if (!row) return null;
   try {
     return parseCheckpointEpisodeRow(row);
@@ -120,18 +125,16 @@ export function getCheckpointEpisodeByPrompt(
 export function listCheckpointEpisodes(
   sql: SqlStorage,
   sessionId: string,
-  limit = 50
+  limit = 50,
 ): CheckpointEpisode[] {
-  const rows = sql
-    .exec(
-      `SELECT * FROM checkpoint_episodes
+  const rows = sql.exec(
+    `SELECT * FROM checkpoint_episodes
      WHERE session_id = ?
      ORDER BY created_at DESC
      LIMIT ?`,
-      sessionId,
-      Math.max(1, Math.min(limit, 200))
-    )
-    .toArray();
+    sessionId,
+    Math.max(1, Math.min(limit, 200)),
+  ).toArray();
   const episodes: CheckpointEpisode[] = [];
   for (const row of rows) {
     try {
@@ -151,7 +154,7 @@ export function transitionCheckpointEpisode(
   sql: SqlStorage,
   episodeId: string,
   input: CheckpointEpisodeTransitionInput,
-  now = Date.now()
+  now = Date.now(),
 ): CheckpointEpisode | null {
   const current = getCheckpointEpisode(sql, episodeId);
   if (!current) return null;
@@ -194,7 +197,7 @@ export function transitionCheckpointEpisode(
     input.toState,
     now,
     episodeId,
-    current.state
+    current.state,
   );
   if (result.rowsWritten === 0) return getCheckpointEpisode(sql, episodeId);
   return getCheckpointEpisode(sql, episodeId);

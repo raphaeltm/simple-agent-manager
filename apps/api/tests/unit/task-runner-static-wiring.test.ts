@@ -11,11 +11,11 @@ import { describe, expect, it } from 'vitest';
 
 const taskRunnerIndexSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner/index.ts'),
-  'utf8'
+  'utf8',
 );
 const taskRunnerTypesSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/task-runner/types.ts'),
-  'utf8'
+  'utf8',
 );
 
 describe('TaskRunner static public contract', () => {

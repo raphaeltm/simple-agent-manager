@@ -46,7 +46,7 @@ export const listSessionsDef: AnthropicToolDef = {
 
 export async function listSessions(
   input: { projectId: string; status?: string; taskId?: string; limit?: number },
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
@@ -74,7 +74,7 @@ export async function listSessions(
     status,
     limit,
     0,
-    taskId
+    taskId,
   );
 
   return {

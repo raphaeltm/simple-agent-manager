@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { handleNodeSelection } from '../../src/durable-objects/task-runner/node-steps';
-import type {
-  TaskRunnerContext,
-  TaskRunnerState,
-} from '../../src/durable-objects/task-runner/types';
+import type { TaskRunnerContext, TaskRunnerState } from '../../src/durable-objects/task-runner/types';
 
 // Task-runner node reuse must never select cf-container (instant-session)
 // nodes: the standalone vm-agent hosts exactly one lightweight workspace and

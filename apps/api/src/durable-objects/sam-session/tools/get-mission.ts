@@ -27,7 +27,10 @@ export const getMissionDef: AnthropicToolDef = {
   },
 };
 
-export async function getMission(input: { missionId: string }, ctx: ToolContext): Promise<unknown> {
+export async function getMission(
+  input: { missionId: string },
+  ctx: ToolContext,
+): Promise<unknown> {
   if (!input.missionId?.trim()) {
     return { error: 'missionId is required.' };
   }
@@ -49,7 +52,10 @@ export async function getMission(input: { missionId: string }, ctx: ToolContext)
     .from(schema.missions)
     .innerJoin(schema.projects, eq(schema.missions.projectId, schema.projects.id))
     .where(
-      and(eq(schema.missions.id, input.missionId.trim()), eq(schema.projects.userId, ctx.userId))
+      and(
+        eq(schema.missions.id, input.missionId.trim()),
+        eq(schema.projects.userId, ctx.userId),
+      ),
     )
     .limit(1);
 
@@ -61,10 +67,8 @@ export async function getMission(input: { missionId: string }, ctx: ToolContext)
   // Get task summary for this mission
   const DATABASE = ctx.env.DATABASE as D1Database;
   const taskSummary = await DATABASE.prepare(
-    `SELECT status, COUNT(*) as cnt FROM tasks WHERE mission_id = ? GROUP BY status`
-  )
-    .bind(input.missionId.trim())
-    .all();
+    `SELECT status, COUNT(*) as cnt FROM tasks WHERE mission_id = ? GROUP BY status`,
+  ).bind(input.missionId.trim()).all();
 
   const tasks: Record<string, number> = {};
   for (const row of taskSummary.results ?? []) {
@@ -75,10 +79,8 @@ export async function getMission(input: { missionId: string }, ctx: ToolContext)
 
   // Get individual task list for this mission
   const taskRows = await DATABASE.prepare(
-    `SELECT id, title, status, updated_at FROM tasks WHERE mission_id = ? ORDER BY created_at`
-  )
-    .bind(input.missionId.trim())
-    .all();
+    `SELECT id, title, status, updated_at FROM tasks WHERE mission_id = ? ORDER BY created_at`,
+  ).bind(input.missionId.trim()).all();
 
   const taskList = (taskRows.results ?? []).map((row) => ({
     id: row.id,

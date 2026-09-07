@@ -56,7 +56,9 @@ export async function delay({ seconds, milliseconds }: DelayOptions = {}): Promi
   } else if (typeof milliseconds === 'number') {
     duration = milliseconds;
   } else {
-    throw new TypeError('Expected an object with either `seconds` or `milliseconds`.');
+    throw new TypeError(
+      'Expected an object with either `seconds` or `milliseconds`.',
+    );
   }
 
   return new Promise((resolve) => {

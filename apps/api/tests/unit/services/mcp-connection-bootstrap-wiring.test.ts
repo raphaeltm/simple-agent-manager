@@ -48,7 +48,9 @@ vi.mock('../../../src/services/project-data', () => ({
   prepareAcpSessionForFreshStart: vi.fn(async () => ({ id: 'acp-1' })),
 }));
 
-const { startSamAwareAgentSession } = await import('../../../src/services/agent-session-bootstrap');
+const { startSamAwareAgentSession } = await import(
+  '../../../src/services/agent-session-bootstrap'
+);
 const { createMcpConnection } = await import('../../../src/services/mcp-connections');
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 5).toString('base64');

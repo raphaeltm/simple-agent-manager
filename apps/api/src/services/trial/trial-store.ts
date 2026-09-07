@@ -56,7 +56,10 @@ export function trialByFingerprintKey(fingerprint: string): string {
 // Reads
 // ---------------------------------------------------------------------------
 
-export async function readTrial(env: Env, trialId: string): Promise<TrialRecord | null> {
+export async function readTrial(
+  env: Env,
+  trialId: string
+): Promise<TrialRecord | null> {
   const raw = await env.KV.get(trialKey(trialId));
   if (!raw) return null;
   try {
@@ -92,7 +95,10 @@ function parseTrialRecord(value: unknown): TrialRecord {
   };
 }
 
-export async function readTrialByProject(env: Env, projectId: string): Promise<TrialRecord | null> {
+export async function readTrialByProject(
+  env: Env,
+  projectId: string
+): Promise<TrialRecord | null> {
   const trialId = await env.KV.get(trialByProjectKey(projectId));
   if (!trialId) return null;
   return readTrial(env, trialId);
@@ -139,7 +145,10 @@ export async function writeTrial(env: Env, record: TrialRecord): Promise<void> {
 }
 
 /** Mark a trial as claimed (idempotent). */
-export async function markTrialClaimed(env: Env, trialId: string): Promise<TrialRecord | null> {
+export async function markTrialClaimed(
+  env: Env,
+  trialId: string
+): Promise<TrialRecord | null> {
   const record = await readTrial(env, trialId);
   if (!record) return null;
   if (record.claimed) return record;

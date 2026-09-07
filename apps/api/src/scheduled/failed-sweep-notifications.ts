@@ -15,15 +15,15 @@ function resolveThrottleMs(env: Env): number {
 }
 
 function throttleKey(env: Env, sweepName: string): string {
-  const prefix =
-    env.CRON_FAILURE_NOTIFICATION_KV_PREFIX ?? DEFAULT_CRON_FAILURE_NOTIFICATION_KV_PREFIX;
+  const prefix = env.CRON_FAILURE_NOTIFICATION_KV_PREFIX ??
+    DEFAULT_CRON_FAILURE_NOTIFICATION_KV_PREFIX;
   return `${prefix}:${sweepName}`;
 }
 
 /** Notify real superadmins once per failed sweep/throttle window. */
 export async function notifyFailedSweeps(
   env: Env,
-  failedSweeps: string[]
+  failedSweeps: string[],
 ): Promise<{ notifiedSweeps: number; notificationsSent: number }> {
   if (failedSweeps.length === 0) return { notifiedSweeps: 0, notificationsSent: 0 };
 
@@ -79,13 +79,13 @@ export async function notifyFailedSweeps(
           },
           now
         )
-      )
+      ),
     );
     notificationsSent += deliveries.filter(
       (delivery) => delivery.status === 'fulfilled' && delivery.value
     ).length;
-    const failedDeliveries =
-      deliveries.length - deliveries.filter((delivery) => delivery.status === 'fulfilled').length;
+    const failedDeliveries = deliveries.length -
+      deliveries.filter((delivery) => delivery.status === 'fulfilled').length;
     if (failedDeliveries > 0) {
       log.error('cron.failed_sweep_notification_delivery_failed', {
         sweepName,

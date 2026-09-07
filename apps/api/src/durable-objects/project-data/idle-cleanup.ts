@@ -51,11 +51,7 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function maxResidenceExceeded(
-  entry: IdleCleanupEntry,
-  now: number,
-  maxResidenceMs: number
-): boolean {
+function maxResidenceExceeded(entry: IdleCleanupEntry, now: number, maxResidenceMs: number): boolean {
   return now - entry.createdAt >= maxResidenceMs;
 }
 
@@ -444,7 +440,7 @@ export async function processExpiredCleanups(
           now + retryDelay,
           entry.retryCount + 1,
           errorText(err),
-          entry.sessionId
+          entry.sessionId,
         );
       }
     }

@@ -98,10 +98,7 @@ export function validateMcpConnectionName(rawName: string): string {
  * still see the error. HTTP is allowed only for loopback, which is what a self-hosted gateway
  * running on the same box would use.
  */
-export function validateMcpConnectionUrl(
-  rawUrl: string,
-  maxBytes: number
-): { url: string; urlHost: string } {
+export function validateMcpConnectionUrl(rawUrl: string, maxBytes: number): { url: string; urlHost: string } {
   const url = rawUrl.trim();
   if (!url) {
     throw errors.badRequest('url is required');
@@ -327,9 +324,7 @@ export async function updateMcpConnection(
     updates.urlHost = urlHost;
   }
 
-  const nextAuthType = input.authType
-    ? assertAuthType(input.authType)
-    : assertAuthType(existing.authType);
+  const nextAuthType = input.authType ? assertAuthType(input.authType) : assertAuthType(existing.authType);
   if (input.authType !== undefined) {
     updates.authType = nextAuthType;
   }

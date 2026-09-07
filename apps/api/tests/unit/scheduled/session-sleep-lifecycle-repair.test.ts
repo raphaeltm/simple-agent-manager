@@ -304,10 +304,7 @@ describe('session sleep lifecycle repair', () => {
       status: 'running',
     });
     expect(
-      sqlite
-        .prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`)
-        .pluck()
-        .get()
+      sqlite.prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'snapshot-1'`).pluck().get()
     ).toBe('stopping');
   });
 });

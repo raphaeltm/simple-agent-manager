@@ -41,11 +41,7 @@ function getCacheConfig(env: Env): CacheConfig | null {
     return null;
   }
 
-  const accountId = (
-    env.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID ||
-    env.CF_ACCOUNT_ID ||
-    ''
-  ).trim();
+  const accountId = (env.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID || env.CF_ACCOUNT_ID || '').trim();
   const apiToken = (env.DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN || env.CF_API_TOKEN || '').trim();
   if (!accountId || !apiToken) {
     return null;

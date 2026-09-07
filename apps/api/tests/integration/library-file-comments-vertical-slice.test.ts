@@ -106,11 +106,7 @@ vi.mock('../../src/services/project-data', async () => {
       ),
     createFileCommentThread: async (_env: Env, projectId: string, input: unknown) =>
       throughRpc(() =>
-        fileComments.createFileCommentThread(
-          sqlFor(projectId),
-          harness.env as never,
-          input as never
-        )
+        fileComments.createFileCommentThread(sqlFor(projectId), harness.env as never, input as never)
       ),
     createFileCommentReply: async (_env: Env, projectId: string, input: unknown) =>
       throughRpc(() =>

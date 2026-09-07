@@ -50,7 +50,7 @@ export const getSessionMessagesDef: AnthropicToolDef = {
 
 export async function getSessionMessages(
   input: { projectId: string; sessionId: string; limit?: number; roles?: string[] },
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
@@ -88,7 +88,7 @@ export async function getSessionMessages(
     limit,
     null,
     null,
-    roles
+    roles,
   );
 
   // Group streaming tokens into logical messages

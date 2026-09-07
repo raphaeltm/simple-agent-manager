@@ -1,20 +1,12 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach,describe, expect, it } from 'vitest';
 
-import {
-  getCachedCommands,
-  saveCachedCommands,
-} from '../../../src/durable-objects/project-data/commands';
+import { getCachedCommands,saveCachedCommands } from '../../../src/durable-objects/project-data/commands';
 
 /**
  * Minimal in-memory SQLite mock for testing cached commands.
  */
 class MockSqlStorage {
-  private rows: Array<{
-    agent_type: string;
-    name: string;
-    description: string;
-    updated_at: number;
-  }> = [];
+  private rows: Array<{ agent_type: string; name: string; description: string; updated_at: number }> = [];
 
   exec(query: string, ...params: unknown[]): { toArray: () => Record<string, unknown>[] } {
     const normalized = query.trim().toUpperCase();
@@ -129,13 +121,11 @@ describe('cached commands DO module', () => {
       ]);
 
       const [cmd] = getCachedCommands(sql as unknown as SqlStorage, 'claude-code');
-      expect(cmd).toEqual(
-        expect.objectContaining({
-          agentType: 'claude-code',
-          name: 'help',
-          description: 'Show help info',
-        })
-      );
+      expect(cmd).toEqual(expect.objectContaining({
+        agentType: 'claude-code',
+        name: 'help',
+        description: 'Show help info',
+      }));
       expect(typeof cmd.updatedAt).toBe('number');
     });
   });

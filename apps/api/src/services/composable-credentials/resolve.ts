@@ -30,7 +30,7 @@ export async function resolveForConsumer(
   userId: string,
   encryptionKey: string,
   consumer: CCConsumerRef,
-  projectId?: string | null
+  projectId?: string | null,
 ): Promise<CCResolvedEnvironment | null> {
   const snapshot = await buildSnapshot(db, userId, encryptionKey, projectId);
   const ctx: CCResolutionContext = { userId, projectId: projectId ?? undefined };
@@ -46,7 +46,7 @@ export async function resolveAgentEnv(
   userId: string,
   encryptionKey: string,
   agentType: string,
-  projectId?: string | null
+  projectId?: string | null,
 ): Promise<CCEnvInjection | null> {
   const consumer: CCConsumerRef = { kind: 'agent', agentType };
   const resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
@@ -63,7 +63,7 @@ export async function resolveComputeConfig(
   userId: string,
   encryptionKey: string,
   provider: string,
-  projectId?: string | null
+  projectId?: string | null,
 ): Promise<CCProviderConfig | null> {
   const consumer: CCConsumerRef = { kind: 'compute', provider };
   const resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);

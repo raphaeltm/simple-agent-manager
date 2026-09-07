@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { beforeEach,describe, expect, test, vi } from 'vitest';
 
 import { createModuleLogger, serializeError } from '../../../src/lib/logger';
 

@@ -6,7 +6,10 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { getAllUsersNodeUsageSummary, getUserNodeDetailedUsage } from '../services/node-usage';
+import {
+  getAllUsersNodeUsageSummary,
+  getUserNodeDetailedUsage,
+} from '../services/node-usage';
 
 const adminUsageRoutes = new Hono<{ Bindings: Env }>();
 

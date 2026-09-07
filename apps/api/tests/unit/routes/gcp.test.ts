@@ -264,35 +264,30 @@ describe('GCP routes', () => {
   it('uses the default timeout when the configured project-list timeout is invalid', async () => {
     env.GCP_API_TIMEOUT_MS = 'not-a-positive-number';
 
-    const res = await app.request(
-      '/api/gcp/projects',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ oauthHandle: 'oauth-handle' }),
-      },
-      env
-    );
+    const res = await app.request('/api/gcp/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oauthHandle: 'oauth-handle' }),
+    }, env);
 
     expect(res.status).toBe(200);
-    expect(mocks.listGcpProjects).toHaveBeenCalledWith('oauth-token', DEFAULT_GCP_API_TIMEOUT_MS);
+    expect(mocks.listGcpProjects).toHaveBeenCalledWith(
+      'oauth-token',
+      DEFAULT_GCP_API_TIMEOUT_MS,
+    );
   });
 
   it('reports service-account persistence failures as internal errors', async () => {
     mocks.replaceUserGcpCredential.mockRejectedValue(new Error('database unavailable'));
 
-    const res = await app.request(
-      '/api/gcp/service-account',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          serviceAccountJson: '{"private_key":"uploaded-secret-material"}',
-          defaultZone: 'us-central1-a',
-        }),
-      },
-      env
-    );
+    const res = await app.request('/api/gcp/service-account', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serviceAccountJson: '{"private_key":"uploaded-secret-material"}',
+        defaultZone: 'us-central1-a',
+      }),
+    }, env);
 
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: 'INTERNAL_ERROR' });

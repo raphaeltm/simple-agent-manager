@@ -22,15 +22,13 @@ const dnsRecordIdResponseSchema = v.object({
 });
 
 const dnsRecordListResponseSchema = v.object({
-  result: v.array(
-    v.object({
-      id: v.string(),
-      name: v.string(),
-      type: v.string(),
-      content: v.optional(v.string()),
-      proxied: v.optional(v.boolean()),
-    })
-  ),
+  result: v.array(v.object({
+    id: v.string(),
+    name: v.string(),
+    type: v.string(),
+    content: v.optional(v.string()),
+    proxied: v.optional(v.boolean()),
+  })),
 });
 
 async function readCloudflareError(response: Response, fallback: string): Promise<string> {
@@ -114,7 +112,11 @@ export class DNSService implements DNSServiceInterface {
  * Create a DNS A record for a workspace.
  * Uses Cloudflare proxy for automatic HTTPS.
  */
-export async function createDNSRecord(workspaceId: string, ip: string, env: Env): Promise<string> {
+export async function createDNSRecord(
+  workspaceId: string,
+  ip: string,
+  env: Env
+): Promise<string> {
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
@@ -136,23 +138,20 @@ export async function createDNSRecord(workspaceId: string, ip: string, env: Env)
   );
 
   if (!response.ok) {
-    throw new Error(
-      await readCloudflareError(response, `Failed to create DNS record: ${response.status}`)
-    );
+    throw new Error(await readCloudflareError(response, `Failed to create DNS record: ${response.status}`));
   }
 
-  const data = await readResponseJson(
-    response,
-    dnsRecordIdResponseSchema,
-    'cloudflare.dns.create_record'
-  );
+  const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.create_record');
   return data.result.id;
 }
 
 /**
  * Delete a DNS record by ID.
  */
-export async function deleteDNSRecord(recordId: string, env: Env): Promise<void> {
+export async function deleteDNSRecord(
+  recordId: string,
+  env: Env
+): Promise<void> {
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
@@ -167,16 +166,18 @@ export async function deleteDNSRecord(recordId: string, env: Env): Promise<void>
 
   // Ignore 404 errors (record already deleted)
   if (!response.ok && response.status !== 404) {
-    throw new Error(
-      await readCloudflareError(response, `Failed to delete DNS record: ${response.status}`)
-    );
+    throw new Error(await readCloudflareError(response, `Failed to delete DNS record: ${response.status}`));
   }
 }
 
 /**
  * Update a DNS record with a new IP address.
  */
-export async function updateDNSRecord(recordId: string, ip: string, env: Env): Promise<void> {
+export async function updateDNSRecord(
+  recordId: string,
+  ip: string,
+  env: Env
+): Promise<void> {
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
@@ -194,39 +195,27 @@ export async function updateDNSRecord(recordId: string, ip: string, env: Env): P
   );
 
   if (!response.ok) {
-    throw new Error(
-      await readCloudflareError(response, `Failed to update DNS record: ${response.status}`)
-    );
+    throw new Error(await readCloudflareError(response, `Failed to update DNS record: ${response.status}`));
   }
 }
 
 async function findDNSRecordByName(
   recordName: string,
-  env: Env
+  env: Env,
 ): Promise<{ id: string; name: string; type: string; content?: string; proxied?: boolean } | null> {
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?type=A&name=${encodeURIComponent(recordName)}`;
-  const response = await fetchWithTimeout(
-    searchUrl,
-    {
-      headers: {
-        Authorization: `Bearer ${env.CF_API_TOKEN}`,
-      },
+  const response = await fetchWithTimeout(searchUrl, {
+    headers: {
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
     },
-    timeoutMs
-  );
+  }, timeoutMs);
 
   if (!response.ok) {
-    throw new Error(
-      await readCloudflareError(response, `Failed to find DNS record: ${response.status}`)
-    );
+    throw new Error(await readCloudflareError(response, `Failed to find DNS record: ${response.status}`));
   }
 
-  const data = await readResponseJson(
-    response,
-    dnsRecordListResponseSchema,
-    'cloudflare.dns.find_record_by_name'
-  );
+  const data = await readResponseJson(response, dnsRecordListResponseSchema, 'cloudflare.dns.find_record_by_name');
   return data.result[0] ?? null;
 }
 
@@ -239,7 +228,7 @@ async function findDNSRecordByName(
 export async function upsertAppRouteDNSRecord(
   hostname: string,
   ip: string,
-  env: Env
+  env: Env,
 ): Promise<string> {
   const existing = await findDNSRecordByName(hostname, env);
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
@@ -263,23 +252,14 @@ export async function upsertAppRouteDNSRecord(
       },
       body,
     },
-    timeoutMs
+    timeoutMs,
   );
 
   if (!response.ok) {
-    throw new Error(
-      await readCloudflareError(
-        response,
-        `Failed to upsert app route DNS record: ${response.status}`
-      )
-    );
+    throw new Error(await readCloudflareError(response, `Failed to upsert app route DNS record: ${response.status}`));
   }
 
-  const data = await readResponseJson(
-    response,
-    dnsRecordIdResponseSchema,
-    'cloudflare.dns.upsert_app_route_record'
-  );
+  const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.upsert_app_route_record');
   return data.result.id;
 }
 
@@ -290,7 +270,10 @@ export async function upsertAppRouteDNSRecord(
  * caller) is treated as success. Returns true if a record was found and
  * deleted, false if no matching record existed.
  */
-export async function deleteAppRouteDNSRecord(hostname: string, env: Env): Promise<boolean> {
+export async function deleteAppRouteDNSRecord(
+  hostname: string,
+  env: Env,
+): Promise<boolean> {
   const existing = await findDNSRecordByName(hostname, env);
   if (!existing) {
     return false;
@@ -309,7 +292,10 @@ export async function deleteAppRouteDNSRecord(hostname: string, env: Env): Promi
  * so a single bad record cannot block the rest of the teardown. Returns the
  * number of records actually deleted.
  */
-export async function cleanupAppRouteDNSRecords(hostnames: string[], env: Env): Promise<number> {
+export async function cleanupAppRouteDNSRecords(
+  hostnames: string[],
+  env: Env,
+): Promise<number> {
   let deleted = 0;
   for (const hostname of hostnames) {
     try {
@@ -332,41 +318,36 @@ export async function cleanupAppRouteDNSRecords(hostnames: string[], env: Env): 
  *   - vm-{id}.{domain} (legacy backend records, pre two-level subdomain migration)
  *   - {id}.vm.{domain} (current backend records, two-level subdomain format)
  */
-export async function cleanupWorkspaceDNSRecords(workspaceId: string, env: Env): Promise<number> {
+export async function cleanupWorkspaceDNSRecords(
+  workspaceId: string,
+  env: Env
+): Promise<number> {
   const baseDomain = env.BASE_DOMAIN;
   const id = workspaceId.toLowerCase();
 
   // Search for all possible DNS record name formats
   const recordNames = [
-    `ws-${id}.${baseDomain}`, // workspace proxied
-    `vm-${id}.${baseDomain}`, // legacy backend (pre migration)
-    `${id}.vm.${baseDomain}`, // current backend (two-level subdomain)
+    `ws-${id}.${baseDomain}`,       // workspace proxied
+    `vm-${id}.${baseDomain}`,       // legacy backend (pre migration)
+    `${id}.vm.${baseDomain}`,       // current backend (two-level subdomain)
   ];
   let deleted = 0;
 
   for (const recordName of recordNames) {
     const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?name=${encodeURIComponent(recordName)}`;
     const cfTimeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
-    const response = await fetchWithTimeout(
-      searchUrl,
-      {
-        headers: {
-          Authorization: `Bearer ${env.CF_API_TOKEN}`,
-        },
+    const response = await fetchWithTimeout(searchUrl, {
+      headers: {
+        Authorization: `Bearer ${env.CF_API_TOKEN}`,
       },
-      cfTimeoutMs
-    );
+    }, cfTimeoutMs);
 
     if (!response.ok) {
       log.error('dns.search_records_failed', { recordName, status: response.status });
       continue;
     }
 
-    const data = await readResponseJson(
-      response,
-      dnsRecordListResponseSchema,
-      'cloudflare.dns.cleanup_records'
-    );
+    const data = await readResponseJson(response, dnsRecordListResponseSchema, 'cloudflare.dns.cleanup_records');
     const records = data.result || [];
 
     for (const record of records) {
@@ -436,16 +417,10 @@ export async function createNodeBackendDNSRecord(
   );
 
   if (!response.ok) {
-    throw new Error(
-      await readCloudflareError(response, `Failed to create backend DNS record: ${response.status}`)
-    );
+    throw new Error(await readCloudflareError(response, `Failed to create backend DNS record: ${response.status}`));
   }
 
-  const data = await readResponseJson(
-    response,
-    dnsRecordIdResponseSchema,
-    'cloudflare.dns.create_backend_record'
-  );
+  const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.create_backend_record');
   return data.result.id;
 }
 

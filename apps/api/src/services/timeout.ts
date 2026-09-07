@@ -98,25 +98,21 @@ export async function checkProvisioningTimeouts(
 
     // Record in OBSERVABILITY_DATABASE (TDF-7)
     if (observabilityDb) {
-      await persistError(
-        observabilityDb,
-        {
-          source: 'api',
-          level: 'warn',
-          message: timeoutMessage,
-          context: {
-            recoveryType: 'provisioning_timeout',
-            workspaceId: workspace.id,
-            nodeId: workspace.nodeId,
-            createdAt: workspace.createdAt,
-            timeoutMs,
-          },
-          userId: workspace.userId,
-          nodeId: workspace.nodeId,
+      await persistError(observabilityDb, {
+        source: 'api',
+        level: 'warn',
+        message: timeoutMessage,
+        context: {
+          recoveryType: 'provisioning_timeout',
           workspaceId: workspace.id,
+          nodeId: workspace.nodeId,
+          createdAt: workspace.createdAt,
+          timeoutMs,
         },
-        env
-      );
+        userId: workspace.userId,
+        nodeId: workspace.nodeId,
+        workspaceId: workspace.id,
+      }, env);
     }
   }
 

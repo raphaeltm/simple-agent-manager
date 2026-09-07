@@ -38,14 +38,10 @@ describe('ProjectData checkpoint episodes', () => {
 
   it('is idempotent for ACP session plus prompt epoch and preserves its envelope', () => {
     const first = checkpoints.createCheckpointEpisode(sql, input, 2_000);
-    const duplicate = checkpoints.createCheckpointEpisode(
-      sql,
-      {
-        ...input,
-        reason: 'duplicate alarm must not replace original',
-      },
-      3_000
-    );
+    const duplicate = checkpoints.createCheckpointEpisode(sql, {
+      ...input,
+      reason: 'duplicate alarm must not replace original',
+    }, 3_000);
 
     expect(first.created).toBe(true);
     expect(duplicate.created).toBe(false);
@@ -56,52 +52,30 @@ describe('ProjectData checkpoint episodes', () => {
 
   it('enforces typed transitions, CAS expectations, attempts, and timestamps', () => {
     const { episode } = checkpoints.createCheckpointEpisode(sql, input, 2_000);
-    const requested = checkpoints.transitionCheckpointEpisode(
-      sql,
-      episode.id,
-      {
-        expectedState: 'planned',
-        toState: 'preempt_requested',
-        incrementAttempt: true,
-      },
-      2_100
-    );
+    const requested = checkpoints.transitionCheckpointEpisode(sql, episode.id, {
+      expectedState: 'planned',
+      toState: 'preempt_requested',
+      incrementAttempt: true,
+    }, 2_100);
     expect(requested?.state).toBe('preempt_requested');
     expect(requested?.attemptCount).toBe(1);
     expect(requested?.preemptRequestedAt).toBe(2_100);
 
-    const staleCas = checkpoints.transitionCheckpointEpisode(
-      sql,
-      episode.id,
-      {
-        expectedState: 'planned',
-        toState: 'cancelled',
-      },
-      2_200
-    );
+    const staleCas = checkpoints.transitionCheckpointEpisode(sql, episode.id, {
+      expectedState: 'planned',
+      toState: 'cancelled',
+    }, 2_200);
     expect(staleCas?.state).toBe('preempt_requested');
 
-    expect(() =>
-      checkpoints.transitionCheckpointEpisode(
-        sql,
-        episode.id,
-        {
-          toState: 'completed',
-        },
-        2_300
-      )
-    ).toThrow('Invalid checkpoint transition');
+    expect(() => checkpoints.transitionCheckpointEpisode(sql, episode.id, {
+      toState: 'completed',
+    }, 2_300)).toThrow('Invalid checkpoint transition');
 
-    const waiting = checkpoints.transitionCheckpointEpisode(
-      sql,
-      episode.id,
-      {
-        expectedState: 'preempt_requested',
-        toState: 'waiting_ready',
-        lastError: 'gracefully stopped',
-      },
-      2_400
-    );
+    const waiting = checkpoints.transitionCheckpointEpisode(sql, episode.id, {
+      expectedState: 'preempt_requested',
+      toState: 'waiting_ready',
+      lastError: 'gracefully stopped',
+    }, 2_400);
     expect(waiting?.state).toBe('waiting_ready');
     expect(waiting?.preemptAcceptedAt).toBe(2_400);
     expect(waiting?.lastError).toBe('gracefully stopped');
@@ -109,14 +83,10 @@ describe('ProjectData checkpoint episodes', () => {
 
   it('creates a distinct episode for a genuinely newer prompt epoch', () => {
     const first = checkpoints.createCheckpointEpisode(sql, input, 2_000);
-    const second = checkpoints.createCheckpointEpisode(
-      sql,
-      {
-        ...input,
-        promptEpoch: 4_000,
-      },
-      4_100
-    );
+    const second = checkpoints.createCheckpointEpisode(sql, {
+      ...input,
+      promptEpoch: 4_000,
+    }, 4_100);
 
     expect(second.created).toBe(true);
     expect(second.episode.id).not.toBe(first.episode.id);

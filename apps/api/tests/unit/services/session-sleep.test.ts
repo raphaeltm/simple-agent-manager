@@ -200,14 +200,18 @@ describe('parseHarnessWorkConfig', () => {
 
 describe('isHarnessWorkLeaseActive', () => {
   it('returns false for null state', async () => {
-    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
+    const { isHarnessWorkLeaseActive } = await import(
+      '../../../src/services/session-idleness'
+    );
     expect(
       isHarnessWorkLeaseActive(null, new Date(), { leaseMs: 300000, maxDurationMs: 1800000 })
     ).toBe(false);
   });
 
   it('returns true for active work within lease', async () => {
-    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
+    const { isHarnessWorkLeaseActive } = await import(
+      '../../../src/services/session-idleness'
+    );
     const now = new Date();
     expect(
       isHarnessWorkLeaseActive(
@@ -223,7 +227,9 @@ describe('isHarnessWorkLeaseActive', () => {
   });
 
   it('returns false for expired lease', async () => {
-    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
+    const { isHarnessWorkLeaseActive } = await import(
+      '../../../src/services/session-idleness'
+    );
     const now = new Date();
     expect(
       isHarnessWorkLeaseActive(
@@ -239,7 +245,9 @@ describe('isHarnessWorkLeaseActive', () => {
   });
 
   it('returns false for inactive work state', async () => {
-    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-idleness');
+    const { isHarnessWorkLeaseActive } = await import(
+      '../../../src/services/session-idleness'
+    );
     const now = new Date();
     expect(
       isHarnessWorkLeaseActive(

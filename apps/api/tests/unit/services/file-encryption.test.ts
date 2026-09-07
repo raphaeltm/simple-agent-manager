@@ -134,9 +134,9 @@ describe('file-encryption', () => {
 
     it('throws on missing metadata fields', () => {
       expect(() => r2CustomMetadataToMetadata({})).toThrow('Missing encryption metadata');
-      expect(() => r2CustomMetadataToMetadata({ 'x-enc-wrapped-dek': 'abc' })).toThrow(
-        'Missing encryption metadata'
-      );
+      expect(() =>
+        r2CustomMetadataToMetadata({ 'x-enc-wrapped-dek': 'abc' })
+      ).toThrow('Missing encryption metadata');
     });
   });
 });

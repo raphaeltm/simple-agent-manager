@@ -19,7 +19,7 @@ import { runBackfill } from './backfill-service';
  */
 export async function hasUserCCData(
   db: ReturnType<typeof drizzle>,
-  userId: string
+  userId: string,
 ): Promise<boolean> {
   const [row] = await db
     .select({ id: ccCredentials.id })
@@ -40,7 +40,7 @@ export async function hasUserCCData(
  */
 export async function lazyBackfillIfNeeded(
   db: ReturnType<typeof drizzle>,
-  userId: string
+  userId: string,
 ): Promise<boolean> {
   const hasCCData = await hasUserCCData(db, userId);
   if (hasCCData) {
@@ -66,7 +66,7 @@ function providerLabel(provider: string): string {
  */
 export async function reconcileMissingCloudProviderMirrors(
   db: ReturnType<typeof drizzle>,
-  userId: string
+  userId: string,
 ): Promise<number> {
   const rows = await db
     .select({
@@ -80,7 +80,12 @@ export async function reconcileMissingCloudProviderMirrors(
       updatedAt: credentials.updatedAt,
     })
     .from(credentials)
-    .where(and(eq(credentials.userId, userId), eq(credentials.credentialType, 'cloud-provider')));
+    .where(
+      and(
+        eq(credentials.userId, userId),
+        eq(credentials.credentialType, 'cloud-provider'),
+      ),
+    );
 
   let inserted = 0;
   for (const row of rows) {
@@ -105,51 +110,42 @@ export async function reconcileMissingCloudProviderMirrors(
     const label = providerLabel(row.provider);
     const scopeLabel = row.projectId ? 'project override' : 'default';
 
-    await db
-      .insert(ccCredentials)
-      .values({
-        id: credentialId,
-        ownerId: userId,
-        name: `${label} cloud credential (migrated)`,
-        kind: 'cloud-provider',
-        encryptedToken: row.encryptedToken,
-        iv: row.iv,
-        isActive: true,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      })
-      .onConflictDoNothing();
+    await db.insert(ccCredentials).values({
+      id: credentialId,
+      ownerId: userId,
+      name: `${label} cloud credential (migrated)`,
+      kind: 'cloud-provider',
+      encryptedToken: row.encryptedToken,
+      iv: row.iv,
+      isActive: true,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }).onConflictDoNothing();
 
-    await db
-      .insert(ccConfigurations)
-      .values({
-        id: configurationId,
-        ownerId: userId,
-        name: `${label} ${scopeLabel} (migrated)`,
-        consumerKind: 'compute',
-        consumerTarget: row.provider,
-        credentialId,
-        settingsJson: null,
-        isActive: true,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      })
-      .onConflictDoNothing();
+    await db.insert(ccConfigurations).values({
+      id: configurationId,
+      ownerId: userId,
+      name: `${label} ${scopeLabel} (migrated)`,
+      consumerKind: 'compute',
+      consumerTarget: row.provider,
+      credentialId,
+      settingsJson: null,
+      isActive: true,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }).onConflictDoNothing();
 
-    await db
-      .insert(ccAttachments)
-      .values({
-        id: attachmentId,
-        configurationId,
-        consumerKind: 'compute',
-        consumerTarget: row.provider,
-        userId,
-        projectId: row.projectId,
-        isActive: row.isActive,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-      })
-      .onConflictDoNothing();
+    await db.insert(ccAttachments).values({
+      id: attachmentId,
+      configurationId,
+      consumerKind: 'compute',
+      consumerTarget: row.provider,
+      userId,
+      projectId: row.projectId,
+      isActive: row.isActive,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }).onConflictDoNothing();
     inserted += 1;
   }
 

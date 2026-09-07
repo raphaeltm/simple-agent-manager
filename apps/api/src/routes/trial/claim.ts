@@ -149,17 +149,14 @@ claimRoutes.post('/claim', requireAuth(), async (c) => {
            updated_at = ?
        WHERE id = ?
          AND user_id = ?`
-    )
-      .bind(anonymousUserId, updatedAt, projectId, userId)
-      .run()
-      .catch((err) => {
-        log.error('trial_claim.reparent_rollback_failed', {
-          trialId,
-          projectId,
-          userId,
-          error: err instanceof Error ? err.message : String(err),
-        });
+    ).bind(anonymousUserId, updatedAt, projectId, userId).run().catch((err) => {
+      log.error('trial_claim.reparent_rollback_failed', {
+        trialId,
+        projectId,
+        userId,
+        error: err instanceof Error ? err.message : String(err),
       });
+    });
     throw errors.internal('Trial claim could not be recorded');
   }
 

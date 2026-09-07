@@ -71,7 +71,7 @@ async function storeToken(token: string, projectId: string, userId: string): Pro
 async function callMcpTool(
   token: string,
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
 ): Promise<JsonRpcToolResponse> {
   const response = await SELF.fetch('https://api.test.example.com/mcp', {
     method: 'POST',
@@ -123,22 +123,15 @@ async function getTrigger(triggerId: string): Promise<TriggerRow | null> {
     `SELECT id, project_id, name, status, cron_expression, cron_timezone, next_fire_at, prompt_template
      FROM triggers
      WHERE id = ?
-     LIMIT 1`
-  )
-    .bind(triggerId)
-    .first<TriggerRow>();
+     LIMIT 1`,
+  ).bind(triggerId).first<TriggerRow>();
 }
 
-async function countRows(
-  table: 'github_trigger_configs' | 'trigger_executions' | 'triggers',
-  triggerId: string
-): Promise<number> {
+async function countRows(table: 'github_trigger_configs' | 'trigger_executions' | 'triggers', triggerId: string): Promise<number> {
   const column = table === 'triggers' ? 'id' : 'trigger_id';
   const row = await env.DATABASE.prepare(
-    `SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`
-  )
-    .bind(triggerId)
-    .first<CountRow>();
+    `SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`,
+  ).bind(triggerId).first<CountRow>();
   return row?.count ?? 0;
 }
 
@@ -253,10 +246,8 @@ describe('MCP trigger management tools', () => {
     await seedTriggerExecution(`${triggerId}-execution`, triggerId, projectId);
     await env.DATABASE.prepare(
       `INSERT INTO github_trigger_configs (id, trigger_id, event_type, filters_json, created_at, updated_at)
-       VALUES (?, ?, 'issues', '{}', datetime('now'), datetime('now'))`
-    )
-      .bind(`${triggerId}-github-config`, triggerId)
-      .run();
+       VALUES (?, ?, 'issues', '{}', datetime('now'), datetime('now'))`,
+    ).bind(`${triggerId}-github-config`, triggerId).run();
 
     const response = await callMcpTool(token, 'delete_trigger', { triggerId });
     const payload = parseToolContent(response);

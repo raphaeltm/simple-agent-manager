@@ -90,7 +90,8 @@ export async function getProjectMultiplayerState(
     activeMemberCount,
     hasActiveInviteLink,
     hasPendingAccessRequest,
-    multiplayerActive: activeMemberCount > 1 || hasActiveInviteLink || hasPendingAccessRequest,
+    multiplayerActive:
+      activeMemberCount > 1 || hasActiveInviteLink || hasPendingAccessRequest,
   };
   if (ttlMs > 0) {
     multiplayerCache.set(projectId, { expiresAt: nowMs + ttlMs, state });

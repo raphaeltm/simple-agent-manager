@@ -17,7 +17,7 @@ const DEFAULT_GITHUB_TIMEOUT_MS = 10_000;
 export const getFileContentDef: AnthropicToolDef = {
   name: 'get_file_content',
   description:
-    "Get the content of a file or directory listing from a project's GitHub repository. " +
+    'Get the content of a file or directory listing from a project\'s GitHub repository. ' +
     'Use this to read specific source files, configs, or browse directory structures. ' +
     'For files, returns the decoded content. For directories, returns a listing of entries. ' +
     'Requires GitHub credentials to be configured in Settings.',
@@ -36,7 +36,7 @@ export const getFileContentDef: AnthropicToolDef = {
       ref: {
         type: 'string',
         description:
-          "Optional: branch, tag, or commit SHA to read from. Defaults to the project's default branch.",
+          'Optional: branch, tag, or commit SHA to read from. Defaults to the project\'s default branch.',
       },
     },
     required: ['projectId', 'path'],
@@ -45,7 +45,7 @@ export const getFileContentDef: AnthropicToolDef = {
 
 export async function getFileContent(
   input: { projectId: string; path: string; ref?: string },
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
@@ -124,14 +124,14 @@ export async function getFileContent(
 
     // Directory listing (array response)
     if (Array.isArray(data)) {
-      const entries = (
-        data as Array<{ name: string; path: string; type: string; size: number }>
-      ).map((entry) => ({
-        name: entry.name,
-        path: entry.path,
-        type: entry.type, // 'file' | 'dir' | 'symlink' | 'submodule'
-        size: entry.type === 'file' ? entry.size : undefined,
-      }));
+      const entries = (data as Array<{ name: string; path: string; type: string; size: number }>).map(
+        (entry) => ({
+          name: entry.name,
+          path: entry.path,
+          type: entry.type, // 'file' | 'dir' | 'symlink' | 'submodule'
+          size: entry.type === 'file' ? entry.size : undefined,
+        }),
+      );
 
       return {
         type: 'directory',

@@ -284,7 +284,9 @@ describe('transitionTaskToTerminal', () => {
       recoverySourceTaskId: 'task-1',
       createdAt: new Date(NOW.getTime() - 30_000).toISOString(),
     });
-    sqlite.prepare(`UPDATE tasks SET superseded_by_task_id = 'task-2' WHERE id = 'task-1'`).run();
+    sqlite
+      .prepare(`UPDATE tasks SET superseded_by_task_id = 'task-2' WHERE id = 'task-1'`)
+      .run();
 
     const outcome = await transitionTaskToTerminal(env, {
       taskId: 'task-1',

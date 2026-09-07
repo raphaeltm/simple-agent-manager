@@ -41,15 +41,14 @@ export const addPolicyDef: AnthropicToolDef = {
       category: {
         type: 'string',
         enum: ['rule', 'constraint', 'delegation', 'preference'],
-        description:
-          'The policy category: rule (mandatory), constraint (limit), delegation (authority), preference (soft guidance).',
+        description: 'The policy category: rule (mandatory), constraint (limit), delegation (authority), preference (soft guidance).',
       },
       scope: {
         type: 'string',
         enum: [...POLICY_SCOPES],
         description:
           "How long this policy applies. 'always' (default) is a standing policy injected into every future session. " +
-          '\'task\' is a one-shot policy captured for a specific piece of work ("use profile X for the 2026-08-21 wave") ' +
+          "'task' is a one-shot policy captured for a specific piece of work (\"use profile X for the 2026-08-21 wave\") " +
           'and REQUIRES expiresAt, so it cannot outlive the work it was captured for.',
       },
       expiresAt: {
@@ -72,7 +71,7 @@ export async function addPolicy(
     scope?: string;
     expiresAt?: number | null;
   },
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
@@ -115,7 +114,12 @@ export async function addPolicy(
   const project = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
+    .where(
+      and(
+        eq(schema.projects.id, input.projectId),
+        eq(schema.projects.userId, ctx.userId),
+      ),
+    )
     .get();
 
   if (!project) {
@@ -126,16 +130,10 @@ export async function addPolicy(
   const content = input.content.trim().slice(0, limits.contentMaxLength);
 
   const result = await projectDataService.createPolicy(
-    env,
-    input.projectId,
+    env, input.projectId,
     input.category as 'rule' | 'constraint' | 'delegation' | 'preference',
-    title,
-    content,
-    'explicit',
-    null,
-    limits.defaultConfidence,
-    scope,
-    expiresAt
+    title, content, 'explicit', null, limits.defaultConfidence,
+    scope, expiresAt,
   );
 
   return {

@@ -70,7 +70,10 @@ export class TrialCounter extends DurableObject<Env> {
    * value. If the increment would exceed `cap`, the counter is NOT incremented
    * and `{ ok: false, count }` is returned. `cap <= 0` disables the limit.
    */
-  async increment(monthKey: string, cap: number): Promise<TrialCounterIncrementResult> {
+  async increment(
+    monthKey: string,
+    cap: number
+  ): Promise<TrialCounterIncrementResult> {
     return this.ctx.storage.transactionSync(() => {
       const current = this.readCount(monthKey);
       if (cap > 0 && current >= cap) {
@@ -111,7 +114,10 @@ export class TrialCounter extends DurableObject<Env> {
    * separate so call sites that speak the HTTP vocabulary don't have to
    * translate `ok` -> `allowed` themselves.
    */
-  async tryIncrement(monthKey: string, cap: number): Promise<TrialCounterTryIncrementResult> {
+  async tryIncrement(
+    monthKey: string,
+    cap: number
+  ): Promise<TrialCounterTryIncrementResult> {
     const result = await this.increment(monthKey, cap);
     return { allowed: result.ok, count: result.count };
   }
@@ -123,13 +129,16 @@ export class TrialCounter extends DurableObject<Env> {
    */
   async prune(keepMonthKey: string): Promise<number> {
     return this.ctx.storage.transactionSync(() => {
-      const before =
-        this.sql
-          .exec<{
-            c: number;
-          }>('SELECT COUNT(*) AS c FROM trial_counter WHERE month_key < ?', keepMonthKey)
-          .toArray()[0]?.c ?? 0;
-      this.sql.exec('DELETE FROM trial_counter WHERE month_key < ?', keepMonthKey);
+      const before = this.sql
+        .exec<{ c: number }>(
+          'SELECT COUNT(*) AS c FROM trial_counter WHERE month_key < ?',
+          keepMonthKey
+        )
+        .toArray()[0]?.c ?? 0;
+      this.sql.exec(
+        'DELETE FROM trial_counter WHERE month_key < ?',
+        keepMonthKey
+      );
       return before;
     });
   }
@@ -211,9 +220,10 @@ export class TrialCounter extends DurableObject<Env> {
 
   private readCount(monthKey: string): number {
     const row = this.sql
-      .exec<{
-        count: number;
-      }>('SELECT count FROM trial_counter WHERE month_key = ? LIMIT 1', monthKey)
+      .exec<{ count: number }>(
+        'SELECT count FROM trial_counter WHERE month_key = ? LIMIT 1',
+        monthKey
+      )
       .toArray()[0];
     return row?.count ?? 0;
   }

@@ -1,8 +1,5 @@
 import { log } from '../../lib/logger';
-import {
-  markVmAdmissionNodeReady,
-  renewVmProvisioningLease,
-} from '../../services/vm-admission-control';
+import { markVmAdmissionNodeReady, renewVmProvisioningLease } from '../../services/vm-admission-control';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';

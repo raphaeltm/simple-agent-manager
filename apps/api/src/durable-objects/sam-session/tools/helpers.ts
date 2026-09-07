@@ -27,7 +27,7 @@ export interface OwnedProject {
  */
 export async function resolveProjectWithOwnership(
   projectId: string,
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<OwnedProject | null> {
   const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
 
@@ -39,7 +39,12 @@ export async function resolveProjectWithOwnership(
       installationId: schema.projects.installationId,
     })
     .from(schema.projects)
-    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, ctx.userId)))
+    .where(
+      and(
+        eq(schema.projects.id, projectId),
+        eq(schema.projects.userId, ctx.userId),
+      ),
+    )
     .limit(1);
 
   return project ?? null;
@@ -64,7 +69,10 @@ export function parseRepository(repository: string): { owner: string; repo: stri
  * Get the user's GitHub token from encrypted credentials.
  * Returns null if not available.
  */
-export async function getUserGitHubToken(userId: string, env: Env): Promise<string | null> {
+export async function getUserGitHubToken(
+  userId: string,
+  env: Env,
+): Promise<string | null> {
   try {
     const db = drizzle(env.DATABASE, { schema });
     const [cred] = await db
@@ -78,8 +86,8 @@ export async function getUserGitHubToken(userId: string, env: Env): Promise<stri
           eq(schema.credentials.userId, userId),
           eq(schema.credentials.provider, 'github'),
           eq(schema.credentials.isActive, true),
-          isNull(schema.credentials.projectId)
-        )
+          isNull(schema.credentials.projectId),
+        ),
       )
       .limit(1);
 

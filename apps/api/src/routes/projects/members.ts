@@ -83,9 +83,7 @@ async function hmacInviteToken(rawToken: string, secret: string): Promise<string
     ['sign']
   );
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(rawToken));
-  return Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 function inviteStatus(row: schema.ProjectInviteLink, now = new Date()): ProjectInviteLinkStatus {
   if (row.revokedAt) return 'revoked';

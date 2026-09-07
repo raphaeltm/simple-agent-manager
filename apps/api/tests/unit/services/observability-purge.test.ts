@@ -1,9 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 
 // Use vi.hoisted() so mock functions are available when vi.mock factories run
-const { mockDelete, mockSelect, mockSelectFrom } = vi.hoisted(() => {
+const {
+  mockDelete,
+  mockSelect,
+  mockSelectFrom,
+} = vi.hoisted(() => {
   const mockDeleteWhere = vi.fn().mockResolvedValue(undefined);
   const mockDelete = vi.fn().mockReturnValue({ where: mockDeleteWhere });
 

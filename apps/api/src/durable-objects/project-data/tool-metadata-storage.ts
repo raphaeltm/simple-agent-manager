@@ -70,10 +70,9 @@ function serializeWithinLimit(value: unknown, maxBytes: number): string {
   let serialized = JSON.stringify(value);
   if (utf8Bytes(serialized) <= maxBytes) return serialized;
 
-  const record =
-    value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
   serialized = JSON.stringify({
     storageSafetyTruncated: true,
     contentTruncated: true,
@@ -118,10 +117,9 @@ export function boundToolMetadataForStorage(
     const parsed = JSON.parse(toolMetadata);
     const compact = stripToolMetadataContent(parsed, resolveCompactMessageOptions(env));
     const compactJson = JSON.stringify(compact);
-    bounded =
-      utf8Bytes(compactJson) <= maxBytes
-        ? compactJson
-        : serializeWithinLimit(buildMinimalToolMetadata(parsed, originalBytes), maxBytes);
+    bounded = utf8Bytes(compactJson) <= maxBytes
+      ? compactJson
+      : serializeWithinLimit(buildMinimalToolMetadata(parsed, originalBytes), maxBytes);
   } catch {
     bounded = serializeWithinLimit(
       {
@@ -195,10 +193,9 @@ export function stripToolMetadataPayloadForStorage(
   }
 
   const maxBytes = resolveToolMetadataMaxBytes(env);
-  const value =
-    compactBytes <= maxBytes
-      ? compactJson
-      : serializeWithinLimit(buildMinimalToolMetadata(parsed, originalBytes), maxBytes);
+  const value = compactBytes <= maxBytes
+    ? compactJson
+    : serializeWithinLimit(buildMinimalToolMetadata(parsed, originalBytes), maxBytes);
 
   return {
     value,

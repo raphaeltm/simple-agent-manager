@@ -35,14 +35,19 @@ export function resolveTrialsEnabledKvKey(env: Env): string {
 
 export function resolveTrialKillSwitchCacheMs(env: Env): number {
   const configured = Number(env.TRIAL_KILL_SWITCH_CACHE_MS ?? DEFAULT_KILL_SWITCH_CACHE_MS);
-  return Number.isFinite(configured) && configured >= 0 ? configured : DEFAULT_KILL_SWITCH_CACHE_MS;
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_KILL_SWITCH_CACHE_MS;
 }
 
 /**
  * Returns `true` when trials are enabled. Default is **disabled** — an
  * operator must explicitly set the KV flag to `"true"` to turn trials on.
  */
-export async function isTrialsEnabled(env: Env, now: number = Date.now()): Promise<boolean> {
+export async function isTrialsEnabled(
+  env: Env,
+  now: number = Date.now()
+): Promise<boolean> {
   if (cache && now < cache.expiresAt) return cache.enabled;
 
   const key = resolveTrialsEnabledKvKey(env);

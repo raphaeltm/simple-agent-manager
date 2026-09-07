@@ -9,7 +9,7 @@
  */
 import { Hono } from 'hono';
 import * as v from 'valibot';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach,describe, expect, it } from 'vitest';
 
 import { jsonValidator, parseOptionalBody } from '../../../src/schemas/_validator';
 

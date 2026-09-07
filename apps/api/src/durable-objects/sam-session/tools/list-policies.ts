@@ -34,7 +34,7 @@ export const listPoliciesDef: AnthropicToolDef = {
 
 export async function listPolicies(
   input: { projectId: string; category?: string },
-  ctx: ToolContext
+  ctx: ToolContext,
 ): Promise<unknown> {
   if (!input.projectId?.trim()) {
     return { error: 'projectId is required.' };
@@ -47,24 +47,26 @@ export async function listPolicies(
   const project = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
+    .where(
+      and(
+        eq(schema.projects.id, input.projectId),
+        eq(schema.projects.userId, ctx.userId),
+      ),
+    )
     .get();
 
   if (!project) {
     return { error: 'Project not found or not owned by you.' };
   }
 
-  const category = input.category && isPolicyCategory(input.category) ? input.category : null;
+  const category = input.category && isPolicyCategory(input.category)
+    ? input.category
+    : null;
 
   const limits = resolvePolicyLimits(env);
 
   const result = await projectDataService.listPolicies(
-    env,
-    input.projectId,
-    category,
-    true,
-    limits.maxPerProject,
-    0
+    env, input.projectId, category, true, limits.maxPerProject, 0,
   );
 
   return {

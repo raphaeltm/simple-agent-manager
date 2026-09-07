@@ -3,10 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { executeTool } from '../../../src/durable-objects/sam-session/tools';
 import { getAccountSetupStatus } from '../../../src/durable-objects/sam-session/tools/get-account-setup-status';
-import type {
-  CollectedToolCall,
-  ToolContext,
-} from '../../../src/durable-objects/sam-session/types';
+import type { CollectedToolCall, ToolContext } from '../../../src/durable-objects/sam-session/types';
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(),

@@ -95,9 +95,7 @@ async function resolveManualVolumeCreateProvider(
 
     for (const volume of existingVolumes) {
       if (volume.providerName !== firstVolume.providerName) {
-        throw new Error(
-          'Existing environment volumes use mixed providers; resolve them before adding more'
-        );
+        throw new Error('Existing environment volumes use mixed providers; resolve them before adding more');
       }
       if (volume.location !== requestedLocation) {
         throw new Error(

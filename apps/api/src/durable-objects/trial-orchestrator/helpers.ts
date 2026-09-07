@@ -5,7 +5,11 @@
  * we re-export those helpers rather than duplicating. Anything trial-specific
  * (event emission helpers, project-row creation) lives in steps.ts.
  */
-export { computeBackoffMs, isTransientError, parseEnvInt } from '../task-runner/helpers';
+export {
+  computeBackoffMs,
+  isTransientError,
+  parseEnvInt,
+} from '../task-runner/helpers';
 
 import type { TrialEvent } from '@simple-agent-manager/shared';
 import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
@@ -36,7 +40,8 @@ export function resolveAnonymousUserId(env: Env): string {
  * override via `TRIAL_ANONYMOUS_INSTALLATION_ID`; the default value matches
  * the row seeded by migration `0045_trial_sentinel_installation.sql`.
  */
-export const DEFAULT_TRIAL_ANONYMOUS_INSTALLATION_ID = 'system_anonymous_trials_installation';
+export const DEFAULT_TRIAL_ANONYMOUS_INSTALLATION_ID =
+  'system_anonymous_trials_installation';
 
 export function resolveAnonymousInstallationId(env: Env): string {
   return env.TRIAL_ANONYMOUS_INSTALLATION_ID ?? DEFAULT_TRIAL_ANONYMOUS_INSTALLATION_ID;

@@ -13,9 +13,7 @@ describe('ws proxy source contract', () => {
 
   it('does not block proxying when workspace vmIp is null', () => {
     expect(file).not.toContain('!workspace || !workspace.vmIp');
-    expect(file).toContain(
-      "return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);"
-    );
+    expect(file).toContain("return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);");
   });
 
   it('strips spoofed routing headers and injects trusted values', () => {

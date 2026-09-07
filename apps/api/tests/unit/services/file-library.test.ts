@@ -1,33 +1,18 @@
-import {
-  buildLibraryR2Key,
-  LIBRARY_DEFAULTS,
-  LIBRARY_FILENAME_PATTERN,
-  LIBRARY_TAG_PATTERN,
-} from '@simple-agent-manager/shared';
+import { buildLibraryR2Key, LIBRARY_DEFAULTS, LIBRARY_FILENAME_PATTERN, LIBRARY_TAG_PATTERN } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import {
-  getTagQueryBatchSize,
-  listFiles,
-  validateFilename,
-  validateTag,
-} from '../../../src/services/file-library';
+import { getTagQueryBatchSize, listFiles, validateFilename, validateTag } from '../../../src/services/file-library';
 
 interface D1QueryStats {
   tagLookupParamCounts: number[];
 }
 
-function createBindLimitedD1(
-  sqlite: Database.Database,
-  maxBindParams: number,
-  stats: D1QueryStats
-): D1Database {
-  const normalize = (params: unknown[]): unknown[] =>
-    params.map((p) => (p === undefined ? null : p));
+function createBindLimitedD1(sqlite: Database.Database, maxBindParams: number, stats: D1QueryStats): D1Database {
+  const normalize = (params: unknown[]): unknown[] => params.map((p) => (p === undefined ? null : p));
 
   const makeBound = (sql: string, params: unknown[]) => ({
     async run() {
@@ -57,18 +42,13 @@ function createBindLimitedD1(
       if (params.length > maxBindParams) {
         throw new Error(`too many SQL variables: ${params.length}`);
       }
-      return sqlite
-        .prepare(sql)
-        .raw()
-        .all(...normalize(params));
+      return sqlite.prepare(sql).raw().all(...normalize(params));
     },
     async first(col?: string) {
       if (params.length > maxBindParams) {
         throw new Error(`too many SQL variables: ${params.length}`);
       }
-      const row = sqlite.prepare(sql).get(...normalize(params)) as
-        | Record<string, unknown>
-        | undefined;
+      const row = sqlite.prepare(sql).get(...normalize(params)) as Record<string, unknown> | undefined;
       if (col != null) return row ? (row[col] ?? null) : null;
       return row ?? null;
     },
@@ -318,7 +298,7 @@ describe('listFiles', () => {
             `library/${projectId}/${fileId}`,
             '/',
             now,
-            now
+            now,
           );
           insertTag.run(fileId, 'docs', 'user');
         }

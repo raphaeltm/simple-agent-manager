@@ -32,7 +32,7 @@ export async function bridgeAcpSessionTransition(
   env: Env,
   projectId: string,
   toStatus: string,
-  opts: { workspaceUrl?: string | null; errorMessage?: string | null } = {}
+  opts: { workspaceUrl?: string | null; errorMessage?: string | null } = {},
 ): Promise<void> {
   try {
     const record = await readTrialByProject(env, projectId);
@@ -51,30 +51,21 @@ export async function bridgeAcpSessionTransition(
            AND status = 'pending'
            AND claimed_by_user_id IS NULL
            AND expires_at > ?`
-      )
-        .bind(projectId, record.trialId, now)
-        .run()
-        .catch((err) => {
-          log.warn('trial_bridge.ready_d1_update_failed', {
-            trialId: record.trialId,
-            projectId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          throw err;
+      ).bind(projectId, record.trialId, now).run().catch((err) => {
+        log.warn('trial_bridge.ready_d1_update_failed', {
+          trialId: record.trialId,
+          projectId,
+          error: err instanceof Error ? err.message : String(err),
         });
+        throw err;
+      });
       if (getD1Changes(updateResult) === 0) {
         const current = await env.DATABASE.prepare(
           `SELECT status, expires_at, claimed_by_user_id
            FROM trials
            WHERE id = ?`
-        )
-          .bind(record.trialId)
-          .first<{ status: string; expires_at: number; claimed_by_user_id: string | null }>();
-        if (
-          current?.status !== 'ready' ||
-          current.expires_at <= now ||
-          current.claimed_by_user_id !== null
-        ) {
+        ).bind(record.trialId).first<{ status: string; expires_at: number; claimed_by_user_id: string | null }>();
+        if (current?.status !== 'ready' || current.expires_at <= now || current.claimed_by_user_id !== null) {
           log.warn('trial_bridge.ready_transition_skipped', {
             trialId: record.trialId,
             projectId,
@@ -127,7 +118,7 @@ export async function bridgeKnowledgeAdded(
   env: Env,
   projectId: string,
   entity: string,
-  observation: string
+  observation: string,
 ): Promise<void> {
   try {
     const record = await readTrialByProject(env, projectId);
@@ -160,7 +151,7 @@ export async function bridgeAgentActivity(
     role: string;
     content: string;
     toolMetadata?: unknown;
-  }>
+  }>,
 ): Promise<void> {
   try {
     const record = await readTrialByProject(env, projectId);
@@ -174,7 +165,9 @@ export async function bridgeAgentActivity(
       if (!text) continue;
 
       const toolName =
-        msg.role === 'tool' ? maybeJsonRecord(msg.toolMetadata)?.toolName : undefined;
+        msg.role === 'tool'
+          ? maybeJsonRecord(msg.toolMetadata)?.toolName
+          : undefined;
 
       await emitTrialEventForProject(env, projectId, {
         type: 'trial.agent_activity',
@@ -200,7 +193,7 @@ export async function bridgeIdeaCreated(
   projectId: string,
   ideaId: string,
   title: string,
-  summary: string
+  summary: string,
 ): Promise<void> {
   try {
     const record = await readTrialByProject(env, projectId);

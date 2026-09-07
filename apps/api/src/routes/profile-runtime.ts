@@ -1,5 +1,5 @@
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context, Hono } from 'hono';
+import { type Context,Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -8,11 +8,7 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import type { ProjectCapability } from '../middleware/project-auth';
-import {
-  jsonValidator,
-  UpsertProjectRuntimeEnvVarSchema,
-  UpsertProjectRuntimeFileSchema,
-} from '../schemas';
+import { jsonValidator, UpsertProjectRuntimeEnvVarSchema, UpsertProjectRuntimeFileSchema } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
 import {
   buildProfileRuntimeConfigResponse,
@@ -22,7 +18,11 @@ import {
   upsertProfileRuntimeEnvVar,
   upsertProfileRuntimeFile,
 } from '../services/profile-runtime-assets';
-import { byteLength, normalizeProjectFilePath, PROJECT_ENV_KEY_PATTERN } from './projects/_helpers';
+import {
+  byteLength,
+  normalizeProjectFilePath,
+  PROJECT_ENV_KEY_PATTERN,
+} from './projects/_helpers';
 import { requireProjectRuntimeAuthorization } from './runtime-project-auth';
 
 export const profileRuntimeRoutes = new Hono<{ Bindings: Env }>();
@@ -35,38 +35,34 @@ profileRuntimeRoutes.get('/env-vars', async (c) => {
   return c.json({ envVars: response.envVars });
 });
 
-profileRuntimeRoutes.post(
-  '/env-vars',
-  jsonValidator(UpsertProjectRuntimeEnvVarSchema),
-  async (c) => {
-    const body = c.req.valid('json');
-    const limits = getRuntimeLimits(c.env);
-    const { db, profileId, userId } = await requireProfileRuntimeAccess(c, 'secret:write');
-    const envKey = body.key.trim();
+profileRuntimeRoutes.post('/env-vars', jsonValidator(UpsertProjectRuntimeEnvVarSchema), async (c) => {
+  const body = c.req.valid('json');
+  const limits = getRuntimeLimits(c.env);
+  const { db, profileId, userId } = await requireProfileRuntimeAccess(c, 'secret:write');
+  const envKey = body.key.trim();
 
-    if (!PROJECT_ENV_KEY_PATTERN.test(envKey)) {
-      throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
-    }
-    if (byteLength(body.value) > limits.maxProjectRuntimeEnvValueBytes) {
-      throw errors.badRequest(
-        `value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`
-      );
-    }
-
-    await upsertProfileRuntimeEnvVar(db, {
-      profileId,
-      userId,
-      envKey,
-      value: body.value,
-      isSecret: Boolean(body.isSecret),
-      maxCount: limits.maxProjectRuntimeEnvVarsPerProject,
-      encryptionKey: getCredentialEncryptionKey(c.env),
-    });
-
-    const response = await buildProfileRuntimeConfigResponse(db, profileId, userId);
-    return c.json(response);
+  if (!PROJECT_ENV_KEY_PATTERN.test(envKey)) {
+    throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
   }
-);
+  if (byteLength(body.value) > limits.maxProjectRuntimeEnvValueBytes) {
+    throw errors.badRequest(
+      `value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`
+    );
+  }
+
+  await upsertProfileRuntimeEnvVar(db, {
+    profileId,
+    userId,
+    envKey,
+    value: body.value,
+    isSecret: Boolean(body.isSecret),
+    maxCount: limits.maxProjectRuntimeEnvVarsPerProject,
+    encryptionKey: getCredentialEncryptionKey(c.env),
+  });
+
+  const response = await buildProfileRuntimeConfigResponse(db, profileId, userId);
+  return c.json(response);
+});
 
 profileRuntimeRoutes.delete('/env-vars/:envKey', async (c) => {
   const envKey = requireRouteParam(c, 'envKey').trim();
