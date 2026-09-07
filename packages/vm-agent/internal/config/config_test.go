@@ -404,6 +404,41 @@ func TestOperationalTimeoutDefaults(t *testing.T) {
 	}
 }
 
+func TestHeartbeatWorkspaceMetricDefaultsAndOverrides(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.HeartbeatDockerStatsTimeout != 2*time.Second {
+		t.Fatalf("HeartbeatDockerStatsTimeout = %v, want 2s", cfg.HeartbeatDockerStatsTimeout)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxContainers != 8 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxContainers = %d, want 8", cfg.HeartbeatWorkspaceMetricsMaxContainers)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxOutputBytes != 64*1024 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxOutputBytes = %d, want %d", cfg.HeartbeatWorkspaceMetricsMaxOutputBytes, int64(64*1024))
+	}
+
+	t.Setenv("HEARTBEAT_DOCKER_STATS_TIMEOUT", "1500ms")
+	t.Setenv("HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS", "4")
+	t.Setenv("HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES", "32768")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() override error = %v", err)
+	}
+	if cfg.HeartbeatDockerStatsTimeout != 1500*time.Millisecond {
+		t.Fatalf("HeartbeatDockerStatsTimeout = %v, want 1500ms", cfg.HeartbeatDockerStatsTimeout)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxContainers != 4 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxContainers = %d, want 4", cfg.HeartbeatWorkspaceMetricsMaxContainers)
+	}
+	if cfg.HeartbeatWorkspaceMetricsMaxOutputBytes != 32768 {
+		t.Fatalf("HeartbeatWorkspaceMetricsMaxOutputBytes = %d, want 32768", cfg.HeartbeatWorkspaceMetricsMaxOutputBytes)
+	}
+}
+
 func TestOperationalTimeoutOverrides(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
@@ -877,48 +912,51 @@ func splitFirst(s, sep string) []string {
 // validConfig returns a Config with all required fields set to valid values.
 func validConfig() *Config {
 	return &Config{
-		Port:                                  8080,
-		ControlPlaneURL:                       "https://api.example.com",
-		NodeID:                                "node-1",
-		SessionMaxCount:                       100,
-		DefaultRows:                           24,
-		DefaultCols:                           80,
-		WSReadBufferSize:                      1024,
-		WSWriteBufferSize:                     1024,
-		TerminalWSMaxMessageBytes:             DefaultTerminalWSMaxMessageBytes,
-		TerminalWSReadTimeout:                 DefaultTerminalWSReadTimeout,
-		TerminalWSPingInterval:                DefaultTerminalWSPingInterval,
-		TerminalWSMessageRate:                 DefaultTerminalWSMessageRate,
-		TerminalWSMessageBurst:                DefaultTerminalWSMessageBurst,
-		TerminalSessionIDMaxLength:            DefaultTerminalSessionIDMaxLength,
-		GitCredentialTimeout:                  DefaultGitCredentialTimeout,
-		SessionSnapshotOperationTimeout:       DefaultSessionSnapshotOperationTimeout,
-		SessionSnapshotProgressReportInterval: DefaultSessionSnapshotProgressReportInterval,
-		SessionSnapshotProgressReportTimeout:  DefaultSessionSnapshotProgressReportTimeout,
-		GracefulShutdownTimeout:               DefaultGracefulShutdownTimeout,
-		BootstrapMaxWait:                      5 * time.Minute,
-		BootstrapTimeout:                      30 * time.Minute,
-		SystemProvisioningTimeout:             DefaultSystemProvisioningTimeout,
-		CFIPFetchTimeout:                      DefaultCFIPFetchTimeout,
-		BootLogHTTPTimeout:                    DefaultBootLogHTTPTimeout,
-		HTTPReadTimeout:                       15 * time.Second,
-		HTTPWriteTimeout:                      15 * time.Second,
-		HTTPIdleTimeout:                       60 * time.Second,
-		HTTPCallbackTimeout:                   30 * time.Second,
-		MCPShortCommandTimeout:                DefaultMCPShortCommandTimeout,
-		MCPDiffCommandTimeout:                 DefaultMCPDiffCommandTimeout,
-		MCPBuildPrepareTimeout:                DefaultMCPBuildPrepareTimeout,
-		JWKSFetchTimeout:                      DefaultJWKSFetchTimeout,
-		ACPCredentialSyncTimeout:              DefaultACPCredentialSyncTimeout,
-		ACPActivityReportTimeout:              DefaultACPActivityReportTimeout,
-		ACPHarnessActivityReportDebounce:      DefaultACPHarnessActivityReportDebounce,
-		WorkspaceReadyCallbackTimeout:         DefaultWorkspaceReadyCallbackTimeout,
-		ErrorReportResponseBytes:              DefaultErrorReportResponseMaxBytes,
-		ErrorReportStoredErrBytes:             DefaultErrorReportStoredErrorBytes,
-		ErrorReportCollectorJobs:              DefaultErrorReportCollectorWorkers,
-		DevcontainerCachePushTimeout:          DefaultDevcontainerCachePushTimeout,
-		DeployPreflightCommandTimeout:         DefaultDeployPreflightCommandTimeout,
-		LogStreamPingWriteTimeout:             DefaultLogStreamPingWriteTimeout,
+		Port:                                    8080,
+		ControlPlaneURL:                         "https://api.example.com",
+		NodeID:                                  "node-1",
+		SessionMaxCount:                         100,
+		DefaultRows:                             24,
+		DefaultCols:                             80,
+		WSReadBufferSize:                        1024,
+		WSWriteBufferSize:                       1024,
+		TerminalWSMaxMessageBytes:               DefaultTerminalWSMaxMessageBytes,
+		TerminalWSReadTimeout:                   DefaultTerminalWSReadTimeout,
+		TerminalWSPingInterval:                  DefaultTerminalWSPingInterval,
+		TerminalWSMessageRate:                   DefaultTerminalWSMessageRate,
+		TerminalWSMessageBurst:                  DefaultTerminalWSMessageBurst,
+		TerminalSessionIDMaxLength:              DefaultTerminalSessionIDMaxLength,
+		GitCredentialTimeout:                    DefaultGitCredentialTimeout,
+		SessionSnapshotOperationTimeout:         DefaultSessionSnapshotOperationTimeout,
+		SessionSnapshotProgressReportInterval:   DefaultSessionSnapshotProgressReportInterval,
+		SessionSnapshotProgressReportTimeout:    DefaultSessionSnapshotProgressReportTimeout,
+		GracefulShutdownTimeout:                 DefaultGracefulShutdownTimeout,
+		BootstrapMaxWait:                        5 * time.Minute,
+		BootstrapTimeout:                        30 * time.Minute,
+		SystemProvisioningTimeout:               DefaultSystemProvisioningTimeout,
+		CFIPFetchTimeout:                        DefaultCFIPFetchTimeout,
+		BootLogHTTPTimeout:                      DefaultBootLogHTTPTimeout,
+		HTTPReadTimeout:                         15 * time.Second,
+		HTTPWriteTimeout:                        15 * time.Second,
+		HTTPIdleTimeout:                         60 * time.Second,
+		HTTPCallbackTimeout:                     30 * time.Second,
+		MCPShortCommandTimeout:                  DefaultMCPShortCommandTimeout,
+		MCPDiffCommandTimeout:                   DefaultMCPDiffCommandTimeout,
+		MCPBuildPrepareTimeout:                  DefaultMCPBuildPrepareTimeout,
+		JWKSFetchTimeout:                        DefaultJWKSFetchTimeout,
+		ACPCredentialSyncTimeout:                DefaultACPCredentialSyncTimeout,
+		ACPActivityReportTimeout:                DefaultACPActivityReportTimeout,
+		ACPHarnessActivityReportDebounce:        DefaultACPHarnessActivityReportDebounce,
+		WorkspaceReadyCallbackTimeout:           DefaultWorkspaceReadyCallbackTimeout,
+		ErrorReportResponseBytes:                DefaultErrorReportResponseMaxBytes,
+		ErrorReportStoredErrBytes:               DefaultErrorReportStoredErrorBytes,
+		ErrorReportCollectorJobs:                DefaultErrorReportCollectorWorkers,
+		HeartbeatDockerStatsTimeout:             2 * time.Second,
+		HeartbeatWorkspaceMetricsMaxContainers:  8,
+		HeartbeatWorkspaceMetricsMaxOutputBytes: 64 * 1024,
+		DevcontainerCachePushTimeout:            DefaultDevcontainerCachePushTimeout,
+		DeployPreflightCommandTimeout:           DefaultDeployPreflightCommandTimeout,
+		LogStreamPingWriteTimeout:               DefaultLogStreamPingWriteTimeout,
 	}
 }
 
@@ -956,6 +994,34 @@ func TestValidateOperationalTimeouts(t *testing.T) {
 		{"cache push", func(cfg *Config) { cfg.DevcontainerCachePushTimeout = 0 }, "DEVCONTAINER_CACHE_PUSH_TIMEOUT"},
 		{"deploy preflight", func(cfg *Config) { cfg.DeployPreflightCommandTimeout = 0 }, "DEPLOY_PREFLIGHT_COMMAND_TIMEOUT"},
 		{"log stream ping write", func(cfg *Config) { cfg.LogStreamPingWriteTimeout = 0 }, "LOG_STREAM_PING_WRITE_TIMEOUT"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tc.wantKey) {
+				t.Fatalf("expected %s error, got: %v", tc.wantKey, err)
+			}
+		})
+	}
+}
+
+func TestValidateHeartbeatWorkspaceMetricBounds(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantKey string
+	}{
+		{"docker stats timeout", func(cfg *Config) { cfg.HeartbeatDockerStatsTimeout = 0 }, "HEARTBEAT_DOCKER_STATS_TIMEOUT"},
+		{"negative container bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxContainers = -1 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS"},
+		{"excess container bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxContainers = 129 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS"},
+		{"low output bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxOutputBytes = 1023 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES"},
+		{"high output bound", func(cfg *Config) { cfg.HeartbeatWorkspaceMetricsMaxOutputBytes = 1048577 }, "HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -98,6 +98,19 @@ const NodeMetricsSchema = v.object({
   cpuLoadAvg1: v.optional(v.number()),
   memoryPercent: v.optional(v.number()),
   diskPercent: v.optional(v.number()),
+  workspaceMemory: v.optional(
+    v.array(
+      v.object({
+        workspaceId: v.string(),
+        memoryUsageBytes: v.number(),
+        memoryLimitBytes: v.optional(v.number()),
+        memoryPercent: v.optional(v.number()),
+        containerId: v.optional(v.string()),
+        containerName: v.optional(v.string()),
+        collectedAt: v.optional(v.string()),
+      })
+    )
+  ),
 });
 
 const DeploymentStateSchema = v.object({

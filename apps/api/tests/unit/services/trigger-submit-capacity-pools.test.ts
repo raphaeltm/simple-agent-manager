@@ -195,4 +195,132 @@ describe('submitTriggeredTask capacity-pool integration', () => {
       })
     );
   });
+
+  it('persists project resource requirements when trigger config omits them', async () => {
+    const { sqlite, env } = createEnv();
+    seedTriggerRows(sqlite);
+    sqlite
+      .prepare(
+        `UPDATE projects
+         SET resource_requirements_json = ?
+         WHERE id = 'project-1'`
+      )
+      .run(JSON.stringify({ minVcpu: 2, exclusiveNode: false, minDiskGb: 0 }));
+    await seedProjectDefaultPool(env);
+
+    await submitTriggeredTask(env, {
+      triggerId: 'trigger-1',
+      triggerExecutionId: 'exec-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      renderedPrompt: 'Run the scheduled job',
+      triggeredBy: 'cron',
+      agentProfileId: null,
+      skillId: null,
+      taskMode: 'task',
+      vmSizeOverride: null,
+      resourceRequirementsJson: null,
+      triggerName: 'Scheduled Capacity',
+    });
+
+    const taskRow = sqlite
+      .prepare(
+        `SELECT resource_requirements_json, resource_requirements_source, resolved_reservation_json
+         FROM tasks
+         WHERE project_id = 'project-1'`
+      )
+      .get() as {
+      resource_requirements_json: string | null;
+      resource_requirements_source: string | null;
+      resolved_reservation_json: string;
+    };
+    expect(JSON.parse(taskRow.resource_requirements_json ?? '{}')).toEqual({
+      minVcpu: 2,
+      exclusiveNode: false,
+      minDiskGb: 0,
+    });
+    expect(taskRow.resource_requirements_source).toBe('project');
+    const reservation = JSON.parse(taskRow.resolved_reservation_json) as {
+      source: string;
+      fieldProvenance: Record<string, { source: string; value: unknown }>;
+    };
+    expect(reservation.source).toBe('project');
+    expect(reservation.fieldProvenance.minDiskGb).toMatchObject({
+      source: 'project',
+      value: 0,
+    });
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        resourceRequirements: {
+          minVcpu: 2,
+          exclusiveNode: false,
+          minDiskGb: 0,
+        },
+        resolvedReservation: expect.objectContaining({ source: 'project' }),
+      })
+    );
+  });
+
+  it('keeps trigger resource requirements above project defaults with per-field provenance', async () => {
+    const { sqlite, env } = createEnv();
+    seedTriggerRows(sqlite);
+    sqlite
+      .prepare(
+        `UPDATE projects
+         SET resource_requirements_json = ?
+         WHERE id = 'project-1'`
+      )
+      .run(JSON.stringify({ minVcpu: 2, exclusiveNode: false, minDiskGb: 0 }));
+    await seedProjectDefaultPool(env);
+
+    await submitTriggeredTask(env, {
+      triggerId: 'trigger-1',
+      triggerExecutionId: 'exec-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      renderedPrompt: 'Run the scheduled job',
+      triggeredBy: 'cron',
+      agentProfileId: null,
+      skillId: null,
+      taskMode: 'task',
+      vmSizeOverride: null,
+      resourceRequirementsJson: JSON.stringify({ minMemoryGb: 4 }),
+      triggerName: 'Scheduled Capacity',
+    });
+
+    const taskRow = sqlite
+      .prepare(
+        `SELECT resource_requirements_json, resource_requirements_source, resolved_reservation_json
+         FROM tasks
+         WHERE project_id = 'project-1'`
+      )
+      .get() as {
+      resource_requirements_json: string | null;
+      resource_requirements_source: string | null;
+      resolved_reservation_json: string;
+    };
+    expect(JSON.parse(taskRow.resource_requirements_json ?? '{}')).toEqual({ minMemoryGb: 4 });
+    expect(taskRow.resource_requirements_source).toBe('trigger');
+    const reservation = JSON.parse(taskRow.resolved_reservation_json) as {
+      source: string;
+      fieldProvenance: Record<string, { source: string; value: unknown }>;
+    };
+    expect(reservation.source).toBe('trigger');
+    expect(reservation.fieldProvenance.minMemoryGb).toMatchObject({
+      source: 'trigger',
+      value: 4,
+    });
+    expect(reservation.fieldProvenance.minVcpu).toMatchObject({
+      source: 'project',
+      value: 2,
+    });
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        resourceRequirements: { minMemoryGb: 4 },
+        resolvedReservation: expect.objectContaining({ source: 'trigger' }),
+      })
+    );
+  });
 });

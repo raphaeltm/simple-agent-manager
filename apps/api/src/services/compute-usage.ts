@@ -27,6 +27,15 @@ export interface StartComputeTrackingInput {
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;
@@ -40,7 +49,10 @@ export async function startComputeTracking(
   input: StartComputeTrackingInput
 ): Promise<string> {
   const id = ulid();
-  const vcpuCount = input.providerInstanceVcpuCount ?? getVcpuCount(input.vmSize, input.cloudProvider);
+  const vcpuCount =
+    input.observedProviderInstanceVcpuCount ??
+    input.providerInstanceVcpuCount ??
+    getVcpuCount(input.vmSize, input.cloudProvider);
   const now = new Date().toISOString();
 
   await db.insert(schema.computeUsage).values({
@@ -54,6 +66,15 @@ export async function startComputeTracking(
     providerInstanceVcpuCount: input.providerInstanceVcpuCount ?? null,
     providerInstanceMemoryMb: input.providerInstanceMemoryMb ?? null,
     providerInstanceDiskGb: input.providerInstanceDiskGb ?? null,
+    providerInstanceBootDiskSizeGb: input.providerInstanceBootDiskSizeGb ?? null,
+    providerInstanceImage: input.providerInstanceImage ?? null,
+    providerInstanceArchitecture: input.providerInstanceArchitecture ?? null,
+    observedProviderInstanceType: input.observedProviderInstanceType ?? null,
+    observedProviderInstanceVcpuCount: input.observedProviderInstanceVcpuCount ?? null,
+    observedProviderInstanceMemoryMb: input.observedProviderInstanceMemoryMb ?? null,
+    observedProviderInstanceDiskGb: input.observedProviderInstanceDiskGb ?? null,
+    observedHardwareJson: input.observedHardwareJson ?? null,
+    observedHardwareSource: input.observedHardwareSource ?? null,
     providerInstancePriceDisplay: input.providerInstancePriceDisplay ?? null,
     providerInstancePriceCurrency: input.providerInstancePriceCurrency ?? null,
     providerInstancePriceMonthlyCents: input.providerInstancePriceMonthlyCents ?? null,
@@ -209,6 +230,7 @@ export async function calculateVcpuHoursForPeriod(
       endedAt: schema.computeUsage.endedAt,
       vcpuCount: schema.computeUsage.vcpuCount,
       providerInstanceVcpuCount: schema.computeUsage.providerInstanceVcpuCount,
+      observedProviderInstanceVcpuCount: schema.computeUsage.observedProviderInstanceVcpuCount,
     })
     .from(schema.computeUsage)
     .where(and(...conditions));
@@ -216,7 +238,8 @@ export async function calculateVcpuHoursForPeriod(
   return calculateNodeVcpuHours(
     rows.map((row) => ({
       ...row,
-      vcpuCount: row.providerInstanceVcpuCount ?? row.vcpuCount,
+      vcpuCount:
+        row.observedProviderInstanceVcpuCount ?? row.providerInstanceVcpuCount ?? row.vcpuCount,
     })),
     periodStart,
     periodEnd,
@@ -253,6 +276,15 @@ export async function getUserUsageSummary(
       providerInstanceVcpuCount: schema.computeUsage.providerInstanceVcpuCount,
       providerInstanceMemoryMb: schema.computeUsage.providerInstanceMemoryMb,
       providerInstanceDiskGb: schema.computeUsage.providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: schema.computeUsage.providerInstanceBootDiskSizeGb,
+      providerInstanceImage: schema.computeUsage.providerInstanceImage,
+      providerInstanceArchitecture: schema.computeUsage.providerInstanceArchitecture,
+      observedProviderInstanceType: schema.computeUsage.observedProviderInstanceType,
+      observedProviderInstanceVcpuCount: schema.computeUsage.observedProviderInstanceVcpuCount,
+      observedProviderInstanceMemoryMb: schema.computeUsage.observedProviderInstanceMemoryMb,
+      observedProviderInstanceDiskGb: schema.computeUsage.observedProviderInstanceDiskGb,
+      observedHardwareJson: schema.computeUsage.observedHardwareJson,
+      observedHardwareSource: schema.computeUsage.observedHardwareSource,
       providerInstancePriceDisplay: schema.computeUsage.providerInstancePriceDisplay,
       providerInstancePriceCurrency: schema.computeUsage.providerInstancePriceCurrency,
       providerInstancePriceMonthlyCents: schema.computeUsage.providerInstancePriceMonthlyCents,
@@ -266,11 +298,20 @@ export async function getUserUsageSummary(
   const activeSessions: ActiveComputeSession[] = activeRows.map((r) => ({
     workspaceId: r.workspaceId,
     serverType: r.serverType,
-    vcpuCount: r.providerInstanceVcpuCount ?? r.vcpuCount,
+    vcpuCount: r.observedProviderInstanceVcpuCount ?? r.providerInstanceVcpuCount ?? r.vcpuCount,
     providerInstanceType: r.providerInstanceType,
     providerInstanceVcpuCount: r.providerInstanceVcpuCount,
     providerInstanceMemoryMb: r.providerInstanceMemoryMb,
     providerInstanceDiskGb: r.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: r.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: r.providerInstanceImage,
+    providerInstanceArchitecture: r.providerInstanceArchitecture,
+    observedProviderInstanceType: r.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: r.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: r.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: r.observedProviderInstanceDiskGb,
+    observedHardwareJson: r.observedHardwareJson,
+    observedHardwareSource: r.observedHardwareSource,
     providerInstancePriceDisplay: r.providerInstancePriceDisplay,
     providerInstancePriceCurrency: r.providerInstancePriceCurrency,
     providerInstancePriceMonthlyCents: r.providerInstancePriceMonthlyCents,
@@ -419,11 +460,20 @@ export async function getUserDetailedUsage(
     workspaceId: r.workspaceId,
     nodeId: r.nodeId,
     serverType: r.serverType,
-    vcpuCount: r.providerInstanceVcpuCount ?? r.vcpuCount,
+    vcpuCount: r.observedProviderInstanceVcpuCount ?? r.providerInstanceVcpuCount ?? r.vcpuCount,
     providerInstanceType: r.providerInstanceType,
     providerInstanceVcpuCount: r.providerInstanceVcpuCount,
     providerInstanceMemoryMb: r.providerInstanceMemoryMb,
     providerInstanceDiskGb: r.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: r.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: r.providerInstanceImage,
+    providerInstanceArchitecture: r.providerInstanceArchitecture,
+    observedProviderInstanceType: r.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: r.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: r.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: r.observedProviderInstanceDiskGb,
+    observedHardwareJson: r.observedHardwareJson,
+    observedHardwareSource: r.observedHardwareSource,
     providerInstancePriceDisplay: r.providerInstancePriceDisplay,
     providerInstancePriceCurrency: r.providerInstancePriceCurrency,
     providerInstancePriceMonthlyCents: r.providerInstancePriceMonthlyCents,

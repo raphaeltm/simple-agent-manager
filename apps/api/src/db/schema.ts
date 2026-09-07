@@ -88,6 +88,9 @@ const capacityPlacementColumns = () => ({
   providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
   providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
   providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+  providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+  providerInstanceImage: text('provider_instance_image'),
+  providerInstanceArchitecture: text('provider_instance_architecture'),
   providerInstancePriceDisplay: text('provider_instance_price_display'),
   providerInstancePriceCurrency: text('provider_instance_price_currency'),
   providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
@@ -391,6 +394,8 @@ export const projects = sqliteTable(
     // Per-project defaults (null = use platform defaults from env vars).
     // Resolved via `resolveProjectScalingConfig()` in task-runner and node services.
     defaultVmSize: text('default_vm_size'),
+    /** Project-layer modern workload requirements JSON. Null = inherit lower layers. */
+    resourceRequirementsJson: text('resource_requirements_json'),
     defaultAgentType: text('default_agent_type'),
     defaultWorkspaceProfile: text('default_workspace_profile'),
     /** Default devcontainer config name for new workspaces. null = auto-discover default. */
@@ -1188,6 +1193,12 @@ export const nodes = sqliteTable(
     vmLocation: text('vm_location').notNull().default('nbg1'),
     cloudProvider: text('cloud_provider'),
     providerInstanceId: text('provider_instance_id'),
+    observedProviderInstanceType: text('observed_provider_instance_type'),
+    observedProviderInstanceVcpuCount: integer('observed_provider_instance_vcpu_count'),
+    observedProviderInstanceMemoryMb: integer('observed_provider_instance_memory_mb'),
+    observedProviderInstanceDiskGb: integer('observed_provider_instance_disk_gb'),
+    observedHardwareJson: text('observed_hardware_json'),
+    observedHardwareSource: text('observed_hardware_source'),
     ipAddress: text('ip_address'),
     backendDnsRecordId: text('backend_dns_record_id'),
     lastHeartbeatAt: text('last_heartbeat_at'),
@@ -1595,6 +1606,7 @@ export const agentProfiles = sqliteTable(
     maxTurns: integer('max_turns'),
     timeoutMinutes: integer('timeout_minutes'),
     vmSizeOverride: text('vm_size_override'),
+    resourceRequirementsJson: text('resource_requirements_json'),
     provider: text('provider'),
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
@@ -2236,6 +2248,7 @@ export const triggers = sqliteTable(
     skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     taskMode: text('task_mode').default('task'),
     vmSizeOverride: text('vm_size_override'),
+    resourceRequirementsJson: text('resource_requirements_json'),
     maxConcurrent: integer('max_concurrent').notNull().default(1),
     lastTriggeredAt: text('last_triggered_at'),
     triggerCount: integer('trigger_count').notNull().default(0),
@@ -2558,8 +2571,12 @@ export const capacityPools = sqliteTable(
     isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
     revision: integer('revision').notNull().default(1),
     status: text('status').notNull().default('active'),
+    configurationState: text('configuration_state').notNull().default('configured-ready'),
     strategy: text('strategy').notNull().default('balanced'),
     exhaustionPolicy: text('exhaustion_policy').notNull().default('queue'),
+    lastReconciledAt: text('last_reconciled_at'),
+    migrationVersion: text('migration_version'),
+    migrationState: text('migration_state').notNull().default('complete'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: text('created_at')
       .notNull()
@@ -2579,6 +2596,9 @@ export const capacityPools = sqliteTable(
       .on(table.ownerProjectId)
       .where(sql`scope = 'project' AND is_default = 1`),
     scopeStatusIdx: index('idx_capacity_pools_scope_status').on(table.scope, table.status),
+    configurationStateIdx: index('idx_capacity_pools_configuration_state').on(
+      table.configurationState
+    ),
   })
 );
 
@@ -2607,12 +2627,18 @@ export const capacityPoolCandidates = sqliteTable(
     providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
     providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
     providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+    providerInstanceImage: text('provider_instance_image'),
+    providerInstanceArchitecture: text('provider_instance_architecture'),
     providerInstancePriceDisplay: text('provider_instance_price_display'),
     providerInstancePriceCurrency: text('provider_instance_price_currency'),
     providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
     providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     providerInstanceCatalogSource: text('provider_instance_catalog_source'),
     providerInstanceCatalogLastSeenAt: text('provider_instance_catalog_last_seen_at'),
+    catalogAvailability: text('catalog_availability').notNull().default('available'),
+    catalogUnavailableAt: text('catalog_unavailable_at'),
+    catalogReturnedAt: text('catalog_returned_at'),
     priority: integer('priority').notNull().default(0),
     candidateOrder: integer('candidate_order').notNull().default(0),
     status: text('status').notNull().default('active'),
@@ -2631,6 +2657,9 @@ export const capacityPoolCandidates = sqliteTable(
       table.candidateOrder
     ),
     sourceIdx: index('idx_capacity_pool_candidates_source').on(table.capacitySourceId),
+    catalogAvailabilityIdx: index('idx_capacity_pool_candidates_catalog_availability').on(
+      table.catalogAvailability
+    ),
   })
 );
 
@@ -2690,6 +2719,15 @@ export const computeUsage = sqliteTable(
     providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
     providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
     providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+    providerInstanceImage: text('provider_instance_image'),
+    providerInstanceArchitecture: text('provider_instance_architecture'),
+    observedProviderInstanceType: text('observed_provider_instance_type'),
+    observedProviderInstanceVcpuCount: integer('observed_provider_instance_vcpu_count'),
+    observedProviderInstanceMemoryMb: integer('observed_provider_instance_memory_mb'),
+    observedProviderInstanceDiskGb: integer('observed_provider_instance_disk_gb'),
+    observedHardwareJson: text('observed_hardware_json'),
+    observedHardwareSource: text('observed_hardware_source'),
     providerInstancePriceDisplay: text('provider_instance_price_display'),
     providerInstancePriceCurrency: text('provider_instance_price_currency'),
     providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),

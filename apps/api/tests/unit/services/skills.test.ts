@@ -23,10 +23,8 @@ function createMockDB() {
       {
         get(_target, prop) {
           if (prop === 'then') {
-            return (
-              resolve: (value: unknown) => unknown,
-              reject?: (reason: unknown) => unknown
-            ) => nextResult().then(resolve, reject);
+            return (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) =>
+              nextResult().then(resolve, reject);
           }
           if (prop === 'limit' || prop === 'orderBy') {
             return () => nextResult();
@@ -64,6 +62,7 @@ function makeProfile(overrides: Record<string, unknown> = {}) {
     maxTurns: 20,
     timeoutMinutes: 60,
     vmSizeOverride: 'small',
+    resourceRequirementsJson: null,
     provider: 'hetzner',
     vmLocation: 'fsn1',
     workspaceProfile: 'full',
@@ -103,14 +102,9 @@ describe('resolveSkillProfile', () => {
     db._pushResult([makeSkill()]);
     db._pushResult([makeProfile()]);
 
-    const resolved = await resolveSkillProfile(
-      db,
-      'project-1',
-      null,
-      'skill-1',
-      'user-1',
-      { DEFAULT_TASK_AGENT_TYPE: 'opencode' } as any
-    );
+    const resolved = await resolveSkillProfile(db, 'project-1', null, 'skill-1', 'user-1', {
+      DEFAULT_TASK_AGENT_TYPE: 'opencode',
+    } as any);
 
     expect(resolved.skillId).toBe('skill-1');
     expect(resolved.profileId).toBe('profile-1');
@@ -120,26 +114,32 @@ describe('resolveSkillProfile', () => {
     expect(resolved.taskMode).toBe('task');
     expect(resolved.systemPromptAppend).toBe('Profile prompt\n\nSkill prompt');
     expect(resolved.resourceRequirementsJson).toBe('{"minVcpu":4}');
+    expect(resolved.agentProfileResourceRequirementsJson).toBeNull();
   });
 
   it('keeps profile values when the skill leaves a field unset', async () => {
     const db = createMockDB();
-    db._pushResult([makeSkill({ model: null, effort: null, vmSizeOverride: null, systemPromptAppend: null })]);
+    db._pushResult([
+      makeSkill({
+        model: null,
+        effort: null,
+        vmSizeOverride: null,
+        systemPromptAppend: null,
+        resourceRequirementsJson: null,
+      }),
+    ]);
     db._pushResult([makeProfile()]);
 
-    const resolved = await resolveSkillProfile(
-      db,
-      'project-1',
-      null,
-      'skill-1',
-      'user-1',
-      { DEFAULT_TASK_AGENT_TYPE: 'opencode' } as any
-    );
+    const resolved = await resolveSkillProfile(db, 'project-1', null, 'skill-1', 'user-1', {
+      DEFAULT_TASK_AGENT_TYPE: 'opencode',
+    } as any);
 
     expect(resolved.model).toBe('profile-model');
     expect(resolved.effort).toBe('high');
     expect(resolved.vmSizeOverride).toBe('small');
     expect(resolved.systemPromptAppend).toBe('Profile prompt');
+    expect(resolved.resourceRequirementsJson).toBeNull();
+    expect(resolved.agentProfileResourceRequirementsJson).toBeNull();
   });
 
   it('applies skill fields over platform defaults when no profile resolves', async () => {
@@ -148,14 +148,9 @@ describe('resolveSkillProfile', () => {
     // short-circuits to platform defaults without querying the profiles table.
     db._pushResult([makeSkill({ defaultProfileId: null })]);
 
-    const resolved = await resolveSkillProfile(
-      db,
-      'project-1',
-      null,
-      'skill-1',
-      'user-1',
-      { DEFAULT_TASK_AGENT_TYPE: 'opencode' } as any
-    );
+    const resolved = await resolveSkillProfile(db, 'project-1', null, 'skill-1', 'user-1', {
+      DEFAULT_TASK_AGENT_TYPE: 'opencode',
+    } as any);
 
     expect(resolved.skillId).toBe('skill-1');
     expect(resolved.profileId).toBeNull();
@@ -166,6 +161,7 @@ describe('resolveSkillProfile', () => {
     expect(resolved.vmSizeOverride).toBe('large');
     expect(resolved.systemPromptAppend).toBe('Skill prompt');
     expect(resolved.resourceRequirementsJson).toBe('{"minVcpu":4}');
+    expect(resolved.agentProfileResourceRequirementsJson).toBeNull();
   });
 
   it('falls back to skill-by-name lookup when the id lookup misses', async () => {
@@ -173,14 +169,9 @@ describe('resolveSkillProfile', () => {
     db._pushResult([]); // by-id lookup misses
     db._pushResult([makeSkill({ id: 'skill-7', name: 'ship-it', defaultProfileId: null })]); // by-name hit
 
-    const resolved = await resolveSkillProfile(
-      db,
-      'project-1',
-      null,
-      'ship-it',
-      'user-1',
-      { DEFAULT_TASK_AGENT_TYPE: 'opencode' } as any
-    );
+    const resolved = await resolveSkillProfile(db, 'project-1', null, 'ship-it', 'user-1', {
+      DEFAULT_TASK_AGENT_TYPE: 'opencode',
+    } as any);
 
     expect(resolved.skillId).toBe('skill-7');
     expect(resolved.skillName).toBe('ship-it');
@@ -211,9 +202,9 @@ describe('builtin skill guard', () => {
     db._pushResult([makeSkill({ isBuiltin: 1 })]); // getSkill lookup
     db.delete = vi.fn();
 
-    await expect(
-      deleteSkill(db, 'project-1', 'skill-1', 'user-1')
-    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(deleteSkill(db, 'project-1', 'skill-1', 'user-1')).rejects.toMatchObject({
+      statusCode: 403,
+    });
     expect(db.delete).not.toHaveBeenCalled();
   });
 });

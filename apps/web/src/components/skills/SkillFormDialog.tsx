@@ -7,7 +7,13 @@ import type {
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
 import { type FC, useEffect, useState } from 'react';
 
-import { expectJsonRecord } from '../../lib/runtime-validation';
+import {
+  deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
+  type ResourceRequirementsFormState,
+  ResourceRequirementsInput,
+  serializeResourceRequirements,
+} from '../resource-requirements';
 import { SkillRuntimeSection } from './SkillRuntimeSection';
 
 interface SkillFormDialogProps {
@@ -37,11 +43,9 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
   const [systemPromptAppend, setSystemPromptAppend] = useState('');
   const [vmSizeOverride, setVmSizeOverride] = useState('');
   const [taskMode, setTaskMode] = useState('task');
-  const [minVcpu, setMinVcpu] = useState('');
-  const [minMemoryGb, setMinMemoryGb] = useState('');
-  const [minDiskGb, setMinDiskGb] = useState('');
-  const [exclusiveNode, setExclusiveNode] = useState(false);
-  const [maxCoTenants, setMaxCoTenants] = useState('');
+  const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
+    ...EMPTY_RESOURCE_STATE,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,34 +57,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
     setSystemPromptAppend(skill?.systemPromptAppend ?? '');
     setVmSizeOverride(skill?.vmSizeOverride ?? '');
     setTaskMode(skill?.taskMode ?? 'task');
-    // Deserialize resource requirements JSON into individual fields
-    if (skill?.resourceRequirementsJson) {
-      try {
-        // expectJsonRecord throws for non-object JSON (arrays, primitives, null),
-        // which the catch below treats the same as invalid JSON — blank fields.
-        const req = expectJsonRecord(
-          JSON.parse(skill.resourceRequirementsJson) as unknown,
-          'skill.resourceRequirementsJson'
-        );
-        setMinVcpu(typeof req.minVcpu === 'number' ? String(req.minVcpu) : '');
-        setMinMemoryGb(typeof req.minMemoryGb === 'number' ? String(req.minMemoryGb) : '');
-        setMinDiskGb(typeof req.minDiskGb === 'number' ? String(req.minDiskGb) : '');
-        setExclusiveNode(req.exclusiveNode === true);
-        setMaxCoTenants(typeof req.maxCoTenants === 'number' ? String(req.maxCoTenants) : '');
-      } catch {
-        setMinVcpu('');
-        setMinMemoryGb('');
-        setMinDiskGb('');
-        setExclusiveNode(false);
-        setMaxCoTenants('');
-      }
-    } else {
-      setMinVcpu('');
-      setMinMemoryGb('');
-      setMinDiskGb('');
-      setExclusiveNode(false);
-      setMaxCoTenants('');
-    }
+    setResourceReqs(deserializeResourceRequirements(skill?.resourceRequirementsJson));
     setError(null);
   }, [isOpen, skill]);
 
@@ -90,15 +67,6 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
       setError('Skill name is required');
       return;
     }
-    // Serialize structured resource fields to JSON
-    const req: Record<string, unknown> = {};
-    if (minVcpu) req.minVcpu = Number(minVcpu);
-    if (minMemoryGb) req.minMemoryGb = Number(minMemoryGb);
-    if (minDiskGb) req.minDiskGb = Number(minDiskGb);
-    if (exclusiveNode) req.exclusiveNode = true;
-    if (maxCoTenants && !exclusiveNode) req.maxCoTenants = Number(maxCoTenants);
-    const serialized = Object.keys(req).length > 0 ? JSON.stringify(req) : null;
-
     setSaving(true);
     setError(null);
     try {
@@ -109,7 +77,7 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
         systemPromptAppend: systemPromptAppend.trim() || null,
         vmSizeOverride: vmSizeOverride || null,
         taskMode: taskMode || 'task',
-        resourceRequirementsJson: serialized,
+        resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
       });
       onClose();
     } catch (err) {
@@ -198,21 +166,6 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
             </span>
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
-            <label htmlFor="skill-vm-size" className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">VM Size</span>
-              <select
-                id="skill-vm-size"
-                value={vmSizeOverride}
-                onChange={(event) => setVmSizeOverride(event.target.value)}
-                disabled={saving}
-                className={FIELD_CLASSES}
-              >
-                <option value="">Default</option>
-                <option value="small">Small</option>
-                <option value="medium">Medium</option>
-                <option value="large">Large</option>
-              </select>
-            </label>
             <label htmlFor="skill-task-mode" className="grid gap-1.5">
               <span className="text-sm text-fg-muted">Task Mode</span>
               <select
@@ -227,84 +180,14 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
               </select>
             </label>
           </div>
-          <fieldset className="grid gap-1.5">
-            <legend className="text-sm text-fg-muted">Resource Requirements</legend>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <label htmlFor="skill-min-vcpu" className="grid gap-1">
-                <span className="text-xs text-fg-muted">Min vCPUs</span>
-                <input
-                  id="skill-min-vcpu"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={minVcpu}
-                  onChange={(e) => setMinVcpu(e.target.value)}
-                  placeholder="Default"
-                  disabled={saving}
-                  className={FIELD_CLASSES}
-                />
-              </label>
-              <label htmlFor="skill-min-memory" className="grid gap-1">
-                <span className="text-xs text-fg-muted">Min Memory (GB)</span>
-                <input
-                  id="skill-min-memory"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={minMemoryGb}
-                  onChange={(e) => setMinMemoryGb(e.target.value)}
-                  placeholder="Default"
-                  disabled={saving}
-                  className={FIELD_CLASSES}
-                />
-              </label>
-              <label htmlFor="skill-min-disk" className="grid gap-1">
-                <span className="text-xs text-fg-muted">Min Disk (GB)</span>
-                <input
-                  id="skill-min-disk"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={minDiskGb}
-                  onChange={(e) => setMinDiskGb(e.target.value)}
-                  placeholder="Default"
-                  disabled={saving}
-                  className={FIELD_CLASSES}
-                />
-              </label>
-            </div>
-            <div className="mt-1 grid gap-3 sm:grid-cols-2">
-              <label htmlFor="skill-exclusive-node" className="flex min-h-11 items-center gap-2">
-                <input
-                  id="skill-exclusive-node"
-                  type="checkbox"
-                  checked={exclusiveNode}
-                  onChange={(e) => setExclusiveNode(e.target.checked)}
-                  disabled={saving}
-                  className="h-4 w-4 rounded border-border-default accent-[var(--sam-color-focus-ring)]"
-                />
-                <span className="text-sm text-fg-muted">Exclusive Node</span>
-              </label>
-              <label htmlFor="skill-max-cotenants" className="grid gap-1">
-                <span className="text-xs text-fg-muted">Max Co-tenants</span>
-                <input
-                  id="skill-max-cotenants"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={exclusiveNode ? '' : maxCoTenants}
-                  onChange={(e) => setMaxCoTenants(e.target.value)}
-                  placeholder={exclusiveNode ? '1 (exclusive)' : 'Default'}
-                  disabled={saving || exclusiveNode}
-                  className={FIELD_CLASSES}
-                />
-              </label>
-            </div>
-            <span className="text-xs text-fg-muted">
-              Optional. Minimum resource constraints for VM selection. Leave blank to use the VM
-              size above.
-            </span>
-          </fieldset>
+          <ResourceRequirementsInput
+            value={resourceReqs}
+            onChange={setResourceReqs}
+            onClearLegacy={() => setVmSizeOverride('')}
+            disabled={saving}
+            legacyVmSize={vmSizeOverride}
+            inheritLabel="profile default"
+          />
         </div>
 
         {isEdit && skill ? (

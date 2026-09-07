@@ -41,6 +41,7 @@ export const UpdateProjectSchema = v.object({
   description: v.optional(v.string()),
   defaultBranch: v.optional(v.string()),
   defaultVmSize: v.optional(v.nullable(VMSizeSchema)),
+  resourceRequirementsJson: v.optional(v.nullable(v.string())),
   defaultAgentType: v.optional(v.nullable(v.string())),
   defaultWorkspaceProfile: v.optional(v.nullable(WorkspaceProfileSchema)),
   defaultDevcontainerConfigName: v.optional(v.nullable(v.string())),

@@ -7,10 +7,8 @@
 import {
   canSatisfyVmSize,
   type CapacityPlacementSnapshot,
-  DEFAULT_MAX_WORKSPACES_PER_NODE,
-  DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
-  DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
   type ResolvedResourceReservation,
+  resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
@@ -23,8 +21,16 @@ import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
+import {
+  evaluateWorkspaceReservationCapacity,
+  hasWorkspaceReservationCapacity,
+  isResolvedResourceReservation,
+  loadActiveWorkspaceReservationUsage,
+  parseWorkspaceAdmissionMetrics,
+  resolveWorkspaceAdmissionPolicy,
+  scoreWorkspaceAdmissionMetrics,
+} from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
-import { parseEnvInt } from './helpers';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export interface ReusableNodeSelection {
@@ -51,11 +57,16 @@ export type NodePlacementFields = {
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;
   providerInstancePriceHourlyMicros?: number | null;
   placementExplanationJson?: string | null;
+  lastMetrics?: string | null;
+  lastHeartbeatAt?: string | null;
 };
 
 function recoverySourceTaskGuard(
@@ -192,11 +203,16 @@ export async function tryClaimWarmNode(
        n.provider_instance_vcpu_count AS providerInstanceVcpuCount,
        n.provider_instance_memory_mb AS providerInstanceMemoryMb,
        n.provider_instance_disk_gb AS providerInstanceDiskGb,
+       n.provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+       n.provider_instance_image AS providerInstanceImage,
+       n.provider_instance_architecture AS providerInstanceArchitecture,
        n.provider_instance_price_display AS providerInstancePriceDisplay,
        n.provider_instance_price_currency AS providerInstancePriceCurrency,
        n.provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
        n.provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
-       n.placement_explanation_json AS placementExplanationJson
+       n.placement_explanation_json AS placementExplanationJson,
+       n.last_metrics AS lastMetrics,
+       n.last_heartbeat_at AS lastHeartbeatAt
      FROM tasks t
      LEFT JOIN nodes n ON n.id = t.claimed_warm_node_id
      WHERE t.id = ?`
@@ -214,7 +230,9 @@ export async function tryClaimWarmNode(
     // node is no longer a reusable selection, or claiming it failed. Release
     // the NodeLifecycle claim first (NodeLifecycle.alarm() does not expire
     // active claims), then clear the D1 pointer so the node becomes reusable.
-    await releaseClaimedWarmNode(state, rc, persistedClaim.claimedWarmNodeId).catch(() => undefined);
+    await releaseClaimedWarmNode(state, rc, persistedClaim.claimedWarmNodeId).catch(
+      () => undefined
+    );
     await rc.env.DATABASE.prepare(
       `UPDATE tasks SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
         WHERE id = ? AND claimed_warm_node_id = ?`
@@ -243,11 +261,16 @@ export async function tryClaimWarmNode(
        provider_instance_vcpu_count AS providerInstanceVcpuCount,
        provider_instance_memory_mb AS providerInstanceMemoryMb,
        provider_instance_disk_gb AS providerInstanceDiskGb,
+       provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+       provider_instance_image AS providerInstanceImage,
+       provider_instance_architecture AS providerInstanceArchitecture,
        provider_instance_price_display AS providerInstancePriceDisplay,
        provider_instance_price_currency AS providerInstancePriceCurrency,
        provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
        provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
        placement_explanation_json AS placementExplanationJson,
+       last_metrics AS lastMetrics,
+       last_heartbeat_at AS lastHeartbeatAt,
        agent_version AS agentVersion
      FROM nodes
      WHERE user_id = ? AND status = 'running' AND warm_since IS NOT NULL AND node_role = 'workspace'
@@ -302,11 +325,16 @@ export async function tryClaimWarmNode(
            provider_instance_vcpu_count AS providerInstanceVcpuCount,
            provider_instance_memory_mb AS providerInstanceMemoryMb,
            provider_instance_disk_gb AS providerInstanceDiskGb,
+           provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+           provider_instance_image AS providerInstanceImage,
+           provider_instance_architecture AS providerInstanceArchitecture,
            provider_instance_price_display AS providerInstancePriceDisplay,
            provider_instance_price_currency AS providerInstancePriceCurrency,
            provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
            provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
            placement_explanation_json AS placementExplanationJson,
+           last_metrics AS lastMetrics,
+           last_heartbeat_at AS lastHeartbeatAt,
            agent_version AS agentVersion
          FROM nodes WHERE id = ? AND status = 'running' AND warm_since IS NOT NULL`
       )
@@ -330,18 +358,9 @@ export async function tryClaimWarmNode(
       if (!selection) continue;
 
       if (await claimWarmNodeCandidate(state, rc, selection)) {
-        // Defense-in-depth: verify workspace count even for warm nodes
-        const wsCount = await rc.env.DATABASE.prepare(
-          `SELECT COUNT(*) as c FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
-        )
-          .bind(warmNode.id)
-          .first<{ c: number }>();
-        const warmMaxWs =
-          state.config.projectScaling?.maxWorkspacesPerNode ??
-          parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
-        if ((wsCount?.c ?? 0) >= warmMaxWs) {
+        if (!(await hasReusableNodeReservationCapacity(rc, state, fresh))) {
           await releaseClaimedWarmNode(state, rc, warmNode.id);
-          continue; // At capacity despite being warm — skip
+          continue;
         }
         log.info('task_runner_do.warm_node_claimed', {
           taskId: state.taskId,
@@ -370,21 +389,8 @@ export async function findNodeWithCapacity(
   rc: TaskRunnerContext
 ): Promise<ReusableNodeSelection | null> {
   const scaling = state.config.projectScaling;
-  const cpuThreshold =
-    scaling?.nodeCpuThresholdPercent ??
-    parseEnvInt(
-      rc.env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
-      DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT
-    );
-  const memThreshold =
-    scaling?.nodeMemoryThresholdPercent ??
-    parseEnvInt(
-      rc.env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-      DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT
-    );
-  const maxWorkspaces =
-    scaling?.maxWorkspacesPerNode ??
-    parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
+  const policy = resolveWorkspaceAdmissionPolicy(rc.env, scaling);
+  const requestedReservation = getTaskReservation(state);
 
   const nodes = await rc.env.DATABASE.prepare(
     `SELECT
@@ -406,6 +412,9 @@ export async function findNodeWithCapacity(
        provider_instance_vcpu_count AS providerInstanceVcpuCount,
        provider_instance_memory_mb AS providerInstanceMemoryMb,
        provider_instance_disk_gb AS providerInstanceDiskGb,
+       provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+       provider_instance_image AS providerInstanceImage,
+       provider_instance_architecture AS providerInstanceArchitecture,
        provider_instance_price_display AS providerInstancePriceDisplay,
        provider_instance_price_currency AS providerInstancePriceCurrency,
        provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
@@ -413,6 +422,7 @@ export async function findNodeWithCapacity(
        placement_explanation_json AS placementExplanationJson,
        health_status AS healthStatus,
        last_metrics AS lastMetrics,
+       last_heartbeat_at AS lastHeartbeatAt,
        agent_version AS agentVersion
      FROM nodes
      WHERE user_id = ? AND status = 'running' AND health_status != 'unhealthy' AND node_role = 'workspace'
@@ -438,6 +448,9 @@ export async function findNodeWithCapacity(
       providerInstanceVcpuCount: number | null;
       providerInstanceMemoryMb: number | null;
       providerInstanceDiskGb: number | null;
+      providerInstanceBootDiskSizeGb: number | null;
+      providerInstanceImage: string | null;
+      providerInstanceArchitecture: string | null;
       providerInstancePriceDisplay: string | null;
       providerInstancePriceCurrency: string | null;
       providerInstancePriceMonthlyCents: number | null;
@@ -445,23 +458,14 @@ export async function findNodeWithCapacity(
       placementExplanationJson: string | null;
       healthStatus: string;
       lastMetrics: string | null;
+      lastHeartbeatAt: string | null;
       agentVersion: string | null;
     }>();
 
   if (!nodes.results.length) return null;
 
-  // Batch workspace count query to avoid N+1 D1 round-trips
   const nodeIds = nodes.results.map((n) => n.id);
-  const placeholders = nodeIds.map(() => '?').join(',');
-  const wsCounts = await rc.env.DATABASE.prepare(
-    `SELECT node_id, COUNT(*) as c FROM workspaces
-     WHERE node_id IN (${placeholders})
-     AND status IN ('running', 'creating', 'recovery')
-     GROUP BY node_id`
-  )
-    .bind(...nodeIds)
-    .all<{ node_id: string; c: number }>();
-  const countByNode = new Map((wsCounts.results ?? []).map((r) => [r.node_id, r.c]));
+  const usageByNode = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, nodeIds);
 
   type ScoredNode = {
     id: string;
@@ -472,6 +476,7 @@ export async function findNodeWithCapacity(
   };
 
   const candidates: ScoredNode[] = [];
+  const rejectionDiagnostics: Array<{ nodeId: string; reasons: string[] }> = [];
 
   for (const node of nodes.results) {
     if (!isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)) {
@@ -481,45 +486,36 @@ export async function findNodeWithCapacity(
     const selection = resolveReusableNodeSelection(state, node);
     if (!selection) continue;
 
-    // Hard workspace count limit — reject node regardless of CPU/memory metrics
-    if ((countByNode.get(node.id) ?? 0) >= maxWorkspaces) continue;
-    let metrics: {
-      cpuLoadAvg1?: number;
-      memoryPercent?: number;
-      creatingWorkspaces?: number;
-    } | null = null;
-    if (node.lastMetrics) {
-      try {
-        metrics = JSON.parse(node.lastMetrics);
-      } catch {
-        /* ignore */
-      }
+    const metrics = parseWorkspaceAdmissionMetrics(node, policy);
+    const capacity = evaluateWorkspaceReservationCapacity(
+      node,
+      usageByNode.get(node.id),
+      requestedReservation,
+      policy,
+      metrics
+    );
+    if (!capacity.admitted) {
+      rejectionDiagnostics.push({ nodeId: node.id, reasons: capacity.reasons });
+      continue;
     }
-
-    if (metrics) {
-      if ((metrics.creatingWorkspaces ?? 0) > 0) continue;
-      const cpu = metrics.cpuLoadAvg1 ?? 0;
-      const mem = metrics.memoryPercent ?? 0;
-      if (cpu >= cpuThreshold || mem >= memThreshold) continue;
-      candidates.push({
-        id: node.id,
-        vmSize: node.vmSize,
-        vmLocation: node.vmLocation,
-        capacityPlacementSnapshot: selection.capacityPlacementSnapshot,
-        score: cpu * 0.4 + mem * 0.6,
-      });
-    } else {
-      candidates.push({
-        id: node.id,
-        vmSize: node.vmSize,
-        vmLocation: node.vmLocation,
-        capacityPlacementSnapshot: selection.capacityPlacementSnapshot,
-        score: null,
-      });
-    }
+    candidates.push({
+      id: node.id,
+      vmSize: node.vmSize,
+      vmLocation: node.vmLocation,
+      capacityPlacementSnapshot: selection.capacityPlacementSnapshot,
+      score: scoreWorkspaceAdmissionMetrics(metrics, policy),
+    });
   }
 
-  if (!candidates.length) return null;
+  if (!candidates.length) {
+    if (rejectionDiagnostics.length) {
+      log.info('task_runner_do.node_capacity_rejected', {
+        taskId: state.taskId,
+        sample: rejectionDiagnostics.slice(0, 5),
+      });
+    }
+    return null;
+  }
 
   // Sort: prefer matching location/size, then lowest load
   candidates.sort((a, b) => {
@@ -543,6 +539,22 @@ export async function findNodeWithCapacity(
   return { nodeId: best.id, capacityPlacementSnapshot: best.capacityPlacementSnapshot };
 }
 
+export async function hasReusableNodeReservationCapacity(
+  rc: TaskRunnerContext,
+  state: TaskRunnerState,
+  node: NodePlacementFields
+): Promise<boolean> {
+  const policy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
+  const usage = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, [node.id]);
+  return hasWorkspaceReservationCapacity(
+    node,
+    usage.get(node.id),
+    getTaskReservation(state),
+    policy,
+    parseWorkspaceAdmissionMetrics(node, policy)
+  );
+}
+
 function resolveReusableNodeSelection(
   state: TaskRunnerState,
   node: NodePlacementFields
@@ -552,7 +564,7 @@ function resolveReusableNodeSelection(
     node: node as CapacityAwareNodePlacementRow,
     projectId: state.projectId,
     requestedVmSize: state.config.vmSize,
-    requestedReservation: state.config.resolvedReservation ?? null,
+    requestedReservation: getTaskReservation(state),
   });
   if (capacityPlacementSnapshot === undefined) return null;
   return {
@@ -565,7 +577,7 @@ export function nodeSatisfiesTaskResources(
   node: NodePlacementFields,
   state: TaskRunnerState
 ): boolean {
-  const reservation = state.config.resolvedReservation ?? null;
+  const reservation = getTaskReservation(state);
   if (
     reservation &&
     node.providerInstanceType &&
@@ -593,6 +605,21 @@ function offeringSatisfiesReservation(
   if (offering.memoryMb < reservation.memoryMb) return false;
   if (offering.diskGb !== null && offering.diskGb * 1024 < reservation.diskMb) return false;
   return true;
+}
+
+export function getTaskReservation(state: TaskRunnerState): ResolvedResourceReservation {
+  if (isResolvedResourceReservation(state.config.resolvedReservation)) {
+    return state.config.resolvedReservation;
+  }
+
+  return resolveResourceReservation(
+    { task: state.config.resourceRequirements ?? undefined },
+    {
+      taskId: state.taskId,
+      projectId: state.projectId,
+      userId: state.userId,
+    }
+  );
 }
 
 function positiveInteger(value: number | null | undefined): number | null {

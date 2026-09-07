@@ -10,7 +10,6 @@ import type {
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import {
-  DEFAULT_VM_SIZE,
   DEFAULT_WORKSPACE_PROFILE,
   hasByocComputeCredential,
 } from '@simple-agent-manager/shared';
@@ -18,6 +17,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
+import {
+  EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
+  serializeResourceRequirements,
+} from '../../components/resource-requirements';
 import { useAgentCatalog } from '../../hooks/useAgentCatalog';
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
@@ -54,7 +57,6 @@ import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
 import {
   FORK_MESSAGE_TEMPLATE,
-  resolveInitialVmSize,
   resolveWizardRuntime,
   resolveWizardTaskMode,
   resolveWizardWorkspaceProfile,
@@ -93,7 +95,7 @@ export interface PendingDerived {
   summaryLoading: boolean;
 }
 
-export type ProfileWizardStep = 'agent' | 'work-type' | 'runtime' | 'vm-size' | 'name';
+export type ProfileWizardStep = 'agent' | 'work-type' | 'runtime' | 'resources' | 'name';
 export type SessionScope = 'my' | 'all';
 
 export interface ProfileWizardState {
@@ -103,6 +105,7 @@ export interface ProfileWizardState {
   workType: TaskMode | null;
   runtime: AgentProfileRuntime | null;
   vmSize: VMSize | null;
+  resourceReqs: import('../../components/resource-requirements').ResourceRequirementsFormState;
   profileName: string;
   saving: boolean;
   error: string | null;
@@ -193,6 +196,7 @@ export function useProjectChatState() {
     workType: null,
     runtime: null,
     vmSize: null,
+    resourceReqs: { ...EMPTY_RESOURCE_STATE_IMPORT },
     profileName: '',
     saving: false,
     error: null,
@@ -210,9 +214,6 @@ export function useProjectChatState() {
   const [selectedWorkspaceProfile, setSelectedWorkspaceProfile] = useState<WorkspaceProfile>(
     (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE
   );
-  const [selectedVmSizeOverride, setSelectedVmSizeOverride] = useState<VMSize | null>(null);
-  const selectedVmSize = selectedVmSizeOverride ?? resolveInitialVmSize(project?.defaultVmSize);
-
   // Devcontainer config name — empty string means auto-detect
   const [selectedDevcontainerConfigName, setSelectedDevcontainerConfigName] = useState(
     project?.defaultDevcontainerConfigName ?? ''
@@ -560,6 +561,7 @@ export function useProjectChatState() {
       workType: null,
       runtime: null,
       vmSize: null,
+      resourceReqs: { ...EMPTY_RESOURCE_STATE_IMPORT },
       profileName: '',
       saving: false,
       error: null,
@@ -606,7 +608,8 @@ export function useProjectChatState() {
     }
     const workType = profileWizard.workType ?? 'conversation';
     const runtime = resolveWizardRuntime(workType, profileWizard.runtime);
-    const vmSize = profileWizard.vmSize ?? DEFAULT_VM_SIZE;
+    const resourceJson =
+      runtime === 'cf-container' ? null : serializeResourceRequirements(profileWizard.resourceReqs);
     setProfileWizard((current) => ({ ...current, saving: true, error: null }));
     try {
       const profile = await createProfile({
@@ -617,7 +620,7 @@ export function useProjectChatState() {
             : 'Chat and explore with a lightweight workspace',
         agentType,
         runtime,
-        vmSizeOverride: runtime === 'cf-container' ? null : vmSize,
+        resourceRequirementsJson: resourceJson,
         workspaceProfile: resolveWizardWorkspaceProfile(runtime, workType),
         taskMode: resolveWizardTaskMode(runtime, workType),
       });
@@ -638,7 +641,7 @@ export function useProjectChatState() {
     profileWizard.profileName,
     profileWizard.runtime,
     profileWizard.selectedAgentType,
-    profileWizard.vmSize,
+    profileWizard.resourceReqs,
     profileWizard.workType,
   ]);
 
@@ -707,7 +710,6 @@ export function useProjectChatState() {
         agentProfileId: submitProfileId,
         skillId: selectedSkillId,
         selectedAgentType,
-        selectedVmSize,
         selectedWorkspaceProfile,
         selectedDevcontainerConfigName,
         selectedTaskMode,
@@ -939,10 +941,6 @@ export function useProjectChatState() {
     setSelectedTaskMode(mode);
   }, []);
 
-  const handleVmSizeChange = useCallback((size: VMSize) => {
-    setSelectedVmSizeOverride(size);
-  }, []);
-
   // ---------------------------------------------------------------------------
   // Derived state
   // ---------------------------------------------------------------------------
@@ -1001,8 +999,6 @@ export function useProjectChatState() {
     suggestProfileName,
     handleUpdateProfile,
     slashCommands,
-    selectedVmSize,
-    handleVmSizeChange,
     selectedWorkspaceProfile,
     setSelectedWorkspaceProfile,
     selectedDevcontainerConfigName,

@@ -649,6 +649,8 @@ export interface RunTaskRequest {
   workspaceProfile?: WorkspaceProfile;
   nodeId?: string;
   branch?: string;
+  /** Explicit resource requirements for this run. Overrides lower configuration layers. */
+  resourceRequirements?: ResourceRequirements;
 }
 
 export interface RunTaskResponse {

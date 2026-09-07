@@ -43,6 +43,7 @@ export interface Project {
   /** Cloudflare Artifacts repo ID. Null for GitHub/GitLab-backed projects. */
   artifactsRepoId?: string | null;
   defaultVmSize?: VMSize | null;
+  resourceRequirementsJson?: string | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = auto-discover default. */
@@ -127,6 +128,7 @@ export interface UpdateProjectRequest {
   description?: string;
   defaultBranch?: string;
   defaultVmSize?: VMSize | null;
+  resourceRequirementsJson?: string | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = reset to auto-discover. */

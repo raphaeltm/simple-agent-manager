@@ -79,6 +79,13 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     status: ws.status as WorkspaceResponse['status'],
     vmSize: ws.vmSize as WorkspaceResponse['vmSize'],
     vmLocation: ws.vmLocation as WorkspaceResponse['vmLocation'],
+    providerInstanceType: ws.providerInstanceType ?? null,
+    providerInstanceBootDiskSizeGb: ws.providerInstanceBootDiskSizeGb ?? null,
+    providerInstanceImage: ws.providerInstanceImage ?? null,
+    providerInstanceArchitecture: ws.providerInstanceArchitecture ?? null,
+    resourceRequirementsJson: ws.resourceRequirementsJson ?? null,
+    resolvedReservationJson: ws.resolvedReservationJson ?? null,
+    placementExplanationJson: ws.placementExplanationJson ?? null,
     workspaceProfile:
       (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? DEFAULT_WORKSPACE_PROFILE,
     devcontainerConfigName: ws.devcontainerConfigName ?? null,
@@ -122,6 +129,7 @@ export function toProjectResponse(project: schema.Project): Project {
     repoProvider: (project.repoProvider as RepoProvider) || 'github',
     artifactsRepoId: project.artifactsRepoId ?? null,
     defaultVmSize: (project.defaultVmSize as Project['defaultVmSize']) ?? null,
+    resourceRequirementsJson: project.resourceRequirementsJson ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
     defaultWorkspaceProfile:
       (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,

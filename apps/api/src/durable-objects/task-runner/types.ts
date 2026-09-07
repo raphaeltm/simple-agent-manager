@@ -73,6 +73,9 @@ export interface TaskRunConfig {
   cloudProvider: CredentialProvider | null;
   /** Provider-native instance type/SKU selected from a compute pool. Null preserves legacy size mapping. */
   providerInstanceType?: string | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: 'x86_64' | 'arm64' | null;
   /** Root-pinned credential attribution user for this task tree. */
   credentialAttributionUserId: string;
   /** Project scope when credentialAttributionSource is 'project'. */
@@ -103,6 +106,12 @@ export interface TaskRunConfig {
     maxWorkspacesPerNode?: number | null;
     nodeCpuThresholdPercent?: number | null;
     nodeMemoryThresholdPercent?: number | null;
+    nodeCpuShareBudgetPercent?: number | null;
+    nodeHostMemoryReserveMb?: number | null;
+    nodeDiskPressureThresholdPercent?: number | null;
+    nodeMetricsTtlMs?: number | null;
+    nodeCpuScoreWeightPercent?: number | null;
+    nodeMemoryScoreWeightPercent?: number | null;
     warmNodeTimeoutMs?: number | null;
   } | null;
   /** Resolved resource requirements (audit-only, Phase 0). */

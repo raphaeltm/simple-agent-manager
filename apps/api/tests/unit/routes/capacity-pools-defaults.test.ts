@@ -256,7 +256,7 @@ describe('default capacity pool routes', () => {
     ).toEqual({ strategy: 'pack', exhaustion_policy: 'fail' });
   });
 
-  it('keeps a zero-active user default visible to the editor but not effective', async () => {
+  it('keeps a zero-active user default visible and effective as configured-empty', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');
     seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1', provider: 'vultr' });
@@ -287,12 +287,14 @@ describe('default capacity pool routes', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('private, no-store');
     const body = await res.json();
-    expect(body.effective).toBeNull();
-    expect(body.effectiveScope).toBeNull();
+    expect(body.effectiveScope).toBe('user');
+    expect(body.effectiveState).toBe('configured-empty');
+    expect(body.effective.pool).toMatchObject({ scope: 'user', status: 'active' });
     expect(body.defaults.find((item: { scope: string }) => item.scope === 'user')).toMatchObject({
       visibility: 'visible',
       summary: {
-        pool: { scope: 'user', status: 'disabled' },
+        pool: { scope: 'user', status: 'active', configurationState: 'configured-empty' },
+        effectiveState: 'configured-empty',
         activeCandidateCount: 0,
         candidates: expect.arrayContaining([
           expect.objectContaining({ id: initial.effective.candidates[0].id, status: 'deleted' }),

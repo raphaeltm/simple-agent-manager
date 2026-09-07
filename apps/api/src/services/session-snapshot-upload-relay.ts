@@ -194,7 +194,15 @@ export async function ensureSessionSnapshotUploadRelay(
   const source = await env.DATABASE.prepare(
     `SELECT id, user_id, vm_size, vm_location, cloud_provider, runtime, node_class,
             agent_version, credential_attribution_user_id,
-            credential_attribution_project_id, credential_attribution_source
+            credential_attribution_project_id, credential_attribution_source,
+            capacity_pool_id, capacity_pool_scope, capacity_pool_revision,
+            capacity_source_id, capacity_pool_candidate_id,
+            placement_credential_source, placement_credential_reference,
+            placement_credential_version, capacity_pool_project_id, workload_role,
+            provider_instance_type, provider_instance_vcpu_count,
+            provider_instance_memory_mb, provider_instance_disk_gb,
+            provider_instance_boot_disk_size_gb, provider_instance_image,
+            provider_instance_architecture
        FROM nodes
       WHERE id = ? AND user_id = ? AND status = 'running'
       LIMIT 1`
@@ -212,6 +220,23 @@ export async function ensureSessionSnapshotUploadRelay(
       credential_attribution_user_id: string | null;
       credential_attribution_project_id: string | null;
       credential_attribution_source: string | null;
+      capacity_pool_id: string | null;
+      capacity_pool_scope: string | null;
+      capacity_pool_revision: number | null;
+      capacity_source_id: string | null;
+      capacity_pool_candidate_id: string | null;
+      placement_credential_source: string | null;
+      placement_credential_reference: string | null;
+      placement_credential_version: number | null;
+      capacity_pool_project_id: string | null;
+      workload_role: string | null;
+      provider_instance_type: string | null;
+      provider_instance_vcpu_count: number | null;
+      provider_instance_memory_mb: number | null;
+      provider_instance_disk_gb: number | null;
+      provider_instance_boot_disk_size_gb: number | null;
+      provider_instance_image: string | null;
+      provider_instance_architecture: string | null;
     }>();
   if (
     !source ||
@@ -235,6 +260,14 @@ export async function ensureSessionSnapshotUploadRelay(
         : 'user';
   const attributionProjectId =
     attributionSource === 'project' ? source.credential_attribution_project_id : null;
+  if (!source.placement_credential_reference || !source.placement_credential_source) {
+    log.warn('session_snapshot.relay_provision_skipped_missing_exact_credential', {
+      userId: input.userId,
+      sourceNodeId: input.sourceNodeId,
+      provider: source.cloud_provider,
+    });
+    return;
+  }
   const db = drizzle(env.DATABASE, { schema });
   const { resolveCredentialSource } = await import('./provider-credentials');
   const credential = await resolveCredentialSource(
@@ -248,6 +281,20 @@ export async function ensureSessionSnapshotUploadRelay(
       userId: input.userId,
       sourceNodeId: input.sourceNodeId,
       provider: source.cloud_provider,
+    });
+    return;
+  }
+  if (
+    credential.credentialSource !== attributionSource ||
+    credential.providerName !== source.cloud_provider
+  ) {
+    log.warn('session_snapshot.relay_provision_skipped_credential_changed', {
+      userId: input.userId,
+      sourceNodeId: input.sourceNodeId,
+      expectedProvider: source.cloud_provider,
+      resolvedProvider: credential.providerName,
+      expectedCredentialSource: attributionSource,
+      resolvedCredentialSource: credential.credentialSource,
     });
     return;
   }
@@ -276,7 +323,44 @@ export async function ensureSessionSnapshotUploadRelay(
     vmSize: source.vm_size as 'small' | 'medium' | 'large',
     vmLocation: source.vm_location,
     cloudProvider: (source.cloud_provider as CredentialProvider | null) ?? undefined,
+    providerInstanceType: source.provider_instance_type,
+    providerInstanceBootDiskSizeGb: source.provider_instance_boot_disk_size_gb,
+    providerInstanceImage: source.provider_instance_image,
+    providerInstanceArchitecture:
+      source.provider_instance_architecture === 'x86_64' ||
+      source.provider_instance_architecture === 'arm64'
+        ? source.provider_instance_architecture
+        : null,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+    capacityPlacementSnapshot: {
+      capacityPoolId: source.capacity_pool_id,
+      capacityPoolScope:
+        source.capacity_pool_scope === 'installation' ||
+        source.capacity_pool_scope === 'user' ||
+        source.capacity_pool_scope === 'project'
+          ? source.capacity_pool_scope
+          : null,
+      capacityPoolRevision: source.capacity_pool_revision,
+      capacitySourceId: source.capacity_source_id,
+      capacityPoolCandidateId: source.capacity_pool_candidate_id,
+      placementCredentialSource:
+        source.placement_credential_source === 'user' ||
+        source.placement_credential_source === 'project' ||
+        source.placement_credential_source === 'platform'
+          ? source.placement_credential_source
+          : null,
+      placementCredentialReference: source.placement_credential_reference,
+      placementCredentialVersion: source.placement_credential_version,
+      capacityPoolProjectId: source.capacity_pool_project_id,
+      workloadRole: 'workspace',
+      providerInstanceType: source.provider_instance_type,
+      providerInstanceVcpuCount: source.provider_instance_vcpu_count,
+      providerInstanceMemoryMb: source.provider_instance_memory_mb,
+      providerInstanceDiskGb: source.provider_instance_disk_gb,
+      providerInstanceBootDiskSizeGb: source.provider_instance_boot_disk_size_gb,
+      providerInstanceImage: source.provider_instance_image,
+      providerInstanceArchitecture: source.provider_instance_architecture,
+    },
   });
 
   log.warn('session_snapshot.relay_provision_started', {

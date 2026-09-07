@@ -7,6 +7,7 @@ import {
   capacitySourceExternalCredentialsMigrationSql,
   concreteOfferingMigrationSql,
   migrationSql,
+  runtimeNativeObservedMetadataMigrationSql,
 } from '../../helpers/capacity-pool-migrations';
 
 let sqlite: Database.Database | null = null;
@@ -130,6 +131,10 @@ function db(): Database.Database {
       placement_explanation_json TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE compute_usage (
+      id TEXT PRIMARY KEY
     );
 
     CREATE TABLE tasks (
@@ -851,5 +856,82 @@ describe('0129_capacity_source_external_credentials migration', () => {
     expect(sql).toContain(
       'CREATE INDEX IF NOT EXISTS IDX_CREDENTIALS_CLOUD_PROVIDER_PROJECT_ACTIVE'
     );
+  });
+});
+
+describe('0146_runtime_native_observed_metadata migration', () => {
+  it('adds nullable native plan and observed hardware columns without fabricating legacy hardware', () => {
+    const database = db();
+    database.exec(migrationSql);
+    database.exec(candidateSnapshotMigrationSql);
+    database.exec(concreteOfferingMigrationSql);
+    database.exec(candidateCatalogMetadataMigrationSql);
+    database.exec(capacitySourceExternalCredentialsMigrationSql);
+
+    database.exec(`
+      INSERT INTO nodes (id, user_id, name, status)
+      VALUES ('node-existing', 'user-1', 'Existing node', 'running');
+
+      INSERT INTO workspaces
+        (id, node_id, project_id, user_id, name, repository, status, vm_size, vm_location)
+      VALUES
+        ('workspace-existing', 'node-existing', 'project-1', 'user-1', 'Existing workspace', 'repo-1', 'running', 'medium', 'nbg1');
+
+      INSERT INTO tasks
+        (id, project_id, user_id, workspace_id, title, status, created_by)
+      VALUES
+        ('task-existing', 'project-1', 'user-1', 'workspace-existing', 'Existing task', 'queued', 'user-1');
+    `);
+
+    database.exec(runtimeNativeObservedMetadataMigrationSql);
+
+    expect(
+      database
+        .prepare(
+          `
+          SELECT
+            provider_instance_boot_disk_size_gb,
+            provider_instance_image,
+            provider_instance_architecture,
+            observed_provider_instance_type,
+            observed_provider_instance_vcpu_count,
+            observed_provider_instance_memory_mb,
+            observed_provider_instance_disk_gb,
+            observed_hardware_json,
+            observed_hardware_source
+          FROM nodes
+          WHERE id = 'node-existing'
+        `
+        )
+        .get()
+    ).toEqual({
+      provider_instance_boot_disk_size_gb: null,
+      provider_instance_image: null,
+      provider_instance_architecture: null,
+      observed_provider_instance_type: null,
+      observed_provider_instance_vcpu_count: null,
+      observed_provider_instance_memory_mb: null,
+      observed_provider_instance_disk_gb: null,
+      observed_hardware_json: null,
+      observed_hardware_source: null,
+    });
+
+    for (const table of ['tasks', 'workspaces', 'capacity_pool_candidates', 'compute_usage']) {
+      const columns = database
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .map((row) => (row as { name: string }).name);
+      expect(columns).toContain('provider_instance_boot_disk_size_gb');
+      expect(columns).toContain('provider_instance_image');
+      expect(columns).toContain('provider_instance_architecture');
+    }
+  });
+
+  it('contains no destructive statements', () => {
+    const sql = runtimeNativeObservedMetadataMigrationSql.toUpperCase();
+    expect(sql).not.toContain('DROP TABLE');
+    expect(sql).not.toContain('DELETE FROM');
+    expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
+    expect(sql).toContain('ALTER TABLE NODES ADD COLUMN OBSERVED_PROVIDER_INSTANCE_TYPE');
   });
 });

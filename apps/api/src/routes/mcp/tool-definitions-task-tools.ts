@@ -2,6 +2,8 @@
  * MCP tool definitions — task lifecycle, dispatch, and notification tools.
  */
 
+import { resourceRequirementsMcpProperty } from './tool-definitions-shared-fields';
+
 export const TASK_LIFECYCLE_TOOLS = [
   {
     name: 'get_instructions',
@@ -100,9 +102,14 @@ export const TASK_LIFECYCLE_TOOLS = [
         vmSize: {
           type: 'string',
           description:
-            'VM size for the dispatched task (small, medium, large). Defaults to project default.',
+            'Deprecated legacy VM size for the dispatched task (small, medium, large). Prefer resourceRequirements; the canonical compatibility adapter translates legacy tiers. Defaults to project default.',
           enum: ['small', 'medium', 'large'],
         },
+        resourceRequirements: resourceRequirementsMcpProperty({
+          nullable: false,
+          description:
+            'Modern workload requirements for the dispatched task. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved.',
+        }),
         runtime: {
           type: 'string',
           enum: ['vm', 'cf-container'],
@@ -127,7 +134,7 @@ export const TASK_LIFECYCLE_TOOLS = [
         agentProfileId: {
           type: 'string',
           description:
-            'Agent profile ID or name to use. Profile settings (model, permissionMode, agentType, vmSize, etc.) override project defaults but are overridden by explicit task-level fields.',
+            'Agent profile ID or name to use. Profile settings (model, permissionMode, agentType, resourceRequirements, deprecated vmSize, etc.) override project defaults but are overridden by explicit task-level fields.',
         },
         skillId: {
           type: 'string',

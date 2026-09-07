@@ -32,8 +32,15 @@ import {
 } from '../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
+import {
+  collectStoredResourceRequirementLayers,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  mergeResourceRequirementLayers,
+  ResourceRequirementsValidationError,
+} from '../../services/resource-requirements-input';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
+import { resolveSkillProfile } from '../../services/skills';
 import { markQueuedTaskFailed } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
@@ -89,6 +96,7 @@ export async function handleDispatchTask(
     explicitProvider,
     explicitVmLocation,
     explicitMissionId,
+    resourceRequirements,
   } = parsedParams.parsed;
 
   // ── Look up current task to get dispatch depth ──────────────────────────
@@ -230,9 +238,29 @@ export async function handleDispatchTask(
           env
         )
       : null;
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.resourceRequirementsJson
-  );
+  let resourceRequirementLayers: ReturnType<typeof collectStoredResourceRequirementLayers>;
+  try {
+    resourceRequirementLayers = mergeResourceRequirementLayers(
+      collectStoredResourceRequirementLayers({
+        skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null,
+        agentProfile:
+          resolvedProfile?.agentProfileResourceRequirementsJson ??
+          (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson),
+        project: project.resourceRequirementsJson,
+      }),
+      {
+        task: resourceRequirements,
+      }
+    );
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
+    throw err;
+  }
+  const persistedResourceRequirementsJson =
+    firstResourceRequirementLayerJson(resourceRequirementLayers);
+  const taskRunnerResourceRequirements = firstResourceRequirementLayer(resourceRequirementLayers);
 
   // ── Build the task description with references ──────────────────────────
   let fullDescription = description;
@@ -309,9 +337,7 @@ export async function handleDispatchTask(
     },
     credentialProjectPolicy: 'inherited-or-none',
     taskModeDefault: 'task',
-    resourceRequirements: {
-      skill: skillResourceRequirements,
-    },
+    resourceRequirements: resourceRequirementLayers,
   };
 
   let preliminaryPlacement: TaskStartPlacement;
@@ -473,7 +499,7 @@ export async function handleDispatchTask(
       explicitMissionId ?? currentTask.missionId ?? null,
       resolvedVmSize,
       vmSizeSource,
-      resolvedProfile?.resourceRequirementsJson ?? null,
+      persistedResourceRequirementsJson,
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
       credentialAttributionUserId,
@@ -680,6 +706,7 @@ export async function handleDispatchTask(
         resolvedReservation,
         capacityPoolSelection,
         vmSizeSource,
+        resourceRequirements: taskRunnerResourceRequirements,
       });
     } catch (err) {
       // TaskRunner DO startup failed — mark task as failed

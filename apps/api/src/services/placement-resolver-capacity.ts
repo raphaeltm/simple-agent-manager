@@ -2,22 +2,27 @@ import type {
   CapacityPlacementSnapshot,
   CapacityPool as CapacityPoolDto,
   CapacityPoolCandidate as CapacityPoolCandidateDto,
+  CapacityPoolPlacementSettings,
   CapacityPoolStrategy,
   CapacitySourceIdentity,
   CapacityWorkloadRole,
   CredentialSource,
   ResolvedResourceReservation,
   VMLocation,
-  VMSize,
 } from '@simple-agent-manager/shared';
 import {
-  canSatisfyVmSize,
   isCapacityPlacementCredentialSource,
   isValidLocationForProvider,
   isValidProvider,
+  resolveApproximateBillingMonthHours,
 } from '@simple-agent-manager/shared';
 
+import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
 import type { CapacityPoolSummary } from './default-capacity-pools';
+import {
+  legacyReusableNodeMatches,
+  normalizeLegacyPoolSize,
+} from './legacy-node-pool-compatibility';
 import type {
   CapacityAwareNodePlacementRow,
   TaskStartCapacityCandidate,
@@ -25,13 +30,25 @@ import type {
   TaskStartPlacement,
 } from './placement-resolver-types';
 
+const CAPACITY_PLACEMENT_PLAN_VERSION = 1;
+const MAX_SCORE_WEIGHT = 1_000_000_000;
+
 export function capacityPoolSnapshotForPool(
   selection: Pick<
     TaskStartCapacityPoolSelection,
-    'poolId' | 'scope' | 'revision' | 'strategy' | 'capacityPoolProjectId' | 'workloadRole'
+    | 'poolId'
+    | 'scope'
+    | 'revision'
+    | 'strategy'
+    | 'exhaustionPolicy'
+    | 'effectiveState'
+    | 'selectionSettings'
+    | 'capacityPoolProjectId'
+    | 'workloadRole'
   >
 ): CapacityPlacementSnapshot {
   return {
+    placementPlanVersion: CAPACITY_PLACEMENT_PLAN_VERSION,
     capacityPoolId: selection.poolId,
     capacityPoolScope: selection.scope,
     capacityPoolRevision: selection.revision,
@@ -42,6 +59,10 @@ export function capacityPoolSnapshotForPool(
     placementCredentialVersion: null,
     capacityPoolProjectId: selection.capacityPoolProjectId,
     workloadRole: selection.workloadRole,
+    exhaustionPolicy: selection.exhaustionPolicy,
+    effectivePoolState: selection.effectiveState,
+    selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
+    sourceGeneration: selectionSourceGeneration(selection),
     placementExplanationJson: buildCapacityPlacementExplanation(selection),
   };
 }
@@ -120,12 +141,21 @@ export function resolveReusableNodeCapacitySnapshot(input: {
 export function capacityPlacementSnapshotForCandidate(
   selection: Pick<
     TaskStartCapacityPoolSelection,
-    'poolId' | 'scope' | 'revision' | 'strategy' | 'capacityPoolProjectId' | 'workloadRole'
+    | 'poolId'
+    | 'scope'
+    | 'revision'
+    | 'strategy'
+    | 'exhaustionPolicy'
+    | 'effectiveState'
+    | 'selectionSettings'
+    | 'capacityPoolProjectId'
+    | 'workloadRole'
   >,
   candidate: TaskStartCapacityCandidate
 ): CapacityPlacementSnapshot {
   return (
     candidate.snapshot ?? {
+      placementPlanVersion: CAPACITY_PLACEMENT_PLAN_VERSION,
       capacityPoolId: selection.poolId,
       capacityPoolScope: selection.scope,
       capacityPoolRevision: selection.revision,
@@ -144,6 +174,10 @@ export function capacityPlacementSnapshotForCandidate(
       providerInstancePriceCurrency: candidate.providerInstancePriceCurrency,
       providerInstancePriceMonthlyCents: candidate.providerInstancePriceMonthlyCents,
       providerInstancePriceHourlyMicros: candidate.providerInstancePriceHourlyMicros,
+      exhaustionPolicy: selection.exhaustionPolicy,
+      effectivePoolState: selection.effectiveState,
+      selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
+      sourceGeneration: selectionSourceGeneration(selection, candidate),
       placementExplanationJson: buildCapacityPlacementExplanation(selection, candidate),
     }
   );
@@ -152,7 +186,8 @@ export function capacityPlacementSnapshotForCandidate(
 export function buildCapacityPoolSelection(
   summary: CapacityPoolSummary,
   placement: TaskStartPlacement,
-  workloadRole: CapacityWorkloadRole
+  workloadRole: CapacityWorkloadRole,
+  settings: CapacityPoolPlacementSettings = defaultPlacementSettings()
 ): TaskStartCapacityPoolSelection | null {
   const pool = summary.pool;
   const sourceById = new Map(summary.sources.map((source) => [source.id, source]));
@@ -161,26 +196,37 @@ export function buildCapacityPoolSelection(
     scope: pool.scope,
     revision: pool.revision,
     strategy: pool.strategy,
+    exhaustionPolicy: pool.exhaustionPolicy,
+    effectiveState: summary.effectiveState ?? 'configured-ready',
+    selectionSettings: settings,
     capacityPoolProjectId:
       pool.scope === 'project' ? (pool.ownerProjectId ?? placement.projectId) : null,
     workloadRole,
   };
   const poolSnapshot = capacityPoolSnapshotForPool(baseSelection);
 
-  const candidates = summary.candidates
-    .flatMap((candidate) => {
-      const source = sourceById.get(candidate.capacitySourceId);
-      if (!source) return [];
-      const normalized = normalizeCapacityCandidate(
-        pool,
-        candidate,
-        source,
-        placement,
-        workloadRole
-      );
-      return normalized ? [normalized] : [];
-    })
-    .sort((a, b) => compareCapacityCandidates(a, b, pool.strategy, placement.resolvedReservation));
+  const effectiveState = summary.effectiveState ?? 'configured-ready';
+  const candidates =
+    effectiveState === 'configured-ready'
+      ? classifyCandidatePriceComparability(
+          summary.candidates.flatMap((candidate) => {
+            const source = sourceById.get(candidate.capacitySourceId);
+            if (!source) return [];
+            const normalized = normalizeCapacityCandidate(
+              pool,
+              candidate,
+              source,
+              placement,
+              workloadRole,
+              settings,
+              effectiveState
+            );
+            return normalized ? [normalized] : [];
+          })
+        ).sort((a, b) =>
+          compareCapacityCandidates(a, b, pool.strategy, placement.resolvedReservation, settings)
+        )
+      : [];
 
   return {
     ...baseSelection,
@@ -194,7 +240,9 @@ function normalizeCapacityCandidate(
   candidate: CapacityPoolCandidateDto,
   source: CapacitySourceIdentity,
   placement: TaskStartPlacement,
-  workloadRole: CapacityWorkloadRole
+  workloadRole: CapacityWorkloadRole,
+  settings: CapacityPoolPlacementSettings,
+  effectiveState: TaskStartCapacityPoolSelection['effectiveState']
 ): TaskStartCapacityCandidate | null {
   if (!isActiveCapacityPlacementOption(pool, source, candidate)) return null;
   if (candidate.workloadRole !== workloadRole) return null;
@@ -210,6 +258,12 @@ function normalizeCapacityCandidate(
   const providerInstanceMemoryMb = positiveInteger(candidate.providerInstanceMemoryMb);
   if (providerInstanceVcpuCount === null || providerInstanceMemoryMb === null) return null;
   const providerInstanceDiskGb = optionalPositiveInteger(candidate.providerInstanceDiskGb);
+  const catalogAvailability =
+    candidate.catalogAvailability === 'last-known-unavailable' ||
+    candidate.providerInstanceCatalogSource === null
+      ? 'last-known-unavailable'
+      : 'available';
+  if (catalogAvailability !== 'available') return null;
   if (
     !capacityCandidateSatisfiesReservation(
       {
@@ -242,7 +296,7 @@ function normalizeCapacityCandidate(
     workloadRole: candidate.workloadRole,
     runtime: candidate.runtime,
     machineClass: candidate.machineClass,
-    machineSize: normalizeLegacyVmSize(candidate.machineSize),
+    machineSize: normalizeLegacyPoolSize(candidate.machineSize),
     providerInstanceType,
     providerInstanceVcpuCount,
     providerInstanceMemoryMb,
@@ -255,6 +309,8 @@ function normalizeCapacityCandidate(
     providerInstancePriceHourlyMicros: nonNegativeInteger(
       candidate.providerInstancePriceHourlyMicros
     ),
+    priceComparability: 'unknown',
+    catalogAvailability,
     priority: candidate.priority,
     candidateOrder: candidate.candidateOrder,
     credentialAttributionSource: source.credentialSource,
@@ -267,6 +323,7 @@ function normalizeCapacityCandidate(
   return {
     ...normalized,
     snapshot: {
+      placementPlanVersion: CAPACITY_PLACEMENT_PLAN_VERSION,
       capacityPoolId: pool.id,
       capacityPoolScope: pool.scope,
       capacityPoolRevision: pool.revision,
@@ -289,12 +346,25 @@ function normalizeCapacityCandidate(
       providerInstancePriceHourlyMicros: nonNegativeInteger(
         candidate.providerInstancePriceHourlyMicros
       ),
+      exhaustionPolicy: pool.exhaustionPolicy,
+      effectivePoolState: effectiveState,
+      selectionSettingsVersion: settings.sourceGeneration,
+      sourceGeneration: selectionSourceGeneration(
+        {
+          revision: pool.revision,
+          selectionSettings: settings,
+        },
+        normalized
+      ),
       placementExplanationJson: buildCapacityPlacementExplanation(
         {
           poolId: pool.id,
           scope: pool.scope,
           revision: pool.revision,
           strategy: pool.strategy,
+          exhaustionPolicy: pool.exhaustionPolicy,
+          effectiveState,
+          selectionSettings: settings,
           capacityPoolProjectId,
           workloadRole,
         },
@@ -349,7 +419,15 @@ function capacityCandidateMatchesNode(
   if (node.providerInstanceType) {
     if (candidate.providerInstanceType !== node.providerInstanceType) return false;
   } else if (candidate.machineSize && node.vmSize) {
-    if (!canSatisfyVmSize(node.vmSize, candidate.machineSize)) return false;
+    if (
+      !legacyReusableNodeMatches({
+        nodeVmSize: node.vmSize,
+        requestedVmSize,
+        candidateMachineSize: candidate.machineSize,
+      })
+    ) {
+      return false;
+    }
   } else {
     return false;
   }
@@ -367,17 +445,23 @@ function capacityCandidateMatchesNode(
   }
 
   if (node.providerInstanceType) return true;
-  return node.vmSize ? canSatisfyVmSize(node.vmSize, requestedVmSize) : false;
+  return legacyReusableNodeMatches({
+    nodeVmSize: node.vmSize,
+    requestedVmSize,
+    candidateMachineSize: null,
+  });
 }
 
 function compareCapacityCandidates(
   a: TaskStartCapacityCandidate,
   b: TaskStartCapacityCandidate,
   strategy: CapacityPoolStrategy,
-  reservation: ResolvedResourceReservation
+  reservation: ResolvedResourceReservation,
+  settings: CapacityPoolPlacementSettings = defaultPlacementSettings()
 ): number {
   const capacityDiff = compareOfferingCapacity(a, b);
   if (strategy === 'pack' && capacityDiff !== 0) return -capacityDiff;
+  if (a.priority !== b.priority) return a.priority - b.priority;
   if (strategy === 'smallest-fit') {
     const fitDiff = compareOfferingFitSurplus(a, b, reservation);
     if (fitDiff !== 0) return fitDiff;
@@ -385,12 +469,38 @@ function compareCapacityCandidates(
     if (priceDiff !== 0) return priceDiff;
     if (capacityDiff !== 0) return capacityDiff;
   }
-  if (a.priority !== b.priority) return a.priority - b.priority;
+  const weighted =
+    weightedCandidateScore(a, strategy, reservation, settings) -
+    weightedCandidateScore(b, strategy, reservation, settings);
+  if (weighted !== 0) return weighted;
   const priceDiff = compareOfferingPrice(a, b);
   if (priceDiff !== 0) return priceDiff;
   if (strategy !== 'pack' && capacityDiff !== 0) return capacityDiff;
   if (a.candidateOrder !== b.candidateOrder) return a.candidateOrder - b.candidateOrder;
   return a.id.localeCompare(b.id);
+}
+
+function weightedCandidateScore(
+  candidate: TaskStartCapacityCandidate,
+  strategy: CapacityPoolStrategy,
+  reservation: ResolvedResourceReservation,
+  settings: CapacityPoolPlacementSettings
+): number {
+  const weights = settings.selectionWeights;
+  const price = normalizedPriceScore(candidate);
+  const fit = boundedScoreTerm(offeringFitSurplus(candidate, reservation));
+  const capacity = compareOfferingCapacity(candidate, {
+    providerInstanceVcpuCount: 0,
+    providerInstanceMemoryMb: 0,
+    providerInstanceDiskGb: 0,
+  });
+  const capacityTerm = strategy === 'pack' ? -capacity : capacity;
+  const score =
+    price * boundedWeight(weights.price) +
+    fit * boundedWeight(weights.fit) +
+    boundedScoreTerm(capacityTerm) * boundedWeight(weights.capacity) +
+    boundedScoreTerm(candidate.candidateOrder) * boundedWeight(weights.candidateOrder);
+  return Number.isFinite(score) ? score : Number.MAX_SAFE_INTEGER;
 }
 
 function capacityCandidateSatisfiesReservation(
@@ -497,6 +607,7 @@ function compareOfferingPrice(
     | 'providerInstancePriceCurrency'
     | 'providerInstancePriceMonthlyCents'
     | 'providerInstancePriceHourlyMicros'
+    | 'placementCredentialVersion'
   >,
   b: Pick<
     TaskStartCapacityCandidate,
@@ -505,6 +616,11 @@ function compareOfferingPrice(
     | 'providerInstancePriceHourlyMicros'
   >
 ): number {
+  const aComparability = priceComparability(a);
+  const bComparability = priceComparability(b);
+  if (aComparability !== 'known' && bComparability !== 'known') return 0;
+  if (aComparability !== 'known') return 1;
+  if (bComparability !== 'known') return -1;
   const aPrice = comparablePriceMicros(a);
   const bPrice = comparablePriceMicros(b);
   if (aPrice === null && bPrice === null) return 0;
@@ -512,6 +628,71 @@ function compareOfferingPrice(
   if (bPrice === null) return -1;
   if (aPrice.currency !== bPrice.currency) return 0;
   return aPrice.value - bPrice.value;
+}
+
+function classifyCandidatePriceComparability(
+  candidates: TaskStartCapacityCandidate[]
+): TaskStartCapacityCandidate[] {
+  const pricedCurrencies = new Set(
+    candidates.flatMap((candidate) => {
+      const price = comparablePriceMicros(candidate);
+      return price ? [price.currency] : [];
+    })
+  );
+  const hasCurrencyMismatch = pricedCurrencies.size > 1;
+  return candidates.map((candidate) => {
+    const price = comparablePriceMicros(candidate);
+    return {
+      ...candidate,
+      priceComparability: price ? (hasCurrencyMismatch ? 'currency-mismatch' : 'known') : 'unknown',
+    };
+  });
+}
+
+function priceComparability(
+  candidate: Pick<
+    TaskStartCapacityCandidate,
+    | 'providerInstancePriceCurrency'
+    | 'providerInstancePriceMonthlyCents'
+    | 'providerInstancePriceHourlyMicros'
+  >
+): TaskStartCapacityCandidate['priceComparability'] {
+  return 'priceComparability' in candidate &&
+    (candidate.priceComparability === 'known' ||
+      candidate.priceComparability === 'unknown' ||
+      candidate.priceComparability === 'currency-mismatch')
+    ? candidate.priceComparability
+    : comparablePriceMicros(candidate)
+      ? 'known'
+      : 'unknown';
+}
+
+function normalizedPriceScore(candidate: TaskStartCapacityCandidate): number {
+  if (candidate.priceComparability !== 'known') return 1_000_000;
+  const price = comparablePriceMicros(candidate);
+  if (!price) return 1_000_000;
+  return Math.min(1_000_000, price.value / 1_000);
+}
+
+function boundedScoreTerm(value: number): number {
+  if (!Number.isFinite(value)) return Number.MAX_SAFE_INTEGER / MAX_SCORE_WEIGHT;
+  return Math.max(-1_000_000_000, Math.min(1_000_000_000, value));
+}
+
+function boundedWeight(value: number): number {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.min(value, MAX_SCORE_WEIGHT);
+}
+
+function selectionSourceGeneration(
+  selection: Pick<TaskStartCapacityPoolSelection, 'revision' | 'selectionSettings'>,
+  candidate?: Pick<TaskStartCapacityCandidate, 'placementCredentialVersion'> | null
+): number {
+  return Math.max(
+    selection.revision,
+    selection.selectionSettings.sourceGeneration ?? selection.selectionSettings.version,
+    candidate?.placementCredentialVersion ?? 0
+  );
 }
 
 function comparablePriceMicros(
@@ -527,8 +708,24 @@ function comparablePriceMicros(
   const hourly = nonNegativeInteger(candidate.providerInstancePriceHourlyMicros);
   if (hourly !== null) return { currency, value: hourly };
   const monthly = nonNegativeInteger(candidate.providerInstancePriceMonthlyCents);
-  if (monthly !== null) return { currency, value: monthly };
+  if (monthly !== null) {
+    return {
+      currency,
+      value: Math.round((monthly * 10_000) / resolveApproximateBillingMonthHours(null)),
+    };
+  }
   return null;
+}
+
+function defaultPlacementSettings(): CapacityPoolPlacementSettings {
+  return {
+    ...DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS,
+    source: {
+      legacyWorkloadMapping: 'default',
+      selection: 'default',
+    },
+    diagnostics: [],
+  };
 }
 
 function nonEmptyString(value: string | null | undefined): string | null {
@@ -550,17 +747,6 @@ function nonNegativeInteger(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-function normalizeLegacyVmSize(value: string | null): VMSize | null {
-  switch (value) {
-    case 'small':
-    case 'medium':
-    case 'large':
-      return value;
-    default:
-      return null;
-  }
-}
-
 function isCredentialPlacementSource(value: unknown): value is CredentialSource {
   return (
     isCapacityPlacementCredentialSource(value) &&
@@ -571,7 +757,15 @@ function isCredentialPlacementSource(value: unknown): value is CredentialSource 
 function buildCapacityPlacementExplanation(
   selection: Pick<
     TaskStartCapacityPoolSelection,
-    'poolId' | 'scope' | 'revision' | 'strategy' | 'capacityPoolProjectId' | 'workloadRole'
+    | 'poolId'
+    | 'scope'
+    | 'revision'
+    | 'strategy'
+    | 'exhaustionPolicy'
+    | 'effectiveState'
+    | 'selectionSettings'
+    | 'capacityPoolProjectId'
+    | 'workloadRole'
   >,
   candidate?: Pick<
     TaskStartCapacityCandidate,
@@ -588,10 +782,12 @@ function buildCapacityPlacementExplanation(
     | 'providerInstancePriceCurrency'
     | 'providerInstancePriceMonthlyCents'
     | 'providerInstancePriceHourlyMicros'
+    | 'placementCredentialVersion'
   >
 ): string {
   return JSON.stringify({
     kind: 'capacity_pool_default',
+    placementPlanVersion: CAPACITY_PLACEMENT_PLAN_VERSION,
     poolId: selection.poolId,
     scope: selection.scope,
     revision: selection.revision,
@@ -611,6 +807,10 @@ function buildCapacityPlacementExplanation(
     providerInstancePriceCurrency: candidate?.providerInstancePriceCurrency ?? null,
     providerInstancePriceMonthlyCents: candidate?.providerInstancePriceMonthlyCents ?? null,
     providerInstancePriceHourlyMicros: candidate?.providerInstancePriceHourlyMicros ?? null,
+    exhaustionPolicy: selection.exhaustionPolicy,
+    effectivePoolState: selection.effectiveState,
+    selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
+    sourceGeneration: selectionSourceGeneration(selection, candidate),
     decidedAt: new Date().toISOString(),
   });
 }

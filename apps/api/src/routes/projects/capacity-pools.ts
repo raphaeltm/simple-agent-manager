@@ -82,26 +82,16 @@ function resolveVisibleEffective(
 ): {
   effective: ProjectDefaultCapacityPoolsResponse['effective'];
   effectiveScope: CapacityPoolScope | null;
+  effectiveState: ProjectDefaultCapacityPoolsResponse['effectiveState'];
 } {
-  const activeProject = activeDefaultSummary(summaries.project);
-  const activeUser = activeDefaultSummary(summaries.user);
-  const activeInstallation = includeInstallation
-    ? activeDefaultSummary(summaries.installation)
-    : null;
-  const effective = activeProject ?? activeUser ?? activeInstallation;
+  const effective =
+    summaries.project ?? summaries.user ?? (includeInstallation ? summaries.installation : null);
 
   return {
     effective,
     effectiveScope: effective?.pool.scope ?? null,
+    effectiveState: effective?.effectiveState,
   };
-}
-
-function activeDefaultSummary(
-  summary: DefaultCapacityPoolsEnsureResult[keyof DefaultCapacityPoolsEnsureResult]
-): ProjectDefaultCapacityPoolsResponse['effective'] {
-  if (!summary || summary.pool.status !== 'active' || summary.activeCandidateCount <= 0)
-    return null;
-  return summary;
 }
 
 async function buildDefaultPoolResponse(

@@ -114,7 +114,17 @@ Exact specs and pricing are shown in the size picker when you create a workspace
 
 Projects that use Infrastructure Compute Pools can go beyond the three legacy size presets. Pool
 editors reconcile from the selected provider credential's native instance catalog and let you add or
-remove concrete offerings by provider, location, vCPU, memory, and price.
+remove concrete offerings by provider, location, vCPU, memory, storage, and price. For those native
+pool offerings, SAM provisions the exact provider instance type rather than deriving hardware from
+the old small/medium/large label. The legacy labels remain compatibility presets for older profiles,
+tasks, and direct workspace requests.
+
+Provider responses are also kept separate from requested compatibility labels. The provider layer
+returns provenance-labeled observed hardware from the cloud API: returned server types and resource
+fields are marked observed, and omitted CPU, memory, or disk details are marked unknown instead of
+being invented from the legacy size (`packages/providers/src/native-vm-config.ts`). The node-pool
+integration that persists those observations into pool/admission records is tracked in the active
+node-pool section C work.
 
 :::note
 Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud). On the hosted platform, compute is typically provided for you.

@@ -46,6 +46,8 @@ import {
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import {
   findNodeWithCapacity,
+  getTaskReservation,
+  hasReusableNodeReservationCapacity,
   nodeSatisfiesTaskResources,
   releaseClaimedWarmNode,
   type ReusableNodeSelection,
@@ -132,11 +134,16 @@ export async function handleNodeSelection(
          provider_instance_vcpu_count AS providerInstanceVcpuCount,
          provider_instance_memory_mb AS providerInstanceMemoryMb,
          provider_instance_disk_gb AS providerInstanceDiskGb,
+         provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+         provider_instance_image AS providerInstanceImage,
+         provider_instance_architecture AS providerInstanceArchitecture,
          provider_instance_price_display AS providerInstancePriceDisplay,
          provider_instance_price_currency AS providerInstancePriceCurrency,
          provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
          provider_instance_price_hourly_micros AS providerInstancePriceHourlyMicros,
          placement_explanation_json AS placementExplanationJson,
+         last_metrics AS lastMetrics,
+         last_heartbeat_at AS lastHeartbeatAt,
          agent_version AS agentVersion
        FROM nodes WHERE id = ? AND user_id = ?`
     )
@@ -163,12 +170,20 @@ export async function handleNodeSelection(
         permanent: true,
       });
     }
+    if (!(await hasReusableNodeReservationCapacity(rc, state, node))) {
+      throw Object.assign(
+        new Error('Specified node lacks aggregate reservation capacity or fresh safe telemetry'),
+        {
+          permanent: true,
+        }
+      );
+    }
     const capacityPlacementSnapshot = resolveReusableNodeCapacitySnapshot({
       selection: state.config.capacityPoolSelection,
       node,
       projectId: state.projectId,
       requestedVmSize: state.config.vmSize,
-      requestedReservation: state.config.resolvedReservation ?? null,
+      requestedReservation: getTaskReservation(state),
     });
     if (capacityPlacementSnapshot === undefined) {
       throw Object.assign(new Error('Specified node is outside the selected capacity pool'), {
@@ -275,6 +290,9 @@ export async function handleNodeProvisioning(
            provider_instance_vcpu_count AS providerInstanceVcpuCount,
            provider_instance_memory_mb AS providerInstanceMemoryMb,
            provider_instance_disk_gb AS providerInstanceDiskGb,
+           provider_instance_boot_disk_size_gb AS providerInstanceBootDiskSizeGb,
+           provider_instance_image AS providerInstanceImage,
+           provider_instance_architecture AS providerInstanceArchitecture,
            provider_instance_price_display AS providerInstancePriceDisplay,
            provider_instance_price_currency AS providerInstancePriceCurrency,
            provider_instance_price_monthly_cents AS providerInstancePriceMonthlyCents,
@@ -543,6 +561,9 @@ export async function handleNodeProvisioning(
       heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
       cloudProvider: state.config.cloudProvider ?? undefined,
       providerInstanceType: state.config.providerInstanceType ?? null,
+      providerInstanceBootDiskSizeGb: state.config.providerInstanceBootDiskSizeGb ?? null,
+      providerInstanceImage: state.config.providerInstanceImage ?? null,
+      providerInstanceArchitecture: state.config.providerInstanceArchitecture ?? null,
       capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
     });
 

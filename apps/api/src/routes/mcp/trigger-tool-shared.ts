@@ -20,6 +20,7 @@ export interface TriggerDbRow {
   skill_id: string | null;
   task_mode: string | null;
   vm_size_override: string | null;
+  resource_requirements_json: string | null;
   max_concurrent: number | null;
   next_fire_at: string | null;
   created_at: string;
@@ -51,6 +52,7 @@ export function triggerResponse(row: TriggerDbRow, cronHumanReadable?: string) {
     skillId: row.skill_id,
     taskMode: row.task_mode ?? 'task',
     vmSizeOverride: row.vm_size_override,
+    resourceRequirementsJson: row.resource_requirements_json,
     maxConcurrent: row.max_concurrent ?? DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
     nextFireAt: row.next_fire_at,
     cronHumanReadable:
@@ -67,7 +69,8 @@ async function getTriggerById(env: Env, triggerId: string): Promise<TriggerDbRow
   return env.DATABASE.prepare(
     `SELECT id, project_id, name, description, status, source_type, cron_expression,
       cron_timezone, skip_if_running, prompt_template, agent_profile_id, skill_id,
-      task_mode, vm_size_override, max_concurrent, next_fire_at, created_at, updated_at
+      task_mode, vm_size_override, resource_requirements_json, max_concurrent, next_fire_at,
+      created_at, updated_at
      FROM triggers
      WHERE id = ?
      LIMIT 1`

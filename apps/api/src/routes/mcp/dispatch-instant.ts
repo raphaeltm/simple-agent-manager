@@ -21,6 +21,7 @@ const VM_ONLY_FIELDS = [
   'vmLocation',
   'workspaceProfile',
   'devcontainerConfigName',
+  'resourceRequirements',
 ] as const;
 
 export function parseDispatchRuntime(value: unknown): AgentProfileRuntime | undefined {

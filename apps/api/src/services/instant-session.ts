@@ -269,10 +269,28 @@ export async function acceptInstantSession(
     vmSize: 'standard-1',
     vmLocation: 'cf-container',
     cloudProvider: 'cloudflare',
+    providerInstanceType: 'cf-container',
     heartbeatStaleAfterSeconds: env.NODE_HEARTBEAT_STALE_SECONDS
       ? Number.parseInt(env.NODE_HEARTBEAT_STALE_SECONDS, 10)
       : 180,
     runtime: 'cf-container',
+    capacityPlacementSnapshot: {
+      capacityPoolId: null,
+      capacityPoolScope: null,
+      capacityPoolRevision: null,
+      capacitySourceId: null,
+      capacityPoolCandidateId: null,
+      placementCredentialSource: null,
+      placementCredentialReference: null,
+      placementCredentialVersion: null,
+      capacityPoolProjectId: null,
+      workloadRole: 'workspace',
+      providerInstanceType: 'cf-container',
+      placementExplanationJson: JSON.stringify({
+        kind: 'explicit_runtime_adapter',
+        runtime: 'cf-container',
+      }),
+    },
   });
 
   const nodeId = node.id;
@@ -292,6 +310,7 @@ export async function acceptInstantSession(
     status: 'creating',
     vmSize: 'standard-1',
     vmLocation: 'cf-container',
+    providerInstanceType: 'cf-container',
     workspaceProfile: 'lightweight',
     agentProfileHint: input.agentProfileId ?? null,
     createdAt: now,

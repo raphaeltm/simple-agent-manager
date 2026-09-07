@@ -1,5 +1,14 @@
+import {
+  normalizeResourceRequirements,
+  RESOURCE_REQUIREMENT_FIELDS,
+  resourceRequirementToReservationUnit,
+} from '../resource-requirements';
 import type {
+  LegacyVmSizeResolutionInput,
   ResolvedResourceReservation,
+  ResourceRequirementField,
+  ResourceRequirementFieldProvenance,
+  ResourceRequirementProvenance,
   ResourceRequirements,
   ResourceRequirementsSource,
   ResourceResolutionInput,
@@ -11,7 +20,10 @@ import type { VMSize } from '../types/workspace';
 // =============================================================================
 
 /** Current schema version for ResolvedResourceReservation. Bump when fields change. */
-export const RESOURCE_RESERVATION_VERSION = 1;
+export const RESOURCE_RESERVATION_VERSION = 2;
+
+export const LEGACY_VM_SIZE_WORKLOAD_ADAPTER = 'legacy-vm-size-workload';
+export const LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION = 1;
 
 // =============================================================================
 // Platform Defaults (bottom of the precedence chain)
@@ -24,6 +36,40 @@ export const PLATFORM_RESOURCE_DEFAULTS: Required<ResourceRequirements> = {
   minDiskGb: 40,
   exclusiveNode: false,
   maxCoTenants: 4,
+};
+
+/**
+ * Compatibility defaults for deprecated small/medium/large values.
+ *
+ * These are workload slices, not historical whole-VM shapes. Deployments can
+ * override them through persisted capacity-pool settings or environment
+ * fallback; the version/provenance is persisted on resolved reservations.
+ */
+export const DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS: Record<
+  VMSize,
+  Required<ResourceRequirements>
+> = {
+  small: {
+    minVcpu: 1,
+    minMemoryGb: 2,
+    minDiskGb: 20,
+    exclusiveNode: false,
+    maxCoTenants: 4,
+  },
+  medium: {
+    minVcpu: 2,
+    minMemoryGb: 4,
+    minDiskGb: 40,
+    exclusiveNode: false,
+    maxCoTenants: 3,
+  },
+  large: {
+    minVcpu: 4,
+    minMemoryGb: 8,
+    minDiskGb: 80,
+    exclusiveNode: false,
+    maxCoTenants: 2,
+  },
 };
 
 // =============================================================================
@@ -117,9 +163,15 @@ interface ResolutionLayer {
   source: ResourceRequirementsSource;
   sourceId: string;
   requirements?: ResourceRequirements;
+  legacyVmSize?: VMSize;
 }
 
-type RequirementField = keyof ResourceRequirements;
+export interface ResourceReservationResolutionOptions {
+  platformDefaults?: Required<ResourceRequirements>;
+  legacyVmSizes?: LegacyVmSizeResolutionInput;
+  legacyWorkloadMapping?: Record<VMSize, Required<ResourceRequirements>>;
+  compatibilityAdapterVersion?: number;
+}
 
 /**
  * Resolve resource requirements from the precedence chain.
@@ -138,75 +190,237 @@ export function resolveResourceReservation(
     agentProfileId?: string;
     projectId?: string;
     userId?: string;
-  } = {}
+  } = {},
+  options: ResourceReservationResolutionOptions = {}
 ): ResolvedResourceReservation {
+  const platformDefaults = validateResourceRequirementsLayer(
+    'platform',
+    'platform',
+    options.platformDefaults ?? PLATFORM_RESOURCE_DEFAULTS,
+    { requireAllFields: true }
+  ) as Required<ResourceRequirements>;
+  const legacyWorkloadMapping = options.legacyWorkloadMapping
+    ? validateLegacyWorkloadMapping(options.legacyWorkloadMapping)
+    : DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS;
+  const compatibilityAdapterVersion =
+    options.compatibilityAdapterVersion ?? LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION;
   const layers: ResolutionLayer[] = [
-    { source: 'task', sourceId: ids.taskId ?? '', requirements: input.task },
-    { source: 'trigger', sourceId: ids.triggerId ?? '', requirements: input.trigger },
-    { source: 'skill', sourceId: ids.skillId ?? '', requirements: input.skill },
+    {
+      source: 'task',
+      sourceId: ids.taskId ?? '',
+      requirements: input.task,
+      legacyVmSize: options.legacyVmSizes?.task,
+    },
+    {
+      source: 'trigger',
+      sourceId: ids.triggerId ?? '',
+      requirements: input.trigger,
+      legacyVmSize: options.legacyVmSizes?.trigger,
+    },
+    {
+      source: 'skill',
+      sourceId: ids.skillId ?? '',
+      requirements: input.skill,
+      legacyVmSize: options.legacyVmSizes?.skill,
+    },
     {
       source: 'agent-profile',
       sourceId: ids.agentProfileId ?? '',
       requirements: input.agentProfile,
+      legacyVmSize: options.legacyVmSizes?.['agent-profile'],
     },
-    { source: 'project', sourceId: ids.projectId ?? '', requirements: input.project },
-    { source: 'user', sourceId: ids.userId ?? '', requirements: input.user },
-  ];
-
-  const fields: RequirementField[] = [
-    'minVcpu',
-    'minMemoryGb',
-    'minDiskGb',
-    'exclusiveNode',
-    'maxCoTenants',
+    {
+      source: 'project',
+      sourceId: ids.projectId ?? '',
+      requirements: input.project,
+      legacyVmSize: options.legacyVmSizes?.project,
+    },
+    {
+      source: 'user',
+      sourceId: ids.userId ?? '',
+      requirements: input.user,
+      legacyVmSize: options.legacyVmSizes?.user,
+    },
   ];
 
   const resolved: Record<string, unknown> = {};
-  const seen = new Set<RequirementField>();
+  const provenance: ResourceRequirementProvenance = {};
+  const diagnostics: string[] = [];
+  const seen = new Set<ResourceRequirementField>();
   let winningSource: ResourceRequirementsSource = 'platform';
   let winningSourceId = 'platform';
   let firstWinnerFound = false;
 
-  for (const layer of layers) {
-    if (!layer.requirements) continue;
-    const req = layer.requirements;
-    let layerContributed = false;
-
-    for (const field of fields) {
+  const recordLayerContribution = (
+    layer: ResolutionLayer,
+    req: { requirements: ResourceRequirements; provenance: ResourceRequirementProvenance }
+  ): void => {
+    for (const field of RESOURCE_REQUIREMENT_FIELDS) {
       if (seen.has(field)) continue;
-      if (req[field] !== undefined) {
-        resolved[field] = req[field];
+      const fieldValue = req.requirements[field];
+      if (fieldValue !== undefined) {
+        resolved[field] = fieldValue;
         seen.add(field);
-        layerContributed = true;
+        provenance[field] = req.provenance[field];
+        if (!firstWinnerFound) {
+          winningSource = layer.source;
+          winningSourceId = layer.sourceId;
+          firstWinnerFound = true;
+        }
       }
     }
+  };
 
-    if (layerContributed && !firstWinnerFound) {
-      winningSource = layer.source;
-      winningSourceId = layer.sourceId;
-      firstWinnerFound = true;
-    }
+  for (const layer of layers) {
+    const explicit = validatedExplicitLayer(layer);
+    if (explicit) recordLayerContribution(layer, explicit);
+
+    const legacy = validatedLegacyLayer(layer, {
+      mapping: legacyWorkloadMapping,
+      adapterVersion: compatibilityAdapterVersion,
+      diagnostics,
+    });
+    if (legacy) recordLayerContribution(layer, legacy);
   }
 
   // Fill remaining fields from platform defaults
-  for (const field of fields) {
+  for (const field of RESOURCE_REQUIREMENT_FIELDS) {
     if (!seen.has(field)) {
-      resolved[field] = PLATFORM_RESOURCE_DEFAULTS[field];
+      resolved[field] = platformDefaults[field];
+      provenance[field] = {
+        source: 'platform',
+        sourceId: 'platform',
+        value: platformDefaults[field],
+      };
     }
   }
 
   const minVcpu = resolved['minVcpu'] as number;
   const minMemoryGb = resolved['minMemoryGb'] as number;
   const minDiskGb = resolved['minDiskGb'] as number;
+  const cpuMillis = resourceRequirementToReservationUnit('minVcpu', minVcpu);
+  const memoryMb = resourceRequirementToReservationUnit('minMemoryGb', minMemoryGb);
+  const diskMb = resourceRequirementToReservationUnit('minDiskGb', minDiskGb);
 
   return {
-    cpuMillis: minVcpu * 1000,
-    memoryMb: minMemoryGb * 1024,
-    diskMb: minDiskGb * 1024,
+    cpuMillis,
+    memoryMb,
+    diskMb,
     exclusiveNode: resolved['exclusiveNode'] as boolean,
     maxCoTenants: resolved['maxCoTenants'] as number,
     source: winningSource,
     sourceId: winningSourceId,
     version: RESOURCE_RESERVATION_VERSION,
+    fieldProvenance: provenance,
+    diagnostics,
   };
+}
+
+function validatedExplicitLayer(
+  layer: ResolutionLayer
+): { requirements: ResourceRequirements; provenance: ResourceRequirementProvenance } | null {
+  const explicit = validateResourceRequirementsLayer(
+    layer.source,
+    layer.sourceId,
+    layer.requirements
+  );
+  if (!explicit) return null;
+  const provenance: ResourceRequirementProvenance = {};
+  let hasValue = false;
+
+  for (const field of RESOURCE_REQUIREMENT_FIELDS) {
+    const explicitValue = explicit[field];
+    if (explicitValue === undefined) continue;
+    provenance[field] = { source: layer.source, sourceId: layer.sourceId, value: explicitValue };
+    hasValue = true;
+  }
+
+  return hasValue ? { requirements: explicit, provenance } : null;
+}
+
+function validatedLegacyLayer(
+  layer: ResolutionLayer,
+  options: {
+    mapping: Record<VMSize, Required<ResourceRequirements>>;
+    adapterVersion: number;
+    diagnostics: string[];
+  }
+): { requirements: ResourceRequirements; provenance: ResourceRequirementProvenance } | null {
+  const provenance: ResourceRequirementProvenance = {};
+  const merged: ResourceRequirements = {};
+  if (!layer.legacyVmSize) return null;
+
+  const legacyDefaults = options.mapping[layer.legacyVmSize];
+  for (const field of RESOURCE_REQUIREMENT_FIELDS) {
+    const legacyValue = legacyDefaults[field];
+    setNormalizedResourceRequirementField(merged, field, legacyValue);
+    provenance[field] = legacyFieldProvenance(layer, legacyValue, options.adapterVersion);
+  }
+  options.diagnostics.push(
+    `${layer.source}:${layer.legacyVmSize}:mapped-by-${LEGACY_VM_SIZE_WORKLOAD_ADAPTER}-v${options.adapterVersion}`
+  );
+
+  return { requirements: merged, provenance };
+}
+
+function setNormalizedResourceRequirementField(
+  target: ResourceRequirements,
+  field: ResourceRequirementField,
+  value: number | boolean
+): void {
+  if (field === 'exclusiveNode') {
+    target.exclusiveNode = value as boolean;
+    return;
+  }
+  target[field] = value as number;
+}
+
+function legacyFieldProvenance(
+  layer: ResolutionLayer,
+  value: number | boolean,
+  adapterVersion: number
+): ResourceRequirementFieldProvenance {
+  return {
+    source: layer.source,
+    sourceId: layer.sourceId,
+    value,
+    compatibility: {
+      adapter: LEGACY_VM_SIZE_WORKLOAD_ADAPTER,
+      version: adapterVersion,
+      legacyVmSize: layer.legacyVmSize as VMSize,
+    },
+  };
+}
+
+function validateLegacyWorkloadMapping(
+  mapping: Record<VMSize, Required<ResourceRequirements>>
+): Record<VMSize, Required<ResourceRequirements>> {
+  return {
+    small: validateResourceRequirementsLayer('platform', 'legacy:small', mapping.small, {
+      requireAllFields: true,
+    }) as Required<ResourceRequirements>,
+    medium: validateResourceRequirementsLayer('platform', 'legacy:medium', mapping.medium, {
+      requireAllFields: true,
+    }) as Required<ResourceRequirements>,
+    large: validateResourceRequirementsLayer('platform', 'legacy:large', mapping.large, {
+      requireAllFields: true,
+    }) as Required<ResourceRequirements>,
+  };
+}
+
+function validateResourceRequirementsLayer(
+  source: ResourceRequirementsSource,
+  sourceId: string,
+  requirements: ResourceRequirements | undefined,
+  options: { requireAllFields?: boolean } = {}
+): ResourceRequirements | undefined {
+  if (!requirements) return undefined;
+  try {
+    return normalizeResourceRequirements(requirements, options);
+  } catch (err) {
+    if (err instanceof Error) {
+      throw new Error(`Invalid ${source} resource requirements ${sourceId}: ${err.message}`);
+    }
+    throw err;
+  }
 }

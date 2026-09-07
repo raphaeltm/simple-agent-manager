@@ -26,6 +26,11 @@ import {
 import { fetchPaginatedHetznerList } from './hetzner-pagination';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import {
+  assertIncludedBootDiskCapacity,
+  type ResolvedNativeVMConfig,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
+import {
   providerDelay,
   providerFetch,
   rethrowIfProviderRequestAborted,
@@ -129,11 +134,13 @@ export class HetznerProvider implements Provider {
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const sizeConfig = this.sizes[config.size];
-    if (!sizeConfig) {
-      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
-    }
-    const serverType = config.instanceType ?? sizeConfig.type;
+    const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
+      providerName: this.name,
+      defaultLocation: this.datacenter,
+      legacySizes: this.sizes,
+      defaultImage: DEFAULT_HETZNER_IMAGE,
+    });
+    assertIncludedBootDiskCapacity(this.name, nativeConfig);
 
     const deadline = Date.now() + this.capacityRetryBudgetMs;
     let lastCapacityError: ProviderError | undefined;
@@ -144,14 +151,13 @@ export class HetznerProvider implements Provider {
       capacityAttempt++
     ) {
       try {
-        return await this.attemptCreateWithPlacementFallback(config, serverType, context);
+        return await this.attemptCreateWithPlacementFallback(nativeConfig, context);
       } catch (err) {
         lastCapacityError = await this.retryAfterCapacityError(
           err,
           capacityAttempt,
           deadline,
-          config,
-          serverType,
+          nativeConfig,
           context
         );
       }
@@ -167,8 +173,7 @@ export class HetznerProvider implements Provider {
     error: unknown,
     attempt: number,
     deadline: number,
-    config: VMConfig,
-    serverType: string,
+    config: ResolvedNativeVMConfig,
     context?: ProviderRequestContext
   ): Promise<ProviderError> {
     rethrowIfProviderRequestAborted(error, context);
@@ -182,7 +187,7 @@ export class HetznerProvider implements Provider {
         this.name,
         422,
         `Capacity exhausted after ${attempt + 1} attempts for ` +
-          `server type ${serverType} in ${config.location || this.datacenter}: ` +
+          `server type ${config.instanceType} in ${config.location}: ` +
           error.message,
         { cause: error, providerCode: error.providerCode, category: 'transient_capacity' }
       );
@@ -193,8 +198,8 @@ export class HetznerProvider implements Provider {
       attempt: attempt + 1,
       maxAttempts: this.capacityRetryMaxAttempts,
       budgetRemainingMs: Math.max(0, deadline - Date.now()),
-      serverType,
-      location: config.location || this.datacenter,
+      serverType: config.instanceType,
+      location: config.location,
       statusCode: error.statusCode,
       providerCode: error.providerCode,
     });
@@ -216,12 +221,11 @@ export class HetznerProvider implements Provider {
    * then falls back to other locations on 412 placement errors.
    */
   private async attemptCreateWithPlacementFallback(
-    config: VMConfig,
-    serverType: string,
+    config: ResolvedNativeVMConfig,
     context?: ProviderRequestContext
   ): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const primaryLocation = config.location || this.datacenter;
+    const primaryLocation = config.location;
 
     const fallbackLocations = this.placementFallbackEnabled
       ? HETZNER_LOCATIONS.filter((loc) => loc !== primaryLocation)
@@ -255,11 +259,11 @@ export class HetznerProvider implements Provider {
             },
             body: JSON.stringify({
               name: config.name,
-              server_type: serverType,
+              server_type: config.instanceType,
               image: config.image || DEFAULT_HETZNER_IMAGE,
               location: attempt.location,
               user_data: config.userData,
-              labels: config.labels || {},
+              labels: config.labels,
               start_after_create: true,
             }),
           },

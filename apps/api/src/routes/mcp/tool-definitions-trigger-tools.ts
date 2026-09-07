@@ -3,6 +3,8 @@
  */
 import { TRIGGER_SOURCE_TYPES, TRIGGER_STATUSES } from '@simple-agent-manager/shared';
 
+import { resourceRequirementsMcpProperty } from './tool-definitions-shared-fields';
+
 export const TRIGGER_TOOLS = [
   {
     name: 'list_triggers',
@@ -74,8 +76,19 @@ export const TRIGGER_TOOLS = [
         },
         vmSizeOverride: {
           type: 'string',
-          description: 'VM size override (small, medium, large). Defaults to project default.',
+          description:
+            'Deprecated legacy VM size override (small, medium, large). Prefer resourceRequirements; the canonical compatibility adapter translates legacy tiers.',
           enum: ['small', 'medium', 'large'],
+        },
+        resourceRequirements: resourceRequirementsMcpProperty({
+          nullable: true,
+          description:
+            'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved.',
+        }),
+        resourceRequirementsJson: {
+          type: ['string', 'null'],
+          description:
+            'Compatibility JSON string for trigger workload requirements. Prefer resourceRequirements.',
         },
       },
       required: ['name', 'cronExpression', 'promptTemplate'],
@@ -144,8 +157,19 @@ export const TRIGGER_TOOLS = [
         },
         vmSizeOverride: {
           type: ['string', 'null'],
-          description: 'VM size override. Use null to clear the override.',
+          description:
+            'Deprecated legacy VM size override. Use null to clear the override. Prefer resourceRequirements.',
           enum: ['small', 'medium', 'large', null],
+        },
+        resourceRequirements: resourceRequirementsMcpProperty({
+          nullable: true,
+          description:
+            'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved. Use null to clear.',
+        }),
+        resourceRequirementsJson: {
+          type: ['string', 'null'],
+          description:
+            'Compatibility JSON string for trigger workload requirements. Prefer resourceRequirements. Use null to clear.',
         },
         maxConcurrent: {
           type: 'number',

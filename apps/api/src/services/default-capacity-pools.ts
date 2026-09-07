@@ -2,13 +2,14 @@ import type {
   CapacityCredentialSource,
   CapacityPool as CapacityPoolDto,
   CapacityPoolCandidate as CapacityPoolCandidateDto,
+  CapacityPoolConfigurationState,
   CapacityPoolScope,
   CapacitySourceIdentity,
   CredentialProvider,
   DefaultCapacityPoolSummary,
   ProviderInstanceOffering,
 } from '@simple-agent-manager/shared';
-import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -18,6 +19,7 @@ import {
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
 } from './capacity-pools';
+import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { ensureCandidatesForSource } from './default-capacity-pool-candidates';
 import {
   defaultCapacitySourceId,
@@ -45,6 +47,10 @@ const DEFAULT_POOL_NAMES: Record<CapacityPoolScope, string> = {
 
 const DEFAULT_POOL_STRATEGY = 'balanced';
 const DEFAULT_EXHAUSTION_POLICY = 'queue';
+const DEFAULT_BACKFILL_SCOPE_BATCH_SIZE = 25;
+const MAX_BACKFILL_SCOPE_BATCH_SIZE = 200;
+const BACKFILL_USER_CURSOR_KEY = 'capacityPools.backfill.userCursor.v1';
+const BACKFILL_PROJECT_CURSOR_KEY = 'capacityPools.backfill.projectCursor.v1';
 const SOURCE_KIND_CLOUD_PROVIDER = 'cloud-provider-credential';
 const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
 const ACTIVE_STATUS = 'active';
@@ -58,6 +64,12 @@ interface ReadDefaultPoolSummaryOptions {
    * last active candidate.
    */
   includeDisabled?: boolean;
+}
+
+interface PoolPublicationGuard {
+  revision: number;
+  updatedAt: string;
+  status: string;
 }
 
 export interface CredentialCapacitySeed extends ScopeIdentity {
@@ -109,6 +121,7 @@ export interface DefaultCapacityPoolsBackfillOptions {
   includeInstallation?: boolean;
   env?: Env;
   offeringResolver?: DefaultCapacityPoolOfferingResolver;
+  scopeBatchSize?: number;
 }
 
 export async function ensureDefaultCapacityPoolsForExistingCredentials(
@@ -135,19 +148,26 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
   const installation =
     options.includeInstallation === false ? null : await ensureInstallationDefaultPool(db, options);
 
-  const userIds = options.userId ? [options.userId] : await listCredentialUserIds(db);
-  const projectIds = options.projectId ? [options.projectId] : await listCredentialProjectIds(db);
+  const scopeBatchSize = resolveBackfillScopeBatchSize(options);
+  const userIds = options.userId
+    ? [options.userId]
+    : await listCredentialUserIdsForBackfill(db, scopeBatchSize);
+  const projectIds = options.projectId
+    ? [options.projectId]
+    : await listCredentialProjectIdsForBackfill(db, scopeBatchSize);
 
   let usersEnsured = 0;
   for (const userId of userIds) {
     await ensureUserDefaultPool(db, userId, options);
     usersEnsured += 1;
+    if (!options.userId) await writeBackfillCursor(db, BACKFILL_USER_CURSOR_KEY, userId);
   }
 
   let projectsEnsured = 0;
   for (const projectId of projectIds) {
     await ensureProjectDefaultPool(db, projectId, options);
     projectsEnsured += 1;
+    if (!options.projectId) await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, projectId);
   }
 
   return { installation, usersEnsured, projectsEnsured };
@@ -175,28 +195,36 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
   }
 
   if (input.projectId) {
-    const project = await readDefaultPoolSummary(db, {
+    const projectScope = {
       scope: 'project',
       ownerUserId: null,
       ownerProjectId: input.projectId,
-    });
-    if (project) return project;
+    } satisfies ScopeIdentity;
+    if (await findDefaultPool(db, projectScope)) {
+      return readDefaultPoolSummary(db, projectScope, { includeDisabled: true });
+    }
   }
 
-  const user = await readDefaultPoolSummary(db, {
+  const userScope = {
     scope: 'user',
     ownerUserId: input.userId,
     ownerProjectId: null,
-  });
-  if (user) return user;
+  } satisfies ScopeIdentity;
+  if (await findDefaultPool(db, userScope)) {
+    return readDefaultPoolSummary(db, userScope, { includeDisabled: true });
+  }
 
   if (input.includeInstallation === false) return null;
 
-  return readDefaultPoolSummary(db, {
+  const installationScope = {
     scope: 'installation',
     ownerUserId: null,
     ownerProjectId: null,
-  });
+  } satisfies ScopeIdentity;
+  if (await findDefaultPool(db, installationScope)) {
+    return readDefaultPoolSummary(db, installationScope, { includeDisabled: true });
+  }
+  return null;
 }
 
 export async function readDefaultCapacityPoolSummaries(
@@ -248,52 +276,124 @@ export async function readDefaultCapacityPoolSummaries(
   return { installation, user, project };
 }
 
-async function listCredentialUserIds(db: Db): Promise<string[]> {
+async function listCredentialUserIdsForBackfill(db: Db, limit: number): Promise<string[]> {
+  const cursor = await readBackfillCursor(db, BACKFILL_USER_CURSOR_KEY);
+  let ids = await listCredentialUserIdsPage(db, cursor, limit);
+  if (ids.length === 0 && cursor) {
+    await writeBackfillCursor(db, BACKFILL_USER_CURSOR_KEY, null);
+    ids = await listCredentialUserIdsPage(db, null, limit);
+  }
+  return ids;
+}
+
+async function listCredentialUserIdsPage(
+  db: Db,
+  cursor: string | null,
+  limit: number
+): Promise<string[]> {
   const legacyRows = await db
     .select({ userId: schema.credentials.userId })
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.credentialType, CREDENTIAL_TYPE_CLOUD_PROVIDER),
-        isNull(schema.credentials.projectId)
+        isNull(schema.credentials.projectId),
+        cursor ? gt(schema.credentials.userId, cursor) : undefined
       )
-    );
+    )
+    .orderBy(asc(schema.credentials.userId))
+    .limit(limit);
   const ccRows = await db
     .select({ userId: schema.ccAttachments.userId })
     .from(schema.ccAttachments)
     .where(
       and(
         eq(schema.ccAttachments.consumerKind, 'compute'),
-        isNull(schema.ccAttachments.projectId)
+        isNull(schema.ccAttachments.projectId),
+        cursor ? gt(schema.ccAttachments.userId, cursor) : undefined
       )
-    );
-  return [...new Set([...legacyRows.map((row) => row.userId), ...ccRows.map((row) => row.userId)])];
+    )
+    .orderBy(asc(schema.ccAttachments.userId))
+    .limit(limit);
+
+  return [
+    ...new Set([...legacyRows.map((row) => row.userId), ...ccRows.map((row) => row.userId)].sort()),
+  ].slice(0, limit);
 }
 
-async function listCredentialProjectIds(db: Db): Promise<string[]> {
+async function listCredentialProjectIdsForBackfill(db: Db, limit: number): Promise<string[]> {
+  const cursor = await readBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY);
+  let ids = await listCredentialProjectIdsPage(db, cursor, limit);
+  if (ids.length === 0 && cursor) {
+    await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, null);
+    ids = await listCredentialProjectIdsPage(db, null, limit);
+  }
+  return ids;
+}
+
+async function listCredentialProjectIdsPage(
+  db: Db,
+  cursor: string | null,
+  limit: number
+): Promise<string[]> {
   const legacyRows = await db
     .select({ projectId: schema.credentials.projectId })
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.credentialType, CREDENTIAL_TYPE_CLOUD_PROVIDER),
-        isNotNull(schema.credentials.projectId)
+        isNotNull(schema.credentials.projectId),
+        cursor ? gt(schema.credentials.projectId, cursor) : undefined
       )
-    );
+    )
+    .orderBy(asc(schema.credentials.projectId))
+    .limit(limit);
   const ccRows = await db
     .select({ projectId: schema.ccAttachments.projectId })
     .from(schema.ccAttachments)
     .where(
       and(
         eq(schema.ccAttachments.consumerKind, 'compute'),
-        isNotNull(schema.ccAttachments.projectId)
+        isNotNull(schema.ccAttachments.projectId),
+        cursor ? gt(schema.ccAttachments.projectId, cursor) : undefined
       )
-    );
+    )
+    .orderBy(asc(schema.ccAttachments.projectId))
+    .limit(limit);
+
   return [
     ...new Set(
-      [...legacyRows, ...ccRows].flatMap((row) => (row.projectId ? [row.projectId] : []))
+      [...legacyRows, ...ccRows].flatMap((row) => (row.projectId ? [row.projectId] : [])).sort()
     ),
-  ];
+  ].slice(0, limit);
+}
+
+async function readBackfillCursor(db: Db, key: string): Promise<string | null> {
+  const [row] = await db
+    .select({ value: schema.platformSettings.value })
+    .from(schema.platformSettings)
+    .where(eq(schema.platformSettings.key, key))
+    .limit(1);
+  return row?.value || null;
+}
+
+async function writeBackfillCursor(db: Db, key: string, cursor: string | null): Promise<void> {
+  const now = nextCapacityPoolTimestamp();
+  if (cursor === null) {
+    await db.delete(schema.platformSettings).where(eq(schema.platformSettings.key, key));
+    return;
+  }
+  await db
+    .insert(schema.platformSettings)
+    .values({ key, value: cursor, updatedAt: now, updatedBy: null })
+    .onConflictDoUpdate({
+      target: schema.platformSettings.key,
+      set: {
+        value: cursor,
+        updatedAt: now,
+        updatedBy: sql`NULL`,
+      },
+    });
 }
 
 async function ensureInstallationDefaultPool(
@@ -376,7 +476,7 @@ async function ensureDefaultPoolForCredentialSeeds(
 
   if (activeSeeds.length === 0) {
     if (existingPool) await disableDefaultPoolAvailability(db, existingPool.id);
-    return readDefaultPoolSummary(db, scope);
+    return readDefaultPoolSummary(db, scope, { includeDisabled: true });
   }
 
   const pool =
@@ -385,8 +485,14 @@ async function ensureDefaultPoolForCredentialSeeds(
       ...scope,
       createdBy: activeSeeds[0]?.createdBy ?? null,
     }));
+  const poolGuard: PoolPublicationGuard = {
+    revision: pool.revision,
+    updatedAt: pool.updatedAt,
+    status: pool.status,
+  };
 
   for (const seed of seeds) {
+    const refreshStartedAt = nextCapacityPoolTimestamp();
     const materializedSeed = seed.active
       ? await materializeCapacitySourceCredential(db, seed)
       : seed;
@@ -397,11 +503,23 @@ async function ensureDefaultPoolForCredentialSeeds(
     }
 
     const source = existingSource
-      ? await updateCapacitySourceForSeed(db, existingSource.id, materializedSeed)
+      ? await updateCapacitySourceForSeed(db, existingSource.id, materializedSeed, refreshStartedAt)
       : await insertCapacitySourceForSeed(db, materializedSeed);
+    if (source.status !== ACTIVE_STATUS) continue;
 
-    const offerings = await resolveOfferingsForSeed(materializedSeed, options);
-    await ensureCandidatesForSource(db, pool.id, source.id, materializedSeed.provider, offerings);
+    const resolvedOfferings = await resolveOfferingsForSeed(materializedSeed, options);
+    const sourceStillCurrent = await isCapacitySourceRefreshCurrent(db, source);
+    if (!sourceStillCurrent) continue;
+    if (resolvedOfferings.refreshSucceeded) {
+      await ensureCandidatesForSource(
+        db,
+        pool.id,
+        source.id,
+        materializedSeed.provider,
+        resolvedOfferings.offerings,
+        { refreshStartedAt }
+      );
+    }
   }
 
   await disableCapacitySourcesMissingFromSeeds(
@@ -410,8 +528,8 @@ async function ensureDefaultPoolForCredentialSeeds(
     scope,
     await Promise.all(activeSeeds.map((seed) => materializeCapacitySourceCredential(db, seed)))
   );
-  await reconcileDefaultPoolStatus(db, pool.id);
-  return readDefaultPoolSummary(db, scope);
+  await reconcileDefaultPoolStatus(db, pool.id, poolGuard);
+  return readDefaultPoolSummary(db, scope, { includeDisabled: true });
 }
 
 export async function findDefaultPool(
@@ -431,7 +549,7 @@ async function createDefaultPoolIfAbsent(
   input: ScopeIdentity & { createdBy: string | null }
 ): Promise<schema.CapacityPool> {
   const id = defaultPoolId(input);
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   await db
     .insert(schema.capacityPools)
     .values({
@@ -443,6 +561,7 @@ async function createDefaultPoolIfAbsent(
       isDefault: true,
       revision: 1,
       status: ACTIVE_STATUS,
+      configurationState: 'migration-pending',
       strategy: DEFAULT_POOL_STRATEGY,
       exhaustionPolicy: DEFAULT_EXHAUSTION_POLICY,
       createdBy: input.createdBy,
@@ -466,7 +585,12 @@ async function createDefaultPoolIfAbsent(
   try {
     await db
       .update(schema.capacityPools)
-      .set({ isDefault: true, status: ACTIVE_STATUS, updatedAt: now })
+      .set({
+        isDefault: true,
+        status: ACTIVE_STATUS,
+        configurationState: 'migration-pending',
+        updatedAt: now,
+      })
       .where(eq(schema.capacityPools.id, deterministicPool.id));
   } catch (error) {
     const racedPool = await findDefaultPool(db, input);
@@ -514,7 +638,7 @@ async function insertCapacitySourceForSeed(
   seed: CredentialCapacitySeed
 ): Promise<schema.CapacitySource> {
   const id = defaultCapacitySourceId(seed);
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   await db
     .insert(schema.capacitySources)
     .values({
@@ -562,9 +686,10 @@ async function insertCapacitySourceForSeed(
 async function updateCapacitySourceForSeed(
   db: Db,
   sourceId: string,
-  seed: CredentialCapacitySeed
+  seed: CredentialCapacitySeed,
+  refreshStartedAt: string
 ): Promise<schema.CapacitySource> {
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   await db
     .update(schema.capacitySources)
     .set({
@@ -578,7 +703,12 @@ async function updateCapacitySourceForSeed(
       status: ACTIVE_STATUS,
       updatedAt: now,
     })
-    .where(eq(schema.capacitySources.id, sourceId));
+    .where(
+      and(
+        eq(schema.capacitySources.id, sourceId),
+        lte(schema.capacitySources.updatedAt, refreshStartedAt)
+      )
+    );
 
   const [source] = await db
     .select()
@@ -589,12 +719,24 @@ async function updateCapacitySourceForSeed(
   return source;
 }
 
+async function isCapacitySourceRefreshCurrent(
+  db: Db,
+  source: schema.CapacitySource
+): Promise<boolean> {
+  const [current] = await db
+    .select({ status: schema.capacitySources.status, updatedAt: schema.capacitySources.updatedAt })
+    .from(schema.capacitySources)
+    .where(eq(schema.capacitySources.id, source.id))
+    .limit(1);
+  return current?.status === source.status && current.updatedAt === source.updatedAt;
+}
+
 async function disableCapacitySourceAvailability(
   db: Db,
   _poolId: string,
   sourceId: string
 ): Promise<void> {
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   await db
     .update(schema.capacitySources)
     .set({ status: DISABLED_STATUS, updatedAt: now })
@@ -660,36 +802,72 @@ async function disableDefaultPoolAvailability(db: Db, poolId: string): Promise<v
     await disableCapacitySourceAvailability(db, poolId, sourceId);
   }
 
-  await db
-    .update(schema.capacityPools)
-    .set({ status: DISABLED_STATUS, updatedAt: new Date().toISOString() })
-    .where(eq(schema.capacityPools.id, poolId));
+  await reconcileDefaultPoolStatus(db, poolId);
 }
 
-export async function reconcileDefaultPoolStatus(db: Db, poolId: string): Promise<void> {
-  const [activeCandidate] = await db
-    .select({ id: schema.capacityPoolCandidates.id })
+export async function reconcileDefaultPoolStatus(
+  db: Db,
+  poolId: string,
+  guard?: PoolPublicationGuard
+): Promise<void> {
+  const rows = await db
+    .select({
+      sourceStatus: schema.capacitySources.status,
+      candidateStatus: schema.capacityPoolCandidates.status,
+      catalogAvailability: schema.capacityPoolCandidates.catalogAvailability,
+      providerInstanceCatalogSource: schema.capacityPoolCandidates.providerInstanceCatalogSource,
+    })
     .from(schema.capacityPoolCandidates)
     .innerJoin(
       schema.capacitySources,
       eq(schema.capacityPoolCandidates.capacitySourceId, schema.capacitySources.id)
     )
-    .where(
-      and(
-        eq(schema.capacityPoolCandidates.poolId, poolId),
-        eq(schema.capacityPoolCandidates.status, ACTIVE_STATUS),
-        eq(schema.capacitySources.status, ACTIVE_STATUS)
-      )
-    )
-    .limit(1);
+    .where(eq(schema.capacityPoolCandidates.poolId, poolId));
+
+  const activeSourceCount = rows.filter((row) => row.sourceStatus === ACTIVE_STATUS).length;
+  const activeCandidateCount = rows.filter(
+    (row) => row.sourceStatus === ACTIVE_STATUS && row.candidateStatus === ACTIVE_STATUS
+  ).length;
+  const availableCandidateCount = rows.filter(
+    (row) =>
+      row.sourceStatus === ACTIVE_STATUS &&
+      row.candidateStatus === ACTIVE_STATUS &&
+      row.catalogAvailability === 'available' &&
+      row.providerInstanceCatalogSource !== null
+  ).length;
+
+  let configurationState: CapacityPoolConfigurationState;
+  if (rows.length === 0) {
+    configurationState = 'configured-empty';
+  } else if (activeSourceCount === 0) {
+    configurationState = 'source-disabled';
+  } else if (activeCandidateCount === 0) {
+    configurationState = 'configured-empty';
+  } else if (availableCandidateCount === 0) {
+    configurationState = 'catalog-unavailable';
+  } else {
+    configurationState = 'configured-ready';
+  }
+
+  const predicates = [eq(schema.capacityPools.id, poolId)];
+  if (guard) {
+    predicates.push(
+      eq(schema.capacityPools.revision, guard.revision),
+      eq(schema.capacityPools.updatedAt, guard.updatedAt),
+      eq(schema.capacityPools.status, guard.status)
+    );
+  }
 
   await db
     .update(schema.capacityPools)
     .set({
-      status: activeCandidate ? ACTIVE_STATUS : DISABLED_STATUS,
-      updatedAt: new Date().toISOString(),
+      status: ACTIVE_STATUS,
+      configurationState,
+      migrationState: 'complete',
+      lastReconciledAt: nextCapacityPoolTimestamp(),
+      updatedAt: nextCapacityPoolTimestamp(),
     })
-    .where(eq(schema.capacityPools.id, poolId));
+    .where(and(...predicates));
 }
 
 export async function readDefaultPoolSummary(
@@ -728,7 +906,9 @@ export async function readDefaultPoolSummary(
     .where(
       and(
         eq(schema.capacityPoolCandidates.poolId, pool.id),
-        eq(schema.capacitySources.status, ACTIVE_STATUS)
+        options.includeDisabled === true
+          ? undefined
+          : eq(schema.capacitySources.status, ACTIVE_STATUS)
       )
     )
     .orderBy(
@@ -737,24 +917,79 @@ export async function readDefaultPoolSummary(
       asc(schema.capacityPoolCandidates.id)
     );
 
-  if (rows.length === 0) return null;
-
   const sourcesById = new Map<string, CapacitySourceIdentity>();
   const candidates: CapacityPoolCandidateDto[] = [];
   let activeCandidateCount = 0;
+  let availableCandidateCount = 0;
   for (const row of rows) {
     sourcesById.set(row.source.id, toCapacitySourceIdentity(row.source));
     const candidate = toCapacityPoolCandidate(row.candidate);
-    if (candidate.status === ACTIVE_STATUS) activeCandidateCount += 1;
+    if (row.source.status === ACTIVE_STATUS && candidate.status === ACTIVE_STATUS) {
+      activeCandidateCount += 1;
+      if (
+        candidate.catalogAvailability === 'available' &&
+        candidate.providerInstanceCatalogSource !== null
+      ) {
+        availableCandidateCount += 1;
+      }
+    }
     candidates.push(candidate);
   }
+  const effectiveState = defaultPoolEffectiveState(pool, {
+    sourceCount: sourcesById.size,
+    candidateCount: candidates.length,
+    activeCandidateCount,
+    availableCandidateCount,
+  });
 
   return {
     pool: toCapacityPool(pool),
     sources: [...sourcesById.values()],
     candidates,
     activeCandidateCount,
+    availableCandidateCount,
+    effectiveState,
+    diagnostics: defaultPoolDiagnostics(effectiveState),
   };
+}
+
+function defaultPoolEffectiveState(
+  pool: schema.CapacityPool,
+  counts: {
+    sourceCount: number;
+    candidateCount: number;
+    activeCandidateCount: number;
+    availableCandidateCount: number;
+  }
+): CapacityPoolConfigurationState {
+  if (pool.migrationState !== 'complete') return 'migration-pending';
+  if (pool.configurationState === 'source-disabled') return 'source-disabled';
+  if (pool.configurationState === 'migration-pending') return 'migration-pending';
+  if (pool.status !== ACTIVE_STATUS) return 'source-disabled';
+  if (
+    counts.sourceCount === 0 ||
+    counts.candidateCount === 0 ||
+    counts.activeCandidateCount === 0
+  ) {
+    return 'configured-empty';
+  }
+  if (counts.availableCandidateCount === 0) return 'catalog-unavailable';
+  return 'configured-ready';
+}
+
+function defaultPoolDiagnostics(effectiveState: CapacityPoolConfigurationState): string[] {
+  switch (effectiveState) {
+    case 'configured-ready':
+      return [];
+    case 'configured-empty':
+      return ['configured-default-pool-has-no-active-candidates'];
+    case 'source-disabled':
+      return ['configured-default-pool-sources-disabled'];
+    case 'catalog-unavailable':
+      return ['configured-default-pool-catalog-last-known-unavailable'];
+    case 'migration-pending':
+      return ['configured-default-pool-migration-pending'];
+  }
 }
 
 function poolScopePredicates(scope: ScopeIdentity) {
@@ -779,4 +1014,20 @@ function sourceScopePredicates(scope: ScopeIdentity) {
       ? eq(schema.capacitySources.ownerProjectId, scope.ownerProjectId)
       : isNull(schema.capacitySources.ownerProjectId),
   ];
+}
+
+function resolveBackfillScopeBatchSize(options: DefaultCapacityPoolsBackfillOptions): number {
+  const configured =
+    options.scopeBatchSize ??
+    numberFromString(options.env?.CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE);
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+    return Math.min(Math.floor(configured), MAX_BACKFILL_SCOPE_BATCH_SIZE);
+  }
+  return DEFAULT_BACKFILL_SCOPE_BATCH_SIZE;
+}
+
+function numberFromString(value: string | undefined): number | undefined {
+  if (!value?.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

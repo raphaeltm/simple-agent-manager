@@ -11,24 +11,29 @@ import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/sess
 type D1ResultMap = {
   persistedWarmClaim?: string | null;
   runs?: Array<{ sql: string; bound: unknown[] }>;
-  preferredNode?: PlacementSeedFields & {
-    status: string;
-  } | null;
+  preferredNode?:
+    | (PlacementSeedFields & {
+        status: string;
+      })
+    | null;
   warmNodes?: Array<PlacementSeedFields & { vm_location: string }>;
-  freshWarmNode?: PlacementMetadataFields & {
-    id?: string;
-    status: string;
-    warm_since: string | null;
-    vm_size?: string;
-    vm_location?: string;
-    agent_version?: string | null;
-    placement_explanation_json?: string | null;
-  } | null;
+  freshWarmNode?:
+    | (PlacementMetadataFields & {
+        id?: string;
+        status: string;
+        warm_since: string | null;
+        vm_size?: string;
+        vm_location?: string;
+        agent_version?: string | null;
+        placement_explanation_json?: string | null;
+      })
+    | null;
   existingNodes?: Array<
     PlacementSeedFields & {
-    vm_location: string;
-    health_status: string;
-    last_metrics: string | null;
+      vm_location: string;
+      health_status: string;
+      last_metrics: string | null;
+      last_heartbeat_at?: string | null;
     }
   >;
   workspaceCounts?: Array<{ node_id: string; c: number }>;
@@ -88,6 +93,7 @@ type PlacementRowNodeSource = PlacementSeedFields & {
   cloud_provider?: string | null;
   health_status?: string | null;
   last_metrics?: string | null;
+  last_heartbeat_at?: string | null;
   warm_since?: string | null;
 };
 
@@ -127,6 +133,10 @@ function toPlacementRow(node: PlacementRowNodeSource | null | undefined) {
     lastMetrics:
       'last_metrics' in node
         ? ((node as { last_metrics?: string | null }).last_metrics ?? null)
+        : undefined,
+    lastHeartbeatAt:
+      'last_heartbeat_at' in node
+        ? ((node as { last_heartbeat_at?: string | null }).last_heartbeat_at ?? null)
         : undefined,
     warmSince:
       'warm_since' in node
@@ -326,16 +336,14 @@ function capacityPoolSelection(
       machineSize
     ];
   const providerInstanceVcpuCount =
-    overrides.vcpuCount ?? ({ small: 2, medium: 2, large: 8 } satisfies Record<string, number>)[
-      machineSize
-    ];
+    overrides.vcpuCount ??
+    ({ small: 2, medium: 2, large: 8 } satisfies Record<string, number>)[machineSize];
   const providerInstanceMemoryMb =
     overrides.memoryMb ??
     ({ small: 4096, medium: 4096, large: 16384 } satisfies Record<string, number>)[machineSize];
   const providerInstanceDiskGb =
-    overrides.diskGb ?? ({ small: 40, medium: 80, large: 160 } satisfies Record<string, number>)[
-      machineSize
-    ];
+    overrides.diskGb ??
+    ({ small: 40, medium: 80, large: 160 } satisfies Record<string, number>)[machineSize];
   const placementCredentialSource = scope === 'installation' ? 'platform' : scope;
   const snapshot = {
     capacityPoolId: poolId,
@@ -442,7 +450,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     };
 
     await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({
-      message: 'No active compute pool offerings in the selected user pool satisfy the requested resources.',
+      message:
+        'No active compute pool offerings in the selected user pool satisfy the requested resources.',
       permanent: true,
     });
 
@@ -680,6 +689,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
 
   it('selects a larger existing node and skips smaller existing nodes', async () => {
     const state = createState({ config: { ...createState().config, vmSize: 'large' } });
+    const now = new Date().toISOString();
     const rc = createContext({
       existingNodes: [
         {
@@ -687,7 +697,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'medium',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1, diskPercent: 1 }),
+          last_heartbeat_at: now,
           agent_version: 'current-sha',
         },
         {
@@ -695,7 +706,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20, diskPercent: 20 }),
+          last_heartbeat_at: now,
           agent_version: 'current-sha',
         },
       ],
@@ -750,7 +762,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'small',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 5, memoryPercent: 5 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 3, memoryPercent: 5, diskPercent: 5 }),
+          last_heartbeat_at: now,
           agent_version: 'current-sha',
           ...nodeCapacityFields(selection),
         },
@@ -806,7 +819,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1, diskPercent: 1 }),
           agent_version: 'current-sha',
           ...nodeCapacityFields(otherProject),
         },
@@ -815,7 +828,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 3, memoryPercent: 20, diskPercent: 20 }),
+          last_heartbeat_at: now,
           agent_version: 'current-sha',
           ...nodeCapacityFields(sameProject),
         },
@@ -863,7 +877,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1, diskPercent: 1 }),
+          last_heartbeat_at: now,
           agent_version: 'current-sha',
           ...nodeCapacityFields(selection),
         },
@@ -911,7 +926,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1, diskPercent: 1 }),
           agent_version: 'current-sha',
           ...nodeCapacityFields(otherProject),
         },
@@ -920,7 +935,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 2, memoryPercent: 2 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 2, memoryPercent: 2, diskPercent: 2 }),
           agent_version: 'current-sha',
           ...nodeCapacityFields(sameProject),
         },
@@ -929,7 +944,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 40, memoryPercent: 40 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 40, memoryPercent: 40, diskPercent: 40 }),
+          last_heartbeat_at: now,
           agent_version: 'current-sha',
         },
       ],
@@ -963,8 +979,10 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           last_metrics: JSON.stringify({
             cpuLoadAvg1: 1,
             memoryPercent: 1,
+            diskPercent: 1,
             creatingWorkspaces: 1,
           }),
+          last_heartbeat_at: now,
           agent_version: 'current-sha',
         },
         {
@@ -972,7 +990,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20, diskPercent: 20 }),
+          last_heartbeat_at: now,
           agent_version: 'current-sha',
         },
       ],
@@ -1002,7 +1021,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1, diskPercent: 1 }),
           agent_version: 'old-sha',
         },
         {
@@ -1010,7 +1029,8 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 40, memoryPercent: 40 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 40, memoryPercent: 40, diskPercent: 40 }),
+          last_heartbeat_at: now,
           agent_version: 'current-sha',
         },
       ],

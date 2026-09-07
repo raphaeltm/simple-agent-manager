@@ -21,6 +21,22 @@ export type CapacityCredentialSource = (typeof CAPACITY_CREDENTIAL_SOURCES)[numb
 export const CAPACITY_POOL_STATUSES = ['active', 'disabled', 'deleted'] as const;
 export type CapacityPoolStatus = (typeof CAPACITY_POOL_STATUSES)[number];
 
+export const CAPACITY_POOL_CONFIGURATION_STATES = [
+  'configured-ready',
+  'configured-empty',
+  'source-disabled',
+  'catalog-unavailable',
+  'migration-pending',
+] as const;
+export type CapacityPoolConfigurationState = (typeof CAPACITY_POOL_CONFIGURATION_STATES)[number];
+
+export const DEFAULT_CAPACITY_POOL_EFFECTIVE_STATES = [
+  'unconfigured',
+  ...CAPACITY_POOL_CONFIGURATION_STATES,
+] as const;
+export type DefaultCapacityPoolEffectiveState =
+  (typeof DEFAULT_CAPACITY_POOL_EFFECTIVE_STATES)[number];
+
 export const CAPACITY_POOL_STRATEGIES = ['balanced', 'pack', 'spread', 'smallest-fit'] as const;
 export type CapacityPoolStrategy = (typeof CAPACITY_POOL_STRATEGIES)[number];
 
@@ -66,8 +82,12 @@ export interface CapacityPool {
   isDefault: boolean;
   revision: number;
   status: CapacityPoolStatus;
+  configurationState?: CapacityPoolConfigurationState;
   strategy: CapacityPoolStrategy;
   exhaustionPolicy: CapacityExhaustionPolicy;
+  lastReconciledAt?: string | null;
+  migrationVersion?: string | null;
+  migrationState?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,12 +113,18 @@ export interface CapacityPoolCandidate {
   providerInstanceVcpuCount: number | null;
   providerInstanceMemoryMb: number | null;
   providerInstanceDiskGb: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay: string | null;
   providerInstancePriceCurrency: string | null;
   providerInstancePriceMonthlyCents: number | null;
   providerInstancePriceHourlyMicros: number | null;
   providerInstanceCatalogSource?: ProviderInstanceCatalogSource | null;
   providerInstanceCatalogLastSeenAt?: string | null;
+  catalogAvailability?: 'available' | 'last-known-unavailable';
+  catalogUnavailableAt?: string | null;
+  catalogReturnedAt?: string | null;
   priority: number;
   candidateOrder: number;
   status: CapacityPoolStatus;
@@ -115,6 +141,7 @@ export interface CapacityPoolFallback {
 }
 
 export interface CapacityPlacementSnapshot {
+  placementPlanVersion?: number;
   capacityPoolId: string | null;
   capacityPoolScope: CapacityPoolScope | null;
   capacityPoolRevision: number | null;
@@ -129,11 +156,40 @@ export interface CapacityPlacementSnapshot {
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay?: string | null;
   providerInstancePriceCurrency?: string | null;
   providerInstancePriceMonthlyCents?: number | null;
   providerInstancePriceHourlyMicros?: number | null;
+  exhaustionPolicy?: CapacityExhaustionPolicy | null;
+  effectivePoolState?: DefaultCapacityPoolEffectiveState | null;
+  selectionSettingsVersion?: number | null;
+  sourceGeneration?: number | null;
   placementExplanationJson?: string | null;
+}
+
+export interface CapacityPoolSelectionWeights {
+  priority: number;
+  price: number;
+  fit: number;
+  capacity: number;
+  candidateOrder: number;
+}
+
+export interface CapacityPoolPlacementSettings {
+  version: number;
+  /** Monotonic/fingerprinted generation of the effective settings source. */
+  sourceGeneration: number;
+  legacyWorkloadAdapterVersion: number;
+  selectionWeights: CapacityPoolSelectionWeights;
+  rolloutCohortPercent: number;
+  source: {
+    legacyWorkloadMapping: 'persisted' | 'environment' | 'default';
+    selection: 'persisted' | 'environment' | 'default';
+  };
+  diagnostics: string[];
 }
 
 // =============================================================================
@@ -145,6 +201,9 @@ export interface DefaultCapacityPoolSummary {
   sources: CapacitySourceIdentity[];
   candidates: CapacityPoolCandidate[];
   activeCandidateCount: number;
+  availableCandidateCount?: number;
+  effectiveState?: DefaultCapacityPoolEffectiveState;
+  diagnostics?: string[];
 }
 
 export interface DefaultCapacityPoolScopeSummary {
@@ -152,6 +211,7 @@ export interface DefaultCapacityPoolScopeSummary {
   visibility: 'visible' | 'hidden';
   visibilityReason: string;
   canReconcile: boolean;
+  effectiveState?: DefaultCapacityPoolEffectiveState;
   summary: DefaultCapacityPoolSummary | null;
 }
 
@@ -182,10 +242,12 @@ export interface DefaultCapacityPoolUpdateRequest {
 export interface ProjectDefaultCapacityPoolsResponse {
   effective: DefaultCapacityPoolSummary | null;
   effectiveScope: CapacityPoolScope | null;
+  effectiveState?: DefaultCapacityPoolEffectiveState;
   defaults: DefaultCapacityPoolScopeSummary[];
   precedence: CapacityPoolScope[];
   reconciledScopes: CapacityPoolScope[];
   policyMutationSupported: boolean;
+  placementSettings?: CapacityPoolPlacementSettings;
 }
 
 export function isCapacityPoolScope(value: unknown): value is CapacityPoolScope {
@@ -204,6 +266,15 @@ export function isCapacityCredentialSource(value: unknown): value is CapacityCre
 
 export function isCapacityPoolStatus(value: unknown): value is CapacityPoolStatus {
   return typeof value === 'string' && (CAPACITY_POOL_STATUSES as readonly string[]).includes(value);
+}
+
+export function isCapacityPoolConfigurationState(
+  value: unknown
+): value is CapacityPoolConfigurationState {
+  return (
+    typeof value === 'string' &&
+    (CAPACITY_POOL_CONFIGURATION_STATES as readonly string[]).includes(value)
+  );
 }
 
 export function isCapacityPoolStrategy(value: unknown): value is CapacityPoolStrategy {

@@ -12,6 +12,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { toWorkspaceResponse } from '../../lib/mappers';
+import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
@@ -32,7 +33,11 @@ import {
   waitForNodeAgentReady,
 } from '../../services/node-agent';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
-import { createNodeRecord, provisionNode } from '../../services/nodes';
+import {
+  assertNodeAllocationPlanCurrent,
+  createNodeRecord,
+  provisionNode,
+} from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
 import { cleanupWorkspaceForDeletion } from '../../services/workspace-cleanup';
@@ -47,6 +52,19 @@ import {
 } from './ports-readiness';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
+
+function optionalPositiveInteger(value: number | undefined, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value <= 0) {
+    throw errors.badRequest(`${field} must be a positive integer`);
+  }
+  return value;
+}
+
+function optionalTrimmedString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
 
 async function startComputeTrackingForNode(
   db: Parameters<typeof startComputeTracking>[0],
@@ -66,6 +84,15 @@ async function startComputeTrackingForNode(
         providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
         providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
         providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+        providerInstanceBootDiskSizeGb: schema.nodes.providerInstanceBootDiskSizeGb,
+        providerInstanceImage: schema.nodes.providerInstanceImage,
+        providerInstanceArchitecture: schema.nodes.providerInstanceArchitecture,
+        observedProviderInstanceType: schema.nodes.observedProviderInstanceType,
+        observedProviderInstanceVcpuCount: schema.nodes.observedProviderInstanceVcpuCount,
+        observedProviderInstanceMemoryMb: schema.nodes.observedProviderInstanceMemoryMb,
+        observedProviderInstanceDiskGb: schema.nodes.observedProviderInstanceDiskGb,
+        observedHardwareJson: schema.nodes.observedHardwareJson,
+        observedHardwareSource: schema.nodes.observedHardwareSource,
         providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
         providerInstancePriceCurrency: schema.nodes.providerInstancePriceCurrency,
         providerInstancePriceMonthlyCents: schema.nodes.providerInstancePriceMonthlyCents,
@@ -85,6 +112,15 @@ async function startComputeTrackingForNode(
       providerInstanceVcpuCount: nodeRow?.providerInstanceVcpuCount,
       providerInstanceMemoryMb: nodeRow?.providerInstanceMemoryMb,
       providerInstanceDiskGb: nodeRow?.providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: nodeRow?.providerInstanceBootDiskSizeGb,
+      providerInstanceImage: nodeRow?.providerInstanceImage,
+      providerInstanceArchitecture: nodeRow?.providerInstanceArchitecture,
+      observedProviderInstanceType: nodeRow?.observedProviderInstanceType,
+      observedProviderInstanceVcpuCount: nodeRow?.observedProviderInstanceVcpuCount,
+      observedProviderInstanceMemoryMb: nodeRow?.observedProviderInstanceMemoryMb,
+      observedProviderInstanceDiskGb: nodeRow?.observedProviderInstanceDiskGb,
+      observedHardwareJson: nodeRow?.observedHardwareJson,
+      observedHardwareSource: nodeRow?.observedHardwareSource,
       providerInstancePriceDisplay: nodeRow?.providerInstancePriceDisplay,
       providerInstancePriceCurrency: nodeRow?.providerInstancePriceCurrency,
       providerInstancePriceMonthlyCents: nodeRow?.providerInstancePriceMonthlyCents,
@@ -356,6 +392,18 @@ crudRoutes.post(
 
     const vmSize = body.vmSize ?? DEFAULT_VM_SIZE;
     const vmLocation = body.vmLocation ?? DEFAULT_VM_LOCATION;
+    const providerInstanceType =
+      optionalTrimmedString(body.providerInstanceType) ??
+      optionalTrimmedString(body.nativeOffering);
+    const providerInstanceBootDiskSizeGb = optionalPositiveInteger(
+      body.bootDiskSizeGb,
+      'bootDiskSizeGb'
+    );
+    const providerInstanceImage = optionalTrimmedString(body.image) ?? null;
+    const providerInstanceArchitecture = body.architecture ?? null;
+    const resourceRequirementsJson = body.resourceRequirements
+      ? JSON.stringify(body.resourceRequirements)
+      : null;
 
     // Validate branch name — reject shell metacharacters to prevent command injection.
     // Git branch names allow: alphanumeric, hyphens, underscores, slashes, dots.
@@ -394,20 +442,28 @@ crudRoutes.post(
       if (!isNodeAgentVersionCompatible(node.agentVersion, c.env.VM_AGENT_REQUIRED_VERSION)) {
         throw errors.badRequest('Selected node is running an incompatible VM agent build');
       }
+      await assertNodeAllocationPlanCurrent(c.env, nodeId, userId, linkedProject.id);
     } else {
       if (userNodeCountVal >= limits.maxNodesPerUser) {
         throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
       }
 
-      const { resolveCredentialSource } = await import('../../services/provider-credentials');
-      const credResult = await resolveCredentialSource(db, userId, body.provider, linkedProject.id);
-      if (!credResult) {
+      const { createProviderForUser } = await import('../../services/provider-credentials');
+      const providerResult = await createProviderForUser(
+        db,
+        userId,
+        getCredentialEncryptionKey(c.env),
+        c.env,
+        body.provider,
+        linkedProject.id
+      );
+      if (!providerResult) {
         throw errors.forbidden(
           'Cloud provider credentials required. Connect your account in Settings.'
         );
       }
-      credentialAttributionSource = credResult.credentialSource;
-      const effectiveProvider = body.provider ?? credResult.providerName;
+      credentialAttributionSource = providerResult.credentialSource;
+      const effectiveProvider = providerResult.providerName;
 
       const createdNode = await createNodeRecord(c.env, {
         userId,
@@ -419,7 +475,30 @@ crudRoutes.post(
         vmSize,
         vmLocation,
         cloudProvider: effectiveProvider,
+        providerInstanceType,
+        providerInstanceBootDiskSizeGb,
+        providerInstanceImage,
+        providerInstanceArchitecture,
         heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+        capacityPlacementSnapshot: {
+          capacityPoolId: null,
+          capacityPoolScope: null,
+          capacityPoolRevision: null,
+          capacitySourceId: null,
+          capacityPoolCandidateId: null,
+          placementCredentialSource:
+            providerResult.exactCredentialBinding?.credentialSource ?? null,
+          placementCredentialReference:
+            providerResult.exactCredentialBinding?.credentialReference ?? null,
+          placementCredentialVersion:
+            providerResult.exactCredentialBinding?.credentialVersion ?? null,
+          capacityPoolProjectId: null,
+          workloadRole: 'workspace',
+          providerInstanceType: providerInstanceType ?? null,
+          providerInstanceBootDiskSizeGb: providerInstanceBootDiskSizeGb ?? null,
+          providerInstanceImage,
+          providerInstanceArchitecture,
+        },
       });
 
       nodeId = createdNode.id;
@@ -462,6 +541,11 @@ crudRoutes.post(
       status: 'creating',
       vmSize,
       vmLocation,
+      providerInstanceType: providerInstanceType ?? null,
+      providerInstanceBootDiskSizeGb: providerInstanceBootDiskSizeGb ?? null,
+      providerInstanceImage,
+      providerInstanceArchitecture,
+      resourceRequirementsJson,
       createdAt: now,
       updatedAt: now,
     });
@@ -479,6 +563,8 @@ crudRoutes.post(
       triggeredBy: 'user',
       credentialAttributionUserId: userId,
       credentialAttributionSource,
+      resourceRequirementsJson,
+      resourceRequirementsSource: resourceRequirementsJson ? 'task' : null,
       createdBy: userId,
       createdAt: now,
       updatedAt: now,

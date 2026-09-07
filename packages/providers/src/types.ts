@@ -10,11 +10,14 @@ export interface VMConfig {
   /** Server name */
   name: string;
 
-  /** VM size tier */
-  size: VMSize;
+  /** Deprecated VM size tier. Native callers should use `native.instanceType`. */
+  size?: VMSize;
 
-  /** Provider-native instance type/SKU. When present, overrides the legacy size mapping. */
+  /** Deprecated top-level provider-native instance type/SKU. Use `native.instanceType`. */
   instanceType?: string;
+
+  /** Exact provider-native VM request. Preferred for all new provisioning paths. */
+  native?: NativeVMConfig;
 
   /** Datacenter/region identifier */
   location: string;
@@ -27,6 +30,30 @@ export interface VMConfig {
 
   /** OS image override (default: provider-specific) */
   image?: string;
+}
+
+export type VMArchitecture = 'x86_64' | 'arm64';
+
+export interface VMHardwareResources {
+  /** vCPU count reported by the provider or catalog. */
+  vcpuCount: number;
+  /** Memory in MiB. */
+  memoryMb: number;
+  /** Root/local disk in GB when the provider exposes it. */
+  diskGb?: number;
+}
+
+export interface NativeVMConfig {
+  /** Exact provider-native instance type/SKU/plan/flavor/machine type. */
+  instanceType: string;
+  /** Explicit boot/root disk request in GB when the provider accepts one. */
+  bootDiskSizeGb?: number;
+  /** Provider image identifier/family/name override for this VM. */
+  image?: string;
+  /** Requested architecture. Providers validate only when their API exposes enough information. */
+  architecture?: VMArchitecture;
+  /** Catalog or caller-known resources for accounting before provider creation. */
+  resources?: VMHardwareResources;
 }
 
 /**
@@ -53,11 +80,27 @@ export interface VMInstance {
   /** Server type (e.g., "cx23") */
   serverType: string;
 
+  /** Provider-observed hardware metadata. Does not use legacy VM tiers as authority. */
+  observedHardware: VMObservedHardware;
+
   /** ISO 8601 creation timestamp */
   createdAt: string;
 
   /** Labels attached to server */
   labels: Record<string, string>;
+}
+
+export type VMHardwareObservationSource = 'observed' | 'inferred' | 'unknown';
+
+export interface VMObservedValue<T> {
+  value: T | null;
+  source: VMHardwareObservationSource;
+  reason?: string;
+}
+
+export interface VMObservedHardware {
+  serverType: VMObservedValue<string>;
+  resources: VMObservedValue<VMHardwareResources>;
 }
 
 /**

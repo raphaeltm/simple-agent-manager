@@ -2,12 +2,16 @@ import {
   expectObject,
   type JsonObject,
   optionalArray,
+  optionalNonNegativeInteger,
   optionalObject,
+  optionalPositiveInteger,
   optionalString,
   optionalStringRecord,
   requireArray,
+  requireNonNegativeInteger,
   requireNumber,
   requireObject,
+  requirePositiveInteger,
   requireString,
   validationError,
 } from './validation-core';
@@ -17,7 +21,7 @@ export interface HetznerServerPayload {
   name: string;
   status: string;
   public_net: { ipv4: { ip: string } };
-  server_type: { name: string };
+  server_type: { name: string; cores?: number; memory?: number; disk?: number };
   created: string;
   labels: Record<string, string>;
 }
@@ -367,6 +371,9 @@ function validateHetznerServer(payload: unknown, context: string): HetznerServer
   const publicNet = requireObject(server, 'public_net', 'hetzner', context);
   const ipv4 = requireObject(publicNet, 'ipv4', 'hetzner', `${context}.public_net`);
   const serverType = requireObject(server, 'server_type', 'hetzner', context);
+  const cores = optionalPositiveInteger(serverType, 'cores', 'hetzner', `${context}.server_type`);
+  const memory = optionalPositiveInteger(serverType, 'memory', 'hetzner', `${context}.server_type`);
+  const disk = optionalNonNegativeInteger(serverType, 'disk', 'hetzner', `${context}.server_type`);
 
   return {
     id: requireNumber(server, 'id', 'hetzner', context),
@@ -379,6 +386,9 @@ function validateHetznerServer(payload: unknown, context: string): HetznerServer
     },
     server_type: {
       name: requireString(serverType, 'name', 'hetzner', `${context}.server_type`),
+      ...(cores !== undefined ? { cores } : {}),
+      ...(memory !== undefined ? { memory } : {}),
+      ...(disk !== undefined ? { disk } : {}),
     },
     created: requireString(server, 'created', 'hetzner', context),
     labels: optionalStringRecord(server, 'labels', 'hetzner', context) ?? {},
@@ -418,9 +428,9 @@ function validateHetznerServerType(payload: unknown, context: string): HetznerSe
     id: requireNumber(serverType, 'id', 'hetzner', context),
     name: requireString(serverType, 'name', 'hetzner', context),
     description: requireString(serverType, 'description', 'hetzner', context),
-    cores: requireNumber(serverType, 'cores', 'hetzner', context),
-    memory: requireNumber(serverType, 'memory', 'hetzner', context),
-    disk: requireNumber(serverType, 'disk', 'hetzner', context),
+    cores: requirePositiveInteger(serverType, 'cores', 'hetzner', context),
+    memory: requirePositiveInteger(serverType, 'memory', 'hetzner', context),
+    disk: requireNonNegativeInteger(serverType, 'disk', 'hetzner', context),
     prices: requireArray(serverType, 'prices', 'hetzner', context).map((price, index) =>
       validateHetznerServerTypePrice(price, `${context}.prices[${index}]`)
     ),
