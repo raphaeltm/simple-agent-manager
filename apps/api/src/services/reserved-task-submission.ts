@@ -102,15 +102,24 @@ async function readTaskByIdentity(
   input: ReservedTaskSubmissionInput
 ): Promise<{
   id: string;
+  project_id: string;
+  user_id: string;
   status: string;
   chat_session_id: string | null;
   error_message: string | null;
 } | null> {
   return db
-    .prepare('SELECT id, status, chat_session_id, error_message FROM tasks WHERE id = ? LIMIT 1')
+    .prepare(
+      `SELECT id, project_id, user_id, status, chat_session_id, error_message
+         FROM tasks
+        WHERE id = ?
+        LIMIT 1`
+    )
     .bind(input.identities.taskId)
     .first<{
       id: string;
+      project_id: string;
+      user_id: string;
       status: string;
       chat_session_id: string | null;
       error_message: string | null;
@@ -431,7 +440,56 @@ async function classifyUnconfirmedStart(
   now: string,
   reused: boolean
 ): Promise<ReservedTaskSubmissionResult> {
+  const observedOutcome = await classifyPersistedTaskOutcome(env, input, snapshot, now, reused);
+  if (observedOutcome) return observedOutcome;
+
+  try {
+    await assertTaskRunnerStartGuard(env, reservedSubmissionGuardFromSnapshot(snapshot), {
+      requireQueuedTask: true,
+    });
+  } catch (error) {
+    if (error instanceof TaskRunnerStartGuardRevokedError) {
+      const winner = await classifyPersistedTaskOutcome(env, input, snapshot, now, reused);
+      if (winner) return winner;
+      return conflict(input, 'authority_unavailable', error.message, snapshot.task.outputBranch);
+    }
+    return {
+      outcome: 'pending',
+      taskId: input.identities.taskId,
+      sessionId: input.identities.chatSessionId,
+      branchName: snapshot.task.outputBranch,
+      pendingAt: 'task_runner_start',
+      reason: error instanceof Error ? error.message : String(error),
+      reused,
+    };
+  }
+  return {
+    outcome: 'pending',
+    taskId: input.identities.taskId,
+    sessionId: input.identities.chatSessionId,
+    branchName: snapshot.task.outputBranch,
+    pendingAt: 'task_runner_start',
+    reason,
+    reused,
+  };
+}
+
+async function classifyPersistedTaskOutcome(
+  env: Env,
+  input: ReservedTaskSubmissionInput,
+  snapshot: AcceptedSnapshot,
+  now: string,
+  reused: boolean
+): Promise<ReservedTaskSubmissionResult | null> {
   const task = await readTaskByIdentity(env.DATABASE, input);
+  if (
+    task &&
+    (task.project_id !== input.projectId ||
+      task.user_id !== input.userId ||
+      task.chat_session_id !== input.identities.chatSessionId)
+  ) {
+    return null;
+  }
   if (task && TERMINAL_STATUSES.has(task.status)) {
     await markTerminalObserved(env, input.identities.taskId, now);
     return {
@@ -455,34 +513,7 @@ async function classifyUnconfirmedStart(
       reused,
     };
   }
-
-  try {
-    await assertTaskRunnerStartGuard(env, reservedSubmissionGuardFromSnapshot(snapshot), {
-      requireQueuedTask: true,
-    });
-  } catch (error) {
-    if (error instanceof TaskRunnerStartGuardRevokedError) {
-      return conflict(input, 'authority_unavailable', error.message, snapshot.task.outputBranch);
-    }
-    return {
-      outcome: 'pending',
-      taskId: input.identities.taskId,
-      sessionId: input.identities.chatSessionId,
-      branchName: snapshot.task.outputBranch,
-      pendingAt: 'task_runner_start',
-      reason: error instanceof Error ? error.message : String(error),
-      reused,
-    };
-  }
-  return {
-    outcome: 'pending',
-    taskId: input.identities.taskId,
-    sessionId: input.identities.chatSessionId,
-    branchName: snapshot.task.outputBranch,
-    pendingAt: 'task_runner_start',
-    reason,
-    reused,
-  };
+  return null;
 }
 
 async function startOrConfirmRunner(

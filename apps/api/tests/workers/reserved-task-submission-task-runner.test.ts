@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   StartTaskInput,
@@ -19,6 +19,11 @@ import type {
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from '../../src/services/task-runner-do';
 import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
 import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
+import { fetchNodeAgent } from '../../src/services/node-agent';
+import {
+  assertTaskRunnerStartGuard,
+  type TaskRunnerReservedSubmissionGuard,
+} from '../../src/services/task-runner-start-guard';
 
 const testEnv = env as unknown as Env;
 type TaskRunnerStartBoundaryInput = Parameters<typeof startTaskRunnerDO>[1];
@@ -29,6 +34,24 @@ function unique(prefix: string): string {
   counter += 1;
   return `${prefix}-${Date.now().toString(36)}-${counter}`;
 }
+
+function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function taskRunnerStub(taskId: string): DurableObjectStub<TaskRunner> {
   const id = env.TASK_RUNNER.idFromName(taskId);
@@ -178,6 +201,21 @@ function submissionDeps(): ReservedTaskSubmissionDependencies {
     >,
     startTaskRunner: vi.fn(startPausedTaskRunner) as typeof startTaskRunnerDO,
   };
+}
+
+function capturedStartInput(deps: ReservedTaskSubmissionDependencies): TaskRunnerStartBoundaryInput {
+  const startMock = deps.startTaskRunner as ReturnType<typeof vi.fn>;
+  const call = startMock.mock.calls[0] as [Env, TaskRunnerStartBoundaryInput] | undefined;
+  if (!call) throw new Error('TaskRunner start was not captured');
+  return call[1];
+}
+
+function capturedStartGuard(deps: ReservedTaskSubmissionDependencies): TaskRunnerReservedSubmissionGuard {
+  const guard = capturedStartInput(deps).startGuard;
+  if (!guard || guard.kind !== 'reserved_submission') {
+    throw new Error('Reserved TaskRunner start guard was not captured');
+  }
+  return guard;
 }
 
 function toTaskRunnerStartInput(input: TaskRunnerStartBoundaryInput): StartTaskInput {
@@ -355,6 +393,59 @@ async function allWorkspaceRowsForFixture(
     .bind(fixture.projectId, fixture.userId, fixture.repository)
     .all<{ id: string; status: string; chat_session_id: string | null }>();
   return results ?? [];
+}
+
+async function reservedRevocationRowsForFixture(
+  fixture: Awaited<ReturnType<typeof seedReservedFixture>>
+): Promise<
+  Array<{ task_id: string; reason: string; source: string; chat_session_id: string }>
+> {
+  const { results } = await env.DATABASE.prepare(
+    `SELECT task_id, reason, source, chat_session_id
+       FROM reserved_task_session_revocations
+      WHERE project_id = ?
+        AND chat_session_id = ?
+      ORDER BY revoked_at, task_id`
+  )
+    .bind(fixture.projectId, fixture.input.identities.chatSessionId)
+    .all<{ task_id: string; reason: string; source: string; chat_session_id: string }>();
+  return results ?? [];
+}
+
+function installNodeAgentFetchRecorder(): Array<{
+  method: string;
+  pathname: string;
+  body: Record<string, unknown> | null;
+}> {
+  const calls: Array<{ method: string; pathname: string; body: Record<string, unknown> | null }> =
+    [];
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    const request =
+      input instanceof Request
+        ? input
+        : new Request(typeof input === 'string' ? input : input.toString(), init);
+    const bodyText =
+      typeof init?.body === 'string'
+        ? init.body
+        : input instanceof Request
+          ? await input.clone().text()
+          : '';
+    const body = bodyText ? (JSON.parse(bodyText) as Record<string, unknown>) : null;
+    const url = new URL(request.url);
+    calls.push({ method: request.method, pathname: url.pathname, body });
+
+    if (url.pathname === '/workspaces') {
+      return new Response(JSON.stringify({ workspaceId: body?.workspaceId }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  return calls;
 }
 
 async function reserveOrphanWorkspaceAllocation(
@@ -669,6 +760,255 @@ describe('reserved submission adapter and TaskRunner durable fencing', () => {
     expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toBeNull();
   });
 
+  it('rejects unsupported or mismatched reserved start guards before initialization', async () => {
+    const fixture = await seedReservedFixture('invalid-start-guard');
+    const deps = submissionDeps();
+    await submitFixture(fixture, deps);
+    const startInput = toTaskRunnerStartInput(capturedStartInput(deps));
+    const unsupportedInput: StartTaskInput = {
+      ...startInput,
+      taskId: `${startInput.taskId}-unsupported`,
+      config: {
+        ...startInput.config,
+        startGuard: { kind: 'other_guard' } as unknown as TaskRunnerReservedSubmissionGuard,
+      },
+    };
+    await expect(
+      runInDurableObject(taskRunnerStub(unsupportedInput.taskId), (instance) =>
+        instance.start(unsupportedInput)
+      )
+    ).rejects.toThrow('Unsupported TaskRunner start guard kind');
+    await expect(taskRunnerStub(unsupportedInput.taskId).getStatus()).resolves.toBeNull();
+
+    const mismatchedInput: StartTaskInput = {
+      ...startInput,
+      taskId: `${startInput.taskId}-mismatch`,
+    };
+    await expect(
+      runInDurableObject(taskRunnerStub(mismatchedInput.taskId), (instance) =>
+        instance.start(mismatchedInput)
+      )
+    ).rejects.toThrow('does not match TaskRunner');
+    await expect(taskRunnerStub(mismatchedInput.taskId).getStatus()).resolves.toBeNull();
+  });
+
+  it('rereads D1 authority after the final ProjectData session await before VM fetch', async () => {
+    const fixture = await seedReservedFixture('cancel-during-final-session-read');
+    const nodeId = `node-${fixture.executionId}`;
+    await makeReadyNode(nodeId, fixture.userId);
+    const deps = submissionDeps();
+    await submitFixture(fixture, deps);
+    const guard = capturedStartGuard(deps);
+    const sessionLookupStarted = deferred<void>();
+    const releaseSessionLookup = deferred<void>();
+    vi.spyOn(projectDataService, 'getSession').mockImplementationOnce(async () => {
+      sessionLookupStarted.resolve();
+      await releaseSessionLookup.promise;
+      return {
+        id: fixture.input.identities.chatSessionId,
+        status: 'active',
+        taskId: fixture.input.identities.taskId,
+        createdByUserId: fixture.userId,
+      };
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const request = fetchNodeAgent(
+      nodeId,
+      testEnv,
+      `https://${nodeId}.vm.example.test/health`,
+      { method: 'GET' },
+      1_000,
+      {
+        beforeExternalMutation: () => assertTaskRunnerStartGuard(testEnv, guard),
+      }
+    );
+
+    await sessionLookupStarted.promise;
+    await cancelTask(fixture.input.identities.taskId, 'cancelled during final session read');
+    releaseSessionLookup.resolve();
+
+    await expect(request).rejects.toThrow('cancelled');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('rereads D1 archive revocation after the final ProjectData session await before VM fetch', async () => {
+    const fixture = await seedReservedFixture('archive-during-final-session-read');
+    const nodeId = `node-${fixture.executionId}`;
+    await makeReadyNode(nodeId, fixture.userId);
+    const deps = submissionDeps();
+    await submitFixture(fixture, deps);
+    const guard = capturedStartGuard(deps);
+    const sessionLookupStarted = deferred<void>();
+    const releaseSessionLookup = deferred<void>();
+    vi.spyOn(projectDataService, 'getSession').mockImplementationOnce(async () => {
+      sessionLookupStarted.resolve();
+      await releaseSessionLookup.promise;
+      return {
+        id: fixture.input.identities.chatSessionId,
+        status: 'active',
+        taskId: fixture.input.identities.taskId,
+        createdByUserId: fixture.userId,
+      };
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const request = fetchNodeAgent(
+      nodeId,
+      testEnv,
+      `https://${nodeId}.vm.example.test/health`,
+      { method: 'GET' },
+      1_000,
+      {
+        beforeExternalMutation: () => assertTaskRunnerStartGuard(testEnv, guard),
+      }
+    );
+
+    await sessionLookupStarted.promise;
+    await projectDataService.stopSession(
+      testEnv,
+      fixture.projectId,
+      fixture.input.identities.chatSessionId
+    );
+    releaseSessionLookup.resolve();
+
+    await expect(request).rejects.toThrow('session_stopped');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('applies the same start guard before cf-container transport dispatch', async () => {
+    const fixture = await seedReservedFixture('container-transport-final-guard');
+    const nodeId = `node-${fixture.executionId}`;
+    await makeReadyNode(nodeId, fixture.userId);
+    await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+      .bind(nodeId)
+      .run();
+    const deps = submissionDeps();
+    await submitFixture(fixture, deps);
+    const guard = capturedStartGuard(deps);
+    await cancelTask(fixture.input.identities.taskId, 'cancelled before container fetch');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    const containerEnv = {
+      ...testEnv,
+      CF_CONTAINER_ENABLED: 'true',
+      VM_AGENT_CONTAINER: {
+        idFromName: vi.fn(),
+        get: vi.fn(),
+      },
+    } as unknown as Env;
+
+    await expect(
+      fetchNodeAgent(
+        nodeId,
+        containerEnv,
+        `https://${nodeId}.vm.example.test/workspaces`,
+        { method: 'POST' },
+        1_000,
+        {
+          beforeExternalMutation: () => assertTaskRunnerStartGuard(containerEnv, guard),
+        }
+      )
+    ).rejects.toThrow('cancelled');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not record reserved revocation when guarded ProjectData fail is rejected', async () => {
+    const fixture = await seedReservedFixture('stale-fail-session-cleanup');
+    const deps = submissionDeps();
+    await submitFixture(fixture, deps);
+    const guard = capturedStartGuard(deps);
+
+    await expect(
+      projectDataService.failSession(testEnv, fixture.projectId, guard.chatSessionId, 'stale cleanup', {
+        taskId: `old-${guard.taskId}`,
+        createdByUserId: fixture.userId,
+        workspaceId: null,
+      })
+    ).resolves.toBe(false);
+
+    expect(await reservedRevocationRowsForFixture(fixture)).toEqual([]);
+    await expect(assertTaskRunnerStartGuard(testEnv, guard)).resolves.toBeUndefined();
+
+    await expect(
+      projectDataService.failSession(testEnv, fixture.projectId, guard.chatSessionId, 'real cleanup', {
+        taskId: guard.taskId,
+        createdByUserId: fixture.userId,
+        workspaceId: null,
+      })
+    ).resolves.toBe(true);
+    expect(await reservedRevocationRowsForFixture(fixture)).toEqual([
+      {
+        task_id: guard.taskId,
+        reason: 'session_failed',
+        source: 'project_data.fail_session',
+        chat_session_id: guard.chatSessionId,
+      },
+    ]);
+  });
+
+  it('classifies a delayed successful start as the persisted winner after queued-only guard loss', async () => {
+    const fixture = await seedReservedFixture('delayed-successful-start');
+    const sessionLookupStarted = deferred<void>();
+    const releaseSessionLookup = deferred<void>();
+    const getSession = projectDataService.getSession;
+    vi.spyOn(projectDataService, 'getSession')
+      .mockImplementationOnce((...args) => getSession(...args))
+      .mockImplementationOnce(async () => {
+        sessionLookupStarted.resolve();
+        await releaseSessionLookup.promise;
+        return {
+          id: fixture.input.identities.chatSessionId,
+          status: 'active',
+          taskId: fixture.input.identities.taskId,
+          createdByUserId: fixture.userId,
+        };
+      });
+    const deps = {
+      ...submissionDeps(),
+      startTaskRunner: vi.fn(async () => {
+        throw new Error('lost TaskRunner acknowledgement before durable status');
+      }) as typeof startTaskRunnerDO,
+      ensureTaskRunnerStarted: vi.fn(async () => false),
+    } satisfies ReservedTaskSubmissionDependencies;
+
+    const submission = submitReservedTask(testEnv, fixture.input, deps);
+    await sessionLookupStarted.promise;
+    await env.DATABASE.prepare(
+      `UPDATE tasks
+          SET status = 'delegated', updated_at = ?
+        WHERE id = ?
+          AND status = 'queued'`
+    )
+      .bind(new Date().toISOString(), fixture.input.identities.taskId)
+      .run();
+    releaseSessionLookup.resolve();
+
+    await expect(submission).resolves.toMatchObject({
+      outcome: 'admitted',
+      startState: 'already_started',
+    });
+    expect(await taskRow(fixture.input.identities.taskId)).toMatchObject({
+      status: 'delegated',
+      workspace_id: null,
+    });
+    expect(deps.ensureTaskRunnerStarted).toHaveBeenCalledOnce();
+  });
+
   it('fences a stopped ProjectData session after ProjectData commit before TaskRunner start', async () => {
     const fixture = await seedReservedFixture('archive-after-projectdata');
     const deps = {
@@ -899,6 +1239,77 @@ describe('reserved submission adapter and TaskRunner durable fencing', () => {
     expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toMatchObject({
       currentStep: 'workspace_dispatch',
       stepResults: { workspaceId },
+    });
+  });
+
+  it('dispatches exactly one physical workspace and first harness prompt through TaskRunner', async () => {
+    const fixture = await seedReservedFixture('physical-first-harness-prompt');
+    const nodeId = `node-${fixture.executionId}`;
+    await makeReadyNode(nodeId, fixture.userId);
+    await submitFixture(fixture);
+    const nodeAgentCalls = installNodeAgentFetchRecorder();
+
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    const afterDispatch = await taskRunnerStub(fixture.input.identities.taskId).getStatus();
+    const workspaceId = afterDispatch?.stepResults.workspaceId;
+    expect(afterDispatch).toMatchObject({
+      currentStep: 'workspace_ready',
+      stepResults: { workspaceId: expect.any(String) },
+    });
+    if (!workspaceId) throw new Error('Missing workspace after dispatch');
+
+    await env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET status = 'running', updated_at = ?
+        WHERE id = ?`
+    )
+      .bind(new Date().toISOString(), workspaceId)
+      .run();
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+    await runTaskRunnerAlarm(fixture.input.identities.taskId);
+
+    const workspaceDispatches = nodeAgentCalls.filter(
+      (call) => call.method === 'POST' && call.pathname === '/workspaces'
+    );
+    const agentSessionCreates = nodeAgentCalls.filter((call) =>
+      /\/workspaces\/[^/]+\/agent-sessions$/.test(call.pathname)
+    );
+    const firstHarnessPrompts = nodeAgentCalls.filter((call) =>
+      /\/workspaces\/[^/]+\/agent-sessions\/[^/]+\/start$/.test(call.pathname)
+    );
+    expect(workspaceDispatches).toHaveLength(1);
+    expect(agentSessionCreates).toHaveLength(1);
+    expect(firstHarnessPrompts).toHaveLength(1);
+    expect(workspaceDispatches[0]?.body).toMatchObject({
+      workspaceId,
+      projectId: fixture.projectId,
+      taskId: fixture.input.identities.taskId,
+    });
+    expect(firstHarnessPrompts[0]?.body).toMatchObject({
+      agentType: 'opencode',
+      initialPrompt: fixture.input.prompt,
+      projectId: fixture.projectId,
+      taskId: fixture.input.identities.taskId,
+      taskMode: 'task',
+    });
+    expect(firstHarnessPrompts[0]?.body?.injectedInstructions).toEqual(
+      expect.stringContaining('get_instructions')
+    );
+    expect(await taskRow(fixture.input.identities.taskId)).toMatchObject({
+      status: 'in_progress',
+      workspace_id: workspaceId,
+    });
+    expect(await taskRunnerStub(fixture.input.identities.taskId).getStatus()).toMatchObject({
+      currentStep: 'running',
+      stepResults: {
+        workspaceId,
+        agentStarted: true,
+        agentSessionId: expect.any(String),
+      },
     });
   });
 

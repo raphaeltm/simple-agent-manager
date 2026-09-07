@@ -5,6 +5,7 @@ export type ReservedTaskSessionRevocationReason = 'session_stopped' | 'session_f
 export interface ReservedTaskSessionRevocationInput {
   projectId: string;
   chatSessionId: string;
+  taskId?: string | null;
   reason: ReservedTaskSessionRevocationReason;
   source: string;
   now?: string;
@@ -29,6 +30,7 @@ export async function recordReservedTaskSessionRevocation(
       WHERE t.project_id = ?
         AND t.chat_session_id = ?
         AND t.chat_session_id IS NOT NULL
+        AND (? IS NULL OR t.id = ?)
      ON CONFLICT(project_id, chat_session_id) DO UPDATE SET
        task_id = excluded.task_id,
        reason = excluded.reason,
@@ -43,7 +45,9 @@ export async function recordReservedTaskSessionRevocation(
       now,
       now,
       input.projectId,
-      input.chatSessionId
+      input.chatSessionId,
+      input.taskId ?? null,
+      input.taskId ?? null
     )
     .run();
 }

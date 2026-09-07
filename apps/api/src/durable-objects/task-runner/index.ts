@@ -496,6 +496,15 @@ export class TaskRunner extends DurableObject<Env> {
     }
     await assertTaskRunnerStartGuard(this.env, input.config.startGuard, {
       requireQueuedTask: options.requireStartGuardQueued === true,
+      expectedRunner: {
+        taskId: input.taskId,
+        projectId: input.projectId,
+        userId: input.userId,
+        chatSessionId:
+          'stepResults' in input
+            ? (input.stepResults.chatSessionId ?? input.config.chatSessionId)
+            : input.config.chatSessionId,
+      },
     });
   }
 

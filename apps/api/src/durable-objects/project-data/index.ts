@@ -75,6 +75,13 @@ import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');
 
+function isFailSessionIdentityGuardDenial(err: unknown, sessionId: string): boolean {
+  return (
+    err instanceof Error &&
+    err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
+  );
+}
+
 export type { Env } from './types';
 
 export class ProjectData extends DurableObject<Env> {
@@ -369,7 +376,21 @@ export class ProjectData extends DurableObject<Env> {
     errorMessage: string | null = null,
     guard?: sessions.SessionIdentityGuard | null
   ): Promise<boolean> {
-    const result = sessions.failSession(this.sql, sessionId, guard);
+    let result: { workspaceId: string | null; messageCount: number } | null;
+    try {
+      result = sessions.failSession(this.sql, sessionId, guard);
+    } catch (err) {
+      if (guard && isFailSessionIdentityGuardDenial(err, sessionId)) {
+        log.info('fail_session_identity_guard_denied', {
+          sessionId,
+          taskId: guard.taskId ?? null,
+          createdByUserId: guard.createdByUserId ?? null,
+          workspaceId: guard.workspaceId ?? null,
+        });
+        return false;
+      }
+      throw err;
+    }
     if (result) {
       activity.recordActivityEventInternal(
         this.sql,

@@ -327,6 +327,13 @@ function normalizeProjectDataEventRpcError(err: unknown): Error | null {
   }
 }
 
+function isFailSessionIdentityGuardDenial(err: unknown, sessionId: string): boolean {
+  return (
+    err instanceof Error &&
+    err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
+  );
+}
+
 async function callProjectDataNoRetry<T>(
   env: Env,
   projectId: string,
@@ -750,15 +757,29 @@ export async function failSession(
   guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'failSession');
-  await recordReservedTaskSessionRevocation(env, {
-    projectId,
-    chatSessionId: sessionId,
-    reason: 'session_failed',
-    source: 'project_data.fail_session',
-  });
   const stub = await getStub(env, projectId);
-  const failed = await stub.failSession(sessionId, errorMessage, guard ?? null);
+  let failed: boolean;
+  try {
+    failed = await stub.failSession(sessionId, errorMessage, guard ?? null);
+  } catch (error) {
+    if (guard && isFailSessionIdentityGuardDenial(error, sessionId)) {
+      log.info('project_data.fail_session_identity_guard_denied', {
+        projectId,
+        sessionId,
+        taskId: guard.taskId ?? null,
+      });
+      return false;
+    }
+    throw error;
+  }
   if (failed) {
+    await recordReservedTaskSessionRevocation(env, {
+      projectId,
+      chatSessionId: sessionId,
+      taskId: guard?.taskId ?? null,
+      reason: 'session_failed',
+      source: 'project_data.fail_session',
+    });
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
       sessionId,
