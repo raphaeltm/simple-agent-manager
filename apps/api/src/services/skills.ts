@@ -2,6 +2,7 @@ import type {
   AgentEffort,
   AgentSkill,
   CreateSkillRequest,
+  ResourceRequirements,
   ResolvedSkillProfile,
   UpdateSkillRequest,
 } from '@simple-agent-manager/shared';
@@ -69,7 +70,7 @@ function serializeSkillResourceRequirements(body: {
 
 export function parseSkillResourceRequirementsJson(
   value: string | null | undefined
-): Record<string, unknown> | undefined {
+): ResourceRequirements | undefined {
   return parseStoredResourceRequirementsJson(value);
 }
 
