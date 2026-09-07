@@ -12,6 +12,94 @@ import {
 import type { Env } from './types';
 import { generateId } from './types';
 
+export type ReservedTaskSessionConflictReason =
+  | 'session_identity_conflict'
+  | 'session_terminal'
+  | 'session_capacity_exceeded';
+
+export class ReservedTaskSessionConflictError extends Error {
+  constructor(
+    readonly reason: ReservedTaskSessionConflictReason,
+    message: string
+  ) {
+    super(message);
+    this.name = 'ReservedTaskSessionConflictError';
+  }
+}
+
+export interface CreateReservedTaskSessionInput {
+  sessionId: string;
+  workspaceId: string | null;
+  topic: string | null;
+  taskId: string;
+  createdByUserId: string | null;
+}
+
+export interface CreateReservedTaskSessionResult {
+  id: string;
+  now: number;
+  inserted: boolean;
+}
+
+export interface CreateReservedTaskSessionWithInitialMessageInput
+  extends CreateReservedTaskSessionInput {
+  initialMessageId: string;
+  initialMessageRole: string;
+  initialMessageContent: string;
+  initialMessageToolMetadata: string | null;
+}
+
+export type CreateReservedTaskSessionWithInitialMessageResult =
+  | {
+      outcome: 'created';
+      sessionId: string;
+      initialMessageId: string;
+      sessionInserted: boolean;
+      initialMessageInserted: boolean;
+    }
+  | {
+      outcome: 'conflict';
+      reason: ReservedTaskSessionConflictReason | 'initial_message_conflict';
+      message: string;
+    };
+
+function readReservedSession(sql: SqlStorage, sessionId: string): Record<string, unknown> | null {
+  return (
+    sql
+      .exec(
+        `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, updated_at
+         FROM chat_sessions WHERE id = ? LIMIT 1`,
+        sessionId
+      )
+      .toArray()[0] ?? null
+  );
+}
+
+function assertReservedSessionMatches(
+  row: Record<string, unknown>,
+  input: CreateReservedTaskSessionInput
+): number {
+  const status = typeof row.status === 'string' ? row.status : null;
+  if (status === 'stopped' || status === 'failed') {
+    throw new ReservedTaskSessionConflictError(
+      'session_terminal',
+      `Session ${input.sessionId} is ${status} and cannot be reused for reserved task submission`
+    );
+  }
+  if (
+    row.task_id !== input.taskId ||
+    row.created_by_user_id !== input.createdByUserId ||
+    row.topic !== input.topic ||
+    (input.workspaceId !== null && row.workspace_id !== input.workspaceId)
+  ) {
+    throw new ReservedTaskSessionConflictError(
+      'session_identity_conflict',
+      `Session ${input.sessionId} already belongs to a different task submission`
+    );
+  }
+  return typeof row.updated_at === 'number' ? row.updated_at : Date.now();
+}
+
 export function createSession(
   sql: SqlStorage,
   env: Env,
@@ -54,6 +142,57 @@ export function createSession(
   }
 
   return { id, now };
+}
+
+export function createReservedTaskSession(
+  sql: SqlStorage,
+  env: Env,
+  input: CreateReservedTaskSessionInput
+): CreateReservedTaskSessionResult {
+  const existing = readReservedSession(sql, input.sessionId);
+  if (existing) {
+    return {
+      id: input.sessionId,
+      now: assertReservedSessionMatches(existing, input),
+      inserted: false,
+    };
+  }
+
+  const maxSessions = parseInt(env.MAX_SESSIONS_PER_PROJECT || '10000', 10);
+  const countRow = sql.exec('SELECT COUNT(*) as cnt FROM chat_sessions').toArray()[0];
+  if (countRow && parseCountCnt(countRow, 'sessions.create_reserved_count') >= maxSessions) {
+    throw new ReservedTaskSessionConflictError(
+      'session_capacity_exceeded',
+      `Maximum ${maxSessions} sessions per project exceeded`
+    );
+  }
+
+  const now = Date.now();
+  sql.exec(
+    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
+    input.sessionId,
+    input.workspaceId,
+    input.taskId,
+    input.createdByUserId,
+    input.topic,
+    now,
+    now,
+    now
+  );
+
+  if (input.workspaceId) {
+    sql.exec(
+      `INSERT OR IGNORE INTO workspace_activity (workspace_id, session_id, last_message_at, created_at)
+       VALUES (?, ?, ?, ?)`,
+      input.workspaceId,
+      input.sessionId,
+      now,
+      now
+    );
+  }
+
+  return { id: input.sessionId, now, inserted: true };
 }
 
 export function linkSessionToTask(sql: SqlStorage, sessionId: string, taskId: string): boolean {

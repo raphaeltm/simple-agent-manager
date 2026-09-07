@@ -1,32 +1,19 @@
 /**
  * Trigger Task Submission Bridge
  *
- * Bridges from trigger execution to the existing TaskRunner pipeline.
- * Called by both the cron sweep engine and the manual "Run Now" endpoint.
- *
- * Flow: trigger fires → submitTriggeredTask() → creates task + session → starts TaskRunner DO
+ * Bridges from trigger execution to the retry-safe normal task submission
+ * adapter. Called by both the cron sweep engine and the manual "Run Now"
+ * endpoint.
  */
-import type { TaskMode, TriggeredBy, VMSize } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
+import type { TaskMode, TriggeredBy } from '@simple-agent-manager/shared';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { ulid } from '../lib/ulid';
-import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
-import { generateBranchName } from './branch-name';
-import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
 import {
-  PlacementResolutionError,
-  resolveTaskStartPlacement,
-  resolveTaskStartPlacementCredentialAttributionFromPlacement,
-} from './placement-resolver';
-import * as projectDataService from './project-data';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
-import { markQueuedTaskFailed } from './task-failure';
-import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
-import { generateTaskTitle, getTaskTitleConfig } from './task-title';
+  reservedIdentitiesForTriggerExecution,
+  submitReservedTask,
+  type ReservedTaskSubmissionResult,
+} from './reserved-task-submission';
 import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 
 export { TriggerTaskSubmissionPendingError } from './trigger-submission';
@@ -57,302 +44,78 @@ export interface SubmitTriggeredTaskInput {
   triggerName: string;
 }
 
+function reservedOutcomeToError(result: ReservedTaskSubmissionResult): Error {
+  if (result.outcome === 'pending') {
+    return new TriggerTaskSubmissionPendingError({
+      taskId: result.taskId,
+      sessionId: result.sessionId,
+      branchName: result.branchName,
+    });
+  }
+  if (result.outcome === 'terminal') {
+    return new Error(
+      `Reserved trigger task ${result.taskId} is already terminal: ${result.status}`
+    );
+  }
+  return new Error(result.outcome === 'conflict' ? result.message : 'Unexpected trigger submission outcome');
+}
+
 /**
- * Submit a task from a trigger execution. Resolves project config,
- * user credentials, agent profile, and starts the TaskRunner DO.
+ * Submit a task from a trigger execution using identities derived from the
+ * already-reserved trigger execution row.
  */
 export async function submitTriggeredTask(
   env: Env,
   input: SubmitTriggeredTaskInput
 ): Promise<SubmittedTriggerTask> {
-  const db = drizzle(env.DATABASE, { schema });
-
-  // Resolve project config
-  const [project] = await db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.id, input.projectId))
-    .limit(1);
-
-  if (!project) {
-    throw new Error(`Project ${input.projectId} not found`);
-  }
-
-  // Resolve agent profile if specified
-  const resolvedProfile =
-    input.agentProfileId || input.skillId
-      ? await resolveSkillProfile(
-          db,
-          input.projectId,
-          input.agentProfileId,
-          input.skillId,
-          input.userId,
-          env
-        )
-      : null;
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.resourceRequirementsJson
-  );
-
-  const taskId = ulid();
-  const placement = (() => {
-    try {
-      return resolveTaskStartPlacement({
-        entryPoint: 'trigger-submit',
-        taskId,
-        triggerId: input.triggerId,
-        projectId: input.projectId,
-        userId: input.userId,
-        project,
-        profile: resolvedProfile,
-        explicit: {
-          vmSize: (input.vmSizeOverride as VMSize | null) ?? null,
-          vmSizeSource: 'trigger',
-          taskMode: input.taskMode ?? null,
-        },
-        credentialProjectPolicy: 'current-project',
-        taskModeDefault: 'workspace-profile',
-        resourceRequirements: {
-          skill: skillResourceRequirements,
-        },
-      });
-    } catch (err) {
-      if (err instanceof PlacementResolutionError) {
-        throw new Error(err.message);
-      }
-      throw err;
-    }
-  })();
-
-  const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
-    db,
-    placement,
-    {
-      credentialsRequiredMessage: `No cloud provider credentials available for trigger ${input.triggerId}`,
-      env,
-    }
-  );
-  if ('error' in placementResolution) {
-    throw new Error(placementResolution.error);
-  }
-  const {
-    capacityPoolSelection,
-    capacityPlacementSnapshot,
-    effectiveProvider,
-    credentialAttributionUserId,
-    credentialAttributionProjectId,
-    credentialAttributionSource,
-  } = placementResolution;
-  const {
-    vmSize,
-    vmSizeSource,
-    vmLocation,
-    workspaceProfile,
-    devcontainerConfigName,
-    taskMode,
-    resolvedReservation,
-    agentType,
-  } = placement;
-
-  // Generate branch name from trigger name + date
-  const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
-  const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
-  const branchName = generateBranchName(input.triggerName, taskId, {
-    prefix: branchPrefix,
-    maxLength: branchMaxLength,
-  });
-
-  // Generate concise task title
-  const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await generateTaskTitle(env, input.renderedPrompt, titleConfig);
-
-  const now = new Date().toISOString();
-
-  // Create task in D1 with trigger metadata
-  await db.insert(schema.tasks).values({
-    id: taskId,
+  const result = await submitReservedTask(env, {
+    identities: reservedIdentitiesForTriggerExecution(input.triggerExecutionId),
     projectId: input.projectId,
     userId: input.userId,
-    title: taskTitle,
-    description: input.renderedPrompt,
-    status: 'queued',
-    executionStep: 'node_selection',
-    priority: 0,
-    agentProfileHint: resolvedProfile?.profileId ?? null,
-    skillId: resolvedProfile?.skillId ?? null,
-    skillHint: input.skillId,
-    taskMode,
-    outputBranch: branchName,
-    triggeredBy: input.triggeredBy,
-    triggerId: input.triggerId,
-    triggerExecutionId: input.triggerExecutionId,
-    requestedVmSize: vmSize,
-    requestedVmSizeSource: vmSizeSource,
-    resourceRequirementsJson: resolvedProfile?.resourceRequirementsJson ?? null,
-    resourceRequirementsSource: resolvedReservation.source,
-    resolvedReservationJson: JSON.stringify(resolvedReservation),
-    credentialAttributionUserId,
-    credentialAttributionProjectId,
-    credentialAttributionSource,
-    ...capacityPlacementSnapshotDbValues(capacityPlacementSnapshot),
-    createdBy: input.userId,
-    createdAt: now,
-    updatedAt: now,
+    prompt: input.renderedPrompt,
+    branchNameSeed: input.triggerName,
+    agentProfileId: input.agentProfileId,
+    skillId: input.skillId,
+    taskMode: input.taskMode,
+    vmSizeOverride: input.vmSizeOverride,
+    source: {
+      kind: 'trigger',
+      sourceId: input.triggerId,
+      sourceExecutionId: input.triggerExecutionId,
+      triggeredBy: input.triggeredBy,
+      displayName: input.triggerName,
+      repositoryAccessFlow: `trigger-${input.triggeredBy}`,
+      initialStatusReason: `Triggered by ${input.triggeredBy} (trigger: ${input.triggerId})`,
+      initialStatusActorType: 'system',
+      initialStatusActorId: null,
+      triggerId: input.triggerId,
+      triggerExecutionId: input.triggerExecutionId,
+    },
   });
 
-  // Record status event: null -> queued
-  await db.insert(schema.taskStatusEvents).values({
-    id: ulid(),
-    taskId,
-    fromStatus: null,
-    toStatus: 'queued',
-    actorType: 'system',
-    actorId: null,
-    reason: `Triggered by ${input.triggeredBy} (trigger: ${input.triggerId})`,
-    createdAt: now,
-  });
-
-  // Create chat session
-  let sessionId: string;
-  try {
-    sessionId = await projectDataService.createSession(
-      env,
-      input.projectId,
-      null, // workspaceId — linked later by TaskRunner DO
-      taskTitle,
-      taskId,
-      input.userId
-    );
-
-    // Persist the rendered prompt as the initial user message
-    await projectDataService.persistMessage(
-      env,
-      input.projectId,
-      sessionId,
-      'user',
-      input.renderedPrompt,
-      null
-    );
-  } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    await markQueuedTaskFailed(db, taskId, `Session creation failed: ${errorMsg}`, {
-      env,
+  if (result.outcome !== 'admitted') {
+    log.warn('trigger_submit.reserved_not_admitted', {
+      taskId: result.taskId,
+      triggerId: input.triggerId,
+      triggerExecutionId: input.triggerExecutionId,
       projectId: input.projectId,
-      source: 'trigger_submit.session_creation',
+      outcome: result.outcome,
+      reason: 'reason' in result ? result.reason : result.status,
     });
-    throw err;
-  }
-
-  // Look up user's githubId for noreply email fallback
-  const [userRow] = await db
-    .select({ githubId: schema.users.githubId, name: schema.users.name, email: schema.users.email })
-    .from(schema.users)
-    .where(eq(schema.users.id, input.userId))
-    .limit(1);
-
-  const branch = project.defaultBranch;
-
-  // Start TaskRunner DO
-  try {
-    await requireRepositoryOwnerAccess(
-      env,
-      db,
-      project,
-      input.userId,
-      `trigger-${input.triggeredBy}`
-    );
-    try {
-      await startTaskRunnerDO(env, {
-        taskId,
-        projectId: input.projectId,
-        userId: input.userId,
-        vmSize,
-        vmLocation,
-        branch,
-        defaultBranch: project.defaultBranch,
-        userName: userRow?.name ?? null,
-        userEmail: userRow?.email ?? null,
-        githubId: userRow?.githubId ?? null,
-        taskTitle,
-        taskDescription: input.renderedPrompt,
-        repository: project.repository,
-        installationId: project.installationId,
-        outputBranch: branchName,
-        projectDefaultVmSize: project.defaultVmSize as VMSize | null,
-        chatSessionId: sessionId,
-        agentType,
-        workspaceProfile,
-        devcontainerConfigName,
-        cloudProvider: placement.provider ?? effectiveProvider,
-        explicitVmLocation: placement.explicitVmLocation === true,
-        credentialAttributionUserId,
-        credentialAttributionProjectId,
-        credentialAttributionSource,
-        taskMode,
-        model: resolvedProfile?.model ?? null,
-        effort: resolvedProfile?.effort ?? null,
-        permissionMode: resolvedProfile?.permissionMode ?? null,
-        // OpenCode settings: VM agent fetches user-level settings via callback
-        opencodeProvider: null,
-        opencodeBaseUrl: null,
-        systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
-        agentProfileHint: resolvedProfile?.profileId ?? null,
-        projectScaling: {
-          taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-          maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
-          nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
-          nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
-          warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
-        },
-        resolvedReservation,
-        capacityPoolSelection,
-        vmSizeSource,
-      });
-    } catch (startError) {
-      let durableStart: boolean;
-      try {
-        durableStart = await ensureTaskRunnerStarted(env, taskId);
-      } catch (statusError) {
-        log.warn('trigger_submit.task_runner_status_check_failed', {
-          taskId,
-          triggerId: input.triggerId,
-          triggerExecutionId: input.triggerExecutionId,
-          error: statusError instanceof Error ? statusError.message : String(statusError),
-        });
-        throw new TriggerTaskSubmissionPendingError({ taskId, sessionId, branchName });
-      }
-      if (!durableStart) throw startError;
-      log.warn('trigger_submit.task_runner_start_ack_lost', {
-        taskId,
-        triggerId: input.triggerId,
-        triggerExecutionId: input.triggerExecutionId,
-      });
-    }
-  } catch (err) {
-    if (err instanceof TriggerTaskSubmissionPendingError) throw err;
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    await markQueuedTaskFailed(db, taskId, `Task runner startup failed: ${errorMsg}`, {
-      env,
-      projectId: input.projectId,
-      source: 'trigger_submit.task_runner_startup',
-      sessionId,
-    });
-    // Stop orphaned session (best-effort)
-    await projectDataService.stopSession(env, input.projectId, sessionId).catch(() => {});
-    throw err;
+    throw reservedOutcomeToError(result);
   }
 
   log.info('trigger_submit.created', {
-    taskId,
+    taskId: result.taskId,
     triggerId: input.triggerId,
     triggerExecutionId: input.triggerExecutionId,
     projectId: input.projectId,
-    sessionId,
-    branchName,
-    vmSize,
-    vmLocation,
+    sessionId: result.sessionId,
+    branchName: result.branchName,
+    reused: result.reused,
+    startState: result.startState,
     triggeredBy: input.triggeredBy,
   });
 
-  return { taskId, sessionId, branchName };
+  return { taskId: result.taskId, sessionId: result.sessionId, branchName: result.branchName };
 }

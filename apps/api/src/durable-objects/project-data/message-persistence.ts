@@ -53,6 +53,25 @@ export async function persistMessageWithSideEffects(
   );
   if (!result.inserted) return result.id;
 
+  await runPersistedMessageSideEffects(sql, env, hooks, sessionId, role, content, result);
+  return result.id;
+}
+
+export async function runPersistedMessageSideEffects(
+  sql: SqlStorage,
+  env: Env,
+  hooks: MessagePersistenceHooks,
+  sessionId: string,
+  role: string,
+  content: string,
+  result: {
+    id: string;
+    now: number;
+    sequence: number;
+    workspaceId: string | null;
+    toolMetadata: string | null;
+  }
+): Promise<void> {
   const idleReset = idleCleanup.resetIdleCleanup(sql, env, sessionId);
   if (idleReset.cleanupAt > 0) await hooks.recalculateAlarm();
 
@@ -88,7 +107,6 @@ export async function persistMessageWithSideEffects(
     },
     sessionId
   );
-  return result.id;
 }
 
 export async function persistMessageBatchWithSideEffects(

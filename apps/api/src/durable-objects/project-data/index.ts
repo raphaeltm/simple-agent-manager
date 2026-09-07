@@ -105,6 +105,45 @@ export class ProjectData extends DurableObject<Env> {
     return this.cachedProjectId;
   }
 
+  private runSessionCreatedHooks(input: {
+    id: string;
+    workspaceId: string | null;
+    taskId: string | null;
+    createdByUserId: string | null;
+    topic: string | null;
+    now: number;
+  }): void {
+    if (input.workspaceId) {
+      this.recalculateAlarm().catch((err) =>
+        log.warn('schedule_workspace_idle_alarm_failed', {
+          workspaceId: input.workspaceId,
+          ...serializeError(err),
+        })
+      );
+    }
+    activity.recordActivityEventInternal(
+      this.sql,
+      'session.started',
+      input.createdByUserId ? 'user' : 'system',
+      input.createdByUserId,
+      input.workspaceId,
+      input.id,
+      input.taskId,
+      null
+    );
+    this.scheduleSummarySync();
+    this.broadcastEvent('session.created', {
+      id: input.id,
+      workspaceId: input.workspaceId,
+      taskId: input.taskId,
+      createdByUserId: input.createdByUserId,
+      topic: input.topic,
+      status: 'active',
+      messageCount: 0,
+      createdAt: input.now,
+    });
+  }
+
   /**
    * Persist this DO's projectId so it can identify itself with no inbound RPC.
    *
@@ -163,33 +202,80 @@ export class ProjectData extends DurableObject<Env> {
       taskId,
       createdByUserId
     );
-    if (workspaceId) {
-      this.recalculateAlarm().catch((err) =>
-        log.warn('schedule_workspace_idle_alarm_failed', { workspaceId, ...serializeError(err) })
+    this.runSessionCreatedHooks({ id, workspaceId, taskId, createdByUserId, topic, now });
+    return id;
+  }
+
+  async createReservedTaskSessionWithInitialMessage(
+    input: sessions.CreateReservedTaskSessionWithInitialMessageInput
+  ): Promise<sessions.CreateReservedTaskSessionWithInitialMessageResult> {
+    let created:
+      | {
+          session: sessions.CreateReservedTaskSessionResult;
+          message: ReturnType<typeof messages.persistMessage>;
+        }
+      | null = null;
+    try {
+      created = this.ctx.storage.transactionSync(() => {
+        const session = sessions.createReservedTaskSession(this.sql, this.env, input);
+        const message = messages.persistMessage(
+          this.sql,
+          this.env,
+          input.sessionId,
+          input.initialMessageRole,
+          input.initialMessageContent,
+          input.initialMessageToolMetadata,
+          input.initialMessageId
+        );
+        return { session, message };
+      });
+    } catch (error) {
+      if (error instanceof sessions.ReservedTaskSessionConflictError) {
+        return {
+          outcome: 'conflict',
+          reason: error.reason,
+          message: error.message,
+        };
+      }
+      if (error instanceof Error && error.message.includes('already belongs to a different')) {
+        return {
+          outcome: 'conflict',
+          reason: 'initial_message_conflict',
+          message: error.message,
+        };
+      }
+      throw error;
+    }
+
+    if (created.session.inserted) {
+      this.runSessionCreatedHooks({
+        id: input.sessionId,
+        workspaceId: input.workspaceId,
+        taskId: input.taskId,
+        createdByUserId: input.createdByUserId,
+        topic: input.topic,
+        now: created.session.now,
+      });
+    }
+    if (created.message.inserted) {
+      await messagePersistence.runPersistedMessageSideEffects(
+        this.sql,
+        this.env,
+        this.messagePersistenceHooks(),
+        input.sessionId,
+        input.initialMessageRole,
+        input.initialMessageContent,
+        created.message
       );
     }
-    activity.recordActivityEventInternal(
-      this.sql,
-      'session.started',
-      createdByUserId ? 'user' : 'system',
-      createdByUserId,
-      workspaceId,
-      id,
-      taskId,
-      null
-    );
-    this.scheduleSummarySync();
-    this.broadcastEvent('session.created', {
-      id,
-      workspaceId,
-      taskId,
-      createdByUserId,
-      topic,
-      status: 'active',
-      messageCount: 0,
-      createdAt: now,
-    });
-    return id;
+
+    return {
+      outcome: 'created',
+      sessionId: input.sessionId,
+      initialMessageId: input.initialMessageId,
+      sessionInserted: created.session.inserted,
+      initialMessageInserted: created.message.inserted,
+    };
   }
   async linkSessionToTask(sessionId: string, taskId: string): Promise<boolean> {
     const updated = sessions.linkSessionToTask(this.sql, sessionId, taskId);
