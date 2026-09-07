@@ -11,8 +11,8 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
   reservedIdentitiesForTriggerExecution,
-  submitReservedTask,
   type ReservedTaskSubmissionResult,
+  submitReservedTask,
 } from './reserved-task-submission';
 import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 
@@ -57,7 +57,21 @@ function reservedOutcomeToError(result: ReservedTaskSubmissionResult): Error {
       `Reserved trigger task ${result.taskId} is already terminal: ${result.status}`
     );
   }
-  return new Error(result.outcome === 'conflict' ? result.message : 'Unexpected trigger submission outcome');
+  return new Error(
+    result.outcome === 'conflict' ? result.message : 'Unexpected trigger submission outcome'
+  );
+}
+
+function reservedOutcomeReason(
+  result: Exclude<ReservedTaskSubmissionResult, { outcome: 'admitted' }>
+): string {
+  switch (result.outcome) {
+    case 'pending':
+    case 'conflict':
+      return result.reason;
+    case 'terminal':
+      return result.status;
+  }
 }
 
 /**
@@ -100,7 +114,7 @@ export async function submitTriggeredTask(
       triggerExecutionId: input.triggerExecutionId,
       projectId: input.projectId,
       outcome: result.outcome,
-      reason: 'reason' in result ? result.reason : result.status,
+      reason: reservedOutcomeReason(result),
     });
     throw reservedOutcomeToError(result);
   }

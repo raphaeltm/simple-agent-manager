@@ -6,392 +6,79 @@
  * task, initial status event, and checkpoint in one batch, then reconciles the
  * ProjectData and TaskRunner boundaries by intent fingerprint on retry.
  */
-import type {
-  AgentEffort,
-  CredentialProvider,
-  CredentialSource,
-  ResourceRequirementsSource,
-  TaskActorType,
-  TaskMode,
-  TaskTerminalStatus,
-  TriggeredBy,
-  VMLocation,
-  VMSize,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
-import {
-  isTaskMode,
-  TASK_TERMINAL_STATUSES,
-  TRIGGERED_BY_VALUES,
-} from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
-import { type DrizzleD1Database, drizzle } from 'drizzle-orm/d1';
+import { TASK_TERMINAL_STATUSES, type TaskTerminalStatus } from '@simple-agent-manager/shared';
+import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { canonicalJson } from '../lib/canonical-json';
 import { log } from '../lib/logger';
-import { generateBranchName } from './branch-name';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
-  capacityPlacementSnapshotDbValues,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
-import {
-  PlacementResolutionError,
-  resolveTaskStartPlacement,
-  resolveTaskStartPlacementCredentialAttributionFromPlacement,
-  type TaskStartCapacityPoolSelection,
-  type TaskStartPlacement,
-  type TaskStartPlacementWithCredential,
-} from './placement-resolver';
+import type {
+  AcceptedSnapshot,
+  CheckpointRow,
+  PreparedSubmission,
+  ReservedTaskSubmissionDependencies,
+  ReservedTaskSubmissionIdentities,
+  ReservedTaskSubmissionInput,
+  ReservedTaskSubmissionResult,
+  ResolvedReservedTaskSubmissionDependencies,
+} from './reserved-task-submission-contracts';
+export type {
+  ReservedTaskSubmissionConflictReason,
+  ReservedTaskSubmissionDependencies,
+  ReservedTaskSubmissionIdentities,
+  ReservedTaskSubmissionInput,
+  ReservedTaskSubmissionResult,
+  ReservedTaskSubmissionSourceKind,
+  ReservedTaskSubmissionSourceProvenance,
+  ReservedTaskSubmissionStartState,
+} from './reserved-task-submission-contracts';
 import * as projectDataService from './project-data';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
+import {
+  parseAcceptedSnapshot,
+  prepareNewSubmission,
+  reservedTaskSubmissionConflict as conflict,
+  revalidateBeforePhysicalStart,
+  startInputFromSnapshot,
+  submissionFingerprint,
+  validateReservedTaskSubmissionInput,
+} from './reserved-task-submission-intent';
 import { markQueuedTaskFailed } from './task-failure';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
-import { generateTaskTitle, getTaskTitleConfig } from './task-title';
+import { generateTaskTitle } from './task-title';
 
-const FINGERPRINT_VERSION = 1;
-const SNAPSHOT_VERSION = 1;
-const MAX_RESERVED_ID_LENGTH = 160;
 const TERMINAL_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
 const ALREADY_STARTED_STATUSES = new Set<string>(['delegated', 'in_progress']);
-const SOURCE_KINDS = new Set<string>(['trigger', 'schedule', 'standing_watch']);
-const TASK_ACTOR_TYPES = new Set<string>(['user', 'system', 'workspace_callback']);
-const TRIGGERED_BY = new Set<string>(TRIGGERED_BY_VALUES);
 
-type Db = DrizzleD1Database<typeof schema>;
-type ResolvedProfile = Awaited<ReturnType<typeof resolveSkillProfile>> | null;
-type TaskRunnerStartInput = Parameters<typeof startTaskRunnerDO>[1];
+type Db = ReturnType<typeof drizzle<typeof schema>>;
 
-export interface ReservedTaskSubmissionIdentities {
-  taskId: string;
-  chatSessionId: string;
-  initialMessageId: string;
-  initialStatusEventId: string;
+function dbForEnv(env: Env): Db {
+  return drizzle(env.DATABASE, { schema });
 }
 
-export type ReservedTaskSubmissionSourceKind = 'trigger' | 'schedule' | 'standing_watch';
+function dependencySet(
+  deps: ReservedTaskSubmissionDependencies
+): ResolvedReservedTaskSubmissionDependencies {
+  const requireRepositoryAccess: ResolvedReservedTaskSubmissionDependencies['requireRepositoryAccess'] =
+    deps.requireRepositoryAccess ??
+    (async (...args) => {
+      const { requireRepositoryOwnerAccess } = await import('../routes/projects/_helpers');
+      return requireRepositoryOwnerAccess(...args);
+    });
 
-export interface ReservedTaskSubmissionSourceProvenance {
-  kind: ReservedTaskSubmissionSourceKind;
-  sourceId: string;
-  sourceExecutionId: string;
-  triggeredBy: TriggeredBy;
-  displayName: string;
-  repositoryAccessFlow: string;
-  initialStatusReason: string;
-  initialStatusActorType: TaskActorType;
-  initialStatusActorId: string | null;
-  triggerId?: string | null;
-  triggerExecutionId?: string | null;
-}
-
-export interface ReservedTaskSubmissionInput {
-  identities: ReservedTaskSubmissionIdentities;
-  projectId: string;
-  userId: string;
-  prompt: string;
-  branchNameSeed: string;
-  agentProfileId: string | null;
-  skillId: string | null;
-  taskMode: TaskMode;
-  vmSizeOverride: string | null;
-  source: ReservedTaskSubmissionSourceProvenance;
-}
-
-export type ReservedTaskSubmissionStartState =
-  | 'started'
-  | 'already_started'
-  | 'confirmed_after_lost_ack';
-
-export type ReservedTaskSubmissionConflictReason =
-  | 'invalid_input'
-  | 'source_reservation_missing'
-  | 'source_reservation_conflict'
-  | 'intent_fingerprint_mismatch'
-  | 'identity_reuse_conflict'
-  | 'project_not_found'
-  | 'profile_unavailable'
-  | 'placement_unavailable'
-  | 'credentials_unavailable'
-  | 'authority_unavailable'
-  | 'accepted_configuration_changed'
-  | 'project_data_conflict'
-  | 'malformed_checkpoint';
-
-export type ReservedTaskSubmissionResult =
-  | {
-      outcome: 'admitted';
-      taskId: string;
-      sessionId: string;
-      branchName: string;
-      startState: ReservedTaskSubmissionStartState;
-      reused: boolean;
-    }
-  | {
-      outcome: 'pending';
-      taskId: string;
-      sessionId: string;
-      branchName: string;
-      pendingAt: 'project_data' | 'task_runner_start';
-      reason: string;
-      reused: boolean;
-    }
-  | {
-      outcome: 'conflict';
-      taskId: string;
-      sessionId: string;
-      branchName: string | null;
-      reason: ReservedTaskSubmissionConflictReason;
-      message: string;
-    }
-  | {
-      outcome: 'terminal';
-      taskId: string;
-      sessionId: string;
-      branchName: string | null;
-      status: TaskTerminalStatus;
-      reason: string | null;
-      reused: boolean;
-    };
-
-export interface ReservedTaskSubmissionDependencies {
-  startTaskRunner?: typeof startTaskRunnerDO;
-  ensureTaskRunnerStarted?: typeof ensureTaskRunnerStarted;
-  requireRepositoryAccess?: typeof import('../routes/projects/_helpers').requireRepositoryOwnerAccess;
-  now?: () => string;
-  generateTitle?: typeof generateTaskTitle;
-  afterD1Commit?: () => Promise<void> | void;
-  afterProjectDataCommit?: () => Promise<void> | void;
-  afterRunnerStartConfirmed?: () => Promise<void> | void;
-}
-
-interface CheckpointRow {
-  task_id: string;
-  project_id: string;
-  user_id: string;
-  chat_session_id: string;
-  initial_message_id: string;
-  initial_status_event_id: string;
-  source_kind: ReservedTaskSubmissionSourceKind;
-  source_id: string;
-  source_execution_id: string;
-  triggered_by: TriggeredBy;
-  intent_fingerprint: string;
-  accepted_snapshot_json: string;
-  branch_name: string;
-  task_title: string;
-  checkpoint_state: string;
-  project_data_committed_at: string | null;
-  runner_start_attempted_at: string | null;
-  runner_started_at: string | null;
-  task_status: string;
-  task_error_message: string | null;
-  task_chat_session_id: string | null;
-}
-
-interface TaskInsertValues {
-  taskId: string;
-  projectId: string;
-  userId: string;
-  chatSessionId: string;
-  title: string;
-  description: string;
-  taskMode: TaskMode;
-  outputBranch: string;
-  triggeredBy: TriggeredBy;
-  triggerId: string | null;
-  triggerExecutionId: string | null;
-  agentProfileHint: string | null;
-  skillId: string | null;
-  skillHint: string | null;
-  requestedVmSize: VMSize;
-  requestedVmSizeSource: ResourceRequirementsSource;
-  resourceRequirementsJson: string | null;
-  resourceRequirementsSource: ResourceRequirementsSource;
-  resolvedReservationJson: string;
-  credentialAttributionUserId: string;
-  credentialAttributionProjectId: string | null;
-  credentialAttributionSource: CredentialSource;
-  capacityPlacementSnapshot: ReturnType<typeof capacityPlacementSnapshotDbValues>;
-}
-
-interface TaskRunnerStartSnapshot {
-  taskId: string;
-  projectId: string;
-  userId: string;
-  vmSize: VMSize;
-  vmLocation: VMLocation;
-  branch: string;
-  defaultBranch: string;
-  userName: string | null;
-  userEmail: string | null;
-  githubId: string | null;
-  taskTitle: string;
-  taskDescription: string;
-  repository: string;
-  installationId: string;
-  outputBranch: string;
-  projectDefaultVmSize: VMSize | null;
-  chatSessionId: string;
-  agentType: string | null;
-  workspaceProfile: WorkspaceProfile | null;
-  devcontainerConfigName: string | null;
-  cloudProvider: CredentialProvider | null;
-  explicitVmLocation: boolean;
-  credentialAttributionUserId: string;
-  credentialAttributionProjectId: string | null;
-  credentialAttributionSource: CredentialSource;
-  taskMode: TaskMode;
-  model: string | null;
-  effort: AgentEffort | null;
-  permissionMode: string | null;
-  opencodeProvider: null;
-  opencodeBaseUrl: null;
-  systemPromptAppend: string | null;
-  agentProfileHint: string | null;
-  projectScaling: {
-    taskExecutionTimeoutMs: number | null;
-    maxWorkspacesPerNode: number | null;
-    nodeCpuThresholdPercent: number | null;
-    nodeMemoryThresholdPercent: number | null;
-    warmNodeTimeoutMs: number | null;
-  };
-  resolvedReservation: TaskStartPlacement['resolvedReservation'];
-  capacityPoolSelection: TaskStartCapacityPoolSelection | null;
-  vmSizeSource: ResourceRequirementsSource;
-}
-
-interface AcceptedSnapshot {
-  version: 1;
-  source: ReservedTaskSubmissionSourceProvenance;
-  intentFingerprint: string;
-  task: TaskInsertValues;
-  runner: TaskRunnerStartSnapshot;
-  projectGuard: {
-    repository: string;
-    installationId: string;
-    defaultBranch: string;
-  };
-  profileGuard: ReturnType<typeof profileGuard>;
-  placementGuard: ReturnType<typeof placementGuard>;
-  credentialGuard: ReturnType<typeof credentialGuard>;
-}
-
-interface PreparedSubmission {
-  snapshot: AcceptedSnapshot;
-  acceptedSnapshotJson: string;
-}
-
-function dependencySet(deps: ReservedTaskSubmissionDependencies) {
   return {
     startTaskRunner: deps.startTaskRunner ?? startTaskRunnerDO,
     ensureTaskRunnerStarted: deps.ensureTaskRunnerStarted ?? ensureTaskRunnerStarted,
-    requireRepositoryAccess:
-      deps.requireRepositoryAccess ??
-      (async (...args: Parameters<NonNullable<ReservedTaskSubmissionDependencies['requireRepositoryAccess']>>) => {
-        const { requireRepositoryOwnerAccess } = await import('../routes/projects/_helpers');
-        return requireRepositoryOwnerAccess(...args);
-      }),
+    requireRepositoryAccess,
     now: deps.now ?? (() => new Date().toISOString()),
     generateTitle: deps.generateTitle ?? generateTaskTitle,
-    afterD1Commit: deps.afterD1Commit ?? (async () => {}),
-    afterProjectDataCommit: deps.afterProjectDataCommit ?? (async () => {}),
-    afterRunnerStartConfirmed: deps.afterRunnerStartConfirmed ?? (async () => {}),
-  };
-}
-
-function nonEmpty(value: string, field: string): string {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error(`${field} is required`);
-  }
-  if (value.length > MAX_RESERVED_ID_LENGTH) {
-    throw new Error(`${field} must be ${MAX_RESERVED_ID_LENGTH} characters or fewer`);
-  }
-  return value;
-}
-
-function validateInput(input: ReservedTaskSubmissionInput): string | null {
-  try {
-    nonEmpty(input.identities.taskId, 'identities.taskId');
-    nonEmpty(input.identities.chatSessionId, 'identities.chatSessionId');
-    nonEmpty(input.identities.initialMessageId, 'identities.initialMessageId');
-    nonEmpty(input.identities.initialStatusEventId, 'identities.initialStatusEventId');
-    nonEmpty(input.projectId, 'projectId');
-    nonEmpty(input.userId, 'userId');
-    nonEmpty(input.prompt, 'prompt');
-    nonEmpty(input.branchNameSeed, 'branchNameSeed');
-    if (!SOURCE_KINDS.has(input.source.kind)) {
-      throw new Error(`source.kind is invalid: ${input.source.kind}`);
-    }
-    if (!TRIGGERED_BY.has(input.source.triggeredBy)) {
-      throw new Error(`source.triggeredBy is invalid: ${input.source.triggeredBy}`);
-    }
-    if (!TASK_ACTOR_TYPES.has(input.source.initialStatusActorType)) {
-      throw new Error(`source.initialStatusActorType is invalid: ${input.source.initialStatusActorType}`);
-    }
-    if (!isTaskMode(input.taskMode)) {
-      throw new Error(`taskMode is invalid: ${input.taskMode}`);
-    }
-    nonEmpty(input.source.sourceId, 'source.sourceId');
-    nonEmpty(input.source.sourceExecutionId, 'source.sourceExecutionId');
-    nonEmpty(input.source.displayName, 'source.displayName');
-    nonEmpty(input.source.repositoryAccessFlow, 'source.repositoryAccessFlow');
-    nonEmpty(input.source.initialStatusReason, 'source.initialStatusReason');
-    if (input.source.kind === 'trigger') {
-      if (input.source.triggerId !== input.source.sourceId) {
-        throw new Error('trigger sourceId must match triggerId');
-      }
-      if (input.source.triggerExecutionId !== input.source.sourceExecutionId) {
-        throw new Error('trigger sourceExecutionId must match triggerExecutionId');
-      }
-    }
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
-}
-
-async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return `sha256:${Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, '0')
-  ).join('')}`;
-}
-
-async function submissionFingerprint(input: ReservedTaskSubmissionInput): Promise<string> {
-  return sha256(
-    canonicalJson({
-      version: FINGERPRINT_VERSION,
-      identities: input.identities,
-      projectId: input.projectId,
-      userId: input.userId,
-      prompt: input.prompt,
-      branchNameSeed: input.branchNameSeed,
-      agentProfileId: input.agentProfileId,
-      skillId: input.skillId,
-      taskMode: input.taskMode,
-      vmSizeOverride: input.vmSizeOverride,
-      source: input.source,
-    })
-  );
-}
-
-function conflict(
-  input: ReservedTaskSubmissionInput,
-  reason: ReservedTaskSubmissionConflictReason,
-  message: string,
-  branchName: string | null = null
-): ReservedTaskSubmissionResult {
-  return {
-    outcome: 'conflict',
-    taskId: input.identities.taskId,
-    sessionId: input.identities.chatSessionId,
-    branchName,
-    reason,
-    message,
+    afterD1Commit: deps.afterD1Commit ?? (() => undefined),
+    afterProjectDataCommit: deps.afterProjectDataCommit ?? (() => undefined),
+    afterRunnerStartConfirmed: deps.afterRunnerStartConfirmed ?? (() => undefined),
   };
 }
 
@@ -414,7 +101,10 @@ async function readCheckpoint(db: D1Database, taskId: string): Promise<Checkpoin
     .first<CheckpointRow>();
 }
 
-async function readTaskByIdentity(db: D1Database, input: ReservedTaskSubmissionInput): Promise<{
+async function readTaskByIdentity(
+  db: D1Database,
+  input: ReservedTaskSubmissionInput
+): Promise<{
   id: string;
   status: string;
   chat_session_id: string | null;
@@ -428,7 +118,10 @@ async function readTaskByIdentity(db: D1Database, input: ReservedTaskSubmissionI
 async function readCheckpointByReservedIdentity(
   db: D1Database,
   input: ReservedTaskSubmissionInput
-): Promise<Pick<CheckpointRow, 'task_id' | 'branch_name' | 'source_kind' | 'source_id' | 'source_execution_id'> | null> {
+): Promise<Pick<
+  CheckpointRow,
+  'task_id' | 'branch_name' | 'source_kind' | 'source_id' | 'source_execution_id'
+> | null> {
   return db
     .prepare(
       `SELECT task_id, branch_name, source_kind, source_id, source_execution_id
@@ -494,403 +187,6 @@ async function validateTriggerReservation(
   return null;
 }
 
-async function loadProject(db: Db, projectId: string): Promise<schema.Project | null> {
-  const [project] = await db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.id, projectId))
-    .limit(1);
-  return project ?? null;
-}
-
-async function loadUserStartSnapshot(
-  db: Db,
-  userId: string
-): Promise<{ githubId: string | null; name: string | null; email: string | null }> {
-  const [userRow] = await db
-    .select({ githubId: schema.users.githubId, name: schema.users.name, email: schema.users.email })
-    .from(schema.users)
-    .where(eq(schema.users.id, userId))
-    .limit(1);
-  return {
-    githubId: userRow?.githubId ?? null,
-    name: userRow?.name ?? null,
-    email: userRow?.email ?? null,
-  };
-}
-
-function profileGuard(profile: ResolvedProfile): {
-  profileId: string | null;
-  skillId: string | null;
-  skillHint: string | null;
-  agentType: string | null;
-  model: string | null;
-  effort: string | null;
-  permissionMode: string | null;
-  systemPromptAppend: string | null;
-  resourceRequirementsJson: string | null;
-} {
-  return {
-    profileId: profile?.profileId ?? null,
-    skillId: profile?.skillId ?? null,
-    skillHint: profile?.skillHint ?? null,
-    agentType: profile?.agentType ?? null,
-    model: profile?.model ?? null,
-    effort: profile?.effort ?? null,
-    permissionMode: profile?.permissionMode ?? null,
-    systemPromptAppend: profile?.systemPromptAppend ?? null,
-    resourceRequirementsJson: profile?.resourceRequirementsJson ?? null,
-  };
-}
-
-function placementGuard(placement: TaskStartPlacement): {
-  vmSize: string;
-  vmSizeSource: string;
-  provider: string | null;
-  vmLocation: string;
-  explicitVmLocation: boolean;
-  workspaceProfile: string;
-  devcontainerConfigName: string | null;
-  taskMode: string;
-  agentType: string | null;
-  resolvedReservation: TaskStartPlacement['resolvedReservation'];
-  credentialLookup: TaskStartPlacement['credentialLookup'];
-  inheritedCredentialAttribution: TaskStartPlacement['inheritedCredentialAttribution'];
-  runtime: TaskStartPlacement['runtime'];
-} {
-  return {
-    vmSize: placement.vmSize,
-    vmSizeSource: placement.vmSizeSource,
-    provider: placement.provider,
-    vmLocation: placement.vmLocation,
-    explicitVmLocation: placement.explicitVmLocation === true,
-    workspaceProfile: placement.workspaceProfile,
-    devcontainerConfigName: placement.devcontainerConfigName,
-    taskMode: placement.taskMode,
-    agentType: placement.agentType,
-    resolvedReservation: placement.resolvedReservation,
-    credentialLookup: placement.credentialLookup,
-    inheritedCredentialAttribution: placement.inheritedCredentialAttribution,
-    runtime: placement.runtime,
-  };
-}
-
-function credentialGuard(resolution: TaskStartPlacementWithCredential): {
-  effectiveProvider: string;
-  credentialAttributionUserId: string;
-  credentialAttributionProjectId: string | null;
-  credentialAttributionSource: CredentialSource;
-  quotaCredentialSource: CredentialSource;
-  capacityPlacementSnapshot: TaskStartPlacementWithCredential['capacityPlacementSnapshot'];
-} {
-  return {
-    effectiveProvider: resolution.effectiveProvider,
-    credentialAttributionUserId: resolution.credentialAttributionUserId,
-    credentialAttributionProjectId: resolution.credentialAttributionProjectId,
-    credentialAttributionSource: resolution.credentialAttributionSource,
-    quotaCredentialSource: resolution.quotaCredentialSource,
-    capacityPlacementSnapshot: resolution.capacityPlacementSnapshot,
-  };
-}
-
-function sameJson(left: unknown, right: unknown): boolean {
-  return canonicalJson(left) === canonicalJson(right);
-}
-
-async function resolvePlacementForInput(
-  db: Db,
-  env: Env,
-  input: ReservedTaskSubmissionInput,
-  project: schema.Project
-): Promise<
-  | {
-      profile: ResolvedProfile;
-      placement: TaskStartPlacement;
-      resolution: TaskStartPlacementWithCredential;
-    }
-  | {
-      reason: 'profile_unavailable' | 'placement_unavailable' | 'credentials_unavailable';
-      message: string;
-    }
-> {
-  let profile: ResolvedProfile;
-  try {
-    profile =
-      input.agentProfileId || input.skillId
-        ? await resolveSkillProfile(
-            db,
-            input.projectId,
-            input.agentProfileId,
-            input.skillId,
-            input.userId,
-            env
-          )
-        : null;
-  } catch (error) {
-    return {
-      reason: 'profile_unavailable',
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    profile?.resourceRequirementsJson
-  );
-
-  let placement: TaskStartPlacement;
-  try {
-    placement = resolveTaskStartPlacement({
-      entryPoint: 'trigger-submit',
-      taskId: input.identities.taskId,
-      triggerId: input.source.kind === 'trigger' ? input.source.sourceId : undefined,
-      projectId: input.projectId,
-      userId: input.userId,
-      project,
-      profile,
-      explicit: {
-        vmSize: (input.vmSizeOverride as VMSize | null) ?? null,
-        vmSizeSource: 'trigger',
-        taskMode: input.taskMode ?? null,
-      },
-      credentialProjectPolicy: 'current-project',
-      taskModeDefault: 'workspace-profile',
-      resourceRequirements: {
-        skill: skillResourceRequirements,
-      },
-    });
-  } catch (err) {
-    if (err instanceof PlacementResolutionError) {
-      return { reason: 'placement_unavailable', message: err.message };
-    }
-    throw err;
-  }
-
-  const placementResolution = await resolveTaskStartPlacementCredentialAttributionFromPlacement(
-    db,
-    placement,
-    {
-      credentialsRequiredMessage: `No cloud provider credentials available for ${input.source.kind} ${input.source.sourceId}`,
-      env,
-    }
-  );
-  if ('error' in placementResolution) {
-    return {
-      reason:
-        placementResolution.errorKind === 'credentials'
-          ? 'credentials_unavailable'
-          : 'placement_unavailable',
-      message: placementResolution.error,
-    };
-  }
-
-  return { profile, placement, resolution: placementResolution };
-}
-
-async function prepareNewSubmission(
-  env: Env,
-  db: Db,
-  input: ReservedTaskSubmissionInput,
-  intentFingerprint: string,
-  deps: ReturnType<typeof dependencySet>
-): Promise<PreparedSubmission | ReservedTaskSubmissionResult> {
-  const project = await loadProject(db, input.projectId);
-  if (!project) {
-    return conflict(input, 'project_not_found', `Project ${input.projectId} not found`);
-  }
-
-  const resolved = await resolvePlacementForInput(db, env, input, project);
-  if ('reason' in resolved) return conflict(input, resolved.reason, resolved.message);
-
-  try {
-    await deps.requireRepositoryAccess(
-      env,
-      db,
-      project,
-      input.userId,
-      `${input.source.repositoryAccessFlow}-admission`
-    );
-  } catch (error) {
-    return conflict(
-      input,
-      'authority_unavailable',
-      error instanceof Error ? error.message : String(error)
-    );
-  }
-
-  const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
-  const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
-  const branchName = generateBranchName(input.branchNameSeed, input.identities.taskId, {
-    prefix: branchPrefix,
-    maxLength: branchMaxLength,
-  });
-  const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await deps.generateTitle(env, input.prompt, titleConfig);
-  const user = await loadUserStartSnapshot(db, input.userId);
-  const { placement, profile, resolution } = resolved;
-  const capacityValues = capacityPlacementSnapshotDbValues(resolution.capacityPlacementSnapshot);
-  const task: TaskInsertValues = {
-    taskId: input.identities.taskId,
-    projectId: input.projectId,
-    userId: input.userId,
-    chatSessionId: input.identities.chatSessionId,
-    title: taskTitle,
-    description: input.prompt,
-    taskMode: placement.taskMode,
-    outputBranch: branchName,
-    triggeredBy: input.source.triggeredBy,
-    triggerId: input.source.kind === 'trigger' ? input.source.sourceId : null,
-    triggerExecutionId: input.source.kind === 'trigger' ? input.source.sourceExecutionId : null,
-    agentProfileHint: profile?.profileId ?? null,
-    skillId: profile?.skillId ?? null,
-    skillHint: input.skillId,
-    requestedVmSize: placement.vmSize,
-    requestedVmSizeSource: placement.vmSizeSource,
-    resourceRequirementsJson: profile?.resourceRequirementsJson ?? null,
-    resourceRequirementsSource: placement.resolvedReservation.source,
-    resolvedReservationJson: JSON.stringify(placement.resolvedReservation),
-    credentialAttributionUserId: resolution.credentialAttributionUserId,
-    credentialAttributionProjectId: resolution.credentialAttributionProjectId,
-    credentialAttributionSource: resolution.credentialAttributionSource,
-    capacityPlacementSnapshot: capacityValues,
-  };
-  const runner: TaskRunnerStartSnapshot = {
-    taskId: input.identities.taskId,
-    projectId: input.projectId,
-    userId: input.userId,
-    vmSize: placement.vmSize,
-    vmLocation: placement.vmLocation,
-    branch: project.defaultBranch,
-    defaultBranch: project.defaultBranch,
-    userName: user.name,
-    userEmail: user.email,
-    githubId: user.githubId,
-    taskTitle,
-    taskDescription: input.prompt,
-    repository: project.repository,
-    installationId: project.installationId,
-    outputBranch: branchName,
-    projectDefaultVmSize: project.defaultVmSize as VMSize | null,
-    chatSessionId: input.identities.chatSessionId,
-    agentType: placement.agentType,
-    workspaceProfile: placement.workspaceProfile,
-    devcontainerConfigName: placement.devcontainerConfigName,
-    cloudProvider: placement.provider ?? resolution.effectiveProvider,
-    explicitVmLocation: placement.explicitVmLocation === true,
-    credentialAttributionUserId: resolution.credentialAttributionUserId,
-    credentialAttributionProjectId: resolution.credentialAttributionProjectId,
-    credentialAttributionSource: resolution.credentialAttributionSource,
-    taskMode: placement.taskMode,
-    model: profile?.model ?? null,
-    effort: profile?.effort ?? null,
-    permissionMode: profile?.permissionMode ?? null,
-    opencodeProvider: null,
-    opencodeBaseUrl: null,
-    systemPromptAppend: profile?.systemPromptAppend ?? null,
-    agentProfileHint: profile?.profileId ?? null,
-    projectScaling: {
-      taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-      maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
-      nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
-      nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
-      warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
-    },
-    resolvedReservation: placement.resolvedReservation,
-    capacityPoolSelection: resolution.capacityPoolSelection,
-    vmSizeSource: placement.vmSizeSource,
-  };
-
-  const snapshot: AcceptedSnapshot = {
-    version: SNAPSHOT_VERSION,
-    source: input.source,
-    intentFingerprint,
-    task,
-    runner,
-    projectGuard: {
-      repository: project.repository,
-      installationId: project.installationId,
-      defaultBranch: project.defaultBranch,
-    },
-    profileGuard: profileGuard(profile),
-    placementGuard: placementGuard(placement),
-    credentialGuard: credentialGuard(resolution),
-  };
-  return { snapshot, acceptedSnapshotJson: canonicalJson(snapshot) };
-}
-
-function parseAcceptedSnapshot(row: CheckpointRow): AcceptedSnapshot | null {
-  try {
-    const parsed = JSON.parse(row.accepted_snapshot_json) as AcceptedSnapshot;
-    if (parsed?.version !== SNAPSHOT_VERSION) return null;
-    if (parsed.task?.taskId !== row.task_id) return null;
-    if (parsed.task?.chatSessionId !== row.chat_session_id) return null;
-    if (parsed.intentFingerprint !== row.intent_fingerprint) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-async function revalidateBeforePhysicalStart(
-  env: Env,
-  db: Db,
-  input: ReservedTaskSubmissionInput,
-  snapshot: AcceptedSnapshot,
-  deps: ReturnType<typeof dependencySet>
-): Promise<ReservedTaskSubmissionResult | null> {
-  const project = await loadProject(db, input.projectId);
-  if (!project) {
-    return conflict(input, 'project_not_found', `Project ${input.projectId} not found`, snapshot.task.outputBranch);
-  }
-  const projectGuard = {
-    repository: project.repository,
-    installationId: project.installationId,
-    defaultBranch: project.defaultBranch,
-  };
-  if (!sameJson(projectGuard, snapshot.projectGuard)) {
-    return conflict(
-      input,
-      'accepted_configuration_changed',
-      'Project repository configuration changed after task submission was accepted',
-      snapshot.task.outputBranch
-    );
-  }
-
-  const resolved = await resolvePlacementForInput(db, env, input, project);
-  if ('reason' in resolved) {
-    return conflict(input, resolved.reason, resolved.message, snapshot.task.outputBranch);
-  }
-
-  if (
-    !sameJson(profileGuard(resolved.profile), snapshot.profileGuard) ||
-    !sameJson(placementGuard(resolved.placement), snapshot.placementGuard) ||
-    !sameJson(credentialGuard(resolved.resolution), snapshot.credentialGuard)
-  ) {
-    return conflict(
-      input,
-      'accepted_configuration_changed',
-      'Resolved profile, placement or credential attribution changed after task submission was accepted',
-      snapshot.task.outputBranch
-    );
-  }
-
-  try {
-    await deps.requireRepositoryAccess(
-      env,
-      db,
-      project,
-      input.userId,
-      `${input.source.repositoryAccessFlow}-start`
-    );
-  } catch (error) {
-    return conflict(
-      input,
-      'authority_unavailable',
-      error instanceof Error ? error.message : String(error),
-      snapshot.task.outputBranch
-    );
-  }
-  return null;
-}
-
 async function commitD1Submission(
   env: Env,
   input: ReservedTaskSubmissionInput,
@@ -899,9 +195,7 @@ async function commitD1Submission(
   now: string
 ): Promise<void> {
   const t = prepared.snapshot.task;
-  const capacity = t.capacityPlacementSnapshot;
-  const insertTask = env.DATABASE.prepare(
-    `INSERT INTO tasks (
+  const insertTaskColumns = `(
        id, project_id, user_id, chat_session_id, title, description, status, execution_step,
        priority, agent_profile_hint, skill_id, skill_hint, task_mode, output_branch,
        triggered_by, trigger_id, trigger_execution_id, requested_vm_size, requested_vm_size_source,
@@ -909,16 +203,16 @@ async function commitD1Submission(
        credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
        ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
        created_by, created_at, updated_at
-     ) VALUES (
+     )`;
+  const insertTaskValues = `
        ?, ?, ?, ?, ?, ?, 'queued', 'node_selection',
        0, ?, ?, ?, ?, ?,
        ?, ?, ?, ?, ?,
        ?, ?, ?,
        ?, ?, ?,
        ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
-       ?, ?, ?
-     )`
-  ).bind(
+       ?, ?, ?`;
+  const insertTaskBindings = [
     t.taskId,
     t.projectId,
     t.userId,
@@ -941,11 +235,34 @@ async function commitD1Submission(
     t.credentialAttributionUserId,
     t.credentialAttributionProjectId,
     t.credentialAttributionSource,
-    ...capacityPlacementSnapshotSqlValues(capacity),
+    ...capacityPlacementSnapshotSqlValues(t.capacityPlacementSnapshot),
     t.userId,
     now,
-    now
-  );
+    now,
+  ];
+  const insertTask =
+    input.source.kind === 'trigger'
+      ? env.DATABASE.prepare(
+          `INSERT INTO tasks ${insertTaskColumns}
+           SELECT ${insertTaskValues}
+            WHERE EXISTS (
+              SELECT 1 FROM trigger_executions
+               WHERE id = ?
+                 AND trigger_id = ?
+                 AND project_id = ?
+                 AND (task_id IS NULL OR task_id = ?)
+            )`
+        ).bind(
+          ...insertTaskBindings,
+          input.source.sourceExecutionId,
+          input.source.sourceId,
+          input.projectId,
+          input.identities.taskId
+        )
+      : env.DATABASE.prepare(
+          `INSERT INTO tasks ${insertTaskColumns}
+           VALUES (${insertTaskValues})`
+        ).bind(...insertTaskBindings);
   const insertStatus = env.DATABASE.prepare(
     `INSERT INTO task_status_events
        (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
@@ -1060,7 +377,7 @@ async function ensureProjectDataBoundary(
   env: Env,
   input: ReservedTaskSubmissionInput,
   snapshot: AcceptedSnapshot,
-  deps: ReturnType<typeof dependencySet>,
+  deps: ResolvedReservedTaskSubmissionDependencies,
   reused: boolean
 ): Promise<ReservedTaskSubmissionResult | null> {
   try {
@@ -1142,58 +459,11 @@ async function failUnstartedTask(
   };
 }
 
-function dbForEnv(env: Env): Db {
-  return drizzle(env.DATABASE, { schema });
-}
-
-function startInputFromSnapshot(snapshot: AcceptedSnapshot): TaskRunnerStartInput {
-  const runner = snapshot.runner;
-  return {
-    taskId: runner.taskId,
-    projectId: runner.projectId,
-    userId: runner.userId,
-    vmSize: runner.vmSize,
-    vmLocation: runner.vmLocation,
-    branch: runner.branch,
-    defaultBranch: runner.defaultBranch,
-    userName: runner.userName,
-    userEmail: runner.userEmail,
-    githubId: runner.githubId,
-    taskTitle: runner.taskTitle,
-    taskDescription: runner.taskDescription,
-    repository: runner.repository,
-    installationId: runner.installationId,
-    outputBranch: runner.outputBranch,
-    projectDefaultVmSize: runner.projectDefaultVmSize,
-    chatSessionId: runner.chatSessionId,
-    agentType: runner.agentType,
-    workspaceProfile: runner.workspaceProfile,
-    devcontainerConfigName: runner.devcontainerConfigName,
-    cloudProvider: runner.cloudProvider,
-    explicitVmLocation: runner.explicitVmLocation,
-    credentialAttributionUserId: runner.credentialAttributionUserId,
-    credentialAttributionProjectId: runner.credentialAttributionProjectId,
-    credentialAttributionSource: runner.credentialAttributionSource,
-    taskMode: runner.taskMode,
-    model: runner.model,
-    effort: runner.effort,
-    permissionMode: runner.permissionMode,
-    opencodeProvider: runner.opencodeProvider,
-    opencodeBaseUrl: runner.opencodeBaseUrl,
-    systemPromptAppend: runner.systemPromptAppend,
-    agentProfileHint: runner.agentProfileHint,
-    projectScaling: runner.projectScaling,
-    resolvedReservation: runner.resolvedReservation,
-    capacityPoolSelection: runner.capacityPoolSelection,
-    vmSizeSource: runner.vmSizeSource,
-  };
-}
-
 async function startOrConfirmRunner(
   env: Env,
   input: ReservedTaskSubmissionInput,
   snapshot: AcceptedSnapshot,
-  deps: ReturnType<typeof dependencySet>,
+  deps: ResolvedReservedTaskSubmissionDependencies,
   reused: boolean,
   existingStartAttempted: boolean
 ): Promise<ReservedTaskSubmissionResult> {
@@ -1290,7 +560,7 @@ async function runTaskRunnerBoundary(
   env: Env,
   input: ReservedTaskSubmissionInput,
   snapshot: AcceptedSnapshot,
-  deps: ReturnType<typeof dependencySet>,
+  deps: ResolvedReservedTaskSubmissionDependencies,
   reused: boolean,
   existingStartAttempted: boolean
 ): Promise<ReservedTaskSubmissionResult> {
@@ -1314,7 +584,7 @@ async function reconcileCheckpoint(
   input: ReservedTaskSubmissionInput,
   row: CheckpointRow,
   fingerprint: string,
-  deps: ReturnType<typeof dependencySet>
+  deps: ResolvedReservedTaskSubmissionDependencies
 ): Promise<ReservedTaskSubmissionResult> {
   if (row.intent_fingerprint !== fingerprint) {
     return conflict(
@@ -1397,7 +667,7 @@ async function reconcileD1InsertConflict(
   db: Db,
   input: ReservedTaskSubmissionInput,
   fingerprint: string,
-  deps: ReturnType<typeof dependencySet>,
+  deps: ResolvedReservedTaskSubmissionDependencies,
   error: unknown
 ): Promise<ReservedTaskSubmissionResult> {
   const row = await readCheckpoint(env.DATABASE, input.identities.taskId);
@@ -1436,7 +706,7 @@ export async function submitReservedTask(
   input: ReservedTaskSubmissionInput,
   dependencyOverrides: ReservedTaskSubmissionDependencies = {}
 ): Promise<ReservedTaskSubmissionResult> {
-  const validationError = validateInput(input);
+  const validationError = validateReservedTaskSubmissionInput(input);
   if (validationError) return conflict(input, 'invalid_input', validationError);
 
   const deps = dependencySet(dependencyOverrides);

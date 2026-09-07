@@ -41,8 +41,7 @@ export interface CreateReservedTaskSessionResult {
   inserted: boolean;
 }
 
-export interface CreateReservedTaskSessionWithInitialMessageInput
-  extends CreateReservedTaskSessionInput {
+export interface CreateReservedTaskSessionWithInitialMessageInput extends CreateReservedTaskSessionInput {
   initialMessageId: string;
   initialMessageRole: string;
   initialMessageContent: string;

@@ -584,11 +584,14 @@ export async function createReservedTaskSessionWithInitialMessage(
     input.sessionId,
     'createReservedTaskSessionWithInitialMessage'
   );
-  const result = await callProjectDataWithRetry(
+  const result = await callProjectDataWithRetry<CreateReservedTaskSessionWithInitialMessageResult>(
     env,
     projectId,
     'createReservedTaskSessionWithInitialMessage',
-    (stub) => stub.createReservedTaskSessionWithInitialMessage(input)
+    async (stub) =>
+      (await stub.createReservedTaskSessionWithInitialMessage(
+        input
+      )) as CreateReservedTaskSessionWithInitialMessageResult
   );
   if (result.outcome === 'created' && result.sessionInserted) {
     await recordSessionLifecycleEventBestEffort(env, {
