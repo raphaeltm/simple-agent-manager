@@ -55,6 +55,7 @@ test('visual, keyboard, accessibility, stress, and reduced-motion audit', async 
   page.on('pageerror', (err) => errors.push(err.message));
   const lab = page.locator('scheduler-explorer');
   await page.screenshot({
+    animations: 'disabled',
     path: `.codex/tmp/playwright-screenshots/scheduler-article-${testInfo.project.name.includes('Mobile') ? 'mobile' : 'desktop'}.png`,
   });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -67,10 +68,12 @@ test('visual, keyboard, accessibility, stress, and reduced-motion audit', async 
     .toBe(true);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({
+    animations: 'disabled',
     path: `.codex/tmp/playwright-screenshots/scheduler-${testInfo.project.name.includes('Mobile') ? 'mobile' : 'desktop'}.png`,
     fullPage: true,
   });
   await lab.screenshot({
+    animations: 'disabled',
     style: '.header { visibility: hidden !important; }',
     path: `.codex/tmp/playwright-screenshots/scheduler-lab-${testInfo.project.name.includes('Mobile') ? 'mobile' : 'desktop'}.png`,
   });
@@ -87,6 +90,7 @@ test('visual, keyboard, accessibility, stress, and reduced-motion audit', async 
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
     .toBe(true);
   await lab.screenshot({
+    animations: 'disabled',
     style: '.header { visibility: hidden !important; }',
     path: `.codex/tmp/playwright-screenshots/scheduler-stress-${testInfo.project.name.includes('Mobile') ? 'mobile' : 'desktop'}.png`,
   });
@@ -117,6 +121,7 @@ test('blog discovery and compact 320px layout', async ({ page }, testInfo) => {
     .filter({ hasText: 'How SAM’s scheduler makes room for your agents' });
   await expect(post).toHaveCount(1);
   await page.screenshot({
+    animations: 'disabled',
     path: `.codex/tmp/playwright-screenshots/scheduler-index-${testInfo.project.name.includes('Mobile') ? 'mobile' : 'desktop'}.png`,
   });
   await post.click();
