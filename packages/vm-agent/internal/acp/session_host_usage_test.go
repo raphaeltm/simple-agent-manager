@@ -1,10 +1,14 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -489,6 +493,235 @@ func TestUsageReporterFlushReportsDeliveryFailure(t *testing.T) {
 	if err := host.flushUsageReports(time.Second); err == nil {
 		t.Fatal("flushUsageReports returned nil after failed delivery")
 	}
+}
+
+func TestSessionHostStopDrainsUsageReportsBeforeIdleActivity(t *testing.T) {
+	server, usageStarted, releaseUsage, events := newLifecycleUsageServer(t, http.StatusNoContent)
+	host := newLifecycleUsageHost(server)
+	enqueueLifecycleUsageReport(host, server)
+	waitUsageStarted(t, usageStarted)
+
+	stopped := make(chan struct{})
+	go func() {
+		host.Stop()
+		close(stopped)
+	}()
+
+	assertLifecycleWaitsForUsageDrain(t, stopped, events)
+	releaseUsage()
+	assertUsagePrecedesIdleActivity(t, stopped, events)
+}
+
+func TestSessionHostSuspendDrainsUsageReportsBeforeIdleActivity(t *testing.T) {
+	server, usageStarted, releaseUsage, events := newLifecycleUsageServer(t, http.StatusNoContent)
+	host := newLifecycleUsageHost(server)
+	enqueueLifecycleUsageReport(host, server)
+	waitUsageStarted(t, usageStarted)
+
+	suspended := make(chan struct{})
+	go func() {
+		host.Suspend()
+		close(suspended)
+	}()
+
+	assertLifecycleWaitsForUsageDrain(t, suspended, events)
+	releaseUsage()
+	assertUsagePrecedesIdleActivity(t, suspended, events)
+}
+
+func TestSessionHostStopLogsUsageDrainFailure(t *testing.T) {
+	logs := captureDefaultSlog(t)
+	server, usageStarted, releaseUsage, events := newLifecycleUsageServer(t, http.StatusInternalServerError)
+	host := newLifecycleUsageHost(server)
+	enqueueLifecycleUsageReport(host, server)
+	waitUsageStarted(t, usageStarted)
+	releaseUsage()
+
+	host.Stop()
+	assertLifecycleDeliveredActivity(t, events, "idle")
+	if !strings.Contains(logs.String(), "usageReport: shutdown flush failed") {
+		t.Fatalf("Stop did not log usage drain failure; logs=%s", logs.String())
+	}
+}
+
+func TestSessionHostSuspendLogsUsageDrainFailure(t *testing.T) {
+	logs := captureDefaultSlog(t)
+	server, usageStarted, releaseUsage, events := newLifecycleUsageServer(t, http.StatusInternalServerError)
+	host := newLifecycleUsageHost(server)
+	enqueueLifecycleUsageReport(host, server)
+	waitUsageStarted(t, usageStarted)
+	releaseUsage()
+
+	host.Suspend()
+	assertLifecycleDeliveredActivity(t, events, "idle")
+	if !strings.Contains(logs.String(), "usageReport: suspend flush failed") {
+		t.Fatalf("Suspend did not log usage drain failure; logs=%s", logs.String())
+	}
+}
+
+type lifecycleUsageEvent struct {
+	kind     string
+	activity string
+}
+
+func newLifecycleUsageServer(t *testing.T, usageStatus int) (*httptest.Server, <-chan struct{}, func(), <-chan lifecycleUsageEvent) {
+	t.Helper()
+	usageStarted := make(chan struct{}, 1)
+	release := make(chan struct{})
+	events := make(chan lifecycleUsageEvent, 8)
+	var releaseOnce sync.Once
+	releaseUsage := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/projects/project-1/acp-sessions/session-1/usage":
+			select {
+			case usageStarted <- struct{}{}:
+			default:
+			}
+			<-release
+			var payload usageReportPayload
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("decode usage payload: %v", err)
+			}
+			events <- lifecycleUsageEvent{kind: "usage"}
+			w.WriteHeader(usageStatus)
+		case "/api/projects/project-1/acp-sessions/session-1/activity":
+			var payload activityPayload
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("decode activity payload: %v", err)
+			}
+			events <- lifecycleUsageEvent{kind: "activity", activity: payload.Activity}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(func() {
+		releaseUsage()
+		server.Close()
+	})
+	return server, usageStarted, releaseUsage, events
+}
+
+func newLifecycleUsageHost(server *httptest.Server) *SessionHost {
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			ControlPlaneURL:                server.URL,
+			ProjectID:                      "project-1",
+			NodeID:                         "node-1",
+			WorkspaceID:                    "workspace-1",
+			SessionID:                      "session-1",
+			CallbackToken:                  "callback-token",
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 1,
+			TerminalActivityReportBackoff:  time.Millisecond,
+			ActivityReportTimeout:          time.Second,
+		},
+	})
+	host.mu.Lock()
+	host.agentType = "claude-code"
+	host.setSessionIDLocked("acp-session-1")
+	host.setStatusLocked(HostReady)
+	host.mu.Unlock()
+	return host
+}
+
+func enqueueLifecycleUsageReport(host *SessionHost, server *httptest.Server) {
+	host.enqueueUsageReport(usageReportRequest{
+		url:           server.URL + "/api/projects/project-1/acp-sessions/session-1/usage",
+		callbackToken: "callback-token",
+		payload: usageReportPayload{
+			NodeID:              "node-1",
+			AgentType:           "claude-code",
+			CredentialSource:    "user",
+			CredentialReference: "cc_credentials:cred-1",
+			Source:              "claude-acp.usage_update",
+			RateLimits: []usageLimitPayload{{
+				Provider:   "anthropic",
+				Source:     "claude-acp.rate_limit",
+				WindowType: "claude.five_hour",
+				Status:     "allowed_warning",
+			}},
+		},
+	})
+}
+
+func waitUsageStarted(t *testing.T, usageStarted <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-usageStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for lifecycle usage request")
+	}
+}
+
+func assertLifecycleWaitsForUsageDrain(t *testing.T, done <-chan struct{}, events <-chan lifecycleUsageEvent) {
+	t.Helper()
+	deadline := time.After(75 * time.Millisecond)
+	for {
+		select {
+		case <-done:
+			t.Fatal("lifecycle returned before blocked usage report drained")
+		case event := <-events:
+			if event.kind == "usage" || (event.kind == "activity" && event.activity == "idle") {
+				t.Fatalf("lifecycle emitted %s/%s before usage release", event.kind, event.activity)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+func assertUsagePrecedesIdleActivity(t *testing.T, done <-chan struct{}, events <-chan lifecycleUsageEvent) {
+	t.Helper()
+	first := readLifecycleEvent(t, events)
+	if first.kind != "usage" {
+		t.Fatalf("first lifecycle event after release = %#v, want usage before idle activity", first)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("lifecycle did not return after usage release")
+	}
+	assertLifecycleDeliveredActivity(t, events, "idle")
+}
+
+func assertLifecycleDeliveredActivity(t *testing.T, events <-chan lifecycleUsageEvent, activity string) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case event := <-events:
+			if event.kind == "activity" && event.activity == activity {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %q activity", activity)
+		}
+	}
+}
+
+func readLifecycleEvent(t *testing.T, events <-chan lifecycleUsageEvent) lifecycleUsageEvent {
+	t.Helper()
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for lifecycle event")
+		return lifecycleUsageEvent{}
+	}
+}
+
+func captureDefaultSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &logs
 }
 
 func TestSessionUpdateUsesOriginatingACPConnectionCredentialAttribution(t *testing.T) {
