@@ -142,8 +142,8 @@ const DefaultMessageBufferSize = 5000
 // Override via ACP_VIEWER_SEND_BUFFER.
 const DefaultViewerSendBuffer = 256
 
-// DefaultUsageReportPendingWindows bounds distinct credential/window reports
-// queued while the serialized usage reporter is busy.
+// DefaultUsageReportPendingWindows bounds usage reports queued while the
+// serialized usage reporter is busy.
 const DefaultUsageReportPendingWindows = 16
 
 // SessionHostConfig holds configuration for a SessionHost.
@@ -170,8 +170,8 @@ type SessionHostConfig struct {
 	// Override via ACP_NOTIF_SERIALIZE_TIMEOUT. Default: 5s.
 	NotifSerializeTimeout time.Duration
 
-	// UsageReportPendingLimit bounds distinct credential/window reports queued
-	// while one usage callback is being delivered. Zero uses the package default.
+	// UsageReportPendingLimit bounds usage reports queued while one usage
+	// callback is being delivered. Zero uses the package default.
 	UsageReportPendingLimit int
 
 	// StartProcess is an internal test hook. Production code leaves it nil and
@@ -287,14 +287,17 @@ type SessionHost struct {
 	credKind          string // "api-key" or "oauth-token"
 
 	usageReportMu           sync.Mutex
-	usageReportPending      map[string]usageReportRequest
+	usageReportPending      map[string]usageReportPendingEntry
 	usageReportOrder        []string
+	usageReportNextSeq      uint64
 	usageReportRunning      bool
 	usageReportDone         chan struct{}
 	usageReportCancel       context.CancelFunc
 	usageReportFailureCount int
 	usageReportLastError    string
 	usageReportClosed       bool
+	usageReportCloseGrace   bool
+	usageReportCallbacks    sync.WaitGroup
 
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
@@ -886,6 +889,9 @@ func (h *SessionHost) Stop() {
 	// Report idle to the control plane so the browser status bar clears.
 	h.stopPromptActivityRereport()
 	h.clearHarnessWork()
+	if err := h.waitForUsageReportCallbacks(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: shutdown callback drain failed", "error", err)
+	}
 	if err := h.flushUsageReports(h.activityReportTimeout()); err != nil {
 		slog.Warn("usageReport: shutdown flush failed", "error", err)
 	}

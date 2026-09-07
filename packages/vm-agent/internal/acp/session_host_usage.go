@@ -54,6 +54,11 @@ type usageReportRequest struct {
 	payload       usageReportPayload
 }
 
+type usageReportPendingEntry struct {
+	coalesceKey string
+	request     usageReportRequest
+}
+
 func (h *SessionHost) storeCredentialAttribution(agentType string, cred *agentCredential) {
 	if cred == nil || cred.credentialReference == "" || cred.credentialSource == "" {
 		return
@@ -77,11 +82,16 @@ func (h *SessionHost) credentialAttributionSnapshot() (credentialAttribution, bo
 }
 
 func (h *SessionHost) captureSessionUsageUpdate(params acpsdk.SessionNotification, attr credentialAttribution, hasAttr bool) {
+	if !h.beginUsageReportCallback() {
+		return
+	}
+	defer h.finishUsageReportCallback()
+
 	request, ok := h.prepareUsageReportWithAttribution(params, attr, hasAttr)
 	if !ok {
 		return
 	}
-	h.enqueueUsageReport(request)
+	h.enqueueUsageReportFromActiveCallback(request)
 }
 
 func (h *SessionHost) prepareUsageReport(params acpsdk.SessionNotification) (usageReportRequest, bool) {
@@ -301,26 +311,47 @@ func safeUsageIdentifier(value string) string {
 }
 
 func (h *SessionHost) enqueueUsageReport(request usageReportRequest) {
+	h.enqueueUsageReportRequest(request, false)
+}
+
+func (h *SessionHost) enqueueUsageReportFromActiveCallback(request usageReportRequest) {
+	h.enqueueUsageReportRequest(request, true)
+}
+
+func (h *SessionHost) enqueueUsageReportRequest(request usageReportRequest, allowClosedGrace bool) {
 	h.usageReportMu.Lock()
-	if h.usageReportClosed {
+	if h.usageReportClosed && (!allowClosedGrace || !h.usageReportCloseGrace) {
 		h.recordUsageReportFailureLocked("usage report ingress closed")
 		h.usageReportMu.Unlock()
 		slog.Warn("usageReport: dropped report after ingress closed")
 		return
 	}
 	if h.usageReportPending == nil {
-		h.usageReportPending = make(map[string]usageReportRequest)
+		h.usageReportPending = make(map[string]usageReportPendingEntry)
 	}
 	if !h.usageReportRunning && len(h.usageReportPending) == 0 {
 		h.usageReportFailureCount = 0
 		h.usageReportLastError = ""
 	}
-	key := usageReportCoalesceKey(request)
-	if _, exists := h.usageReportPending[key]; exists {
-		h.usageReportOrder = removeUsageReportOrderKey(h.usageReportOrder, key)
+	coalesceKey := usageReportCoalesceKey(request)
+	if len(h.usageReportOrder) > 0 {
+		lastKey := h.usageReportOrder[len(h.usageReportOrder)-1]
+		if entry, exists := h.usageReportPending[lastKey]; exists && entry.coalesceKey == coalesceKey {
+			h.usageReportPending[lastKey] = usageReportPendingEntry{
+				coalesceKey: coalesceKey,
+				request:     request,
+			}
+			h.usageReportMu.Unlock()
+			return
+		}
 	}
+	key := fmt.Sprintf("%020d", h.usageReportNextSeq)
+	h.usageReportNextSeq++
 	h.usageReportOrder = append(h.usageReportOrder, key)
-	h.usageReportPending[key] = request
+	h.usageReportPending[key] = usageReportPendingEntry{
+		coalesceKey: coalesceKey,
+		request:     request,
+	}
 	limit := h.usageReportPendingLimit()
 	for len(h.usageReportOrder) > limit {
 		evicted := h.usageReportOrder[0]
@@ -375,12 +406,12 @@ func (h *SessionHost) nextUsageReport() (usageReportRequest, bool) {
 	for len(h.usageReportOrder) > 0 {
 		key := h.usageReportOrder[0]
 		h.usageReportOrder = h.usageReportOrder[1:]
-		request, ok := h.usageReportPending[key]
+		entry, ok := h.usageReportPending[key]
 		if !ok {
 			continue
 		}
 		delete(h.usageReportPending, key)
-		return request, true
+		return entry.request, true
 	}
 	h.usageReportRunning = false
 	h.usageReportCancel = nil
@@ -401,7 +432,49 @@ func (h *SessionHost) recordUsageReportFailureLocked(message string) {
 func (h *SessionHost) closeUsageReportIngress() {
 	h.usageReportMu.Lock()
 	h.usageReportClosed = true
+	h.usageReportCloseGrace = true
 	h.usageReportMu.Unlock()
+}
+
+func (h *SessionHost) beginUsageReportCallback() bool {
+	h.usageReportMu.Lock()
+	defer h.usageReportMu.Unlock()
+	if h.usageReportClosed {
+		return false
+	}
+	h.usageReportCallbacks.Add(1)
+	return true
+}
+
+func (h *SessionHost) finishUsageReportCallback() {
+	h.usageReportCallbacks.Done()
+}
+
+func (h *SessionHost) waitForUsageReportCallbacks(timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = h.activityReportTimeout()
+	}
+	done := make(chan struct{})
+	go func() {
+		h.usageReportCallbacks.Wait()
+		close(done)
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		h.usageReportMu.Lock()
+		h.usageReportCloseGrace = false
+		h.usageReportMu.Unlock()
+		return nil
+	case <-timer.C:
+		h.usageReportMu.Lock()
+		h.usageReportCloseGrace = false
+		h.recordUsageReportFailureLocked("usage report callback drain timed out")
+		h.usageReportMu.Unlock()
+		return fmt.Errorf("usage report callback drain timed out after %s", timeout)
+	}
 }
 
 func (h *SessionHost) flushUsageReports(timeout time.Duration) error {

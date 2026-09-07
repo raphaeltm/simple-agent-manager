@@ -472,7 +472,7 @@ func TestUsageReporterCoalescesEquivalentPendingReportsToLatest(t *testing.T) {
 func TestSessionUpdateUsageReporterMovesReplacementAfterInterveningTransitionAndRetries(t *testing.T) {
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
-	received := make(chan usageReportPayload, 4)
+	received := make(chan usageReportPayload, 5)
 	var allowedResetAttempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload usageReportPayload
@@ -537,18 +537,103 @@ func TestSessionUpdateUsageReporterMovesReplacementAfterInterveningTransitionAnd
 		readUsagePayload(t, received).RateLimits[0],
 		readUsagePayload(t, received).RateLimits[0],
 		readUsagePayload(t, received).RateLimits[0],
+		readUsagePayload(t, received).RateLimits[0],
 	}
 	if got[0].WindowType != "blocker" {
 		t.Fatalf("first window = %q, want blocker", got[0].WindowType)
 	}
-	if got[1].Status != "rejected" || got[1].ObservedAt != 2 {
-		t.Fatalf("second report = %#v, want rejected observation at 2 before reset", got[1])
+	if got[1].Status != "allowed" || got[1].ObservedAt != 1 {
+		t.Fatalf("second report = %#v, want allowed observation at 1 before rejection", got[1])
 	}
-	if got[2].Status != "allowed" || got[2].ObservedAt != 3 {
-		t.Fatalf("third report = %#v, want latest allowed reset at 3", got[2])
+	if got[2].Status != "rejected" || got[2].ObservedAt != 2 {
+		t.Fatalf("third report = %#v, want rejected observation at 2 before reset", got[2])
 	}
 	if got[3].Status != "allowed" || got[3].ObservedAt != 3 {
-		t.Fatalf("retry report = %#v, want same latest allowed reset at 3", got[3])
+		t.Fatalf("fourth report = %#v, want latest allowed reset at 3", got[3])
+	}
+	if got[4].Status != "allowed" || got[4].ObservedAt != 3 {
+		t.Fatalf("retry report = %#v, want same latest allowed reset at 3", got[4])
+	}
+	select {
+	case extra := <-received:
+		t.Fatalf("unexpected extra report: %#v", extra)
+	default:
+	}
+}
+
+func TestSessionUpdateUsageReporterPreservesRepeatedMeaningfulCycle(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	received := make(chan usageReportPayload, 5)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload usageReportPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode usage report: %v", err)
+		}
+		received <- payload
+		if len(payload.RateLimits) > 0 && payload.RateLimits[0].WindowType == "blocker" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	var nowMs atomic.Int64
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			ControlPlaneURL:                server.URL,
+			ProjectID:                      "project-1",
+			NodeID:                         "node-1",
+			WorkspaceID:                    "workspace-1",
+			SessionID:                      "session-1",
+			CallbackToken:                  "callback-token",
+			HTTPClient:                     server.Client(),
+			TerminalActivityReportAttempts: 1,
+			ActivityReportTimeout:          time.Second,
+			Now: func() time.Time {
+				return time.UnixMilli(nowMs.Add(1))
+			},
+		},
+	})
+	client := usageSessionClientForTest(host)
+
+	host.enqueueUsageReport(usageReportRequestForTest(server.URL, "blocker", "allowed", 0, nil))
+	<-firstStarted
+	for _, status := range []string{"rejected", "allowed", "rejected", "allowed"} {
+		if err := client.SessionUpdate(context.Background(), claudeRateLimitNotification(status, "five_hour", 0.5)); err != nil {
+			t.Fatalf("SessionUpdate %s: %v", status, err)
+		}
+	}
+	close(releaseFirst)
+
+	if err := host.flushUsageReports(time.Second); err != nil {
+		t.Fatalf("flushUsageReports: %v", err)
+	}
+	got := []usageLimitPayload{
+		readUsagePayload(t, received).RateLimits[0],
+		readUsagePayload(t, received).RateLimits[0],
+		readUsagePayload(t, received).RateLimits[0],
+		readUsagePayload(t, received).RateLimits[0],
+		readUsagePayload(t, received).RateLimits[0],
+	}
+	if got[0].WindowType != "blocker" {
+		t.Fatalf("first window = %q, want blocker", got[0].WindowType)
+	}
+	want := []struct {
+		status     string
+		observedAt int64
+	}{
+		{status: "rejected", observedAt: 1},
+		{status: "allowed", observedAt: 2},
+		{status: "rejected", observedAt: 3},
+		{status: "allowed", observedAt: 4},
+	}
+	for i, expected := range want {
+		report := got[i+1]
+		if report.Status != expected.status || report.ObservedAt != expected.observedAt {
+			t.Fatalf("report %d = %#v, want %s at %d", i+1, report, expected.status, expected.observedAt)
+		}
 	}
 	select {
 	case extra := <-received:
@@ -804,6 +889,68 @@ func TestSessionHostStopAndSuspendCloseUsageIngressBeforeLateACPUsageCallback(t 
 				t.Fatalf("late usage callback reached control plane: %#v", payload)
 			case <-time.After(50 * time.Millisecond):
 			}
+		})
+	}
+}
+
+func TestSessionHostStopAndSuspendWaitForActiveACPUsageCallbackBeforeIdle(t *testing.T) {
+	cases := []struct {
+		name     string
+		shutdown func(*SessionHost)
+	}{
+		{name: "stop", shutdown: func(host *SessionHost) { host.Stop() }},
+		{name: "suspend", shutdown: func(host *SessionHost) { host.Suspend() }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server, usageStarted, releaseUsage, events := newLifecycleUsageServer(t, http.StatusNoContent)
+			host := newLifecycleUsageHost(server)
+			nowEntered := make(chan struct{})
+			releaseNow := make(chan struct{})
+			var nowOnce sync.Once
+			host.config.Now = func() time.Time {
+				nowOnce.Do(func() { close(nowEntered) })
+				<-releaseNow
+				return time.UnixMilli(1)
+			}
+			client := usageSessionClientForTest(host)
+
+			callbackDone := make(chan error, 1)
+			go func() {
+				callbackDone <- client.SessionUpdate(context.Background(), claudeRateLimitNotification("allowed_warning", "five_hour", 0.82))
+			}()
+			select {
+			case <-nowEntered:
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for usage callback to enter clock")
+			}
+
+			lifecycleDone := make(chan struct{})
+			go func() {
+				tc.shutdown(host)
+				close(lifecycleDone)
+			}()
+			select {
+			case <-lifecycleDone:
+				t.Fatal("lifecycle returned before active usage callback finished")
+			case event := <-events:
+				t.Fatalf("lifecycle emitted event before active usage callback release: %#v", event)
+			case <-time.After(75 * time.Millisecond):
+			}
+
+			close(releaseNow)
+			select {
+			case err := <-callbackDone:
+				if err != nil {
+					t.Fatalf("SessionUpdate: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("usage callback did not finish after clock release")
+			}
+			waitUsageStarted(t, usageStarted)
+			assertLifecycleWaitsForUsageDrain(t, lifecycleDone, events)
+			releaseUsage()
+			assertUsagePrecedesIdleActivity(t, lifecycleDone, events)
 		})
 	}
 }
