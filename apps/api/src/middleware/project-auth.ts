@@ -112,6 +112,12 @@ function roleHasCapability(role: string, capability: ProjectCapability): boolean
   return ROLE_CAPABILITIES[parsedRole].has(capability);
 }
 
+export function projectMemberRolesWithCapability(
+  capability: ProjectCapability
+): ProjectMemberRole[] {
+  return PROJECT_MEMBER_ROLES.filter((role) => ROLE_CAPABILITIES[role].has(capability));
+}
+
 async function requireActiveProjectMembership(
   db: AppDb,
   projectId: string,

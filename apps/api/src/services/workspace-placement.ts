@@ -13,6 +13,7 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
+import type { PlacementAuthorityNodeClass } from './placement-authority';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import {
   ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
@@ -45,6 +46,7 @@ export interface WorkspacePlacementInput {
   agentProfileHint: string | null;
   resourceRequirementsJson?: string | null;
   capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
+  authorityNodeClass?: PlacementAuthorityNodeClass;
   resolvedReservation?: ResolvedResourceReservation | null;
   createdAt: string;
 }
@@ -81,6 +83,7 @@ export async function reserveWorkspacePlacement(
     projectId: input.projectId,
     nodeRole: 'workspace',
     workloadRole: 'workspace',
+    nodeClass: input.authorityNodeClass ?? 'managed',
     capacityPlacementSnapshot: input.capacityPlacementSnapshot ?? null,
     requireProjectMembership: true,
   });
@@ -108,23 +111,26 @@ export async function reserveWorkspacePlacement(
              ELSE NULL
            END AS metrics_age_ms,
            CASE
-             WHEN n.provider_instance_id IS NOT NULL
-              AND typeof(n.observed_provider_instance_vcpu_count) = 'integer'
-              AND n.observed_provider_instance_vcpu_count > 0
+              WHEN (n.provider_instance_id IS NOT NULL OR n.node_class = 'user-owned')
+               AND n.observed_hardware_source = 'observed'
+               AND typeof(n.observed_provider_instance_vcpu_count) = 'integer'
+               AND n.observed_provider_instance_vcpu_count > 0
              THEN n.observed_provider_instance_vcpu_count
              ELSE NULL
            END AS trusted_provider_instance_vcpu_count,
            CASE
-             WHEN n.provider_instance_id IS NOT NULL
-              AND typeof(n.observed_provider_instance_memory_mb) = 'integer'
-              AND n.observed_provider_instance_memory_mb > 0
+              WHEN (n.provider_instance_id IS NOT NULL OR n.node_class = 'user-owned')
+               AND n.observed_hardware_source = 'observed'
+               AND typeof(n.observed_provider_instance_memory_mb) = 'integer'
+               AND n.observed_provider_instance_memory_mb > 0
              THEN n.observed_provider_instance_memory_mb
              ELSE NULL
            END AS trusted_provider_instance_memory_mb,
            CASE
-             WHEN n.provider_instance_id IS NOT NULL
-              AND typeof(n.observed_provider_instance_disk_gb) = 'integer'
-              AND n.observed_provider_instance_disk_gb > 0
+              WHEN (n.provider_instance_id IS NOT NULL OR n.node_class = 'user-owned')
+               AND n.observed_hardware_source = 'observed'
+               AND typeof(n.observed_provider_instance_disk_gb) = 'integer'
+               AND n.observed_provider_instance_disk_gb > 0
              THEN n.observed_provider_instance_disk_gb
              ELSE NULL
            END AS trusted_provider_instance_disk_gb
@@ -301,6 +307,7 @@ export async function attachPrecreatedWorkspacePlacement(
     projectId: input.projectId,
     nodeRole: 'workspace',
     workloadRole: 'workspace',
+    nodeClass: input.authorityNodeClass ?? 'managed',
     capacityPlacementSnapshot: input.capacityPlacementSnapshot ?? null,
     requireProjectMembership: true,
   });
@@ -328,23 +335,26 @@ export async function attachPrecreatedWorkspacePlacement(
              ELSE NULL
            END AS metrics_age_ms,
            CASE
-             WHEN n.provider_instance_id IS NOT NULL
-              AND typeof(n.observed_provider_instance_vcpu_count) = 'integer'
-              AND n.observed_provider_instance_vcpu_count > 0
+              WHEN (n.provider_instance_id IS NOT NULL OR n.node_class = 'user-owned')
+               AND n.observed_hardware_source = 'observed'
+               AND typeof(n.observed_provider_instance_vcpu_count) = 'integer'
+               AND n.observed_provider_instance_vcpu_count > 0
              THEN n.observed_provider_instance_vcpu_count
              ELSE NULL
            END AS trusted_provider_instance_vcpu_count,
            CASE
-             WHEN n.provider_instance_id IS NOT NULL
-              AND typeof(n.observed_provider_instance_memory_mb) = 'integer'
-              AND n.observed_provider_instance_memory_mb > 0
+              WHEN (n.provider_instance_id IS NOT NULL OR n.node_class = 'user-owned')
+               AND n.observed_hardware_source = 'observed'
+               AND typeof(n.observed_provider_instance_memory_mb) = 'integer'
+               AND n.observed_provider_instance_memory_mb > 0
              THEN n.observed_provider_instance_memory_mb
              ELSE NULL
            END AS trusted_provider_instance_memory_mb,
            CASE
-             WHEN n.provider_instance_id IS NOT NULL
-              AND typeof(n.observed_provider_instance_disk_gb) = 'integer'
-              AND n.observed_provider_instance_disk_gb > 0
+              WHEN (n.provider_instance_id IS NOT NULL OR n.node_class = 'user-owned')
+               AND n.observed_hardware_source = 'observed'
+               AND typeof(n.observed_provider_instance_disk_gb) = 'integer'
+               AND n.observed_provider_instance_disk_gb > 0
              THEN n.observed_provider_instance_disk_gb
              ELSE NULL
            END AS trusted_provider_instance_disk_gb

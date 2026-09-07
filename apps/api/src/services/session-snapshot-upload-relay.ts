@@ -27,6 +27,21 @@ type RelayNode = {
   name: string;
 };
 
+type RelaySourceNode = {
+  id: string;
+  user_id: string;
+  vm_size: string;
+  vm_location: string;
+  cloud_provider: string | null;
+  runtime: string | null;
+  node_class: string;
+  agent_version: string | null;
+  provider_instance_type: string | null;
+  provider_instance_boot_disk_size_gb: number | null;
+  provider_instance_image: string | null;
+  provider_instance_architecture: string | null;
+};
+
 export const SESSION_SNAPSHOT_RELAY_NODE_ID_HEADER = 'X-SAM-Relay-Node-ID';
 export const SESSION_SNAPSHOT_RELAY_AUTHORIZATION_HEADER = 'X-SAM-Relay-Authorization';
 
@@ -39,17 +54,10 @@ async function resolveRelayAllocation(
   input: {
     userId: string;
     projectId: string | null;
-    source?: {
-      vm_size: string;
-      vm_location: string;
-      cloud_provider: string | null;
-      provider_instance_type: string | null;
-      provider_instance_boot_disk_size_gb: number | null;
-      provider_instance_image: string | null;
-      provider_instance_architecture: string | null;
-    } | null;
+    source?: RelaySourceNode | null;
   }
 ): Promise<CanonicalVmAllocationPlan | null> {
+  if (input.source && !input.source.cloud_provider) return null;
   const db = drizzle(env.DATABASE, { schema });
   const project = input.projectId
     ? await env.DATABASE.prepare(
@@ -59,7 +67,8 @@ async function resolveRelayAllocation(
                 default_location AS defaultLocation,
                 default_workspace_profile AS defaultWorkspaceProfile,
                 default_devcontainer_config_name AS defaultDevcontainerConfigName,
-                default_agent_type AS defaultAgentType
+                default_agent_type AS defaultAgentType,
+                resource_requirements_json AS resourceRequirementsJson
            FROM projects
           WHERE id = ?
           LIMIT 1`
@@ -96,10 +105,70 @@ async function resolveRelayAllocation(
   return 'error' in allocation ? null : allocation;
 }
 
+async function loadRelaySourceNode(
+  env: Env,
+  userId: string,
+  sourceNodeId: string
+): Promise<RelaySourceNode | null> {
+  return await env.DATABASE.prepare(
+    `SELECT id, user_id, vm_size, vm_location, cloud_provider, runtime, node_class,
+            agent_version, provider_instance_type,
+            provider_instance_boot_disk_size_gb, provider_instance_image,
+            provider_instance_architecture
+       FROM nodes
+      WHERE id = ? AND user_id = ? AND status = 'running'
+      LIMIT 1`
+  )
+    .bind(sourceNodeId, userId)
+    .first<RelaySourceNode>();
+}
+
+function sourceStillNeedsRelay(
+  source: RelaySourceNode | null,
+  requiredVersion: string
+): source is RelaySourceNode {
+  return !!(
+    source &&
+    source.runtime !== 'cf-container' &&
+    source.node_class !== 'user-owned' &&
+    source.agent_version !== requiredVersion &&
+    source.cloud_provider
+  );
+}
+
+function allocationMatchesRelaySource(
+  allocation: CanonicalVmAllocationPlan,
+  source: RelaySourceNode | null | undefined
+): boolean {
+  if (!source) return true;
+  if (source.cloud_provider && allocation.effectiveProvider !== source.cloud_provider) return false;
+  if (allocation.vmLocation !== source.vm_location) return false;
+  if (source.provider_instance_type && allocation.providerInstanceType !== source.provider_instance_type) {
+    return false;
+  }
+  if (
+    source.provider_instance_boot_disk_size_gb !== null &&
+    allocation.providerInstanceBootDiskSizeGb !== source.provider_instance_boot_disk_size_gb
+  ) {
+    return false;
+  }
+  if (source.provider_instance_image && allocation.providerInstanceImage !== source.provider_instance_image) {
+    return false;
+  }
+  if (
+    source.provider_instance_architecture &&
+    allocation.providerInstanceArchitecture !== source.provider_instance_architecture
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export async function findSessionSnapshotUploadRelay(
   env: Env,
   userId: string,
-  projectId: string | null = null
+  projectId: string | null = null,
+  source: RelaySourceNode | null = null
 ): Promise<RelayNode | null> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
   if (!requiredVersion) return null;
@@ -107,8 +176,10 @@ export async function findSessionSnapshotUploadRelay(
   const allocation = await resolveRelayAllocation(env, {
     userId,
     projectId,
+    source,
   });
   if (!allocation) return null;
+  if (!allocationMatchesRelaySource(allocation, source)) return null;
   const authority = buildPlacementAuthoritySqlPredicate({
     nodeAlias: 'n',
     userId,
@@ -132,6 +203,10 @@ export async function findSessionSnapshotUploadRelay(
         AND n.cloud_provider = ?
         AND n.vm_location = ?
         AND n.vm_size = ?
+        AND n.provider_instance_type IS ?
+        AND n.provider_instance_boot_disk_size_gb IS ?
+        AND n.provider_instance_image IS ?
+        AND n.provider_instance_architecture IS ?
         ${authority.sql}
       ORDER BY CASE WHEN n.warm_since IS NOT NULL THEN 0 ELSE 1 END, n.created_at ASC
       LIMIT 1`
@@ -142,6 +217,10 @@ export async function findSessionSnapshotUploadRelay(
       allocation.effectiveProvider,
       allocation.vmLocation,
       allocation.vmSize,
+      allocation.providerInstanceType,
+      allocation.providerInstanceBootDiskSizeGb,
+      allocation.providerInstanceImage,
+      allocation.providerInstanceArchitecture,
       ...authority.binds
     )
     .first<RelayNode>();
@@ -170,7 +249,8 @@ export async function verifySessionSnapshotRelayAuthorization(
   workspaceUserId: string,
   projectId: string | null,
   relayNodeIdHeader: string | undefined,
-  relayAuthorizationHeader: string | undefined
+  relayAuthorizationHeader: string | undefined,
+  sourceNodeId?: string | null
 ): Promise<void> {
   const relayNodeId = relayNodeIdHeader?.trim() ?? '';
   const relayAuthorization = relayAuthorizationHeader?.trim() ?? '';
@@ -199,11 +279,21 @@ export async function verifySessionSnapshotRelayAuthorization(
   if (!requiredVersion) {
     throw errors.forbidden('Invalid snapshot relay authorization');
   }
+  const source = sourceNodeId
+    ? await loadRelaySourceNode(env, workspaceUserId, sourceNodeId)
+    : null;
+  if (sourceNodeId && !sourceStillNeedsRelay(source, requiredVersion)) {
+    throw errors.forbidden('Invalid snapshot relay authorization');
+  }
   const allocation = await resolveRelayAllocation(env, {
     userId: workspaceUserId,
     projectId,
+    source,
   });
   if (!allocation) {
+    throw errors.forbidden('Invalid snapshot relay authorization');
+  }
+  if (!allocationMatchesRelaySource(allocation, source)) {
     throw errors.forbidden('Invalid snapshot relay authorization');
   }
   const authority = buildPlacementAuthoritySqlPredicate({
@@ -229,6 +319,10 @@ export async function verifySessionSnapshotRelayAuthorization(
         AND n.cloud_provider = ?
         AND n.vm_location = ?
         AND n.vm_size = ?
+        AND n.provider_instance_type IS ?
+        AND n.provider_instance_boot_disk_size_gb IS ?
+        AND n.provider_instance_image IS ?
+        AND n.provider_instance_architecture IS ?
         ${authority.sql}
       LIMIT 1`
   )
@@ -239,6 +333,10 @@ export async function verifySessionSnapshotRelayAuthorization(
       allocation.effectiveProvider,
       allocation.vmLocation,
       allocation.vmSize,
+      allocation.providerInstanceType,
+      allocation.providerInstanceBootDiskSizeGb,
+      allocation.providerInstanceImage,
+      allocation.providerInstanceArchitecture,
       ...authority.binds
     )
     .first<{ id: string }>();
@@ -266,15 +364,20 @@ export async function resolveSessionSnapshotUploadTargets(
     generation: string;
     directUploadAvailable: boolean;
     directUploadSupported: boolean;
+    sourceNodeId?: string | null;
   }
 ): Promise<{
   upload: { home: string; wip: string };
   directUpload?: { home: string; wip: string };
   needsRelayProvisioning: boolean;
 }> {
+  let source: RelaySourceNode | null = null;
+  if (input.directUploadAvailable && !input.directUploadSupported && input.sourceNodeId) {
+    source = await loadRelaySourceNode(env, input.userId, input.sourceNodeId);
+  }
   const relay =
     input.directUploadAvailable && !input.directUploadSupported
-      ? await findSessionSnapshotUploadRelay(env, input.userId, input.projectId)
+      ? await findSessionSnapshotUploadRelay(env, input.userId, input.projectId, source)
       : null;
   const target = (artifact: 'home' | 'wip'): string => {
     const authorizationPath = snapshotUploadAuthorizationPath({ ...input, artifact });
@@ -307,57 +410,16 @@ export async function ensureSessionSnapshotUploadRelay(
 ): Promise<void> {
   const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
   if (!requiredVersion) return;
-  if (await findSessionSnapshotUploadRelay(env, input.userId, input.projectId)) return;
-
-  const name = relayNodeName(requiredVersion);
-  const existing = await env.DATABASE.prepare(
-    `SELECT id
-       FROM nodes
-      WHERE user_id = ? AND name = ? AND status IN ('creating', 'running', 'error')
-      LIMIT 1`
-  )
-    .bind(input.userId, name)
-    .first<{ id: string }>();
-  if (existing) return;
-
-  const source = await env.DATABASE.prepare(
-    `SELECT id, user_id, vm_size, vm_location, cloud_provider, runtime, node_class,
-            agent_version, provider_instance_type,
-            provider_instance_boot_disk_size_gb, provider_instance_image,
-            provider_instance_architecture
-       FROM nodes
-      WHERE id = ? AND user_id = ? AND status = 'running'
-      LIMIT 1`
-  )
-    .bind(input.sourceNodeId, input.userId)
-    .first<{
-      id: string;
-      user_id: string;
-      vm_size: string;
-      vm_location: string;
-      cloud_provider: string | null;
-      runtime: string | null;
-      node_class: string;
-      agent_version: string | null;
-      provider_instance_type: string | null;
-      provider_instance_boot_disk_size_gb: number | null;
-      provider_instance_image: string | null;
-      provider_instance_architecture: string | null;
-    }>();
-  if (
-    !source ||
-    source.runtime === 'cf-container' ||
-    source.node_class === 'user-owned' ||
-    source.agent_version === requiredVersion
-  ) {
-    return;
-  }
+  const source = await loadRelaySourceNode(env, input.userId, input.sourceNodeId);
+  if (!sourceStillNeedsRelay(source, requiredVersion)) return;
+  if (await findSessionSnapshotUploadRelay(env, input.userId, input.projectId, source)) return;
 
   // The versioned name above bounds this to one rollout replacement. It is
   // intentionally allowed beyond the normal node count: incompatible nodes
   // cannot accept work and counting them would deadlock their own drain.
   const limits = getRuntimeLimits(env);
   const db = drizzle(env.DATABASE, { schema });
+  const name = relayNodeName(requiredVersion);
   const allocation = await resolveRelayAllocation(env, {
     userId: input.userId,
     projectId: input.projectId,
@@ -371,6 +433,47 @@ export async function ensureSessionSnapshotUploadRelay(
     });
     return;
   }
+  if (!allocationMatchesRelaySource(allocation, source)) {
+    log.warn('session_snapshot.relay_provision_skipped_source_affinity_mismatch', {
+      userId: input.userId,
+      sourceNodeId: input.sourceNodeId,
+      provider: source.cloud_provider,
+      vmLocation: source.vm_location,
+      providerInstanceType: source.provider_instance_type,
+    });
+    return;
+  }
+  const inFlightDuplicate = await env.DATABASE.prepare(
+    `SELECT id
+       FROM nodes
+      WHERE user_id = ?
+        AND name = ?
+        AND status = 'creating'
+        AND runtime = 'vm'
+        AND node_class = 'managed'
+        AND node_role = 'workspace'
+        AND cloud_provider IS ?
+        AND vm_location = ?
+        AND vm_size = ?
+        AND provider_instance_type IS ?
+        AND provider_instance_boot_disk_size_gb IS ?
+        AND provider_instance_image IS ?
+        AND provider_instance_architecture IS ?
+      LIMIT 1`
+  )
+    .bind(
+      input.userId,
+      name,
+      allocation.effectiveProvider,
+      allocation.vmLocation,
+      allocation.vmSize,
+      allocation.providerInstanceType,
+      allocation.providerInstanceBootDiskSizeGb,
+      allocation.providerInstanceImage,
+      allocation.providerInstanceArchitecture
+    )
+    .first<{ id: string }>();
+  if (inFlightDuplicate) return;
   if (
     allocation.quotaCredentialSource === 'platform' &&
     env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false'

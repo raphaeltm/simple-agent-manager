@@ -53,6 +53,7 @@ export interface WorkspaceReservationCapacityResult {
 
 export interface WorkspaceResourceNode {
   id: string;
+  nodeClass?: string | null;
   providerInstanceId?: string | null;
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
@@ -286,14 +287,17 @@ export function resolveTrustedWorkspaceNodeCapacity(
   const observedVcpu = positiveInteger(node.observedProviderInstanceVcpuCount);
   const observedMemoryMb = positiveInteger(node.observedProviderInstanceMemoryMb);
   const observedDiskGb = positiveInteger(node.observedProviderInstanceDiskGb);
-  const plannedVcpu = positiveInteger(node.providerInstanceVcpuCount);
-  const plannedMemoryMb = positiveInteger(node.providerInstanceMemoryMb);
-  const plannedDiskGb = positiveInteger(node.providerInstanceDiskGb);
   const hasProviderInstance =
     typeof node.providerInstanceId === 'string' && node.providerInstanceId.trim().length > 0;
+  const isUserOwnedNode = node.nodeClass === 'user-owned';
+  const hasObservedSource = node.observedHardwareSource === 'observed';
 
-  if (hasProviderInstance) {
+  if (hasProviderInstance || isUserOwnedNode) {
     if (observedVcpu !== null && observedMemoryMb !== null && observedDiskGb !== null) {
+      if (!hasObservedSource) {
+        reasons.push('node observed hardware source is not verified');
+        return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
+      }
       return {
         vcpuCount: observedVcpu,
         memoryMb: observedMemoryMb,
@@ -306,17 +310,7 @@ export function resolveTrustedWorkspaceNodeCapacity(
     return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
   }
 
-  if (plannedVcpu !== null && plannedMemoryMb !== null && plannedDiskGb !== null) {
-    return {
-      vcpuCount: plannedVcpu,
-      memoryMb: plannedMemoryMb,
-      diskGb: plannedDiskGb,
-      source: 'planned',
-      reasons,
-    };
-  }
-
-  reasons.push('node has no planned capacity before provider allocation');
+  reasons.push('managed node has no provider runtime identity');
   return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
 }
 

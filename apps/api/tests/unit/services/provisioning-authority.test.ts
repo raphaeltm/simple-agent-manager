@@ -184,6 +184,8 @@ describe('provisioning authority helpers', () => {
     });
 
     const statement = statements[0]!;
+    expect(statement.sql).toContain('JOIN nodes relay');
+    expect(statement.sql).toContain("relay.status IN ('creating', 'running')");
     expect(statement.sql).toContain("source.status = 'running'");
     expect(statement.sql).toContain("source.runtime = 'vm'");
     expect(statement.sql).toContain('(source.agent_version IS NULL OR source.agent_version != ?)');
@@ -193,7 +195,11 @@ describe('provisioning authority helpers', () => {
     expect(statement.sql).toContain('FROM project_members pm');
     expect(statement.sql).toContain('AND NOT EXISTS');
     expect(statement.sql).toContain("duplicate.status IN ('creating', 'running')");
+    expect(statement.sql).toContain('duplicate.provider_instance_type IS relay.provider_instance_type');
     expect(statement.binds).toEqual([
+      'relay-node',
+      'user-1',
+      'Session snapshot relay required',
       'legacy-node',
       'user-1',
       'required-version',

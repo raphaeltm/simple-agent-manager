@@ -1,5 +1,9 @@
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
+import {
+  type ProjectCapability,
+  projectMemberRolesWithCapability,
+} from '../middleware/project-auth';
 import { deleteNodeResourcesStrict } from './strict-node-deletion';
 
 export class ProvisioningAuthorityError extends Error {
@@ -67,6 +71,12 @@ export type FreshProvisioningNodeCleanupResult =
   | 'skipped'
   | 'failed';
 
+function projectMemberCapabilitySql(capability: ProjectCapability): string {
+  const roles = projectMemberRolesWithCapability(capability);
+  if (roles.length === 0) return '0 = 1';
+  return `pm.role IN (${roles.map((role) => `'${role}'`).join(', ')})`;
+}
+
 function requireD1(env: Env): D1Database {
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     throw new ProvisioningAuthorityError('Provisioning authority database is unavailable');
@@ -99,9 +109,10 @@ export async function assertDirectWorkspaceProvisioningAuthority(
         AND t.project_id = w.project_id
        JOIN project_members pm
          ON pm.project_id = w.project_id
-        AND pm.user_id = w.user_id
-        AND pm.status = 'active'
-        AND pm.removed_at IS NULL
+         AND pm.user_id = w.user_id
+         AND pm.status = 'active'
+         AND pm.removed_at IS NULL
+         AND ${projectMemberCapabilitySql('workspace:write')}
       WHERE w.id = ?
         AND w.user_id = ?
         AND w.project_id = ?
@@ -136,9 +147,10 @@ export async function assertDeploymentProvisioningAuthority(
        FROM deployment_environments de
        JOIN project_members pm
          ON pm.project_id = de.project_id
-        AND pm.user_id = ?
-        AND pm.status = 'active'
-        AND pm.removed_at IS NULL
+         AND pm.user_id = ?
+         AND pm.status = 'active'
+         AND pm.removed_at IS NULL
+         AND ${projectMemberCapabilitySql('deployment:deploy')}
        JOIN nodes n
          ON n.id = de.node_id
         AND n.user_id = ?
@@ -189,9 +201,10 @@ export async function assertTrialProvisioningAuthority(
         AND p.user_id = ?
        JOIN project_members pm
          ON pm.project_id = p.id
-        AND pm.user_id = ?
-        AND pm.status = 'active'
-        AND pm.removed_at IS NULL
+         AND pm.user_id = ?
+         AND pm.status = 'active'
+         AND pm.removed_at IS NULL
+         AND ${projectMemberCapabilitySql('workspace:write')}
       WHERE t.id = ?
         AND t.project_id = ?
         AND t.status = 'pending'
@@ -212,9 +225,10 @@ export async function assertRelayProvisioningAuthority(
          SELECT 1
            FROM project_members pm
           WHERE pm.project_id = ?
-            AND pm.user_id = ?
-            AND pm.status = 'active'
-            AND pm.removed_at IS NULL
+             AND pm.user_id = ?
+             AND pm.status = 'active'
+             AND pm.removed_at IS NULL
+             AND ${projectMemberCapabilitySql('workspace:write')}
        )`
     : '';
   const projectMembershipBinds = input.projectId ? [input.projectId, input.userId] : [];
@@ -223,6 +237,14 @@ export async function assertRelayProvisioningAuthority(
     env,
     `SELECT 1 AS ok
        FROM nodes source
+       JOIN nodes relay
+         ON relay.id = ?
+        AND relay.user_id = ?
+        AND relay.name = ?
+        AND relay.status IN ('creating', 'running')
+        AND relay.runtime = 'vm'
+        AND relay.node_class = 'managed'
+        AND relay.node_role = 'workspace'
       WHERE source.id = ?
         AND source.user_id = ?
         AND source.status = 'running'
@@ -242,10 +264,23 @@ export async function assertRelayProvisioningAuthority(
            WHERE duplicate.user_id = ?
              AND duplicate.name = ?
              AND duplicate.status IN ('creating', 'running')
+             AND duplicate.runtime = 'vm'
+             AND duplicate.node_class = 'managed'
+             AND duplicate.node_role = 'workspace'
+             AND duplicate.cloud_provider IS relay.cloud_provider
+             AND duplicate.vm_location = relay.vm_location
+             AND duplicate.vm_size = relay.vm_size
+             AND duplicate.provider_instance_type IS relay.provider_instance_type
+             AND duplicate.provider_instance_boot_disk_size_gb IS relay.provider_instance_boot_disk_size_gb
+             AND duplicate.provider_instance_image IS relay.provider_instance_image
+             AND duplicate.provider_instance_architecture IS relay.provider_instance_architecture
              AND duplicate.id <> ?
         )
       LIMIT 1`,
     [
+      input.relayNodeId,
+      input.userId,
+      input.relayName,
       input.sourceNode.id,
       input.userId,
       input.requiredAgentVersion,

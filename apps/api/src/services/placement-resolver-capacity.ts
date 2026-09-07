@@ -24,6 +24,7 @@ import {
   legacyReusableNodeMatches,
   normalizeLegacyPoolSize,
 } from './legacy-node-pool-compatibility';
+import { capacityCandidateWorkloadRoleEligible } from './placement-authority';
 import type {
   CapacityAwareNodePlacementRow,
   TaskStartCapacityCandidate,
@@ -250,7 +251,7 @@ function normalizeCapacityCandidate(
   effectiveState: TaskStartCapacityPoolSelection['effectiveState']
 ): TaskStartCapacityCandidate | null {
   if (!isActiveCapacityPlacementOption(pool, source, candidate)) return null;
-  if (candidate.workloadRole !== workloadRole) return null;
+  if (!capacityCandidateWorkloadRoleEligible(candidate.workloadRole, workloadRole)) return null;
   if (candidate.runtime && candidate.runtime !== placement.runtime.executionRuntime) return null;
   if (source.sourceKind !== 'cloud-provider-credential') return null;
   if (!candidate.provider || !isValidProvider(candidate.provider)) return null;
@@ -301,7 +302,7 @@ function normalizeCapacityCandidate(
     capacitySourceExternalRef: source.externalSourceRef,
     provider: candidate.provider,
     location: candidate.location as VMLocation,
-    workloadRole: candidate.workloadRole,
+    workloadRole,
     runtime: candidate.runtime,
     machineClass: candidate.machineClass,
     machineSize: normalizeLegacyPoolSize(candidate.machineSize),
@@ -348,7 +349,7 @@ function normalizeCapacityCandidate(
       placementCredentialReference: source.credentialReference,
       placementCredentialVersion: source.credentialVersion,
       capacityPoolProjectId,
-      workloadRole: candidate.workloadRole,
+      workloadRole,
       providerInstanceType,
       providerInstanceVcpuCount,
       providerInstanceMemoryMb,

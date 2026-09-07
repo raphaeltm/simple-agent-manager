@@ -59,7 +59,12 @@ import { startDiscoveryAgent } from '../../services/trial/trial-runner';
 import { readTrial, writeTrial } from '../../services/trial/trial-store';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../services/workspace-resource-capacity';
+import {
+  evaluateWorkspaceReservationCapacity,
+  loadActiveWorkspaceReservationUsage,
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceResourceNode,
+} from '../../services/workspace-resource-capacity';
 import { verifyNodeAgentHealthy } from '../task-runner/node-steps';
 import { isNodeAgentReadyForWorkspaceDispatch } from '../task-runner/readiness';
 import {
@@ -411,14 +416,27 @@ export async function handleNodeSelection(
   });
   const requiredAgentVersion = rc.env.VM_AGENT_REQUIRED_VERSION || null;
   const existing = await rc.env.DATABASE.prepare(
-    `SELECT n.id FROM nodes n
+    `SELECT
+        n.id,
+        n.node_class AS nodeClass,
+        n.provider_instance_id AS providerInstanceId,
+        n.provider_instance_vcpu_count AS providerInstanceVcpuCount,
+        n.provider_instance_memory_mb AS providerInstanceMemoryMb,
+        n.provider_instance_disk_gb AS providerInstanceDiskGb,
+        n.observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
+        n.observed_provider_instance_memory_mb AS observedProviderInstanceMemoryMb,
+        n.observed_provider_instance_disk_gb AS observedProviderInstanceDiskGb,
+        n.observed_hardware_source AS observedHardwareSource,
+        n.last_metrics AS lastMetrics,
+        n.last_heartbeat_at AS lastHeartbeatAt
+     FROM nodes n
      WHERE n.user_id = ? AND n.status = 'running' AND n.health_status = 'healthy'
-       AND (? IS NULL OR n.agent_version = ?)
-       AND n.cloud_provider = ?
-       AND n.vm_location = ?
-       AND n.vm_size = ?
-       ${authority.sql}
-     LIMIT 1`
+        AND (? IS NULL OR n.agent_version = ?)
+        AND n.cloud_provider = ?
+        AND n.vm_location = ?
+        AND n.vm_size = ?
+        ${authority.sql}
+      ORDER BY n.id ASC`
   )
     .bind(
       userId,
@@ -429,16 +447,33 @@ export async function handleNodeSelection(
       allocation.vmSize,
       ...authority.binds
     )
-    .first<{ id: string }>();
+    .all<WorkspaceResourceNode>();
 
-  if (existing?.id) {
+  const candidates = existing.results ?? [];
+  const usage = await loadActiveWorkspaceReservationUsage(
+    rc.env.DATABASE,
+    candidates.map((node) => node.id)
+  );
+  const admissionPolicy = resolveWorkspaceAdmissionPolicy(rc.env);
+
+  for (const candidate of candidates) {
+    if (
+      !evaluateWorkspaceReservationCapacity(
+        candidate,
+        usage.get(candidate.id),
+        allocation.placement.resolvedReservation,
+        admissionPolicy
+      ).admitted
+    ) {
+      continue;
+    }
     if (
       await verifyNodeAgentHealthy(
-        existing.id,
+        candidate.id,
         rc as unknown as import('../task-runner/types').TaskRunnerContext
       )
     ) {
-      state.nodeId = existing.id;
+      state.nodeId = candidate.id;
       await rc.ctx.storage.put('state', state);
       await rc.advanceToStep(state, 'workspace_creation');
       return;

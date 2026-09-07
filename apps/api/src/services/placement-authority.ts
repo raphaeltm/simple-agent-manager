@@ -4,7 +4,13 @@ import type {
   CapacityWorkloadRole,
 } from '@simple-agent-manager/shared';
 
+import {
+  type ProjectCapability,
+  projectMemberRolesWithCapability,
+} from '../middleware/project-auth';
+
 export type PlacementSqlBind = string | number | null;
+export type PlacementAuthorityNodeClass = 'managed' | 'user-owned';
 
 export interface PlacementAuthoritySqlPredicate {
   sql: string;
@@ -17,6 +23,8 @@ export interface PlacementAuthoritySqlInput {
   projectId?: string | null;
   nodeRole: 'workspace' | 'deployment';
   workloadRole: CapacityWorkloadRole;
+  nodeClass?: PlacementAuthorityNodeClass;
+  projectCapability?: ProjectCapability;
   capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
   requireProjectMembership?: boolean;
 }
@@ -63,14 +71,17 @@ export function buildPlacementAuthoritySqlPredicate(
   input: PlacementAuthoritySqlInput
 ): PlacementAuthoritySqlPredicate {
   const nodeAlias = safeSqlAlias(input.nodeAlias ?? 'n');
+  const nodeClass = input.nodeClass ?? 'managed';
+  const projectCapability =
+    input.projectCapability ?? (input.nodeRole === 'deployment' ? 'deployment:deploy' : 'workspace:write');
   const binds: PlacementSqlBind[] = [];
   const clauses: string[] = [
     `AND ${nodeAlias}.runtime = 'vm'`,
-    `AND ${nodeAlias}.node_class = 'managed'`,
+    `AND ${nodeAlias}.node_class = ?`,
     `AND ${nodeAlias}.node_role = ?`,
     `AND ${nodeAlias}.workload_role = ?`,
   ];
-  binds.push(input.nodeRole, input.workloadRole);
+  binds.push(nodeClass, input.nodeRole, input.workloadRole);
 
   const requireProjectMembership =
     input.requireProjectMembership ?? (input.projectId !== null && input.projectId !== undefined);
@@ -84,12 +95,21 @@ export function buildPlacementAuthoritySqlPredicate(
           AND current_project_member.user_id = ?
           AND current_project_member.status = 'active'
           AND current_project_member.removed_at IS NULL
+          AND ${projectMemberRoleCapabilitySql('current_project_member', projectCapability)}
       )`
     );
     binds.push(input.projectId, input.userId);
   }
 
   const snapshot = input.capacityPlacementSnapshot ?? null;
+  if (nodeClass === 'user-owned') {
+    if (snapshot?.capacityPoolId) return impossiblePredicate();
+    return {
+      sql: clauses.join('\n'),
+      binds,
+    };
+  }
+
   if (!snapshot?.capacityPoolId) {
     const legacy = buildLegacyUnpooledAuthorityPredicate(nodeAlias, input);
     return joinPredicates({ sql: clauses.join('\n'), binds }, legacy);
@@ -159,7 +179,7 @@ export function buildPlacementAuthoritySqlPredicate(
         AND c.catalog_availability = 'available'
         AND c.provider = ${nodeAlias}.cloud_provider
         AND c.location = ${nodeAlias}.vm_location
-        AND c.workload_role = ?
+        AND ${capacityCandidateWorkloadRoleSql('c.workload_role', concrete.workloadRole)}
         AND c.provider_instance_type = ?
         AND c.provider_instance_vcpu_count = ?
         AND c.provider_instance_memory_mb = ?
@@ -198,7 +218,6 @@ export function buildPlacementAuthoritySqlPredicate(
     concrete.capacitySourceGeneration,
     concrete.capacitySourceExternalRef,
     ...sourceScope.binds,
-    concrete.workloadRole,
     concrete.providerInstanceType,
     concrete.providerInstanceVcpuCount,
     concrete.providerInstanceMemoryMb,
@@ -210,6 +229,28 @@ export function buildPlacementAuthoritySqlPredicate(
   );
 
   return { sql: clauses.join('\n'), binds };
+}
+
+export function capacityCandidateWorkloadRoleEligible(
+  candidateRole: string | null | undefined,
+  requestedRole: CapacityWorkloadRole
+): boolean {
+  if (requestedRole === 'deployment') {
+    return candidateRole === 'deployment' || candidateRole === 'workspace';
+  }
+  return candidateRole === 'workspace';
+}
+
+export function capacityCandidateWorkloadRoleSql(
+  candidateColumnSql: string,
+  requestedRole: CapacityWorkloadRole
+): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(candidateColumnSql)) {
+    throw new Error(`Unsafe capacity candidate role SQL column: ${candidateColumnSql}`);
+  }
+  return requestedRole === 'deployment'
+    ? `${candidateColumnSql} IN ('deployment', 'workspace')`
+    : `${candidateColumnSql} = 'workspace'`;
 }
 
 export function evaluateLegacyNodeAdoptionCompatibility(
@@ -554,6 +595,13 @@ function joinPredicates(
 
 function impossiblePredicate(): PlacementAuthoritySqlPredicate {
   return { sql: 'AND 0 = 1', binds: [] };
+}
+
+function projectMemberRoleCapabilitySql(alias: string, capability: ProjectCapability): string {
+  const safeAliasName = safeSqlAlias(alias);
+  const roles = projectMemberRolesWithCapability(capability);
+  if (roles.length === 0) return '0 = 1';
+  return `${safeAliasName}.role IN (${roles.map((role) => `'${role}'`).join(', ')})`;
 }
 
 function safeSqlAlias(value: string): string {

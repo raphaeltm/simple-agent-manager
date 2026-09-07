@@ -224,6 +224,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/prepare', async (c) => {
     generation: prepared.generation,
     directUploadAvailable,
     directUploadSupported,
+    sourceNodeId: workspace.nodeId,
   });
   if (uploadTargets.needsRelayProvisioning && workspace.nodeId) {
     c.executionCtx.waitUntil(
@@ -298,7 +299,8 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/artifacts/:artifact/upload-url
     workspace.userId,
     workspace.projectId,
     c.req.header(SESSION_SNAPSHOT_RELAY_NODE_ID_HEADER),
-    c.req.header(SESSION_SNAPSHOT_RELAY_AUTHORIZATION_HEADER)
+    c.req.header(SESSION_SNAPSHOT_RELAY_AUTHORIZATION_HEADER),
+    workspace.nodeId
   );
   const capture = await db
     .select({ generation: schema.sessionSnapshots.captureGeneration })

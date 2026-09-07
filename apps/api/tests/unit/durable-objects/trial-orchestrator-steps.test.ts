@@ -127,6 +127,7 @@ import { drizzle } from 'drizzle-orm/d1';
 const {
   handleRunning,
   handleDiscoveryAgentStart,
+  handleNodeSelection,
   handleNodeProvisioning,
   handleNodeAgentReady,
   handleWorkspaceCreation,
@@ -220,9 +221,11 @@ function makeCtx(storage: Storage = new Map()) {
 
 function makeRc(ctx: ReturnType<typeof makeCtx>, advanced: string[]) {
   const firstMock = vi.fn(async () => null);
+  const allMock = vi.fn(async () => ({ results: [] }));
   const bindMock = vi.fn(() => ({
     run: vi.fn(async () => {}),
     first: firstMock,
+    all: allMock,
   }));
   const prepareMock = vi.fn(() => ({ bind: bindMock }));
 
@@ -245,6 +248,7 @@ function makeRc(ctx: ReturnType<typeof makeCtx>, advanced: string[]) {
     getNodeReadyTimeoutMs: () => 180_000,
     getHeartbeatSkewMs: () => 30_000,
     _dbFirst: firstMock,
+    _dbAll: allMock,
   } as unknown as Parameters<typeof handleRunning>[1];
 }
 
@@ -260,6 +264,111 @@ describe('handleRunning', () => {
     await handleRunning(state, rc);
     expect(state.completed).toBe(true);
     expect(ctx.storage.put).toHaveBeenCalledWith('state', state);
+  });
+});
+
+describe('handleNodeSelection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(drizzle).mockReturnValue(makeProjectDb() as any);
+    placementProjectDefaultsFromRowMock.mockImplementation((project) => project);
+    resolveCanonicalVmAllocationPlanMock.mockResolvedValue({
+      ...trialAllocation(),
+      placement: {
+        workloadRole: 'workspace',
+        resolvedReservation: {
+          cpuMillis: 1000,
+          memoryMb: 1024,
+          diskMb: 1024,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+          source: 'platform',
+          sourceId: 'platform',
+          version: 1,
+        },
+      },
+      capacityPlacementSnapshot: {
+        capacityPoolId: 'pool-trial',
+        capacityPoolScope: 'project',
+        capacityPoolRevision: 1,
+        capacitySourceId: 'source-trial',
+        capacitySourceGeneration: 1_700_000_000_000,
+        capacitySourceExternalRef: null,
+        capacityPoolCandidateId: 'candidate-trial',
+        placementCredentialSource: 'platform',
+        placementCredentialReference: 'platform_credentials:trial',
+        placementCredentialVersion: 1_700_000_000_000,
+        capacityPoolProjectId: 'proj_trial',
+        workloadRole: 'workspace',
+        providerInstanceType: 'cx22',
+        providerInstanceVcpuCount: 2,
+        providerInstanceMemoryMb: 4096,
+        providerInstanceDiskGb: 40,
+        placementExplanationJson: '{"candidate":"trial"}',
+      },
+    });
+  });
+
+  it('skips a full healthy node and advances to provisioning without resetting retry state', async () => {
+    const ctx = makeCtx();
+    const advanced: string[] = [];
+    const rc = makeRc(ctx, advanced) as Parameters<typeof handleNodeSelection>[1] & {
+      _dbAll: ReturnType<typeof vi.fn>;
+    };
+    const now = new Date().toISOString();
+    rc._dbAll
+      .mockResolvedValueOnce({
+        results: [
+          {
+            id: 'node-trial-full',
+            nodeClass: 'managed',
+            providerInstanceId: 'server-trial-full',
+            providerInstanceVcpuCount: 2,
+            providerInstanceMemoryMb: 4096,
+            providerInstanceDiskGb: 40,
+            observedProviderInstanceVcpuCount: 2,
+            observedProviderInstanceMemoryMb: 4096,
+            observedProviderInstanceDiskGb: 40,
+            observedHardwareSource: 'observed',
+            lastMetrics: JSON.stringify({
+              version: 1,
+              cpuLoadAvg1: 0.2,
+              memoryPercent: 10,
+              diskPercent: 10,
+            }),
+            lastHeartbeatAt: now,
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        results: [
+          {
+            nodeId: 'node-trial-full',
+            reservationJson: JSON.stringify({
+              cpuMillis: 2000,
+              memoryMb: 3072,
+              diskMb: 1024,
+              exclusiveNode: false,
+              maxCoTenants: 4,
+              source: 'platform',
+              sourceId: 'platform',
+              version: 1,
+            }),
+          },
+        ],
+      });
+    const state = makeState({
+      currentStep: 'node_selection',
+      projectId: 'proj_trial',
+      nodeId: null,
+      retryCount: 3,
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(advanced).toEqual(['node_provisioning']);
+    expect(state.nodeId).toBeNull();
+    expect(state.retryCount).toBe(3);
   });
 });
 

@@ -51,6 +51,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
+  projectMemberRolesWithCapability: vi.fn(() => ['owner', 'admin', 'maintainer']),
   requireProjectAccess: mocks.requireProjectAccess,
   requireProjectCapability: mocks.requireProjectCapability,
 }));

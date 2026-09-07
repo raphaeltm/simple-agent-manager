@@ -11,7 +11,11 @@ import {
   reserveWorkspacePlacement,
 } from '../../../src/services/workspace-placement';
 import type { WorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  createAllSchemaTables,
+  createSqliteD1,
+  createSqliteD1WithBindLimit,
+} from '../../helpers/sqlite-d1';
 
 const AUTHORITY_VERSION = 1_700_000_000_000;
 const AUTHORITY_TIMESTAMP = new Date(AUTHORITY_VERSION).toISOString();
@@ -133,7 +137,63 @@ function seedNode(overrides: Record<string, unknown> = {}): void {
     observed_provider_instance_vcpu_count: 8,
     observed_provider_instance_memory_mb: 16 * 1024,
     observed_provider_instance_disk_gb: 240,
-    observed_hardware_source: 'provider-create',
+    observed_hardware_source: 'observed',
+    last_heartbeat_at: new Date().toISOString(),
+    last_metrics: JSON.stringify({
+      version: 1,
+      cpuLoadAvg1: 0.2,
+      memoryPercent: 10,
+      diskPercent: 10,
+    }),
+    ...overrides,
+  };
+  const columns = Object.keys(row);
+  sqlite
+    ?.prepare(
+      `INSERT INTO nodes (${columns.join(', ')})
+       VALUES (${columns.map(() => '?').join(', ')})`
+    )
+    .run(...Object.values(row));
+}
+
+function seedUserOwnedNode(overrides: Record<string, unknown> = {}): void {
+  seedAuthority();
+  const row = {
+    id: 'node-1',
+    user_id: 'user-1',
+    name: 'User-owned node',
+    status: 'running',
+    runtime: 'vm',
+    vm_size: 'large',
+    vm_location: 'fsn1',
+    cloud_provider: null,
+    provider_instance_id: null,
+    node_role: 'workspace',
+    node_class: 'user-owned',
+    workload_role: 'workspace',
+    capacity_pool_id: null,
+    capacity_pool_scope: null,
+    capacity_pool_revision: null,
+    capacity_source_id: null,
+    capacity_source_generation: null,
+    capacity_source_external_ref: null,
+    capacity_pool_candidate_id: null,
+    capacity_pool_project_id: null,
+    placement_credential_source: null,
+    placement_credential_reference: null,
+    placement_credential_version: null,
+    provider_instance_type: null,
+    provider_instance_vcpu_count: null,
+    provider_instance_memory_mb: null,
+    provider_instance_disk_gb: null,
+    provider_instance_boot_disk_size_gb: null,
+    provider_instance_image: null,
+    provider_instance_architecture: null,
+    observed_provider_instance_type: 'byo-standard',
+    observed_provider_instance_vcpu_count: 8,
+    observed_provider_instance_memory_mb: 16 * 1024,
+    observed_provider_instance_disk_gb: 240,
+    observed_hardware_source: 'observed',
     last_heartbeat_at: new Date().toISOString(),
     last_metrics: JSON.stringify({
       version: 1,
@@ -261,6 +321,18 @@ afterEach(() => {
 });
 
 describe('reserveWorkspacePlacement', () => {
+  it('keeps the atomic authority reservation within the D1 bind limit', async () => {
+    createDb();
+    if (!sqlite) throw new Error('SQLite fixture was not initialized');
+    const database = createSqliteD1WithBindLimit(sqlite, 100);
+    const snapshot = capacitySnapshot();
+    seedNode();
+
+    await expect(reserveWorkspacePlacement(database, reserveInput(snapshot), 5)).resolves.toBe(
+      true
+    );
+  });
+
   it('persists concrete provider offering and authority metadata on the workspace row', async () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
@@ -341,6 +413,18 @@ describe('reserveWorkspacePlacement', () => {
 
     await expect(
       reserveWorkspacePlacement(database, reserveInput(capacitySnapshot()), admissionPolicy())
+    ).resolves.toBe(false);
+    expect(countWorkspace()).toBe(0);
+  });
+
+  it('rejects project viewers without workspace execution capability in final admission', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode();
+    sqlite?.prepare(`UPDATE project_members SET role = 'viewer' WHERE project_id = 'project-1'`).run();
+
+    await expect(
+      reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())
     ).resolves.toBe(false);
     expect(countWorkspace()).toBe(0);
   });
@@ -662,6 +746,46 @@ describe('reserveWorkspacePlacement', () => {
         admissionPolicy()
       )
     ).resolves.toBe(false);
+  });
+
+  it('admits a user-owned direct node only through verified observed capacity and project access', async () => {
+    const database = createDb();
+    seedUserOwnedNode();
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(capacitySnapshot()),
+          capacityPlacementSnapshot: null,
+          authorityNodeClass: 'user-owned',
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+
+    sqlite?.prepare(`DELETE FROM workspaces WHERE id = 'workspace-1'`).run();
+    sqlite
+      ?.prepare(
+        `UPDATE nodes
+         SET observed_hardware_source = NULL
+         WHERE id = 'node-1'`
+      )
+      .run();
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(capacitySnapshot()),
+          id: 'workspace-byo-unverified',
+          capacityPlacementSnapshot: null,
+          authorityNodeClass: 'user-owned',
+        },
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+    expect(countWorkspace('workspace-byo-unverified')).toBe(0);
   });
 });
 

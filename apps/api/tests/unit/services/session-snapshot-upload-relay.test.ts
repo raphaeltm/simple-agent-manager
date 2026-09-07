@@ -118,6 +118,18 @@ function sourceNode(agentVersion = 'legacy-version') {
   };
 }
 
+function largeSourceNode(agentVersion = 'legacy-version') {
+  return {
+    ...sourceNode(agentVersion),
+    vm_size: 'large',
+    vm_location: 'fsn1',
+    provider_instance_type: 'cx42',
+    provider_instance_boot_disk_size_gb: 120,
+    provider_instance_image: 'ubuntu-24.04',
+    provider_instance_architecture: 'x86',
+  };
+}
+
 describe('session snapshot upload relay', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -141,13 +153,17 @@ describe('session snapshot upload relay', () => {
       expect(sql).toContain("health_status = 'healthy'");
       expect(sql).toContain("runtime = 'vm'");
       expect(sql).toContain('capacity_pool_id IS NULL');
-      expect(values.slice(0, 6)).toEqual([
+      expect(values.slice(0, 10)).toEqual([
         'relay-node',
         'user-1',
         'abcdef1234567890',
         'hetzner',
         'nbg1',
         'medium',
+        'cx22',
+        null,
+        null,
+        null,
       ]);
       return { id: 'relay-node' };
     });
@@ -226,12 +242,16 @@ describe('session snapshot upload relay', () => {
       expect(sql).toContain('agent_version = ?');
       expect(sql).toContain("runtime = 'vm'");
       expect(sql).toContain('capacity_pool_id IS NULL');
-      expect(values.slice(0, 5)).toEqual([
+      expect(values.slice(0, 9)).toEqual([
         'user-1',
         'abcdef1234567890',
         'hetzner',
         'nbg1',
         'medium',
+        'cx22',
+        null,
+        null,
+        null,
       ]);
       return { id: 'relay-node', name: 'current relay' };
     });
@@ -239,6 +259,42 @@ describe('session snapshot upload relay', () => {
     await expect(findSessionSnapshotUploadRelay(env, 'user-1')).resolves.toEqual({
       id: 'relay-node',
       name: 'current relay',
+    });
+  });
+
+  it('resolves relay lookup with source native affinity before reusing a current relay', async () => {
+    mocks.resolveCanonicalVmAllocationPlan.mockResolvedValueOnce(
+      canonicalAllocation({
+        vmSize: 'large',
+        vmLocation: 'fsn1',
+        providerInstanceType: 'cx42',
+        providerInstanceBootDiskSizeGb: 120,
+        providerInstanceImage: 'ubuntu-24.04',
+        providerInstanceArchitecture: 'x86',
+      })
+    );
+    const env = makeEnv((sql, values) => {
+      expect(sql).toContain('agent_version = ?');
+      expect(sql).toContain('provider_instance_type IS ?');
+      expect(values.slice(0, 9)).toEqual([
+        'user-1',
+        'abcdef1234567890',
+        'hetzner',
+        'fsn1',
+        'large',
+        'cx42',
+        120,
+        'ubuntu-24.04',
+        'x86',
+      ]);
+      return { id: 'relay-large', name: 'current large relay' };
+    });
+
+    await expect(
+      findSessionSnapshotUploadRelay(env, 'user-1', null, largeSourceNode())
+    ).resolves.toEqual({
+      id: 'relay-large',
+      name: 'current large relay',
     });
   });
 
@@ -283,11 +339,11 @@ describe('session snapshot upload relay', () => {
 
   it('provisions one rollout replacement, respects quota, and puts it in the normal warm pool', async () => {
     const env = makeEnv((sql) => {
+      if (sql.includes('agent_version, provider_instance_type')) return sourceNode();
       if (sql.includes('agent_version = ?')) return null;
       if (sql.includes('FROM projects') && sql.includes('default_vm_size'))
         return projectDefaultsRow();
       if (sql.includes('name = ?')) return null;
-      if (sql.includes('agent_version, provider_instance_type')) return sourceNode();
       if (sql.includes('SELECT status FROM nodes')) return { status: 'running' };
       if (sql.includes('warm_node_timeout_ms')) return { warm_node_timeout_ms: 7_200_000 };
       throw new Error(`unexpected SQL: ${sql}`);
@@ -353,13 +409,66 @@ describe('session snapshot upload relay', () => {
     expect(mocks.markIdle).toHaveBeenCalledWith('relay-node', 'user-1', 7_200_000);
   });
 
+  it('does not let a same-name relay for a different native offering block recovery', async () => {
+    mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue(
+      canonicalAllocation({
+        vmSize: 'large',
+        vmLocation: 'fsn1',
+        providerInstanceType: 'cx42',
+        providerInstanceBootDiskSizeGb: 120,
+        providerInstanceImage: 'ubuntu-24.04',
+        providerInstanceArchitecture: 'x86',
+      })
+    );
+    const env = makeEnv((sql, values) => {
+      if (sql.includes('agent_version, provider_instance_type')) return largeSourceNode();
+      if (sql.includes('agent_version = ?')) return null;
+      if (sql.includes('name = ?')) {
+        expect(sql).toContain('provider_instance_type IS ?');
+        expect(values).toEqual([
+          'user-1',
+          'Session snapshot relay abcdef123456',
+          'hetzner',
+          'fsn1',
+          'large',
+          'cx42',
+          120,
+          'ubuntu-24.04',
+          'x86',
+        ]);
+        return null;
+      }
+      if (sql.includes('SELECT status FROM nodes')) return { status: 'running' };
+      if (sql.includes('warm_node_timeout_ms')) return { warm_node_timeout_ms: 7_200_000 };
+      throw new Error(`unexpected SQL: ${sql}`);
+    });
+
+    await ensureSessionSnapshotUploadRelay(env, {
+      userId: 'user-1',
+      sourceNodeId: 'legacy-node',
+      projectId: null,
+    });
+
+    expect(mocks.createNodeRecord).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        vmSize: 'large',
+        vmLocation: 'fsn1',
+        providerInstanceType: 'cx42',
+        providerInstanceBootDiskSizeGb: 120,
+        providerInstanceImage: 'ubuntu-24.04',
+        providerInstanceArchitecture: 'x86',
+      })
+    );
+  });
+
   it('cleans up a replacement relay when provisioning does not leave it running', async () => {
     const env = makeEnv((sql) => {
+      if (sql.includes('agent_version, provider_instance_type')) return sourceNode();
       if (sql.includes('agent_version = ?')) return null;
       if (sql.includes('FROM projects') && sql.includes('default_vm_size'))
         return projectDefaultsRow();
       if (sql.includes('name = ?')) return null;
-      if (sql.includes('agent_version, provider_instance_type')) return sourceNode();
       if (sql.includes('SELECT status FROM nodes')) return { status: 'error' };
       throw new Error(`unexpected SQL: ${sql}`);
     });

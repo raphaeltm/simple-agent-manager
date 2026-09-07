@@ -65,16 +65,16 @@ describe('workspace resource capacity accounting', () => {
     expect(normalizeLoadAverageToCpuPercent(2, null)).toBeNull();
   });
 
-  it('admits an empty unknown-capacity node while fail-closing occupied unknown capacity', () => {
+  it('rejects nodes without trusted observed hardware capacity', () => {
     const request = reservation({ memoryMb: 4096, diskMb: 40960 });
-    expect(
-      evaluateWorkspaceReservationCapacity({ id: 'empty' }, emptyUsage(), request, policy())
-        .admitted
-    ).toBe(true);
+    const empty = evaluateWorkspaceReservationCapacity({ id: 'empty' }, emptyUsage(), request, policy());
+    expect(empty.admitted).toBe(false);
+    expect(empty.reasons).toContain('managed node has no provider runtime identity');
 
     const occupied = evaluateWorkspaceReservationCapacity(
       {
         id: 'occupied',
+        providerInstanceId: 'server-occupied',
         lastMetrics: JSON.stringify({ diskPercent: 10 }),
         lastHeartbeatAt: new Date().toISOString(),
       },
@@ -83,33 +83,27 @@ describe('workspace resource capacity accounting', () => {
       policy()
     );
     expect(occupied.admitted).toBe(false);
-    expect(occupied.reasons).toContain('occupied node has unknown CPU capacity');
-    expect(occupied.reasons).toContain('occupied node has unknown memory capacity');
-    expect(occupied.reasons).toContain('occupied node has unknown disk capacity');
+    expect(occupied.reasons).toContain('node has no trusted observed hardware capacity');
   });
 
   it('reports concrete rejection diagnostics for headroom, exclusivity and disk pressure', () => {
     const now = new Date().toISOString();
+    const node = {
+      id: 'node',
+      providerInstanceId: 'server-node',
+      observedProviderInstanceVcpuCount: 4,
+      observedProviderInstanceMemoryMb: 8192,
+      observedProviderInstanceDiskGb: 80,
+      observedHardwareSource: 'observed',
+      lastHeartbeatAt: now,
+      lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 95 }),
+    };
     const metrics = parseWorkspaceAdmissionMetrics(
-      {
-        id: 'node',
-        providerInstanceVcpuCount: 4,
-        providerInstanceMemoryMb: 8192,
-        providerInstanceDiskGb: 80,
-        lastHeartbeatAt: now,
-        lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 95 }),
-      },
+      node,
       policy()
     );
     const result = evaluateWorkspaceReservationCapacity(
-      {
-        id: 'node',
-        providerInstanceVcpuCount: 4,
-        providerInstanceMemoryMb: 8192,
-        providerInstanceDiskGb: 80,
-        lastHeartbeatAt: now,
-        lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 95 }),
-      },
+      node,
       usage({
         activeCount: 1,
         exclusiveCount: 1,
@@ -139,9 +133,11 @@ describe('workspace resource capacity accounting', () => {
     });
     const baseNode = {
       id: 'occupied',
-      providerInstanceVcpuCount: 4,
-      providerInstanceMemoryMb: 8192,
-      providerInstanceDiskGb: 80,
+      providerInstanceId: 'server-occupied',
+      observedProviderInstanceVcpuCount: 4,
+      observedProviderInstanceMemoryMb: 8192,
+      observedProviderInstanceDiskGb: 80,
+      observedHardwareSource: 'observed',
       lastHeartbeatAt: new Date().toISOString(),
     };
 
@@ -179,9 +175,11 @@ describe('workspace resource capacity accounting', () => {
     });
     const baseNode = {
       id: 'occupied',
-      providerInstanceVcpuCount: 4,
-      providerInstanceMemoryMb: 8192,
-      providerInstanceDiskGb: 80,
+      providerInstanceId: 'server-occupied',
+      observedProviderInstanceVcpuCount: 4,
+      observedProviderInstanceMemoryMb: 8192,
+      observedProviderInstanceDiskGb: 80,
+      observedHardwareSource: 'observed',
       lastHeartbeatAt: new Date().toISOString(),
     };
 
