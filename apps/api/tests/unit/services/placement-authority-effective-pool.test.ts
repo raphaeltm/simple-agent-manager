@@ -21,8 +21,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { assertNodeAllocationPlanCurrent } from '../../../src/services/nodes';
-import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
 import type { WorkspacePlacementInput } from '../../../src/services/workspace-placement';
+import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
 import {
   createAllSchemaTables,
   createSqliteD1,

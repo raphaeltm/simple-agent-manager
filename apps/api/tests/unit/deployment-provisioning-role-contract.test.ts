@@ -25,12 +25,9 @@ vi.mock('../../src/lib/logger', () => ({
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
-import {
-  provisionDeploymentNode,
-  resolveDeploymentPlacement,
-} from '../../src/services/deployment-provisioning';
 import { resolveCanonicalVmAllocationPlan } from '../../src/services/canonical-vm-allocation';
+import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
+import { provisionDeploymentNode } from '../../src/services/deployment-provisioning';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const OWNER_ID = 'owner-shared-deploy';
