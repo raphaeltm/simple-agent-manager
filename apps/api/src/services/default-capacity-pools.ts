@@ -17,14 +17,20 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log, serializeError } from '../lib/logger';
 import { capacitySourceAuthorityGeneration } from './capacity-pool-authority';
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
+import { PRIMARY_CAPACITY_WORKLOAD_ROLE } from './capacity-pool-workload-roles';
 import {
   toCapacityPool,
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
 } from './capacity-pools';
-import { ensureCandidatesForSource } from './default-capacity-pool-candidates';
+import {
+  type CapacityCandidatePublicationCursorStore,
+  DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE,
+  ensureCandidatesForSource,
+} from './default-capacity-pool-candidates';
 import {
   defaultCapacitySourceId,
   defaultPoolId,
@@ -32,8 +38,8 @@ import {
   timestampVersion,
 } from './default-capacity-pool-helpers';
 import {
-  materializeCapacitySourceCredential,
   resolveOfferingsForSeed,
+  retireSyntheticCapacitySourceCredentials,
 } from './default-capacity-source-credentials';
 import {
   catalogSeedStateFingerprint,
@@ -143,6 +149,10 @@ export interface DefaultCapacityPoolsBackfillOptions {
   env?: Env;
   offeringResolver?: DefaultCapacityPoolOfferingResolver;
   scopeBatchSize?: number;
+  /** Candidate ROWS published per source per pass before the durable cursor defers the rest. */
+  candidatePublishBatchSize?: number;
+  /** Synthetic legacy credential mirrors retired per backfill pass. */
+  credentialMirrorRetirementBatchSize?: number;
   beforeSourcePublication?: (input: {
     seed: CredentialCapacitySeed;
     existingSource: schema.CapacitySource | null;
@@ -178,6 +188,8 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
   installation: CapacityPoolSummary | null;
   usersEnsured: number;
   projectsEnsured: number;
+  credentialMirrorsRetired: number;
+  credentialMirrorsPending: boolean;
 }> {
   const installation =
     options.includeInstallation === false ? null : await ensureInstallationDefaultPool(db, options);
@@ -204,7 +216,22 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
     if (!options.projectId) await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, projectId);
   }
 
-  return { installation, usersEnsured, projectsEnsured };
+  const credentialMirrors = await retireSyntheticCapacitySourceCredentials(db, {
+    batchSize: options.credentialMirrorRetirementBatchSize,
+  }).catch((error: unknown) => {
+    // Retirement is best-effort cleanup of SAM-generated mirrors; it must never block
+    // pool reconciliation. The next pass retries because the rows are still present.
+    log.warn('default_capacity_pools.credential_mirror_retirement_failed', serializeError(error));
+    return { detachedSources: 0, deletedCredentials: 0, hasMore: true };
+  });
+
+  return {
+    installation,
+    usersEnsured,
+    projectsEnsured,
+    credentialMirrorsRetired: credentialMirrors.deletedCredentials,
+    credentialMirrorsPending: credentialMirrors.hasMore,
+  };
 }
 
 export async function requestDefaultCapacityPoolBackfillRetry(
@@ -739,10 +766,9 @@ async function ensureDefaultPoolForCredentialSeeds(
 
   for (const seed of seeds) {
     if (seed.active && !(await isCapacitySeedStillCurrent(db, seed))) continue;
-    const materializedSeed = seed.active
-      ? await materializeCapacitySourceCredential(db, seed)
-      : seed;
-    if (materializedSeed.active && !(await isCapacitySeedStillCurrent(db, seed))) continue;
+    // No credential copy: a composable-backed source binds to the EXACT credential via
+    // credential_source + credential_reference + external_source_ref + credential_version.
+    const materializedSeed = seed;
     const existingSource = await findCapacitySourceForCredential(db, materializedSeed);
     if (!materializedSeed.active) {
       if (
@@ -781,6 +807,8 @@ async function ensureDefaultPoolForCredentialSeeds(
           sourceGeneration: publication.generation,
           sourceAuthorityGeneration: publication.source.authorityGeneration,
           catalogComplete: resolvedOfferings.catalogComplete !== false,
+          publishBatchSize: resolveCandidatePublishBatchSize(options),
+          cursorStore: platformSettingsCursorStore(db),
         }
       );
     }
@@ -1450,8 +1478,11 @@ export async function reconcileDefaultPoolStatus(
     : [];
   const rows = await db
     .select({
+      candidateId: schema.capacityPoolCandidates.id,
       sourceStatus: schema.capacitySources.status,
+      sourceAuthorityGeneration: schema.capacitySources.authorityGeneration,
       candidateStatus: schema.capacityPoolCandidates.status,
+      candidateAuthorityGeneration: schema.capacityPoolCandidates.authorityGeneration,
       catalogAvailability: schema.capacityPoolCandidates.catalogAvailability,
       providerInstanceCatalogSource: schema.capacityPoolCandidates.providerInstanceCatalogSource,
     })
@@ -1460,7 +1491,8 @@ export async function reconcileDefaultPoolStatus(
       schema.capacitySources,
       eq(schema.capacityPoolCandidates.capacitySourceId, schema.capacitySources.id)
     )
-    .where(eq(schema.capacityPoolCandidates.poolId, poolId));
+    .where(eq(schema.capacityPoolCandidates.poolId, poolId))
+    .orderBy(asc(schema.capacityPoolCandidates.id));
 
   const activeSourceCount = sourceRows.filter((row) => row.status === ACTIVE_STATUS).length;
   const activeCandidateCount = rows.filter(
@@ -1487,6 +1519,21 @@ export async function reconcileDefaultPoolStatus(
     configurationState = 'configured-ready';
   }
 
+  const [currentPool] = await db
+    .select({
+      revision: schema.capacityPools.revision,
+      selectionDigest: schema.capacityPools.selectionDigest,
+    })
+    .from(schema.capacityPools)
+    .where(eq(schema.capacityPools.id, poolId))
+    .limit(1);
+
+  const selectionDigest = capacityPoolSelectionDigest(rows);
+  // First reconcile after upgrade only RECORDS the digest: bumping on a null baseline would
+  // mass-invalidate healthy in-flight plans that never saw a selection change.
+  const selectionChanged =
+    currentPool?.selectionDigest != null && currentPool.selectionDigest !== selectionDigest;
+
   const predicates = [eq(schema.capacityPools.id, poolId)];
   if (guard) {
     predicates.push(
@@ -1501,11 +1548,57 @@ export async function reconcileDefaultPoolStatus(
     .set({
       status: ACTIVE_STATUS,
       configurationState,
+      selectionDigest,
+      // Revision is the pool-level input to placement authority. Bump it exactly when the
+      // pool's selection-affecting state changed, so an identical refresh stays stable but a
+      // ranking change (including a price-only one on a competing candidate) invalidates
+      // plans authorized against the old ordering.
+      ...(selectionChanged
+        ? { revision: sql`${schema.capacityPools.revision} + 1` }
+        : {}),
       migrationState: 'complete',
       lastReconciledAt: nextCapacityPoolTimestamp(),
       updatedAt: nextCapacityPoolTimestamp(),
     })
     .where(and(...predicates));
+}
+
+/**
+ * Stable digest over every selection-affecting attribute of the pool's candidate set.
+ *
+ * Candidate authority already covers a single candidate's own attributes (including price);
+ * this covers the SET — membership, availability, source status and relative composition — so
+ * a change that only reorders ranking is still detected.
+ */
+function capacityPoolSelectionDigest(
+  rows: readonly {
+    candidateId: string;
+    sourceStatus: string;
+    sourceAuthorityGeneration: number;
+    candidateStatus: string;
+    candidateAuthorityGeneration: number;
+    catalogAvailability: string;
+    providerInstanceCatalogSource: string | null;
+  }[]
+): string {
+  const value = JSON.stringify([
+    'capacity-pool-selection:v1',
+    rows.map((row) => [
+      row.candidateId,
+      row.sourceStatus,
+      row.sourceAuthorityGeneration,
+      row.candidateStatus,
+      row.candidateAuthorityGeneration,
+      row.catalogAvailability,
+      row.providerInstanceCatalogSource,
+    ]),
+  ]);
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 export async function readDefaultPoolSummary(
@@ -1544,6 +1637,10 @@ export async function readDefaultPoolSummary(
     .where(
       and(
         eq(schema.capacityPoolCandidates.poolId, pool.id),
+        // Placement-only mirrors for non-primary workload roles are hidden from the editor
+        // and from the counts, so a user curates one row per offering rather than one per
+        // role. Their status is coupled to the visible row, so counts stay faithful.
+        eq(schema.capacityPoolCandidates.workloadRole, PRIMARY_CAPACITY_WORKLOAD_ROLE),
         options.includeDisabled === true
           ? undefined
           : eq(schema.capacitySources.status, ACTIVE_STATUS)
@@ -1652,6 +1749,27 @@ function sourceScopePredicates(scope: ScopeIdentity) {
       ? eq(schema.capacitySources.ownerProjectId, scope.ownerProjectId)
       : isNull(schema.capacitySources.ownerProjectId),
   ];
+}
+
+/**
+ * Durable publication progress, reusing the existing platform_settings key/value store so a
+ * partially published catalog resumes on the next tick instead of restarting from scratch.
+ */
+function platformSettingsCursorStore(db: Db): CapacityCandidatePublicationCursorStore {
+  return {
+    read: (key) => readBackfillCursor(db, key),
+    write: (key, value) => writeBackfillCursor(db, key, value),
+  };
+}
+
+function resolveCandidatePublishBatchSize(options: DefaultCapacityPoolsBackfillOptions): number {
+  const configured =
+    options.candidatePublishBatchSize ??
+    numberFromString(options.env?.CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE);
+  if (configured === undefined || !Number.isSafeInteger(configured) || configured <= 0) {
+    return DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE;
+  }
+  return configured;
 }
 
 function resolveBackfillScopeBatchSize(options: DefaultCapacityPoolsBackfillOptions): number {

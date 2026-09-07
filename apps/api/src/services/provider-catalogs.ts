@@ -84,7 +84,13 @@ export async function listProviderCatalogOfferings(
     });
     return {
       offerings,
-      refreshStatus: refreshStatusForOfferings(offerings),
+      refreshStatus: refreshStatusForOfferings(offerings, {
+        // The transport succeeded: `allowStaticFallback: false` means an API-backed provider
+        // either enumerated its inventory or threw. Completeness is therefore carried from
+        // the call, not inferred from whether the array happens to have members.
+        transportSucceeded: true,
+        apiBacked: provider.instanceOfferingApiBacked === true,
+      }),
     };
   } catch (error) {
     log.warn('catalog.live_offerings_failed', {
@@ -646,12 +652,26 @@ async function buildCatalogsFromCredentialRows(
   return { catalogs, credentialCount: seeds.length, refreshFailures };
 }
 
+/**
+ * Explicit provenance/completeness for a catalog refresh.
+ *
+ * Deriving this from array members alone misclassified a SUCCESSFUL, COMPLETE, EMPTY API
+ * inventory (Hetzner `server_types: []`) as an incomplete static catalog, which made
+ * candidate reconciliation skip marking the pool's prior offerings unavailable — forever.
+ * The empty case is only authoritative when the provider actually has an API-backed catalog;
+ * an empty STATIC list stays incomplete so a provider without a live catalog can never
+ * wipe last-known-good availability.
+ */
 function refreshStatusForOfferings(
-  offerings: ProviderInstanceOffering[]
+  offerings: ProviderInstanceOffering[],
+  transport: { transportSucceeded: boolean; apiBacked: boolean }
 ): ProviderCatalogRefreshStatus {
   const hasApiOfferings = offerings.some((offering) => offering.catalogSource === 'api');
   const hasStaticOfferings = offerings.some((offering) => offering.catalogSource === 'static');
   if (hasApiOfferings && !hasStaticOfferings) {
+    return { succeeded: true, origin: 'api', complete: true };
+  }
+  if (offerings.length === 0 && transport.transportSucceeded && transport.apiBacked) {
     return { succeeded: true, origin: 'api', complete: true };
   }
   return {

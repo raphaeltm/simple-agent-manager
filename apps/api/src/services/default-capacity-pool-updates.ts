@@ -5,10 +5,17 @@ import type {
   DefaultCapacityPoolCandidateCatalogAddition,
 } from '@simple-agent-manager/shared';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import type { BatchItem } from 'drizzle-orm/batch';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
+import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
+import {
+  CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
+  capacityCandidateBaseId,
+  capacityCandidateIdForRole,
+} from './capacity-pool-workload-roles';
 import type { DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
 import { defaultCandidateId } from './default-capacity-pool-helpers';
 import {
@@ -19,6 +26,7 @@ import {
 } from './default-capacity-pools';
 
 type Db = ReturnType<typeof drizzle>;
+type SqliteBatch = [BatchItem<'sqlite'>, ...BatchItem<'sqlite'>[]];
 
 export interface DefaultCapacityPoolUpdateInput extends DefaultPoolScopeIdentity {
   policy?: {
@@ -36,6 +44,12 @@ export interface DefaultCapacityPoolUpdateResult {
   unavailableCandidateIds: string[];
   missingCatalogAdditions: string[];
   unavailableCatalogAdditions: string[];
+  /**
+   * True when a concurrent editor advanced the pool between this edit's read and its write.
+   * Nothing was published: membership, policy and revision are all fenced on the same
+   * pre-read revision inside one D1 batch, so a losing editor changes nothing at all.
+   */
+  conflict: boolean;
 }
 
 type CandidateStatusUpdate = { id: string; status: CapacityPoolStatus };
@@ -43,10 +57,30 @@ type PolicyUpdate = NonNullable<DefaultCapacityPoolUpdateInput['policy']>;
 const READ_CANDIDATE_STATUS_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
 const READ_SOURCE_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 3;
 
-interface CandidateStatusUpdateResult {
-  changed: boolean;
+/**
+ * Statements per candidate row in the atomic edit batch. D1 caps a BATCH at the same
+ * bound-parameter budget per statement, not per batch, but the batch itself must stay a
+ * bounded unit of work (.claude/rules/47), so a very large edit is rejected rather than
+ * silently split into non-atomic pieces.
+ */
+const MAX_ATOMIC_CANDIDATE_STATEMENTS = 200;
+
+interface CandidateIdentityRow {
+  id: string;
+  capacitySourceId: string;
+  provider: string | null;
+  location: string | null;
+  workloadRole: string;
+  providerInstanceType: string | null;
+  providerInstanceSku: string | null;
+  status: CapacityPoolStatus;
+  currentlyAddable: boolean;
+}
+
+interface CandidateStatusUpdateResolution {
   missingCandidateIds: string[];
   unavailableCandidateIds: string[];
+  changedUpdates: CandidateStatusUpdate[];
 }
 
 interface CatalogAdditionUpdateResult {
@@ -60,35 +94,38 @@ interface PolicyUpdateResult {
   values: Partial<PolicyUpdate>;
 }
 
+function emptyUpdateResult(
+  overrides: Partial<DefaultCapacityPoolUpdateResult>
+): DefaultCapacityPoolUpdateResult {
+  return {
+    poolFound: true,
+    summary: null,
+    missingCandidateIds: [],
+    unavailableCandidateIds: [],
+    missingCatalogAdditions: [],
+    unavailableCatalogAdditions: [],
+    conflict: false,
+    ...overrides,
+  };
+}
+
 export async function updateDefaultCapacityPool(
   db: Db,
   input: DefaultCapacityPoolUpdateInput
 ): Promise<DefaultCapacityPoolUpdateResult> {
   const pool = await findDefaultPool(db, input);
   if (!pool) {
-    return {
-      poolFound: false,
-      summary: null,
-      missingCandidateIds: [],
-      unavailableCandidateIds: [],
-      missingCatalogAdditions: [],
-      unavailableCatalogAdditions: [],
-    };
+    return emptyUpdateResult({ poolFound: false });
   }
 
   const catalogAdditionResult = await resolveCatalogAdditionUpdates(db, pool, input);
   if (catalogAdditionResult.missingCatalogAdditions.length > 0) {
-    return {
-      poolFound: true,
-      summary: null,
-      missingCandidateIds: [],
-      unavailableCandidateIds: [],
+    return emptyUpdateResult({
       missingCatalogAdditions: catalogAdditionResult.missingCatalogAdditions,
-      unavailableCatalogAdditions: [],
-    };
+    });
   }
 
-  const candidateResult = await updateCandidateStatuses(db, pool.id, [
+  const candidateResult = await resolveCandidateStatusUpdates(db, pool.id, [
     ...(input.candidates ?? []),
     ...catalogAdditionResult.candidateUpdates,
   ]);
@@ -96,50 +133,126 @@ export async function updateDefaultCapacityPool(
     const missingCatalogAdditions = candidateResult.missingCandidateIds.flatMap(
       (candidateId) => catalogAdditionResult.additionKeysByCandidateId.get(candidateId) ?? []
     );
-    return {
-      poolFound: true,
-      summary: null,
+    return emptyUpdateResult({
       missingCandidateIds: candidateResult.missingCandidateIds.filter(
         (candidateId) => !catalogAdditionResult.additionKeysByCandidateId.has(candidateId)
       ),
-      unavailableCandidateIds: [],
       missingCatalogAdditions,
-      unavailableCatalogAdditions: [],
-    };
+    });
   }
   if (candidateResult.unavailableCandidateIds.length > 0) {
     const unavailableCatalogAdditions = candidateResult.unavailableCandidateIds.flatMap(
       (candidateId) => catalogAdditionResult.additionKeysByCandidateId.get(candidateId) ?? []
     );
-    return {
-      poolFound: true,
-      summary: null,
-      missingCandidateIds: [],
+    return emptyUpdateResult({
       unavailableCandidateIds: candidateResult.unavailableCandidateIds.filter(
         (candidateId) => !catalogAdditionResult.additionKeysByCandidateId.has(candidateId)
       ),
-      missingCatalogAdditions: [],
       unavailableCatalogAdditions,
-    };
+    });
   }
 
   const policyResult = resolvePolicyUpdate(pool, input.policy);
-  if (policyResult.changed || candidateResult.changed) {
-    await updatePoolPolicyAndRevision(db, pool.id, policyResult.values);
+  const candidatesChanged = candidateResult.changedUpdates.length > 0;
+  if (!policyResult.changed && !candidatesChanged) {
+    // Ordinary no-op reads must not mutate: an unchanged edit publishes nothing and
+    // does not burn a revision.
+    return emptyUpdateResult({
+      summary: await readDefaultPoolSummary(db, input, { includeDisabled: true }),
+    });
   }
 
-  if (candidateResult.changed) {
+  if (candidateResult.changedUpdates.length > MAX_ATOMIC_CANDIDATE_STATEMENTS) {
+    throw new Error(
+      `Capacity pool edit exceeds the atomic batch budget (${candidateResult.changedUpdates.length} > ${MAX_ATOMIC_CANDIDATE_STATEMENTS} candidate rows)`
+    );
+  }
+
+  const published = await publishPoolEditAtomically(db, {
+    poolId: pool.id,
+    guardRevision: pool.revision,
+    candidateUpdates: candidateResult.changedUpdates,
+    policyValues: policyResult.values,
+  });
+  if (!published) {
+    return emptyUpdateResult({ conflict: true });
+  }
+
+  if (candidatesChanged) {
     await reconcileDefaultPoolStatus(db, pool.id);
   }
 
-  return {
-    poolFound: true,
+  return emptyUpdateResult({
     summary: await readDefaultPoolSummary(db, input, { includeDisabled: true }),
-    missingCandidateIds: [],
-    unavailableCandidateIds: [],
-    missingCatalogAdditions: [],
-    unavailableCatalogAdditions: [],
-  };
+  });
+}
+
+/**
+ * Publish membership + policy + revision as ONE fenced unit.
+ *
+ * Every statement carries the same `revision = guardRevision` precondition and they are sent
+ * as a single D1 batch (one implicit transaction), so a mid-edit failure rolls the whole edit
+ * back and a concurrent editor that already advanced the revision cannot be partially
+ * overwritten. Returns false when the fence rejected the edit.
+ */
+async function publishPoolEditAtomically(
+  db: Db,
+  input: {
+    poolId: string;
+    guardRevision: number;
+    candidateUpdates: CandidateStatusUpdate[];
+    policyValues: Partial<PolicyUpdate>;
+  }
+): Promise<boolean> {
+  const now = nextCapacityPoolTimestamp();
+  const nextRevision = input.guardRevision + 1;
+  const poolRevisionFence = sql`EXISTS (
+    SELECT 1 FROM capacity_pools
+    WHERE id = ${input.poolId} AND revision = ${input.guardRevision}
+  )`;
+
+  const statements: BatchItem<'sqlite'>[] = input.candidateUpdates.map((candidate) =>
+    db
+      .update(schema.capacityPoolCandidates)
+      .set({ status: candidate.status, updatedAt: now })
+      .where(
+        and(
+          eq(schema.capacityPoolCandidates.poolId, input.poolId),
+          eq(schema.capacityPoolCandidates.id, candidate.id),
+          poolRevisionFence
+        )
+      )
+  );
+  statements.push(
+    db
+      .update(schema.capacityPools)
+      .set({
+        ...input.policyValues,
+        revision: nextRevision,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(schema.capacityPools.id, input.poolId),
+          eq(schema.capacityPools.revision, input.guardRevision)
+        )
+      )
+  );
+
+  await db.batch(statements as SqliteBatch);
+
+  // Read back rather than trusting a driver-specific `changes` shape. Comparing BOTH the
+  // revision and the exact timestamp this edit wrote closes the ABA window where a
+  // concurrent editor also advanced guardRevision -> guardRevision + 1.
+  const [after] = await db
+    .select({
+      revision: schema.capacityPools.revision,
+      updatedAt: schema.capacityPools.updatedAt,
+    })
+    .from(schema.capacityPools)
+    .where(eq(schema.capacityPools.id, input.poolId))
+    .limit(1);
+  return after?.revision === nextRevision && after.updatedAt === now;
 }
 
 async function resolveCatalogAdditionUpdates(
@@ -246,66 +359,112 @@ function catalogAdditionKey(addition: DefaultCapacityPoolCandidateCatalogAdditio
   ].join(':');
 }
 
-async function updateCandidateStatuses(
+/**
+ * Validate the requested edits and expand them across coupled workload-role rows.
+ *
+ * Only the editor-visible (primary-role) row is addressable by a caller; the placement-only
+ * mirrors must move with it so a deliberate removal or disable is not silently retained for
+ * one workload role.
+ */
+async function resolveCandidateStatusUpdates(
   db: Db,
   poolId: string,
   candidates: CandidateStatusUpdate[]
-): Promise<CandidateStatusUpdateResult> {
+): Promise<CandidateStatusUpdateResolution> {
   const updates = dedupeCandidateStatusUpdates(candidates);
   if (updates.length === 0) {
-    return { changed: false, missingCandidateIds: [], unavailableCandidateIds: [] };
+    return { missingCandidateIds: [], unavailableCandidateIds: [], changedUpdates: [] };
   }
 
-  const existingById = await readCandidateStatuses(
+  const requestedById = await readCandidateIdentities(
     db,
     poolId,
     updates.map(({ id }) => id)
   );
   const missingCandidateIds = updates
     .map(({ id }) => id)
-    .filter((candidateId) => !existingById.has(candidateId));
+    .filter((candidateId) => !requestedById.has(candidateId));
   if (missingCandidateIds.length > 0) {
-    return { changed: false, missingCandidateIds, unavailableCandidateIds: [] };
+    return { missingCandidateIds, unavailableCandidateIds: [], changedUpdates: [] };
   }
 
   const unavailableCandidateIds = updates
     .filter(({ id, status }) => {
-      const existing = existingById.get(id);
+      const existing = requestedById.get(id);
       return status === 'active' && !existing?.currentlyAddable;
     })
     .map(({ id }) => id);
   if (unavailableCandidateIds.length > 0) {
-    return { changed: false, missingCandidateIds: [], unavailableCandidateIds };
+    return { missingCandidateIds: [], unavailableCandidateIds, changedUpdates: [] };
   }
 
-  const changedUpdates = updates.filter(({ id, status }) => existingById.get(id)?.status !== status);
-  if (changedUpdates.length === 0) {
-    return { changed: false, missingCandidateIds: [], unavailableCandidateIds: [] };
+  const coupledById = await readCandidateIdentities(db, poolId, coupledCandidateIds(updates));
+  const resolvedStatuses = new Map<string, CapacityPoolStatus>();
+  for (const update of updates) {
+    const requested = requestedById.get(update.id);
+    if (!requested) continue;
+    resolvedStatuses.set(update.id, update.status);
+    for (const coupledId of coupledCandidateIds([update])) {
+      const coupled = coupledById.get(coupledId);
+      if (!coupled) continue;
+      if (!sharesExactProviderNativeIdentity(requested, coupled)) continue;
+      resolvedStatuses.set(coupledId, update.status);
+    }
   }
 
-  const now = new Date().toISOString();
-  for (const candidate of changedUpdates) {
-    await db
-      .update(schema.capacityPoolCandidates)
-      .set({ status: candidate.status, updatedAt: now })
-      .where(
-        and(
-          eq(schema.capacityPoolCandidates.poolId, poolId),
-          eq(schema.capacityPoolCandidates.id, candidate.id)
-        )
-      );
-  }
+  const changedUpdates = [...resolvedStatuses.entries()]
+    .map(([id, status]) => ({ id, status }))
+    .filter(({ id, status }) => (requestedById.get(id) ?? coupledById.get(id))?.status !== status);
 
-  return { changed: true, missingCandidateIds: [], unavailableCandidateIds: [] };
+  return { missingCandidateIds: [], unavailableCandidateIds: [], changedUpdates };
 }
 
-async function readCandidateStatuses(
+/** Sibling role ids for each requested edit, excluding the requested row itself. */
+function coupledCandidateIds(updates: CandidateStatusUpdate[]): string[] {
+  const ids = new Set<string>();
+  for (const update of updates) {
+    const baseId = capacityCandidateBaseId(update.id);
+    for (const role of CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES) {
+      const coupledId = capacityCandidateIdForRole(baseId, role);
+      if (coupledId !== update.id) ids.add(coupledId);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Coupling is only allowed on EXACT provider-native identity. Legacy rows that predate
+ * concrete offerings carry a NULL provider_instance_type; they are addressable by exact id
+ * and are never coupled, so a null-typed row can never be matched to an unrelated offering.
+ */
+function sharesExactProviderNativeIdentity(
+  requested: CandidateIdentityRow,
+  coupled: CandidateIdentityRow
+): boolean {
+  if (requested.capacitySourceId !== coupled.capacitySourceId) return false;
+  if (requested.provider === null || requested.provider !== coupled.provider) return false;
+  if (requested.location === null || requested.location !== coupled.location) return false;
+  if (requested.providerInstanceType === null || coupled.providerInstanceType === null) {
+    return false;
+  }
+  if (requested.providerInstanceType !== coupled.providerInstanceType) return false;
+  return (requested.providerInstanceSku ?? null) === (coupled.providerInstanceSku ?? null);
+}
+
+async function readCandidateIdentities(
   db: Db,
   poolId: string,
   candidateIds: string[]
-): Promise<Map<string, { status: CapacityPoolStatus; currentlyAddable: boolean }>> {
+): Promise<Map<string, CandidateIdentityRow>> {
+  if (candidateIds.length === 0) return new Map();
   const rows: {
     id: string;
+    capacitySourceId: string;
+    provider: string | null;
+    location: string | null;
+    workloadRole: string;
+    providerInstanceType: string | null;
+    providerInstanceSku: string | null;
     status: string;
     providerInstanceCatalogSource: string | null;
     catalogAvailability: string;
@@ -316,6 +475,12 @@ async function readCandidateStatuses(
       ...(await db
         .select({
           id: schema.capacityPoolCandidates.id,
+          capacitySourceId: schema.capacityPoolCandidates.capacitySourceId,
+          provider: schema.capacityPoolCandidates.provider,
+          location: schema.capacityPoolCandidates.location,
+          workloadRole: schema.capacityPoolCandidates.workloadRole,
+          providerInstanceType: schema.capacityPoolCandidates.providerInstanceType,
+          providerInstanceSku: schema.capacityPoolCandidates.providerInstanceSku,
           status: schema.capacityPoolCandidates.status,
           providerInstanceCatalogSource: schema.capacityPoolCandidates.providerInstanceCatalogSource,
           catalogAvailability: schema.capacityPoolCandidates.catalogAvailability,
@@ -334,6 +499,13 @@ async function readCandidateStatuses(
     rows.map((candidate) => [
       candidate.id,
       {
+        id: candidate.id,
+        capacitySourceId: candidate.capacitySourceId,
+        provider: candidate.provider,
+        location: candidate.location,
+        workloadRole: candidate.workloadRole,
+        providerInstanceType: candidate.providerInstanceType,
+        providerInstanceSku: candidate.providerInstanceSku,
         status: candidate.status as CapacityPoolStatus,
         currentlyAddable:
           candidate.catalogAvailability === 'available' &&
@@ -356,21 +528,6 @@ function resolvePolicyUpdate(
   }
 
   return { changed: Object.keys(values).length > 0, values };
-}
-
-async function updatePoolPolicyAndRevision(
-  db: Db,
-  poolId: string,
-  values: Partial<PolicyUpdate>
-): Promise<void> {
-  await db
-    .update(schema.capacityPools)
-    .set({
-      ...values,
-      revision: sql`${schema.capacityPools.revision} + 1`,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.capacityPools.id, poolId));
 }
 
 function dedupeCandidateStatusUpdates(

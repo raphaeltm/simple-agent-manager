@@ -87,6 +87,8 @@ export class HetznerProvider implements Provider {
   readonly sizes = HETZNER_SIZE_CONFIGS;
   readonly volumeCapabilities = HETZNER_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
+  /** listInstanceOfferings reads the live /server_types API and throws instead of falling back. */
+  readonly instanceOfferingApiBacked = true;
 
   private readonly apiToken: string;
   private readonly datacenter: string;

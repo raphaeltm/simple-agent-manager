@@ -47,6 +47,14 @@ export interface CapacityCandidateAuthorityInput {
   providerInstanceBootDiskSizeGb?: number | null;
   providerInstanceImage?: string | null;
   providerInstanceArchitecture?: string | null;
+  /**
+   * Price fields are part of candidate authority because compareCapacityCandidates ranks on
+   * them: a price-only catalog change reorders selection, so a plan authorized against the
+   * old prices must not stay authoritative.
+   */
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   providerInstanceCatalogSource?: ProviderInstanceCatalogSource | string | null;
   catalogAvailability?: 'available' | 'last-known-unavailable' | string | null;
   status: CapacityPoolStatus | string;
@@ -83,7 +91,7 @@ export function capacityCandidateAuthorityGeneration(
   input: CapacityCandidateAuthorityInput
 ): number {
   return stablePositiveHash([
-    'capacity-candidate-authority:v1',
+    'capacity-candidate-authority:v2',
     normalizeCapacityAuthorityGeneration(input.sourceAuthorityGeneration),
     input.id,
     input.poolId,
@@ -102,6 +110,9 @@ export function capacityCandidateAuthorityGeneration(
     input.providerInstanceBootDiskSizeGb ?? null,
     input.providerInstanceImage ?? null,
     input.providerInstanceArchitecture ?? null,
+    input.providerInstancePriceCurrency ?? null,
+    input.providerInstancePriceMonthlyCents ?? null,
+    input.providerInstancePriceHourlyMicros ?? null,
     input.providerInstanceCatalogSource ?? null,
     input.catalogAvailability ?? null,
     input.status,
