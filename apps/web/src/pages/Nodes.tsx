@@ -1,4 +1,9 @@
-import type { CredentialProvider, WorkspaceResponse } from '@simple-agent-manager/shared';
+import type {
+  CredentialProvider,
+  ProviderInstanceOffering,
+  VMSize,
+  WorkspaceResponse,
+} from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import {
   Alert,
@@ -15,11 +20,6 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { NodeCard } from '../components/node/NodeCard';
-import {
-  EMPTY_RESOURCE_STATE,
-  type ResourceRequirementsFormState,
-  ResourceRequirementsInput,
-} from '../components/resource-requirements';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { createNode, deleteNode, stopNode } from '../lib/api';
 import { NODE_LIST_POLL_MS, WORKSPACE_LIST_POLL_MS } from '../lib/poll-intervals';
@@ -30,6 +30,21 @@ import {
   workspaceListQueryOptions,
 } from '../lib/query-options';
 
+function offeringToLegacySize(o: ProviderInstanceOffering): VMSize {
+  const vcpu = o.vcpu ?? 0;
+  if (vcpu >= 8) return 'large';
+  if (vcpu >= 4) return 'medium';
+  return 'small';
+}
+
+function formatOfferingLabel(o: ProviderInstanceOffering): string {
+  const parts = [o.displayName || o.providerInstanceType];
+  if (o.vcpu) parts.push(`${o.vcpu} vCPU`);
+  if (o.memoryMb) parts.push(`${(o.memoryMb / 1024).toFixed(o.memoryMb % 1024 === 0 ? 0 : 1)} GB`);
+  if (o.diskGb) parts.push(`${o.diskGb} GB disk`);
+  return parts.join(' · ');
+}
+
 export function Nodes() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -37,9 +52,7 @@ export function Nodes() {
 
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [nodeResourceReqs, setNodeResourceReqs] = useState<ResourceRequirementsFormState>({
-    ...EMPTY_RESOURCE_STATE,
-  });
+  const [selectedOffering, setSelectedOffering] = useState('');
   const [newNodeLocation, setNewNodeLocation] = useState(DEFAULT_VM_LOCATION);
   const [selectedProvider, setSelectedProvider] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +88,14 @@ export function Nodes() {
   const effectiveProvider = selectedProvider || catalogs[0]?.provider || '';
   const activeCatalog = catalogs.find((c) => c.provider === effectiveProvider);
 
+  const locationOfferings = useMemo(
+    () =>
+      (activeCatalog?.offerings ?? []).filter(
+        (o) => o.location === newNodeLocation
+      ),
+    [activeCatalog, newNodeLocation]
+  );
+
   // --- Derived state ---
 
   const isLoading = nodesLoading;
@@ -105,9 +126,15 @@ export function Nodes() {
       setError(null);
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').toLowerCase();
       const provider = effectiveProvider;
+      const offering = locationOfferings.find(
+        (o) => o.providerInstanceType === selectedOffering
+      );
+      const legacySize: VMSize = offering
+        ? offeringToLegacySize(offering)
+        : 'medium';
       const created = await createNode({
         name: `node-${timestamp}`,
-        vmSize: 'medium',
+        vmSize: legacySize,
         vmLocation: newNodeLocation,
         ...(provider ? { provider: provider as CredentialProvider } : {}),
       });
@@ -197,13 +224,29 @@ export function Nodes() {
               </Select>
             </div>
           )}
-          <div>
-            <ResourceRequirementsInput
-              value={nodeResourceReqs}
-              onChange={setNodeResourceReqs}
-              inheritLabel="platform default"
-            />
-          </div>
+          {locationOfferings.length > 0 && (
+            <div>
+              <label
+                htmlFor="node-offering"
+                className="block text-fg-muted font-medium mb-1"
+                style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+              >
+                Instance Type
+              </label>
+              <Select
+                id="node-offering"
+                value={selectedOffering}
+                onChange={(e) => setSelectedOffering(e.target.value)}
+              >
+                <option value="">Auto (platform default)</option>
+                {locationOfferings.map((o) => (
+                  <option key={o.providerInstanceType} value={o.providerInstanceType}>
+                    {formatOfferingLabel(o)}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
           {activeCatalog && (
             <div>
               <label

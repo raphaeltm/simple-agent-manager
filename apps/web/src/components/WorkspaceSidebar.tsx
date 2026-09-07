@@ -84,10 +84,21 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-function vmHardwareLabel(workspace: WorkspaceResponse): string {
-  return formatHardwareDisplay({
-    vmSize: workspace.vmSize,
-  });
+function vmHardwareLabel(
+  workspace: WorkspaceResponse,
+  systemInfo: import('@simple-agent-manager/shared').NodeSystemInfo | null
+): string {
+  if (systemInfo) {
+    const vcpu = systemInfo.cpu.numCpu;
+    const memGb = Math.round(systemInfo.memory.totalBytes / (1024 * 1024 * 1024));
+    const diskGb = Math.round(systemInfo.disk.totalBytes / (1024 * 1024 * 1024));
+    const parts: string[] = [];
+    parts.push(`${vcpu} vCPU`);
+    parts.push(`${memGb} GB`);
+    parts.push(`${diskGb} GB disk`);
+    return parts.join(' · ');
+  }
+  return formatHardwareDisplay({ vmSize: workspace.vmSize });
 }
 
 function vmLocationLabel(location: string): string {
@@ -325,7 +336,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
             {/* Hardware */}
             {workspace && (
               <InfoRow label="Hardware">
-                {vmHardwareLabel(workspace)}
+                {vmHardwareLabel(workspace, systemInfo)}
                 {workspace.vmLocation ? ` \u00B7 ${vmLocationLabel(workspace.vmLocation)}` : ''}
               </InfoRow>
             )}

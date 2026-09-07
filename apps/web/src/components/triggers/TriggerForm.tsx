@@ -24,7 +24,6 @@ import { useProjectContext } from '../../pages/ProjectContext';
 import {
   deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
-  hasAnyResourceValue,
   type ResourceRequirementsFormState,
   serializeResourceRequirements,
 } from '../resource-requirements';
@@ -268,7 +267,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
           promptTemplate,
           skipIfRunning,
           maxConcurrent,
-          vmSizeOverride: hasAnyResourceValue(resourceReqs) ? null : vmSizeOverride || null,
+          vmSizeOverride: vmSizeOverride || null,
           resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
           taskMode,
           agentProfileId: agentProfileId || null,
@@ -294,7 +293,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
           promptTemplate,
           skipIfRunning,
           maxConcurrent,
-          vmSizeOverride: hasAnyResourceValue(resourceReqs) ? undefined : vmSizeOverride || undefined,
+          vmSizeOverride: vmSizeOverride || undefined,
           resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
           taskMode,
           agentProfileId: agentProfileId || undefined,
@@ -526,6 +525,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
             onSkipIfRunningChange={setSkipIfRunning}
             onTaskModeChange={setTaskMode}
             onResourceReqsChange={setResourceReqs}
+            onResourceInherit={() => setVmSizeOverride('')}
             open={advancedOpen}
             profiles={profiles}
             resourceReqs={resourceReqs}

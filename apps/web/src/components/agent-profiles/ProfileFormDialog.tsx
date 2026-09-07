@@ -372,7 +372,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         maxTurns: maxTurns ? parseInt(maxTurns, 10) : null,
         timeoutMinutes: timeoutMinutes ? parseInt(timeoutMinutes, 10) : null,
         runtime: runtime ? (runtime as AgentProfileRuntime) : null,
-        vmSizeOverride: hasAnyResourceValue(resourceReqs) ? null : vmSizeOverride || null,
+        vmSizeOverride: vmSizeOverride || null,
         resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
         workspaceProfile: workspaceProfile || null,
         devcontainerConfigName:
@@ -415,7 +415,9 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
   const handleResourceReqsChange = (next: ResourceRequirementsFormState) => {
     setResourceReqs(next);
-    if (!hasAnyResourceValue(next)) return;
+  };
+
+  const handleResourceInherit = () => {
     setVmSizeOverride('');
   };
 
@@ -633,6 +635,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
                 <ResourceRequirementsInput
                   value={resourceReqs}
                   onChange={handleResourceReqsChange}
+                  onInherit={handleResourceInherit}
                   disabled={saving}
                   legacyVmSize={vmSizeOverride}
                   inheritLabel="default"

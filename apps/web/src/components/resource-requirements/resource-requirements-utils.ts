@@ -44,9 +44,7 @@ export function serializeResourceRequirements(
   if (state.minMemoryGb) req.minMemoryGb = Number(state.minMemoryGb);
   if (state.minDiskGb) req.minDiskGb = Number(state.minDiskGb);
   if (state.exclusiveNode !== undefined) req.exclusiveNode = state.exclusiveNode;
-  if (state.maxCoTenants && state.exclusiveNode !== true) {
-    req.maxCoTenants = Number(state.maxCoTenants);
-  }
+  if (state.maxCoTenants) req.maxCoTenants = Number(state.maxCoTenants);
   return Object.keys(req).length > 0 ? JSON.stringify(req) : null;
 }
 
@@ -58,9 +56,7 @@ export function toResourceRequirements(
   if (state.minMemoryGb) req.minMemoryGb = Number(state.minMemoryGb);
   if (state.minDiskGb) req.minDiskGb = Number(state.minDiskGb);
   if (state.exclusiveNode !== undefined) req.exclusiveNode = state.exclusiveNode;
-  if (state.maxCoTenants && state.exclusiveNode !== true) {
-    req.maxCoTenants = Number(state.maxCoTenants);
-  }
+  if (state.maxCoTenants) req.maxCoTenants = Number(state.maxCoTenants);
   return Object.keys(req).length > 0 ? req : undefined;
 }
 

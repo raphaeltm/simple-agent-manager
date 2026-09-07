@@ -87,7 +87,7 @@ describe('serializeResourceRequirements', () => {
     expect(parsed.minMemoryGb).toBe(8);
   });
 
-  it('excludes maxCoTenants when exclusiveNode is true', () => {
+  it('preserves maxCoTenants even when exclusiveNode is true (no-op compatibility)', () => {
     const result = serializeResourceRequirements({
       ...EMPTY_RESOURCE_STATE,
       exclusiveNode: true,
@@ -95,7 +95,7 @@ describe('serializeResourceRequirements', () => {
     });
     const parsed = JSON.parse(result!);
     expect(parsed.exclusiveNode).toBe(true);
-    expect(parsed.maxCoTenants).toBeUndefined();
+    expect(parsed.maxCoTenants).toBe(4);
   });
 
   it('includes exclusiveNode false', () => {
@@ -224,5 +224,30 @@ describe('legacy no-op edit safety', () => {
     const cleared = { ...EMPTY_RESOURCE_STATE };
     expect(hasAnyResourceValue(cleared)).toBe(false);
     expect(serializeResourceRequirements(cleared)).toBeNull();
+  });
+
+  it('no-op edit with BOTH legacy and partial modern preserves both unchanged', () => {
+    const existingJson = JSON.stringify({ minVcpu: 4, exclusiveNode: false });
+    const loaded = deserializeResourceRequirements(existingJson);
+    expect(loaded.minVcpu).toBe('4');
+    expect(loaded.exclusiveNode).toBe(false);
+    const reserialized = serializeResourceRequirements(loaded);
+    expect(reserialized).not.toBeNull();
+    const parsed = JSON.parse(reserialized!);
+    expect(parsed.minVcpu).toBe(4);
+    expect(parsed.exclusiveNode).toBe(false);
+  });
+
+  it('no-op with maxCoTenants and exclusiveNode=true preserves maxCoTenants', () => {
+    const existingJson = JSON.stringify({ exclusiveNode: true, maxCoTenants: 2 });
+    const loaded = deserializeResourceRequirements(existingJson);
+    const reserialized = serializeResourceRequirements(loaded);
+    const parsed = JSON.parse(reserialized!);
+    expect(parsed.exclusiveNode).toBe(true);
+    expect(parsed.maxCoTenants).toBe(2);
+  });
+
+  it('hasAnyResourceValue detects legacy-only state correctly', () => {
+    expect(hasAnyResourceValue(EMPTY_RESOURCE_STATE)).toBe(false);
   });
 });

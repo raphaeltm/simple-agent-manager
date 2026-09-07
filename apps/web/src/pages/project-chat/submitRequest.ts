@@ -1,4 +1,4 @@
-import type { ResourceRequirements, TaskMode, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { TaskMode, WorkspaceProfile } from '@simple-agent-manager/shared';
 
 import type { TaskAttachmentRef } from '../../lib/api';
 import type { submitTask } from '../../lib/api';
@@ -16,7 +16,6 @@ export function buildBaseSubmitRequest({
   agentProfileId,
   skillId,
   selectedAgentType,
-  selectedResourceRequirements,
   selectedWorkspaceProfile,
   selectedDevcontainerConfigName,
   selectedTaskMode,
@@ -26,7 +25,6 @@ export function buildBaseSubmitRequest({
   agentProfileId: string | null;
   skillId: string | null;
   selectedAgentType: string | null;
-  selectedResourceRequirements?: ResourceRequirements;
   selectedWorkspaceProfile: WorkspaceProfile;
   selectedDevcontainerConfigName: string;
   selectedTaskMode: TaskMode;
@@ -40,7 +38,6 @@ export function buildBaseSubmitRequest({
     message,
     ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
     ...(skillId ? { skillId } : {}),
-    ...(selectedResourceRequirements ? { resourceRequirements: selectedResourceRequirements } : {}),
     workspaceProfile: selectedWorkspaceProfile,
     ...(selectedWorkspaceProfile !== 'lightweight' && devcontainerConfigName ? { devcontainerConfigName } : {}),
     taskMode: selectedTaskMode,

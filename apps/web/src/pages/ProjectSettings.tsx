@@ -17,13 +17,11 @@ import { ProjectRuntimeConfigSection } from '../components/project-settings/Proj
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
 import {
-  deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
   formatLegacyVmSize,
   hasAnyResourceValue,
   type ResourceRequirementsFormState,
   ResourceRequirementsInput,
-  serializeResourceRequirements,
 } from '../components/resource-requirements';
 import { ScalingSettings } from '../components/ScalingSettings';
 import { useQueryScope } from '../hooks/useQueryScope';
@@ -319,29 +317,28 @@ export function ProjectSettingsInfrastructure() {
   );
   const [savingWorkspaceTimeout, setSavingWorkspaceTimeout] = useState(false);
 
-  const legacyVmSize = project?.defaultVmSize ?? null;
+  const [legacyVmSize, setLegacyVmSize] = useState(project?.defaultVmSize ?? null);
 
   useEffect(() => {
     if (project) {
-      setResourceReqs(
-        deserializeResourceRequirements(
-          (project as unknown as { resourceRequirementsJson?: string | null }).resourceRequirementsJson
-        )
-      );
+      setLegacyVmSize(project.defaultVmSize ?? null);
+      setResourceReqs({ ...EMPTY_RESOURCE_STATE });
       setWorkspaceIdleTimeoutMs(
         project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
       );
     }
   }, [project]);
 
+  const handleResourceInherit = () => {
+    setLegacyVmSize(null);
+  };
+
   const handleSaveResources = async () => {
     setSavingResources(true);
     try {
-      const json = serializeResourceRequirements(resourceReqs);
       await updateProject(projectId, {
-        defaultVmSize: hasAnyResourceValue(resourceReqs) ? null : (legacyVmSize ?? undefined),
-        ...(json !== undefined ? { resourceRequirementsJson: json } : {}),
-      } as Parameters<typeof updateProject>[1]);
+        defaultVmSize: legacyVmSize ?? undefined,
+      });
       await reload();
       toast.success('Default resource requirements saved');
     } catch (err) {
@@ -379,6 +376,7 @@ export function ProjectSettingsInfrastructure() {
         <ResourceRequirementsInput
           value={resourceReqs}
           onChange={setResourceReqs}
+          onInherit={handleResourceInherit}
           disabled={savingResources}
           legacyVmSize={legacyVmSize}
           inheritLabel="platform default"

@@ -377,6 +377,7 @@ export function CreateWorkspace() {
         activeCatalog?.defaultLocation ??
         DEFAULT_VM_LOCATION;
 
+      const resolvedResources = toResourceRequirements(resourceReqs);
       const workspace = await createWorkspace({
         name,
         projectId: linkedProject.id,
@@ -384,11 +385,9 @@ export function CreateWorkspace() {
         repository: repo,
         branch,
         installationId,
-        vmSize: selectedNode?.vmSize ?? 'medium',
+        ...(selectedNode ? { vmSize: selectedNode.vmSize } : {}),
         vmLocation: effectiveVmLocation || undefined,
-        ...(toResourceRequirements(resourceReqs)
-          ? { resourceRequirements: toResourceRequirements(resourceReqs) }
-          : {}),
+        ...(resolvedResources ? { resourceRequirements: resolvedResources } : {}),
         ...(selectedProvider && !selectedNodeId
           ? { provider: selectedProvider as CredentialProvider }
           : {}),

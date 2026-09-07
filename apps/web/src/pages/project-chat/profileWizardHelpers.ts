@@ -1,5 +1,4 @@
-import type { AgentProfile, AgentProfileRuntime, TaskMode, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
+import type { AgentProfile, AgentProfileRuntime, TaskMode, WorkspaceProfile } from '@simple-agent-manager/shared';
 
 export function resolveWizardRuntime(workType: TaskMode, runtime: AgentProfileRuntime | null): AgentProfileRuntime {
   if (runtime) return runtime;
@@ -15,10 +14,6 @@ export function resolveWizardWorkspaceProfile(runtime: AgentProfileRuntime, work
 export function resolveWizardTaskMode(runtime: AgentProfileRuntime, workType: TaskMode): TaskMode {
   if (runtime === 'cf-container') return 'conversation';
   return workType;
-}
-
-export function resolveInitialVmSize(defaultVmSize: unknown): VMSize {
-  return (defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
 }
 
 export function selectProfileId(current: string | null, profiles: AgentProfile[]) {

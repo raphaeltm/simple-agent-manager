@@ -19,6 +19,7 @@ interface TriggerAdvancedOptionsProps {
   onSkipIfRunningChange: (value: boolean) => void;
   onTaskModeChange: (value: 'task' | 'conversation') => void;
   onResourceReqsChange: (value: ResourceRequirementsFormState) => void;
+  onResourceInherit: () => void;
   open: boolean;
   profiles: AgentProfile[];
   resourceReqs: ResourceRequirementsFormState;
@@ -37,6 +38,7 @@ export function TriggerAdvancedOptions({
   onSkipIfRunningChange,
   onTaskModeChange,
   onResourceReqsChange,
+  onResourceInherit,
   open,
   profiles,
   resourceReqs,
@@ -102,6 +104,7 @@ export function TriggerAdvancedOptions({
           <ResourceRequirementsInput
             value={resourceReqs}
             onChange={onResourceReqsChange}
+            onInherit={onResourceInherit}
             legacyVmSize={legacyVmSize}
             inheritLabel="profile default"
             hideDisk
