@@ -164,13 +164,12 @@ describe('session snapshot upload relay', () => {
       expect(sql).toContain("health_status = 'healthy'");
       expect(sql).toContain("runtime = 'vm'");
       expect(sql).toContain('capacity_pool_id IS NULL');
-      expect(values.slice(0, 10)).toEqual([
+      expect(values.slice(0, 9)).toEqual([
         'relay-node',
         'user-1',
         'abcdef1234567890',
         'hetzner',
         'nbg1',
-        'medium',
         'cx22',
         null,
         null,
@@ -253,12 +252,11 @@ describe('session snapshot upload relay', () => {
       expect(sql).toContain('agent_version = ?');
       expect(sql).toContain("runtime = 'vm'");
       expect(sql).toContain('capacity_pool_id IS NULL');
-      expect(values.slice(0, 9)).toEqual([
+      expect(values.slice(0, 8)).toEqual([
         'user-1',
         'abcdef1234567890',
         'hetzner',
         'nbg1',
-        'medium',
         'cx22',
         null,
         null,
@@ -286,13 +284,12 @@ describe('session snapshot upload relay', () => {
     );
     const env = makeEnv((sql, values) => {
       expect(sql).toContain('agent_version = ?');
-      expect(sql).toContain('provider_instance_type IS ?');
-      expect(values.slice(0, 9)).toEqual([
+      expect(sql).toContain('provider_instance_type = ?');
+      expect(values.slice(0, 8)).toEqual([
         'user-1',
         'abcdef1234567890',
         'hetzner',
         'fsn1',
-        'large',
         'cx42',
         120,
         'ubuntu-24.04',
@@ -435,7 +432,7 @@ describe('session snapshot upload relay', () => {
       if (sql.includes('agent_version, provider_instance_type')) return largeSourceNode();
       if (sql.includes('agent_version = ?')) return null;
       if (sql.includes('name = ?')) {
-        expect(sql).toContain('provider_instance_type IS ?');
+        expect(sql).toContain('provider_instance_type = ?');
         expect(values).toEqual([
           'user-1',
           'Session snapshot relay abcdef123456',

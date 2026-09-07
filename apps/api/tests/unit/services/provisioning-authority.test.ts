@@ -99,7 +99,7 @@ describe('provisioning authority helpers', () => {
     ).rejects.toBeInstanceOf(ProvisioningAuthorityError);
   });
 
-  it('requires active deployment environment, member, node role, provider, location, size, and mode', async () => {
+  it('requires active deployment environment, member, node role, provider, location, native identity, and mode', async () => {
     const { env, statements } = makeEnv(() => ({ ok: 1 }));
 
     await assertDeploymentProvisioningAuthority(env, {
@@ -109,7 +109,10 @@ describe('provisioning authority helpers', () => {
       nodeId: 'node-1',
       provider: 'hetzner',
       location: 'fsn1',
-      vmSize: 'small',
+      providerInstanceType: 'native-sku',
+      providerInstanceBootDiskSizeGb: null,
+      providerInstanceImage: null,
+      providerInstanceArchitecture: null,
       nodeMode: 'exclusive',
       requiresVolumes: true,
     });
@@ -122,7 +125,7 @@ describe('provisioning authority helpers', () => {
     expect(statement.sql).toContain("n.node_role = 'deployment'");
     expect(statement.sql).toContain('n.cloud_provider = ?');
     expect(statement.sql).toContain('n.vm_location = ?');
-    expect(statement.sql).toContain('n.vm_size = ?');
+    expect(statement.sql).toContain('n.provider_instance_type = ?');
     expect(statement.binds).toEqual([
       'user-1',
       'user-1',
@@ -135,7 +138,10 @@ describe('provisioning authority helpers', () => {
       'exclusive',
       'hetzner',
       'fsn1',
-      'small',
+      'native-sku',
+      null,
+      null,
+      null,
     ]);
   });
 

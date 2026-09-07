@@ -1,28 +1,70 @@
-import { type ListTaskEventsResponse, type ListTasksResponse, type TaskActorType, type TaskDetailResponse, type TaskStatus, type TaskTriggerExecutionInfo, type TaskTriggerInfo } from '@simple-agent-manager/shared';
+import {
+  type ListTaskEventsResponse,
+  type ListTasksResponse,
+  type TaskActorType,
+  type TaskDetailResponse,
+  type TaskStatus,
+  type TaskTriggerExecutionInfo,
+  type TaskTriggerInfo,
+} from '@simple-agent-manager/shared';
 import type { SQL } from 'drizzle-orm';
-import { and, count, desc, eq, gte, lt } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  lt,
+} from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { toDependencyResponse, toTaskResponse } from '../../lib/mappers';
+import { toDependencyResponse,toTaskResponse } from '../../lib/mappers';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';
-import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
+import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
-import { CreateTaskDependencySchema, CreateTaskSchema, DelegateTaskSchema, jsonValidator, UpdateTaskSchema, UpdateTaskStatusSchema } from '../../schemas';
+import {
+  CreateTaskDependencySchema,
+  CreateTaskSchema,
+  DelegateTaskSchema,
+  jsonValidator,
+  UpdateTaskSchema,
+  UpdateTaskStatusSchema,
+} from '../../schemas';
 import { resolveTaskAgentProfileHint, resolveTaskAgentProfileHints } from '../../services/agent-profile-display';
 import { cronToHumanReadable } from '../../services/cron-utils';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
-import { isLifecycleTaskStatus, recordTaskLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
-import { type TaskDependencyEdge, wouldCreateTaskDependencyCycle } from '../../services/task-graph';
-import { canTransitionTaskStatus, getAllowedTaskTransitions, isExecutableTaskStatus, isTaskStatus } from '../../services/task-status';
+import {
+  isLifecycleTaskStatus,
+  recordTaskLifecycleEventBestEffort,
+} from '../../services/project-lifecycle-events';
+import {
+  type TaskDependencyEdge,
+  wouldCreateTaskDependencyCycle,
+} from '../../services/task-graph';
+import {
+  canTransitionTaskStatus,
+  getAllowedTaskTransitions,
+  isExecutableTaskStatus,
+  isTaskStatus,
+} from '../../services/task-status';
 import { cleanupTerminalTaskResourcesOrThrow } from '../../services/task-terminal-cleanup';
-import { appendStatusEvent, computeBlockedForTask, computeBlockedSet, getTaskDependencies, parseTaskSortOrder, requireProjectTaskById, setTaskStatus } from './_helpers';
-import { registerTaskCloseRoute } from './task-close';
+import { cleanupWorkspaceForDeletion } from '../../services/workspace-cleanup';
+import {
+  appendStatusEvent,
+  computeBlockedForTask,
+  computeBlockedSet,
+  getTaskDependencies,
+  parseTaskSortOrder,
+  requireProjectTaskById,
+  setTaskStatus,
+} from './_helpers';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
@@ -664,7 +706,110 @@ crudRoutes.get('/:taskId/events', requireAuth(), requireApproved(), async (c) =>
   return c.json(response);
 });
 
-registerTaskCloseRoute(crudRoutes);
+// ─── Close conversation endpoint ──────────────────────────────────────────────
+// Human-initiated completion for conversation-mode tasks.
+// POST /api/projects/:projectId/tasks/:taskId/close
+crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const taskId = requireRouteParam(c, 'taskId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  const task = await requireProjectTaskById(db, projectId, taskId);
+
+  // Only conversation-mode tasks can be closed via this endpoint
+  if (task.taskMode !== 'conversation') {
+    throw errors.badRequest('Only conversation-mode tasks can be closed via this endpoint. Use complete_task for task-mode tasks.');
+  }
+
+  // Only active tasks can be closed
+  const closableStatuses: TaskStatus[] = ['in_progress', 'delegated'];
+  if (!closableStatuses.includes(task.status as TaskStatus)) {
+    throw errors.badRequest(`Task cannot be closed from status '${task.status}'. Must be in_progress or delegated.`);
+  }
+
+  const now = new Date().toISOString();
+
+  await db.update(schema.tasks)
+    .set({ status: 'completed', completedAt: now, updatedAt: now })
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)));
+
+  await appendStatusEvent(db, taskId, task.status as TaskStatus, 'completed', 'user', userId, 'Conversation closed by user');
+
+  c.executionCtx.waitUntil(
+    recordTaskLifecycleEventBestEffort(c.env, {
+      projectId,
+      taskId,
+      status: 'completed',
+      fromStatus: task.status,
+      workspaceId: task.workspaceId,
+      actorType: 'user',
+      actorId: userId,
+      reason: 'Conversation closed by user',
+      source: 'tasks.conversation_close',
+      occurredAt: now,
+      title: task.title,
+    })
+  );
+
+  // Record activity event (best-effort)
+  c.executionCtx.waitUntil(
+    projectDataService.recordActivityEvent(
+      c.env,
+      projectId,
+      'task.completed',
+      'user',
+      userId,
+      null,
+      null,
+      taskId,
+      { reason: 'Conversation closed by user' }
+    ).catch(() => { /* best-effort */ })
+  );
+
+  // Immediately clean up the linked workspace so Archive has the same
+  // user-visible lifecycle semantics as Complete & Delete.
+  //
+  // The workspace lookup is deliberately caller-scoped, mirroring cleanupTaskRun's
+  // requiredUserId guard: closing a shared conversation task is project-authorized, but
+  // destroying the workspace it ran on is not — a member must never delete another
+  // member's compute by archiving their conversation. When the caller does not own the
+  // workspace we skip and log, leaving teardown to the node-cleanup sweep.
+  if (task.workspaceId) {
+    const [workspace] = await db
+      .select()
+      .from(schema.workspaces)
+      .where(and(
+        eq(schema.workspaces.id, task.workspaceId),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.projectId, projectId)
+      ))
+      .limit(1);
+
+    if (workspace) {
+      await cleanupWorkspaceForDeletion({
+        db,
+        env: c.env,
+        workspace,
+        userId,
+        logContext: { taskId, projectId, closePath: 'conversation' },
+      });
+    } else {
+      log.info('task.close.workspace_cleanup_skipped_owner_mismatch', {
+        taskId,
+        projectId,
+        workspaceId: task.workspaceId,
+        requiredUserId: userId,
+        action: 'skipped',
+      });
+    }
+  }
+
+  log.info('task.conversation_closed', { taskId, projectId, userId });
+
+  return c.json({ status: 'completed', closedAt: now });
+});
 
 /**
  * GET /api/projects/:projectId/tasks/:taskId/sessions

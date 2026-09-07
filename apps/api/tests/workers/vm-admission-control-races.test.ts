@@ -659,6 +659,70 @@ describe('VM admission control D1 races', () => {
     expect(waitingRows?.c).toBe(taskIds.length - 1);
   });
 
+  it('shares one provisioning lease across mixed requests then packs them onto one native host', async () => {
+    const userId = 'mixed-request-burst-user';
+    await seedUser(userId);
+    const scopeKey = `${SCOPE_KEY}:mixed-requests`;
+    const providerDomainKey = `${PROVIDER_DOMAIN}:mixed-requests`;
+    const requests = (['small', 'medium', 'large'] as const).map((vmSize, index) => ({
+      taskId: `mixed-request-burst-${index}`,
+      vmSize,
+      reservation: reservation({ cpuMillis: 1000 + index * 500, memoryMb: 1024 + index * 512 }),
+    }));
+    await Promise.all(requests.map((request) => seedQueuedTask(request.taskId, userId)));
+    const claims = await Promise.all(
+      requests.map((request) =>
+        tryAcquireVmProvisioningLease(
+          env,
+          admission(request.taskId, {
+            userId,
+            scopeKey,
+            providerDomainKey,
+            requestedVmSize: request.vmSize,
+          })
+        )
+      )
+    );
+    expect(claims.filter((claim) => claim.kind === 'granted')).toHaveLength(1);
+    expect(claims.filter((claim) => claim.kind === 'waiting')).toHaveLength(2);
+    // Model the one paid provisioner returning a concrete host. Different legacy
+    // labels must not make the waiting requests start another VM when it fits.
+    const nodeId = 'mixed-request-burst-native-host';
+    await makeReadyNode(nodeId, userId, 'large');
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET vm_size = 'small',
+      provider_instance_type = 'arbitrary-native-sku', observed_provider_instance_type = 'arbitrary-native-sku'
+      WHERE id = ?`
+    )
+      .bind(nodeId)
+      .run();
+    for (const [index, request] of requests.entries()) {
+      const state = taskState(userId, request.vmSize, {
+        resolvedReservation: request.reservation,
+        projectScaling: { maxWorkspacesPerNode: 4 },
+      });
+      const selected = await findNodeWithCapacity(state, selectorContext());
+      expect(selected?.nodeId).toBe(nodeId);
+      expect(
+        await reserveWorkspacePlacement(
+          env.DATABASE,
+          placement(`mixed-request-workspace-${index}`, nodeId, {
+            userId,
+            vmSize: request.vmSize,
+            resolvedReservation: request.reservation,
+          }),
+          admissionPolicy()
+        )
+      ).toBe(true);
+    }
+    const count = await env.DATABASE.prepare(
+      'SELECT COUNT(DISTINCT node_id) AS hosts, COUNT(*) AS workspaces FROM workspaces WHERE user_id = ?'
+    )
+      .bind(userId)
+      .first<{ hosts: number; workspaces: number }>();
+    expect(count).toEqual({ hosts: 1, workspaces: 3 });
+  });
+
   it('fences lease expiry recovery and rejects stale owners', async () => {
     const scopeKey = `${SCOPE_KEY}:expiry`;
     const providerDomainKey = `${PROVIDER_DOMAIN}:expiry`;

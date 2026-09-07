@@ -1,3 +1,4 @@
+import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 /**
  * Response mappers — convert database schema types to API response DTOs.
  *
@@ -67,10 +68,48 @@ function parseAgentDefaults(raw: string | null): ProjectAgentDefaults | null {
 import type * as schema from '../db/schema';
 import { getWorkspaceUrl } from '../services/dns';
 
-export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): WorkspaceResponse {
+export function toWorkspaceResponse(
+  ws: schema.Workspace,
+  baseDomain: string,
+  node?: Pick<
+    schema.Node,
+    | 'cloudProvider'
+    | 'vmSize'
+    | 'providerInstanceType'
+    | 'providerInstanceVcpuCount'
+    | 'providerInstanceMemoryMb'
+    | 'providerInstanceDiskGb'
+    | 'providerInstanceBootDiskSizeGb'
+    | 'providerInstanceArchitecture'
+    | 'observedProviderInstanceType'
+    | 'observedProviderInstanceVcpuCount'
+    | 'observedProviderInstanceMemoryMb'
+    | 'observedProviderInstanceDiskGb'
+  > | null
+): WorkspaceResponse {
   return {
     id: ws.id,
     nodeId: ws.nodeId ?? undefined,
+    ...(node
+      ? {
+          hardware: {
+            cloudProvider: node.cloudProvider as NonNullable<
+              WorkspaceResponse['hardware']
+            >['cloudProvider'],
+            vmSize: node.vmSize as WorkspaceResponse['vmSize'],
+            providerInstanceType: node.providerInstanceType,
+            providerInstanceVcpuCount: node.providerInstanceVcpuCount,
+            providerInstanceMemoryMb: node.providerInstanceMemoryMb,
+            providerInstanceDiskGb: node.providerInstanceDiskGb,
+            providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+            providerInstanceArchitecture: node.providerInstanceArchitecture,
+            observedProviderInstanceType: node.observedProviderInstanceType,
+            observedProviderInstanceVcpuCount: node.observedProviderInstanceVcpuCount,
+            observedProviderInstanceMemoryMb: node.observedProviderInstanceMemoryMb,
+            observedProviderInstanceDiskGb: node.observedProviderInstanceDiskGb,
+          },
+        }
+      : {}),
     projectId: ws.projectId,
     displayName: ws.displayName ?? ws.name,
     name: ws.name,
@@ -85,7 +124,7 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     providerInstanceArchitecture: ws.providerInstanceArchitecture ?? null,
     resourceRequirementsJson: ws.resourceRequirementsJson ?? null,
     resolvedReservationJson: ws.resolvedReservationJson ?? null,
-    placementExplanationJson: ws.placementExplanationJson ?? null,
+    placementExplanationJson: publicPlacementExplanationJson(ws.placementExplanationJson),
     workspaceProfile:
       (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? DEFAULT_WORKSPACE_PROFILE,
     devcontainerConfigName: ws.devcontainerConfigName ?? null,
@@ -207,7 +246,7 @@ export function toTaskResponse(
     resourceRequirementsSource:
       (task.resourceRequirementsSource as Task['resourceRequirementsSource']) ?? null,
     resolvedReservationJson: task.resolvedReservationJson ?? null,
-    placementExplanationJson: task.placementExplanationJson ?? null,
+    placementExplanationJson: publicPlacementExplanationJson(task.placementExplanationJson),
     admissionState: task.admissionState ?? null,
     admissionReason: task.admissionReason ?? null,
     admissionNextRetryAt: task.admissionNextRetryAt ?? null,

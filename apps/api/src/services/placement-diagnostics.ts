@@ -20,15 +20,13 @@ import {
   type PlacementDecisionDiagnostics,
   type PlacementHostDiagnostic,
   type PlacementQueueDiagnostic,
+  type PlacementRolloutDiagnostic,
   type PlacementResourceEvidence,
   type PlacementResourceFacts,
   type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
 
-import {
-  PLACEMENT_STRATEGY_HOST_ORDERING,
-  type PlacementHostSignals,
-} from './placement-strategy';
+import { PLACEMENT_STRATEGY_HOST_ORDERING, type PlacementHostSignals } from './placement-strategy';
 import type { TaskStartCapacityPoolSelection } from './placement-resolver-types';
 
 /** A host that was considered, with the capacity gate's verdict on it. */
@@ -42,6 +40,8 @@ export interface PlacementHostDiagnosticInput {
 }
 
 export interface BuildPlacementDiagnosticsInput {
+  previous?: PlacementDecisionDiagnostics;
+  rollout?: PlacementRolloutDiagnostic;
   requestedReservation: ResolvedResourceReservation | null;
   selection: TaskStartCapacityPoolSelection | null;
   /**
@@ -62,19 +62,22 @@ export function buildPlacementDecisionDiagnostics(
   input: BuildPlacementDiagnosticsInput
 ): PlacementDecisionDiagnostics {
   const now = input.now ?? (() => new Date());
+  const rollout = input.rollout ?? input.previous?.rollout ?? input.selection?.rollout;
   const diagnostics: PlacementDecisionDiagnostics = {
     version: PLACEMENT_DIAGNOSTICS_VERSION,
+    rollout,
     decidedAt: now().toISOString(),
     requested: requestedFacts(input.requestedReservation),
     authority: authorityDiagnostic(
       input.selection,
-      input.revalidatedAgainstCurrentAuthority ?? true
+      input.revalidatedAgainstCurrentAuthority ?? false,
+      rollout?.appliedStrategy
     ),
     selectedNodeId: input.selectedNodeId ?? null,
-    hosts: (input.hosts ?? []).map(hostDiagnostic),
-    attempts: input.attempts ?? [],
-    queue: queueDiagnostic(input.queue),
-    notes: [...(input.notes ?? [])],
+    hosts: input.hosts ? input.hosts.map(hostDiagnostic) : (input.previous?.hosts ?? []),
+    attempts: input.attempts ?? input.previous?.attempts ?? [],
+    queue: queueDiagnostic(input.queue ?? input.previous?.queue),
+    notes: [...(input.notes ?? input.previous?.notes ?? [])],
   };
 
   // Fail loudly if a credential reference ever reaches a user-facing payload.
@@ -83,9 +86,7 @@ export function buildPlacementDecisionDiagnostics(
   return diagnostics;
 }
 
-function requestedFacts(
-  reservation: ResolvedResourceReservation | null
-): PlacementResourceFacts {
+function requestedFacts(reservation: ResolvedResourceReservation | null): PlacementResourceFacts {
   if (!reservation) {
     return { cpuMillis: null, memoryMb: null, diskMb: null, evidence: 'unknown' };
   }
@@ -140,7 +141,8 @@ function hostEvidence(source: PlacementHostSignals['capacitySource']): Placement
 
 function authorityDiagnostic(
   selection: TaskStartCapacityPoolSelection | null,
-  revalidated: boolean
+  revalidated: boolean,
+  appliedStrategy?: CapacityPoolStrategy
 ): PlacementAuthorityDiagnostic {
   if (!selection) {
     return {
@@ -159,8 +161,8 @@ function authorityDiagnostic(
     capacityPoolScope: selection.scope,
     capacityPoolRevision: selection.revision,
     effectivePoolState: selection.effectiveState,
-    strategy: selection.strategy,
-    strategyOrdering: describePlacementStrategyOrdering(selection.strategy),
+    strategy: appliedStrategy ?? selection.strategy,
+    strategyOrdering: describePlacementStrategyOrdering(appliedStrategy ?? selection.strategy),
     exhaustionPolicy: selection.exhaustionPolicy,
     revalidatedAgainstCurrentAuthority: revalidated,
   };
@@ -174,7 +176,9 @@ export function describePlacementStrategyOrdering(
   return PLACEMENT_STRATEGY_HOST_ORDERING[strategy] ?? null;
 }
 
-function queueDiagnostic(queue: Partial<PlacementQueueDiagnostic> | undefined): PlacementQueueDiagnostic {
+function queueDiagnostic(
+  queue: Partial<PlacementQueueDiagnostic> | undefined
+): PlacementQueueDiagnostic {
   return {
     state: queue?.state ?? null,
     reason: queue?.reason ?? null,

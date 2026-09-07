@@ -178,6 +178,7 @@ describe('chatRoutes agent session routing', () => {
 
   async function requestTaskEmbed(input: {
     taskMode: 'task' | 'conversation';
+    placementExplanationJson?: string;
     storedHint: string;
     profileRows: Array<{ id: string; name: string }>;
   }) {
@@ -192,6 +193,7 @@ describe('chatRoutes agent session routing', () => {
               status: 'in_progress',
               executionStep: 'agent_session',
               errorMessage: null,
+              placementExplanationJson: input.placementExplanationJson ?? null,
               outputBranch: 'sam/feature-x',
               outputPrUrl: null,
               outputSummary: null,
@@ -564,6 +566,19 @@ describe('chatRoutes agent session routing', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.session.agentType).toBeNull();
+  });
+
+  it('includes the saved placement decision for a task before a workspace exists', async () => {
+    const placementExplanationJson = JSON.stringify({
+      diagnostics: { version: 1, queue: { state: 'waiting' } },
+    });
+    const task = await requestTaskEmbed({
+      taskMode: 'task',
+      storedHint: 'Default',
+      profileRows: [],
+      placementExplanationJson,
+    });
+    expect(task.placementExplanationJson).toBe(placementExplanationJson);
   });
 
   it('resolves a task embed agentProfileHint profile ID to the profile name', async () => {

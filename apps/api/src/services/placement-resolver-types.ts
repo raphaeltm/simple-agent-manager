@@ -9,6 +9,7 @@ import type {
   CredentialProvider,
   CredentialSource,
   DefaultCapacityPoolEffectiveState,
+  PlacementRolloutDiagnostic,
   ResolvedResourceReservation,
   ResourceRequirements,
   ResourceRequirementsSource,
@@ -203,6 +204,7 @@ export interface TaskStartCapacityCandidate {
 }
 
 export interface TaskStartCapacityPoolSelection {
+  rollout?: PlacementRolloutDiagnostic;
   poolId: string;
   scope: CapacityPoolScope;
   revision: number;

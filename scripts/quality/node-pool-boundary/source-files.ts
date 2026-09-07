@@ -41,10 +41,14 @@ export function findRepoRoot(start = process.cwd()): string {
 }
 
 export function listRepositorySourceFiles(repoRoot = findRepoRoot()): SourceFileInput[] {
-  const tracked = execFileSync('git', ['ls-files', ...SCANNED_SOURCE_ROOTS], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-  })
+  const tracked = execFileSync(
+    'git',
+    ['ls-files', '--cached', '--others', '--exclude-standard', ...SCANNED_SOURCE_ROOTS],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    }
+  )
     .split('\n')
     .filter((filePath) => filePath.endsWith('.ts') || filePath.endsWith('.tsx'))
     .filter((filePath) => !filePath.endsWith('.d.ts'));

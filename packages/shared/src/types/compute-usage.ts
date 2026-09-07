@@ -1,5 +1,12 @@
 import type { CredentialSource } from './user';
 
+export type ComputeVcpuCountSource =
+  | 'observed'
+  | 'planned'
+  | 'recorded'
+  | 'compatibility-estimate'
+  | 'unknown';
+
 // =============================================================================
 // Compute Usage Metering Types
 // =============================================================================
@@ -12,6 +19,8 @@ export interface ComputeUsageRecord {
   nodeId: string;
   serverType: string;
   vcpuCount: number;
+  /** Provenance of the CPU figure; null/unknown is not zero hardware. */
+  vcpuCountSource?: ComputeVcpuCountSource;
   providerInstanceType?: string | null;
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
@@ -44,7 +53,9 @@ export interface ActiveComputeSession {
   status?: string;
   workspaceId: string;
   serverType: string;
-  vcpuCount: number;
+  vcpuCount: number | null;
+  /** Provenance of the CPU figure; null/unknown is not zero hardware. */
+  vcpuCountSource?: ComputeVcpuCountSource;
   providerInstanceType?: string | null;
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
@@ -125,7 +136,9 @@ export interface NodeUsageRecord {
   nodeId: string;
   name: string;
   vmSize: string;
-  vcpuCount: number;
+  vcpuCount: number | null;
+  /** Provenance of the CPU figure; null/unknown is not zero hardware. */
+  vcpuCountSource?: ComputeVcpuCountSource;
   providerInstanceType?: string | null;
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;

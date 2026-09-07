@@ -296,7 +296,10 @@ describe('provisionDeploymentNode', () => {
       nodeId: 'node-deploy-1',
       provider: 'hetzner',
       location: 'fsn1',
-      vmSize: 'small',
+      providerInstanceType: 'cx22',
+      providerInstanceBootDiskSizeGb: null,
+      providerInstanceImage: null,
+      providerInstanceArchitecture: null,
       nodeMode: 'shared',
       requiresVolumes: false,
     });

@@ -1,8 +1,4 @@
-/**
- * MCP dispatch_task tool — spawns a new task in the current project.
- *
- * Config precedence: explicit field → profile value → project default → platform default.
- */
+/** Dispatch a project task using explicit → profile → project → platform configuration. */
 import type {
   CapacityPlacementSnapshot,
   CredentialProvider,
@@ -16,8 +12,6 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
-import { AppError } from '../../middleware/error';
-import { requireProjectCapability } from '../../middleware/project-auth';
 import { generateBranchName } from '../../services/branch-name';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
@@ -42,7 +36,6 @@ import {
   mergeResourceRequirementLayers,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
-import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { resolveSkillProfile } from '../../services/skills';
 import { markQueuedTaskFailed } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
@@ -58,7 +51,10 @@ import {
   type JsonRpcResponse,
   type McpTokenData,
 } from './_helpers';
-import { recordDispatchActivityEvent } from './dispatch-activity';
+import {
+  recomputeDispatchMissionSchedulerState,
+  recordDispatchActivityEvent,
+} from './dispatch-activity';
 import {
   type DispatchExecutionContext,
   getRuntimeValidationError,
@@ -66,24 +62,9 @@ import {
 } from './dispatch-instant';
 import { buildDispatchTaskSuccessResponse } from './dispatch-task-response';
 import { parseDispatchTaskParams } from './dispatch-tool-params';
+import { requireMcpTaskWriteProject } from './task-project-access';
 
 export { getConversationTaskModeWarning } from './dispatch-task-response';
-
-async function requireMcpTaskWriteProject(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  projectId: string,
-  userId: string,
-  requestId: string | number | null
-): Promise<typeof schema.projects.$inferSelect | JsonRpcResponse> {
-  try {
-    return await requireProjectCapability(db, projectId, userId, 'task:write');
-  } catch (err) {
-    if (err instanceof AppError) {
-      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
-    }
-    throw err;
-  }
-}
 
 export async function handleDispatchTask(
   requestId: string | number | null,
@@ -779,17 +760,8 @@ export async function handleDispatchTask(
 
   // Recompute scheduler states if the new task belongs to a mission (best-effort)
   const resolvedMissionId = explicitMissionId ?? currentTask.missionId ?? null;
-  if (resolvedMissionId) {
-    try {
-      await recomputeMissionSchedulerStates(env.DATABASE, resolvedMissionId);
-    } catch (err) {
-      log.warn('mcp.dispatch_task.scheduler_state_recompute_failed', {
-        taskId,
-        missionId: resolvedMissionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  if (resolvedMissionId)
+    await recomputeDispatchMissionSchedulerState(env, resolvedMissionId, taskId);
 
   log.info('mcp.dispatch_task.created', {
     taskId,

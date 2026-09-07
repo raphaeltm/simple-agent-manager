@@ -9,6 +9,8 @@ import { request } from './client';
 /** Task embed shape — populated in the detail response, added via enrichment for list items. */
 export interface ChatSessionTaskEmbed {
   id: string;
+  /** Canonical, user-safe saved placement diagnostics, including queued runs. */
+  placementExplanationJson?: string | null;
   status?: string;
   executionStep?: string | null;
   errorMessage?: string | null;

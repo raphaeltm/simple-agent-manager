@@ -207,8 +207,19 @@ Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of t
 | `CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE`       | `25`                      | Maximum user scopes and maximum project scopes reconciled by one unscoped capacity-pool backfill pass. Values above `200` are capped; rerun the backfill to continue.                                                                                                                                                                                                                                             |
 | `CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON`    | built-in slices           | Environment fallback for the versioned legacy `small`/`medium`/`large` to workload requirements adapter. Persisted `platform_settings.capacityPools.legacyWorkloadMapping.v1` wins when present. Values are workload slices, not old whole-VM shapes.                                                                                              |
 | `CAPACITY_POOL_PLATFORM_DEFAULTS_JSON`          | built-in defaults         | Environment fallback for platform resource requirement defaults used when no task/trigger/skill/profile/project/user layer sets a field. Persisted `platform_settings.capacityPools.platformDefaults.v1` wins when present. Values are validated by the shared `ResourceRequirements` validator and must provide every field.                         |
-| `CAPACITY_POOL_SELECTION_SETTINGS_JSON`         | built-in scoring weights  | Environment fallback for default capacity-pool selection weights and rollout diagnostics. Persisted `platform_settings.capacityPools.selectionSettings.v1` wins when present. Candidate priority remains explicit pool policy; price comparisons are normalized by unit and currency, with unknown price sorted after known comparable prices.          |
+| `CAPACITY_POOL_SELECTION_SETTINGS_JSON`         | built-in scoring weights  | Environment fallback for default capacity-pool selection weights and ranking rollout. Persisted `platform_settings.capacityPools.selectionSettings.v1` wins when present. Candidate priority remains explicit pool policy; price comparisons are normalized by unit and currency, with unknown price sorted after known comparable prices.          |
 | `ORIGIN_CA_CERT_VALIDITY_DAYS`                  | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                                                                                                        |
+
+The `rolloutCohortPercent` field in capacity-pool selection settings accepts 0–100
+(default 100). `resolvePlacementRollout` in `services/placement-rollout.ts` assigns
+stable user/pool cohorts. Enabled cohorts use the pool's configured ranking;
+other cohorts use native `balanced` ranking while the reuse selector records
+which host the configured strategy would select and why the selections differ.
+The same eligible host set feeds both comparisons. Pool precedence, membership,
+credential generation, workload role, aggregate reservations, and paid allocation
+fences remain enforced at every percentage. Reducing rollout changes ranking;
+it never restores legacy size labels as allocation authority. Settings and plan
+columns remain additive, and readers accept plans without rollout diagnostics.
 
 Activity coalescing and binding caches are per Worker isolate, so burst reduction scales with the number of active isolates for the same session. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
 

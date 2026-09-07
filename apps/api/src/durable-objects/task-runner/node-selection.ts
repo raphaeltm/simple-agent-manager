@@ -11,6 +11,13 @@ import {
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 
+import {
+  resolvePlacementRollout,
+  comparePlacementRolloutHosts,
+  PLACEMENT_ROLLOUT_BASELINE_STRATEGY,
+} from '../../services/placement-rollout';
+import type { PlacementHostDiagnosticInput } from '../../services/placement-diagnostics';
+import { updatePlacementDiagnostics } from './placement-diagnostics';
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
@@ -400,6 +407,19 @@ export async function tryClaimWarmNode(
           capacityPoolCandidateId:
             selection.capacityPlacementSnapshot?.capacityPoolCandidateId ?? null,
         });
+        updatePlacementDiagnostics(state, {
+          selectedNodeId: warmNode.id,
+          hosts: [
+            {
+              signals: warmNode.signals,
+              outcome: 'selected',
+              reasons: [],
+              provider: warmNode.cloudProvider,
+              location: warmNode.vmLocation,
+              providerInstanceType: warmNode.providerInstanceType,
+            },
+          ],
+        });
         return selection;
       }
     } catch (error) {
@@ -513,17 +533,41 @@ export async function findNodeWithCapacity(
   };
 
   const candidates: RankedNode[] = [];
+  const diagnosticHosts: PlacementHostDiagnosticInput[] = [];
   const rejectionDiagnostics: Array<{ nodeId: string; reasons: string[] }> = [];
 
   for (const node of nodes.results) {
-    if (!isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)) {
+    const metrics = parseWorkspaceAdmissionMetrics(node, policy);
+    const signals = normalizePlacementHostSignals({
+      node,
+      usage: usageByNode.get(node.id),
+      request: requestedReservation,
+      policy,
+      metrics,
+    });
+    const selection = resolveReusableNodeSelection(state, node);
+    const exclusion = !isNodeAgentVersionCompatible(
+      node.agentVersion,
+      rc.env.VM_AGENT_REQUIRED_VERSION
+    )
+      ? 'Host agent version is incompatible'
+      : !nodeSatisfiesTaskResources(node, state)
+        ? 'Trusted host hardware does not satisfy the requested resources'
+        : !selection
+          ? 'Host is outside the current pool allocation authority'
+          : null;
+    if (exclusion || !selection) {
+      diagnosticHosts.push({
+        signals,
+        outcome: 'rejected',
+        reasons: [exclusion ?? 'Host is not eligible'],
+        provider: node.cloudProvider,
+        location: node.vmLocation,
+        providerInstanceType: node.providerInstanceType,
+      });
       continue;
     }
-    if (!nodeSatisfiesTaskResources(node, state)) continue;
-    const selection = resolveReusableNodeSelection(state, node);
-    if (!selection) continue;
 
-    const metrics = parseWorkspaceAdmissionMetrics(node, policy);
     const capacity = evaluateWorkspaceReservationCapacity(
       node,
       usageByNode.get(node.id),
@@ -531,6 +575,21 @@ export async function findNodeWithCapacity(
       policy,
       metrics
     );
+    const diagnosticHost: PlacementHostDiagnosticInput = {
+      signals: normalizePlacementHostSignals({
+        node,
+        usage: usageByNode.get(node.id),
+        request: requestedReservation,
+        policy,
+        metrics,
+      }),
+      outcome: 'rejected',
+      reasons: capacity.admitted ? ['Another eligible host ranked higher'] : capacity.reasons,
+      provider: node.cloudProvider,
+      location: node.vmLocation,
+      providerInstanceType: node.providerInstanceType,
+    };
+    diagnosticHosts.push(diagnosticHost);
     if (!capacity.admitted) {
       rejectionDiagnostics.push({ nodeId: node.id, reasons: capacity.reasons });
       continue;
@@ -550,6 +609,7 @@ export async function findNodeWithCapacity(
   }
 
   if (!candidates.length) {
+    updatePlacementDiagnostics(state, { hosts: diagnosticHosts });
     if (rejectionDiagnostics.length) {
       log.info('task_runner_do.node_capacity_rejected', {
         taskId: state.taskId,
@@ -577,6 +637,24 @@ export async function findNodeWithCapacity(
     // candidates.length was already checked above — this should never happen.
     return null;
   }
+  const pool = state.config.capacityPoolSelection;
+  if (pool) {
+    const rollout = comparePlacementRolloutHosts({
+      userId: state.userId,
+      poolId: pool.poolId,
+      strategy: pool.strategy,
+      settings: pool.selectionSettings,
+      location: state.config.vmLocation,
+      candidates,
+    });
+    updatePlacementDiagnostics(state, { rollout });
+  }
+  const selectedDiagnostic = diagnosticHosts.find((host) => host.signals.nodeId === best.id);
+  if (selectedDiagnostic) {
+    selectedDiagnostic.outcome = 'selected';
+    selectedDiagnostic.reasons = [];
+  }
+  updatePlacementDiagnostics(state, { hosts: diagnosticHosts, selectedNodeId: best.id });
   return { nodeId: best.id, capacityPlacementSnapshot: best.capacityPlacementSnapshot };
 }
 
@@ -681,7 +759,14 @@ function offeringSatisfiesReservation(
  * the historical least-loaded ordering, which `balanced` reproduces exactly.
  */
 export function taskPlacementStrategy(state: TaskRunnerState): CapacityPoolStrategy {
-  return state.config.capacityPoolSelection?.strategy ?? 'balanced';
+  const selection = state.config.capacityPoolSelection;
+  if (!selection) return PLACEMENT_ROLLOUT_BASELINE_STRATEGY;
+  return resolvePlacementRollout({
+    userId: state.userId,
+    poolId: selection.poolId,
+    strategy: selection.strategy,
+    cohortPercent: selection.selectionSettings?.rolloutCohortPercent,
+  }).appliedStrategy;
 }
 
 export function getTaskReservation(state: TaskRunnerState): ResolvedResourceReservation {

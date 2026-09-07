@@ -15,6 +15,12 @@ import {
   type LegacyReadClassification,
 } from './legacy-authority-scope';
 import {
+  classifySqlTemplateValue,
+  isLegacyLabelRecordingComparison,
+  isReviewedMetadataRead,
+} from './legacy-metadata';
+import { legacySqlAuthority } from './legacy-sql';
+import {
   type BoundaryViolation,
   enclosingFunctionName,
   parseSourceFile,
@@ -88,6 +94,8 @@ function scanLegacyAuthorityFile(file: SourceFileInput): BoundaryViolation[] {
   };
 
   const visit = (node: ts.Node): void => {
+    if (legacySqlAuthority(node, bindings.lexical))
+      record(node, 'uses legacy node vm_size in SQL placement eligibility or ordering');
     const importedSymbol = importedAuthoritySymbol(node);
     if (importedSymbol) {
       record(node, `imports legacy VM-size authority ${importedSymbol}`);
@@ -114,8 +122,10 @@ function scanLegacyAuthorityFile(file: SourceFileInput): BoundaryViolation[] {
     if (isLegacySizeValueExpression(node, bindings)) {
       const classification = classifyLegacyRead(node, bindings);
       const reviewed =
-        classification === 'authority-comparison' &&
-        isReviewedLegacyValidator(file.filePath, enclosingFunctionName(node));
+        (classification === 'authority-comparison' &&
+          (isReviewedLegacyValidator(file.filePath, enclosingFunctionName(node)) ||
+            isLegacyLabelRecordingComparison(node))) ||
+        (classification === 'plain-read' && isReviewedMetadataRead(file.filePath, node));
       const isViolation =
         !reviewed &&
         (AUTHORITY_CLASSIFICATIONS.has(classification) ||
@@ -215,6 +225,8 @@ export function classifyLegacyRead(
   bindings: LegacyBindings = { lexical: createBindings(node.getSourceFile()) }
 ): LegacyReadClassification {
   if (isInTypePosition(node)) return 'type-position';
+  const sqlValue = classifySqlTemplateValue(node);
+  if (sqlValue) return sqlValue;
 
   // A write target is not a read. `state.config.vmSize = x` moves a value into a
   // legacy field, which is propagation, not authority.

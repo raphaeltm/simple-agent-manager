@@ -436,7 +436,10 @@ export async function handleNodeSelection(
         AND (? IS NULL OR n.agent_version = ?)
         AND n.cloud_provider = ?
         AND n.vm_location = ?
-        AND n.vm_size = ?
+        AND n.provider_instance_type = ?
+        AND n.provider_instance_boot_disk_size_gb IS ?
+        AND n.provider_instance_image IS ?
+        AND n.provider_instance_architecture IS ?
         ${authority.sql}
       ORDER BY n.id ASC`
   )
@@ -446,7 +449,10 @@ export async function handleNodeSelection(
       requiredAgentVersion,
       allocation.effectiveProvider,
       allocation.vmLocation,
-      allocation.vmSize,
+      allocation.providerInstanceType,
+      allocation.providerInstanceBootDiskSizeGb,
+      allocation.providerInstanceImage,
+      allocation.providerInstanceArchitecture,
       ...authority.binds
     )
     .all<WorkspaceResourceNode>();

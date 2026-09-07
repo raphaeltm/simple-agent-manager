@@ -8,8 +8,13 @@
  * change is introduced by the split itself.
  */
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
-import type { CredentialProvider, VMSize } from '@simple-agent-manager/shared';
+import type {
+  CredentialProvider,
+  PlacementAttemptDiagnostic,
+  VMSize,
+} from '@simple-agent-manager/shared';
 
+import { persistPlacementDiagnostics } from './placement-diagnostics';
 import { log } from '../../lib/logger';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
@@ -306,6 +311,7 @@ export async function handleNodeProvisioning(
     if (reusableNode) {
       state.stepResults.nodeId = reusableNode.nodeId;
       state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
+      await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
@@ -328,6 +334,14 @@ export async function handleNodeProvisioning(
         'user_node_limit'
       );
       if (waitResult.kind === 'expired') {
+        await persistPlacementDiagnostics(state, rc, {
+          selectedNodeId: null,
+          queue: {
+            state: 'expired',
+            reason: waitResult.reason,
+            waitDeadlineAt: waitResult.waitDeadlineAt,
+          },
+        });
         throw Object.assign(
           new Error(`Maximum ${maxNodes} nodes allowed. Cannot auto-provision.`),
           {
@@ -409,6 +423,7 @@ export async function handleNodeProvisioning(
       state.admissionLeaseToken = null;
       state.stepResults.nodeId = reusableNode.nodeId;
       state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
+      await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
@@ -434,7 +449,22 @@ export async function handleNodeProvisioning(
     });
   }
 
+  const diagnosticAttempts: PlacementAttemptDiagnostic[] = exhaustionPlan.attempts.map(
+    (attempt, index) => ({
+      order: index + 1,
+      provider: attempt.provider,
+      location: attempt.location,
+      providerInstanceType: attempt.providerInstanceType,
+      outcome: 'not-attempted',
+      reason: null,
+    })
+  );
+  await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts, queue: {} });
+
   for (const [i, attempt] of exhaustionPlan.attempts.entries()) {
+    const diagnosticAttempt = diagnosticAttempts[i]!;
+    diagnosticAttempt.outcome = 'pending';
+    await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts });
     const isLastAttempt = i === exhaustionPlan.attempts.length - 1;
     const size = attempt.vmSize;
     // Every attempt after the first re-points the provisioning target at that
@@ -557,12 +587,30 @@ export async function handleNodeProvisioning(
         state.admissionLeaseToken
       );
     } catch (err) {
+      diagnosticAttempt.outcome =
+        err instanceof ProviderError && isTransientCapacityError(err)
+          ? 'capacity-exhausted'
+          : 'failed';
+      diagnosticAttempt.reason =
+        diagnosticAttempt.outcome === 'capacity-exhausted'
+          ? 'Provider offering has no available capacity'
+          : 'Provider allocation failed';
+      await persistPlacementDiagnostics(state, rc, {
+        attempts: diagnosticAttempts,
+        selectedNodeId: null,
+      });
       if (admissionIdentity) {
         const providerCapacity = await recordVmProviderCapacityFailure(rc.env, {
           scope: admissionIdentity,
           error: err,
         });
         if (providerCapacity) {
+          diagnosticAttempt.outcome = 'capacity-exhausted';
+          diagnosticAttempt.reason = 'Provider account capacity is exhausted';
+          await persistPlacementDiagnostics(state, rc, {
+            attempts: diagnosticAttempts,
+            selectedNodeId: null,
+          });
           await rc.env.DATABASE.prepare(
             `DELETE FROM nodes WHERE id = ? AND provider_instance_id IS NULL`
           )
@@ -597,6 +645,14 @@ export async function handleNodeProvisioning(
             providerCapacity
           );
           if (waitResult.kind === 'expired') {
+            await persistPlacementDiagnostics(state, rc, {
+              selectedNodeId: null,
+              queue: {
+                state: 'expired',
+                reason: waitResult.reason,
+                waitDeadlineAt: waitResult.waitDeadlineAt,
+              },
+            });
             throw Object.assign(new Error('Timed out waiting for provider account capacity'), {
               permanent: true,
             });
@@ -677,6 +733,14 @@ export async function handleNodeProvisioning(
           'provider_transient_capacity'
         );
         if (waitResult.kind === 'expired') {
+          await persistPlacementDiagnostics(state, rc, {
+            selectedNodeId: null,
+            queue: {
+              state: 'expired',
+              reason: waitResult.reason,
+              waitDeadlineAt: waitResult.waitDeadlineAt,
+            },
+          });
           throw Object.assign(new Error(terminalMessage), { permanent: true });
         }
         await scheduleAdmissionWait(state, rc, waitResult);
@@ -684,6 +748,10 @@ export async function handleNodeProvisioning(
       }
       throw Object.assign(new Error(terminalMessage), { permanent: true });
     }
+
+    diagnosticAttempt.outcome = 'succeeded';
+    diagnosticAttempt.reason = null;
+    await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts, queue: {} });
 
     // provisionNode returned without throwing — this size was accepted.
     // Update the working size so downstream steps reference the size actually

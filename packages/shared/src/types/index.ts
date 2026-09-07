@@ -99,6 +99,7 @@ export type {
   PlacementDecisionDiagnostics,
   PlacementHostDiagnostic,
   PlacementQueueDiagnostic,
+  PlacementRolloutDiagnostic,
   PlacementResourceEvidence,
   PlacementResourceFacts,
 } from './placement-diagnostics';
@@ -627,6 +628,7 @@ export type {
   ComputeUsagePeriod,
   ComputeUsageRecord,
   ComputeUsageResponse,
+  ComputeVcpuCountSource,
   NodeUsageRecord,
 } from './compute-usage';
 

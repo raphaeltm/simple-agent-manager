@@ -13,8 +13,9 @@ import { getPortAccessUrl } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
 import { sanitizeUrl } from '../lib/url-utils';
 import { CollapsibleSection } from './CollapsibleSection';
+import { EffectivePoolSummary } from './hardware/EffectivePoolSummary';
+import { WorkspaceHardwareDetails } from './hardware/HardwareDetails';
 import { ResourceBar } from './node/ResourceBar';
-import { formatHardwareDisplay } from './resource-requirements';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -82,10 +83,6 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
-}
-
-function vmHardwareLabel(workspace: WorkspaceResponse): string {
-  return formatHardwareDisplay({ vmSize: workspace.vmSize });
 }
 
 function vmLocationLabel(location: string): string {
@@ -322,10 +319,11 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
 
             {/* Hardware */}
             {workspace && (
-              <InfoRow label="Hardware">
-                {vmHardwareLabel(workspace)}
-                {workspace.vmLocation ? ` \u00B7 ${vmLocationLabel(workspace.vmLocation)}` : ''}
-              </InfoRow>
+              <div className="grid gap-2">
+                <WorkspaceHardwareDetails workspace={workspace} />
+                <span className="text-fg-muted">{vmLocationLabel(workspace.vmLocation)}</span>
+                <EffectivePoolSummary projectId={workspace.projectId} />
+              </div>
             )}
 
             {/* Node */}

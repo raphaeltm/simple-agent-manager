@@ -29,7 +29,10 @@ interface DeploymentProvisioningAuthorityInput {
   nodeId: string;
   provider: string;
   location: string;
-  vmSize: string;
+  providerInstanceType: string | null;
+  providerInstanceBootDiskSizeGb: number | null;
+  providerInstanceImage: string | null;
+  providerInstanceArchitecture: string | null;
   nodeMode: 'shared' | 'exclusive';
   requiresVolumes: boolean;
 }
@@ -171,7 +174,10 @@ export async function assertDeploymentProvisioningAuthority(
         AND n.node_mode = ?
         AND n.cloud_provider = ?
         AND n.vm_location = ?
-        AND n.vm_size = ?
+        AND n.provider_instance_type = ?
+        AND n.provider_instance_boot_disk_size_gb IS ?
+        AND n.provider_instance_image IS ?
+        AND n.provider_instance_architecture IS ?
       LIMIT 1`,
     [
       input.userId,
@@ -185,7 +191,10 @@ export async function assertDeploymentProvisioningAuthority(
       input.nodeMode,
       input.provider,
       input.location,
-      input.vmSize,
+      input.providerInstanceType,
+      input.providerInstanceBootDiskSizeGb,
+      input.providerInstanceImage,
+      input.providerInstanceArchitecture,
     ],
     'Deployment provisioning authority is no longer current'
   );
@@ -272,7 +281,6 @@ export async function assertRelayProvisioningAuthority(
              AND duplicate.node_role = 'workspace'
              AND duplicate.cloud_provider IS relay.cloud_provider
              AND duplicate.vm_location = relay.vm_location
-             AND duplicate.vm_size = relay.vm_size
              AND duplicate.provider_instance_type IS relay.provider_instance_type
              AND duplicate.provider_instance_boot_disk_size_gb IS relay.provider_instance_boot_disk_size_gb
              AND duplicate.provider_instance_image IS relay.provider_instance_image

@@ -1,3 +1,8 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,6 +12,7 @@ import {
   type AllocationWriterInventoryEntry,
   formatBoundaryViolations,
   isLegacyAuthorityScope,
+  listRepositorySourceFiles,
   REVIEWED_LEGACY_REQUEST_VALIDATORS,
   scanAllocationEntrypoints,
   scanAllocationWriters,
@@ -511,6 +517,192 @@ describe('node-pool legacy authority: reviewed exceptions are narrow', () => {
   });
 });
 
+describe('node-pool metadata exemptions preserve real authority detection', () => {
+  it.each([
+    [
+      'apps/api/src/durable-objects/task-runner/node-provisioning-exhaustion.ts',
+      'exhaustionTerminalMessage',
+      'return input.vmSize;',
+    ],
+    [
+      'apps/api/src/services/capacity-pool-authority.ts',
+      'capacityCandidateAuthorityGeneration',
+      'return hash([input.machineSize]);',
+    ],
+    [
+      'apps/api/src/services/default-capacity-pool-candidates.ts',
+      'legacyVmSizeHintForOffering',
+      'return input.machineSize;',
+    ],
+    [
+      'apps/api/src/services/placement-resolver.ts',
+      'resolveVmSize',
+      'return input.vmSizeOverride ?? fallback;',
+    ],
+  ])('permits only metadata reads in %s::%s', (path, owner, body) => {
+    expect(authorityFindings(file(path, `function ${owner}(input) { ${body} }`))).toEqual([]);
+    expect(
+      authorityFindings(file(path, `function ${owner}(input) { return offers[input.vmSize]; }`))
+    ).not.toEqual([]);
+    expect(
+      authorityFindings(
+        file(path, `function ${owner}(input) { return { vcpuCount: input.vmSize }; }`)
+      )
+    ).not.toEqual([]);
+  });
+
+  it('does not let a compatibility helper forward labels into a native sink', () => {
+    const path = 'apps/api/src/services/placement-resolver-capacity.ts';
+    expect(
+      authorityFindings(
+        file(
+          path,
+          'function normalizeCapacityCandidate(candidate) { return { machineSize: normalizeLegacyPoolSize(candidate.machineSize) }; }'
+        )
+      )
+    ).toEqual([]);
+    expect(
+      authorityFindings(
+        file(
+          path,
+          'function normalizeCapacityCandidate(candidate) { return { vcpuCount: normalizeLegacyPoolSize(candidate.machineSize) }; }'
+        )
+      )
+    ).not.toEqual([]);
+  });
+
+  it('classifies constant workload requirements independently of forbidden VM tier tables', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/capacity-pool-placement-settings.ts',
+          "import { PLATFORM_RESOURCE_DEFAULTS } from '@simple-agent-manager/shared'; const defaults = PLATFORM_RESOURCE_DEFAULTS;"
+        )
+      )
+    ).toEqual([]);
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/capacity-pool-placement-settings.ts',
+          "import { PROVIDER_VM_CAPACITY } from '@simple-agent-manager/shared'; const defaults = PROVIDER_VM_CAPACITY;"
+        )
+      )
+    ).not.toEqual([]);
+  });
+
+  it('keeps the extracted project update vocabulary validator narrow', () => {
+    const path = 'apps/api/src/routes/projects/project-update.ts';
+    expect(
+      authorityFindings(
+        file(
+          path,
+          "router.patch('/:id', (c) => { const body = c.body; if (!['small', 'medium', 'large'].includes(body.defaultVmSize)) throw Error('invalid'); });"
+        )
+      )
+    ).toEqual([]);
+    expect(
+      authorityFindings(
+        file(path, "router.patch('/:id', (c) => { return offers[c.body.defaultVmSize]; });")
+      )
+    ).not.toEqual([]);
+  });
+
+  it('allows deprecated trial vocabulary validation while retaining its catalog fence', () => {
+    const path = 'apps/api/src/durable-objects/trial-orchestrator/steps.ts';
+    expect(
+      authorityFindings(
+        file(
+          path,
+          "function resolveTrialVmSize(env) { return env.TRIAL_VM_SIZE === 'small' ? env.TRIAL_VM_SIZE : fallback; }"
+        )
+      )
+    ).toEqual([]);
+    expect(
+      authorityFindings(
+        file(path, 'function resolveTrialVmSize(env) { return offers[env.TRIAL_VM_SIZE]; }')
+      )
+    ).not.toEqual([]);
+  });
+
+  it('allows comparison only when its sole effect records the deprecated task label', () => {
+    const path = 'apps/api/src/durable-objects/task-runner/node-provisioning-step.ts';
+    const update =
+      "await db.prepare('UPDATE tasks SET provisioned_vm_size = ?, updated_at = ? WHERE id = ?').bind(node.vmSize, now, taskId).run();";
+    expect(
+      authorityFindings(
+        file(
+          path,
+          `async function record(node, prior) { if (node.vmSize !== prior) { ${update} } }`
+        )
+      )
+    ).toEqual([]);
+    expect(
+      authorityFindings(
+        file(
+          path,
+          `async function record(node, prior) { if (node.vmSize !== prior) { ${update} provisionNode(); } }`
+        )
+      )
+    ).not.toEqual([]);
+    expect(
+      authorityFindings(
+        file(
+          path,
+          `async function record(node, prior) { if (node.vmSize !== prior) { ${update} } else { provisionNode(); } }`
+        )
+      )
+    ).not.toEqual([]);
+  });
+
+  it.each([
+    'db.prepare("SELECT * FROM nodes n WHERE n.vm_size = ?").bind(size).all();',
+    'const query = "SELECT * FROM nodes n ORDER BY n.vm_size"; db.prepare(query).all();',
+    'db.prepare("SELECT * FROM nodes n WHERE n.vm_size IN (?, ?)").bind(a, b).all();',
+  ])('rejects legacy node authority in executable SQL: %s', (source) => {
+    expect(
+      authorityFindings(file('apps/api/src/services/placement-new.ts', source)).some((finding) =>
+        finding.includes('SQL placement eligibility')
+      )
+    ).toBe(true);
+  });
+
+  it('keeps SQL metadata projection, recording and quoted log text valid', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/placement-new.ts',
+          [
+            'db.prepare("SELECT n.vm_size FROM nodes n WHERE n.id = ?").bind(id).first();',
+            'db.prepare("UPDATE nodes SET vm_size = ? WHERE id = ?").bind(size, id).run();',
+            'console.log("SELECT * FROM nodes WHERE vm_size = ?");',
+            'db.prepare("WITH scope AS (SELECT * FROM nodes WHERE id = ?) UPDATE workspaces SET vm_size = ? WHERE node_id IN (SELECT id FROM scope)").bind(id, size).run();',
+          ].join('\n')
+        )
+      )
+    ).toEqual([]);
+  });
+
+  it('follows SQL interpolations to actual legacy or native destination columns', () => {
+    const path = 'apps/api/src/services/default-capacity-pool-candidates.ts';
+    expect(
+      authorityFindings(
+        file(
+          path,
+          'db.run(sql`INSERT INTO capacity_pool_candidates (id, machine_size) SELECT ${id}, ${input.machineSize}`);'
+        )
+      )
+    ).toEqual([]);
+    expect(
+      authorityFindings(
+        file(
+          path,
+          'db.run(sql`INSERT INTO capacity_pool_candidates (id, provider_instance_vcpu_count) SELECT ${id}, ${input.machineSize}`);'
+        )
+      )
+    ).not.toEqual([]);
+  });
+});
+
 describe('node-pool allocation writers: detection', () => {
   it('resolves a renamed drizzle table binding', () => {
     expect(
@@ -915,6 +1107,28 @@ function currentRepositoryReport() {
   return (repositoryReport ??= scanRepositoryNodePoolBoundary());
 }
 
+describe('node-pool source discovery', () => {
+  it('checks newly written untracked authority modules before a commit', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'sam-node-pool-gate-'));
+    try {
+      execFileSync('git', ['init', '-q', directory]);
+      const sourceDirectory = join(directory, 'apps/api/src/services');
+      mkdirSync(sourceDirectory, { recursive: true });
+      writeFileSync(
+        join(sourceDirectory, 'new-placement.ts'),
+        'export function pick(node, offers) { return offers[node.vmSize]; }'
+      );
+      const discovered = listRepositorySourceFiles(directory);
+      expect(discovered.map((entry) => entry.filePath)).toEqual([
+        'apps/api/src/services/new-placement.ts',
+      ]);
+      expect(scanLegacyAuthority(discovered)).toHaveLength(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('node-pool inventories', () => {
   it('records every allocation writer with an owning function and a role', () => {
     for (const entry of ALLOCATION_WRITER_INVENTORY) {
@@ -959,20 +1173,12 @@ describe('node-pool inventories', () => {
 });
 
 describe('node-pool boundary gate: current repository state', () => {
-  /**
-   * The application migration is still in progress, so this documents the
-   * current honest violation count rather than asserting zero. It must go DOWN
-   * as the migration lands; it must never be raised to accommodate a new leak.
-   */
-  const MAX_KNOWN_VIOLATIONS = 60;
-
   it(
-    'does not regress past the recorded node-pool boundary violation count',
+    'has zero legacy authority leaks and no uninventoried allocation entrypoints',
     { timeout: 120_000 },
     () => {
-      const violations = currentRepositoryReport();
-      const formatted = formatBoundaryViolations(violations);
-      expect(formatted.length, formatted.join('\n')).toBeLessThanOrEqual(MAX_KNOWN_VIOLATIONS);
+      const formatted = formatBoundaryViolations(currentRepositoryReport());
+      expect(formatted, formatted.join('\n')).toEqual([]);
     }
   );
 });

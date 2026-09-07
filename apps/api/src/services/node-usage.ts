@@ -6,12 +6,12 @@ import type {
   CredentialSource,
   NodeUsageRecord,
 } from '@simple-agent-manager/shared';
-import { getVcpuCount, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
+import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { getCurrentPeriodBounds } from './compute-usage';
+import { getCurrentPeriodBounds, resolveComputeVcpuCount } from './compute-usage';
 
 // =============================================================================
 // Node status helpers
@@ -118,18 +118,7 @@ function createEmptyTotals(): NodeUsageTotals {
 
 function addNodeToTotals(
   totals: NodeUsageTotals,
-  node: Pick<
-    NodeUsageRow,
-    | 'vmSize'
-    | 'cloudProvider'
-    | 'providerInstanceVcpuCount'
-    | 'observedProviderInstanceVcpuCount'
-    | 'credentialSource'
-    | 'nodeClass'
-    | 'status'
-    | 'createdAt'
-    | 'updatedAt'
-  >,
+  node: NodeUsageCalculationRow,
   periodStart: Date,
   periodEnd: Date,
   now: Date
@@ -150,11 +139,10 @@ function addNodeToTotals(
   }
   const endedAt = getNodeEndedAt(node.status, node.updatedAt);
   const hours = calculateNodeHoursInPeriod(node.createdAt, endedAt, periodStart, periodEnd, now);
-  const vcpus =
-    node.observedProviderInstanceVcpuCount ??
-    node.providerInstanceVcpuCount ??
-    getVcpuCount(node.vmSize, node.cloudProvider);
-  const vcpuHours = hours * vcpus;
+  const { vcpuCount } = resolveComputeVcpuCount(node, { legacyNode: node });
+  // Unknown CPU contributes no invented charge; node uptime remains accounted
+  // and its active/detail record exposes null with source="unknown".
+  const vcpuHours = vcpuCount === null ? 0 : hours * vcpuCount;
   const isPlatform = node.credentialSource === 'platform';
 
   totals.totalNodeHours += hours;
@@ -311,10 +299,7 @@ function toActiveComputeSession(node: NodeUsageRow): ActiveComputeSession | null
     workspaceId: node.id,
     serverType: node.vmSize,
     vmSize: node.vmSize,
-    vcpuCount:
-      node.observedProviderInstanceVcpuCount ??
-      node.providerInstanceVcpuCount ??
-      getVcpuCount(node.vmSize, node.cloudProvider),
+    ...resolveComputeVcpuCount(node, { legacyNode: node }),
     providerInstanceType: node.providerInstanceType,
     providerInstanceVcpuCount: node.providerInstanceVcpuCount,
     providerInstanceMemoryMb: node.providerInstanceMemoryMb,
@@ -344,10 +329,7 @@ function toNodeUsageRecord(
     nodeId: node.id,
     name: node.name,
     vmSize: node.vmSize,
-    vcpuCount:
-      node.observedProviderInstanceVcpuCount ??
-      node.providerInstanceVcpuCount ??
-      getVcpuCount(node.vmSize, node.cloudProvider),
+    ...resolveComputeVcpuCount(node, { legacyNode: node }),
     providerInstanceType: node.providerInstanceType,
     providerInstanceVcpuCount: node.providerInstanceVcpuCount,
     providerInstanceMemoryMb: node.providerInstanceMemoryMb,

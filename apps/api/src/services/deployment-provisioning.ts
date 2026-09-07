@@ -78,8 +78,6 @@ interface DeploymentPlacement {
 
 interface DeploymentNodeCandidate {
   id: string;
-  vm_size: string;
-  vm_location: string;
   last_metrics: string | null;
 }
 
@@ -112,7 +110,24 @@ function parseMetrics(
   }
 }
 
-async function findDeploymentNodeWithCapacity(
+/** Native identity is independent of the historical vm_size label. The shared
+ * authority predicate additionally pins the current pool candidate and role. */
+function deploymentNativeIdentityPredicate(placement: DeploymentPlacement) {
+  return {
+    sql: `AND n.provider_instance_type = ?
+          AND n.provider_instance_boot_disk_size_gb IS ?
+          AND n.provider_instance_image IS ?
+          AND n.provider_instance_architecture IS ?`,
+    binds: [
+      placement.providerInstanceType,
+      placement.providerInstanceBootDiskSizeGb,
+      placement.providerInstanceImage,
+      placement.providerInstanceArchitecture,
+    ],
+  };
+}
+
+export async function findDeploymentNodeWithCapacity(
   env: Env,
   userId: string,
   placement: DeploymentPlacement,
@@ -147,8 +162,9 @@ async function findDeploymentNodeWithCapacity(
     requireProjectMembership: true,
   });
 
+  const nativeIdentity = deploymentNativeIdentityPredicate(placement);
   const nodes = await env.DATABASE.prepare(
-    `SELECT n.id, n.vm_size, n.vm_location, n.last_metrics
+    `SELECT n.id, n.last_metrics
      FROM nodes n
      WHERE n.user_id = ?
        AND n.status = 'running'
@@ -157,10 +173,16 @@ async function findDeploymentNodeWithCapacity(
        AND COALESCE(n.node_mode, 'shared') = 'shared'
        AND n.cloud_provider = ?
        AND n.vm_location = ?
-       AND n.vm_size = ?
+       ${nativeIdentity.sql}
        ${authority.sql}`
   )
-    .bind(userId, placement.provider, placement.location, placement.vmSize, ...authority.binds)
+    .bind(
+      userId,
+      placement.provider,
+      placement.location,
+      ...nativeIdentity.binds,
+      ...authority.binds
+    )
     .all<DeploymentNodeCandidate>();
 
   const candidates = nodes.results ?? [];
@@ -183,36 +205,25 @@ async function findDeploymentNodeWithCapacity(
     .map((node) => {
       const metrics = parseMetrics(node.last_metrics);
       if (!metrics) {
-        return { id: node.id, vmSize: node.vm_size, vmLocation: node.vm_location, score: null };
+        return { id: node.id, score: null };
       }
       const cpu = metrics.cpuLoadAvg1 ?? 0;
       const mem = metrics.memoryPercent ?? 0;
       if (cpu >= cpuThreshold || mem >= memThreshold) return null;
       return {
         id: node.id,
-        vmSize: node.vm_size,
-        vmLocation: node.vm_location,
         score: cpu * 0.4 + mem * 0.6,
       };
     })
-    .filter(
-      (node): node is { id: string; vmSize: string; vmLocation: string; score: number | null } =>
-        node !== null
-    );
+    .filter((node): node is { id: string; score: number | null } => node !== null);
 
   if (scored.length === 0) return null;
 
   scored.sort((a, b) => {
-    const aLoc = a.vmLocation === placement.location ? 1 : 0;
-    const bLoc = b.vmLocation === placement.location ? 1 : 0;
-    if (aLoc !== bLoc) return bLoc - aLoc;
-    const aSize = a.vmSize === placement.vmSize ? 1 : 0;
-    const bSize = b.vmSize === placement.vmSize ? 1 : 0;
-    if (aSize !== bSize) return bSize - aSize;
-    if (a.score === null && b.score === null) return 0;
+    if (a.score === null && b.score === null) return a.id.localeCompare(b.id);
     if (a.score === null) return 1;
     if (b.score === null) return -1;
-    return a.score - b.score;
+    return a.score - b.score || a.id.localeCompare(b.id);
   });
 
   return scored[0]?.id ?? null;
@@ -230,7 +241,7 @@ async function readEnvironmentNodeId(
   return rows[0]?.nodeId ?? null;
 }
 
-async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promise<boolean> {
+export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promise<boolean> {
   const { env, envId, nodeId, placement, userId, expectedNodeStatus, nodeMode } = opts;
   if (typeof env.DATABASE.prepare !== 'function') return false;
 
@@ -243,6 +254,14 @@ async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promis
     capacityPlacementSnapshot: placement.capacityPlacementSnapshot,
     requireProjectMembership: true,
   });
+  const nativeIdentity = deploymentNativeIdentityPredicate(placement);
+  const maxEnvironments =
+    nodeMode === 'exclusive'
+      ? 1
+      : parseEnvInt(
+          env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
+          DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
+        );
   const result = await env.DATABASE.prepare(
     `UPDATE deployment_environments
      SET node_id = ?, provider = ?, location = ?, updated_at = ?
@@ -256,8 +275,9 @@ async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promis
            AND n.node_role = 'deployment'
            AND n.cloud_provider = ?
            AND n.vm_location = ?
-           AND n.vm_size = ?
+           ${nativeIdentity.sql}
            AND COALESCE(n.node_mode, 'shared') = ?
+           AND (SELECT COUNT(*) FROM deployment_environments occupied WHERE occupied.node_id = n.id) < ?
            AND (
              COALESCE(n.node_mode, 'shared') = 'shared'
              OR NOT EXISTS (
@@ -279,8 +299,9 @@ async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promis
       expectedNodeStatus,
       placement.provider,
       placement.location,
-      placement.vmSize,
+      ...nativeIdentity.binds,
       nodeMode,
+      maxEnvironments,
       ...authority.binds
     )
     .run();
@@ -320,7 +341,10 @@ async function assertFreshDeploymentProvisioningAuthority(input: {
     nodeId: input.nodeId,
     provider: input.placement.provider,
     location: input.placement.location,
-    vmSize: input.placement.vmSize,
+    providerInstanceType: input.placement.providerInstanceType,
+    providerInstanceBootDiskSizeGb: input.placement.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: input.placement.providerInstanceImage,
+    providerInstanceArchitecture: input.placement.providerInstanceArchitecture,
     nodeMode: input.nodeMode,
     requiresVolumes: input.requiresVolumes,
   });

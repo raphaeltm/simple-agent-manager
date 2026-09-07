@@ -5,13 +5,13 @@ import type {
   ComputeUsageRecord,
   CredentialSource,
 } from '@simple-agent-manager/shared';
-import { getVcpuCount } from '@simple-agent-manager/shared';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { legacyNodeVcpuEstimate } from './legacy-node-pool-compatibility';
 
 // =============================================================================
 // Start / Stop Tracking
@@ -43,16 +43,85 @@ export interface StartComputeTrackingInput {
   credentialSource?: CredentialSource;
 }
 
+type ComputeHardwareInput = Pick<
+  StartComputeTrackingInput,
+  | 'providerInstanceType'
+  | 'providerInstanceVcpuCount'
+  | 'providerInstanceMemoryMb'
+  | 'providerInstanceDiskGb'
+  | 'providerInstanceBootDiskSizeGb'
+  | 'providerInstanceImage'
+  | 'providerInstanceArchitecture'
+  | 'observedProviderInstanceType'
+  | 'observedProviderInstanceVcpuCount'
+  | 'observedProviderInstanceMemoryMb'
+  | 'observedProviderInstanceDiskGb'
+  | 'observedHardwareJson'
+  | 'observedHardwareSource'
+>;
+
+/** One CPU metering contract for workspace records and node-lifetime accounting. */
+export function resolveComputeVcpuCount(
+  input: ComputeHardwareInput,
+  historical?: {
+    bookedVcpuCount?: number | null;
+    legacyNode?: { vmSize: string; cloudProvider?: string | null };
+  }
+): {
+  vcpuCount: number | null;
+  vcpuCountSource: NonNullable<ActiveComputeSession['vcpuCountSource']>;
+} {
+  const positiveCount = (value: number | null | undefined): number | null =>
+    typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+  const observed = positiveCount(input.observedProviderInstanceVcpuCount);
+  if (observed !== null) return { vcpuCount: observed, vcpuCountSource: 'observed' };
+  const planned = positiveCount(input.providerInstanceVcpuCount);
+  if (planned !== null) return { vcpuCount: planned, vcpuCountSource: 'planned' };
+  const booked = positiveCount(historical?.bookedVcpuCount);
+  if (booked !== null) return { vcpuCount: booked, vcpuCountSource: 'recorded' };
+
+  // Any native plan/observation identifies a modern row. Its missing CPU cannot
+  // be invented from an unrelated compatibility label, even on partial rows.
+  const hasNativeEvidence = Object.values(computeHardwareInput(input)).some(
+    (value) => value !== null && value !== undefined && value !== ''
+  );
+  if (!hasNativeEvidence && historical?.legacyNode) {
+    const estimate = legacyNodeVcpuEstimate(historical.legacyNode);
+    if (estimate !== null)
+      return { vcpuCount: estimate, vcpuCountSource: 'compatibility-estimate' };
+  }
+  return { vcpuCount: null, vcpuCountSource: 'unknown' };
+}
+
+/** Explicit hardware projection: unrelated row fields must not imply native evidence. */
+function computeHardwareInput(input: ComputeHardwareInput): ComputeHardwareInput {
+  return {
+    providerInstanceType: input.providerInstanceType,
+    providerInstanceVcpuCount: input.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: input.providerInstanceMemoryMb,
+    providerInstanceDiskGb: input.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: input.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: input.providerInstanceImage,
+    providerInstanceArchitecture: input.providerInstanceArchitecture,
+    observedProviderInstanceType: input.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: input.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: input.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: input.observedProviderInstanceDiskGb,
+    observedHardwareJson: input.observedHardwareJson,
+    observedHardwareSource: input.observedHardwareSource,
+  };
+}
+
 /** Insert a compute_usage row when a workspace starts running. */
 export async function startComputeTracking(
   db: DrizzleD1Database<typeof schema>,
   input: StartComputeTrackingInput
 ): Promise<string> {
   const id = ulid();
-  const vcpuCount =
-    input.observedProviderInstanceVcpuCount ??
-    input.providerInstanceVcpuCount ??
-    getVcpuCount(input.vmSize, input.cloudProvider);
+  const { vcpuCount } = resolveComputeVcpuCount(input);
+  if (vcpuCount === null) {
+    throw new Error('Compute tracking requires observed or configured native vCPU hardware');
+  }
   const now = new Date().toISOString();
 
   await db.insert(schema.computeUsage).values({
@@ -229,22 +298,11 @@ export async function calculateVcpuHoursForPeriod(
       startedAt: schema.computeUsage.startedAt,
       endedAt: schema.computeUsage.endedAt,
       vcpuCount: schema.computeUsage.vcpuCount,
-      providerInstanceVcpuCount: schema.computeUsage.providerInstanceVcpuCount,
-      observedProviderInstanceVcpuCount: schema.computeUsage.observedProviderInstanceVcpuCount,
     })
     .from(schema.computeUsage)
     .where(and(...conditions));
 
-  return calculateNodeVcpuHours(
-    rows.map((row) => ({
-      ...row,
-      vcpuCount:
-        row.observedProviderInstanceVcpuCount ?? row.providerInstanceVcpuCount ?? row.vcpuCount,
-    })),
-    periodStart,
-    periodEnd,
-    new Date(nowIso)
-  );
+  return calculateNodeVcpuHours(rows, periodStart, periodEnd, new Date(nowIso));
 }
 
 // =============================================================================
@@ -298,7 +356,7 @@ export async function getUserUsageSummary(
   const activeSessions: ActiveComputeSession[] = activeRows.map((r) => ({
     workspaceId: r.workspaceId,
     serverType: r.serverType,
-    vcpuCount: r.observedProviderInstanceVcpuCount ?? r.providerInstanceVcpuCount ?? r.vcpuCount,
+    ...resolveComputeVcpuCount(r, { bookedVcpuCount: r.vcpuCount }),
     providerInstanceType: r.providerInstanceType,
     providerInstanceVcpuCount: r.providerInstanceVcpuCount,
     providerInstanceMemoryMb: r.providerInstanceMemoryMb,
@@ -460,7 +518,8 @@ export async function getUserDetailedUsage(
     workspaceId: r.workspaceId,
     nodeId: r.nodeId,
     serverType: r.serverType,
-    vcpuCount: r.observedProviderInstanceVcpuCount ?? r.providerInstanceVcpuCount ?? r.vcpuCount,
+    vcpuCount: r.vcpuCount,
+    vcpuCountSource: 'recorded',
     providerInstanceType: r.providerInstanceType,
     providerInstanceVcpuCount: r.providerInstanceVcpuCount,
     providerInstanceMemoryMb: r.providerInstanceMemoryMb,

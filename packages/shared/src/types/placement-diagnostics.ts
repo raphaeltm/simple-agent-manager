@@ -100,9 +100,9 @@ export interface PlacementQueueDiagnostic {
 /**
  * The authority a placement was resolved under, and whether it is still current.
  *
- * `revalidatedAgainstCurrentAuthority` is false when the plan being displayed
- * was resolved under a pool revision or source generation that has since moved —
- * the run must re-resolve before allocating, and the UI should say so rather
+ * `revalidatedAgainstCurrentAuthority` is true only after the final atomic
+ * placement fence succeeds. False includes advisory selection and queued runs;
+ * it does not by itself prove a stale plan. The UI must describe verification rather
  * than presenting stale placement as settled.
  */
 export interface PlacementAuthorityDiagnostic {
@@ -117,7 +117,18 @@ export interface PlacementAuthorityDiagnostic {
   revalidatedAgainstCurrentAuthority: boolean;
 }
 
+export interface PlacementRolloutDiagnostic {
+  cohortPercent: number;
+  mode: 'enabled' | 'shadow';
+  configuredStrategy: CapacityPoolStrategy;
+  appliedStrategy: CapacityPoolStrategy;
+  baselineSelectedNodeId: string | null;
+  configuredSelectedNodeId: string | null;
+  differenceReasons: Array<'strategy-order-differs' | 'same-selection' | 'no-eligible-hosts'>;
+}
+
 export interface PlacementDecisionDiagnostics {
+  rollout?: PlacementRolloutDiagnostic;
   version: typeof PLACEMENT_DIAGNOSTICS_VERSION;
   decidedAt: string;
   /** The ORIGINAL canonical intent this run was admitted with. */

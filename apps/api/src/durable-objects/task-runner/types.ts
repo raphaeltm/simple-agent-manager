@@ -8,6 +8,7 @@ import type {
   CapacityPlacementSnapshot,
   CredentialProvider,
   CredentialSource,
+  PlacementDecisionDiagnostics,
   ResolvedResourceReservation,
   ResourceRequirements,
   ResourceRequirementsSource,
@@ -27,6 +28,7 @@ import type { TaskStartCapacityPoolSelection } from '../../services/placement-re
 // the complete Worker Env interface. DOs receive the full env at runtime.
 
 export interface StepResults {
+  placementDiagnostics?: PlacementDecisionDiagnostics;
   nodeId: string | null;
   autoProvisioned: boolean;
   /** Exact warm-pool claim owned by this task until workspace activation or release. */

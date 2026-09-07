@@ -1,3 +1,4 @@
+import { gcpInstanceToVM, resolveGcpSourceImage } from './gcp-native-instance';
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 
 import {
@@ -7,12 +8,10 @@ import {
   DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
   DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
   DEFAULT_GCP_MAX_LIST_PAGES,
-  extractIp,
   GCP_LOCATIONS,
   GCP_VOLUME_CAPABILITIES,
   type GcpTokenProvider,
   LOCATION_METADATA,
-  mapGcpStatus,
   SAM_AGENT_FIREWALL_RULE_NAME,
   SAM_APP_ROUTE_FIREWALL_RULE_NAME,
   SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG,
@@ -20,7 +19,7 @@ import {
   SIZE_MAP,
 } from './gcp-metadata';
 import { getProviderCatalogOfferings } from './instance-offerings';
-import { observedHardware, resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
+import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
 import {
   providerDelay,
   providerFetch,
@@ -43,7 +42,6 @@ import type {
 } from './types';
 import { ProviderError } from './types';
 import {
-  type GcpInstancePayload,
   parseProviderJson,
   validateGcpAggregatedInstances,
   validateGcpInstance,
@@ -318,7 +316,10 @@ export class GcpProvider implements Provider {
           boot: true,
           autoDelete: true,
           initializeParams: {
-            sourceImage: resolveGcpSourceImage(nativeConfig.image ?? this.imageFamily, this.imageProject),
+            sourceImage: resolveGcpSourceImage(
+              nativeConfig.image ?? this.imageFamily,
+              this.imageProject
+            ),
             diskSizeGb: String(nativeConfig.bootDiskSizeGb ?? this.diskSizeGb),
           },
         },
@@ -414,7 +415,7 @@ export class GcpProvider implements Provider {
     throwIfProviderRequestAborted(context);
     const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) return null;
-    return this.toVMInstance(instance);
+    return gcpInstanceToVM(instance);
   }
 
   async listVMs(
@@ -444,7 +445,7 @@ export class GcpProvider implements Provider {
           headers,
           `listVMs.${zone}`,
           (data) => {
-            results.push(...(data.items || []).map((i) => this.toVMInstance(i)));
+            results.push(...(data.items || []).map((i) => gcpInstanceToVM(i)));
           },
           context
         );
@@ -771,23 +772,6 @@ export class GcpProvider implements Provider {
     );
   }
 
-  private toVMInstance(instance: GcpInstancePayload): VMInstance {
-    const machineType = instance.machineType.split('/').pop() || instance.machineType;
-    return {
-      id: instance.id || instance.name,
-      name: instance.name,
-      ip: extractIp(instance.networkInterfaces),
-      status: mapGcpStatus(instance.status),
-      serverType: machineType,
-      observedHardware: observedHardware({
-        serverType: machineType,
-        unknownResourcesReason: 'GCP instance response does not include machine resources',
-      }),
-      createdAt: instance.creationTimestamp,
-      labels: instance.labels || {},
-    };
-  }
-
   private isToleratedZoneListError(err: unknown): boolean {
     return err instanceof ProviderError && (err.statusCode === 404 || err.statusCode === 503);
   }
@@ -806,34 +790,4 @@ export class GcpProvider implements Provider {
     const match = machineType.match(/zones\/([^/]+)/);
     return match?.[1] || this.defaultLocation;
   }
-}
-
-function resolveGcpSourceImage(image: string, imageProject: string): string {
-  const trimmed = image.trim();
-  const projectScopedImageRef = /^projects\/[^/]+\/global\/images\/(?:family\/)?[^/]+$/;
-  const globalImageRef = /^global\/images\/(?:family\/)?[^/]+$/;
-  const shortFamilyRef = /^family\/[^/]+$/;
-  const shortImageRef = /^images\/[^/]+$/;
-  const familyName = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
-
-  if (
-    /^https:\/\/(?:(?:www|compute)\.)googleapis\.com\/compute\/v1\/projects\/[^/]+\/global\/images\/(?:family\/)?[^/]+$/.test(
-      trimmed
-    )
-  ) {
-    return trimmed;
-  }
-  if (projectScopedImageRef.test(trimmed) || globalImageRef.test(trimmed)) return trimmed;
-  if (shortFamilyRef.test(trimmed)) return `projects/${imageProject}/global/images/${trimmed}`;
-  if (shortImageRef.test(trimmed)) {
-    return `projects/${imageProject}/global/${trimmed}`;
-  }
-  if (familyName.test(trimmed)) return `projects/${imageProject}/global/images/family/${trimmed}`;
-
-  throw new ProviderError(
-    'gcp',
-    400,
-    `GCP image must be an image family name or a Compute Engine image/family reference: ${trimmed}`,
-    { category: 'invalid_config' }
-  );
 }

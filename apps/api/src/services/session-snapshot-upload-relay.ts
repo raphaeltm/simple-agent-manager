@@ -211,8 +211,7 @@ export async function findSessionSnapshotUploadRelay(
         AND n.runtime = 'vm'
         AND n.cloud_provider = ?
         AND n.vm_location = ?
-        AND n.vm_size = ?
-        AND n.provider_instance_type IS ?
+        AND n.provider_instance_type = ?
         AND n.provider_instance_boot_disk_size_gb IS ?
         AND n.provider_instance_image IS ?
         AND n.provider_instance_architecture IS ?
@@ -225,7 +224,6 @@ export async function findSessionSnapshotUploadRelay(
       requiredVersion,
       allocation.effectiveProvider,
       allocation.vmLocation,
-      allocation.vmSize,
       allocation.providerInstanceType,
       allocation.providerInstanceBootDiskSizeGb,
       allocation.providerInstanceImage,
@@ -327,8 +325,7 @@ export async function verifySessionSnapshotRelayAuthorization(
         AND n.runtime = 'vm'
         AND n.cloud_provider = ?
         AND n.vm_location = ?
-        AND n.vm_size = ?
-        AND n.provider_instance_type IS ?
+        AND n.provider_instance_type = ?
         AND n.provider_instance_boot_disk_size_gb IS ?
         AND n.provider_instance_image IS ?
         AND n.provider_instance_architecture IS ?
@@ -341,7 +338,6 @@ export async function verifySessionSnapshotRelayAuthorization(
       requiredVersion,
       allocation.effectiveProvider,
       allocation.vmLocation,
-      allocation.vmSize,
       allocation.providerInstanceType,
       allocation.providerInstanceBootDiskSizeGb,
       allocation.providerInstanceImage,
@@ -463,8 +459,7 @@ export async function ensureSessionSnapshotUploadRelay(
         AND node_role = 'workspace'
         AND cloud_provider IS ?
         AND vm_location = ?
-        AND vm_size = ?
-        AND provider_instance_type IS ?
+        AND provider_instance_type = ?
         AND provider_instance_boot_disk_size_gb IS ?
         AND provider_instance_image IS ?
         AND provider_instance_architecture IS ?
@@ -475,7 +470,6 @@ export async function ensureSessionSnapshotUploadRelay(
       name,
       allocation.effectiveProvider,
       allocation.vmLocation,
-      allocation.vmSize,
       allocation.providerInstanceType,
       allocation.providerInstanceBootDiskSizeGb,
       allocation.providerInstanceImage,

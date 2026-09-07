@@ -268,6 +268,22 @@ export interface BootLogEntry {
 
 /** API response (includes computed URL) */
 export interface WorkspaceResponse {
+  /** Safe current host hardware; never includes credentials or allocation authority. */
+  hardware?: Pick<
+    NodeResponse,
+    | 'cloudProvider'
+    | 'vmSize'
+    | 'providerInstanceType'
+    | 'providerInstanceVcpuCount'
+    | 'providerInstanceMemoryMb'
+    | 'providerInstanceDiskGb'
+    | 'providerInstanceBootDiskSizeGb'
+    | 'providerInstanceArchitecture'
+    | 'observedProviderInstanceType'
+    | 'observedProviderInstanceVcpuCount'
+    | 'observedProviderInstanceMemoryMb'
+    | 'observedProviderInstanceDiskGb'
+  >;
   id: string;
   nodeId?: string;
   projectId?: string | null;

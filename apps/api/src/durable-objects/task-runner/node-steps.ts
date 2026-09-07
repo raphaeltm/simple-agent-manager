@@ -5,6 +5,8 @@
  * `node_agent_ready` in `./node-agent-ready-step`; both are re-exported here so
  * the DO's step table keeps one import site. See rule 18.
  */
+import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-resource-capacity';
+import { persistPlacementDiagnostics } from './placement-diagnostics';
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
@@ -53,6 +55,7 @@ export async function handleNodeSelection(
     const node = await rc.env.DATABASE.prepare(
       `SELECT
          id,
+         ${trustedWorkspaceNodeCapacityColumnsSql()},
          status,
          vm_size AS vmSize,
          vm_location AS vmLocation,
@@ -132,6 +135,7 @@ export async function handleNodeSelection(
     if (await verifyNodeAgentHealthy(node.id, rc)) {
       state.stepResults.nodeId = node.id;
       state.stepResults.capacityPlacementSnapshot = capacityPlacementSnapshot;
+      await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
@@ -148,6 +152,7 @@ export async function handleNodeSelection(
     if (await verifyNodeAgentHealthy(warmNode.nodeId, rc)) {
       state.stepResults.nodeId = warmNode.nodeId;
       state.stepResults.capacityPlacementSnapshot = warmNode.capacityPlacementSnapshot;
+      await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
@@ -165,6 +170,7 @@ export async function handleNodeSelection(
     if (await verifyNodeAgentHealthy(existingNode.nodeId, rc)) {
       state.stepResults.nodeId = existingNode.nodeId;
       state.stepResults.capacityPlacementSnapshot = existingNode.capacityPlacementSnapshot;
+      await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
@@ -176,6 +182,7 @@ export async function handleNodeSelection(
   }
 
   // No node found — need to provision
+  await persistPlacementDiagnostics(state, rc);
   await rc.advanceToStep(state, 'node_provisioning');
 }
 export { handleNodeProvisioning } from './node-provisioning-step';

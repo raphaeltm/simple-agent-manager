@@ -1,3 +1,4 @@
+import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 /**
  * Chat session routes — CRUD for project chat sessions and messages.
  *
@@ -282,6 +283,7 @@ chatRoutes.get('/:sessionId', async (c) => {
           status: schema.tasks.status,
           executionStep: schema.tasks.executionStep,
           errorMessage: schema.tasks.errorMessage,
+          placementExplanationJson: schema.tasks.placementExplanationJson,
           outputBranch: schema.tasks.outputBranch,
           outputPrUrl: schema.tasks.outputPrUrl,
           outputSummary: schema.tasks.outputSummary,
@@ -305,6 +307,9 @@ chatRoutes.get('/:sessionId', async (c) => {
           status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
           executionStep: isTaskExecutionStep(taskRow.executionStep) ? taskRow.executionStep : null,
           errorMessage: taskRow.errorMessage ?? null,
+          placementExplanationJson: publicPlacementExplanationJson(
+            taskRow.placementExplanationJson
+          ),
           outputBranch: taskRow.outputBranch,
           outputPrUrl: taskRow.outputPrUrl,
           outputSummary: taskRow.outputSummary ?? null,

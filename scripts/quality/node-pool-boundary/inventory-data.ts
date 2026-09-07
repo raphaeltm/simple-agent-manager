@@ -79,7 +79,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     requiredEvidence: CANONICAL_TASK_START,
   },
   {
-    filePath: 'apps/api/src/routes/workspaces/crud.ts',
+    filePath: 'apps/api/src/routes/workspaces/workspace-create.ts',
     table: 'tasks',
     owner: 'post /',
     role: 'legacy direct workspace conversation task adapter',
@@ -171,7 +171,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     ],
   },
   {
-    filePath: 'apps/api/src/routes/workspaces/crud.ts',
+    filePath: 'apps/api/src/routes/workspaces/workspace-create.ts',
     table: 'workspaces',
     owner: 'post /',
     role: 'legacy direct workspace route adapter',
@@ -212,7 +212,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
 
 export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInventoryEntry[] = [
   {
-    filePath: 'apps/api/src/services/nodes.ts',
+    filePath: 'apps/api/src/services/node-provisioning.ts',
     owner: 'provisionNode',
     entrypoint: 'createVM',
     scope: 'service',
@@ -226,7 +226,7 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     ],
   },
   {
-    filePath: 'apps/api/src/routes/workspaces/crud.ts',
+    filePath: 'apps/api/src/routes/workspaces/workspace-create.ts',
     owner: 'post /',
     entrypoint: 'reserveWorkspacePlacement',
     scope: 'route',
@@ -319,7 +319,7 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     requiredEvidence: [{ kind: 'call', name: 'resolveCanonicalVmAllocationPlan' }],
   },
   {
-    filePath: 'apps/api/src/routes/workspaces/crud.ts',
+    filePath: 'apps/api/src/routes/workspaces/workspace-create.ts',
     owner: 'post /',
     entrypoint: 'createNodeRecord',
     scope: 'route',
@@ -333,7 +333,7 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     ],
   },
   {
-    filePath: 'apps/api/src/routes/workspaces/crud.ts',
+    filePath: 'apps/api/src/routes/workspaces/workspace-create.ts',
     owner: 'post /',
     entrypoint: 'provisionNode',
     scope: 'route',
@@ -341,10 +341,10 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     admission:
       'provisionNode revalidates the persisted canonical allocation plan for the node whose workspace was atomically reserved',
     status: 'role-adapter',
-    requiredEvidence: [{ kind: 'call', name: 'reserveWorkspacePlacement' }],
+    requiredEvidence: [{ kind: 'call', name: 'reserveWorkspacePlacement', scope: 'module' }],
   },
   {
-    filePath: 'apps/api/src/routes/workspaces/crud.ts',
+    filePath: 'apps/api/src/routes/workspaces/workspace-create-helpers.ts',
     owner: 'startComputeTrackingForNode',
     entrypoint: 'startComputeTracking',
     scope: 'route',

@@ -12,7 +12,6 @@ import { pathStartsWithAny } from './source-files';
 export const LEGACY_AUTHORITY_SYMBOLS = new Set([
   'canSatisfyVmSize',
   'getVcpuCount',
-  'PLATFORM_RESOURCE_DEFAULTS',
   'PROVIDER_VM_CAPACITY',
   'vmSizeFallbackChain',
   'VM_SIZE_ORDER',
@@ -23,11 +22,7 @@ export const LEGACY_AUTHORITY_SYMBOLS = new Set([
  * being read — `sizes.PROVIDER_VM_CAPACITY[provider][size]` never calls
  * anything — so every reference is reported, not just calls.
  */
-export const LEGACY_AUTHORITY_CONSTANTS = new Set([
-  'PLATFORM_RESOURCE_DEFAULTS',
-  'PROVIDER_VM_CAPACITY',
-  'VM_SIZE_ORDER',
-]);
+export const LEGACY_AUTHORITY_CONSTANTS = new Set(['PROVIDER_VM_CAPACITY', 'VM_SIZE_ORDER']);
 
 /**
  * Fields that carry provider-native machine identity. A legacy tier written into
@@ -159,6 +154,11 @@ export interface ReviewedLegacyValidator {
 
 export const REVIEWED_LEGACY_REQUEST_VALIDATORS: readonly ReviewedLegacyValidator[] = [
   {
+    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
+    owner: 'resolveTrialVmSize',
+    reason: 'validates the deprecated trial VM size setting before canonical native placement',
+  },
+  {
     filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts',
     owner: 'dispatchTask',
     reason: 'validates the deprecated dispatch_task vmSize argument before translation',
@@ -179,7 +179,7 @@ export const REVIEWED_LEGACY_REQUEST_VALIDATORS: readonly ReviewedLegacyValidato
     reason: 'validates the deprecated trigger vmSizeOverride parameter',
   },
   {
-    filePath: 'apps/api/src/routes/projects/crud.ts',
+    filePath: 'apps/api/src/routes/projects/project-update.ts',
     owner: 'patch /:id',
     reason: 'validates the deprecated project defaultVmSize body field',
   },
@@ -228,6 +228,7 @@ export function isLegacySizeName(name: string): boolean {
     lower.includes('vmsize') ||
     lower.includes('vm_size') ||
     lower === 'machinesize' ||
+    lower === 'machine_size' ||
     // `serverType` is deliberately absent: it names a persisted column and the
     // observed-hardware provenance record, not legacy VM-tier authority.
     lower === 'legacysize' ||

@@ -102,10 +102,6 @@ describe('compute usage metering pipeline', () => {
       expect(serviceFile).toContain('export async function closeOrphanedComputeUsage(');
     });
 
-    it('startComputeTracking uses getVcpuCount for vCPU derivation', () => {
-      expect(serviceFile).toContain('getVcpuCount(input.vmSize, input.cloudProvider)');
-    });
-
     it('startComputeTracking inserts into computeUsage table', () => {
       expect(serviceFile).toContain('db.insert(schema.computeUsage)');
     });

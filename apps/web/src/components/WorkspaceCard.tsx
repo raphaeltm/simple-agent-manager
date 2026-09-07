@@ -3,6 +3,7 @@ import { Button, Card, DropdownMenu, type DropdownMenuItem } from '@simple-agent
 import { useNavigate } from 'react-router';
 
 import { useIsStandalone } from '../hooks/useIsStandalone';
+import { WorkspaceHardwareDetails } from './hardware/HardwareDetails';
 import { StatusBadge } from './StatusBadge';
 
 interface WorkspaceCardProps {
@@ -143,6 +144,10 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
             />
           </div>
         )}
+      </div>
+
+      <div className="mt-3 border-t border-border-default pt-2">
+        <WorkspaceHardwareDetails workspace={workspace} />
       </div>
 
       {workspace.errorMessage && (
