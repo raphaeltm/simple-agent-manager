@@ -64,7 +64,14 @@ function recoverySourceTaskGuard(
   const taskId = state.config.recoverySourceTaskId ?? null;
   const chatSessionId = state.config.resumeSnapshotChatSessionId ?? null;
   return taskId && chatSessionId
-    ? { taskId, projectId: state.projectId, chatSessionId }
+    ? {
+        taskId,
+        projectId: state.projectId,
+        chatSessionId,
+        ...(state.config.projectEventWakeGuard
+          ? { projectEventWake: state.config.projectEventWakeGuard }
+          : {}),
+      }
     : undefined;
 }
 

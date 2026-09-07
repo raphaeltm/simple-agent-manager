@@ -46,47 +46,36 @@ export function computeProjectEventMaterializationAlarmTime(
   }
   const row = sql
     .exec(
-      `WITH subscription_due AS (
-         SELECT s.id,
-                s.delivery_cooldown_until,
-                MIN(m.matched_at) AS due_at
-         FROM project_event_subscriptions s
-         JOIN chat_sessions c ON c.id = s.target_session_id
-         JOIN project_event_matches m
-           ON m.project_id = s.project_id
-          AND m.subscription_id = s.id
-         WHERE s.project_id = ?
-           AND s.contract_version >= 2
-           AND s.owner_version >= 2
-           AND s.owner_type = 'agent'
-           AND s.owner_project_id = s.project_id
-           AND s.owner_chat_session_id = s.target_session_id
-           AND s.owner_task_id IS NOT NULL
-           AND s.lifecycle_state = 'active'
-           AND (s.expires_at IS NULL OR s.expires_at > ?)
-           AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
-           AND s.prompt_delivery_count < ?
-           AND s.requested_delivery = 'existing_session_prompt'
-           AND s.resolved_delivery = 'queued_for_prompt_delivery'
-           AND s.target_session_id IS NOT NULL
-           AND c.status IN ('active', 'sleeping')
-           AND m.state = 'matched'
-           AND m.batch_id IS NULL
-         GROUP BY s.id
-       )
-       SELECT MIN(
+      `SELECT MIN(
                 CASE
-                  WHEN delivery_cooldown_until IS NOT NULL AND delivery_cooldown_until > ?
-                  THEN delivery_cooldown_until
-                  ELSE due_at
+                  WHEN s.delivery_cooldown_until IS NOT NULL AND s.delivery_cooldown_until > ?
+                  THEN s.delivery_cooldown_until
+                  ELSE s.wake_due_at
                 END
               ) AS due_at
-       FROM subscription_due`,
+       FROM project_event_subscriptions s
+       JOIN chat_sessions c ON c.id = s.target_session_id
+       WHERE s.project_id = ?
+         AND s.contract_version >= 2
+         AND s.owner_version >= 2
+         AND s.owner_type = 'agent'
+         AND s.owner_project_id = s.project_id
+         AND s.owner_chat_session_id = s.target_session_id
+         AND s.owner_task_id IS NOT NULL
+         AND s.lifecycle_state = 'active'
+         AND (s.expires_at IS NULL OR s.expires_at > ?)
+         AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
+         AND s.prompt_delivery_count < ?
+         AND s.requested_delivery = 'existing_session_prompt'
+         AND s.resolved_delivery = 'queued_for_prompt_delivery'
+         AND s.target_session_id IS NOT NULL
+         AND s.wake_due_at IS NOT NULL
+         AND c.status IN ('active', 'sleeping')`,
+      now,
       projectId,
       now,
       now,
-      limits.wakeMaxPerSubscription,
-      now
+      limits.wakeMaxPerSubscription
     )
     .toArray()[0];
   const dueAt = typeof row?.due_at === 'number' ? row.due_at : null;

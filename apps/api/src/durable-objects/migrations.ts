@@ -2058,6 +2058,47 @@ export const MIGRATIONS: Migration[] = [
         ON project_event_subscriptions(project_id, updated_at DESC, id)`);
     },
   },
+  {
+    name: '050-project-event-wake-due-index',
+    run: (sql) => {
+      try {
+        sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN wake_due_at INTEGER`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/duplicate column name:\s*wake_due_at/i.test(message)) throw error;
+      }
+      sql.exec(`SELECT wake_due_at FROM project_event_subscriptions LIMIT 0`);
+      sql.exec(`
+        UPDATE project_event_subscriptions
+           SET wake_due_at = (
+             SELECT MIN(m.matched_at)
+               FROM project_event_matches m
+              WHERE m.project_id = project_event_subscriptions.project_id
+                AND m.subscription_id = project_event_subscriptions.id
+                AND m.state = 'matched'
+                AND m.batch_id IS NULL
+           )
+         WHERE contract_version >= 2
+           AND owner_version >= 2
+           AND lifecycle_state = 'active'
+           AND requested_delivery = 'existing_session_prompt'
+           AND resolved_delivery = 'queued_for_prompt_delivery'
+           AND wake_due_at IS NULL
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_due
+        ON project_event_subscriptions(
+          project_id,
+          lifecycle_state,
+          requested_delivery,
+          resolved_delivery,
+          wake_due_at,
+          delivery_cooldown_until,
+          id
+        )
+      `);
+    },
+  },
 ];
 
 /**

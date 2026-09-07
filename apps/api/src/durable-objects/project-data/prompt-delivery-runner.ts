@@ -193,10 +193,18 @@ function sourceTaskGuardForClaim(
     return undefined;
   }
   if (!claim.message.sourceTaskId || !projectId) return undefined;
+  const metadata = claim.message.metadata ?? {};
+  const projectEventWake =
+    claim.message.sourceKind === 'project_event_wake' &&
+    typeof metadata.batchId === 'string' &&
+    typeof metadata.subscriptionId === 'string'
+      ? { batchId: metadata.batchId, subscriptionId: metadata.subscriptionId }
+      : null;
   return {
     taskId: claim.message.sourceTaskId,
     projectId,
     chatSessionId: claim.message.targetSessionId,
+    ...(projectEventWake ? { projectEventWake } : {}),
   };
 }
 
@@ -295,7 +303,13 @@ export async function runPromptDeliveryClaim(
       );
       if (localInvalid) return localInvalid;
       try {
-        return await invalidProjectEventWakeSourceTaskResult(env, hooks.projectId, claim);
+        const sourceInvalid = await invalidProjectEventWakeSourceTaskResult(
+          env,
+          hooks.projectId,
+          claim
+        );
+        if (sourceInvalid) return sourceInvalid;
+        return invalidProjectEventWakeDeliveryTargetResult(sql, env, hooks.projectId, claim);
       } catch (error) {
         return projectEventWakeValidationReadFailure(claim, error);
       }

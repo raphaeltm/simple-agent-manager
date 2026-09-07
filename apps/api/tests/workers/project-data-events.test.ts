@@ -13,6 +13,11 @@ import {
   readProjectEventWakeLeaseUntil,
 } from '../../src/durable-objects/project-data/project-events-wake-delivery';
 import {
+  readEventsForMatches,
+  readMatchesByIds,
+  updateMatchesForBatch,
+} from '../../src/durable-objects/project-data/project-events-storage-helpers';
+import {
   computeProjectEventMaterializationAlarmTime,
   computeProjectEventRetentionAlarmTime,
 } from '../../src/durable-objects/project-data/project-events-scheduler';
@@ -505,6 +510,212 @@ describe('ProjectData event subscription core', () => {
     }
   });
 
+  it('defers same-project wake materialization at cross-chat mailbox capacity without partial writes', async () => {
+    const projectId = 'project-events-wake-cross-chat-mailbox-cap';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await disableProjectEventWakeOnStub(projectId);
+    const saturatedSessionId = await stub.createSession(null, 'Saturated target', 'task-saturated');
+    const readySessionId = await stub.createSession(null, 'Ready target', 'task-ready');
+    await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
+      await svc.createProjectEventSubscription(
+        testEnv,
+        projectId,
+        subscriptionInputForSession('sub-cross-chat-mailbox-cap', readySessionId)
+      );
+      await svc.admitProjectEvent(
+        testEnv,
+        projectId,
+        eventInput({
+          deliveryKey: 'delivery-cross-chat-mailbox-cap',
+          payloadFingerprint: 'sha256:cross-chat-mailbox-cap',
+        })
+      );
+    });
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      for (let index = 0; index < 2; index += 1) {
+        state.storage.sql.exec(
+          `INSERT INTO session_inbox
+           (id, target_session_id, source_task_id, message_type, content, priority,
+            created_at, delivered_at, message_class, delivery_state, sender_type,
+            sender_id, ack_required, acked_at, ack_timeout_ms, expires_at,
+            delivery_attempts, last_delivery_at, metadata, source_kind,
+            prompt_message_id, next_attempt_at, durable_delivery)
+           VALUES (?, ?, NULL, 'deliver', 'existing', 'high', 1000, NULL, 'deliver',
+            'queued', 'system', 'test', 0, NULL, NULL, 60000, 0, NULL, NULL,
+            'agent_mailbox', ?, 1000, 1)`,
+          `cross-chat-existing-${index}`,
+          saturatedSessionId,
+          `cross-chat-existing-${index}`
+        );
+      }
+    });
+
+    const materialized = await materializeEventWakeForTest(projectId, 20_000, {
+      MAILBOX_MAX_MESSAGES_PER_PROJECT: '2',
+    });
+    expect(materialized).toMatchObject({ status: 'capacity_deferred', materialized: 0 });
+
+    const snapshot = await runInDurableObject(stub, async (_instance, state) => ({
+      inbox: state.storage.sql
+        .exec(`SELECT target_session_id, COUNT(*) AS cnt FROM session_inbox GROUP BY target_session_id`)
+        .toArray(),
+      matches: state.storage.sql
+        .exec(`SELECT state, batch_id FROM project_event_matches`)
+        .toArray(),
+      batches: state.storage.sql.exec(`SELECT COUNT(*) AS cnt FROM project_event_delivery_batches`).toArray()[0],
+      transcripts: state.storage.sql
+        .exec(`SELECT COUNT(*) AS cnt FROM chat_messages WHERE session_id = ?`, readySessionId)
+        .toArray()[0],
+    }));
+    expect(snapshot.inbox).toEqual([{ target_session_id: saturatedSessionId, cnt: 2 }]);
+    expect(snapshot.matches).toEqual([{ state: 'matched', batch_id: null }]);
+    expect(snapshot.batches).toEqual({ cnt: 0 });
+    expect(snapshot.transcripts).toEqual({ cnt: 0 });
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE project_event_subscriptions
+         SET lifecycle_state = 'cancelled', wake_due_at = NULL
+         WHERE project_id = ?`,
+        projectId
+      );
+      state.storage.sql.exec(
+        `UPDATE project_event_matches
+         SET state = 'cancelled', reason = 'test cleanup'
+         WHERE project_id = ?`,
+        projectId
+      );
+    });
+  });
+
+  it('keeps delivered-unacked event wake occupancy through read grace', async () => {
+    const projectId = 'project-events-wake-read-grace-occupancy';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession(null, 'Read grace target', 'task-read-grace');
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO project_event_subscriptions
+         (id, project_id, contract_version, owner_type, owner_id, owner_name,
+          idempotency_key, idempotency_fingerprint, filter_version, filter_json,
+          filter_fingerprint, match_key_count, requested_delivery, resolved_delivery,
+          target_session_id, target_task_id, target_runtime_id, target_agent_id,
+          lifecycle_state, reason, created_at, updated_at, expires_at,
+          owner_version, owner_project_id, owner_chat_session_id, owner_task_id,
+          owner_runtime_id, prompt_delivery_count, prompt_delivery_last_at,
+          delivery_cooldown_until, delivery_lifetime_expires_at)
+         VALUES ('sub-read-grace', ?, 2, 'agent', 'agent-read-grace', NULL,
+          'idem-read-grace', 'fp-read-grace', 1, '{"version":1}', 'filter-read-grace', 0,
+          'existing_session_prompt', 'queued_for_prompt_delivery', ?, 'task-read-grace',
+          NULL, 'agent-1', 'active', NULL, 1000, 1000, NULL, 2, ?, ?, 'task-read-grace',
+          NULL, 0, NULL, NULL, NULL)`,
+        projectId,
+        sessionId,
+        projectId,
+        sessionId
+      );
+      state.storage.sql.exec(
+        `INSERT INTO project_event_delivery_batches
+         (id, project_id, subscription_id, idempotency_key, idempotency_fingerprint, state,
+          delivery_channel, delivery_expires_at, readable_until, ack_required,
+          requested_delivery, resolved_delivery, adapter_decision_json,
+          target_session_id, target_task_id, target_runtime_id, target_agent_id,
+          match_ids_json, event_count, created_at, updated_at, delivered_at,
+          terminal_at, terminal_reason)
+         VALUES ('batch-read-grace', ?, 'sub-read-grace', 'idem-batch-read-grace',
+          'fp-batch-read-grace', 'delivered', 'prompt_queue', 20000, 80000, 1,
+          'existing_session_prompt', 'queued_for_prompt_delivery', '{}', ?, 'task-read-grace',
+          NULL, 'agent-1', '[]', 1, 1000, 30000, 30000, 30000,
+          'prompt accepted by runtime')`,
+        projectId,
+        sessionId
+      );
+    });
+
+    const leases = await runInDurableObject(stub, async (_instance, state) => ({
+      globalLease: readProjectEventWakeLeaseUntil(state.storage.sql, sessionId, 30_000),
+      targetLease: hasProjectEventWakeLease(state.storage.sql, sessionId, 30_000),
+      afterGrace: readProjectEventWakeLeaseUntil(state.storage.sql, sessionId, 80_001),
+    }));
+    expect(leases).toEqual({ globalLease: 80000, targetLease: true, afterGrace: null });
+  });
+
+  it('validates event-wake recovery authority by exact pending batch and subscription', async () => {
+    const projectId = 'project-events-wake-recovery-authority';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await disableProjectEventWakeOnStub(projectId);
+    const sessionId = await stub.createSession(null, 'Recovery authority target', 'task-recovery');
+    let subscription!: Awaited<ReturnType<typeof svc.createProjectEventSubscription>>;
+    await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
+      subscription = await svc.createProjectEventSubscription(
+        testEnv,
+        projectId,
+        subscriptionInputForSession('sub-wake-recovery-authority', sessionId)
+      );
+      await svc.admitProjectEvent(
+        testEnv,
+        projectId,
+        eventInput({
+          deliveryKey: 'delivery-wake-recovery-authority',
+          payloadFingerprint: 'sha256:wake-recovery-authority',
+        })
+      );
+    });
+    const materialized = await materializeEventWakeForTest(projectId, Date.now());
+    const batchId = materialized.accepted[0]!.accepted.message.id;
+    await runInDurableObject(stub, async (instance) => {
+      (
+        instance as unknown as { env: Env & Record<string, string | undefined> }
+      ).env.PROJECT_EVENT_WAKE_ENABLED = 'true';
+    });
+
+    await expect(
+      svc.validateProjectEventWakeRecoveryAuthority(testEnv, projectId, {
+        chatSessionId: sessionId,
+        sourceTaskId: 'task-1',
+        batchId,
+        subscriptionId: subscription.subscription.id,
+      })
+    ).resolves.toBe(true);
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE project_event_subscriptions
+         SET lifecycle_state = 'cancelled', cancelled_at = ?, cancel_reason = 'test cancellation'
+         WHERE project_id = ? AND id = ?`,
+        Date.now(),
+        projectId,
+        subscription.subscription.id
+      );
+    });
+    await expect(
+      svc.validateProjectEventWakeRecoveryAuthority(testEnv, projectId, {
+        chatSessionId: sessionId,
+        sourceTaskId: 'task-1',
+        batchId,
+        subscriptionId: subscription.subscription.id,
+      })
+    ).resolves.toBe(false);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE project_event_delivery_batches
+         SET state = 'cancelled', terminal_at = ?, terminal_reason = 'test cleanup'
+         WHERE project_id = ? AND id = ?`,
+        Date.now(),
+        projectId,
+        batchId
+      );
+      state.storage.sql.exec(
+        `UPDATE session_inbox
+         SET delivery_state = 'expired', terminal_reason = 'test cleanup'
+         WHERE id = ?`,
+        batchId
+      );
+    });
+  });
+
   it('persists original event-wake source authority when the target task is a recovery owner', async () => {
     const projectId = 'project-events-wake-source-vs-target-task';
     const stub = getStub(projectId);
@@ -668,8 +879,15 @@ describe('ProjectData event subscription core', () => {
              WHEN id = ? THEN 1000
              WHEN id = ? THEN 2000
              ELSE last_matched_at
+           END,
+           wake_due_at = CASE
+             WHEN id = ? THEN 1000
+             WHEN id = ? THEN 2000
+             ELSE wake_due_at
            END
          WHERE project_id = ?`,
+        blocked.subscription.id,
+        ready.subscription.id,
         blocked.subscription.id,
         ready.subscription.id,
         projectId
@@ -869,8 +1087,15 @@ describe('ProjectData event subscription core', () => {
              WHEN id = ? THEN 1000
              WHEN id = ? THEN 2000
              ELSE last_matched_at
+           END,
+           wake_due_at = CASE
+             WHEN id = ? THEN 1000
+             WHEN id = ? THEN 2000
+             ELSE wake_due_at
            END
          WHERE project_id = ?`,
+        blocked.subscription.id,
+        ready.subscription.id,
         blocked.subscription.id,
         ready.subscription.id,
         projectId
@@ -1066,7 +1291,14 @@ describe('ProjectData event subscription core', () => {
       const wake = state.storage.sql
         .exec(
           `EXPLAIN QUERY PLAN
-           SELECT s.id AS subscription_id
+           SELECT MIN(
+                    CASE
+                      WHEN s.delivery_cooldown_until IS NOT NULL
+                       AND s.delivery_cooldown_until > ?
+                        THEN s.delivery_cooldown_until
+                      ELSE s.wake_due_at
+                    END
+                  ) AS due_at
            FROM project_event_subscriptions s
            JOIN chat_sessions c ON c.id = s.target_session_id
            WHERE s.project_id = ?
@@ -1080,28 +1312,17 @@ describe('ProjectData event subscription core', () => {
              AND (s.expires_at IS NULL OR s.expires_at > ?)
              AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
              AND s.prompt_delivery_count < ?
-             AND (s.delivery_cooldown_until IS NULL OR s.delivery_cooldown_until <= ?)
+             AND s.wake_due_at IS NOT NULL
              AND s.requested_delivery = 'existing_session_prompt'
              AND s.resolved_delivery = 'queued_for_prompt_delivery'
              AND s.target_session_id IS NOT NULL
-             AND c.status IN ('active', 'sleeping')
-             AND EXISTS (
-               SELECT 1
-               FROM project_event_matches m
-               WHERE m.project_id = s.project_id
-                 AND m.subscription_id = s.id
-                 AND m.state = 'matched'
-                 AND m.batch_id IS NULL
-             )
-           ORDER BY s.last_matched_at ASC, s.id ASC
-           LIMIT ?`,
+             AND c.status IN ('active', 'sleeping')`,
+          20_000,
           projectId,
           projectId,
           20_000,
           20_000,
-          10,
-          20_000,
-          2
+          10
         )
         .toArray()
         .map((row) => String((row as { detail?: unknown }).detail ?? ''));
@@ -1193,12 +1414,10 @@ describe('ProjectData event subscription core', () => {
       return { wake, expiry, attempts, syntheticAttempts, batches };
     });
 
-    expect(plans.wake.some((detail) => detail.includes('idx_project_event_subscriptions_wake_candidates'))).toBe(
+    expect(plans.wake.some((detail) => detail.includes('idx_project_event_subscriptions_wake_due'))).toBe(
       true
     );
-    expect(plans.wake.some((detail) => detail.includes('idx_project_event_matches_subscription_due'))).toBe(
-      true
-    );
+    expect(plans.wake.some((detail) => detail.includes('project_event_matches'))).toBe(false);
     expect(plans.expiry.some((detail) => detail.includes('idx_project_event_subscriptions_wake_expiry'))).toBe(
       true
     );
@@ -1630,6 +1849,31 @@ describe('ProjectData event subscription core', () => {
             wakeProject,
             { message, attemptId: 'wake-retention-physical-attempt-1', mode: 'submit' },
             {
+              kind: 'retry',
+              reason: 'busy',
+              error: 'runtime busy before eventual acceptance',
+              runtimeIdentity: 'runtime:wake-retention',
+              capabilities: {
+                protocolVersion: 1,
+                runtimeIdentity: 'runtime:wake-retention',
+                promptReceipts: { supported: true, lookup: true, states: ['accepted'] },
+                checkpointRollover: {
+                  supported: false,
+                  automatic: false,
+                  states: [],
+                  defaultGraceMs: 0,
+                  maxGraceMs: 0,
+                  operationTimeoutMs: 0,
+                },
+              },
+            },
+            10_500
+          );
+          advanceProjectEventPromptAttemptCheckpoint(
+            state.storage.sql,
+            wakeProject,
+            { message, attemptId: 'wake-retention-physical-attempt-2', mode: 'submit' },
+            {
               kind: 'accepted',
               acpSessionId: wakeSessionId,
               promptEpoch: 11_000,
@@ -1695,19 +1939,23 @@ describe('ProjectData event subscription core', () => {
         }).then((attemptsBefore) => {
           expect(attemptsBefore).toEqual([
             { attempt_number: 0, state: 'retry' },
-            { attempt_number: 1, state: 'accepted' },
+            { attempt_number: 1, state: 'retry' },
+            { attempt_number: 2, state: 'accepted' },
           ]);
         });
-        const wakeRetention = await svc.runProjectEventRetention(testEnv, wakeProject, {
-          now: 3 * 24 * 60 * 60 * 1000,
-          limit: 10,
-        });
-        expect(wakeRetention).toMatchObject({
-          deletedEvents: 1,
-          deletedMatches: 1,
-          deletedBatches: 1,
-          deletedAttempts: 2,
-        });
+        const wakeRetentionPasses = [];
+        for (let pass = 0; pass < 10; pass += 1) {
+          const result = await svc.runProjectEventRetention(testEnv, wakeProject, {
+            now: 3 * 24 * 60 * 60 * 1000,
+            limit: 1,
+          });
+          wakeRetentionPasses.push(result);
+          if (!result.hasMore) break;
+        }
+        expect(wakeRetentionPasses.map((result) => result.deletedAttempts)).toEqual([
+          1, 1, 1, 0, 0,
+        ]);
+        expect(wakeRetentionPasses.at(-1)?.hasMore).toBe(false);
         const wakeStatus = await svc.getProjectEventRecentStatus(testEnv, wakeProject);
         expect(wakeStatus.events).toHaveLength(0);
         expect(wakeStatus.matches).toHaveLength(0);
@@ -1807,6 +2055,91 @@ describe('ProjectData event subscription core', () => {
   );
 
   it.each([97, 98, 99, 100, 500])(
+    'reads and updates %i public helper matches without exceeding the real SQLite bind budget',
+    async (count) => {
+      const projectId = `project-events-public-helper-bind-${count}`;
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      await runInDurableObject(stub, async (_instance, state) => {
+        state.storage.sql.exec(
+          `INSERT INTO project_event_subscriptions
+           (id, project_id, contract_version, owner_type, owner_id, owner_name,
+            idempotency_key, idempotency_fingerprint, filter_version, filter_json,
+            filter_fingerprint, match_key_count, requested_delivery, resolved_delivery,
+            target_session_id, target_task_id, target_runtime_id, target_agent_id,
+            lifecycle_state, reason, created_at, updated_at, expires_at,
+            owner_version, owner_project_id, owner_chat_session_id, owner_task_id,
+            owner_runtime_id, prompt_delivery_count, prompt_delivery_last_at,
+            delivery_cooldown_until, delivery_lifetime_expires_at)
+           VALUES ('sub-helper-bind', ?, 2, 'agent', 'agent-helper-bind', NULL,
+            'idem-helper-bind', 'fp-helper-bind', 1, '{"version":1}', 'filter-helper-bind', 0,
+            'existing_session_prompt', 'queued_for_prompt_delivery', 'session-helper-bind',
+            'task-helper-bind', NULL, 'agent-1', 'active', NULL, 1000, 1000, NULL,
+            2, ?, 'session-helper-bind', 'task-helper-bind', NULL, 0, NULL, NULL, 100000)`,
+          projectId,
+          projectId
+        );
+        for (let index = 0; index < count; index += 1) {
+          const eventId = `event-helper-bind-${index}`;
+          const matchId = `match-helper-bind-${index}`;
+          state.storage.sql.exec(
+            `INSERT INTO project_events
+             (id, project_id, contract_version, source, event_type, subject_type, subject_id,
+              severity, delivery_key, payload_fingerprint, metadata_json, metadata_bytes,
+              display_json, display_bytes, raw_payload_ref_json, raw_payload_ref_bytes,
+              occurred_at, received_at, updated_at, state)
+             VALUES (?, ?, 1, 'github', 'check_suite.completed', 'pull_request', ?,
+              'warning', ?, ?, '{}', 2, '{"untrusted":true}', 18, NULL, 0, ?, ?, ?, 'recorded')`,
+            eventId,
+            projectId,
+            String(index),
+            `delivery-helper-bind-${index}`,
+            `sha256:helper-bind-${index}`,
+            1000 + index,
+            1000 + index,
+            1000 + index
+          );
+          state.storage.sql.exec(
+            `INSERT INTO project_event_matches
+             (id, project_id, event_id, subscription_id, state, matched_at,
+              lifecycle_checked_at, batch_id, reason)
+             VALUES (?, ?, ?, 'sub-helper-bind', 'matched', ?, ?, NULL, NULL)`,
+            matchId,
+            projectId,
+            eventId,
+            1000 + index,
+            1000 + index
+          );
+        }
+      });
+
+      const helperResult = await runInDurableObject(stub, async (_instance, state) => {
+        const matchIds = Array.from({ length: count }, (_value, index) => `match-helper-bind-${index}`);
+        const matches = readMatchesByIds(state.storage.sql, projectId, 'sub-helper-bind', matchIds);
+        const events = readEventsForMatches(state.storage.sql, projectId, matchIds, count);
+        updateMatchesForBatch(
+          state.storage.sql,
+          projectId,
+          matchIds,
+          'batch-helper-bind',
+          'delivered',
+          20_000
+        );
+        const updated = state.storage.sql
+          .exec(
+            `SELECT COUNT(*) AS cnt
+             FROM project_event_matches
+             WHERE project_id = ? AND batch_id = 'batch-helper-bind' AND state = 'batch_created'`,
+            projectId
+          )
+          .toArray()[0];
+        return { matches: matches.length, events: events.length, updated };
+      });
+      expect(helperResult).toEqual({ matches: count, events: count, updated: { cnt: count } });
+    }
+  );
+
+  it.each([97, 98, 99, 100, 500])(
     'materializes %i wake matches without exceeding the real SQLite bind budget',
     async (count) => {
       const projectId = `project-events-wake-bind-budget-${count}`;
@@ -1862,7 +2195,7 @@ describe('ProjectData event subscription core', () => {
         }
         state.storage.sql.exec(
           `UPDATE project_event_subscriptions
-           SET last_matched_at = 1000
+           SET last_matched_at = 1000, wake_due_at = 1000
            WHERE id = ?`,
           subscription.subscription.id
         );

@@ -1245,6 +1245,20 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  validateProjectEventWakeRecoveryAuthority(
+    input: projectEvents.ValidateProjectEventWakeRecoveryAuthorityInput
+  ): boolean {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      projectEvents.validateProjectEventWakeRecoveryAuthority(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input
+      )
+    );
+  }
+
   runProjectEventRetention(
     input: projectEvents.RunProjectEventRetentionInput
   ): projectEvents.ProjectEventRetentionResult {

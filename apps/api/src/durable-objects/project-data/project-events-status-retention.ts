@@ -235,7 +235,7 @@ function expireDueSubscriptionsWithinBudget(
     const placeholders = chunk.map(() => '?').join(', ');
     const written = sql.exec(
       `UPDATE project_event_subscriptions
-       SET lifecycle_state = 'expired', updated_at = ?
+       SET lifecycle_state = 'expired', wake_due_at = NULL, updated_at = ?
        WHERE project_id = ? AND id IN (${placeholders})`,
       now,
       projectId,
@@ -427,6 +427,23 @@ function eligibleAttemptDeletionPhases(
          ON b.project_id = a.project_id AND b.id = a.batch_id
        WHERE a.project_id = ?
          AND a.created_at < ?
+         AND a.attempt_number > 0
+         AND a.state = 'retry'
+         AND a.completed_at IS NOT NULL
+         AND b.updated_at < ?
+         AND b.state IN (${TERMINAL_BATCH_STATES_SQL})
+         AND ${RETENTION_SAFE_BATCH_ALIAS_PREDICATE}
+       ORDER BY a.created_at ASC, a.id
+       LIMIT ?`,
+      params: [projectId, cutoff, cutoff],
+    },
+    {
+      query: `SELECT a.id AS id
+       FROM project_event_delivery_attempts a
+       JOIN project_event_delivery_batches b
+         ON b.project_id = a.project_id AND b.id = a.batch_id
+       WHERE a.project_id = ?
+         AND a.created_at < ?
          AND a.attempt_number = 0
          AND a.state = 'retry'
          AND a.transport_state = 'queued'
@@ -439,6 +456,7 @@ function eligibleAttemptDeletionPhases(
              AND physical.batch_id = a.batch_id
              AND physical.attempt_number > 0
              AND physical.state NOT IN (${TERMINAL_ATTEMPT_STATES_SQL})
+             AND physical.completed_at IS NULL
          )
        ORDER BY a.created_at ASC, a.id
        LIMIT ?`,

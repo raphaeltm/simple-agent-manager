@@ -456,6 +456,7 @@ export class TaskRunner extends DurableObject<Env> {
     raw.config.recoverySourceTaskId ??= null;
     raw.config.retrySourceTaskId ??= null;
     raw.config.startGuard ??= null;
+    raw.config.projectEventWakeGuard ??= null;
     raw.stepResults.claimedWarmNodeId ??= null;
     raw.stepResults.capacityPlacementSnapshot ??= null;
     raw.lastD1Step ??= null;
@@ -470,12 +471,26 @@ export class TaskRunner extends DurableObject<Env> {
     // recoverySourceTaskId and require revocable authorization.
     if (!sourceTaskId) return true;
     if (!chatSessionId) return false;
-    return isSessionRecoveryTaskAuthorized(this.env.DATABASE, {
+    const d1Authorized = await isSessionRecoveryTaskAuthorized(this.env.DATABASE, {
       recoveryTaskId: input.taskId,
       sourceTaskId,
       projectId: input.projectId,
       chatSessionId,
     });
+    if (!d1Authorized) return false;
+    const eventGuard = input.config.projectEventWakeGuard ?? null;
+    if (!eventGuard) return true;
+    const projectDataService = await import('../../services/project-data');
+    return projectDataService.validateProjectEventWakeRecoveryAuthority(
+      this.env as unknown as Env,
+      input.projectId,
+      {
+        chatSessionId,
+        sourceTaskId,
+        batchId: eventGuard.batchId,
+        subscriptionId: eventGuard.subscriptionId,
+      }
+    );
   }
 
   private async assertRecoveryAuthority(

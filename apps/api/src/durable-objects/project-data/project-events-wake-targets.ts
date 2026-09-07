@@ -18,9 +18,7 @@ export function isTargetAtWakeCapacity(sql: SqlStorage, env: Env, sessionId: str
     .exec(
       `SELECT COUNT(*) AS cnt
        FROM session_inbox
-       WHERE target_session_id = ?
-         AND delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
-      sessionId
+       WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`
     )
     .toArray()[0];
   const activeMailboxRows = typeof row?.cnt === 'number' ? row.cnt : maxMailboxMessages;
@@ -37,9 +35,8 @@ export function readLivePromptBatchLeaseUntilForTarget(
     .exec(
       `SELECT MIN(
                 CASE
-                  WHEN delivery_expires_at IS NULL THEN readable_until
-                  WHEN readable_until IS NULL THEN delivery_expires_at
-                  WHEN delivery_expires_at < readable_until THEN delivery_expires_at
+                  WHEN state = 'delivered' THEN readable_until
+                  WHEN delivery_expires_at IS NOT NULL THEN delivery_expires_at
                   ELSE readable_until
                 END
               ) AS lease_until
@@ -48,9 +45,13 @@ export function readLivePromptBatchLeaseUntilForTarget(
          AND delivery_channel = 'prompt_queue'
          AND target_session_id = ?
          AND state IN ('pending', 'delivered')
-         AND (readable_until IS NULL OR readable_until > ?)`,
+         AND (
+           (state = 'pending' AND (delivery_expires_at IS NULL OR delivery_expires_at > ?))
+           OR (state = 'delivered' AND readable_until IS NOT NULL AND readable_until > ?)
+         )`,
       projectId,
       sessionId,
+      now,
       now
     )
     .toArray()[0];
@@ -70,6 +71,10 @@ export function deferWakeTarget(
            WHEN delivery_cooldown_until IS NULL OR delivery_cooldown_until < ? THEN ?
            ELSE delivery_cooldown_until
          END,
+         wake_due_at = CASE
+           WHEN wake_due_at IS NOT NULL AND wake_due_at < ? THEN wake_due_at
+           ELSE ?
+         END,
          updated_at = ?
      WHERE project_id = ?
        AND target_session_id = ?
@@ -79,13 +84,15 @@ export function deferWakeTarget(
        AND resolved_delivery = 'queued_for_prompt_delivery'`,
     nextAt,
     nextAt,
+    nextAt,
+    nextAt,
     now,
     projectId,
     sessionId
   );
 }
 
-function resolveMailboxMaxMessages(env: Env): number {
+export function resolveMailboxMaxMessages(env: Env): number {
   const parsed = Number.parseInt(env.MAILBOX_MAX_MESSAGES_PER_PROJECT ?? '', 10);
   return Number.isSafeInteger(parsed) && parsed > 0
     ? parsed

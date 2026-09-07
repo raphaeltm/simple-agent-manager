@@ -20,6 +20,7 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import type { StartTaskInput, TaskRunner } from '../durable-objects/task-runner';
+import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import type {
@@ -201,6 +202,8 @@ export async function startTaskRunnerDO(
     retrySourceTaskId?: string | null;
     /** Optional durable lifecycle guard for reserved first-start submissions. */
     startGuard?: TaskRunnerStartGuard | null;
+    /** Event wake batch/subscription identity that must still authorize guarded recovery. */
+    projectEventWakeGuard?: ProjectEventWakeRecoveryGuard | null;
   }
 ): Promise<void> {
   const deletionSourceTaskId = input.retrySourceTaskId ?? input.recoverySourceTaskId ?? null;
@@ -270,6 +273,7 @@ export async function startTaskRunnerDO(
       recoverySourceTaskId: input.recoverySourceTaskId ?? null,
       retrySourceTaskId: input.retrySourceTaskId ?? null,
       startGuard: input.startGuard ?? null,
+      projectEventWakeGuard: input.projectEventWakeGuard ?? null,
     },
   };
 

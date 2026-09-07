@@ -121,6 +121,9 @@ export {
   ProjectEventValidationError,
 } from '../durable-objects/project-data/project-events-contracts';
 import type {
+  ValidateProjectEventWakeRecoveryAuthorityInput,
+} from '../durable-objects/project-data/project-events-wake-delivery';
+import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
 } from '../durable-objects/project-data/prompt-delivery';
@@ -513,6 +516,9 @@ type ProjectDataEventRpc = {
   getProjectEventRecentStatus(
     input: GetProjectEventRecentStatusInput
   ): Promise<ProjectEventRecentStatus>;
+  validateProjectEventWakeRecoveryAuthority(
+    input: ValidateProjectEventWakeRecoveryAuthorityInput
+  ): Promise<boolean> | boolean;
   runProjectEventRetention(
     input: RunProjectEventRetentionInput
   ): Promise<ProjectEventRetentionResult>;
@@ -1429,6 +1435,14 @@ export async function getProjectEventRecentStatus(
   input: ProjectDataEventInput<GetProjectEventRecentStatusInput> = {}
 ): Promise<ProjectEventRecentStatus> {
   return callProjectDataEvent(env, projectId, 'getProjectEventRecentStatus', input);
+}
+
+export async function validateProjectEventWakeRecoveryAuthority(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ValidateProjectEventWakeRecoveryAuthorityInput>
+): Promise<boolean> {
+  return callProjectDataEvent(env, projectId, 'validateProjectEventWakeRecoveryAuthority', input);
 }
 
 export async function runProjectEventRetention(

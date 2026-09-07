@@ -126,6 +126,8 @@ export {
   hasProjectEventWakeLease,
   invalidProjectEventWakeDeliveryTargetResult,
   readProjectEventWakeLeaseUntil,
+  validateProjectEventWakeRecoveryAuthority,
+  type ValidateProjectEventWakeRecoveryAuthorityInput,
 } from './project-events-wake-delivery';
 export { compileProjectEventFilter } from './project-events-normalization';
 export {
@@ -449,6 +451,7 @@ export function cancelProjectEventSubscription(
          cancelled_by_id = ?,
          cancelled_by_name = ?,
          cancel_reason = ?,
+         wake_due_at = NULL,
          updated_at = ?
      WHERE project_id = ? AND id = ? AND lifecycle_state != 'cancelled'`,
     now,
