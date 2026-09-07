@@ -143,6 +143,9 @@ export class HetznerProvider implements Provider {
       defaultImage: DEFAULT_HETZNER_IMAGE,
     });
     assertIncludedBootDiskCapacity(this.name, nativeConfig);
+    // Native plans are authorized for one pool location. Cross-location
+    // fallback must be a new control-plane placement decision.
+    const allowLocationFallback = config.native === undefined && this.placementFallbackEnabled;
 
     const deadline = Date.now() + this.capacityRetryBudgetMs;
     let lastCapacityError: ProviderError | undefined;
@@ -153,7 +156,11 @@ export class HetznerProvider implements Provider {
       capacityAttempt++
     ) {
       try {
-        return await this.attemptCreateWithPlacementFallback(nativeConfig, context);
+        return await this.attemptCreateWithPlacementFallback(
+          nativeConfig,
+          allowLocationFallback,
+          context
+        );
       } catch (err) {
         lastCapacityError = await this.retryAfterCapacityError(
           err,
@@ -224,12 +231,13 @@ export class HetznerProvider implements Provider {
    */
   private async attemptCreateWithPlacementFallback(
     config: ResolvedNativeVMConfig,
+    allowLocationFallback: boolean,
     context?: ProviderRequestContext
   ): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
     const primaryLocation = config.location;
 
-    const fallbackLocations = this.placementFallbackEnabled
+    const fallbackLocations = allowLocationFallback
       ? HETZNER_LOCATIONS.filter((loc) => loc !== primaryLocation)
       : [];
     const attemptsToTry: Array<{ location: string; delayMs: number }> = [

@@ -149,7 +149,7 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
             projectId: linkedProject.id,
             project: projectDefaults,
             explicit: {
-              vmSize,
+              vmSize: body.vmSize,
               provider: body.provider ?? null,
               vmLocation,
             },
@@ -176,7 +176,7 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
           projectId: linkedProject.id,
           project: projectDefaults,
           explicit: {
-            vmSize,
+            vmSize: body.vmSize,
             provider: body.provider ?? null,
             vmLocation,
             native: {

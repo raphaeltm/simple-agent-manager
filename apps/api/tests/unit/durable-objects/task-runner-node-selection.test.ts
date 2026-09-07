@@ -259,6 +259,23 @@ function createStatement(sql: string, results: D1ResultMap) {
       return Promise.resolve({ meta: { changes: 1 } });
     },
     all() {
+      // This suite exercises orchestration with a successful authority boundary.
+      // Real SQL revocation/stale-snapshot cases live in
+      // placement-authority-effective-pool.test.ts.
+      if (sql.includes('SELECT n.id FROM nodes n')) {
+        const ids = new Set(
+          [
+            results.persistedWarmClaim,
+            results.preferredNode?.id,
+            results.freshWarmNode?.id,
+            ...(results.warmNodes ?? []).map((node) => node.id),
+            ...(results.existingNodes ?? []).map((node) => node.id),
+          ].filter((id): id is string => typeof id === 'string')
+        );
+        return Promise.resolve({
+          results: [...ids].filter((id) => bound.includes(id)).map((id) => ({ id })),
+        });
+      }
       if (sql.includes('warm_since IS NOT NULL')) {
         return Promise.resolve({ results: (results.warmNodes ?? []).map(toPlacementRow) });
       }
@@ -708,7 +725,21 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
 
   it('rejects an undersized preferred node before health verification', async () => {
     const state = createState({
-      config: { ...createState().config, preferredNodeId: 'node-medium', vmSize: 'large' },
+      config: {
+        ...createState().config,
+        preferredNodeId: 'node-medium',
+        vmSize: 'large',
+        resolvedReservation: {
+          version: 2,
+          cpuMillis: 8000,
+          memoryMb: 16384,
+          diskMb: 163840,
+          exclusiveNode: false,
+          maxCoTenants: 1,
+          source: 'task',
+          sourceId: 'task-1',
+        },
+      },
     });
     const rc = createContext({
       preferredNode: {

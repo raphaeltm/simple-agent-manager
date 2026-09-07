@@ -20,6 +20,7 @@ import type { PlacementHostDiagnosticInput } from '../../services/placement-diag
 import { updatePlacementDiagnostics } from './placement-diagnostics';
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
   type CapacityAwareNodePlacementRow,
   resolveReusableNodeCapacitySnapshot,
@@ -121,6 +122,12 @@ async function claimWarmNodeCandidate(
   selection: ReusableNodeSelection
 ): Promise<boolean> {
   const nodeId = selection.nodeId;
+  const eligible = await filterReusableNodesByCurrentAuthority(rc.env.DATABASE, {
+    userId: state.userId,
+    projectId: state.projectId,
+    selections: [selection],
+  });
+  if (!eligible.has(nodeId)) return false;
   const doId = rc.env.NODE_LIFECYCLE.idFromName(nodeId);
   const stub = rc.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<NodeLifecycle>;
   await rc.assertRecoveryAuthority(state);
@@ -308,7 +315,9 @@ export async function tryClaimWarmNode(
   );
   const warmStrategy = taskPlacementStrategy(state);
   const warmSelectionSettings = state.config.capacityPoolSelection?.selectionSettings;
+  const authoritativeWarmNodes = await currentReusableNodeIds(state, rc, warmNodes.results);
   const sorted = warmNodes.results
+    .filter((node) => authoritativeWarmNodes.has(node.id))
     .filter((node) =>
       isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)
     )
@@ -522,6 +531,8 @@ export async function findNodeWithCapacity(
 
   if (!nodes.results.length) return null;
 
+  const authoritativeNodes = await currentReusableNodeIds(state, rc, nodes.results);
+
   const nodeIds = nodes.results.map((n) => n.id);
   const usageByNode = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, nodeIds);
 
@@ -553,7 +564,7 @@ export async function findNodeWithCapacity(
       ? 'Host agent version is incompatible'
       : !nodeSatisfiesTaskResources(node, state)
         ? 'Trusted host hardware does not satisfy the requested resources'
-        : !selection
+        : !selection || !authoritativeNodes.has(node.id)
           ? 'Host is outside the current pool allocation authority'
           : null;
     if (exclusion || !selection) {
@@ -690,6 +701,21 @@ function resolveReusableNodeSelection(
     nodeId: node.id,
     capacityPlacementSnapshot,
   };
+}
+
+async function currentReusableNodeIds(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  nodes: readonly NodePlacementFields[]
+): Promise<Set<string>> {
+  return filterReusableNodesByCurrentAuthority(rc.env.DATABASE, {
+    userId: state.userId,
+    projectId: state.projectId,
+    selections: nodes.flatMap((node) => {
+      const selection = resolveReusableNodeSelection(state, node);
+      return selection ? [selection] : [];
+    }),
+  });
 }
 
 /**

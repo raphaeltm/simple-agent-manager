@@ -16,10 +16,21 @@
  */
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import {
+  findNodeWithCapacity,
+  tryClaimWarmNode,
+} from '../../../src/durable-objects/task-runner/node-selection';
+import { handleNodeSelection } from '../../../src/durable-objects/task-runner/node-steps';
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../../src/durable-objects/task-runner/types';
+import type { TaskStartCapacityPoolSelection } from '../../../src/services/placement-resolver';
+import { filterReusableNodesByCurrentAuthority } from '../../../src/services/reusable-node-authority';
 import { assertNodeAllocationPlanCurrent } from '../../../src/services/nodes';
 import type { WorkspacePlacementInput } from '../../../src/services/workspace-placement';
 import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
@@ -250,6 +261,161 @@ function placementInput(
 function envFor(database: D1Database): Env {
   return { DATABASE: database } as unknown as Env;
 }
+
+function reuseState(fixture: PoolFixture): TaskRunnerState {
+  const snapshot = snapshotFor(fixture);
+  const selection = {
+    poolId: fixture.poolId,
+    scope: fixture.scope,
+    revision: 4,
+    strategy: 'balanced',
+    exhaustionPolicy: 'queue',
+    effectiveState: 'configured-ready',
+    capacityPoolProjectId: null,
+    workloadRole: 'workspace',
+    poolSnapshot: snapshot,
+    candidates: [
+      {
+        ...snapshot,
+        id: fixture.candidateId,
+        poolId: fixture.poolId,
+        provider: 'hetzner',
+        location: 'fsn1',
+        machineSize: 'large',
+        credentialAttributionSource: 'user',
+        snapshot,
+      },
+    ],
+  } as TaskStartCapacityPoolSelection;
+  return {
+    taskId: 'task-reuse',
+    userId: USER_ID,
+    projectId: PROJECT_ID,
+    config: {
+      vmSize: 'large',
+      vmLocation: 'fsn1',
+      capacityPoolSelection: selection,
+      resolvedReservation: {
+        version: 2,
+        cpuMillis: 1000,
+        memoryMb: 1024,
+        diskMb: 1024,
+        exclusiveNode: false,
+        maxCoTenants: 5,
+        source: 'platform',
+        sourceId: 'platform',
+      },
+    },
+    stepResults: { nodeId: null },
+  } as TaskRunnerState;
+}
+
+describe('reuse selection agrees with final authority admission', () => {
+  it('never claims a stale warm node when a current warm host is available', async () => {
+    const database = createDb();
+    const pool = seedPool('user');
+    seedNode(pool, { capacity_pool_revision: 3, warm_since: AUTHORITY_TIMESTAMP });
+    seedNode(pool, { id: 'node-2', warm_since: AUTHORITY_TIMESTAMP });
+    const claimedIds: string[] = [];
+    const context = {
+      env: {
+        ...envFor(database),
+        NODE_LIFECYCLE: {
+          idFromName: (id: string) => id,
+          get: (id: string) => ({
+            tryClaim: async () => {
+              claimedIds.push(id);
+              return { claimed: true };
+            },
+          }),
+        },
+      },
+      assertRecoveryAuthority: vi.fn(),
+      ctx: { storage: { put: vi.fn() } },
+    } as unknown as TaskRunnerContext;
+    expect((await tryClaimWarmNode(reuseState(pool), context))?.nodeId).toBe('node-2');
+    expect(claimedIds).toEqual(['node-2']);
+  });
+
+  it('rejects a stale preferred host before advancing to workspace creation', async () => {
+    const database = createDb();
+    const pool = seedPool('user');
+    seedNode(pool, { capacity_pool_revision: 3 });
+    const state = reuseState(pool);
+    state.config.preferredNodeId = 'node-1';
+    const advanceToStep = vi.fn();
+    await expect(
+      handleNodeSelection(state, {
+        env: envFor(database),
+        updateD1ExecutionStep: vi.fn(),
+        advanceToStep,
+      } as unknown as TaskRunnerContext)
+    ).rejects.toMatchObject({ permanent: true });
+    expect(advanceToStep).not.toHaveBeenCalled();
+  });
+
+  it('skips a stale pool revision and selects the current host instead of retrying the same host', async () => {
+    const database = createDb();
+    const pool = seedPool('user');
+    seedNode(pool, { capacity_pool_revision: 3 });
+    seedNode(pool, { id: 'node-2' });
+
+    expect(await reserveWorkspacePlacement(database, placementInput(pool), 5)).toBe(false);
+    const selected = await findNodeWithCapacity(reuseState(pool), {
+      env: envFor(database),
+    } as TaskRunnerContext);
+    expect(selected?.nodeId).toBe('node-2');
+    expect(
+      await reserveWorkspacePlacement(database, placementInput(pool, { nodeId: 'node-2' }), 5)
+    ).toBe(true);
+  });
+
+  it('returns no reusable node when only a grandfathered host exists under a current user pool', async () => {
+    const database = createDb();
+    const pool = seedPool('user');
+    seedNode(null);
+    expect(
+      await findNodeWithCapacity(reuseState(pool), {
+        env: envFor(database),
+      } as TaskRunnerContext)
+    ).toBeNull();
+  });
+
+  it.each([
+    "UPDATE credentials SET is_active = 0 WHERE id = 'user-cloud'",
+    "UPDATE project_members SET status = 'removed' WHERE project_id = 'project-1'",
+    "UPDATE capacity_pools SET is_default = 0 WHERE id = 'pool-user'",
+  ])('does not offer a node whose authority was revoked: %s', async (sql) => {
+    const database = createDb();
+    const pool = seedPool('user');
+    seedNode(pool);
+    db().exec(sql);
+    expect(
+      await findNodeWithCapacity(reuseState(pool), {
+        env: envFor(database),
+      } as TaskRunnerContext)
+    ).toBeNull();
+  });
+
+  it('filters 150 hosts using grouped queries within the D1 parameter ceiling', async () => {
+    createDb();
+    const pool = seedPool('user');
+    const selections = Array.from({ length: 150 }, (_, index) => {
+      const nodeId = `node-${index}`;
+      seedNode(pool, { id: nodeId });
+      return { nodeId, capacityPlacementSnapshot: snapshotFor(pool) };
+    });
+    const database = createSqliteD1WithBindLimit(db(), 100);
+    const prepare = vi.spyOn(database, 'prepare');
+    const eligible = await filterReusableNodesByCurrentAuthority(database, {
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      selections,
+    });
+    expect(eligible.size).toBe(150);
+    expect(prepare.mock.calls.length).toBeLessThanOrEqual(3);
+  });
+});
 
 describe('current effective pool authority at final admission', () => {
   it('admits a user-pool node while the user default pool is the effective pool', async () => {

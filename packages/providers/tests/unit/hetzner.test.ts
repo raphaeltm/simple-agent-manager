@@ -648,6 +648,52 @@ describe('HetznerProvider', () => {
       expect(body.location).toBe('hel1');
     });
 
+    it.each(['fsn1', undefined])('keeps native placement in its authorized location (%s)', async (location) => {
+      vi.useFakeTimers();
+      const mockFetch = vi.fn().mockImplementation(async (_url, init) => {
+        const body = jsonBody(init);
+        if (body.location === 'fsn1') {
+          return new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          });
+        }
+        return new Response(JSON.stringify({ server: createMockServer() }), { status: 200 });
+      });
+      globalThis.fetch = mockFetch;
+
+      const promise = provider.createVM({
+        name: 'pool-node',
+        location,
+        userData: '',
+        native: { instanceType: 'cx33' },
+      }).catch((err) => err);
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toMatchObject({ statusCode: 412 });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      for (let index = 0; index < mockFetch.mock.calls.length; index++) {
+        expect(jsonBody(fetchCall(mockFetch, index).init).location).toBe('fsn1');
+      }
+    });
+
+    it('allows native placement to recover on the same-location retry', async () => {
+      vi.useFakeTimers();
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'error during placement' } }), { status: 412 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ server: createMockServer() }), { status: 200 }));
+      globalThis.fetch = mockFetch;
+
+      const promise = provider.createVM({
+        name: 'pool-node', location: 'hel1', userData: '', native: { instanceType: 'cx33' },
+      });
+      await vi.runAllTimersAsync();
+
+      expect(await promise).toMatchObject({ id: String(createMockServer().id) });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(jsonBody(fetchCall(mockFetch, 0).init).location).toBe('hel1');
+      expect(jsonBody(fetchCall(mockFetch, 1).init).location).toBe('hel1');
+    });
+
     it('should only retry primary when fallback is disabled', async () => {
       vi.useFakeTimers();
       const noFallbackProvider = new HetznerProvider('test-token', 'fsn1', undefined, false);

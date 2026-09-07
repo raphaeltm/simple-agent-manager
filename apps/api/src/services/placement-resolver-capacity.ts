@@ -140,7 +140,9 @@ export function resolveReusableNodeCapacitySnapshot(input: {
   }
 
   if (!node.capacityPoolId) {
-    return selection.scope === 'project' ? undefined : capacityPoolSnapshotForPool(selection);
+    // Legacy nodes drain once any effective pool exists. An incomplete pool
+    // snapshot cannot pass final admission and would be selected again on retry.
+    return undefined;
   }
 
   if (selection.scope === 'project') {

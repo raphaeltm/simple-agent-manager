@@ -9,6 +9,7 @@ import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
   type CapacityAwareNodePlacementRow,
   capacityPoolNoCandidatesError,
@@ -127,6 +128,17 @@ export async function handleNodeSelection(
     });
     if (capacityPlacementSnapshot === undefined) {
       throw Object.assign(new Error('Specified node is outside the selected capacity pool'), {
+        permanent: true,
+      });
+    }
+
+    const authoritativeNodes = await filterReusableNodesByCurrentAuthority(rc.env.DATABASE, {
+      userId: state.userId,
+      projectId: state.projectId,
+      selections: [{ nodeId: node.id, capacityPlacementSnapshot }],
+    });
+    if (!authoritativeNodes.has(node.id)) {
+      throw Object.assign(new Error('Specified node no longer has current placement authority'), {
         permanent: true,
       });
     }

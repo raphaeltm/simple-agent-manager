@@ -317,7 +317,8 @@ export async function cleanupFreshProvisioningNode(
   const database = requireD1(env);
   const row = await database
     .prepare(
-      `SELECT n.id, n.status, n.provider_instance_id AS providerInstanceId
+      `SELECT n.id, n.status, n.provider_instance_id AS providerInstanceId,
+              n.runtime_incarnation_id AS runtimeIncarnationId
          FROM nodes n
         WHERE n.id = ?
           AND n.user_id = ?
@@ -337,7 +338,12 @@ export async function cleanupFreshProvisioningNode(
         LIMIT 1`
     )
     .bind(input.nodeId, input.userId, input.nodeRole)
-    .first<{ id: string; status: string; providerInstanceId: string | null }>();
+    .first<{
+      id: string;
+      status: string;
+      providerInstanceId: string | null;
+      runtimeIncarnationId: string | null;
+    }>();
 
   if (!row) return 'skipped';
 
@@ -351,6 +357,7 @@ export async function cleanupFreshProvisioningNode(
             AND node_class = 'managed'
             AND node_role = ?
             AND provider_instance_id IS NULL
+            AND runtime_incarnation_id IS ?
             AND status IN ('creating', 'error')
             AND NOT EXISTS (
               SELECT 1 FROM workspaces w
@@ -362,13 +369,52 @@ export async function cleanupFreshProvisioningNode(
                WHERE de.node_id = nodes.id
             )`
       )
-      .bind(input.nodeId, input.userId, input.nodeRole)
+      .bind(input.nodeId, input.userId, input.nodeRole, row.runtimeIncarnationId ?? null)
       .run();
     return (deleted.meta?.changes ?? 0) > 0 ? 'placeholder-deleted' : 'skipped';
   }
 
   try {
-    await deleteNodeResourcesStrict(input.nodeId, input.userId, env);
+    // Claim teardown atomically with the no-consumer checks. A SELECT alone lets
+    // another task reserve this running node before provider deletion begins.
+    // Final admission requires running, so either that reservation wins and this
+    // claim fails, or destroying fences every later reservation.
+    const claimed = await database
+      .prepare(
+        `UPDATE nodes SET status = 'destroying', updated_at = ?
+          WHERE id = ? AND user_id = ?
+            AND runtime = 'vm' AND node_class = 'managed' AND node_role = ?
+            AND status = ?
+            AND provider_instance_id = ?
+            AND runtime_incarnation_id IS ?
+            AND NOT EXISTS (
+              SELECT 1 FROM workspaces w WHERE w.node_id = nodes.id
+                AND w.status IN ('creating', 'running', 'recovery', 'stopping')
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM deployment_environments de WHERE de.node_id = nodes.id
+            )`
+      )
+      .bind(
+        new Date().toISOString(),
+        input.nodeId,
+        input.userId,
+        input.nodeRole,
+        row.status,
+        row.providerInstanceId,
+        row.runtimeIncarnationId ?? null
+      )
+      .run();
+    if ((claimed.meta?.changes ?? 0) !== 1) return 'skipped';
+
+    await deleteNodeResourcesStrict(input.nodeId, input.userId, env, {
+      expectedRuntime: {
+        userId: input.userId,
+        runtime: 'vm',
+        providerInstanceId: row.providerInstanceId,
+        runtimeIncarnationId: row.runtimeIncarnationId ?? null,
+      },
+    });
     return 'strict-deleted';
   } catch (err) {
     log.error('provisioning_authority.fresh_node_cleanup_failed', {

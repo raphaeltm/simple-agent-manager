@@ -250,11 +250,15 @@ describe('provisioning authority helpers', () => {
   });
 
   it('strictly deletes a provisioned fresh node and reports cleanup failure without hiding it', async () => {
-    const { env } = makeEnv(() => ({
-      id: 'node-1',
-      status: 'running',
-      providerInstanceId: 'vm-1',
-    }));
+    const { env } = makeEnv((_sql, _binds, method) =>
+      method === 'run'
+        ? { meta: { changes: 1 } }
+        : {
+            id: 'node-1',
+            status: 'running',
+            providerInstanceId: 'vm-1',
+          }
+    );
 
     await expect(
       cleanupFreshProvisioningNode(env, {
@@ -264,7 +268,14 @@ describe('provisioning authority helpers', () => {
         reason: 'test-strict',
       })
     ).resolves.toBe('strict-deleted');
-    expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-1', 'user-1', env);
+    expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-1', 'user-1', env, {
+      expectedRuntime: {
+        userId: 'user-1',
+        runtime: 'vm',
+        providerInstanceId: 'vm-1',
+        runtimeIncarnationId: null,
+      },
+    });
 
     mocks.deleteNodeResourcesStrict.mockRejectedValueOnce(new Error('provider delete failed'));
     await expect(

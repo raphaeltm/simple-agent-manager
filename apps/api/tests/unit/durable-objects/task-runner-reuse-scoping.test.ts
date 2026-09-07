@@ -21,7 +21,7 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const REQUIRED_AGENT_VERSION = 'agent-v1';
 
@@ -69,7 +69,7 @@ function insertNode(sqlite: Database.Database, row: NodeRow): void {
       row.status ?? 'running',
       row.healthStatus ?? 'healthy',
       row.nodeRole ?? 'workspace',
-      row.runtime ?? null,
+      row.runtime === undefined ? 'vm' : row.runtime,
       REQUIRED_AGENT_VERSION,
       now,
       row.warmSince ?? null,
@@ -133,7 +133,9 @@ let database: D1Database;
 
 beforeEach(() => {
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.nodes, schema.workspaces]);
+  createAllSchemaTables(sqlite, schema);
+  sqlite.exec(`INSERT INTO project_members (project_id, user_id, role, status)
+    VALUES ('project-1', 'user-1', 'owner', 'active'), ('project-1', 'user-2', 'owner', 'active')`);
   database = createSqliteD1(sqlite);
 });
 
