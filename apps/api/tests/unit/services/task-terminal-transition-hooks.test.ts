@@ -1,13 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { reconcileTaskWaits, recordTaskLifecycleEventViaSourceOutbox } = vi.hoisted(() => ({
+const { admitProjectEventSourceIntentById, reconcileTaskWaits } = vi.hoisted(() => ({
+  admitProjectEventSourceIntentById: vi.fn(async () => ({ state: 'admitted' })),
   reconcileTaskWaits: vi.fn(async () => ({ checked: 1 })),
-  recordTaskLifecycleEventViaSourceOutbox: vi.fn(async () => undefined),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits }));
-vi.mock('../../../src/services/project-lifecycle-events', () => ({
-  recordTaskLifecycleEventViaSourceOutbox,
+vi.mock('../../../src/services/project-event-source-outbox', () => ({
+  admitProjectEventSourceIntentById,
 }));
 
 import {
@@ -17,6 +17,10 @@ import {
 } from '../../../src/services/task-terminal-transition-hooks';
 
 describe('task terminal transition hooks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('publishes the shared event to injected subscribers', async () => {
     const handle = vi.fn(async () => {});
     const event = {
@@ -51,11 +55,12 @@ describe('task terminal transition hooks', () => {
     expect(reconcileTaskWaits).toHaveBeenCalledWith({}, 'project-1', 'child-1');
   });
 
-  it('records a normalized ProjectData task lifecycle event for terminal tasks', async () => {
+  it('nudges the captured ProjectData task lifecycle intent for terminal tasks', async () => {
     const event = {
       taskId: 'child-1',
       projectId: 'project-1',
       parentTaskId: 'parent-1',
+      projectEventSourceIntentId: 'intent-1',
       status: 'completed' as const,
       reason: 'done',
       occurredAt: '2026-08-09T00:00:00.000Z',
@@ -65,14 +70,22 @@ describe('task terminal transition hooks', () => {
 
     await createProjectEventTaskTerminalTransitionHook(env as never).handle(event);
 
-    expect(recordTaskLifecycleEventViaSourceOutbox).toHaveBeenCalledWith(env, {
-      projectId: 'project-1',
+    expect(admitProjectEventSourceIntentById).toHaveBeenCalledWith(env, 'intent-1');
+  });
+
+  it('does not rebuild a lifecycle event when the captured intent id is missing', async () => {
+    const event = {
       taskId: 'child-1',
-      status: 'completed',
+      projectId: 'project-1',
       parentTaskId: 'parent-1',
+      status: 'completed' as const,
       reason: 'done',
-      source: 'test',
       occurredAt: '2026-08-09T00:00:00.000Z',
-    });
+      source: 'test',
+    };
+
+    await createProjectEventTaskTerminalTransitionHook({} as never).handle(event);
+
+    expect(admitProjectEventSourceIntentById).not.toHaveBeenCalled();
   });
 });

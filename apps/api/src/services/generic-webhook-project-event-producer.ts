@@ -71,7 +71,10 @@ function truncateUtf8(value: string, maxBytes: number): string {
   return `${value.slice(0, low)}${TRUNCATION_SUFFIX}`;
 }
 
-function boundedString(value: string, maxBytes = DEFAULT_PROJECT_EVENT_LIMITS.maxReasonBytes): string {
+function boundedString(
+  value: string,
+  maxBytes = DEFAULT_PROJECT_EVENT_LIMITS.maxReasonBytes
+): string {
   return truncateUtf8(value.trim(), maxBytes);
 }
 
@@ -202,7 +205,9 @@ function receivedAtMs(receivedAt: string): number | undefined {
 }
 
 function projectEventLimits(env: Env): ProjectEventLimits {
-  return resolveProjectEventLimits(env as unknown as Parameters<typeof resolveProjectEventLimits>[0]);
+  return resolveProjectEventLimits(
+    env as unknown as Parameters<typeof resolveProjectEventLimits>[0]
+  );
 }
 
 async function buildValidatedEventInput(
@@ -221,7 +226,12 @@ async function buildValidatedEventInput(
     subject,
     severity: input.outcome === 'internal_error' ? 'error' : 'info',
     deliveryKey: `delivery:${input.deliveryId}`,
-    payloadFingerprint: await fingerprint({ source: WEBHOOK_EVENT_SOURCE, eventType, subject, metadata }),
+    payloadFingerprint: await fingerprint({
+      source: WEBHOOK_EVENT_SOURCE,
+      eventType,
+      subject,
+      metadata,
+    }),
     metadata,
     display: {
       title: `Webhook ${input.outcome.replaceAll('_', ' ')}`,

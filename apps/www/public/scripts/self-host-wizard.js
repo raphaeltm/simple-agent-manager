@@ -5,6 +5,37 @@
 (function () {
   'use strict';
 
+  if (window.SAMSelfHostWizardStarted) return;
+  var helpers = window.SAMSelfHostWizardHelpers;
+  if (!helpers) {
+    var helperScript = document.createElement('script');
+    helperScript.src = '/scripts/self-host-wizard-helpers.js';
+    helperScript.onload = function () {
+      var mainScript = document.createElement('script');
+      mainScript.src = '/scripts/self-host-wizard.js';
+      document.head.appendChild(mainScript);
+    };
+    document.head.appendChild(helperScript);
+    return;
+  }
+  window.SAMSelfHostWizardStarted = true;
+
+  var generateWebhookSecret = helpers.generateWebhookSecret;
+  var generatePassphrase = helpers.generatePassphrase;
+  var base64Encode = helpers.base64Encode;
+  var buildGitHubAppUrl = helpers.buildGitHubAppUrl;
+  var addPreviewRow = helpers.addPreviewRow;
+  var renderRows = helpers.renderRows;
+  var copyIconEl = helpers.copyIconEl;
+  var eyeIconEl = helpers.eyeIconEl;
+  var eyeOffIconEl = helpers.eyeOffIconEl;
+  var setIcon = helpers.setIcon;
+  var safeHttpsUrl = helpers.safeHttpsUrl;
+  var buildGhScript = helpers.buildGhScript;
+  var renderMaskedGhScript = helpers.renderMaskedGhScript;
+  var copyText = helpers.copyText;
+  var flash = helpers.flash;
+
   var main = document.querySelector('.sh');
   if (!main) return;
 
@@ -98,36 +129,6 @@
     if (n < 0) return 0;
     if (n > LAST) return LAST;
     return n;
-  }
-
-  // --- Crypto helpers (mirror GitHubAppSetup.astro) ---
-  function generateWebhookSecret() {
-    var bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    var hex = '';
-    for (var i = 0; i < bytes.length; i++) {
-      hex += bytes[i].toString(16).padStart(2, '0');
-    }
-    return hex;
-  }
-
-  function generatePassphrase() {
-    var bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    var binary = '';
-    for (var i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  }
-
-  function base64Encode(str) {
-    var bytes = new TextEncoder().encode(str);
-    var binary = '';
-    for (var i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
   }
 
   // --- Field helpers ---
@@ -261,99 +262,6 @@
     if (el) el.textContent = value;
   }
 
-  // --- GitHub App URL (mirror GitHubAppSetup.astro buildGitHubAppUrl) ---
-  function buildGitHubAppUrl(domain, appName, org) {
-    var name = appName && appName.trim() ? appName.trim() : 'SAM';
-    var params = new URLSearchParams();
-    params.set('name', name);
-    params.set('url', 'https://app.' + domain);
-    params.append('callback_urls[]', 'https://api.' + domain + '/api/auth/callback/github');
-    params.set('setup_url', 'https://api.' + domain + '/api/github/callback');
-    params.set('setup_on_update', 'true');
-    params.set('public', 'false');
-    params.set('webhook_active', 'true');
-    params.set('webhook_url', 'https://api.' + domain + '/api/github/webhook');
-    params.set('contents', 'write');
-    params.set('metadata', 'read');
-    params.set('email_addresses', 'read');
-    params.set('pull_requests', 'read');
-    params.set('checks', 'read');
-    params.set('actions', 'read');
-    params.set('issues', 'read');
-    params.append('events[]', 'check_run');
-    params.append('events[]', 'check_suite');
-    params.append('events[]', 'issues');
-    params.append('events[]', 'issue_comment');
-    params.append('events[]', 'pull_request_review');
-    params.append('events[]', 'pull_request_review_comment');
-    params.append('events[]', 'repository');
-    params.append('events[]', 'workflow_run');
-    params.append('events[]', 'push');
-    params.append('events[]', 'pull_request');
-
-    var base =
-      org && org.trim()
-        ? 'https://github.com/organizations/' +
-          encodeURIComponent(org.trim()) +
-          '/settings/apps/new'
-        : 'https://github.com/settings/apps/new';
-    return base + '?' + params.toString();
-  }
-
-  function generateAppLink() {
-    var domain = getDomain();
-    if (!isValidDomain(domain)) {
-      goTo(STEP_IDS.indexOf('domain'));
-      flash(fieldEl('sh-domain'));
-      return;
-    }
-    if (!state.webhookSecret) {
-      state.webhookSecret = generateWebhookSecret();
-    }
-    var appName = getField('sh-app-name') || 'SAM';
-    var org = state.accountType === 'org' ? getField('sh-org') : '';
-    var url = buildGitHubAppUrl(domain, appName, org);
-
-    var link = document.getElementById('sh-app-link');
-    if (link) link.href = safeHttpsUrl([url]) || '#';
-
-    var secretEl = document.getElementById('sh-webhook-secret');
-    if (secretEl) secretEl.textContent = state.webhookSecret;
-
-    var preview = document.getElementById('sh-app-preview');
-    if (preview) {
-      preview.replaceChildren();
-      addPreviewRow(preview, 'Name', appName);
-      addPreviewRow(preview, 'Homepage URL', 'https://app.' + domain);
-      addPreviewRow(preview, 'Callback URL', 'https://api.' + domain + '/api/auth/callback/github');
-      addPreviewRow(preview, 'Setup URL', 'https://api.' + domain + '/api/github/callback');
-      addPreviewRow(preview, 'Redirect on update', 'Enabled');
-      addPreviewRow(preview, 'Webhook URL', 'https://api.' + domain + '/api/github/webhook');
-      addPreviewRow(
-        preview,
-        'Permissions',
-        'Contents: write · Metadata: read · Emails: read · Issues: read · Pull requests: read · Checks: read · Actions: read'
-      );
-      addPreviewRow(
-        preview,
-        'Events',
-        'check_run, check_suite, issues, issue_comment, pull_request, pull_request_review, pull_request_review_comment, push, repository, workflow_run'
-      );
-    }
-
-    var result = document.getElementById('sh-app-result');
-    if (result) result.hidden = false;
-  }
-
-  function addPreviewRow(dl, term, value) {
-    var dt = document.createElement('dt');
-    dt.textContent = term;
-    var dd = document.createElement('dd');
-    dd.textContent = value;
-    dl.appendChild(dt);
-    dl.appendChild(dd);
-  }
-
   // --- Passphrase ---
   function ensurePassphrase() {
     if (!state.passphrase) {
@@ -427,219 +335,10 @@
       });
   }
 
-  function maskValue(value) {
-    // Show a fixed-length dot run rather than mirroring the real length, so the
-    // mask never leaks how long the secret is.
-    return '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
-  }
-
-  function renderRows(container, rows) {
-    if (!container) return;
-    container.replaceChildren();
-    rows.forEach(function (row) {
-      var hasValue = row.value && row.value.length > 0;
-      var realVal;
-      var displayVal;
-      var missing = false;
-      if (hasValue) {
-        realVal = row.value;
-        displayVal = row.value;
-      } else if (row.fallback) {
-        realVal = row.fallback;
-        displayVal = row.fallback + ' (default)';
-      } else {
-        realVal = '';
-        displayVal = 'Add in Step ' + missingStepFor(row.key);
-        missing = true;
-      }
-
-      // Secret rows with a real value start masked; everything else shows plainly.
-      var maskable = !!row.secret && hasValue;
-
-      var wrap = document.createElement('div');
-      wrap.className = 'sh-secret-row';
-
-      var key = document.createElement('button');
-      key.type = 'button';
-      key.className = 'sh-secret-key';
-      key.title = 'Copy name';
-      key.setAttribute('aria-label', 'Copy name ' + row.key);
-      var keyName = document.createElement('span');
-      keyName.className = 'sh-secret-key-name';
-      keyName.textContent = row.key;
-      key.appendChild(keyName);
-      if (row.note) {
-        var keyNote = document.createElement('span');
-        keyNote.className = 'sh-secret-key-note';
-        keyNote.textContent = row.note;
-        key.appendChild(keyNote);
-      }
-      key.addEventListener('click', function () {
-        copyText(row.key, key);
-      });
-
-      var val = document.createElement('span');
-      val.className =
-        'sh-secret-val' + (missing ? ' is-missing' : '') + (maskable ? ' is-masked' : '');
-      val.textContent = maskable ? maskValue(realVal) : displayVal;
-
-      var acts = document.createElement('span');
-      acts.className = 'sh-secret-acts';
-
-      if (maskable) {
-        var revealed = false;
-        var eye = document.createElement('button');
-        eye.type = 'button';
-        eye.className = 'sh-secret-act sh-secret-reveal';
-        eye.setAttribute('aria-label', 'Reveal ' + row.key);
-        eye.setAttribute('aria-pressed', 'false');
-        setIcon(eye, eyeIconEl);
-        eye.addEventListener('click', function () {
-          revealed = !revealed;
-          val.textContent = revealed ? realVal : maskValue(realVal);
-          val.classList.toggle('is-masked', !revealed);
-          setIcon(eye, revealed ? eyeOffIconEl : eyeIconEl);
-          eye.setAttribute('aria-pressed', revealed ? 'true' : 'false');
-          eye.setAttribute('aria-label', (revealed ? 'Hide ' : 'Reveal ') + row.key);
-        });
-        acts.appendChild(eye);
-      }
-
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'sh-secret-act';
-      btn.setAttribute('aria-label', 'Copy ' + row.key);
-      btn.appendChild(copyIconEl());
-      if (missing) {
-        btn.disabled = true;
-      } else {
-        btn.addEventListener('click', function () {
-          copyText(realVal, btn);
-        });
-      }
-      acts.appendChild(btn);
-
-      wrap.appendChild(key);
-      wrap.appendChild(val);
-      wrap.appendChild(acts);
-      container.appendChild(wrap);
-    });
-  }
-
-  function missingStepFor(key) {
-    if (key.indexOf('CF_') === 0) return 3;
-    if (key.indexOf('GH_') === 0) return 4;
-    if (key.indexOf('R2_') === 0) return 3;
-    if (key === 'PULUMI_CONFIG_PASSPHRASE') return 5;
-    return 6;
-  }
-
-  // --- Safe SVG icon construction (no innerHTML) ---
-  var SVG_NS = 'http://www.w3.org/2000/svg';
-  var SVG_ATTRS = {
-    width: '15',
-    height: '15',
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    'stroke-width': '2',
-    'stroke-linecap': 'round',
-    'stroke-linejoin': 'round',
-  };
-
-  function createSvg(children) {
-    var svg = document.createElementNS(SVG_NS, 'svg');
-    Object.keys(SVG_ATTRS).forEach(function (k) {
-      svg.setAttribute(k, SVG_ATTRS[k]);
-    });
-    children.forEach(function (child) {
-      svg.appendChild(child);
-    });
-    return svg;
-  }
-
-  function svgEl(tag, attrs) {
-    var el = document.createElementNS(SVG_NS, tag);
-    if (attrs) {
-      Object.keys(attrs).forEach(function (k) {
-        el.setAttribute(k, attrs[k]);
-      });
-    }
-    return el;
-  }
-
-  function copyIconEl() {
-    return createSvg([
-      svgEl('rect', { x: '9', y: '9', width: '13', height: '13', rx: '2', ry: '2' }),
-      svgEl('path', { d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' }),
-    ]);
-  }
-
-  function eyeIconEl() {
-    return createSvg([
-      svgEl('path', { d: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z' }),
-      svgEl('circle', { cx: '12', cy: '12', r: '3' }),
-    ]);
-  }
-
-  function eyeOffIconEl() {
-    return createSvg([
-      svgEl('path', { d: 'M9.88 9.88a3 3 0 1 0 4.24 4.24' }),
-      svgEl('path', {
-        d: 'M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68',
-      }),
-      svgEl('path', {
-        d: 'M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61',
-      }),
-      svgEl('line', { x1: '2', x2: '22', y1: '2', y2: '22' }),
-    ]);
-  }
-
-  function setIcon(el, iconFn) {
-    var existing = el.querySelector('svg');
-    if (existing) existing.remove();
-    el.appendChild(iconFn());
-  }
-
-  // Validates scheme only (blocks javascript:/data: injection). Does not check host.
-  function safeHttpsUrl(parts) {
-    var url = parts.join('');
-    try {
-      var parsed = new URL(url);
-      if (parsed.protocol !== 'https:') return null;
-      return parsed.href;
-    } catch (e) {
-      return null;
-    }
-  }
-
   // --- Step 6: gh CLI one-shot script ---
   // Closure variable for the unmasked gh CLI script. Avoids exposing secrets in
   // the DOM (previously stored as a data-script attribute).
   var ghCliScriptCache = '';
-
-  // Single-quote escaping for POSIX shells: close the quote, emit an escaped
-  // quote, reopen — '\'' — so arbitrary values (incl. base64 PEM) survive intact.
-  function shellQuote(value) {
-    return "'" + String(value).replace(/'/g, "'\\''") + "'";
-  }
-
-  function buildGhScript(data, repo) {
-    var lines = [];
-    var r = repo ? ' --repo ' + shellQuote(repo) : '';
-    data.vars.forEach(function (row) {
-      var v = row.value && row.value.length > 0 ? row.value : row.fallback || '';
-      if (!v) return;
-      lines.push('gh variable set ' + row.key + r + ' --env production --body ' + shellQuote(v));
-    });
-    data.secrets.forEach(function (row) {
-      if (!row.value || row.value.length === 0) return;
-      lines.push(
-        'gh secret set ' + row.key + r + ' --env production --body ' + shellQuote(row.value)
-      );
-    });
-    return lines.join('\n');
-  }
 
   function renderGhCli(data) {
     var repo = getField('sh-repo').trim();
@@ -660,23 +359,13 @@
     if (note) note.hidden = !!repo;
   }
 
-  function renderMaskedGhScript(script) {
-    return script
-      .split('\n')
-      .map(function (line) {
-        return line.replace(/(--body )('.*')$/, function (m, p1) {
-          return p1 + maskValue();
-        });
-      })
-      .join('\n');
-  }
-
   // --- Step 7: deploy ---
   function renderDeploy() {
     var domain = getDomain();
     var d = isValidDomain(domain) ? domain : 'yourdomain.com';
     var appUrl = safeHttpsUrl(['https://app.', d]) || 'https://app.yourdomain.com';
-    var apiUrl = safeHttpsUrl(['https://api.', d, '/health']) || 'https://api.yourdomain.com/health';
+    var apiUrl =
+      safeHttpsUrl(['https://api.', d, '/health']) || 'https://api.yourdomain.com/health';
     var health = document.getElementById('sh-health-cmd');
     if (health) health.textContent = 'curl ' + apiUrl;
     var open = document.getElementById('sh-app-open');
@@ -697,63 +386,27 @@
     var zoneLink = document.getElementById('sh-cf-zone-link');
 
     if (cfApiLink) {
-      cfApiLink.href = (hasAccount &&
-        safeHttpsUrl(['https://dash.cloudflare.com/', encodeURIComponent(account), '/api-tokens'])) ||
+      cfApiLink.href =
+        (hasAccount &&
+          safeHttpsUrl([
+            'https://dash.cloudflare.com/',
+            encodeURIComponent(account),
+            '/api-tokens',
+          ])) ||
         fallback;
     }
     if (zoneLink) {
-      zoneLink.href = (hasAccount && isValidDomain(domain) &&
-        safeHttpsUrl([
-          'https://dash.cloudflare.com/',
-          encodeURIComponent(account),
-          '/',
-          encodeURIComponent(domain),
-        ])) || fallback;
+      zoneLink.href =
+        (hasAccount &&
+          isValidDomain(domain) &&
+          safeHttpsUrl([
+            'https://dash.cloudflare.com/',
+            encodeURIComponent(account),
+            '/',
+            encodeURIComponent(domain),
+          ])) ||
+        fallback;
     }
-  }
-
-  // --- Copy helpers ---
-  function copyText(text, btn) {
-    if (!text) return;
-    var done = function () {
-      if (!btn) return;
-      btn.classList.add('is-copied');
-      setTimeout(function () {
-        btn.classList.remove('is-copied');
-      }, 1400);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, function () {
-        fallbackCopy(text, done);
-      });
-    } else {
-      fallbackCopy(text, done);
-    }
-  }
-
-  function fallbackCopy(text, done) {
-    var ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    try {
-      document.execCommand('copy');
-    } catch (e) {
-      /* noop */
-    }
-    document.body.removeChild(ta);
-    done();
-  }
-
-  function flash(el) {
-    if (!el) return;
-    el.focus();
-    el.style.boxShadow = '0 0 0 3px rgba(245, 158, 11, 0.4)';
-    setTimeout(function () {
-      el.style.boxShadow = '';
-    }, 1200);
   }
 
   // --- Navigation / rendering ---

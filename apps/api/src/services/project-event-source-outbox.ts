@@ -154,7 +154,9 @@ export function resolveProjectEventSourceOutboxConfig(env: Env): ProjectEventSou
   };
 }
 
-function withoutProjectId(input: AdmitProjectEventInput): Omit<AdmitProjectEventInput, 'projectId'> {
+function withoutProjectId(
+  input: AdmitProjectEventInput
+): Omit<AdmitProjectEventInput, 'projectId'> {
   const { projectId, ...event } = input;
   void projectId;
   return event;
@@ -235,7 +237,10 @@ async function loadIntentByDelivery(
     .first<ProjectEventSourceOutboxIntent>();
 }
 
-async function loadIntentById(env: Env, id: string): Promise<ProjectEventSourceOutboxIntent | null> {
+async function loadIntentById(
+  env: Env,
+  id: string
+): Promise<ProjectEventSourceOutboxIntent | null> {
   return env.DATABASE.prepare(
     `SELECT id, project_id AS projectId, source, event_type AS eventType,
             subject_type AS subjectType, subject_id AS subjectId,
@@ -256,7 +261,9 @@ async function loadIntentById(env: Env, id: string): Promise<ProjectEventSourceO
 
 function replayConflict(intent: ProjectEventSourceOutboxIntent, input: AdmitProjectEventInput) {
   const incomingPayload = jsonPayload(input);
+  if (intent.source !== input.source) return 'source_mismatch';
   if (intent.eventType !== input.eventType) return 'event_type_mismatch';
+  if (intent.deliveryKey !== input.deliveryKey) return 'delivery_key_mismatch';
   if (intent.subjectType !== input.subject.type || intent.subjectId !== input.subject.id) {
     return 'subject_mismatch';
   }
@@ -304,7 +311,7 @@ export async function enqueueProjectEventSourceIntent(
 ): Promise<ProjectEventSourceOutboxIntent> {
   await projectEventSourceOutboxInsertStatement(env, input, options).run();
   const intent = options.id
-    ? (await loadIntentById(env, options.id)) ?? (await loadIntentByDelivery(env, input))
+    ? ((await loadIntentById(env, options.id)) ?? (await loadIntentByDelivery(env, input)))
     : await loadIntentByDelivery(env, input);
   if (!intent) throw new Error('Project event source outbox intent was not persisted');
   const conflict = replayConflict(intent, input);
@@ -315,7 +322,11 @@ export async function enqueueProjectEventSourceIntent(
   return intent;
 }
 
-function nextRetryAt(now: Date, attemptCount: number, config: ProjectEventSourceOutboxConfig): Date {
+function nextRetryAt(
+  now: Date,
+  attemptCount: number,
+  config: ProjectEventSourceOutboxConfig
+): Date {
   const exponent = Math.min(Math.max(0, attemptCount - 1), 16);
   const delay = Math.min(config.retryMaxMs, config.retryBaseMs * 2 ** exponent);
   return new Date(now.getTime() + delay);
@@ -333,7 +344,9 @@ function clockFrom(input: AdmissionClock | undefined): () => Date {
   return () => new Date();
 }
 
-function resultFromIntent(intent: ProjectEventSourceOutboxIntent): ProjectEventSourceAdmissionResult {
+function resultFromIntent(
+  intent: ProjectEventSourceOutboxIntent
+): ProjectEventSourceAdmissionResult {
   return {
     intentId: intent.id,
     state: intent.state,
@@ -427,7 +440,8 @@ async function markIntentFailed(
     : final
       ? 'permanent_failed'
       : 'retryable_failed';
-  const nextAttemptAt = state === 'retryable_failed' ? nextRetryAt(now, intent.attemptCount, config) : now;
+  const nextAttemptAt =
+    state === 'retryable_failed' ? nextRetryAt(now, intent.attemptCount, config) : now;
   return updateClaimedIntent(
     env,
     intent,
@@ -438,7 +452,9 @@ async function markIntentFailed(
   );
 }
 
-function parseEventPayload(intent: ProjectEventSourceOutboxIntent): Omit<AdmitProjectEventInput, 'projectId'> {
+function parseEventPayload(
+  intent: ProjectEventSourceOutboxIntent
+): Omit<AdmitProjectEventInput, 'projectId'> {
   const parsed = JSON.parse(intent.eventPayloadJson) as unknown;
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error('Project event source outbox payload is not an object');
@@ -492,9 +508,10 @@ async function admitClaimedIntent(
       projectDataService.admitProjectEvent(env, intent.projectId, payload),
       config.admissionTimeoutMs
     );
-    const state: ProjectEventSourceOutboxState = result.outcome === 'conflict' ? 'permanent_failed' : 'admitted';
+    const state: ProjectEventSourceOutboxState =
+      result.outcome === 'conflict' ? 'permanent_failed' : 'admitted';
     const nowIso = clock().toISOString();
-    const updated = await updateClaimedIntent(
+    return updateClaimedIntent(
       env,
       intent,
       `SET state = ?, processing_lease_expires_at = NULL, claim_token = NULL,
@@ -509,7 +526,6 @@ async function admitClaimedIntent(
         nowIso,
       ]
     );
-    return { ...updated, state, admissionOutcome: result.outcome, eventId: result.event.id };
   } catch (error) {
     log.warn('project_event_source_outbox.admission_failed', {
       intentId: intent.id,
@@ -606,40 +622,47 @@ async function deleteTerminalRows(
   return Number(result.meta.changes ?? 0);
 }
 
-async function selectCandidateIds(
-  env: Env,
-  nowIso: string,
-  limit: number
-): Promise<string[]> {
+async function selectCandidateIds(env: Env, nowIso: string, limit: number): Promise<string[]> {
   const ids: string[] = [];
   for (const state of ['pending', 'retryable_failed'] as const) {
     if (ids.length >= limit) break;
     const rows = await env.DATABASE.prepare(
-      `SELECT id FROM project_event_source_outbox
-        WHERE state = ? AND next_attempt_at <= ? AND expires_at > ? AND attempt_count < max_attempts
-        ORDER BY next_attempt_at, id
-        LIMIT ?`
+      `SELECT id FROM (
+         SELECT id, expires_at, attempt_count, max_attempts
+           FROM project_event_source_outbox
+          WHERE state = ? AND next_attempt_at <= ?
+          ORDER BY next_attempt_at, id
+          LIMIT ?
+       )
+       WHERE expires_at > ? AND attempt_count < max_attempts`
     )
-      .bind(state, nowIso, nowIso, limit - ids.length)
+      .bind(state, nowIso, limit - ids.length, nowIso)
       .all<{ id: string }>();
     ids.push(...(rows.results ?? []).map((row) => row.id));
   }
   if (ids.length < limit) {
     const rows = await env.DATABASE.prepare(
-      `SELECT id FROM project_event_source_outbox
-        WHERE state = 'processing' AND processing_lease_expires_at IS NOT NULL
-          AND processing_lease_expires_at <= ? AND expires_at > ? AND attempt_count < max_attempts
-        ORDER BY processing_lease_expires_at, id
-        LIMIT ?`
+      `SELECT id FROM (
+         SELECT id, expires_at, attempt_count, max_attempts
+           FROM project_event_source_outbox
+          WHERE state = 'processing' AND processing_lease_expires_at IS NOT NULL
+            AND processing_lease_expires_at <= ?
+          ORDER BY processing_lease_expires_at, id
+          LIMIT ?
+       )
+       WHERE expires_at > ? AND attempt_count < max_attempts`
     )
-      .bind(nowIso, nowIso, limit - ids.length)
+      .bind(nowIso, limit - ids.length, nowIso)
       .all<{ id: string }>();
     ids.push(...(rows.results ?? []).map((row) => row.id));
   }
   return ids;
 }
 
-function countResult(stats: ProjectEventSourceOutboxStats, result: ProjectEventSourceAdmissionResult | null): void {
+function countResult(
+  stats: ProjectEventSourceOutboxStats,
+  result: ProjectEventSourceAdmissionResult | null
+): void {
   if (!result) {
     stats.skipped += 1;
     return;
@@ -730,7 +753,8 @@ export async function reconcileProjectEventSourceOutbox(
     const result = await admitProjectEventSourceIntentById(env, id, { clock });
     if (result?.state === 'retryable_failed') {
       const current = await loadIntentById(env, id);
-      if (current?.claimToken === null && current.lastError?.includes('timed out')) stats.timedOut += 1;
+      if (current?.claimToken === null && current.lastError?.includes('timed out'))
+        stats.timedOut += 1;
     }
     countResult(stats, result);
   }
