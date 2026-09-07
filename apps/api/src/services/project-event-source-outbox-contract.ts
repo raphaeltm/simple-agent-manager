@@ -1,5 +1,7 @@
 import {
   type AdmitProjectEventInput,
+  CREDENTIAL_LIMIT_EVENT_SOURCE,
+  CREDENTIAL_LIMIT_EVENT_TYPES,
   DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS,
   DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS,
   DEFAULT_PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS,
@@ -37,14 +39,11 @@ export const PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES = [
   'expired',
   'permanent_failed',
 ] as const;
-const PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_SOURCE = 'sam.credential_limit';
+const PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_SOURCE = CREDENTIAL_LIMIT_EVENT_SOURCE;
 const PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_SUBJECT_TYPE = 'credential';
-const PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_EVENT_TYPES = [
-  'credential.limit.warning',
-  'credential.limit.critical',
-  'credential.limit.rejected',
-  'credential.limit.reset',
-] as const;
+const PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_EVENT_TYPES = Object.values(
+  CREDENTIAL_LIMIT_EVENT_TYPES
+);
 
 export class ProjectEventSourceAdmissionTimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -137,6 +136,9 @@ type CredentialLimitWindowCaptureGuard = {
   credentialReference: string;
   windowType: string;
   observedAt: number;
+  previousObservedAt?: number | null;
+  previousLevel?: string | null;
+  previousDeliveryKey?: string | null;
   maxActiveIntentsPerProject: number;
 };
 
@@ -247,6 +249,23 @@ function assertCredentialLimitWindowCaptureMatchesInput(
   }
   if (input.metadata?.observedAt !== capture.observedAt) {
     throw new Error('Credential limit capture observedAt does not match intent metadata');
+  }
+  const previousObservedAt = capture.previousObservedAt ?? null;
+  if (previousObservedAt !== null) {
+    if (!Number.isInteger(previousObservedAt) || previousObservedAt < 0) {
+      throw new Error('Credential limit capture previousObservedAt must be a non-negative integer');
+    }
+    if (previousObservedAt >= capture.observedAt) {
+      throw new Error('Credential limit capture observedAt must advance the predecessor');
+    }
+    if (
+      capture.previousLevel !== 'ok' &&
+      capture.previousLevel !== 'warning' &&
+      capture.previousLevel !== 'critical' &&
+      capture.previousLevel !== 'rejected'
+    ) {
+      throw new Error('Credential limit capture previousLevel is invalid');
+    }
   }
   if (
     !Number.isInteger(capture.maxActiveIntentsPerProject) ||

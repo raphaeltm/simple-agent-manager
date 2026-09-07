@@ -26,10 +26,17 @@ import {
   type ProjectEventSourceOutboxState,
   type ProjectEventSourceOutboxStats,
   type ProjectEventSourceOutboxSupersedeInput,
-  type ProjectEventSourceOutboxTerminalState,
   resolveProjectEventSourceOutboxConfig,
   withProjectEventSourceAdmissionTimeout,
 } from './project-event-source-outbox-contract';
+import {
+  backfillLegacyTerminalizedRows,
+  countResult,
+  deleteTerminalRows,
+  selectCandidateIds,
+  terminalizeExhaustedRows,
+  updateOpenRows,
+} from './project-event-source-outbox-reconcile-helpers';
 import {
   loadProjectEventSourceIntentByClaim,
   loadProjectEventSourceIntentByDelivery,
@@ -50,9 +57,13 @@ export type {
   ProjectEventSourceOutboxSupersedeInput,
 } from './project-event-source-outbox-contract';
 export {
+  projectEventSourceOutboxClockFrom,
+  projectEventSourceOutboxErrorText,
+  projectEventSourceOutboxNextRetryAt,
   projectEventSourceOutboxPayload,
   projectEventSourceOutboxReplayConflict,
   resolveProjectEventSourceOutboxConfig,
+  withProjectEventSourceAdmissionTimeout,
 } from './project-event-source-outbox-contract';
 
 const log = createModuleLogger('project_event_source_outbox');
@@ -84,6 +95,36 @@ export function projectEventSourceOutboxInsertStatement(
     const guard = options.capture;
     const credentialColumns = `${columns.slice(0, -1)},
        credential_limit_window_type, credential_limit_observed_at)`;
+    const previousObservedAt = guard.previousObservedAt ?? null;
+    const predecessorSql =
+      previousObservedAt === null
+        ? `AND NOT EXISTS (
+            SELECT 1 FROM credential_limit_windows
+             WHERE project_id = ?
+               AND credential_reference = ?
+               AND window_type = ?
+          )`
+        : `AND EXISTS (
+            SELECT 1 FROM credential_limit_windows
+             WHERE project_id = ?
+               AND credential_reference = ?
+               AND window_type = ?
+               AND observed_at = ?
+               AND last_event_level = ?
+               AND ((? IS NULL AND last_event_delivery_key IS NULL) OR last_event_delivery_key = ?)
+          )`;
+    const predecessorValues =
+      previousObservedAt === null
+        ? [guard.projectId, guard.credentialReference, guard.windowType]
+        : [
+            guard.projectId,
+            guard.credentialReference,
+            guard.windowType,
+            previousObservedAt,
+            guard.previousLevel,
+            guard.previousDeliveryKey ?? null,
+            guard.previousDeliveryKey ?? null,
+          ];
     return env.DATABASE.prepare(
       `INSERT OR IGNORE INTO project_event_source_outbox ${credentialColumns}
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?, ?, ?, ?, ?
@@ -96,13 +137,7 @@ export function projectEventSourceOutboxInsertStatement(
              LIMIT ?
           )
         ) < ?
-          AND NOT EXISTS (
-            SELECT 1 FROM credential_limit_windows
-             WHERE project_id = ?
-               AND credential_reference = ?
-               AND window_type = ?
-               AND observed_at >= ?
-        )`
+          ${predecessorSql}`
     ).bind(
       ...values,
       guard.windowType,
@@ -112,10 +147,7 @@ export function projectEventSourceOutboxInsertStatement(
       values[10],
       guard.maxActiveIntentsPerProject,
       guard.maxActiveIntentsPerProject,
-      guard.projectId,
-      guard.credentialReference,
-      guard.windowType,
-      guard.observedAt
+      ...predecessorValues
     );
   }
   return env.DATABASE.prepare(
@@ -429,15 +461,19 @@ async function admitClaimedIntent(
       return markIntentFailed(env, intent, new ProjectEventSourceAdmissionTimeoutError(0), clock());
     }
     const result = await withProjectEventSourceAdmissionTimeout(
+      // Canonical admission checks an existing immutable receipt before window
+      // supersession. A D1 preflight cannot distinguish a stale event from a
+      // previously accepted event whose response was lost, and must not replace
+      // that decision or add a third outbox mutation to the reserved budget.
       () => projectDataService.admitProjectEvent(env, intent.projectId, payload),
       timeoutMs
     );
     const state: ProjectEventSourceOutboxState =
       result.outcome === 'conflict' ? 'permanent_failed' : 'admitted';
     const nowIso = clock().toISOString();
-    return updateClaimedIntent(
+    const settled = await updateClaimedIntent(
       env,
-      intent,
+      currentClaim,
       `SET state = ?, processing_lease_expires_at = NULL, claim_token = NULL,
            admitted_event_id = ?, admission_outcome = ?, terminalized_at = ?,
            last_error = ?, updated_at = ?`,
@@ -450,6 +486,7 @@ async function admitClaimedIntent(
         nowIso,
       ]
     );
+    return settled;
   } catch (error) {
     log.warn('project_event_source_outbox.admission_failed', {
       intentId: intent.id,
@@ -498,162 +535,6 @@ export async function enqueueAndAdmitProjectEventSourceIntent(
     return markLocalReplayConflict(env, existing, input, reason);
   }
   return (await admitProjectEventSourceIntentById(env, intent.id)) ?? resultFromIntent(intent);
-}
-
-async function updateOpenRows(
-  env: Env,
-  state: ProjectEventSourceOutboxActiveState,
-  predicate: string,
-  orderBy: string,
-  values: readonly unknown[],
-  terminalState: 'expired' | 'permanent_failed',
-  terminalReason: string,
-  now: Date,
-  limit: number
-): Promise<number> {
-  if (limit <= 0) return 0;
-  const nowIso = now.toISOString();
-  const result = await env.DATABASE.prepare(
-    `UPDATE project_event_source_outbox
-        SET state = ?, processing_lease_expires_at = NULL, claim_token = NULL,
-            terminalized_at = ?, last_error = COALESCE(last_error, ?), updated_at = ?
-      WHERE id IN (
-        SELECT id FROM project_event_source_outbox
-         WHERE state = ? AND ${predicate}
-         ORDER BY ${orderBy}
-         LIMIT ?
-      )`
-  )
-    .bind(terminalState, nowIso, terminalReason, nowIso, state, ...values, limit)
-    .run();
-  return Number(result.meta.changes ?? 0);
-}
-
-async function deleteTerminalRows(
-  env: Env,
-  state: ProjectEventSourceOutboxTerminalState,
-  beforeIso: string,
-  limit: number
-): Promise<number> {
-  if (limit <= 0) return 0;
-  const result = await env.DATABASE.prepare(
-    `DELETE FROM project_event_source_outbox
-      WHERE id IN (
-        SELECT id FROM project_event_source_outbox
-         WHERE state = ? AND terminalized_at IS NOT NULL AND terminalized_at <= ?
-         ORDER BY terminalized_at, id
-         LIMIT ?
-      )`
-  )
-    .bind(state, beforeIso, limit)
-    .run();
-  return Number(result.meta.changes ?? 0);
-}
-
-async function backfillLegacyTerminalizedRows(
-  env: Env,
-  state: ProjectEventSourceOutboxTerminalState,
-  fallbackIso: string,
-  limit: number
-): Promise<number> {
-  if (limit <= 0) return 0;
-  const result = await env.DATABASE.prepare(
-    `UPDATE project_event_source_outbox
-        SET terminalized_at = COALESCE(updated_at, created_at, ?), updated_at = ?
-      WHERE id IN (
-        SELECT id FROM project_event_source_outbox
-         WHERE state = ? AND terminalized_at IS NULL
-         ORDER BY terminalized_at, id
-         LIMIT ?
-      )`
-  )
-    .bind(fallbackIso, fallbackIso, state, limit)
-    .run();
-  return Number(result.meta.changes ?? 0);
-}
-
-async function terminalizeExhaustedRows(
-  env: Env,
-  state: ProjectEventSourceOutboxActiveState,
-  now: Date,
-  limit: number
-): Promise<number> {
-  if (limit <= 0) return 0;
-  const nowIso = now.toISOString();
-  const processingPredicate =
-    state === 'processing'
-      ? `AND processing_lease_expires_at IS NOT NULL AND processing_lease_expires_at <= ?`
-      : '';
-  const bindValues = state === 'processing' ? [state, nowIso, limit] : [state, limit];
-  const result = await env.DATABASE.prepare(
-    `UPDATE project_event_source_outbox
-        SET state = 'permanent_failed', processing_lease_expires_at = NULL,
-            claim_token = NULL, terminalized_at = ?,
-            last_error = COALESCE(last_error, 'Max attempts exhausted'), updated_at = ?
-      WHERE id IN (
-        SELECT id FROM project_event_source_outbox
-         WHERE state = ? AND (attempt_count >= max_attempts) = 1
-         ${processingPredicate}
-         ORDER BY processing_lease_expires_at, id
-         LIMIT ?
-      )`
-  )
-    .bind(nowIso, nowIso, ...bindValues)
-    .run();
-  return Number(result.meta.changes ?? 0);
-}
-
-async function selectCandidateIds(env: Env, nowIso: string, limit: number): Promise<string[]> {
-  const ids: string[] = [];
-  for (const state of ['pending', 'retryable_failed'] as const) {
-    if (ids.length >= limit) break;
-    const rows = await env.DATABASE.prepare(
-      `SELECT id FROM (
-         SELECT id, expires_at, attempt_count, max_attempts
-           FROM project_event_source_outbox
-          WHERE state = ? AND next_attempt_at <= ?
-          ORDER BY next_attempt_at, id
-          LIMIT ?
-       )
-       WHERE expires_at > ? AND attempt_count < max_attempts`
-    )
-      .bind(state, nowIso, limit - ids.length, nowIso)
-      .all<{ id: string }>();
-    ids.push(...(rows.results ?? []).map((row) => row.id));
-  }
-  if (ids.length < limit) {
-    const rows = await env.DATABASE.prepare(
-      `SELECT id FROM (
-         SELECT id, expires_at, attempt_count, max_attempts
-           FROM project_event_source_outbox
-          WHERE state = 'processing' AND processing_lease_expires_at IS NOT NULL
-            AND processing_lease_expires_at <= ?
-          ORDER BY processing_lease_expires_at, id
-          LIMIT ?
-       )
-       WHERE expires_at > ? AND attempt_count < max_attempts`
-    )
-      .bind(nowIso, limit - ids.length, nowIso)
-      .all<{ id: string }>();
-    ids.push(...(rows.results ?? []).map((row) => row.id));
-  }
-  return ids;
-}
-
-function countResult(
-  stats: ProjectEventSourceOutboxStats,
-  result: ProjectEventSourceAdmissionResult | null
-): void {
-  if (!result) {
-    stats.skipped += 1;
-    return;
-  }
-  if (result.state === 'admitted') stats.admitted += 1;
-  else if (result.state === 'retryable_failed') stats.retryableFailed += 1;
-  else if (result.state === 'permanent_failed') stats.permanentFailed += 1;
-  else if (result.state === 'expired') stats.expired += 1;
-  else stats.skipped += 1;
-  if (result.state !== 'pending' && result.state !== 'processing') stats.attempted += 1;
 }
 
 export async function reconcileProjectEventSourceOutbox(

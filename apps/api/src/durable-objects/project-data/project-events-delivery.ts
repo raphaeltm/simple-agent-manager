@@ -18,6 +18,7 @@ import {
 } from './project-events-contracts';
 import { resolveProjectEventDelivery } from './project-events-delivery-resolver';
 import { resolveProjectEventLimits } from './project-events-limits';
+import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import {
   mapProjectEventDeliveryAttempt,
   mapProjectEventDeliveryBatch,
@@ -124,6 +125,12 @@ export function createProjectEventDeliveryBatch(
     normalized.matchIds,
     limits.maxDeliveryBatchEvents
   );
+  const unauthorizedEvent = events.find(
+    (event) => !subscriptionCanMatchProjectEvent(subscription, event)
+  );
+  if (unauthorizedEvent) {
+    throw new ProjectEventValidationError('Event match is not authorized for this subscription');
+  }
   const resolution = resolveProjectEventDelivery({
     subscription,
     requestedDelivery: normalized.requestedDelivery,

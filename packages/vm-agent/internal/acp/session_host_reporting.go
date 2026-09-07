@@ -92,13 +92,14 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	}
 
 	var result struct {
-		APIKey              string           `json:"apiKey"`
-		CredentialKind      string           `json:"credentialKind"`
-		CredentialSource    string           `json:"credentialSource"`
-		CredentialReference string           `json:"credentialReference"`
-		CredentialProvider  string           `json:"credentialProvider"`
-		ProviderMode        string           `json:"providerMode"`
-		InferenceConfig     *inferenceConfig `json:"inferenceConfig,omitempty"`
+		APIKey               string           `json:"apiKey"`
+		CredentialKind       string           `json:"credentialKind"`
+		CredentialSource     string           `json:"credentialSource"`
+		CredentialReference  string           `json:"credentialReference"`
+		CredentialGeneration int64            `json:"credentialGeneration"`
+		CredentialProvider   string           `json:"credentialProvider"`
+		ProviderMode         string           `json:"providerMode"`
+		InferenceConfig      *inferenceConfig `json:"inferenceConfig,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
@@ -114,13 +115,14 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	}
 
 	return &agentCredential{
-		credential:          result.APIKey,
-		credentialKind:      result.CredentialKind,
-		credentialSource:    result.CredentialSource,
-		credentialReference: result.CredentialReference,
-		credentialProvider:  result.CredentialProvider,
-		providerMode:        result.ProviderMode,
-		inferenceConfig:     result.InferenceConfig,
+		credential:           result.APIKey,
+		credentialKind:       result.CredentialKind,
+		credentialSource:     result.CredentialSource,
+		credentialReference:  result.CredentialReference,
+		credentialGeneration: result.CredentialGeneration,
+		credentialProvider:   result.CredentialProvider,
+		providerMode:         result.ProviderMode,
+		inferenceConfig:      result.InferenceConfig,
 	}, nil
 }
 

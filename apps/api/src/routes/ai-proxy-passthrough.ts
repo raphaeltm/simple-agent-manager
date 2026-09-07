@@ -15,6 +15,7 @@
  * from, or returned to, tenant workspaces.
  */
 import {
+  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
   type Dialect,
@@ -24,19 +25,16 @@ import {
   resolveHarnessDialect,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import { type Context,Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { readRequestJsonRecord } from '../lib/runtime-validation';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { RequestBodyTooLargeError, readRequestJsonRecord } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
-import {
-  AIProxyAuthError,
-  updateAIProxyAgentCredentialAttribution,
-  verifyAIProxyAuth,
-} from '../services/ai-proxy-shared';
+import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
 import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
 import { checkAiUsageGate } from '../services/ai-token-budget';
 import {
@@ -45,10 +43,8 @@ import {
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
-import {
-  copyCredentialLimitHeaders,
-  recordProxyCredentialLimitObservationsFromHeaders,
-} from '../services/credential-limit-events';
+import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
+import { schedulePassthroughLimitHeaders } from './ai-proxy-passthrough-telemetry';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();
 type ProxyContext = Context<{ Bindings: Env }>;
@@ -57,17 +53,39 @@ type ProxyContext = Context<{ Bindings: Env }>;
 // Error Helpers
 // =============================================================================
 
-function anthropicError(message: string, type: string, status: number): Response {
+function jsonErrorHeaders(headers?: HeadersInit): Headers {
+  const responseHeaders = new Headers(headers);
+  if (!responseHeaders.has('Content-Type')) responseHeaders.set('Content-Type', 'application/json');
+  return responseHeaders;
+}
+
+function credentialErrorHeaders(upstreamHeaders: Headers): Headers {
+  const headers = jsonErrorHeaders();
+  copyCredentialLimitHeaders(upstreamHeaders, headers);
+  return headers;
+}
+
+function anthropicError(
+  message: string,
+  type: string,
+  status: number,
+  headers?: HeadersInit
+): Response {
   return new Response(
     JSON.stringify({ type: 'error', error: { type, message } }),
-    { status, headers: { 'Content-Type': 'application/json' } },
+    { status, headers: jsonErrorHeaders(headers) },
   );
 }
 
-function openaiError(message: string, type: string, status: number): Response {
+function openaiError(
+  message: string,
+  type: string,
+  status: number,
+  headers?: HeadersInit
+): Response {
   return new Response(
     JSON.stringify({ error: { message, type } }),
-    { status, headers: { 'Content-Type': 'application/json' } },
+    { status, headers: jsonErrorHeaders(headers) },
   );
 }
 
@@ -103,6 +121,7 @@ interface PassthroughAuthResult {
   agentCredentialSource?: 'user' | 'project' | 'platform' | null;
   agentCredentialProvider?: string | null;
   agentProviderMode?: string | null;
+  agentCredentialGeneration: number;
 }
 
 interface ResolvedProxyUpstream {
@@ -136,6 +155,7 @@ interface PrepareProxyOptions {
   invalidTokenResponse: () => Response;
   rateLimitResponse: (c: ProxyContext, resetAt: number) => Response;
   invalidJsonResponse: () => Response;
+  requestTooLargeResponse: (maxBytes: number) => Response;
   invalidBodyResponse?: (body: Record<string, unknown>) => Response | null;
   missingModelResponse: () => Response;
   usageGateResponse: (reason: 'daily-token-budget' | 'monthly-cost-cap') => Response;
@@ -325,35 +345,6 @@ async function resolveProxyUpstream(input: {
   return null;
 }
 
-async function recordPassthroughLimitHeaders(input: {
-  env: Env;
-  headers: Headers;
-  prepared: PreparedProxyRequest;
-  provider: 'anthropic' | 'openai';
-  source: string;
-  responseStatus: number;
-}): Promise<void> {
-  await updateAIProxyAgentCredentialAttribution(input.env, input.prepared, {
-    credentialReference: input.prepared.upstream.credentialReference,
-    credentialSource: input.prepared.upstream.credentialSource,
-    credentialProvider: input.prepared.upstream.credentialProvider,
-    providerMode: input.prepared.upstream.providerMode,
-  });
-  await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.headers, {
-    projectId: input.prepared.projectId,
-    userId: input.prepared.userId,
-    workspaceId: input.prepared.workspaceId,
-    chatSessionId: input.prepared.chatSessionId,
-    agentSessionId: input.prepared.agentSessionId,
-    agentType: input.prepared.upstream.agentType,
-    credentialReference: input.prepared.upstream.credentialReference,
-    credentialSource: input.prepared.upstream.credentialSource,
-    provider: input.provider,
-    providerMode: input.prepared.upstream.providerMode,
-    source: input.source,
-    responseStatus: input.responseStatus,
-  });
-}
 
 function buildUpstreamAuthHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
   if (upstream.capability.authStyle === 'bearer-token' || upstream.dialect === 'openai-compatible') {
@@ -400,6 +391,7 @@ function anthropicProxyOptions(
     invalidTokenResponse: () => anthropicError('Invalid or expired workspace token', 'authentication_error', 401),
     rateLimitResponse,
     invalidJsonResponse: () => anthropicError('Invalid JSON in request body', 'invalid_request_error', 400),
+    requestTooLargeResponse: (maxBytes) => anthropicError(`Request body exceeds ${maxBytes} bytes`, 'invalid_request_error', 413),
     missingModelResponse: () => anthropicError('model is required', 'invalid_request_error', 400),
     usageGateResponse: anthropicUsageGateError,
     missingUpstreamResponse: () => anthropicError('No compatible upstream credential configured.', 'authentication_error', 401),
@@ -418,6 +410,7 @@ function openaiProxyOptions(jsonContext: string): PrepareProxyOptions {
       return openaiError('Rate limit exceeded. Please try again later.', 'rate_limit_error', 429);
     },
     invalidJsonResponse: () => openaiError('Invalid JSON body', 'invalid_request_error', 400),
+    requestTooLargeResponse: (maxBytes) => openaiError(`Request body exceeds ${maxBytes} bytes`, 'invalid_request_error', 413),
     invalidBodyResponse: (body) => (
       !Array.isArray(body.messages) || body.messages.length === 0
         ? openaiError('messages array is required', 'invalid_request_error', 400)
@@ -462,8 +455,15 @@ async function prepareProxyRequest(
 
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, options.jsonContext);
-  } catch {
+    const maxBodyBytes = parsePositiveInt(
+      c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
+      DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
+    );
+    body = await readRequestJsonRecord(c.req.raw, options.jsonContext, maxBodyBytes);
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return { ok: false, response: options.requestTooLargeResponse(error.maxBytes) };
+    }
     return { ok: false, response: options.invalidJsonResponse() };
   }
 
@@ -573,7 +573,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
         workspaceId,
         modelId,
       });
-      await recordPassthroughLimitHeaders({
+      schedulePassthroughLimitHeaders(c, {
         env: c.env,
         headers: upstreamResponse.headers,
         prepared: prepared.value,
@@ -583,7 +583,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
       });
       return anthropicError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
-        'api_error', upstreamResponse.status,
+        'api_error',
+        upstreamResponse.status,
+        credentialErrorHeaders(upstreamResponse.headers)
       );
     }
 
@@ -592,7 +594,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     if (contentType) responseHeaders.set('Content-Type', contentType);
     copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
     if (isStreaming) responseHeaders.set('Cache-Control', 'no-cache');
-    await recordPassthroughLimitHeaders({
+    schedulePassthroughLimitHeaders(c, {
       env: c.env,
       headers: upstreamResponse.headers,
       prepared: prepared.value,
@@ -652,7 +654,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
         modelId,
         status: upstreamResponse.status,
       });
-      await recordPassthroughLimitHeaders({
+      schedulePassthroughLimitHeaders(c, {
         env: c.env,
         headers: upstreamResponse.headers,
         prepared: prepared.value,
@@ -660,7 +662,12 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
         source: 'ai-proxy-passthrough.anthropic.count_tokens',
         responseStatus: upstreamResponse.status,
       });
-      return anthropicError(`Token counting failed (${upstreamResponse.status}).`, 'api_error', upstreamResponse.status);
+      return anthropicError(
+        `Token counting failed (${upstreamResponse.status}).`,
+        'api_error',
+        upstreamResponse.status,
+        credentialErrorHeaders(upstreamResponse.headers)
+      );
     }
 
     const responseText = await upstreamResponse.text();
@@ -668,7 +675,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
       'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json',
     });
     copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
-    await recordPassthroughLimitHeaders({
+    schedulePassthroughLimitHeaders(c, {
       env: c.env,
       headers: upstreamResponse.headers,
       prepared: prepared.value,
@@ -729,7 +736,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
         workspaceId,
         modelId,
       });
-      await recordPassthroughLimitHeaders({
+      schedulePassthroughLimitHeaders(c, {
         env: c.env,
         headers: upstreamResponse.headers,
         prepared: prepared.value,
@@ -739,7 +746,9 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       });
       return openaiError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
-        'server_error', upstreamResponse.status,
+        'server_error',
+        upstreamResponse.status,
+        credentialErrorHeaders(upstreamResponse.headers)
       );
     }
 
@@ -752,7 +761,7 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
       responseHeaders.set('Connection', 'keep-alive');
       responseHeaders.set('X-Accel-Buffering', 'no');
     }
-    await recordPassthroughLimitHeaders({
+    schedulePassthroughLimitHeaders(c, {
       env: c.env,
       headers: upstreamResponse.headers,
       prepared: prepared.value,

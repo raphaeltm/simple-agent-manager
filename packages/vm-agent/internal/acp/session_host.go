@@ -142,6 +142,10 @@ const DefaultMessageBufferSize = 5000
 // Override via ACP_VIEWER_SEND_BUFFER.
 const DefaultViewerSendBuffer = 256
 
+// DefaultUsageReportPendingWindows bounds usage reports queued while the
+// serialized usage reporter is busy.
+const DefaultUsageReportPendingWindows = 16
+
 // SessionHostConfig holds configuration for a SessionHost.
 // It extends GatewayConfig with multi-viewer settings.
 type SessionHostConfig struct {
@@ -165,6 +169,10 @@ type SessionHostConfig struct {
 	// SDK's concurrent goroutine dispatch from reordering streaming tokens.
 	// Override via ACP_NOTIF_SERIALIZE_TIMEOUT. Default: 5s.
 	NotifSerializeTimeout time.Duration
+
+	// UsageReportPendingLimit bounds usage reports queued while one usage
+	// callback is being delivered. Zero uses the package default.
+	UsageReportPendingLimit int
 
 	// StartProcess is an internal test hook. Production code leaves it nil and
 	// uses StartProcess via startAgentProcess.
@@ -277,6 +285,19 @@ type SessionHost struct {
 	credInjectionMode string // "env" or "auth-file"
 	credAuthFilePath  string // relative to home dir, e.g. ".codex/auth.json"
 	credKind          string // "api-key" or "oauth-token"
+
+	usageReportMu           sync.Mutex
+	usageReportPending      map[string]usageReportPendingEntry
+	usageReportOrder        []string
+	usageReportNextSeq      uint64
+	usageReportRunning      bool
+	usageReportDone         chan struct{}
+	usageReportCancel       context.CancelFunc
+	usageReportFailureCount int
+	usageReportLastError    string
+	usageReportClosed       bool
+	usageReportCloseGrace   bool
+	usageReportCallbacks    sync.WaitGroup
 
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
@@ -848,6 +869,7 @@ func (h *SessionHost) Stop() {
 		h.mu.Unlock()
 		return
 	}
+	h.closeUsageReportIngress()
 	h.setStatusLocked(HostStopped)
 	h.statusErr = ""
 	h.stopCurrentAgentLocked()
@@ -867,6 +889,12 @@ func (h *SessionHost) Stop() {
 	// Report idle to the control plane so the browser status bar clears.
 	h.stopPromptActivityRereport()
 	h.clearHarnessWork()
+	if err := h.waitForUsageReportCallbacks(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: shutdown callback drain failed", "error", err)
+	}
+	if err := h.flushUsageReports(h.activityReportTimeout()); err != nil {
+		slog.Warn("usageReport: shutdown flush failed", "error", err)
+	}
 	h.reportActivity("idle")
 
 	// Cancel any pending auto-suspend timer.
@@ -1038,7 +1066,7 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 func (h *SessionHost) monitorStderr(process agentProcess) {
 	scanner := bufio.NewScanner(process.Stderr())
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := redactAgentDiagnosticText(scanner.Text())
 		slog.Warn("Agent stderr", "line", line)
 		h.stderrMu.Lock()
 		if h.stderrBuf.Len() < h.config.StderrBufferBytes {

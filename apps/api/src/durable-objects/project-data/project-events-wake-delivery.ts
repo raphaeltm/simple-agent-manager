@@ -1,3 +1,4 @@
+import { isProjectEventWakeBatchAudienceAuthorized } from './project-events-wake-targets';
 import {
   type ProjectEventDeliveryAttemptState,
   type ProjectEventDeliveryBatchState,
@@ -149,7 +150,7 @@ export function validateProjectEventWakeRecoveryAuthority(
       now
     )
     .toArray()[0];
-  return Boolean(row);
+  return Boolean(row) && isProjectEventWakeBatchAudienceAuthorized(sql, input.projectId, input.batchId);
 }
 
 export function invalidProjectEventWakeDeliveryTargetResult(
@@ -232,6 +233,15 @@ export function invalidProjectEventWakeDeliveryTargetResult(
             : chatStatus !== 'active' && chatStatus !== 'sleeping'
               ? 'Project event wake target session is no longer active'
               : 'Project event wake delivery lease expired',
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
+  if (!isProjectEventWakeBatchAudienceAuthorized(sql, projectId, claim.message.id)) {
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake audience is no longer authorized',
       runtimeIdentity: claim.message.runtimeIdentity,
       capabilities: null,
     };

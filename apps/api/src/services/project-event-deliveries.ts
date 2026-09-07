@@ -47,6 +47,7 @@ export async function getProjectEventForCaller(
     visibility: {
       owner: context.owner,
       legacyOwners: context.legacyOwners,
+      userId: context.userId,
       target: context.target,
     },
   });
@@ -66,6 +67,7 @@ export async function listProjectEventSubscriptionEventsForCaller(
     visibility: {
       owner: context.owner,
       legacyOwners: context.legacyOwners,
+      userId: context.userId,
       target: context.target,
     },
   });
@@ -82,6 +84,7 @@ export async function ackProjectEventDeliveryForCaller(
     visibility: {
       owner: context.owner,
       legacyOwners: context.legacyOwners,
+      userId: context.userId,
       target: context.target,
     },
     acknowledgedBy: context.owner,

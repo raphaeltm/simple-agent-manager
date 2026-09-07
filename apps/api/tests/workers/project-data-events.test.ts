@@ -1411,7 +1411,53 @@ describe('ProjectData event subscription core', () => {
         )
         .toArray()
         .map((row) => String((row as { detail?: unknown }).detail ?? ''));
-      return { wake, expiry, attempts, syntheticAttempts, batches };
+      const terminalizeInactiveTarget = state.storage.sql
+        .exec(
+          `EXPLAIN QUERY PLAN
+           SELECT s.id AS subscription_id
+           FROM project_event_subscriptions s
+           LEFT JOIN chat_sessions c ON c.id = s.target_session_id
+           WHERE s.project_id = ?
+             AND s.contract_version >= 2
+             AND s.requested_delivery = 'existing_session_prompt'
+             AND s.resolved_delivery = 'queued_for_prompt_delivery'
+             AND s.lifecycle_state = 'active'
+             AND s.wake_due_at IS NOT NULL
+             AND (s.target_session_id IS NULL OR c.id IS NULL OR c.status NOT IN ('active', 'sleeping'))
+             AND EXISTS (
+               SELECT 1 FROM project_event_matches m
+               WHERE m.project_id = s.project_id
+                 AND m.subscription_id = s.id
+                 AND m.state = 'matched'
+                 AND m.batch_id IS NULL
+             )
+           ORDER BY s.wake_due_at ASC, s.id ASC
+           LIMIT ?`,
+          projectId,
+          1
+        )
+        .toArray()
+        .map((row) => String((row as { detail?: unknown }).detail ?? ''));
+      const orphanRepair = state.storage.sql
+        .exec(
+          `EXPLAIN QUERY PLAN
+           SELECT m.id AS id
+           FROM project_event_matches m
+           WHERE m.project_id = ?
+             AND m.state = 'batch_created'
+             AND m.batch_id IS NOT NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM project_event_delivery_batches b
+               WHERE b.project_id = m.project_id AND b.id = m.batch_id
+             )
+           ORDER BY m.lifecycle_checked_at ASC, m.id
+           LIMIT ?`,
+          projectId,
+          1
+        )
+        .toArray()
+        .map((row) => String((row as { detail?: unknown }).detail ?? ''));
+      return { wake, expiry, attempts, syntheticAttempts, batches, terminalizeInactiveTarget, orphanRepair };
     });
 
     expect(plans.wake.some((detail) => detail.includes('idx_project_event_subscriptions_wake_due'))).toBe(
@@ -1432,6 +1478,20 @@ describe('ProjectData event subscription core', () => {
     expect(plans.batches.some((detail) => detail.includes('idx_project_event_batches_retention'))).toBe(
       true
     );
+    expect(
+      plans.terminalizeInactiveTarget.some((detail) =>
+        detail.includes('idx_project_event_subscriptions_wake_due')
+      )
+    ).toBe(true);
+    expect(plans.terminalizeInactiveTarget.some((detail) => detail.includes('USE TEMP B-TREE'))).toBe(
+      false
+    );
+    expect(
+      plans.orphanRepair.some((detail) =>
+        detail.includes('idx_project_event_matches_orphan_lifecycle')
+      )
+    ).toBe(true);
+    expect(plans.orphanRepair.some((detail) => detail.includes('USE TEMP B-TREE'))).toBe(false);
   });
 
   it('uses finite event-wake leases and rejects physical delivery after cancellation', async () => {
@@ -1952,8 +2012,17 @@ describe('ProjectData event subscription core', () => {
           wakeRetentionPasses.push(result);
           if (!result.hasMore) break;
         }
+        expect(
+          wakeRetentionPasses.map(
+            (result) =>
+              result.deletedAttempts +
+              result.deletedMatches +
+              result.deletedBatches +
+              result.deletedEvents
+          )
+        ).toEqual([1, 1, 1, 1, 1, 1]);
         expect(wakeRetentionPasses.map((result) => result.deletedAttempts)).toEqual([
-          1, 1, 1, 0, 0,
+          1, 1, 1, 0, 0, 0,
         ]);
         expect(wakeRetentionPasses.at(-1)?.hasMore).toBe(false);
         const wakeStatus = await svc.getProjectEventRecentStatus(testEnv, wakeProject);
@@ -2634,6 +2703,144 @@ describe('ProjectData event subscription core', () => {
     });
     expect(due.before).toBe(nextAttemptAt);
     expect(due.run).toMatchObject({ status: 'not_due', materialized: 0 });
+  });
+
+  it('refreshes wake_due_at when helper batch mutation claims the last due match', async () => {
+    const projectId = 'project-events-helper-claim-refreshes-due';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO project_event_subscriptions
+         (id, project_id, contract_version, owner_type, owner_id, owner_name,
+          idempotency_key, idempotency_fingerprint, filter_version, filter_json,
+          filter_fingerprint, match_key_count, requested_delivery, resolved_delivery,
+          target_session_id, target_task_id, target_runtime_id, target_agent_id,
+          lifecycle_state, reason, created_at, updated_at, expires_at,
+          owner_version, owner_project_id, owner_chat_session_id, owner_task_id,
+          wake_due_at)
+         VALUES ('sub-helper-due', ?, 2, 'agent', 'agent-helper', NULL, 'idem-helper',
+          'fp-helper', 1, '{"version":1}', 'filter-helper', 0,
+          'existing_session_prompt', 'queued_for_prompt_delivery', 'session-helper',
+          'task-helper', NULL, 'agent-helper', 'active', NULL, 1000, 1000, NULL,
+          2, ?, 'session-helper', 'task-helper', 1000)`,
+        projectId,
+        projectId
+      );
+      state.storage.sql.exec(
+        `INSERT INTO project_events
+         (id, project_id, contract_version, source, event_type, subject_type, subject_id,
+          severity, delivery_key, payload_fingerprint, metadata_json, metadata_bytes,
+          display_json, display_bytes, raw_payload_ref_json, raw_payload_ref_bytes,
+          occurred_at, received_at, updated_at, state)
+         VALUES ('event-helper-due', ?, 1, 'github', 'check_suite.completed', 'pull_request',
+          'helper-due', 'warning', 'delivery-helper-due', 'sha256:helper-due',
+          '{}', 2, '{"untrusted":true}', 18, NULL, 0, 1000, 1000, 1000, 'recorded')`,
+        projectId
+      );
+      state.storage.sql.exec(
+        `INSERT INTO project_event_matches
+         (id, project_id, event_id, subscription_id, state, matched_at,
+          lifecycle_checked_at, batch_id, reason)
+         VALUES ('match-helper-due', ?, 'event-helper-due', 'sub-helper-due',
+          'matched', 1000, 1000, NULL, NULL)`,
+        projectId
+      );
+
+      updateMatchesForBatch(
+        state.storage.sql,
+        projectId,
+        ['match-helper-due'],
+        'batch-helper-due',
+        'pending',
+        2000
+      );
+
+      return state.storage.sql
+        .exec(`SELECT wake_due_at FROM project_event_subscriptions WHERE id = 'sub-helper-due'`)
+        .toArray()[0];
+    }).then((row) => expect(row).toEqual({ wake_due_at: null }));
+  });
+
+  it('clears stale wake_due_at after public pull claims the last matched event', async () => {
+    const projectId = 'project-events-pull-refreshes-due';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await disableProjectEventWakeOnStub(projectId);
+    const sessionId = await stub.createSession(null, 'Pull due target', 'task-1');
+    let subscriptionId = '';
+    await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
+      const created = await svc.createProjectEventSubscription(
+        testEnv,
+        projectId,
+        subscriptionInputForSession('sub-pull-due', sessionId)
+      );
+      subscriptionId = created.subscription.id;
+      await svc.admitProjectEvent(
+        testEnv,
+        projectId,
+        eventInput({
+          deliveryKey: 'delivery-pull-due',
+          payloadFingerprint: 'sha256:pull-due',
+        })
+      );
+    });
+
+    await svc.listProjectEventSubscriptionEvents(testEnv, projectId, {
+      subscriptionId,
+      visibility: {
+        owner: { type: 'agent', id: 'agent-1' },
+        target: { sessionId },
+      },
+      limit: 5,
+    });
+
+    const row = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.sql
+        .exec('SELECT wake_due_at FROM project_event_subscriptions WHERE id = ?', subscriptionId)
+        .toArray()[0]
+    );
+    expect(row).toEqual({ wake_due_at: null });
+  });
+
+  it('repairs stale wake_due_at when a materialization candidate has no matched rows', async () => {
+    const projectId = 'project-events-empty-candidate-repairs-due';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await disableProjectEventWakeOnStub(projectId);
+    const sessionId = await stub.createSession(null, 'Empty candidate target', 'task-1');
+    let subscriptionId = '';
+    await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
+      const created = await svc.createProjectEventSubscription(
+        testEnv,
+        projectId,
+        subscriptionInputForSession('sub-empty-candidate', sessionId)
+      );
+      subscriptionId = created.subscription.id;
+    });
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE project_event_subscriptions SET wake_due_at = 1 WHERE id = ?`,
+        subscriptionId
+      );
+    });
+
+    const result = await materializeEventWakeForTest(projectId, 20_000);
+    expect(result).toMatchObject({ status: 'no_due_work', materialized: 0 });
+
+    const after = await runInDurableObject(stub, async (_instance, state) => ({
+      subscription: state.storage.sql
+        .exec('SELECT wake_due_at FROM project_event_subscriptions WHERE id = ?', subscriptionId)
+        .toArray()[0],
+      alarm: computeProjectEventMaterializationAlarmTime(
+        state.storage.sql,
+        { ...testEnv, PROJECT_EVENT_WAKE_ENABLED: 'true' },
+        projectId,
+        20_000
+      ),
+    }));
+    expect(after.subscription).toEqual({ wake_due_at: null });
+    expect(after.alarm).toBeNull();
   });
 
   it('keeps later alarm phases running when materialization and failure checkpoint persistence both fail', async () => {

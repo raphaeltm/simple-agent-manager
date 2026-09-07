@@ -1,4 +1,8 @@
+import { DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
+
+const UsageIdentifierSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(160));
+const UsageSourceSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(160));
 
 export const CreateAcpSessionSchema = v.object({
   taskId: v.optional(v.string()),
@@ -47,11 +51,11 @@ export const AcpSessionActivityReportSchema = v.object({
 });
 
 export const AcpSessionUsageLimitObservationSchema = v.object({
-  windowType: v.string(),
-  provider: v.optional(v.string()),
-  source: v.optional(v.string()),
+  windowType: UsageIdentifierSchema,
+  provider: v.optional(UsageIdentifierSchema),
+  source: v.optional(UsageSourceSchema),
   status: v.optional(v.picklist(['allowed', 'allowed_warning', 'rejected', 'unknown'])),
-  utilizationPercent: v.optional(v.number()),
+  utilizationPercent: v.optional(v.pipe(v.number(), v.minValue(0), v.maxValue(100))),
   limitAmount: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
   remainingAmount: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
   windowMinutes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
@@ -61,13 +65,17 @@ export const AcpSessionUsageLimitObservationSchema = v.object({
 });
 
 export const AcpSessionUsageReportSchema = v.object({
-  nodeId: v.string(),
-  agentType: v.optional(v.string()),
-  credentialReference: v.optional(v.string()),
+  nodeId: UsageIdentifierSchema,
+  agentType: v.optional(UsageIdentifierSchema),
+  credentialReference: v.optional(UsageIdentifierSchema),
   credentialSource: v.optional(v.picklist(['user', 'project', 'platform'])),
+  credentialGeneration: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
   observedAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
-  source: v.optional(v.string()),
-  rateLimits: v.array(AcpSessionUsageLimitObservationSchema),
+  source: v.optional(UsageSourceSchema),
+  rateLimits: v.pipe(
+    v.array(AcpSessionUsageLimitObservationSchema),
+    v.maxLength(DEFAULT_CREDENTIAL_LIMIT_MAX_OBSERVATIONS_PER_REPORT)
+  ),
 });
 
 export const AcpSessionForkSchema = v.object({

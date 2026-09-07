@@ -69,6 +69,11 @@ export function mapProjectEvent(row: unknown): ProjectEventRecord {
       parsed.metadata_json,
       'project_events.metadata_json'
     ),
+    audience: {
+      scope: parsed.audience_scope,
+      projectId: parsed.audience_project_id,
+      userId: parsed.audience_user_id,
+    },
     display: parseJsonColumn<ProjectEventDisplayData>(
       parsed.display_json,
       'project_events.display_json'

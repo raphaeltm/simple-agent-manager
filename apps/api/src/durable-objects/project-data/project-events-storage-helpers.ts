@@ -29,6 +29,7 @@ import {
 } from './project-events-mappers';
 import { filterMatchesProjectEvent, projectEventKeys } from './project-events-normalization';
 import { normalizeNullableText, normalizeText } from './project-events-values';
+import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import { generateId } from './types';
 
 const log = createModuleLogger('project_data.project_events.storage');
@@ -126,6 +127,7 @@ export function createMatchesForEvent(
       continue;
     }
     if (!filterMatchesProjectEvent(subscription.filter, event)) continue;
+    if (!subscriptionCanMatchProjectEvent(subscription, event)) continue;
     if (requireCompleteFanout && matches.length >= limits.maxMatchesPerEvent) {
       // The enclosing channel transaction rolls back all earlier match writes.
       throw new ProjectEventLimitExceededError('Channel event fanout capacity exceeded');
@@ -429,6 +431,7 @@ export function updateMatchesForBatch(
       ...chunk
     );
   }
+  refreshWakeDueAtForMatches(sql, projectId, matchIds, now);
 }
 
 function matchStateForBatchState(
@@ -644,6 +647,7 @@ export function claimProjectEventMatchesForBatch(
       .toArray()[0];
     claimed += typeof row?.cnt === 'number' ? row.cnt : 0;
   }
+  refreshWakeDueAtForMatches(sql, projectId, matchIds, now);
   return claimed;
 }
 
@@ -716,5 +720,55 @@ export function insertMatchIfAbsent(
         matchId
       )
       .toArray()[0]
+  );
+}
+
+
+export function refreshWakeDueAtForMatches(
+  sql: SqlStorage,
+  projectId: string,
+  matchIds: readonly string[],
+  now: number
+): void {
+  for (const chunk of chunkIdsForBindBudget(matchIds, 1)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    const rows = sql
+      .exec(
+        `SELECT DISTINCT subscription_id
+         FROM project_event_matches
+         WHERE project_id = ? AND id IN (${placeholders})`,
+        projectId,
+        ...chunk
+      )
+      .toArray();
+    for (const row of rows) {
+      if (typeof row.subscription_id === 'string') {
+        refreshWakeDueAtForSubscription(sql, projectId, row.subscription_id, now);
+      }
+    }
+  }
+}
+
+export function refreshWakeDueAtForSubscription(
+  sql: SqlStorage,
+  projectId: string,
+  subscriptionId: string,
+  now: number
+): void {
+  sql.exec(
+    `UPDATE project_event_subscriptions
+     SET wake_due_at = (
+           SELECT MIN(m.matched_at)
+           FROM project_event_matches m
+           WHERE m.project_id = project_event_subscriptions.project_id
+             AND m.subscription_id = project_event_subscriptions.id
+             AND m.state = 'matched'
+             AND m.batch_id IS NULL
+         ),
+         updated_at = ?
+     WHERE project_id = ? AND id = ?`,
+    now,
+    projectId,
+    subscriptionId
   );
 }

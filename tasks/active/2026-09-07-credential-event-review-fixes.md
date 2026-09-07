@@ -26,6 +26,20 @@ Independent read-only security and Go review found the issues below. Root reprod
 Run meaningful real-D1/workerd tests for the migration, signed callback authorization, visibility and producer-to-event path. Preserve existing proxy accounting and event tests. Run shared build before dependent checks, API lint/typecheck, file-size quality, and Go tests with the repository-pinned toolchain. Run concurrency/race tests where applicable. Record actual commands and results; distinguish mocks from real runtime evidence. Independent reviewers must re-check the fixes before final whole-PR review and staging. The full parent release scope remains pending.
 
 
+## C2 checkpoint evidence before parent review (2026-09-07)
+
+Checkpoint `73ebe5e7e3431ec0365772fe71e067d4c48d4a88` was pushed on branch `sam/fix-credential-event-telemetry-gn45kf` without a separate PR, staging mutation, deploy, merge, or main push. Parent review below reopens the remaining acceptance criteria; this evidence is retained only as historical context for the repair pass.
+
+Validation run for that checkpoint:
+
+- `pnpm --filter @simple-agent-manager/api lint` — pass
+- `pnpm --filter @simple-agent-manager/shared build` — pass
+- `pnpm --filter @simple-agent-manager/api typecheck` — pass
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/credential-limit-events.test.ts tests/unit/acp-usage-callback-auth-real-jwt.test.ts tests/unit/durable-objects/project-events-credential-visibility.test.ts tests/unit/ai-proxy-passthrough.test.ts tests/unit/routes/ai-proxy-accounting.test.ts tests/unit/routes/ai-proxy-billing-integration.test.ts tests/unit/services/ai-proxy-shared-credential-generation.test.ts` — pass, 7 files / 46 tests.
+- `pnpm quality:file-sizes` — pass
+- `PATH=/tmp/go1.26.6/bin:$PATH GOTOOLCHAIN=local go -C packages/vm-agent test ./internal/acp -run 'Test(FetchAgentKeyPropagatesAgentSessionAndCredentialAttribution|UsageReport|UsageReporter|SendUsageReport)' -count=1` — pass
+- `PATH=/tmp/go1.26.6/bin:$PATH GOTOOLCHAIN=local go -C packages/vm-agent test -race ./internal/acp -run 'Test(UsageReporterCoalescesPendingReportsAndFlushes|SendUsageReportStopsRetryingWhenContextCancelled|UsageReportFromClaudeRateLimitUsesStoredCredentialAttribution)' -count=1` — pass
+
 ## Parent review of C2 checkpoint `73ebe5e7e`
 
 This checkpoint is pushed and fetched but not integrated or accepted. Its checked-off child notes and self-review do not replace the required independent and real-storage evidence. Root inspected the exact source; an independent Go reviewer inspected the changed Go code without rerunning Go. The parent still requires all original acceptance criteria.

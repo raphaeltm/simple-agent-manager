@@ -285,6 +285,7 @@ export async function scheduled(
     triggerExecRetentionPurged: triggerCleanup?.retentionPurged,
     webhookDeliveriesPurged: triggerCleanup?.webhookDeliveriesPurged,
     projectEventSourceOutboxAdmitted: triggerCleanup?.projectEventSourceOutboxAdmitted,
+    credentialLimitWindowsPurged: triggerCleanup?.credentialLimitWindowsPurged,
     triggerExecCleanupErrors: triggerCleanup?.errors,
     sessionTaskRepairScanned: sessionTaskRepair?.scanned,
     sessionTaskRepairRepaired: sessionTaskRepair?.repaired,

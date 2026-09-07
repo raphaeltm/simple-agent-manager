@@ -28,6 +28,7 @@ import {
   resolveMailboxMaxMessages,
 } from './project-events-wake-targets';
 import { stableStringify } from './project-events-values';
+import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import {
   type AcceptedPromptDelivery,
   type AcceptPromptDeliveryInput,
@@ -116,6 +117,12 @@ export function runProjectEventWakeMaterializationBatch(
     options.subscriptionId ?? null
   );
   if (candidates.length === 0) {
+    repairStaleWakeDueAtBackstop(
+      sql,
+      projectId,
+      now,
+      Math.max(1, limits.maxActiveSubscriptionsPerProject)
+    );
     markSchedulerSuccess(sql, projectId, now, 'materialization');
     return { status: 'no_due_work', materialized: 0, accepted: [] };
   }
@@ -271,7 +278,11 @@ function materializeCandidate(
     subscription.id,
     limits.maxDeliveryBatchEvents
   );
-  if (matches.length === 0) return { status: 'no_due_work', materialized: 0, accepted: [] };
+  if (matches.length === 0) {
+    refreshWakeDueAtForSubscription(sql, projectId, subscription.id, now);
+    markSchedulerSuccess(sql, projectId, now, 'materialization');
+    return { status: 'no_due_work', materialized: 0, accepted: [] };
+  }
 
   const events = readEvents(
     sql,
@@ -279,9 +290,24 @@ function materializeCandidate(
     matches.map((match) => match.eventId),
     limits.maxDeliveryBatchEvents
   );
+  const authorized = authorizedWakeMatches(subscription, matches, events);
+  if (authorized.rejected.length > 0) {
+    terminalizeProjectEventWakeMatches(
+      sql,
+      projectId,
+      authorized.rejected,
+      'recorded_not_injected',
+      now,
+      'event audience not authorized for wake target'
+    );
+  }
+  if (authorized.matches.length === 0) {
+    markSchedulerSuccess(sql, projectId, now, 'materialization');
+    return { status: 'no_due_work', materialized: 0, accepted: [] };
+  }
   const resolution = resolveProjectEventDelivery({
     subscription,
-    events,
+    events: authorized.events,
     now,
     maxSummaryEvents: limits.maxDeliveryBatchEvents,
     adapterCapabilities: [
@@ -305,7 +331,7 @@ function materializeCandidate(
     terminalizeProjectEventWakeMatches(
       sql,
       projectId,
-      matches.map((match) => match.id),
+      authorized.matches.map((match) => match.id),
       resolution.batchState,
       now
     );
@@ -314,8 +340,8 @@ function materializeCandidate(
   }
 
   const batchId = generateId();
-  const matchIds = matches.map((match) => match.id);
-  const eventIds = matches.map((match) => match.eventId);
+  const matchIds = authorized.matches.map((match) => match.id);
+  const eventIds = authorized.matches.map((match) => match.eventId);
   const promptInput = buildWakePromptInput({
     batchId,
     subscription,
@@ -511,34 +537,56 @@ function terminalizeIneligibleWakeMatchesByPredicate(
     params: unknown[];
   }
 ): number {
-  const rows = sql
+  const subscriptionRows = sql
     .exec(
-      `SELECT m.id AS id, m.subscription_id AS subscription_id
-       FROM project_event_matches m
-       JOIN project_event_subscriptions s
-         ON s.project_id = m.project_id AND s.id = m.subscription_id
+      `SELECT s.id AS subscription_id
+       FROM project_event_subscriptions s
        LEFT JOIN chat_sessions c ON c.id = s.target_session_id
-       WHERE m.project_id = ?
-         AND m.state = 'matched'
-         AND m.batch_id IS NULL
+       WHERE s.project_id = ?
          AND s.contract_version >= 2
          AND s.requested_delivery = 'existing_session_prompt'
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
+         AND s.lifecycle_state = 'active'
+         AND s.wake_due_at IS NOT NULL
          AND (${input.predicate})
-       ORDER BY m.matched_at ASC, m.id ASC
+         AND EXISTS (
+           SELECT 1 FROM project_event_matches m
+           WHERE m.project_id = s.project_id
+             AND m.subscription_id = s.id
+             AND m.state = 'matched'
+             AND m.batch_id IS NULL
+         )
+       ORDER BY s.wake_due_at ASC, s.id ASC
        LIMIT ?`,
       input.projectId,
       ...input.params,
       1
     )
     .toArray();
-  const selected = rows
-    .filter(
-      (row): row is { id: string; subscription_id: string } =>
-        typeof row.id === 'string' && typeof row.subscription_id === 'string'
-    );
-  const ids = selected
-    .map((row) => row.id);
+  const selectedSubscriptionIds = subscriptionRows
+    .filter((row): row is { subscription_id: string } => typeof row.subscription_id === 'string')
+    .map((row) => row.subscription_id);
+  const ids: string[] = [];
+  for (const subscriptionId of selectedSubscriptionIds) {
+    const matchRows = sql
+      .exec(
+        `SELECT id
+         FROM project_event_matches
+         WHERE project_id = ?
+           AND subscription_id = ?
+           AND state = 'matched'
+           AND batch_id IS NULL
+         ORDER BY matched_at ASC, id ASC
+         LIMIT ?`,
+        input.projectId,
+        subscriptionId,
+        1
+      )
+      .toArray();
+    for (const row of matchRows) {
+      if (typeof row.id === 'string') ids.push(row.id);
+    }
+  }
   if (ids.length === 0) return 0;
   let mutated = 0;
   for (const chunk of chunkIdsForBindBudget(ids, 4)) {
@@ -559,10 +607,49 @@ function terminalizeIneligibleWakeMatchesByPredicate(
       ...chunk
     ).rowsWritten;
   }
-  for (const subscriptionId of new Set(selected.map((row) => row.subscription_id))) {
+  for (const subscriptionId of selectedSubscriptionIds) {
     refreshWakeDueAtForSubscription(sql, input.projectId, subscriptionId, input.now);
   }
   return mutated;
+}
+
+function repairStaleWakeDueAtBackstop(
+  sql: SqlStorage,
+  projectId: string,
+  now: number,
+  limit: number
+): number {
+  const rows = sql
+    .exec(
+      `SELECT s.id AS subscription_id
+       FROM project_event_subscriptions s
+       WHERE s.project_id = ?
+         AND s.lifecycle_state = 'active'
+         AND s.contract_version >= 2
+         AND s.owner_version >= 2
+         AND s.requested_delivery = 'existing_session_prompt'
+         AND s.resolved_delivery = 'queued_for_prompt_delivery'
+         AND s.wake_due_at IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM project_event_matches m
+           WHERE m.project_id = s.project_id
+             AND m.subscription_id = s.id
+             AND m.state = 'matched'
+             AND m.batch_id IS NULL
+         )
+       ORDER BY s.wake_due_at ASC, s.id ASC
+       LIMIT ?`,
+      projectId,
+      limit
+    )
+    .toArray();
+  let repaired = 0;
+  for (const row of rows) {
+    if (typeof row.subscription_id !== 'string') continue;
+    refreshWakeDueAtForSubscription(sql, projectId, row.subscription_id, now);
+    repaired += 1;
+  }
+  return repaired;
 }
 
 function readSubscription(
@@ -737,7 +824,8 @@ export function terminalizeProjectEventWakeMatches(
   projectId: string,
   matchIds: string[],
   batchState: string,
-  now: number
+  now: number,
+  reason = 'event wake resolver returned terminal delivery'
 ): void {
   if (matchIds.length === 0) return;
   const state =
@@ -754,7 +842,7 @@ export function terminalizeProjectEventWakeMatches(
        WHERE project_id = ? AND id IN (${placeholders}) AND state = 'matched' AND batch_id IS NULL`,
       state,
       now,
-      'event wake resolver returned terminal delivery',
+      reason,
       projectId,
       ...chunk
     );
@@ -764,4 +852,29 @@ export function terminalizeProjectEventWakeMatches(
 
 function earliestNonNull(current: number | null, candidate: number): number {
   return current === null ? candidate : Math.min(current, candidate);
+}
+
+function authorizedWakeMatches(
+  subscription: ProjectEventSubscriptionRecord,
+  matches: Array<{ id: string; eventId: string }>,
+  events: ProjectEventRecord[]
+): {
+  matches: Array<{ id: string; eventId: string }>;
+  events: ProjectEventRecord[];
+  rejected: string[];
+} {
+  const eventsById = new Map(events.map((event) => [event.id, event]));
+  const allowedMatches: Array<{ id: string; eventId: string }> = [];
+  const allowedEvents: ProjectEventRecord[] = [];
+  const rejected: string[] = [];
+  for (const match of matches) {
+    const event = eventsById.get(match.eventId);
+    if (!event || !subscriptionCanMatchProjectEvent(subscription, event)) {
+      rejected.push(match.id);
+      continue;
+    }
+    allowedMatches.push(match);
+    allowedEvents.push(event);
+  }
+  return { matches: allowedMatches, events: allowedEvents, rejected };
 }

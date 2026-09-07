@@ -4,6 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
+  captureCredentialLimitEventAdmission,
+  upsertCredentialLimitWindow,
+} from '../../../src/services/credential-limit-events/admissions';
+import { resolveCredentialLimitConfig } from '../../../src/services/credential-limit-events/config';
+import type { SanitizedCredentialLimitObservation } from '../../../src/services/credential-limit-events/types';
+import {
   admitProjectEventSourceIntentById,
   enqueueAndAdmitProjectEventSourceIntent,
   enqueueProjectEventSourceIntent,
@@ -32,6 +38,7 @@ describe('project event source outbox', () => {
     sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [schema.projectEventSourceOutbox, schema.credentialLimitWindows]);
     createOutboxIndexes();
+    addCredentialLimitIndexes();
     env = {
       DATABASE: createSqliteD1(sqlite),
       PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS: '1000',
@@ -63,6 +70,44 @@ describe('project event source outbox', () => {
     };
   }
 
+  function credentialObservation(observedAt = NOW.getTime()): SanitizedCredentialLimitObservation {
+    return {
+      projectId: 'project-1',
+      userId: 'user-1',
+      credentialReference: 'cc_credentials:cred-1',
+      credentialSource: 'user',
+      provider: 'openai',
+      providerMode: 'user-api-key',
+      windowType: 'openai.tokens',
+      source: 'proxy',
+      observedAt,
+      status: 'allowed_warning',
+      agentType: null,
+      workspaceId: null,
+      agentSessionId: null,
+      chatSessionId: null,
+      utilizationPercent: 95,
+      limitAmount: null,
+      remainingAmount: null,
+      windowMinutes: null,
+      resetsAt: null,
+      freshnessMs: 0,
+      serverReceivedAt: NOW.getTime(),
+    };
+  }
+
+  function credentialEvent(key: string, observedAt = NOW.getTime()) {
+    return {
+      ...sourceEvent(),
+      source: 'sam.credential_limit',
+      eventType: 'credential.limit.critical',
+      subject: { type: 'credential', id: 'cc_credentials:cred-1' },
+      deliveryKey: key,
+      payloadFingerprint: `sha256:${key}`,
+      metadata: { level: 'critical', windowType: 'openai.tokens', observedAt },
+    };
+  }
+
   function createOutboxIndexes() {
     sqlite.exec(`
       CREATE UNIQUE INDEX idx_project_event_source_outbox_delivery
@@ -89,7 +134,7 @@ describe('project event source outbox', () => {
     `);
   }
 
-  function addCredentialLimitOutboxColumns() {
+  function addCredentialLimitIndexes() {
     sqlite.exec(`
       CREATE INDEX idx_credential_limit_windows_project_updated
         ON credential_limit_windows(project_id, updated_at, credential_reference, window_type);
@@ -706,8 +751,167 @@ describe('project event source outbox', () => {
     ).toEqual({ count: 1 });
   });
 
+  it('supersedes only never-attempted credential intents and preserves live or uncertain receipts', async () => {
+    const oldObservedAt = NOW.getTime() - 1;
+    for (const id of ['unattempted', 'live-claim', 'expired-claim', 'lost-ack']) {
+      await projectEventSourceOutboxInsertStatement(env, credentialEvent(id, oldObservedAt), {
+        id,
+        now: NOW,
+        capture: {
+          kind: 'credential_limit_window_transition',
+          projectId: 'project-1',
+          credentialReference: 'cc_credentials:cred-1',
+          windowType: 'openai.tokens',
+          observedAt: oldObservedAt,
+          maxActiveIntentsPerProject: 10,
+        },
+      }).run();
+    }
+    for (const [id, lease] of [
+      ['live-claim', new Date(NOW.getTime() + 1_000).toISOString()],
+      ['expired-claim', new Date(NOW.getTime() - 1).toISOString()],
+    ]) {
+      sqlite
+        .prepare(
+          `UPDATE project_event_source_outbox SET state = 'processing',
+        attempt_count = 1, claim_token = ?, processing_lease_expires_at = ? WHERE id = ?`
+        )
+        .run(`claim:${id}`, lease, id);
+    }
+    sqlite
+      .prepare(
+        `UPDATE project_event_source_outbox SET state = 'retryable_failed',
+      attempt_count = 1 WHERE id = 'lost-ack'`
+      )
+      .run();
+    const preserved = ['live-claim', 'expired-claim', 'lost-ack'].map(rowById);
+
+    const result = await captureCredentialLimitEventAdmission(
+      env,
+      credentialObservation(),
+      'critical',
+      credentialEvent('newer'),
+      'critical',
+      resolveCredentialLimitConfig(env),
+      null
+    );
+
+    expect(result.outcome).toBe('created');
+    expect(rowById('unattempted')).toMatchObject({ state: 'permanent_failed', claim_token: null });
+    expect(['live-claim', 'expired-claim', 'lost-ack'].map(rowById)).toEqual(preserved);
+    expect(admitProjectEvent).not.toHaveBeenCalled();
+  });
+
+  it.each(['duplicate_replay', 'conflict'] as const)(
+    'uses canonical %s for a previously attempted credential envelope with exactly two outbox writes',
+    async (outcome) => {
+      const event = credentialEvent('old-envelope', NOW.getTime() - 1);
+      await enqueueProjectEventSourceIntent(env, event, { id: 'old-envelope', now: NOW });
+      sqlite
+        .prepare(
+          `UPDATE project_event_source_outbox SET state = 'retryable_failed',
+        attempt_count = 1 WHERE id = 'old-envelope'`
+        )
+        .run();
+      await upsertCredentialLimitWindow(env, credentialObservation(), 'critical', 'newer', null);
+      admitProjectEvent.mockResolvedValue({
+        outcome,
+        event: { id: 'canonical-receipt' },
+        matches: [],
+      });
+      const before = sqlite.prepare('SELECT total_changes() AS count').get() as { count: number };
+
+      const stats = await reconcileProjectEventSourceOutbox(env, { limit: 2, now: NOW });
+
+      const after = sqlite.prepare('SELECT total_changes() AS count').get() as { count: number };
+      expect(after.count - before.count).toBe(2);
+      expect(stats.outboxMutations).toBe(2);
+      const stored = sqlite
+        .prepare(
+          `SELECT event_payload_json FROM project_event_source_outbox
+        WHERE id = 'old-envelope'`
+        )
+        .get() as { event_payload_json: string };
+      expect(admitProjectEvent).toHaveBeenCalledTimes(1);
+      expect(admitProjectEvent).toHaveBeenCalledWith(
+        env,
+        event.projectId,
+        JSON.parse(stored.event_payload_json)
+      );
+      expect(rowById('old-envelope')).toMatchObject({
+        state: outcome === 'conflict' ? 'permanent_failed' : 'admitted',
+        admission_outcome: outcome,
+        admitted_event_id: 'canonical-receipt',
+        claim_token: null,
+      });
+    }
+  );
+
+  it('keeps a credential admission claim while a newer captured event fails externally', async () => {
+    const old = {
+      ...credentialEvent('held-reset', NOW.getTime() - 1),
+      eventType: 'credential.limit.reset',
+      metadata: { level: 'ok', windowType: 'openai.tokens', observedAt: NOW.getTime() - 1 },
+    };
+    const captured = await captureCredentialLimitEventAdmission(
+      env,
+      { ...credentialObservation(NOW.getTime() - 1), status: 'allowed', utilizationPercent: 10 },
+      'ok',
+      old,
+      'reset',
+      resolveCredentialLimitConfig(env),
+      null
+    );
+    if (captured.outcome !== 'created') throw new Error('Expected initial credential capture');
+    let accept: ((value: unknown) => void) | undefined;
+    admitProjectEvent
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            accept = resolve;
+          })
+      )
+      .mockRejectedValueOnce(new Error('newer canonical admission unavailable'));
+    const delivery = admitProjectEventSourceIntentById(env, captured.admission.id, NOW);
+    await waitForProjectDataAdmissions(1);
+    const claim = rowById(captured.admission.id)!.claim_token;
+
+    const newer = await captureCredentialLimitEventAdmission(
+      env,
+      credentialObservation(),
+      'critical',
+      credentialEvent('newer-critical'),
+      'critical',
+      resolveCredentialLimitConfig(env),
+      {
+        observed_at: NOW.getTime() - 1,
+        last_event_level: 'ok',
+        last_event_delivery_key: old.deliveryKey,
+      }
+    );
+    if (newer.outcome !== 'created') throw new Error('Expected newer credential capture');
+    expect(await admitProjectEventSourceIntentById(env, newer.admission.id, NOW)).toMatchObject({
+      state: 'retryable_failed',
+    });
+    expect(rowById(captured.admission.id)).toMatchObject({
+      state: 'processing',
+      claim_token: claim,
+    });
+
+    accept?.({ outcome: 'created', event: { id: 'accepted-reset' }, matches: [] });
+    expect(await delivery).toMatchObject({
+      state: 'admitted',
+      admissionOutcome: 'created',
+      outboxMutations: 2,
+    });
+    expect(rowById(captured.admission.id)).toMatchObject({
+      state: 'admitted',
+      admitted_event_id: 'accepted-reset',
+      claim_token: null,
+    });
+  });
+
   it('captures credential limit window transitions with stale-window and capacity guards', async () => {
-    addCredentialLimitOutboxColumns();
     const observedAt = NOW.getTime();
     const event = {
       ...sourceEvent(),
@@ -803,6 +1007,31 @@ describe('project event source outbox', () => {
         },
       })
     ).toThrow('Credential limit capture credential does not match intent subject');
+    expect(() =>
+      projectEventSourceOutboxInsertStatement(
+        env,
+        { ...event, metadata: { ...event.metadata, windowType: 'openai.requests' } },
+        {
+          id: 'credential-window-mismatch-window',
+          now: NOW,
+          capture: {
+            kind: 'credential_limit_window_transition',
+            projectId: 'project-1',
+            credentialReference: 'cc_credentials:cred-1',
+            windowType: 'openai.tokens',
+            observedAt,
+            maxActiveIntentsPerProject: 2,
+          },
+        }
+      )
+    ).toThrow('Credential limit capture window type does not match intent metadata');
+    expect(() =>
+      projectEventSourceOutboxInsertStatement(env, event, {
+        id: 'unsupported-capture-kind',
+        now: NOW,
+        capture: { kind: 'unsupported', projectId: 'project-1' } as never,
+      })
+    ).toThrow('Unsupported project event source outbox capture kind');
     expect(
       sqlite
         .prepare(

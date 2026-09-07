@@ -14,6 +14,7 @@
  */
 import {
   DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST,
+  DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
 } from '@simple-agent-manager/shared';
@@ -23,7 +24,8 @@ import { type Context, Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { readRequestJsonRecord } from '../lib/runtime-validation';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { RequestBodyTooLargeError, readRequestJsonRecord } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import {
   checkRateLimit,
@@ -65,7 +67,7 @@ const aiProxyRoutes = new Hono<{ Bindings: Env }>();
 type AIProxyContext = Context<{ Bindings: Env }>;
 type AIProxyDb = Parameters<typeof verifyAIProxyAuth>[2];
 type AIProxyRequestContext = Awaited<ReturnType<typeof verifyAIProxyAuth>> & { db: AIProxyDb };
-type ProxyErrorStatus = 400 | 401 | 403 | 404 | 429 | 502 | 503;
+type ProxyErrorStatus = 400 | 401 | 403 | 404 | 413 | 429 | 502 | 503;
 type OpenAIProxyCredential = AIProxyCredentialAttribution & {
   apiKey: string;
   credentialProvider: 'openai';
@@ -79,6 +81,25 @@ function proxyJsonError(
   extra?: Record<string, unknown>
 ): Response {
   return c.json({ error: { message, type, ...(extra ?? {}) } }, status);
+}
+
+function aiProxyRequestBodyMaxBytes(c: AIProxyContext): number {
+  return parsePositiveInt(
+    c.env.AI_PROXY_REQUEST_BODY_MAX_BYTES,
+    DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES
+  );
+}
+
+function aiProxyBodyParseError(c: AIProxyContext, error: unknown): Response {
+  if (error instanceof RequestBodyTooLargeError) {
+    return proxyJsonError(
+      c,
+      `Request body exceeds ${error.maxBytes} bytes`,
+      'invalid_request_error',
+      413
+    );
+  }
+  return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
 }
 
 async function prepareAIProxyRequest(c: AIProxyContext): Promise<Response | AIProxyRequestContext> {
@@ -261,7 +282,18 @@ async function recordPlatformProxyLimitHeaders(input: {
   attribution: AIProxyCredentialAttribution;
   source: string;
 }): Promise<void> {
-  await updateAIProxyAgentCredentialAttribution(input.env, input.prepared, input.attribution);
+  try {
+    await updateAIProxyAgentCredentialAttribution(input.env, input.prepared, input.attribution);
+  } catch (error) {
+    log.warn('ai_proxy.credential_attribution_update_failed', {
+      userId: input.prepared.userId,
+      workspaceId: input.prepared.workspaceId,
+      agentSessionId: input.prepared.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.response.headers, {
     projectId: input.prepared.projectId,
     userId: input.prepared.userId,
@@ -276,6 +308,27 @@ async function recordPlatformProxyLimitHeaders(input: {
     source: input.source,
     responseStatus: input.response.status,
   });
+}
+
+function schedulePlatformProxyLimitHeaders(
+  c: AIProxyContext,
+  input: Parameters<typeof recordPlatformProxyLimitHeaders>[0]
+): void {
+  const telemetry = recordPlatformProxyLimitHeaders(input).catch((error) => {
+    log.warn('ai_proxy.credential_limit_telemetry_failed', {
+      userId: input.prepared.userId,
+      workspaceId: input.prepared.workspaceId,
+      agentSessionId: input.prepared.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  try {
+    c.executionCtx.waitUntil(telemetry);
+  } catch {
+    /* no execution context in tests */
+  }
+  void telemetry;
 }
 
 function accountingResponse(
@@ -318,9 +371,13 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   // --- Parse request body ---
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy.chat_completions');
-  } catch {
-    return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
+    body = await readRequestJsonRecord(
+      c.req.raw,
+      'ai-proxy.chat_completions',
+      aiProxyRequestBodyMaxBytes(c)
+    );
+  } catch (error) {
+    return aiProxyBodyParseError(c, error);
   }
 
   // Minimal validation: messages must be present
@@ -418,7 +475,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     });
 
     if (provider === 'anthropic' && anthropicAuth) {
-      await recordPlatformProxyLimitHeaders({
+      schedulePlatformProxyLimitHeaders(c, {
         env: c.env,
         response,
         prepared,
@@ -427,7 +484,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         source: 'ai-proxy.anthropic.chat_completions',
       });
     } else if (provider === 'openai' && openaiCredential) {
-      await recordPlatformProxyLimitHeaders({
+      schedulePlatformProxyLimitHeaders(c, {
         env: c.env,
         response,
         prepared,
@@ -470,9 +527,13 @@ aiProxyRoutes.post('/responses', async (c) => {
 
   let body: Record<string, unknown>;
   try {
-    body = await readRequestJsonRecord(c.req.raw, 'ai-proxy.responses');
-  } catch {
-    return c.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, 400);
+    body = await readRequestJsonRecord(
+      c.req.raw,
+      'ai-proxy.responses',
+      aiProxyRequestBodyMaxBytes(c)
+    );
+  } catch (error) {
+    return aiProxyBodyParseError(c, error);
   }
 
   if (!body.input && !body.instructions) {
@@ -536,7 +597,7 @@ aiProxyRoutes.post('/responses', async (c) => {
       status: response.status,
     });
 
-    await recordPlatformProxyLimitHeaders({
+    schedulePlatformProxyLimitHeaders(c, {
       env: c.env,
       response,
       prepared,

@@ -53,6 +53,7 @@ type AgentSessionRow = {
 
 export type AgentSubscriptionContext = {
   projectId: string;
+  userId: string;
   owner: ProjectEventSubscriptionOwner;
   legacyOwners: ProjectEventSubscriptionOwner[];
   sourceTaskId: string;
@@ -287,6 +288,7 @@ async function resolveAgentContext(
 
   return {
     projectId,
+    userId,
     owner: {
       type: 'agent',
       id: ownerId,

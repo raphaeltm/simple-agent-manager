@@ -693,6 +693,9 @@ export const DEFAULT_AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT = 200_000;
 /** Default max input tokens per request. Override via AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST env var. */
 export const DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST = 32_000;
 
+/** Default max raw JSON request body bytes. Override via AI_PROXY_REQUEST_BODY_MAX_BYTES env var. */
+export const DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES = 1_048_576;
+
 /** Default rate limit in requests per minute per user. Override via AI_PROXY_RATE_LIMIT_RPM env var. */
 export const DEFAULT_AI_PROXY_RATE_LIMIT_RPM = 30;
 
@@ -701,12 +704,6 @@ export const DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS = 120_000;
 
 /** Default rate limit window in seconds. Override via AI_PROXY_RATE_LIMIT_WINDOW_SECONDS env var. */
 export const DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS = 60;
-
-/** Default advisory warning threshold for credential provider quota windows. */
-export const DEFAULT_CREDENTIAL_LIMIT_WARNING_PERCENT = 75;
-
-/** Default advisory critical threshold for credential provider quota windows. */
-export const DEFAULT_CREDENTIAL_LIMIT_CRITICAL_PERCENT = 90;
 
 // =============================================================================
 // User Budget Settings

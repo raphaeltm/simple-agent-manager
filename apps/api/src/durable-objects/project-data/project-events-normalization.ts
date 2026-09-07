@@ -2,12 +2,14 @@ import {
   type AdmitProjectEventInput,
   type CreateProjectEventDeliveryBatchInput,
   type CreateProjectEventSubscriptionInput,
+  CREDENTIAL_LIMIT_EVENT_SOURCE,
   PROJECT_EVENT_FILTER_FIELDS,
   PROJECT_EVENT_FILTER_VERSION,
   PROJECT_EVENT_REQUESTED_DELIVERY_MODES,
   PROJECT_EVENT_RESOLVED_DELIVERY_MODES,
   PROJECT_EVENT_SEVERITIES,
   PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES,
+  type ProjectEventAudience,
   type ProjectEventDeliveryAdapterCapability,
   type ProjectEventDeliveryAuthorization,
   type ProjectEventDeliveryPreference,
@@ -146,6 +148,7 @@ export function normalizeProjectEventInput(
     limits.maxFilterStringBytes
   );
   const metadata = normalizeMetadata(input.metadata ?? {}, limits);
+  const audience = deriveProjectEventAudience(projectId, source, metadata);
   const metadataJson = stableStringify(metadata);
   const metadataBytes = byteLength(metadataJson);
   if (metadataBytes > limits.maxMetadataBytes) {
@@ -177,6 +180,7 @@ export function normalizeProjectEventInput(
     deliveryKey,
     payloadFingerprint,
     metadata,
+    audience,
     display,
     rawPayloadRef,
     occurredAt,
@@ -584,6 +588,38 @@ function normalizeMetadata(
     throw new ProjectEventValidationError('metadata must be an object');
   }
   return normalized as ProjectEventMetadata;
+}
+
+function deriveProjectEventAudience(
+  projectId: string,
+  source: string,
+  metadata: ProjectEventMetadata
+): ProjectEventAudience {
+  if (source !== CREDENTIAL_LIMIT_EVENT_SOURCE) {
+    return { scope: 'project', projectId, userId: null };
+  }
+  const credentialSource = metadataText(metadata, 'credentialSource');
+  const visibilityScope = metadataText(metadata, 'visibilityScope');
+  if (credentialSource === 'user' || visibilityScope === 'user') {
+    return {
+      scope: 'user',
+      projectId,
+      userId: metadataText(metadata, 'affectedUserId') ?? metadataText(metadata, 'userId'),
+    };
+  }
+  if (
+    credentialSource === 'project' ||
+    credentialSource === 'platform' ||
+    visibilityScope === 'project'
+  ) {
+    return { scope: 'project', projectId, userId: null };
+  }
+  return { scope: 'user', projectId, userId: null };
+}
+
+function metadataText(metadata: ProjectEventMetadata, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === 'string' && value.trim() ? value : null;
 }
 
 function matchesFilterField(expected: string | string[] | undefined, actual: string): boolean {

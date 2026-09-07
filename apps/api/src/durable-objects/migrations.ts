@@ -2019,6 +2019,33 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
+    name: '047-project-event-server-derived-audience',
+    run: (sql) => {
+      const additiveColumns = [
+        [
+          'audience_scope',
+          "ALTER TABLE project_events ADD COLUMN audience_scope TEXT NOT NULL DEFAULT 'project' CHECK (audience_scope IN ('project', 'user'))",
+        ],
+        ['audience_project_id', 'ALTER TABLE project_events ADD COLUMN audience_project_id TEXT'],
+        ['audience_user_id', 'ALTER TABLE project_events ADD COLUMN audience_user_id TEXT'],
+      ] as const;
+      for (const [column, statement] of additiveColumns) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
+        }
+        sql.exec(`SELECT ${column} FROM project_events LIMIT 0`);
+      }
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_events_audience
+        ON project_events(project_id, audience_scope, audience_user_id, received_at DESC, id)
+      `);
+    },
+  },
+  {
     name: '048-project-event-channel-member-surfaces',
     run: (sql) => {
       sql.exec(`CREATE TABLE IF NOT EXISTS project_event_channels (
@@ -2097,6 +2124,27 @@ export const MIGRATIONS: Migration[] = [
           id
         )
       `);
+    },
+  },
+  {
+    name: '051-project-event-retention-lifecycle-index',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_due_order
+        ON project_event_subscriptions(project_id, lifecycle_state, requested_delivery,
+          resolved_delivery, wake_due_at, id)`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_matches_orphan_lifecycle
+        ON project_event_matches(project_id, state, lifecycle_checked_at, id)
+        WHERE batch_id IS NOT NULL`);
+    },
+  },
+  {
+    name: '052-project-event-credential-window-index',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_events_credential_window
+        ON project_events(project_id, source, subject_type, subject_id,
+          json_extract(metadata_json, '$.windowType'),
+          json_extract(metadata_json, '$.observedAt') DESC, id DESC)
+        WHERE state = 'recorded'`);
     },
   },
 ];

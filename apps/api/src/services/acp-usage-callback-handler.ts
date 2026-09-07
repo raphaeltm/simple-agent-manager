@@ -1,9 +1,15 @@
+import {
+  DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM,
+  DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS,
+} from '@simple-agent-manager/shared';
 import type { Context } from 'hono';
 
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { errors } from '../middleware/error';
+import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import { type AcpActivityBinding, buildAcpActivityBinding } from './acp-activity-admission';
 import { assertAcpActivityCallbackResourcesActive } from './acp-activity-callback-flush';
 import {
@@ -33,6 +39,7 @@ export interface AcpUsageCallbackReport {
   agentType?: string;
   credentialReference?: string;
   credentialSource?: 'user' | 'project' | 'platform';
+  credentialGeneration?: number;
   observedAt?: number;
   source?: string;
   rateLimits: AcpUsageLimitObservationReport[];
@@ -48,6 +55,7 @@ type AgentSessionCredentialAttributionRow = {
   agent_credential_source: string | null;
   agent_credential_provider: string | null;
   agent_provider_mode: string | null;
+  agent_credential_generation: number;
   workspace_id: string;
   workspace_project_id: string | null;
   workspace_chat_session_id: string | null;
@@ -87,6 +95,50 @@ function assertCallbackTokenBoundToUsageBinding(
   }
 }
 
+async function enforceAcpUsageCallbackRateLimit(
+  c: Context<{ Bindings: Env }>,
+  input: {
+    payload: CallbackTokenPayload;
+    projectId: string;
+    sessionId: string;
+  }
+): Promise<Response | null> {
+  const limit = parsePositiveInt(
+    c.env.CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM,
+    DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_RPM
+  );
+  const windowSeconds = parsePositiveInt(
+    c.env.CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS,
+    DEFAULT_CREDENTIAL_LIMIT_USAGE_CALLBACK_RATE_LIMIT_WINDOW_SECONDS
+  );
+  const windowStart = getCurrentWindowStart(windowSeconds);
+  const key = createRateLimitKey(
+    'acp-usage-callback',
+    `${input.payload.scope}:${input.payload.workspace}:${input.projectId}:${input.sessionId}`,
+    windowStart
+  );
+  const { allowed, remaining, resetAt } = await checkRateLimit(
+    c.env.KV,
+    key,
+    limit,
+    windowSeconds
+  );
+  c.header('X-RateLimit-Limit', limit.toString());
+  c.header('X-RateLimit-Remaining', remaining.toString());
+  c.header('X-RateLimit-Reset', resetAt.toString());
+  if (allowed) return null;
+
+  const retryAfter = resetAt - Math.floor(Date.now() / 1000);
+  c.header('Retry-After', Math.max(1, retryAfter).toString());
+  return c.json(
+    {
+      error: 'RATE_LIMITED',
+      message: 'Usage callback rate limit exceeded. Please try again later.',
+    },
+    429
+  );
+}
+
 function requireAcpUsageBinding(input: {
   existing: ExistingAcpSession;
   projectId: string;
@@ -120,6 +172,14 @@ function providerFromAgent(agentType: string | null | undefined): string {
   return agentType;
 }
 
+function normalizeTelemetryProvider(
+  provider: string | null,
+  agentType: string | null | undefined
+): string {
+  if (provider === 'anthropic' || provider === 'openai') return provider;
+  return providerFromAgent(provider ?? agentType);
+}
+
 async function loadServerCredentialAttribution(
   env: Env,
   input: {
@@ -138,6 +198,7 @@ async function loadServerCredentialAttribution(
         s.agent_credential_source,
         s.agent_credential_provider,
         s.agent_provider_mode,
+        s.agent_credential_generation,
         w.id AS workspace_id,
         w.project_id AS workspace_project_id,
         w.chat_session_id AS workspace_chat_session_id,
@@ -200,6 +261,40 @@ function assertServerAttributionMatchesCallback(
     });
     throw errors.forbidden('Agent type mismatch');
   }
+  if (!Number.isSafeInteger(row.agent_credential_generation) || row.agent_credential_generation < 0) {
+    log.warn('acp_usage.invalid_server_credential_generation', {
+      sessionId: row.id,
+      workspaceId: row.workspace_id,
+      credentialReference: row.agent_credential_reference,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Credential attribution generation is not server verified');
+  }
+  const callbackCredentialGeneration = body.credentialGeneration;
+  if (
+    !Number.isSafeInteger(callbackCredentialGeneration) ||
+    callbackCredentialGeneration === undefined ||
+    callbackCredentialGeneration < 0
+  ) {
+    log.warn('acp_usage.missing_credential_generation', {
+      sessionId: row.id,
+      workspaceId: row.workspace_id,
+      credentialReference: row.agent_credential_reference,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Credential attribution generation is required');
+  }
+  if (callbackCredentialGeneration !== row.agent_credential_generation) {
+    log.warn('acp_usage.credential_generation_mismatch', {
+      sessionId: row.id,
+      workspaceId: row.workspace_id,
+      credentialReference: row.agent_credential_reference,
+      expectedCredentialGeneration: row.agent_credential_generation,
+      receivedCredentialGeneration: callbackCredentialGeneration,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Credential attribution generation mismatch');
+  }
   return {
     credentialReference: row.agent_credential_reference,
     credentialSource: source,
@@ -214,9 +309,10 @@ function buildObservations(input: {
   credentialSource: 'user' | 'project' | 'platform';
   defaultObservedAt: number;
 }): CredentialLimitObservation[] {
-  const providerDefault =
-    input.row.agent_credential_provider ??
-    providerFromAgent(input.body.agentType ?? input.row.agent_type);
+  const providerDefault = normalizeTelemetryProvider(
+    input.row.agent_credential_provider,
+    input.body.agentType ?? input.row.agent_type
+  );
   const providerMode = input.row.agent_provider_mode ?? 'direct';
   const sourceDefault = input.body.source ?? 'vm-agent.acp_usage_update';
 
@@ -263,6 +359,13 @@ export async function handleAcpUsageCallback(
   }
 
   const { projectId, sessionId, body } = input;
+  const rateLimitResponse = await enforceAcpUsageCallbackRateLimit(c, {
+    payload,
+    projectId,
+    sessionId,
+  });
+  if (rateLimitResponse) return rateLimitResponse;
+
   const existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
   if (!existing) throw errors.notFound('ACP session not found');
 
