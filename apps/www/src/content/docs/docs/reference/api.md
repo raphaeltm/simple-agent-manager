@@ -19,6 +19,20 @@ Project eventing uses a pull loop over the canonical ProjectData `project_event_
 
 After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. V1 records matches, delivery decisions, and pull acknowledgements only. It does not inject prompts, steer runtimes, interrupt sessions, spawn tasks, or expose human/UI controls.
 
+## Event subscriptions
+
+Project members with read access can inspect subscriptions. Members with task write access can cancel human or agent subscriptions. System, policy and standing-watch subscriptions must be managed through their owning controls.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/projects/:projectId/event-subscriptions` | List subscriptions; optional `sessionId`, `state` and `limit` |
+| GET | `/api/projects/:projectId/event-subscriptions/:subscriptionId` | Inspect one subscription |
+| POST | `/api/projects/:projectId/event-subscriptions/:subscriptionId/cancel` | Cancel with optional `{ "reason": "No longer needed" }` |
+
+The list defaults to active subscriptions and returns `{ subscriptions, hasMore }`. `state` accepts `active`, `cancelled`, `expired` or `any`. Results include ownership, target, requested and resolved delivery, expiry and cancellation details. Cancelling again is safe and reports `idempotent: true`; cancellation does not undo work an agent has already performed. The server derives the cancelling user's identity from the authenticated session.
+
+Implementation: [`projectEventSubscriptionRoutes`](https://github.com/raphaeltm/simple-agent-manager/blob/main/apps/api/src/routes/project-event-subscriptions.ts) uses the existing project capability checks and canonical subscription cancellation.
+
 ## Authentication
 
 ### `POST /api/auth/sign-in/social`

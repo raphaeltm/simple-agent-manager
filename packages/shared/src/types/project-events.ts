@@ -337,6 +337,8 @@ export type CreateProjectEventSubscriptionInput = {
 
 export type ListProjectEventSubscriptionsInput = {
   projectId: string;
+  /** Contextual member surfaces filter before applying the result limit. */
+  targetSessionId?: string | null;
   state?: ProjectEventSubscriptionState | 'any' | null;
   owner?: ProjectEventSubscriptionOwner | null;
   legacyOwners?: ProjectEventSubscriptionOwner[] | null;

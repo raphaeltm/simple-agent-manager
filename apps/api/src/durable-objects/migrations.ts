@@ -2018,6 +2018,17 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '048-project-event-channel-member-surfaces',
+    run: (sql) => {
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_session_state
+        ON project_event_subscriptions(project_id, target_session_id, lifecycle_state, updated_at DESC, id)`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_session
+        ON project_event_subscriptions(project_id, target_session_id, updated_at DESC, id)`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_recent
+        ON project_event_subscriptions(project_id, updated_at DESC, id)`);
+    },
+  },
 ];
 
 /**

@@ -362,6 +362,10 @@ export function listProjectEventSubscriptions(
   );
   const params: unknown[] = [projectId];
   let where = 'WHERE project_id = ?';
+  if (input.targetSessionId !== undefined && input.targetSessionId !== null) {
+    where += ' AND target_session_id = ?';
+    params.push(normalizeText(input.targetSessionId, 'targetSessionId', limits.maxFilterStringBytes));
+  }
   if (state !== 'any') {
     where += ' AND lifecycle_state = ?';
     params.push(state);

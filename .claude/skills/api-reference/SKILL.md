@@ -87,6 +87,12 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 - `POST /api/projects/:projectId/tasks/:taskId/delegate` — Delegate ready+unblocked task to owned running workspace
 - `GET /api/projects/:projectId/tasks/:taskId/events` — List append-only task status events
 
+## Member event subscriptions
+
+- `GET /api/projects/:projectId/event-subscriptions` — Requires project `task:read`. Returns `{ subscriptions, hasMore }`, accepting `state=active|cancelled|expired|any`, bounded `limit`, and optional `sessionId`. Session filtering happens before the result limit.
+- `GET /api/projects/:projectId/event-subscriptions/:subscriptionId` — Requires project `task:read`; returns `{ subscription }` within the authorized project.
+- `POST /api/projects/:projectId/event-subscriptions/:subscriptionId/cancel` — Requires project `task:write`; accepts only optional `{ reason }`. Cancels human/agent subscriptions through canonical cancellation, derives `cancelledBy` from the authenticated human, and returns `{ subscription, idempotent, changed }`. System, policy and standing-watch subscriptions must be managed through their owning controls. Cancellation requests use the configured event metadata byte cap and reason limit. No platform caller identity is granted to members.
+
 ## MCP Orchestration
 
 - `wait_for_subtasks` — Task-agent-only tool that registers one durable wait for unique same-project task IDs. `waitKey` is a required stable workflow-step idempotency key and must be reused after a lost response. `condition` is `all` (default) or `any`; optional `wakeAfterSeconds` is positive and server-capped. Persist workflow state before calling, then end the turn. ProjectData wakes the caller through exact-once durable prompt delivery when the condition or finite deadline resolves.
