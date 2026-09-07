@@ -209,25 +209,23 @@ export function buildCapacityPoolSelection(
   const candidates =
     effectiveState === 'configured-ready'
       ? classifyCandidatePriceComparability(
-          summary.candidates
-    .flatMap((candidate) => {
-      const source = sourceById.get(candidate.capacitySourceId);
-      if (!source) return [];
-      const normalized = normalizeCapacityCandidate(
-        pool,
-        candidate,
-        source,
-        placement,
-        workloadRole,
-        settings,
-        effectiveState
-      );
-      return normalized ? [normalized] : [];
-    })
+          summary.candidates.flatMap((candidate) => {
+            const source = sourceById.get(candidate.capacitySourceId);
+            if (!source) return [];
+            const normalized = normalizeCapacityCandidate(
+              pool,
+              candidate,
+              source,
+              placement,
+              workloadRole,
+              settings,
+              effectiveState
+            );
+            return normalized ? [normalized] : [];
+          })
+        ).sort((a, b) =>
+          compareCapacityCandidates(a, b, pool.strategy, placement.resolvedReservation, settings)
         )
-    .sort((a, b) =>
-      compareCapacityCandidates(a, b, pool.strategy, placement.resolvedReservation, settings)
-    )
       : [];
 
   return {
@@ -491,14 +489,11 @@ function weightedCandidateScore(
   const weights = settings.selectionWeights;
   const price = normalizedPriceScore(candidate);
   const fit = boundedScoreTerm(offeringFitSurplus(candidate, reservation));
-  const capacity = compareOfferingCapacity(
-    candidate,
-    {
-      providerInstanceVcpuCount: 0,
-      providerInstanceMemoryMb: 0,
-      providerInstanceDiskGb: 0,
-    }
-  );
+  const capacity = compareOfferingCapacity(candidate, {
+    providerInstanceVcpuCount: 0,
+    providerInstanceMemoryMb: 0,
+    providerInstanceDiskGb: 0,
+  });
   const capacityTerm = strategy === 'pack' ? -capacity : capacity;
   const score =
     price * boundedWeight(weights.price) +
@@ -612,6 +607,7 @@ function compareOfferingPrice(
     | 'providerInstancePriceCurrency'
     | 'providerInstancePriceMonthlyCents'
     | 'providerInstancePriceHourlyMicros'
+    | 'placementCredentialVersion'
   >,
   b: Pick<
     TaskStartCapacityCandidate,
@@ -786,6 +782,7 @@ function buildCapacityPlacementExplanation(
     | 'providerInstancePriceCurrency'
     | 'providerInstancePriceMonthlyCents'
     | 'providerInstancePriceHourlyMicros'
+    | 'placementCredentialVersion'
   >
 ): string {
   return JSON.stringify({

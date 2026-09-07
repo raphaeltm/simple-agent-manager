@@ -11,14 +11,17 @@ const MAX_PROJECT_SCOPES_PER_CREDENTIAL_MUTATION = 25;
 export async function reconcileCapacityPoolsForCredentialMutation(
   env: Env,
   input:
-    | { scope: 'user'; userId: string }
+    | { scope: 'user'; userId: string; projectIds?: string[] }
     | { scope: 'project'; userId: string; projectId: string }
     | { scope: 'installation' }
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   try {
     if (input.scope === 'installation') {
-      await ensureDefaultCapacityPoolsForExistingCredentials(db, { includeInstallation: true, env });
+      await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+        includeInstallation: true,
+        env,
+      });
       return;
     }
     if (input.scope === 'project') {
@@ -35,7 +38,10 @@ export async function reconcileCapacityPoolsForCredentialMutation(
       includeInstallation: false,
       env,
     });
-    const projectIds = await listUserComputeAttachmentProjectIds(db, input.userId);
+    const projectIds = new Set([
+      ...(input.projectIds ?? []),
+      ...(await listUserComputeAttachmentProjectIds(db, input.userId)),
+    ]);
     for (const projectId of projectIds) {
       await ensureDefaultCapacityPoolsForExistingCredentials(db, {
         userId: input.userId,
