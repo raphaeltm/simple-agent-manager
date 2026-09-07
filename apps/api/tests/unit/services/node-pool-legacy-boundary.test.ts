@@ -680,6 +680,60 @@ describe('node-pool allocation entrypoints: provisioning beyond INSERT', () => {
     ]);
   });
 
+  it('resolves an aliased import of a shared allocation service', () => {
+    const callsites = scanAllocationEntrypoints([
+      file(
+        'apps/api/src/services/new-warmer.ts',
+        [
+          "import { createNodeRecord as allocate } from './nodes';",
+          'export async function bypass(env: Env, input: Input) {',
+          '  await allocate(env, input);',
+          '}',
+        ].join('\n')
+      ),
+    ]).map(({ entrypoint, owner }) => ({ entrypoint, owner }));
+
+    expect(callsites).toEqual([{ entrypoint: 'createNodeRecord', owner: 'bypass' }]);
+  });
+
+  it('detects a direct provider allocation call', () => {
+    const callsites = scanAllocationEntrypoints([
+      file(
+        'apps/api/src/services/rogue-provisioner.ts',
+        'export async function go(provider: Provider, config: VMConfig) {\n  return provider.createVM(config);\n}\n'
+      ),
+    ]).map(({ entrypoint, owner }) => ({ entrypoint, owner }));
+
+    expect(callsites).toEqual([{ entrypoint: 'createVM', owner: 'go' }]);
+  });
+
+  it('does not let a same-named local function suppress a different symbol', () => {
+    const callsites = scanAllocationEntrypoints([
+      file(
+        'apps/api/src/services/shadow.ts',
+        'export async function provisionNode(id: string, env: Env) {\n  return other.provisionNode(id, env);\n}\n'
+      ),
+    ]).map(({ entrypoint, owner }) => ({ entrypoint, owner }));
+
+    expect(callsites).toEqual([{ entrypoint: 'provisionNode', owner: 'provisionNode' }]);
+  });
+
+  it('still exempts genuine self-recursion of a declared symbol', () => {
+    expect(
+      scanAllocationEntrypoints([
+        file(
+          'apps/api/src/services/nodes.ts',
+          [
+            'export async function provisionNode(id: string, env: Env): Promise<void> {',
+            '  if (!id) return;',
+            '  return provisionNode(id, env);',
+            '}',
+          ].join('\n')
+        ),
+      ])
+    ).toEqual([]);
+  });
+
   it('does not treat the shared service definition as its own entrypoint', () => {
     expect(
       scanAllocationEntrypoints([
@@ -768,6 +822,232 @@ describe('node-pool allocation entrypoints: provisioning beyond INSERT', () => {
   });
 });
 
+describe('node-pool legacy authority: native SKU and accounting sinks', () => {
+  it('flags a legacy size written into a provider-native instance type', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/nodes.ts',
+          [
+            'export async function go(provider: Provider, node: { vmSize: string }) {',
+            '  return provider.createVM({ instanceType: node.vmSize });',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([
+      'apps/api/src/services/nodes.ts:2:44 writes a legacy VM size into a provider-native SKU or resource/accounting field: return provider.createVM({ instanceType: node.vmSize });',
+    ]);
+  });
+
+  it('flags a legacy size written into a billable resource count', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/compute-usage.ts',
+          [
+            'export async function track(db: Db, node: { vmSize: string }) {',
+            '  await db.insert(schema.computeUsage).values({ vcpuCount: node.vmSize });',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([
+      'apps/api/src/services/compute-usage.ts:2:60 writes a legacy VM size into a provider-native SKU or resource/accounting field: await db.insert(schema.computeUsage).values({ vcpuCount: node.vmSize });',
+    ]);
+  });
+
+  it('flags a native field assigned outside an object literal', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/nodes.ts',
+          [
+            'export function adapt(config: { providerInstanceType: string }, node: { vmSize: string }) {',
+            '  config.providerInstanceType = node.vmSize;',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([
+      'apps/api/src/services/nodes.ts:2:33 writes a legacy VM size into a provider-native SKU or resource/accounting field: config.providerInstanceType = node.vmSize;',
+    ]);
+  });
+
+  it('still allows the deprecated-size audit property', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/compute-usage.ts',
+          'export function audit(node: { vmSize: string }) {\n  return { deprecatedSize: node.vmSize };\n}\n'
+        )
+      )
+    ).toEqual([]);
+  });
+
+  it('still allows the pre-existing persisted serverType column', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/compute-usage.ts',
+          [
+            'export async function track(db: Db, input: { vmSize: string }) {',
+            '  await db.insert(schema.computeUsage).values({ serverType: input.vmSize });',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([]);
+  });
+});
+
+describe('node-pool legacy authority: namespace constants and computed fields', () => {
+  it('flags a namespace-qualified legacy capacity table', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/node-selector.ts',
+          [
+            "import * as sizes from '@simple-agent-manager/shared';",
+            'export function capacity(provider: string, size: string) {',
+            '  return sizes.PROVIDER_VM_CAPACITY[provider][size];',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([
+      'apps/api/src/services/node-selector.ts:3:10 reads legacy VM-size authority table PROVIDER_VM_CAPACITY: return sizes.PROVIDER_VM_CAPACITY[provider][size];',
+    ]);
+  });
+
+  it('flags a bare reference to a legacy capacity table without calling it', () => {
+    const findings = authorityFindings(
+      file(
+        'apps/api/src/services/node-selector.ts',
+        [
+          "import { PROVIDER_VM_CAPACITY } from '@simple-agent-manager/shared';",
+          'export const table = PROVIDER_VM_CAPACITY;',
+        ].join('\n')
+      )
+    );
+
+    expect(findings).toEqual([
+      "apps/api/src/services/node-selector.ts:1:10 imports legacy VM-size authority PROVIDER_VM_CAPACITY: import { PROVIDER_VM_CAPACITY } from '@simple-agent-manager/shared';",
+      'apps/api/src/services/node-selector.ts:2:22 reads legacy VM-size authority table PROVIDER_VM_CAPACITY: export const table = PROVIDER_VM_CAPACITY;',
+    ]);
+  });
+
+  it('resolves a statically computed legacy field name', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/node-selector.ts',
+          [
+            'export function pick(node: Record<string, string>, offers: Record<string, number>) {',
+            "  const key = 'vm' + 'Size';",
+            '  const selected = offers[node[key]];',
+            '  return selected;',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([
+      'apps/api/src/services/node-selector.ts:3:27 uses a legacy VM size as a catalog/capacity lookup key: const selected = offers[node[key]];',
+    ]);
+  });
+
+  it('does not invent a field name it cannot statically resolve', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/node-selector.ts',
+          [
+            'export function pick(node: Record<string, string>, offers: Record<string, number>, key: string) {',
+            '  return offers[node[key]];',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([]);
+  });
+});
+
+describe('node-pool legacy authority: alias bindings are lexical', () => {
+  it('does not leak a legacy alias into an unrelated function', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/node-selector.ts',
+          [
+            'export function historical(node: { vmSize: string }) {',
+            '  const { vmSize: size } = node;',
+            '  return { deprecatedSize: size };',
+            '}',
+            'export function native(size: string) {',
+            '  return offers[size];',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([]);
+  });
+
+  it('still tracks the alias inside the function that bound it', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/node-selector.ts',
+          [
+            'export function pick(node: { vmSize: string }, offers: Record<string, number>) {',
+            '  const { vmSize: size } = node;',
+            '  return offers[size];',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([
+      'apps/api/src/services/node-selector.ts:3:17 uses a legacy VM size as a catalog/capacity lookup key: return offers[size];',
+    ]);
+  });
+
+  it('lets an inner parameter shadow an outer legacy alias', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/node-selector.ts',
+          [
+            'export function outer(node: { vmSize: string }, offers: Record<string, number>) {',
+            '  const { vmSize: size } = node;',
+            '  const inner = (size: string) => offers[size];',
+            "  return inner('medium');",
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([]);
+  });
+
+  it('does not treat a container of legacy sizes as a legacy size', () => {
+    expect(
+      authorityFindings(
+        file(
+          'apps/api/src/services/placement-resolver.ts',
+          [
+            'export function collect(explicit: { vmSize?: string; vmSizeSource?: string }) {',
+            '  const legacyVmSizes: Record<string, string> = {};',
+            '  if (explicit.vmSize) {',
+            "    legacyVmSizes[explicit.vmSizeSource ?? 'task'] = explicit.vmSize;",
+            '  }',
+            '  if (Object.keys(legacyVmSizes).length === 0) return null;',
+            '  return legacyVmSizes;',
+            '}',
+          ].join('\n')
+        )
+      )
+    ).toEqual([]);
+  });
+});
+
 describe('node-pool inventories', () => {
   it('records every allocation writer with an owning function and a role', () => {
     for (const entry of ALLOCATION_WRITER_INVENTORY) {
@@ -782,7 +1062,7 @@ describe('node-pool inventories', () => {
       expect(entry.owner.length).toBeGreaterThan(0);
       expect(entry.admission.length).toBeGreaterThan(20);
     }
-    expect(ALLOCATION_ENTRYPOINT_INVENTORY.length).toBeGreaterThanOrEqual(21);
+    expect(ALLOCATION_ENTRYPOINT_INVENTORY.length).toBeGreaterThanOrEqual(22);
   });
 
   it('has no duplicate writer or entrypoint ownership keys', () => {

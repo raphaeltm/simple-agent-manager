@@ -271,6 +271,20 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     status: 'canonical',
   },
   {
+    filePath: 'apps/api/src/services/nodes.ts',
+    owner: 'provisionNode',
+    entrypoint: 'createVM',
+    scope: 'service',
+    role: 'workspace',
+    admission:
+      'the single provider allocation boundary in the control plane; the node row and its capacity snapshot were written by createNodeRecord, and the caller of provisionNode carries the admission contract',
+    status: 'canonical',
+    requiredEvidence: [
+      { kind: 'export', name: 'provisionNode' },
+      { kind: 'call', name: 'throwIfProviderRequestAborted' },
+    ],
+  },
+  {
     filePath: 'apps/api/src/routes/nodes.ts',
     owner: 'post /',
     entrypoint: 'createNodeRecord',

@@ -252,3 +252,100 @@ Baseline reconciliation: the only files this branch changes are the scanner
 modules, `package.json`, this branch's task docs and the boundary test file. The
 boundary test file went from 7 tests to 50, so the expected total is
 `8704 + 43 = 8747`, which matches. No test file lost its collection.
+
+## Round 2 — independent re-review of `2e3d89023`
+
+The reviewer re-ran injected fixtures against commit `2e3d89023`, which is
+checkpoint 2 of 5 on this branch, and confirmed most round-1 fixes while raising
+five further issues.
+
+### Finding 1 — regression tests not yet published
+
+Accurate for the commit reviewed. `2e3d89023` still carried the original 7-test
+file with obsolete contract expectations, because the replacement suite landed in
+the very next commit, `01afddfb4`. At branch head the suite is published, the
+obsolete expectations are gone, and the current-repo assertion is retained. No
+action beyond confirming this; the reviewer should re-review branch head.
+
+### Findings 2-5 — reproduced at head, then fixed
+
+All four reproduced against the head that existed when the re-review arrived.
+
+**2. Legacy sizes flowing into native SKU / resource / accounting fields.**
+Treating every object-literal property value as metadata meant
+`provider.createVM({ instanceType: node.vmSize })` and
+`.values({ vcpuCount: node.vmSize })` produced zero findings. A new
+`authority-native-sink` classification is checked BEFORE the legacy and transport
+exemptions, for both object-literal properties and plain assignment targets, over
+`NATIVE_SKU_FIELDS` (instanceType, providerInstanceType, machineType, sku, …) and
+`RESOURCE_ACCOUNTING_FIELDS` (vcpuCount, memoryMb, diskGb, providerInstance\*, …).
+`{ deprecatedSize: node.vmSize }` and the pre-existing persisted
+`serverType` column both remain allowed, each with a paired control test.
+
+**3. Allocation-entrypoint resolution.**
+
+- `import { createNodeRecord as allocate }` then `allocate(env, input)` is now
+  resolved through the same alias map used for legacy symbols.
+- The self-definition exemption was function-name equality, so a module-local
+  `provisionNode` that called `other.provisionNode(...)` suppressed itself. It is
+  now narrowed to genuine recursion: a bare-identifier call to a symbol this
+  module declares at module level, from inside that same declaration. A member
+  call can never be exempt. A control test proves real self-recursion is still
+  exempt.
+- `provider.createVM(...)` is now an allocation entrypoint. It has exactly one
+  control-plane call site — `services/nodes.ts` `provisionNode` — which is
+  inventoried as canonical; a new module calling `provider.createVM(config)`
+  is reported.
+
+**4. Namespace constants and computed field names.**
+
+- `PROVIDER_VM_CAPACITY`, `PLATFORM_RESOURCE_DEFAULTS` and `VM_SIZE_ORDER` are
+  constants that leak by being READ, so every reference is reported: a bare one,
+  an `as` alias, or any `<namespace>.CONSTANT`. `import * as sizes` no longer
+  hides one.
+- `const key = 'vm' + 'Size'; offers[node[key]]` resolves, via literal and `+`
+  concatenation of literals only. A field name the scanner cannot statically
+  resolve is left alone rather than guessed at — a paired control test asserts
+  `offers[node[key]]` with a parameter `key` produces nothing.
+
+**5. Alias bindings are lexical.**
+The alias set was file-global, so `historical()`'s `const { vmSize: size }`
+reclassified `native(size)`'s unrelated parameter. Bindings are now resolved
+through a lexical scope chain with shadowing: a parameter or local that binds a
+name to something untraceable shadows any outer legacy alias. Legacy-ness now
+comes only from a destructured legacy property or a legacy-access initializer,
+never from the local's own name — registering by name additionally made
+`legacyVmSizes`, the adapter's own container, look like a size and re-broke the
+round-1 finding about `placement-resolver.ts:139/140`.
+
+### Round-2 discrimination evidence
+
+| Guard removed                                           |               Result |
+| ------------------------------------------------------- | -------------------: |
+| native/accounting sink on an object property            | 2 failed / 65 passed |
+| native/accounting sink on an assignment RHS             | 2 failed / 65 passed |
+| entrypoint alias resolution                             | 1 failed / 66 passed |
+| narrowed recursion exemption (restore `owner !== name`) | 1 failed / 66 passed |
+| `createVM` in the entrypoint set                        | 3 failed / 64 passed |
+| namespace/bare constant reference detection             | 2 failed / 65 passed |
+| static computed field-name resolution                   | 1 failed / 66 passed |
+| lexical shadow lookup                                   | 1 failed / 66 passed |
+| parameter shadow registration                           | 1 failed / 66 passed |
+| re-register aliases by NAME (container regression)      | 4 failed / 63 passed |
+
+A mutation run that exceeded its wall clock left the shadow-lookup line deleted;
+the boundary test caught it on the next run, it was restored, and both shadowing
+guards were re-proven discriminating against a clean baseline.
+
+### Gate state after round 2
+
+Still **60 violations**, and the composition is unchanged. The only new repo
+findings the round-2 fixes surfaced were the two `provider.createVM` call sites in
+`services/nodes.ts` `provisionNode`, which are now inventoried as the canonical
+provider allocation boundary (entrypoint inventory 21 -> 22 entries). No
+application code has a legacy size flowing into a native SKU or accounting field
+today, so fix 2 adds no findings; it is a guard against a future leak, with
+fixture tests.
+
+Scanner regression suite: **67/67 PASS** (was 50). Modules were re-split so no
+file exceeds the 500-line ceiling (largest: `inventory-data.ts` at 440).

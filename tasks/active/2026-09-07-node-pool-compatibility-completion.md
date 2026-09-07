@@ -256,10 +256,14 @@ exercised by `apps/api/tests/unit/services/node-pool-legacy-boundary.test.ts`.
 What the gate enforces:
 
 1. **Legacy VM-tier authority** — importing, aliasing, namespacing or calling
-   `getVcpuCount`, `canSatisfyVmSize`, `vmSizeFallbackChain`,
-   `PROVIDER_VM_CAPACITY`, `PLATFORM_RESOURCE_DEFAULTS` or `VM_SIZE_ORDER`, and
-   using a legacy size as a catalog lookup key or an eligibility/ranking
-   comparison. Reported anywhere in `apps/api/src` and `packages/providers/src`.
+   `getVcpuCount`, `canSatisfyVmSize` or `vmSizeFallbackChain`; READING the
+   `PROVIDER_VM_CAPACITY`, `PLATFORM_RESOURCE_DEFAULTS` or `VM_SIZE_ORDER` tables
+   through any name or namespace; using a legacy size as a catalog lookup key or
+   an eligibility/ranking comparison; and writing a legacy size into a
+   provider-native SKU or resource/accounting field. Reported anywhere in
+   `apps/api/src` and `packages/providers/src`. Legacy-size aliases are resolved
+   lexically, with parameter shadowing, and statically computed field names
+   (`const key = 'vm' + 'Size'`) resolve.
 2. **Legacy size reads inside canonical authority scope** — matched by canonical
    directory and by family token in the module name, so a newly created
    `services/placement-ranking.ts` is in scope on creation rather than needing a
@@ -267,9 +271,10 @@ What the gate enforces:
 3. **Allocation writers** — every `INSERT` into `tasks` / `nodes` / `workspaces`
    / `compute_usage`, owned per enclosing function.
 4. **Allocation and provisioning entrypoints** — `createNodeRecord`,
-   `provisionNode`, `reserveWorkspacePlacement`, `createWorkspaceOnNode` and
-   `startComputeTracking` call sites, each carrying an explicit scope, role and
-   admission contract.
+   `provisionNode`, `reserveWorkspacePlacement`, `createWorkspaceOnNode`,
+   `provider.createVM` and `startComputeTracking` call sites, resolved through
+   import aliases, each carrying an explicit scope, role and admission contract.
+   Only genuine self-recursion of a symbol the module itself declares is exempt.
 
 Accepted exclusions are narrow, source-parsed and paired with tests:
 
@@ -323,8 +328,9 @@ Checked allocation writer inventory (24 entries, owner-scoped):
 | `workspaces`    | `apps/api/src/durable-objects/trial-orchestrator/steps.ts`         | `handleWorkspaceCreation`   | explicit trial runtime adapter                                                      |
 | `compute_usage` | `apps/api/src/services/compute-usage.ts`                           | `startComputeTracking`      | canonical metering writer                                                           |
 
-Checked allocation/provision entrypoint inventory (21 call sites). `status` is an
-honest classification of what each call site does today, not an approval:
+Checked allocation/provision entrypoint inventory (22 call sites, including the
+single `provider.createVM` boundary). `status` is an honest classification of what
+each call site does today, not an approval:
 
 | Entrypoint                  | Callsite                                                                       | Scope / role             | Status                |
 | --------------------------- | ------------------------------------------------------------------------------ | ------------------------ | --------------------- |

@@ -7,10 +7,18 @@ import {
   isLegacyAuthorityScope,
   isLegacySizeFieldLiteral,
   isLegacySizeName,
+  isNativeOrAccountingField,
   isReviewedLegacyValidator,
+  LEGACY_AUTHORITY_CONSTANTS,
   LEGACY_AUTHORITY_SYMBOLS,
   type LegacyReadClassification,
 } from './legacy-authority-scope';
+import {
+  collectLegacyBindings,
+  elementAccessFieldName,
+  type LegacyBindings,
+  resolvesToLegacyAlias,
+} from './legacy-bindings';
 import {
   type BoundaryViolation,
   enclosingFunctionName,
@@ -58,13 +66,6 @@ export function scanLegacyAuthority(files: readonly SourceFileInput[]): Boundary
     .flatMap((file) => scanLegacyAuthorityFile(file));
 }
 
-interface LegacyBindings {
-  /** local name -> canonical legacy authority symbol (covers `as` aliases). */
-  authorityAliases: Map<string, string>;
-  /** local identifiers holding a legacy VM-size value (destructuring / aliasing). */
-  valueAliases: Set<string>;
-}
-
 function scanLegacyAuthorityFile(file: SourceFileInput): BoundaryViolation[] {
   const sourceFile = parseSourceFile(file);
   const bindings = collectLegacyBindings(sourceFile);
@@ -98,6 +99,11 @@ function scanLegacyAuthorityFile(file: SourceFileInput): BoundaryViolation[] {
       record(callTarget(node), `calls legacy VM-size authority ${calledSymbol}`);
     }
 
+    const constantSymbol = referencedAuthorityConstant(node, bindings);
+    if (constantSymbol) {
+      record(node, `reads legacy VM-size authority table ${constantSymbol}`);
+    }
+
     if (isLegacySizeValueExpression(node, bindings)) {
       const classification = classifyLegacyRead(node, bindings);
       const reviewed =
@@ -115,46 +121,6 @@ function scanLegacyAuthorityFile(file: SourceFileInput): BoundaryViolation[] {
 
   visit(sourceFile);
   return violations;
-}
-
-function collectLegacyBindings(sourceFile: ts.SourceFile): LegacyBindings {
-  const authorityAliases = new Map<string, string>();
-  const valueAliases = new Set<string>();
-
-  const bindPattern = (pattern: ts.ObjectBindingPattern): void => {
-    for (const element of pattern.elements) {
-      if (!ts.isIdentifier(element.name)) continue;
-      const local = element.name.text;
-      const property =
-        element.propertyName && ts.isIdentifier(element.propertyName)
-          ? element.propertyName.text
-          : local;
-      if (LEGACY_AUTHORITY_SYMBOLS.has(property)) authorityAliases.set(local, property);
-      if (isLegacySizeName(property)) valueAliases.add(local);
-    }
-  };
-
-  const visit = (node: ts.Node): void => {
-    if (ts.isImportSpecifier(node)) {
-      const imported = node.propertyName?.text ?? node.name.text;
-      if (LEGACY_AUTHORITY_SYMBOLS.has(imported)) authorityAliases.set(node.name.text, imported);
-    } else if (ts.isVariableDeclaration(node)) {
-      if (ts.isObjectBindingPattern(node.name)) bindPattern(node.name);
-      else if (
-        ts.isIdentifier(node.name) &&
-        node.initializer &&
-        isLegacySizeAccess(node.initializer)
-      ) {
-        valueAliases.add(node.name.text);
-      }
-    } else if (ts.isParameter(node) && ts.isObjectBindingPattern(node.name)) {
-      bindPattern(node.name);
-    }
-    ts.forEachChild(node, visit);
-  };
-
-  visit(sourceFile);
-  return { authorityAliases, valueAliases };
 }
 
 function importedAuthoritySymbol(node: ts.Node): string | null {
@@ -177,6 +143,24 @@ function calledAuthoritySymbol(node: ts.Node, bindings: LegacyBindings): string 
   return null;
 }
 
+/**
+ * Constants leak by being READ. Covers a bare reference, an `as` alias and any
+ * `<namespace>.PROVIDER_VM_CAPACITY`, so `import * as sizes` cannot hide one.
+ */
+function referencedAuthorityConstant(node: ts.Node, bindings: LegacyBindings): string | null {
+  if (ts.isPropertyAccessExpression(node) && LEGACY_AUTHORITY_CONSTANTS.has(node.name.text)) {
+    return node.name.text;
+  }
+  if (!ts.isIdentifier(node)) return null;
+  const parent = node.parent;
+  if (ts.isImportSpecifier(parent) || ts.isExportSpecifier(parent)) return null;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return null;
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return null;
+  if (LEGACY_AUTHORITY_CONSTANTS.has(node.text)) return node.text;
+  const aliased = bindings.authorityAliases.get(node.text);
+  return aliased && LEGACY_AUTHORITY_CONSTANTS.has(aliased) ? aliased : null;
+}
+
 function callTarget(node: ts.Node): ts.Node {
   if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
     return node.expression.name;
@@ -184,18 +168,11 @@ function callTarget(node: ts.Node): ts.Node {
   return ts.isCallExpression(node) ? node.expression : node;
 }
 
-function isLegacySizeAccess(node: ts.Node): boolean {
-  if (ts.isPropertyAccessExpression(node)) return isLegacySizeName(node.name.text);
-  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
-    return isLegacySizeFieldLiteral(node.argumentExpression.text);
-  }
-  return false;
-}
-
 function isLegacySizeValueExpression(node: ts.Node, bindings: LegacyBindings): boolean {
   if (ts.isPropertyAccessExpression(node)) return isLegacySizeName(node.name.text);
-  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
-    return isLegacySizeFieldLiteral(node.argumentExpression.text);
+  if (ts.isElementAccessExpression(node)) {
+    const field = elementAccessFieldName(node, bindings);
+    return field !== null && isLegacySizeFieldLiteral(field);
   }
   if (ts.isStringLiteralLike(node) && isLegacySizeFieldLiteral(node.text)) {
     const parent = node.parent;
@@ -207,7 +184,7 @@ function isLegacySizeValueExpression(node: ts.Node, bindings: LegacyBindings): b
     return !ts.isImportDeclaration(parent) && !ts.isExportDeclaration(parent);
   }
   if (ts.isIdentifier(node)) {
-    if (!bindings.valueAliases.has(node.text)) return false;
+    if (!resolvesToLegacyAlias(node, bindings)) return false;
     // Only value positions: skip declarations, property keys and member names.
     const parent = node.parent;
     if (ts.isBindingElement(parent) || ts.isVariableDeclaration(parent)) return false;
@@ -221,20 +198,13 @@ function isLegacySizeValueExpression(node: ts.Node, bindings: LegacyBindings): b
 
 export function classifyLegacyRead(
   node: ts.Node,
-  bindings: LegacyBindings = { authorityAliases: new Map(), valueAliases: new Set() }
+  bindings: LegacyBindings = {
+    authorityAliases: new Map(),
+    scopes: new Map(),
+    staticStrings: new Map(),
+  }
 ): LegacyReadClassification {
   if (isInTypePosition(node)) return 'type-position';
-
-  // A write target is not a read. `state.config.vmSize = x` moves a value into a
-  // legacy field, which is propagation, not authority.
-  if (
-    node.parent &&
-    ts.isBinaryExpression(node.parent) &&
-    node.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-    node.parent.left === node
-  ) {
-    return 'legacy-propagation';
-  }
 
   let child: ts.Node = node;
   let parent: ts.Node | undefined = node.parent;
@@ -248,6 +218,18 @@ export function classifyLegacyRead(
   }
 
   if (!parent) return 'plain-read';
+
+  // A write target is not a read. `state.config.vmSize = x` and
+  // `legacyVmSizes[source] = x` both move a value INTO a legacy field.
+  if (
+    ts.isBinaryExpression(parent) &&
+    parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    parent.left === child
+  ) {
+    return isNativeOrAccountingAssignmentTarget(parent.left)
+      ? 'authority-native-sink'
+      : 'legacy-propagation';
+  }
 
   if (ts.isElementAccessExpression(parent) && parent.argumentExpression === child) {
     return 'authority-lookup';
@@ -282,6 +264,10 @@ export function classifyLegacyRead(
 
   if (ts.isPropertyAssignment(parent) && parent.initializer === child) {
     if (ts.isIdentifier(parent.name) || ts.isStringLiteralLike(parent.name)) {
+      // A native SKU or resource/accounting target is checked BEFORE the legacy
+      // and transport exemptions: those fields must never receive a legacy tier,
+      // whichever call or object literal they are written through.
+      if (isNativeOrAccountingField(parent.name.text)) return 'authority-native-sink';
       if (isLegacySizeName(parent.name.text)) return 'legacy-propagation';
     }
     return isInsidePersistedTransport(parent) ? 'persisted-transport' : 'metadata-property';
@@ -292,10 +278,10 @@ export function classifyLegacyRead(
   if (
     ts.isBinaryExpression(parent) &&
     parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-    parent.right === child &&
-    isLegacyAssignmentTarget(parent.left)
+    parent.right === child
   ) {
-    return 'legacy-propagation';
+    if (isNativeOrAccountingAssignmentTarget(parent.left)) return 'authority-native-sink';
+    if (isLegacyAssignmentTarget(parent.left)) return 'legacy-propagation';
   }
 
   if (
@@ -336,6 +322,15 @@ function isPresenceOperand(node: ts.Node): boolean {
   if (ts.isIdentifier(node) && node.text === 'undefined') return true;
   if (PRESENCE_KEYWORDS.has(node.kind)) return true;
   return node.kind === ts.SyntaxKind.NullKeyword;
+}
+
+function isNativeOrAccountingAssignmentTarget(target: ts.Expression): boolean {
+  if (ts.isIdentifier(target)) return isNativeOrAccountingField(target.text);
+  if (ts.isPropertyAccessExpression(target)) return isNativeOrAccountingField(target.name.text);
+  if (ts.isElementAccessExpression(target) && ts.isStringLiteralLike(target.argumentExpression)) {
+    return isNativeOrAccountingField(target.argumentExpression.text);
+  }
+  return false;
 }
 
 function isLegacyAssignmentTarget(target: ts.Expression): boolean {

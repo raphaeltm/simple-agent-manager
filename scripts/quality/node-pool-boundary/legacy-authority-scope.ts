@@ -19,6 +19,67 @@ export const LEGACY_AUTHORITY_SYMBOLS = new Set([
 ]);
 
 /**
+ * The subset of the above that are CONSTANTS rather than functions. They leak by
+ * being read — `sizes.PROVIDER_VM_CAPACITY[provider][size]` never calls
+ * anything — so every reference is reported, not just calls.
+ */
+export const LEGACY_AUTHORITY_CONSTANTS = new Set([
+  'PLATFORM_RESOURCE_DEFAULTS',
+  'PROVIDER_VM_CAPACITY',
+  'VM_SIZE_ORDER',
+]);
+
+/**
+ * Fields that carry provider-native machine identity. A legacy tier written into
+ * one of these makes a compatibility alias masquerade as a concrete SKU, which
+ * is precisely what the native-contract work forbids.
+ */
+export const NATIVE_SKU_FIELDS = new Set([
+  'flavor',
+  'instanceType',
+  'instanceTypeId',
+  'machineType',
+  'nativeOffering',
+  'offering',
+  'offeringId',
+  'providerInstanceType',
+  'serverTypeId',
+  'sku',
+]);
+
+/**
+ * Fields that carry measured resources or billable quantities. A legacy tier
+ * written into one of these makes metering treat a compatibility tier as
+ * authoritative hardware metadata.
+ *
+ * `serverType` is deliberately absent: it is the pre-existing legacy column on
+ * `compute_usage`, and old persisted fields are not required to be removed.
+ */
+export const RESOURCE_ACCOUNTING_FIELDS = new Set([
+  'bootDiskSizeGb',
+  'cores',
+  'cpu',
+  'cpuCount',
+  'cpuCores',
+  'disk',
+  'diskGb',
+  'memory',
+  'memoryMb',
+  'providerInstanceBootDiskSizeGb',
+  'providerInstanceDiskGb',
+  'providerInstanceMemoryMb',
+  'providerInstanceVcpuCount',
+  'ramMb',
+  'storageGb',
+  'vcpuCount',
+  'vcpus',
+]);
+
+export function isNativeOrAccountingField(name: string): boolean {
+  return NATIVE_SKU_FIELDS.has(name) || RESOURCE_ACCOUNTING_FIELDS.has(name);
+}
+
+/**
  * Named compatibility modules. These OWN legacy semantics: they define the legacy
  * tier tables or translate legacy tiers at one reviewed boundary.
  */
@@ -134,18 +195,22 @@ export type LegacyReadClassification =
   | 'metadata-property'
   | 'adapter-guard'
   | 'adapter-validation'
+  | 'authority-native-sink'
   | 'plain-read';
 
 export const AUTHORITY_CLASSIFICATIONS = new Set<LegacyReadClassification>([
   'authority-lookup',
   'authority-comparison',
   'authority-argument',
+  'authority-native-sink',
 ]);
 
 export const CLASSIFICATION_REASON: Record<LegacyReadClassification, string> = {
   'authority-lookup': 'uses a legacy VM size as a catalog/capacity lookup key',
   'authority-comparison': 'compares a legacy VM size to decide eligibility or ranking',
   'authority-argument': 'passes a legacy VM size into legacy VM-size authority',
+  'authority-native-sink':
+    'writes a legacy VM size into a provider-native SKU or resource/accounting field',
   'type-position': '',
   'persisted-transport': '',
   'legacy-propagation': '',
