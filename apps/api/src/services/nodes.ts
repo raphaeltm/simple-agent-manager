@@ -10,6 +10,7 @@ import {
 } from '@simple-agent-manager/providers';
 import {
   type CapacityPlacementSnapshot,
+  type CapacityWorkloadRole,
   type CredentialProvider,
   type CredentialSource,
   DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH,
@@ -106,11 +107,23 @@ function managedNodeStopDiagnostic(env: Env): string {
   );
 }
 
+/**
+ * Role the caller intends to place. The node row cannot supply this: deriving the
+ * expected role from the same row being validated makes the check self-consistent,
+ * so a row whose `workload_role` drifted to another role would validate against
+ * itself instead of being rejected.
+ */
+export interface NodeAllocationPlanRole {
+  nodeRole: 'workspace' | 'deployment';
+  workloadRole: CapacityWorkloadRole;
+}
+
 export async function assertNodeAllocationPlanCurrent(
   env: Env,
   nodeId: string,
   userId: string,
-  projectId: string | null
+  projectId: string | null,
+  expectedRole: NodeAllocationPlanRole = { nodeRole: 'workspace', workloadRole: 'workspace' }
 ): Promise<void> {
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     throw new Error('Node allocation authority database is unavailable');
@@ -161,8 +174,7 @@ export async function assertNodeAllocationPlanCurrent(
   if (row.user_id !== userId) {
     throw new Error('Node allocation user changed before provider allocation');
   }
-  const nodeRole = row.node_role === 'deployment' ? 'deployment' : 'workspace';
-  const workloadRole = row.workload_role === 'deployment' ? 'deployment' : 'workspace';
+  const { nodeRole, workloadRole } = expectedRole;
   const predicate = buildPlacementAuthoritySqlPredicate({
     userId,
     projectId,
@@ -526,9 +538,20 @@ export async function provisionNode(
       : null;
   const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
   const authorityProjectId = provisionAuthorityProjectId(taskContext, options, deploymentContext);
+  // Caller intent, not the node row: a deployment provision supplies a deployment
+  // context, everything else is placing a workspace node.
+  const authorityRole: NodeAllocationPlanRole = deploymentContext
+    ? { nodeRole: 'deployment', workloadRole: 'deployment' }
+    : { nodeRole: 'workspace', workloadRole: 'workspace' };
 
   try {
-    await assertNodeAllocationPlanCurrent(env, node.id, node.userId, authorityProjectId);
+    await assertNodeAllocationPlanCurrent(
+      env,
+      node.id,
+      node.userId,
+      authorityProjectId,
+      authorityRole
+    );
     const providerResult = await createProviderForUser(
       db,
       attributionUserId,
@@ -662,7 +685,13 @@ export async function provisionNode(
     // Last authority check before the paid provider allocation. A revocation
     // that races createVM is handled by the post-request check below, which can
     // strictly destroy the resource using the persisted provider identity.
-    await assertNodeAllocationPlanCurrent(env, node.id, node.userId, authorityProjectId);
+    await assertNodeAllocationPlanCurrent(
+      env,
+      node.id,
+      node.userId,
+      authorityProjectId,
+      authorityRole
+    );
     await options?.assertExternalMutationAuthority?.();
     const vmConfig = applyNativePlanToVmConfig(
       {
@@ -710,7 +739,13 @@ export async function provisionNode(
       throw new Error('Node lifecycle changed before provider identity could be recorded');
     }
     try {
-      await assertNodeAllocationPlanCurrent(env, node.id, node.userId, authorityProjectId);
+      await assertNodeAllocationPlanCurrent(
+        env,
+        node.id,
+        node.userId,
+        authorityProjectId,
+        authorityRole
+      );
       await options?.assertExternalMutationAuthority?.();
     } catch (authorityErr) {
       log.error('node_provisioning.authority_revoked_after_create', {
