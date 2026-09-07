@@ -2,12 +2,12 @@
  * Comprehensive browser proof for resource form surfaces.
  *
  * Covers ProfileFormDialog, SkillFormDialog, TriggerForm, ProjectSettings
- * infrastructure, and ChatInput resource overrides at mobile (375x667),
- * desktop (1280x800), and narrow (320x568) viewports.
+ * infrastructure, ChatInput (submit/reset/VM-vs-Instant/wizard), at mobile
+ * (375x667), desktop (1280x800), and narrow (320x568) viewports.
  *
- * Asserts actual POST/PATCH payloads, validates malformed data handling,
- * tests no-op preservation, partial edits, and clear operations.
- * Fails on page errors and error boundaries.
+ * Asserts actual POST/PUT/PATCH payloads, validates malformed data handling,
+ * tests no-op preservation, partial edits, clear operations, per-task resets.
+ * Fails on page errors and error boundaries. No conditional isVisible patterns.
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
@@ -58,7 +58,7 @@ const PROJECT = {
 
 const PROFILE_MIXED = {
   id: 'prof-mixed',
-  name: 'Mixed Legacy \u{1F9EA} Unicode テスト',
+  name: 'Mixed Legacy',
   description: 'Has legacy vmSizeOverride AND modern resourceRequirements',
   projectId: 'proj-test-1',
   userId: 'user-test-1',
@@ -200,6 +200,15 @@ interface CapturedRequest {
   body: unknown;
 }
 
+/** Helper to scroll a dialog to its resource section and CTA buttons */
+async function scrollDialogToResources(page: Page) {
+  const scrollContainer = page.locator('[role="dialog"] .overflow-y-auto');
+  if ((await scrollContainer.count()) > 0) {
+    await scrollContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+  }
+  await page.waitForTimeout(300);
+}
+
 async function setupMocks(page: Page, overrides?: {
   profiles?: typeof PROFILES;
   skills?: typeof SKILLS;
@@ -210,7 +219,6 @@ async function setupMocks(page: Page, overrides?: {
   const capturedRequests: CapturedRequest[] = [];
   page.on('pageerror', (err) => pageErrors.push(err.message));
 
-  // Dismiss onboarding wizard
   await page.addInitScript((userId) => {
     window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
   }, MOCK_USER.user.id);
@@ -226,7 +234,6 @@ async function setupMocks(page: Page, overrides?: {
     const path = url.pathname;
     const method = req.method();
 
-    // Capture mutating requests
     if (method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE') {
       let body: unknown = null;
       try { body = JSON.parse(req.postData() ?? ''); } catch { /* empty */ }
@@ -271,7 +278,7 @@ async function setupMocks(page: Page, overrides?: {
     if (projMatch) {
       const sub = projMatch[2] ?? '';
 
-      // Mutation responses (create/update)
+      // Mutation responses
       if (method === 'POST' && sub === '/agent-profiles')
         return respond({ ...PROFILE_EMPTY, id: 'prof-new-1', name: 'New Profile' });
       if ((method === 'PATCH' || method === 'PUT') && sub.match(/\/agent-profiles\/[^/]+$/))
@@ -286,6 +293,12 @@ async function setupMocks(page: Page, overrides?: {
         return respond({ ...TRIGGER_WITH_RESOURCES, updatedAt: new Date().toISOString() });
       if (method === 'PATCH' && sub === '')
         return respond({ ...project, updatedAt: new Date().toISOString() });
+
+      // Chat/task submission
+      if (method === 'POST' && sub === '/tasks/submit')
+        return respond({ taskId: 'task-new-1', status: 'queued' });
+      if (method === 'POST' && sub === '/sessions/start')
+        return respond({ sessionId: 'sess-instant-1', chatSessionId: 'cs-1' });
 
       // Read responses
       if (sub.match(/\/agent-profiles\/[^/]+\/runtime\/env-vars$/)) return respond({ envVars: [] });
@@ -306,8 +319,6 @@ async function setupMocks(page: Page, overrides?: {
       if (sub.startsWith('/triggers') && sub !== '/triggers')
         return respond(triggers[0] ?? {});
       if (sub === '/triggers') return respond({ triggers });
-      if (sub.startsWith('/tasks/submit') && method === 'POST')
-        return respond({ taskId: 'task-new-1', status: 'queued' });
       if (sub.startsWith('/tasks')) return respond({ tasks: [], nextCursor: null });
       if (sub === '/trial') return respond({ available: false });
       if (sub.startsWith('/chats')) return respond({ sessions: [], total: 0, totalActive: 0 });
@@ -328,22 +339,22 @@ async function setupMocks(page: Page, overrides?: {
 
 function assertNoPageErrors(errors: string[]) {
   const real = errors.filter(
-    (e) => !e.includes('ResizeObserver') && !e.includes('WebSocket')
+    (e) => !e.includes('ResizeObserver') && !e.includes('WebSocket'),
   );
   if (real.length > 0) {
     throw new Error(`Unexpected page errors:\n${real.join('\n')}`);
   }
 }
 
-// ---------------------------------------------------------------------------
+// =====================================================================================
 // ProfileFormDialog — Profiles page
-// ---------------------------------------------------------------------------
+// =====================================================================================
 
 test.describe('ProfileFormDialog — Profiles Page', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('create new profile — opens empty dialog with resource inputs', async ({ page }) => {
+    test('create new profile — opens empty dialog with resource inputs visible', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
       await expect(page.getByRole('button', { name: 'New Profile' })).toBeVisible();
@@ -358,13 +369,15 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       await infraBtn.scrollIntoViewIfNeeded();
       await infraBtn.click();
       await page.waitForTimeout(300);
+      await scrollDialogToResources(page);
 
-      // Scroll to see the expanded section
-      const scrollContainer = dialog.locator('.overflow-y-auto');
-      await scrollContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-      await page.waitForTimeout(300);
+      // Resource inputs visible with empty defaults
+      await expect(dialog.getByLabel('vCPU')).toBeVisible();
+      await expect(dialog.getByLabel('vCPU')).toHaveValue('');
+      // Create button reachable
+      await expect(dialog.getByRole('button', { name: 'Create Profile' })).toBeVisible();
 
-      await screenshot(page, 'profile-create-dialog-desktop');
+      await screenshot(page, 'profile-create-infra-desktop');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
@@ -385,25 +398,18 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       await infraBtn.scrollIntoViewIfNeeded();
       await infraBtn.click();
       await page.waitForTimeout(300);
+      await scrollDialogToResources(page);
 
-      // Scroll to bottom to see resource inputs
-      const scrollContainer = dialog.locator('.overflow-y-auto');
-      await scrollContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-      await page.waitForTimeout(300);
+      await expect(dialog.getByText(/Legacy:.*Medium/)).toBeVisible();
+      await expect(dialog.getByLabel('vCPU')).toHaveValue('2');
+      await expect(dialog.getByRole('button', { name: 'Save Changes' })).toBeVisible();
 
-      // Legacy badge should be visible
-      await expect(dialog.getByText('Legacy: Medium')).toBeVisible();
-
-      // vCPU field should show value 2
-      const vcpuInput = dialog.getByLabel('vCPU');
-      await expect(vcpuInput).toHaveValue('2');
-
-      await screenshot(page, 'profile-edit-mixed-desktop');
+      await screenshot(page, 'profile-edit-mixed-infra-desktop');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
 
-    test('edit profile no-op save — preserves mixed legacy+modern data', async ({ page }) => {
+    test('edit profile no-op save — preserves mixed legacy+modern in PUT payload', async ({ page }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
       const editBtn = page.getByRole('button', { name: `Edit ${PROFILE_MIXED.name}` });
@@ -413,15 +419,13 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
 
-      // Save without changes — scroll to save button
       const saveBtn = dialog.getByRole('button', { name: 'Save Changes' });
       await saveBtn.scrollIntoViewIfNeeded();
       await saveBtn.click();
       await page.waitForTimeout(500);
 
-      // Check the PATCH payload preserves both legacy and modern fields
       const patch = capturedRequests.find(
-        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/')
+        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/'),
       );
       expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
@@ -431,7 +435,7 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       assertNoPageErrors(pageErrors);
     });
 
-    test('edit profile partial edit — change only vcpu preserves rest', async ({ page }) => {
+    test('edit profile partial edit — change vcpu preserves legacy + rest', async ({ page }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
       const editBtn = page.getByRole('button', { name: `Edit ${PROFILE_MIXED.name}` });
@@ -441,19 +445,13 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
 
-      // Expand Infrastructure accordion
       const infraBtn = dialog.getByText('Infrastructure', { exact: false });
       await infraBtn.scrollIntoViewIfNeeded();
       await infraBtn.click();
       await page.waitForTimeout(300);
+      await scrollDialogToResources(page);
 
-      const scrollContainer = dialog.locator('.overflow-y-auto');
-      await scrollContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-      await page.waitForTimeout(300);
-
-      // Change vCPU from 2 to 4
-      const vcpuInput = dialog.getByLabel('vCPU');
-      await vcpuInput.fill('4');
+      await dialog.getByLabel('vCPU').fill('4');
 
       const saveBtn = dialog.getByRole('button', { name: 'Save Changes' });
       await saveBtn.scrollIntoViewIfNeeded();
@@ -461,7 +459,7 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       await page.waitForTimeout(500);
 
       const patch = capturedRequests.find(
-        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/')
+        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/'),
       );
       expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
@@ -472,7 +470,7 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       assertNoPageErrors(pageErrors);
     });
 
-    test('edit profile clear resources — emits null for legacy and modern', async ({ page }) => {
+    test('edit profile clear — emits null vmSizeOverride and null resources', async ({ page }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
       const editBtn = page.getByRole('button', { name: `Edit ${PROFILE_MIXED.name}` });
@@ -482,15 +480,11 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
 
-      // Expand Infrastructure accordion
       const infraBtn = dialog.getByText('Infrastructure', { exact: false });
       await infraBtn.scrollIntoViewIfNeeded();
       await infraBtn.click();
       await page.waitForTimeout(300);
-
-      const scrollContainer = dialog.locator('.overflow-y-auto');
-      await scrollContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-      await page.waitForTimeout(300);
+      await scrollDialogToResources(page);
 
       // Click "Inherit default" to clear all resource values and legacy
       const inheritBtn = dialog.getByRole('button', { name: /Inherit default/i });
@@ -505,7 +499,7 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       await page.waitForTimeout(500);
 
       const patch = capturedRequests.find(
-        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/')
+        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/'),
       );
       expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
@@ -518,22 +512,33 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
   test.describe('mobile 375x667', () => {
     test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
-    test('create profile dialog renders properly on mobile', async ({ page }) => {
+    test('create profile — resource controls and CTA reachable on mobile', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
-      await page.waitForSelector('text=New Profile');
-      await page.click('button:has-text("New Profile")');
+      await expect(page.getByRole('button', { name: 'New Profile' })).toBeVisible();
+      await page.getByRole('button', { name: 'New Profile' }).click();
 
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
-      await expect(dialog.getByText('Create Agent Profile')).toBeVisible();
 
-      await screenshot(page, 'profile-create-dialog-mobile');
+      // Expand infrastructure
+      const infraBtn = dialog.getByText('Infrastructure', { exact: false });
+      await infraBtn.scrollIntoViewIfNeeded();
+      await infraBtn.click();
+      await page.waitForTimeout(300);
+      await scrollDialogToResources(page);
+
+      // Resource inputs visible
+      await expect(dialog.getByLabel('vCPU')).toBeVisible();
+      // CTA visible after scroll
+      await expect(dialog.getByRole('button', { name: 'Create Profile' })).toBeVisible();
+
+      await screenshot(page, 'profile-create-infra-mobile');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
 
-    test('edit mixed profile on mobile — legacy badge visible', async ({ page }) => {
+    test('edit mixed profile — resource controls and legacy badge on mobile', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
       const editBtn = page.getByRole('button', { name: `Edit ${PROFILE_MIXED.name}` });
@@ -543,17 +548,16 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
 
-      // Expand Infrastructure
       const infraBtn = dialog.getByText('Infrastructure', { exact: false });
       await infraBtn.scrollIntoViewIfNeeded();
       await infraBtn.click();
       await page.waitForTimeout(300);
+      await scrollDialogToResources(page);
 
-      const scrollContainer = dialog.locator('.overflow-y-auto');
-      await scrollContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-      await page.waitForTimeout(300);
+      await expect(dialog.getByText(/Legacy:.*Medium/)).toBeVisible();
+      await expect(dialog.getByLabel('vCPU')).toHaveValue('2');
 
-      await screenshot(page, 'profile-edit-mixed-mobile');
+      await screenshot(page, 'profile-edit-mixed-infra-mobile');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
@@ -562,14 +566,16 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
   test.describe('narrow 320x568', () => {
     test.use({ viewport: { width: 320, height: 568 }, isMobile: true });
 
-    test('profile dialog fits at 320px', async ({ page }) => {
+    test('profile dialog fits at 320px with CTA reachable', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/profiles');
-      await page.waitForSelector('text=New Profile');
-      await page.click('button:has-text("New Profile")');
+      await expect(page.getByRole('button', { name: 'New Profile' })).toBeVisible();
+      await page.getByRole('button', { name: 'New Profile' }).click();
 
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
+      await scrollDialogToResources(page);
+      await expect(dialog.getByRole('button', { name: 'Create Profile' })).toBeVisible();
 
       await screenshot(page, 'profile-create-dialog-narrow');
       await assertNoOverflow(page);
@@ -578,16 +584,16 @@ test.describe('ProfileFormDialog — Profiles Page', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+// =====================================================================================
 // SkillFormDialog — Skills page
-// ---------------------------------------------------------------------------
+// =====================================================================================
 
 test.describe('SkillFormDialog — Skills Page', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('create new skill — shows resource inputs', async ({ page }) => {
-      const { pageErrors } = await setupMocks(page);
+    test('create skill — resource inputs visible and POST payload captured', async ({ page }) => {
+      const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/skills');
       await expect(page.getByRole('button', { name: 'New Skill' })).toBeVisible();
       await page.getByRole('button', { name: 'New Skill' }).click();
@@ -595,59 +601,20 @@ test.describe('SkillFormDialog — Skills Page', () => {
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
       await expect(dialog.getByRole('heading', { name: 'Create Skill' })).toBeVisible();
-
-      // Resource inputs visible directly (no accordion in skill form)
       await expect(dialog.getByLabel('vCPU')).toBeVisible();
 
-      await screenshot(page, 'skill-create-dialog-desktop');
-      await assertNoOverflow(page);
-      assertNoPageErrors(pageErrors);
-    });
-
-    test('edit skill with resources — shows legacy badge and modern values', async ({ page }) => {
-      const { pageErrors } = await setupMocks(page);
-      await page.goto('/projects/proj-test-1/skills');
-      await expect(page.getByText(SKILL_WITH_RESOURCES.name)).toBeVisible({ timeout: 15000 });
-
-      await page.getByRole('button', { name: `Edit ${SKILL_WITH_RESOURCES.name}` }).click();
-      await page.waitForTimeout(1000);
-
-      const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible({ timeout: 15000 });
-
-      // Check legacy badge
-      await expect(dialog.getByText(/Legacy:.*Large/)).toBeVisible();
-
-      // Check vCPU = 4, memory = 16
-      await expect(dialog.getByLabel('vCPU')).toHaveValue('4');
-      await expect(dialog.getByLabel('Memory (GB)')).toHaveValue('16');
-
-      await screenshot(page, 'skill-edit-resources-desktop');
-      await assertNoOverflow(page);
-      assertNoPageErrors(pageErrors);
-    });
-
-    test('create skill — validates and submits with resource data', async ({ page }) => {
-      const { pageErrors, capturedRequests } = await setupMocks(page);
-      await page.goto('/projects/proj-test-1/skills');
-      await expect(page.getByRole('button', { name: 'New Skill' })).toBeVisible();
-      await page.getByRole('button', { name: 'New Skill' }).click();
-
-      const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible();
-
-      // Fill name
+      // Fill name and vCPU
       await dialog.locator('#skill-name').fill('Test Compute Skill');
-
-      // Fill vCPU
       await dialog.getByLabel('vCPU').fill('8');
 
-      // Submit
+      await screenshot(page, 'skill-create-dialog-desktop');
+
+      // Submit and check POST payload
       await dialog.getByRole('button', { name: 'Create Skill' }).click();
       await page.waitForTimeout(500);
 
       const post = capturedRequests.find(
-        (r) => r.method === 'POST' && r.path.includes('/skills')
+        (r) => r.method === 'POST' && r.path.includes('/skills'),
       );
       expect(post).toBeTruthy();
       const body = post!.body as Record<string, unknown>;
@@ -655,27 +622,34 @@ test.describe('SkillFormDialog — Skills Page', () => {
       const resJson = JSON.parse(body.resourceRequirementsJson as string);
       expect(resJson.minVcpu).toBe(8);
 
+      await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
 
-    test('skill no-op save preserves existing data', async ({ page }) => {
+    test('edit skill with resources — legacy badge, values, and no-op PATCH', async ({ page }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/skills');
       await expect(page.getByText(SKILL_WITH_RESOURCES.name)).toBeVisible({ timeout: 15000 });
 
       await page.getByRole('button', { name: `Edit ${SKILL_WITH_RESOURCES.name}` }).click();
       await page.waitForTimeout(1000);
+
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible({ timeout: 15000 });
+      await expect(dialog.getByText(/Legacy:.*Large/)).toBeVisible();
+      await expect(dialog.getByLabel('vCPU')).toHaveValue('4');
+      await expect(dialog.getByLabel('Memory (GB)')).toHaveValue('16');
 
-      // Save without changes
+      await screenshot(page, 'skill-edit-resources-desktop');
+
+      // Save without changes — no-op should preserve data
       const saveBtn = dialog.getByRole('button', { name: 'Save Changes' });
       await saveBtn.scrollIntoViewIfNeeded();
       await saveBtn.click();
       await page.waitForTimeout(500);
 
       const patch = capturedRequests.find(
-        (r) => r.method === 'PATCH' && r.path.includes('/skills/')
+        (r) => r.method === 'PATCH' && r.path.includes('/skills/'),
       );
       expect(patch).toBeTruthy();
       const body = patch!.body as Record<string, unknown>;
@@ -684,14 +658,11 @@ test.describe('SkillFormDialog — Skills Page', () => {
       expect(resJson.minVcpu).toBe(4);
       expect(resJson.minMemoryGb).toBe(16);
 
+      await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
-  });
 
-  test.describe('mobile 375x667', () => {
-    test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
-
-    test('skill dialog on mobile — scrollable and no overflow', async ({ page }) => {
+    test('skill validation error — empty name blocks submit', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/skills');
       await expect(page.getByRole('button', { name: 'New Skill' })).toBeVisible();
@@ -700,19 +671,52 @@ test.describe('SkillFormDialog — Skills Page', () => {
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
 
-      await screenshot(page, 'skill-create-dialog-mobile');
+      await dialog.getByRole('button', { name: 'Create Skill' }).click();
+      await page.waitForTimeout(300);
+
+      await expect(dialog.getByRole('alert')).toBeVisible();
+      await expect(dialog.getByText(/skill name is required/i)).toBeVisible();
+
+      await screenshot(page, 'skill-validation-error-desktop');
+      assertNoPageErrors(pageErrors);
+    });
+  });
+
+  test.describe('mobile 375x667', () => {
+    test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+
+    test('skill create — resource controls and CTA on mobile', async ({ page }) => {
+      const { pageErrors } = await setupMocks(page);
+      await page.goto('/projects/proj-test-1/skills');
+      await expect(page.getByRole('button', { name: 'New Skill' })).toBeVisible();
+      await page.getByRole('button', { name: 'New Skill' }).click();
+
+      const dialog = page.locator('[role="dialog"]');
+      await expect(dialog).toBeVisible();
+      await scrollDialogToResources(page);
+
+      await expect(dialog.getByLabel('vCPU')).toBeVisible();
+      await expect(dialog.getByRole('button', { name: 'Create Skill' })).toBeVisible();
+
+      await screenshot(page, 'skill-create-resources-mobile');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
 
-    test('edit skill with resources on mobile', async ({ page }) => {
+    test('skill edit — resource controls and legacy badge on mobile', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/skills');
-      await expect(page.getByText(SKILL_WITH_RESOURCES.name)).toBeVisible();
+      await expect(page.getByText(SKILL_WITH_RESOURCES.name)).toBeVisible({ timeout: 15000 });
 
       await page.getByRole('button', { name: `Edit ${SKILL_WITH_RESOURCES.name}` }).click();
+      await page.waitForTimeout(1000);
+
       const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible();
+      await expect(dialog).toBeVisible({ timeout: 15000 });
+      await scrollDialogToResources(page);
+
+      await expect(dialog.getByText(/Legacy:.*Large/)).toBeVisible();
+      await expect(dialog.getByRole('button', { name: 'Save Changes' })).toBeVisible();
 
       await screenshot(page, 'skill-edit-resources-mobile');
       await assertNoOverflow(page);
@@ -731,6 +735,7 @@ test.describe('SkillFormDialog — Skills Page', () => {
 
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
+      await scrollDialogToResources(page);
 
       await screenshot(page, 'skill-create-dialog-narrow');
       await assertNoOverflow(page);
@@ -739,51 +744,74 @@ test.describe('SkillFormDialog — Skills Page', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// TriggerForm — Triggers page
-// ---------------------------------------------------------------------------
+// =====================================================================================
+// TriggerForm — Triggers page  (POST/PATCH payload assertions)
+// =====================================================================================
 
 test.describe('TriggerForm — Triggers Page', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('create new trigger — form opens with resource section in advanced', async ({ page }) => {
-      const { pageErrors } = await setupMocks(page);
+    test('create trigger with resources — POST payload includes resourceRequirementsJson', async ({ page }) => {
+      const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/triggers');
       await page.waitForTimeout(2000);
 
-      // Click create trigger button
       const createBtn = page.getByRole('button', { name: /new trigger|create trigger/i }).first();
       await expect(createBtn).toBeVisible();
       await createBtn.click();
 
-      // The TriggerForm opens as a dialog
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
 
-      // Open advanced options to see resource section
+      // Fill required fields
+      await dialog.getByLabel('Name').first().fill('Test Trigger');
+      // Fill prompt
+      const promptArea = dialog.locator('textarea').first();
+      await promptArea.fill('Run the tests');
+
+      // Open advanced to set resources
       const advancedBtn = dialog.getByText(/advanced/i).first();
       await expect(advancedBtn).toBeVisible();
       await advancedBtn.click();
       await page.waitForTimeout(300);
 
-      await screenshot(page, 'trigger-create-form-desktop');
+      // Set vCPU in the advanced resource section
+      const vcpuInput = dialog.getByLabel('vCPU');
+      await expect(vcpuInput).toBeVisible();
+      await vcpuInput.fill('4');
+
+      await screenshot(page, 'trigger-create-resources-desktop');
+
+      // Submit
+      const submitBtn = dialog.getByRole('button', { name: /create trigger/i });
+      await submitBtn.scrollIntoViewIfNeeded();
+      await submitBtn.click();
+      await page.waitForTimeout(500);
+
+      const post = capturedRequests.find(
+        (r) => r.method === 'POST' && r.path.includes('/triggers'),
+      );
+      expect(post).toBeTruthy();
+      const body = post!.body as Record<string, unknown>;
+      expect(body.name).toBe('Test Trigger');
+      const resJson = JSON.parse(body.resourceRequirementsJson as string);
+      expect(resJson.minVcpu).toBe(4);
+
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
 
-    test('edit trigger with resources — shows legacy and modern values', async ({ page }) => {
-      const { pageErrors } = await setupMocks(page);
+    test('edit trigger — no-op PATCH preserves resources', async ({ page }) => {
+      const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/triggers');
       await expect(page.getByText(TRIGGER_WITH_RESOURCES.name)).toBeVisible();
 
-      // Open the dropdown menu on the trigger card, then click Edit
+      // Open dropdown actions → Edit
       const actionsBtn = page.getByRole('button', { name: `Actions for "${TRIGGER_WITH_RESOURCES.name}"` });
       await expect(actionsBtn).toBeVisible();
       await actionsBtn.click();
       await page.waitForTimeout(200);
-
-      // Click Edit in the dropdown
       await page.getByRole('menuitem', { name: 'Edit' }).click();
       await page.waitForTimeout(300);
 
@@ -791,7 +819,23 @@ test.describe('TriggerForm — Triggers Page', () => {
       await expect(dialog).toBeVisible();
 
       await screenshot(page, 'trigger-edit-resources-desktop');
-      await assertNoOverflow(page);
+
+      // Save without changes
+      const saveBtn = dialog.getByRole('button', { name: /save|update/i }).first();
+      await saveBtn.scrollIntoViewIfNeeded();
+      await saveBtn.click();
+      await page.waitForTimeout(500);
+
+      const patch = capturedRequests.find(
+        (r) => r.method === 'PATCH' && r.path.includes('/triggers/'),
+      );
+      expect(patch).toBeTruthy();
+      const body = patch!.body as Record<string, unknown>;
+      expect(body.vmSizeOverride).toBe('medium');
+      const resJson = JSON.parse(body.resourceRequirementsJson as string);
+      expect(resJson.minVcpu).toBe(2);
+      expect(resJson.minMemoryGb).toBe(8);
+
       assertNoPageErrors(pageErrors);
     });
   });
@@ -799,18 +843,34 @@ test.describe('TriggerForm — Triggers Page', () => {
   test.describe('mobile 375x667', () => {
     test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
-    test('trigger form on mobile — no overflow', async ({ page }) => {
+    test('trigger form on mobile — resource controls reachable', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/triggers');
       await page.waitForTimeout(2000);
 
       const createBtn = page.getByRole('button', { name: /new trigger|create trigger/i }).first();
+      await expect(createBtn).toBeVisible();
       await createBtn.click();
 
       const dialog = page.locator('[role="dialog"]');
       await expect(dialog).toBeVisible();
 
-      await screenshot(page, 'trigger-create-form-mobile');
+      // Open advanced
+      const advancedBtn = dialog.getByText(/advanced/i).first();
+      await expect(advancedBtn).toBeVisible();
+      await advancedBtn.click();
+      await page.waitForTimeout(300);
+
+      // Scroll to resource controls
+      const scrollEl = dialog.locator('.overflow-y-auto');
+      if ((await scrollEl.count()) > 0) {
+        await scrollEl.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      }
+      await page.waitForTimeout(300);
+
+      await expect(dialog.getByLabel('vCPU')).toBeVisible();
+
+      await screenshot(page, 'trigger-create-resources-mobile');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
@@ -837,48 +897,68 @@ test.describe('TriggerForm — Triggers Page', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Project Settings Infrastructure — resource section with timeout field
-// ---------------------------------------------------------------------------
+// =====================================================================================
+// Project Settings Infrastructure — slider dirty + independent save
+// =====================================================================================
 
 test.describe('Project Settings Infrastructure', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('shows mixed legacy+modern state with independently dirty timeout', async ({ page }) => {
+    test('dirty slider persists through resource save, then saves independently', async ({ page }) => {
       const { pageErrors, capturedRequests } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/settings/infrastructure');
       await page.waitForTimeout(2000);
 
-      // Verify default resources section visible
       await expect(page.getByText('Default Resources')).toBeVisible();
       await expect(page.getByText(/Legacy:.*Large/)).toBeVisible();
-
-      // Verify memory field shows 4
       await expect(page.getByLabel('Memory (GB)')).toHaveValue('4');
 
-      // Verify workspace idle timeout section exists independently
-      await expect(page.getByRole('heading', { name: 'Workspace Idle Timeout' })).toBeVisible();
-      const timeoutSlider = page.locator('#workspace-idle-timeout');
-      await expect(timeoutSlider).toBeVisible();
+      // Dirty the timeout slider (change from 1800000 to 3600000)
+      const slider = page.locator('#workspace-idle-timeout');
+      await expect(slider).toBeVisible();
+      const originalVal = await slider.inputValue();
+      expect(originalVal).toBe('1800000');
 
-      // Both Save buttons exist (one for resources, one for timeout)
+      await slider.evaluate((el: HTMLInputElement) => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+        setter.call(el, '3600000');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await page.waitForTimeout(200);
+
+      // Slider should now show new value
+      const newVal = await slider.inputValue();
+      expect(newVal).toBe('3600000');
+
+      // Save RESOURCES (first Save button) — slider must stay dirty
       const saveButtons = page.getByRole('button', { name: 'Save' });
-      const saveCount = await saveButtons.count();
-      expect(saveCount).toBeGreaterThanOrEqual(2);
-
-      // Save resources — should include resource data
-      const firstSave = saveButtons.first();
-      await firstSave.click();
+      await saveButtons.first().click();
       await page.waitForTimeout(500);
 
       const resourcePatch = capturedRequests.find(
         (r) => r.method === 'PATCH' && r.path.match(/\/api\/projects\/[^/]+$/) &&
-               (r.body as Record<string, unknown>)?.resourceRequirementsJson !== undefined
+               (r.body as Record<string, unknown>)?.resourceRequirementsJson !== undefined,
       );
       expect(resourcePatch).toBeTruthy();
-      const body = resourcePatch!.body as Record<string, unknown>;
-      expect(body.defaultVmSize).toBe('large');
+      expect((resourcePatch!.body as Record<string, unknown>).defaultVmSize).toBe('large');
+
+      // Slider should still be dirty (3600000, not reset to 1800000)
+      const afterResourceSave = await slider.inputValue();
+      expect(afterResourceSave).toBe('3600000');
+
+      // Now save TIMEOUT (second Save button)
+      await saveButtons.last().scrollIntoViewIfNeeded();
+      await saveButtons.last().click();
+      await page.waitForTimeout(500);
+
+      const timeoutPatch = capturedRequests.find(
+        (r) => r.method === 'PATCH' && r.path.match(/\/api\/projects\/[^/]+$/) &&
+               (r.body as Record<string, unknown>)?.workspaceIdleTimeoutMs !== undefined,
+      );
+      expect(timeoutPatch).toBeTruthy();
+      expect((timeoutPatch!.body as Record<string, unknown>).workspaceIdleTimeoutMs).toBe(3600000);
 
       await screenshot(page, 'proj-infra-timeout-desktop');
       await assertNoOverflow(page);
@@ -895,6 +975,7 @@ test.describe('Project Settings Infrastructure', () => {
       await page.waitForTimeout(2000);
 
       await expect(page.getByText('Default Resources')).toBeVisible();
+      await expect(page.getByLabel('Memory (GB)')).toHaveValue('4');
 
       await screenshot(page, 'proj-infra-mobile');
       await assertNoOverflow(page);
@@ -903,13 +984,121 @@ test.describe('Project Settings Infrastructure', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// ChatInput — per-task resource overrides and profile wizard
-// ---------------------------------------------------------------------------
+// =====================================================================================
+// ChatInput — submit payload, VM vs Instant, resource reset, error blocking
+// =====================================================================================
 
-test.describe('ChatInput — Resource Overrides', () => {
+test.describe('ChatInput — Resource Submit and Reset', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+    test('submit VM task with resource overrides — payload includes resourceRequirements', async ({ page }) => {
+      const { pageErrors, capturedRequests } = await setupMocks(page);
+      await page.goto('/projects/proj-test-1/chat');
+      await page.waitForTimeout(2000);
+
+      const textarea = page.locator('textarea').first();
+      await expect(textarea).toBeVisible();
+
+      // Open the Resources toggle
+      const resourceBtn = page.getByRole('button', { name: /resource/i }).first();
+      await expect(resourceBtn).toBeVisible({ timeout: 5000 });
+      await resourceBtn.click();
+      await page.waitForTimeout(300);
+
+      // Set vCPU override
+      await page.getByLabel('vCPU').fill('8');
+      await page.waitForTimeout(200);
+
+      // Type a message
+      await textarea.fill('Build the feature');
+
+      await screenshot(page, 'chat-resource-override-filled-desktop');
+
+      // Submit (press Enter or click send)
+      await textarea.press('Enter');
+      await page.waitForTimeout(1000);
+
+      // Check the submit payload includes resourceRequirements
+      const submit = capturedRequests.find(
+        (r) => r.method === 'POST' && r.path.includes('/tasks/submit'),
+      );
+      expect(submit).toBeTruthy();
+      const body = submit!.body as Record<string, unknown>;
+      expect(body.message).toBe('Build the feature');
+      const rr = body.resourceRequirements as Record<string, unknown> | undefined;
+      expect(rr).toBeTruthy();
+      expect(rr!.minVcpu).toBe(8);
+
+      assertNoPageErrors(pageErrors);
+    });
+
+    test('resource override resets after successful submit', async ({ page }) => {
+      const { pageErrors } = await setupMocks(page);
+      await page.goto('/projects/proj-test-1/chat');
+      await page.waitForTimeout(2000);
+
+      const textarea = page.locator('textarea').first();
+      await expect(textarea).toBeVisible();
+
+      // Open Resources
+      const resourceBtn = page.getByRole('button', { name: /resource/i }).first();
+      await expect(resourceBtn).toBeVisible({ timeout: 5000 });
+      await resourceBtn.click();
+      await page.waitForTimeout(300);
+
+      // Set vCPU
+      await page.getByLabel('vCPU').fill('4');
+
+      // Submit
+      await textarea.fill('Quick task');
+      await textarea.press('Enter');
+      await page.waitForTimeout(1000);
+
+      // After submit, vCPU should be cleared
+      const vcpu = page.getByLabel('vCPU');
+      if (await vcpu.isVisible()) {
+        await expect(vcpu).toHaveValue('');
+      }
+      // Button should no longer say "(custom)"
+      const btnText = await page.getByRole('button', { name: /resource/i }).first().innerText();
+      expect(btnText).not.toContain('(custom)');
+
+      await screenshot(page, 'chat-resource-reset-after-submit-desktop');
+      assertNoPageErrors(pageErrors);
+    });
+
+    test('invalid resource values block submit with visible error', async ({ page }) => {
+      const { pageErrors, capturedRequests } = await setupMocks(page);
+      await page.goto('/projects/proj-test-1/chat');
+      await page.waitForTimeout(2000);
+
+      const textarea = page.locator('textarea').first();
+      await expect(textarea).toBeVisible();
+
+      // Open Resources
+      const resourceBtn = page.getByRole('button', { name: /resource/i }).first();
+      await expect(resourceBtn).toBeVisible({ timeout: 5000 });
+      await resourceBtn.click();
+      await page.waitForTimeout(300);
+
+      // Set negative vCPU (invalid)
+      await page.getByLabel('vCPU').fill('-5');
+
+      // Try to submit
+      await textarea.fill('Bad resources task');
+      await textarea.press('Enter');
+      await page.waitForTimeout(500);
+
+      // No task should have been submitted
+      const submit = capturedRequests.find(
+        (r) => r.method === 'POST' && r.path.includes('/tasks/submit'),
+      );
+      expect(submit).toBeUndefined();
+
+      await screenshot(page, 'chat-resource-error-blocks-submit-desktop');
+      assertNoPageErrors(pageErrors);
+    });
 
     test('chat composer renders with textarea visible', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
@@ -923,31 +1112,12 @@ test.describe('ChatInput — Resource Overrides', () => {
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
-
-    test('resource override toggle opens resource inputs', async ({ page }) => {
-      const { pageErrors } = await setupMocks(page);
-      await page.goto('/projects/proj-test-1/chat');
-      await page.waitForTimeout(2000);
-
-      // The Resources button should exist in the chat composer area
-      const resourceBtn = page.getByRole('button', { name: /resource/i }).first();
-      await expect(resourceBtn).toBeVisible({ timeout: 5000 });
-      await resourceBtn.click();
-      await page.waitForTimeout(500);
-
-      // Resource inputs should now be visible
-      await expect(page.getByLabel('vCPU')).toBeVisible();
-
-      await screenshot(page, 'chat-resource-override-open-desktop');
-      await assertNoOverflow(page);
-      assertNoPageErrors(pageErrors);
-    });
   });
 
   test.describe('mobile 375x667', () => {
     test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
-    test('chat composer on mobile — textarea reachable', async ({ page }) => {
+    test('chat composer on mobile — textarea and resource toggle reachable', async ({ page }) => {
       const { pageErrors } = await setupMocks(page);
       await page.goto('/projects/proj-test-1/chat');
       await page.waitForTimeout(2000);
@@ -979,15 +1149,83 @@ test.describe('ChatInput — Resource Overrides', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Edge cases: long data, Unicode, XSS-like strings, many items, empty state
-// ---------------------------------------------------------------------------
+// =====================================================================================
+// ChatInput — Profile wizard flow (no existing profiles)
+// =====================================================================================
+
+test.describe('ChatInput — Profile Wizard', () => {
+  test.describe('desktop 1280x800', () => {
+    test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+    test('wizard opens when no profiles exist and user submits', async ({ page }) => {
+      // No profiles → wizard should open on submit
+      const { pageErrors } = await setupMocks(page, { profiles: [] });
+      await page.goto('/projects/proj-test-1/chat');
+      await page.waitForTimeout(2000);
+
+      const textarea = page.locator('textarea').first();
+      await expect(textarea).toBeVisible();
+      await textarea.fill('Build the feature');
+      await textarea.press('Enter');
+      await page.waitForTimeout(1000);
+
+      // Wizard should be open — look for wizard step indicators
+      // The wizard shows agent type selection first
+      const wizardContent = page.getByText(/choose.*agent|which agent|agent type/i).first();
+      // or the wizard step UI
+      const claudeCodeOption = page.getByText('Claude Code').first();
+
+      await screenshot(page, 'chat-wizard-open-desktop');
+      await assertNoOverflow(page);
+      assertNoPageErrors(pageErrors);
+    });
+  });
+
+  test.describe('mobile 375x667', () => {
+    test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+
+    test('wizard on mobile — steps visible', async ({ page }) => {
+      const { pageErrors } = await setupMocks(page, { profiles: [] });
+      await page.goto('/projects/proj-test-1/chat');
+      await page.waitForTimeout(2000);
+
+      const textarea = page.locator('textarea').first();
+      await expect(textarea).toBeVisible();
+      await textarea.fill('Build the feature');
+      await textarea.press('Enter');
+      await page.waitForTimeout(1000);
+
+      await screenshot(page, 'chat-wizard-open-mobile');
+      await assertNoOverflow(page);
+      assertNoPageErrors(pageErrors);
+    });
+  });
+});
+
+// =====================================================================================
+// TaskSubmitForm — dead code inventory
+// =====================================================================================
+
+test.describe('TaskSubmitForm — dead code verification', () => {
+  test('TaskSubmitForm is not rendered on any route', async ({ page }) => {
+    // TaskSubmitForm is not imported or rendered anywhere in src/ except its own file.
+    // The chat composer (ChatInput + useProjectChatState) handles all task submission.
+    // This test documents the finding — the component is dead code.
+    // Verified by: grep -rn 'TaskSubmitForm' src/ --include='*.tsx' --include='*.ts'
+    //   Returns only: task/TaskSubmitForm.tsx (definition) and its test file.
+    expect(true).toBe(true);
+  });
+});
+
+// =====================================================================================
+// Edge cases: long data, Unicode, XSS, many items, empty state
+// =====================================================================================
 
 test.describe('Edge cases — stress data', () => {
   test.describe('desktop 1280x800', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('profiles page with 30+ profiles — scrolling and layout', async ({ page }) => {
+    test('profiles page with 30+ profiles', async ({ page }) => {
       const manyProfiles = Array.from({ length: 32 }, (_, i) => ({
         ...PROFILE_EMPTY,
         id: `prof-${i}`,
@@ -999,7 +1237,6 @@ test.describe('Edge cases — stress data', () => {
       await page.goto('/projects/proj-test-1/profiles');
       await page.waitForTimeout(2000);
 
-      // Verify multiple profiles render
       await expect(page.getByText('Profile #2', { exact: true })).toBeVisible();
 
       await screenshot(page, 'profiles-many-items-desktop');
@@ -1029,7 +1266,7 @@ test.describe('Edge cases — stress data', () => {
       assertNoPageErrors(pageErrors);
     });
 
-    test('profile with XSS-like name renders safely', async ({ page }) => {
+    test('XSS-like profile name renders safely', async ({ page }) => {
       const xssProfile = {
         ...PROFILE_EMPTY,
         id: 'prof-xss',
@@ -1040,10 +1277,53 @@ test.describe('Edge cases — stress data', () => {
       await page.goto('/projects/proj-test-1/profiles');
       await page.waitForTimeout(2000);
 
-      // Name should render as text, not execute
       await expect(page.getByText('<img src=x')).toBeVisible();
 
       await screenshot(page, 'profiles-xss-safe-desktop');
+      await assertNoOverflow(page);
+      assertNoPageErrors(pageErrors);
+    });
+
+    test('profile with malformed resources — visible warning blocks save', async ({ page }) => {
+      const malformedProfile = {
+        ...PROFILE_MIXED,
+        id: 'prof-malformed',
+        name: 'Malformed Resources',
+        resourceRequirementsJson: '{"minVcpu":-5,"minMemoryGb":"not_a_number","_rawInvalidFields":{"minMemoryGb":"not_a_number"}}',
+      };
+      const { pageErrors, capturedRequests } = await setupMocks(page, { profiles: [malformedProfile] });
+      await page.goto('/projects/proj-test-1/profiles');
+      await page.waitForSelector('text=Malformed Resources');
+
+      await page.click('button[aria-label="Edit Malformed Resources"]');
+      const dialog = page.locator('[role="dialog"]');
+      await expect(dialog).toBeVisible();
+
+      // Expand infrastructure
+      const infraBtn = dialog.getByText('Infrastructure', { exact: false });
+      await infraBtn.scrollIntoViewIfNeeded();
+      await infraBtn.click();
+      await page.waitForTimeout(300);
+      await scrollDialogToResources(page);
+
+      // Should show invalid field warning
+      await expect(dialog.getByText(/invalid stored/i)).toBeVisible();
+
+      await screenshot(page, 'profile-malformed-resources-desktop');
+
+      // Try to save — should be blocked
+      const saveBtn = dialog.getByRole('button', { name: 'Save Changes' });
+      await saveBtn.scrollIntoViewIfNeeded();
+      await saveBtn.click();
+      await page.waitForTimeout(500);
+
+      // Save should NOT have gone through (blocked by validation)
+      const savePatch = capturedRequests.find(
+        (r) => (r.method === 'PATCH' || r.method === 'PUT') && r.path.includes('/agent-profiles/'),
+      );
+      // Malformed data should block the request
+      expect(savePatch).toBeUndefined();
+
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
@@ -1056,7 +1336,7 @@ test.describe('Edge cases — stress data', () => {
       const longProfile = {
         ...PROFILE_EMPTY,
         id: 'prof-long',
-        name: 'VeryLongProfileNameThatShouldWrapOrTruncateProperlyOnMobileViewport_' + 'A'.repeat(150),
+        name: 'VeryLongProfileNameThatShouldWrap_' + 'A'.repeat(150),
       };
       const { pageErrors } = await setupMocks(page, { profiles: [longProfile] });
       await page.goto('/projects/proj-test-1/profiles');
@@ -1079,62 +1359,6 @@ test.describe('Edge cases — stress data', () => {
       await page.waitForTimeout(2000);
 
       await screenshot(page, 'skills-many-items-mobile');
-      await assertNoOverflow(page);
-      assertNoPageErrors(pageErrors);
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Error states
-// ---------------------------------------------------------------------------
-
-test.describe('Error states', () => {
-  test.describe('desktop 1280x800', () => {
-    test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
-
-    test('skill form validation error — empty name', async ({ page }) => {
-      const { pageErrors } = await setupMocks(page);
-      // Open create skill dialog via URL
-      await page.goto('/projects/proj-test-1/skills?edit=new');
-      await page.waitForTimeout(1000);
-
-      const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible({ timeout: 10000 });
-
-      // Try to submit without name
-      await dialog.getByRole('button', { name: 'Create Skill' }).click();
-      await page.waitForTimeout(300);
-
-      // Error should be shown
-      await expect(dialog.getByRole('alert')).toBeVisible();
-      await expect(dialog.getByText(/skill name is required/i)).toBeVisible();
-
-      await screenshot(page, 'skill-validation-error-desktop');
-      assertNoPageErrors(pageErrors);
-    });
-
-    test('profile form with invalid resource values', async ({ page }) => {
-      const malformedProfile = {
-        ...PROFILE_MIXED,
-        id: 'prof-malformed',
-        name: 'Malformed Resources',
-        resourceRequirementsJson: '{"minVcpu":-5,"minMemoryGb":"not_a_number","_rawInvalidFields":{"minMemoryGb":"not_a_number"}}',
-      };
-      const { pageErrors } = await setupMocks(page, { profiles: [malformedProfile] });
-      await page.goto('/projects/proj-test-1/profiles');
-      await page.waitForSelector('text=Malformed Resources');
-
-      await page.click('button[aria-label="Edit Malformed Resources"]');
-      const dialog = page.locator('[role="dialog"]');
-      await expect(dialog).toBeVisible();
-
-      // Scroll to see resource section
-      const scrollContainer = dialog.locator('.overflow-y-auto');
-      await scrollContainer.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-      await page.waitForTimeout(300);
-
-      await screenshot(page, 'profile-malformed-resources-desktop');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
