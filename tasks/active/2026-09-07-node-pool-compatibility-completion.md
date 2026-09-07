@@ -80,27 +80,27 @@ Changing a deprecated size hint cannot change a native payload or accounting.
 
 ### A. Canonical requirements, pool state and migration (F1, F2, F3, F6, F7, F9, F11)
 
-- [x] Implement one shared versioned legacy-to-workload adapter, validation,
+- [ ] Implement one shared versioned legacy-to-workload adapter, validation,
   per-field precedence and provenance. Cover task/profile/skill/project/platform
   values, defaults, queued plans, retry and recovery. Reject nonfinite/negative
   resources and malformed compatibility constraints consistently.
-- [x] Persist configurable defaults/mapping and strategy weights with validated
+- [ ] Persist configurable defaults/mapping and strategy weights with validated
   environment fallbacks; expose their effective nonsecret values to clients.
-- [x] Separate pool configuration state from current eligibility. Preserve a
+- [ ] Separate pool configuration state from current eligibility. Preserve a
   configured pool when all selections are removed or a source is disabled.
-- [x] Add bounded, resumable, idempotent migration/ensure independent of visiting
+- [ ] Add bounded, resumable, idempotent migration/ensure independent of visiting
   settings; integrate credential create/attach/rotate/disable/delete/re-enable
   lifecycle. Backfill missing modern values with CAS and preserve concurrent
   edits, removals, original values and migration provenance.
-- [x] Separate selected membership from catalog availability/staleness/retirement.
+- [ ] Separate selected membership from catalog availability/staleness/retirement.
   Cache credential-scoped snapshots with bounded refresh; provider failure or
   incomplete pagination cannot replace a valid catalog with a narrow fallback.
   Returning inventory becomes available without reselecting removed inventory.
-- [x] Make policy edits atomic and revisioned, including effective reconciliation
+- [ ] Make policy edits atomic and revisioned, including effective reconciliation
   changes. Carry exhaustion policy and ranking settings in versioned plans.
   Define queue/fail/intra-pool fallback behavior; do not expose unsupported
   cross-pool semantics or claim settings execute when they do not.
-- [x] Normalize comparable prices to one time unit and same currency; explicitly
+- [ ] Normalize comparable prices to one time unit and same currency; explicitly
   rank unknown/noncomparable prices and preserve owner-defined priority order.
 - [ ] Distinguish explicit provider/location/architecture/image/network constraints
   from inherited preferences. Return actionable incompatibility reasons.
@@ -177,7 +177,7 @@ Changing a deprecated size hint cannot change a native payload or accounting.
 
 ### E. No-leakage gates and release validation
 
-- [x] Add a tested boundary/architecture gate banning legacy-size authority in
+- [ ] Add a tested boundary/architecture gate banning legacy-size authority in
   canonical placement/provider/metering code outside named compatibility modules.
   Inventory allocation writers in a checked contract. Allow historical migrations,
   adapter fixtures, labeled historical displays and unrelated responsive CSS.
@@ -210,3 +210,13 @@ SHAs, exact commands/results, tests linked to its criteria and remaining integra
 requirements. Completion requires evidence on the integrated final candidate,
 not only the child branch or an earlier PR. No criterion may be silently deferred
 to another PR or replaced by documentation claiming unimplemented behavior.
+
+## Integration review status
+
+The canonical policy contracts are integrated for dependent implementation, but
+section A is not accepted yet. Independent review found precedence, resumable
+backfill, D1 bind accounting, reconciliation concurrency, blocked pool-state,
+price comparison, and settings provenance gaps. Corrective implementation and
+discriminating regressions are required before these items can be checked off.
+The narrow legacy-boundary test is an initial guard; the complete allocation-writer
+inventory and cross-boundary no-leakage gate remain part of section E.
