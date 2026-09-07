@@ -33,14 +33,24 @@ export function buildBaseSubmitRequest({
   pendingDerived: PendingDerived | null;
 }>): SubmitTaskPayload {
   const derivedFields = getDerivedSubmitFields(pendingDerived);
-  if (agentProfileId) return { message, agentProfileId, ...(skillId ? { skillId } : {}), ...derivedFields };
+  const resourceFields = selectedResourceRequirements ? { resourceRequirements: selectedResourceRequirements } : {};
+
+  if (agentProfileId) {
+    return {
+      message,
+      agentProfileId,
+      ...(skillId ? { skillId } : {}),
+      ...resourceFields,
+      ...derivedFields,
+    };
+  }
 
   const devcontainerConfigName = selectedDevcontainerConfigName.trim();
   return {
     message,
     ...(selectedAgentType ? { agentType: selectedAgentType } : {}),
     ...(skillId ? { skillId } : {}),
-    ...(selectedResourceRequirements ? { resourceRequirements: selectedResourceRequirements } : {}),
+    ...resourceFields,
     workspaceProfile: selectedWorkspaceProfile,
     ...(selectedWorkspaceProfile !== 'lightweight' && devcontainerConfigName ? { devcontainerConfigName } : {}),
     taskMode: selectedTaskMode,

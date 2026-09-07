@@ -1,13 +1,20 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentInfo, AgentProfile, AgentProfileRuntime, AgentSkill, TaskMode, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
-import { Check, ChevronRight, MessageSquare, Plus, Server, Settings, Wrench, Zap } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, MessageSquare, Plus, Server, Settings, Wrench, Zap } from 'lucide-react';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
-import { EMPTY_RESOURCE_STATE, type ResourceRequirementsFormState, ResourceRequirementsInput } from '../../components/resource-requirements';
+import {
+  EMPTY_RESOURCE_STATE,
+  hasAnyResourceValue,
+  hasValidationErrors,
+  type ResourceRequirementsFormState,
+  ResourceRequirementsInput,
+  type ResourceValidationErrors,
+} from '../../components/resource-requirements';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { ProfileWizardState, ProfileWizardStep } from './useProjectChatState';
 
@@ -101,6 +108,10 @@ type ChatInputProps = Readonly<{
   selectedSkillId: string | null;
   onSkillChange: (skillId: string | null) => void;
   onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<void>;
+  taskResourceReqs: ResourceRequirementsFormState;
+  onTaskResourceReqsChange: (next: ResourceRequirementsFormState) => void;
+  taskResourceErrors: ResourceValidationErrors;
+  onTaskResourceErrorsClear: () => void;
   profileWizard: ProfileWizardState;
   onOpenProfileWizard: () => void;
   onCloseProfileWizard: () => void;
@@ -186,6 +197,10 @@ export function ChatInput({
   selectedSkillId,
   onSkillChange,
   onUpdateProfile,
+  taskResourceReqs,
+  onTaskResourceReqsChange,
+  taskResourceErrors,
+  onTaskResourceErrorsClear,
   profileWizard,
   onOpenProfileWizard,
   onCloseProfileWizard,
@@ -201,6 +216,9 @@ export function ChatInput({
 }: ChatInputProps) {
   const isMobile = useIsMobile();
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [resourceOverrideOpen, setResourceOverrideOpen] = useState(false);
+  const hasTaskResources = hasAnyResourceValue(taskResourceReqs);
+  const hasResourceErrors = hasValidationErrors(taskResourceErrors);
 
   const selectedProfile = selectedProfileId
     ? agentProfiles.find((p) => p.id === selectedProfileId) ?? null
@@ -459,6 +477,38 @@ export function ChatInput({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {!noAgents && !profileWizard.open && !needsProfileBeforeSubmit && (
+        <div className="mb-1.5 flex items-center">
+          <button
+            type="button"
+            onClick={() => setResourceOverrideOpen((v) => !v)}
+            disabled={submitting}
+            className={[
+              'text-[11px] flex items-center gap-1 bg-transparent border-none cursor-pointer p-0 disabled:opacity-50',
+              hasTaskResources ? 'text-accent font-medium' : 'text-fg-muted hover:text-fg-secondary',
+            ].join(' ')}
+          >
+            <Server size={12} aria-hidden="true" />
+            Resources{hasTaskResources ? ' (custom)' : ''}
+            {resourceOverrideOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          </button>
+        </div>
+      )}
+
+      {(resourceOverrideOpen || hasResourceErrors) && !profileWizard.open && (
+        <div className="mb-2 rounded-md border border-border-default bg-surface px-3 py-2">
+          <ResourceRequirementsInput
+            value={taskResourceReqs}
+            onChange={(next) => { onTaskResourceReqsChange(next); onTaskResourceErrorsClear(); }}
+            disabled={submitting}
+            inheritLabel="profile/project default"
+            errors={taskResourceErrors}
+            compact={isMobile}
+          />
+          <p className="m-0 mt-1 text-[10px] text-fg-muted">Override resources for this task only. Leave blank to inherit.</p>
         </div>
       )}
 

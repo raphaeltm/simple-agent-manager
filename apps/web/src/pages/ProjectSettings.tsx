@@ -5,7 +5,7 @@ import {
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 import { Button, Tabs } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
@@ -19,11 +19,12 @@ import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings
 import {
   deserializeResourceRequirements,
   EMPTY_RESOURCE_STATE,
-  formatLegacyVmSize,
-  hasAnyResourceValue,
+  hasValidationErrors,
   type ResourceRequirementsFormState,
   ResourceRequirementsInput,
+  type ResourceValidationErrors,
   serializeResourceRequirements,
+  validateResourceState,
 } from '../components/resource-requirements';
 import { ScalingSettings } from '../components/ScalingSettings';
 import { useQueryScope } from '../hooks/useQueryScope';
@@ -314,32 +315,50 @@ export function ProjectSettingsInfrastructure() {
     ...EMPTY_RESOURCE_STATE,
   });
   const [savingResources, setSavingResources] = useState(false);
+  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
+  const [legacyCleared, setLegacyCleared] = useState(false);
   const [workspaceIdleTimeoutMs, setWorkspaceIdleTimeoutMs] = useState<number>(
     project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
   );
   const [savingWorkspaceTimeout, setSavingWorkspaceTimeout] = useState(false);
+  const resourceDirtyRef = useRef(false);
+  const lastProjectIdRef = useRef<string | null>(null);
 
   const legacyVmSize = project?.defaultVmSize ?? null;
 
   useEffect(() => {
-    if (project) {
+    if (!project) return;
+    const isProjectSwitch = lastProjectIdRef.current !== project.id;
+    lastProjectIdRef.current = project.id;
+    // Always sync timeout (it has its own save button, no dirty tracking needed)
+    setWorkspaceIdleTimeoutMs(
+      project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
+    );
+    // Only reset resource draft on project switch or when not dirty
+    if (isProjectSwitch || !resourceDirtyRef.current) {
       setResourceReqs(
         deserializeResourceRequirements(project.resourceRequirementsJson)
       );
-      setWorkspaceIdleTimeoutMs(
-        project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
-      );
+      setLegacyCleared(false);
+      resourceDirtyRef.current = false;
     }
   }, [project]);
 
   const handleSaveResources = async () => {
+    const resErrors = validateResourceState(resourceReqs);
+    setResourceErrors(resErrors);
+    if (hasValidationErrors(resErrors)) {
+      toast.error('Fix resource requirement errors before saving');
+      return;
+    }
     setSavingResources(true);
     try {
       const json = serializeResourceRequirements(resourceReqs);
       await updateProject(projectId, {
-        defaultVmSize: hasAnyResourceValue(resourceReqs) ? null : (legacyVmSize ?? undefined),
-        ...(json != null ? { resourceRequirementsJson: json } : {}),
+        defaultVmSize: legacyCleared ? null : (legacyVmSize ?? undefined),
+        resourceRequirementsJson: json,
       });
+      resourceDirtyRef.current = false;
       await reload();
       toast.success('Default resource requirements saved');
     } catch (err) {
@@ -376,10 +395,12 @@ export function ProjectSettingsInfrastructure() {
         </div>
         <ResourceRequirementsInput
           value={resourceReqs}
-          onChange={setResourceReqs}
+          onChange={(next) => { setResourceReqs(next); setResourceErrors({}); resourceDirtyRef.current = true; }}
+          onClearLegacy={() => { setLegacyCleared(true); resourceDirtyRef.current = true; }}
           disabled={savingResources}
-          legacyVmSize={legacyVmSize}
+          legacyVmSize={legacyCleared ? null : legacyVmSize}
           inheritLabel="platform default"
+          errors={resourceErrors}
         />
         <div className="flex items-center gap-2">
           <Button
@@ -391,11 +412,6 @@ export function ProjectSettingsInfrastructure() {
           >
             Save
           </Button>
-          {legacyVmSize && !hasAnyResourceValue(resourceReqs) && (
-            <span className="text-xs text-fg-muted">
-              Legacy default: {formatLegacyVmSize(legacyVmSize)}
-            </span>
-          )}
         </div>
       </section>
 
