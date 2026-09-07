@@ -1,8 +1,8 @@
 import {
   normalizeResourceRequirements,
   type ResolvedResourceReservation,
-  type ResourceRequirementFieldProvenance,
   RESOURCE_REQUIREMENT_FIELDS,
+  type ResourceRequirementFieldProvenance,
   type ResourceRequirements,
   type ResourceRequirementsSource,
   type ResourceResolutionInput,

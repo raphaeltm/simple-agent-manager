@@ -200,6 +200,7 @@ function makeNode(overrides: Partial<schema.Node> = {}): schema.Node {
 describe('project member offboarding preview', () => {
   let app: Hono<{ Bindings: Env }>;
   let selectResults: QueryResult[];
+  let executionPrincipalMembers: QueryResult;
   let insertedRows: Array<{ table: unknown; values: unknown }>;
   let updatedRows: Array<{ table: unknown; values: Record<string, unknown> }>;
 
@@ -213,6 +214,12 @@ describe('project member offboarding preview', () => {
     mocks.currentUserId = 'owner-user';
     mocks.requireProjectCapability.mockResolvedValue(makeProject());
     selectResults = [];
+    // Active members available as a trigger execution principal. Overridden by
+    // the case that asserts reattach is withheld when none remain.
+    executionPrincipalMembers = [
+      { userId: 'owner-user', role: 'owner', status: 'active' },
+      { userId: 'departing-user', role: 'admin', status: 'active' },
+    ];
     insertedRows = [];
     updatedRows = [];
 
@@ -232,7 +239,24 @@ describe('project member offboarding preview', () => {
     };
 
     const mockDb = {
-      select: vi.fn(() => makeSelectBuilder()),
+      // `enumerateOffboardingResources` now also loads the active members who
+      // could serve as a trigger execution principal. That lookup is answered
+      // out-of-band, keyed on its distinctive {userId, role, status} projection,
+      // so it does not shift the positional sequences these cases were written
+      // against. The predicate itself is proven against real project_members
+      // rows in tests/unit/services/offboarding-trigger-execution-principal.test.ts.
+      select: vi.fn((projection?: Record<string, unknown>) => {
+        const keys = projection ? Object.keys(projection).sort().join(',') : '';
+        if (keys === 'role,status,userId') {
+          const chain: Record<string, unknown> = {};
+          chain.from = vi.fn(() => chain);
+          chain.where = vi.fn(() => chain);
+          chain.then = (resolve: (value: QueryResult) => unknown) =>
+            Promise.resolve(executionPrincipalMembers).then(resolve);
+          return chain;
+        }
+        return makeSelectBuilder();
+      }),
       update: vi.fn((table: unknown) => ({
         set: vi.fn((values: Record<string, unknown>) => {
           updatedRows.push({ table, values });

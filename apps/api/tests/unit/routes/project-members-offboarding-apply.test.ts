@@ -278,6 +278,13 @@ function triggerDetails(hasCoverage = false) {
     sourceType: 'cron',
     agentTarget: 'claude-code',
     computeTarget: 'hetzner',
+    // Creator and effective executor are recorded separately so a reviewer can
+    // see which one is departing after a keep-active transfer.
+    creatorUserId: 'departing-user',
+    executionUserId: null,
+    effectiveExecutionUserId: 'departing-user',
+    executionCapability: 'task:write',
+    hasAuthorizedRemainingExecutionPrincipal: true,
     remainingProjectCoverage: {
       agent: hasCoverage
         ? { attachmentId: 'attach-agent-owner', configurationId: 'config-agent-owner' }
@@ -352,6 +359,7 @@ function storedAction(input: {
 describe('project member offboarding apply', () => {
   let app: Hono<{ Bindings: Env }>;
   let selectResults: QueryResult[];
+  let executionPrincipalMembers: QueryResult;
   let updatedRows: Array<{ table: unknown; values: Record<string, unknown> }>;
   let updateReturningRows: unknown[][];
   let transactionCalls: number;
@@ -366,6 +374,11 @@ describe('project member offboarding apply', () => {
     mocks.currentUserId = 'owner-user';
     mocks.requireProjectCapability.mockResolvedValue(makeProject());
     selectResults = [];
+    // Active members available as a trigger execution principal.
+    executionPrincipalMembers = [
+      { userId: 'owner-user', role: 'owner', status: 'active' },
+      { userId: 'departing-user', role: 'admin', status: 'active' },
+    ];
     updatedRows = [];
     updateReturningRows = [];
     transactionCalls = 0;
@@ -386,7 +399,24 @@ describe('project member offboarding apply', () => {
     };
 
     const mockDb = {
-      select: vi.fn(() => makeSelectBuilder()),
+      // `enumerateOffboardingResources` now also loads the active members who
+      // could serve as a trigger execution principal. That lookup is answered
+      // out-of-band, keyed on its distinctive {userId, role, status} projection,
+      // so it does not shift the positional sequences these cases were written
+      // against. The predicate itself is proven against real project_members
+      // rows in tests/unit/services/offboarding-trigger-execution-principal.test.ts.
+      select: vi.fn((projection?: Record<string, unknown>) => {
+        const keys = projection ? Object.keys(projection).sort().join(',') : '';
+        if (keys === 'role,status,userId') {
+          const chain: Record<string, unknown> = {};
+          chain.from = vi.fn(() => chain);
+          chain.where = vi.fn(() => chain);
+          chain.then = (resolve: (value: QueryResult) => unknown) =>
+            Promise.resolve(executionPrincipalMembers).then(resolve);
+          return chain;
+        }
+        return makeSelectBuilder();
+      }),
       update: vi.fn((table: unknown) => ({
         set: vi.fn((values: Record<string, unknown>) => {
           updatedRows.push({ table, values });
