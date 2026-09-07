@@ -330,6 +330,86 @@ describe('AI Proxy Passthrough Routes', () => {
       );
     });
 
+    it('preserves allowlisted Anthropic 429 limit headers on sanitized upstream errors', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1',
+        workspaceId: 'ws1',
+        projectId: 'proj1',
+        agentType: 'claude-code',
+      });
+      mockAllowedRateLimit();
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'sk-leaked-upstream-diagnostic' }), {
+        status: 429,
+        headers: {
+          'Content-Type': 'application/json',
+          'retry-after': '30',
+          'anthropic-ratelimit-requests-reset': '2026-09-07T12:00:00Z',
+          'x-credential-debug': 'do-not-copy',
+        },
+      }));
+
+      const res = await postJson(ANTHROPIC_MESSAGES_PATH, anthropicMessagesBody());
+
+      expect(res.status).toBe(429);
+      expect(res.headers.get('retry-after')).toBe('30');
+      expect(res.headers.get('anthropic-ratelimit-requests-reset')).toBe('2026-09-07T12:00:00Z');
+      expect(res.headers.get('x-credential-debug')).toBeNull();
+      expect(await res.text()).not.toContain('sk-leaked-upstream-diagnostic');
+    });
+
+    it('accounts successful Anthropic responses when advisory credential telemetry persistence fails', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1',
+        workspaceId: 'ws1',
+        projectId: 'proj1',
+        agentType: 'claude-code',
+        agentSessionId: 'agent-session-1',
+        agentCredentialGeneration: 7,
+      });
+      mockAllowedRateLimit();
+      mockIncrementTokenUsage.mockResolvedValueOnce({ inputTokens: 13, outputTokens: 8 });
+      mockUpdateAIProxyAgentCredentialAttribution.mockRejectedValueOnce(new Error('d1 unavailable'));
+      mockRecordProxyCredentialLimitObservationsFromHeaders.mockRejectedValueOnce(new Error('telemetry unavailable'));
+      mockFetch.mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'msg_1',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hello' }],
+        model: 'claude-sonnet-5',
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 13, output_tokens: 8 },
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-ratelimit-tokens-remaining': '100',
+        },
+      }));
+
+      const res = await postJson(ANTHROPIC_MESSAGES_PATH, anthropicMessagesBody());
+
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({ id: 'msg_1' });
+      expect(mockIncrementTokenUsage).toHaveBeenCalledWith(
+        expect.anything(),
+        'user1',
+        13,
+        8,
+        expect.objectContaining({ AI_PROXY_ENABLED: 'true' }),
+      );
+      await vi.waitFor(() => {
+        expect(mockRecordProxyCredentialLimitObservationsFromHeaders).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.any(Headers),
+          expect.objectContaining({
+            agentSessionId: 'agent-session-1',
+            credentialReference: 'cc_credentials:cred-anthropic-default',
+            responseStatus: 200,
+          }),
+        );
+      });
+    });
+
     it('increments token usage after a successful Anthropic response', async () => {
       mockVerifyAIProxyAuth.mockResolvedValueOnce({
         userId: 'user1', workspaceId: 'ws1', projectId: 'proj1', agentType: 'claude-code',

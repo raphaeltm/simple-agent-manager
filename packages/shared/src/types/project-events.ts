@@ -457,6 +457,7 @@ export type ProjectEventDeliveryBatchListResult = {
 export type ProjectEventAgentVisibility = {
   owner: ProjectEventSubscriptionOwner;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
+  userId?: string | null;
 };
 
 export type ProjectEventPullDeliveryInfo = {

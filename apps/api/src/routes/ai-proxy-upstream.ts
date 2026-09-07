@@ -147,6 +147,8 @@ export async function forwardToAnthropic(
       status: response.status,
       body: errorText.slice(0, 500),
     });
+    const errorHeaders = new Headers({ 'Content-Type': 'application/json' });
+    copyCredentialLimitHeaders(response.headers, errorHeaders);
     return new Response(
       JSON.stringify({
         error: {
@@ -154,7 +156,7 @@ export async function forwardToAnthropic(
           type: 'server_error',
         },
       }),
-      { status: response.status, headers: { 'Content-Type': 'application/json' } }
+      { status: response.status, headers: errorHeaders }
     );
   }
 

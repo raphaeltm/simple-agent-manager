@@ -32,6 +32,7 @@ export interface AIProxyAuthResult {
   agentCredentialSource?: 'user' | 'project' | 'platform' | null;
   agentCredentialProvider?: string | null;
   agentProviderMode?: string | null;
+  agentCredentialGeneration: number;
 }
 
 export type AIProxyCredentialAttribution = {
@@ -123,6 +124,7 @@ export async function verifyAIProxyAuth(
       agentCredentialSource: schema.agentSessions.agentCredentialSource,
       agentCredentialProvider: schema.agentSessions.agentCredentialProvider,
       agentProviderMode: schema.agentSessions.agentProviderMode,
+      agentCredentialGeneration: schema.agentSessions.agentCredentialGeneration,
     })
     .from(schema.agentSessions)
     .where(and(...agentSessionConditions))
@@ -160,26 +162,42 @@ export async function verifyAIProxyAuth(
         : null,
     agentCredentialProvider: agentSession?.agentCredentialProvider ?? null,
     agentProviderMode: agentSession?.agentProviderMode ?? null,
+    agentCredentialGeneration: agentSession?.agentCredentialGeneration ?? 0,
   };
 }
 
 export async function updateAIProxyAgentCredentialAttribution(
   env: Env,
-  auth: Pick<AIProxyAuthResult, 'agentSessionId' | 'workspaceId' | 'userId' | 'agentType'>,
+  auth: Pick<
+    AIProxyAuthResult,
+    'agentSessionId' | 'workspaceId' | 'userId' | 'agentType' | 'agentCredentialGeneration'
+  >,
   attribution: AIProxyCredentialAttribution
 ): Promise<void> {
   if (!auth.agentSessionId) return;
+  if (!Number.isInteger(auth.agentCredentialGeneration) || auth.agentCredentialGeneration < 0) {
+    log.warn('ai_proxy.credential_attribution_update_skipped', {
+      workspaceId: auth.workspaceId,
+      userId: auth.userId,
+      agentSessionId: auth.agentSessionId,
+      agentType: auth.agentType ?? null,
+      reason: 'missing_generation',
+    });
+    return;
+  }
   const update = await env.DATABASE.prepare(
     `UPDATE agent_sessions
         SET agent_credential_source = ?,
             agent_credential_reference = ?,
             agent_credential_provider = ?,
             agent_provider_mode = ?,
+            agent_credential_generation = agent_credential_generation + 1,
             updated_at = ?
       WHERE id = ?
         AND workspace_id = ?
         AND user_id = ?
-        AND (agent_type IS NULL OR ? IS NULL OR agent_type = ?)`
+        AND (agent_type IS NULL OR ? IS NULL OR agent_type = ?)
+        AND agent_credential_generation = ?`
   )
     .bind(
       attribution.credentialSource,
@@ -191,7 +209,8 @@ export async function updateAIProxyAgentCredentialAttribution(
       auth.workspaceId,
       auth.userId,
       auth.agentType ?? null,
-      auth.agentType ?? null
+      auth.agentType ?? null,
+      auth.agentCredentialGeneration
     )
     .run();
 
@@ -201,6 +220,7 @@ export async function updateAIProxyAgentCredentialAttribution(
       userId: auth.userId,
       agentSessionId: auth.agentSessionId,
       agentType: auth.agentType ?? null,
+      expectedGeneration: auth.agentCredentialGeneration,
     });
   }
 }

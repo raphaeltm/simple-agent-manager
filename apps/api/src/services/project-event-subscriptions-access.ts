@@ -52,6 +52,7 @@ type AgentSessionRow = {
 
 export type AgentSubscriptionContext = {
   projectId: string;
+  userId: string;
   owner: ProjectEventSubscriptionOwner;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
 };
@@ -258,6 +259,7 @@ async function resolveAgentContext(
 
   return {
     projectId,
+    userId,
     owner: {
       type: 'agent',
       id: ownerId,

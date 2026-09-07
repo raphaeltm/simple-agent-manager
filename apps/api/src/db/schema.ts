@@ -1418,6 +1418,7 @@ export const agentSessions = sqliteTable(
     agentCredentialReference: text('agent_credential_reference'),
     agentCredentialProvider: text('agent_credential_provider'),
     agentProviderMode: text('agent_provider_mode'),
+    agentCredentialGeneration: integer('agent_credential_generation').notNull().default(0),
     skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     worktreePath: text('worktree_path'),
     stoppedAt: text('stopped_at'),
@@ -1501,6 +1502,55 @@ export const credentialLimitWindows = sqliteTable(
       table.agentSessionId
     ),
     observedAtIdx: index('idx_credential_limit_windows_observed_at').on(table.observedAt),
+  })
+);
+
+export const credentialLimitEventAdmissions = sqliteTable(
+  'credential_limit_event_admissions',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    credentialReference: text('credential_reference').notNull(),
+    windowType: text('window_type').notNull(),
+    eventSource: text('event_source').notNull(),
+    deliveryKey: text('delivery_key').notNull(),
+    payloadFingerprint: text('payload_fingerprint').notNull(),
+    eventType: text('event_type').notNull(),
+    transition: text('transition').notNull(),
+    observedAt: integer('observed_at').notNull(),
+    receivedAt: integer('received_at').notNull(),
+    eventPayloadJson: text('event_payload_json').notNull(),
+    dispatchState: text('dispatch_state', {
+      enum: ['pending', 'delivered', 'failed', 'conflicted', 'superseded'],
+    })
+      .notNull()
+      .default('pending'),
+    dispatchOutcome: text('dispatch_outcome'),
+    dispatchAttempts: integer('dispatch_attempts').notNull().default(0),
+    dispatchError: text('dispatch_error'),
+    nextAttemptAt: integer('next_attempt_at'),
+    lastAttemptAt: integer('last_attempt_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (table) => ({
+    projectCredentialIdx: index('idx_credential_limit_admissions_project_credential').on(
+      table.projectId,
+      table.credentialReference,
+      table.windowType
+    ),
+    retryIdx: index('idx_credential_limit_admissions_retry')
+      .on(table.nextAttemptAt, table.createdAt)
+      .where(sql`dispatch_state IN ('pending', 'failed')`),
+    expiryIdx: index('idx_credential_limit_admissions_expires').on(table.expiresAt),
+    deliveryKeyUnique: uniqueIndex('idx_credential_limit_admissions_delivery_key_unique').on(
+      table.projectId,
+      table.eventSource,
+      table.deliveryKey
+    ),
   })
 );
 
@@ -2152,6 +2202,8 @@ export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
 export type CredentialLimitWindow = typeof credentialLimitWindows.$inferSelect;
 export type NewCredentialLimitWindow = typeof credentialLimitWindows.$inferInsert;
+export type CredentialLimitEventAdmission = typeof credentialLimitEventAdmissions.$inferSelect;
+export type NewCredentialLimitEventAdmission = typeof credentialLimitEventAdmissions.$inferInsert;
 export type SessionSnapshot = typeof sessionSnapshots.$inferSelect;
 export type NewSessionSnapshot = typeof sessionSnapshots.$inferInsert;
 export type UIStandard = typeof uiStandards.$inferSelect;

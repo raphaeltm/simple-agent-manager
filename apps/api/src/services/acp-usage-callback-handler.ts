@@ -120,6 +120,14 @@ function providerFromAgent(agentType: string | null | undefined): string {
   return agentType;
 }
 
+function normalizeTelemetryProvider(
+  provider: string | null,
+  agentType: string | null | undefined
+): string {
+  if (provider === 'anthropic' || provider === 'openai') return provider;
+  return providerFromAgent(provider ?? agentType);
+}
+
 async function loadServerCredentialAttribution(
   env: Env,
   input: {
@@ -214,9 +222,10 @@ function buildObservations(input: {
   credentialSource: 'user' | 'project' | 'platform';
   defaultObservedAt: number;
 }): CredentialLimitObservation[] {
-  const providerDefault =
-    input.row.agent_credential_provider ??
-    providerFromAgent(input.body.agentType ?? input.row.agent_type);
+  const providerDefault = normalizeTelemetryProvider(
+    input.row.agent_credential_provider,
+    input.body.agentType ?? input.row.agent_type
+  );
   const providerMode = input.row.agent_provider_mode ?? 'direct';
   const sourceDefault = input.body.source ?? 'vm-agent.acp_usage_update';
 

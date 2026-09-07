@@ -81,19 +81,10 @@ func (h *SessionHost) captureSessionUsageUpdate(params acpsdk.SessionNotificatio
 	if !ok {
 		return
 	}
-	go h.sendUsageReport(request)
+	h.enqueueUsageReport(request)
 }
 
 func (h *SessionHost) prepareUsageReport(params acpsdk.SessionNotification) (usageReportRequest, bool) {
-	raw, err := json.Marshal(params)
-	if err != nil {
-		slog.Warn("usageReport: marshal session update failed", "error", err)
-		return usageReportRequest{}, false
-	}
-	return h.prepareUsageReportFromRaw(raw)
-}
-
-func (h *SessionHost) prepareUsageReportFromRaw(raw []byte) (usageReportRequest, bool) {
 	projectID := h.config.ProjectID
 	nodeID := h.config.NodeID
 	controlPlaneURL := h.config.ControlPlaneURL
@@ -108,7 +99,7 @@ func (h *SessionHost) prepareUsageReportFromRaw(raw []byte) (usageReportRequest,
 		return usageReportRequest{}, false
 	}
 
-	meta, ok := findObjectKey(raw, claudeRateLimitMetaKey)
+	meta, ok := claudeRateLimitMeta(params)
 	if !ok {
 		return usageReportRequest{}, false
 	}
@@ -136,38 +127,17 @@ func (h *SessionHost) prepareUsageReportFromRaw(raw []byte) (usageReportRequest,
 	}, true
 }
 
-func findObjectKey(raw []byte, key string) (map[string]any, bool) {
-	var decoded any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
+func claudeRateLimitMeta(params acpsdk.SessionNotification) (map[string]any, bool) {
+	usage := params.Update.UsageUpdate
+	if usage == nil {
 		return nil, false
 	}
-	value, ok := findObjectKeyValue(decoded, key)
+	value, ok := usage.Meta[claudeRateLimitMetaKey]
 	if !ok {
 		return nil, false
 	}
 	meta, ok := value.(map[string]any)
 	return meta, ok
-}
-
-func findObjectKeyValue(value any, key string) (any, bool) {
-	switch typed := value.(type) {
-	case map[string]any:
-		if found, ok := typed[key]; ok {
-			return found, true
-		}
-		for _, nested := range typed {
-			if found, ok := findObjectKeyValue(nested, key); ok {
-				return found, true
-			}
-		}
-	case []any:
-		for _, nested := range typed {
-			if found, ok := findObjectKeyValue(nested, key); ok {
-				return found, true
-			}
-		}
-	}
-	return nil, false
 }
 
 func usageLimitFromClaudeRateLimit(meta map[string]any, observedAt int64) (usageLimitPayload, bool) {
@@ -282,7 +252,7 @@ func resetMillisField(values map[string]any, keys ...string) *int64 {
 			}
 		default:
 			if number, ok := numberFromJSON(typed); ok && number >= 0 {
-				ms := int64(number)
+				ms := int64(number * 1000)
 				return &ms
 			}
 		}
@@ -326,7 +296,75 @@ func safeUsageIdentifier(value string) string {
 	return result
 }
 
+func (h *SessionHost) enqueueUsageReport(request usageReportRequest) {
+	h.usageReportMu.Lock()
+	h.usageReportPending = &request
+	if h.usageReportRunning {
+		h.usageReportMu.Unlock()
+		return
+	}
+	h.usageReportRunning = true
+	done := make(chan struct{})
+	h.usageReportDone = done
+	h.usageReportMu.Unlock()
+
+	go h.runUsageReporter(done)
+}
+
+func (h *SessionHost) runUsageReporter(done chan struct{}) {
+	defer close(done)
+	for {
+		h.usageReportMu.Lock()
+		pending := h.usageReportPending
+		if pending == nil {
+			h.usageReportRunning = false
+			h.usageReportMu.Unlock()
+			return
+		}
+		request := *pending
+		h.usageReportPending = nil
+		h.usageReportMu.Unlock()
+
+		h.sendUsageReportWithContext(h.ctx, request)
+	}
+}
+
+func (h *SessionHost) flushUsageReports(timeout time.Duration) bool {
+	if timeout <= 0 {
+		timeout = h.activityReportTimeout()
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		h.usageReportMu.Lock()
+		if !h.usageReportRunning {
+			h.usageReportMu.Unlock()
+			return true
+		}
+		done := h.usageReportDone
+		h.usageReportMu.Unlock()
+
+		if done == nil {
+			return true
+		}
+		select {
+		case <-done:
+			continue
+		case <-timer.C:
+			return false
+		}
+	}
+}
+
 func (h *SessionHost) sendUsageReport(request usageReportRequest) bool {
+	return h.sendUsageReportWithContext(context.Background(), request)
+}
+
+func (h *SessionHost) sendUsageReportWithContext(ctx context.Context, request usageReportRequest) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	body, err := json.Marshal(request.payload)
 	if err != nil {
 		slog.Warn("usageReport: marshal failed", "error", err)
@@ -335,11 +373,16 @@ func (h *SessionHost) sendUsageReport(request usageReportRequest) bool {
 
 	attempts, retryBackoff := h.usageReportRetryPolicy()
 	for attempt := 1; attempt <= attempts; attempt++ {
-		statusCode, responseBody, doErr := h.doUsageRequest(request.url, body, request.callbackToken)
+		if ctx.Err() != nil {
+			return false
+		}
+		statusCode, responseBody, doErr := h.doUsageRequest(ctx, request.url, body, request.callbackToken)
 		if doErr != nil {
 			if attempt < attempts {
 				slog.Info("usageReport: attempt failed, retrying", "attempt", attempt, "error", doErr)
-				time.Sleep(retryBackoff)
+				if !sleepUsageRetry(ctx, retryBackoff) {
+					return false
+				}
 				continue
 			}
 			slog.Warn("usageReport: all attempts failed", "error", doErr)
@@ -347,7 +390,9 @@ func (h *SessionHost) sendUsageReport(request usageReportRequest) bool {
 		}
 		if statusCode >= 500 && attempt < attempts {
 			slog.Info("usageReport: server error, retrying", "status", statusCode)
-			time.Sleep(retryBackoff)
+			if !sleepUsageRetry(ctx, retryBackoff) {
+				return false
+			}
 			continue
 		}
 		if statusCode >= 400 {
@@ -359,6 +404,20 @@ func (h *SessionHost) sendUsageReport(request usageReportRequest) bool {
 		return true
 	}
 	return false
+}
+
+func sleepUsageRetry(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func (h *SessionHost) usageReportRetryPolicy() (int, time.Duration) {
@@ -373,8 +432,8 @@ func (h *SessionHost) usageReportRetryPolicy() (int, time.Duration) {
 	return attempts, backoff
 }
 
-func (h *SessionHost) doUsageRequest(url string, body []byte, callbackToken string) (int, string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), h.activityReportTimeout())
+func (h *SessionHost) doUsageRequest(parentCtx context.Context, url string, body []byte, callbackToken string) (int, string, error) {
+	ctx, cancel := context.WithTimeout(parentCtx, h.activityReportTimeout())
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))

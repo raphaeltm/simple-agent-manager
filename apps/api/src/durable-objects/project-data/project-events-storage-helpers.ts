@@ -31,6 +31,7 @@ import {
 } from './project-events-mappers';
 import { filterMatchesProjectEvent, projectEventKeys } from './project-events-normalization';
 import { normalizeNullableText, normalizeText } from './project-events-values';
+import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import { generateId } from './types';
 
 const log = createModuleLogger('project_data.project_events.storage');
@@ -65,11 +66,9 @@ type DeleteOldRowsInput = {
   extraWhere?: string;
   extraParams?: unknown[];
 };
-
 function isFingerprintRow(input: unknown): input is FingerprintRow {
   return isJsonRecord(input) && typeof input.idempotency_fingerprint === 'string';
 }
-
 function isCountRow(input: unknown): input is CountRow {
   return isJsonRecord(input) && typeof input.cnt === 'number';
 }
@@ -159,6 +158,7 @@ export function createMatchesForEvent(
       continue;
     }
     if (!filterMatchesProjectEvent(subscription.filter, event)) continue;
+    if (!subscriptionCanMatchProjectEvent(subscription, event)) continue;
     const match = insertMatchIfAbsent(sql, event, subscription, now);
     matches.push(match);
     if (matches.length >= limits.maxMatchesPerEvent) break;

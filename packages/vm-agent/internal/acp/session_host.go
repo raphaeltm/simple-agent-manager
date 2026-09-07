@@ -278,6 +278,11 @@ type SessionHost struct {
 	credAuthFilePath  string // relative to home dir, e.g. ".codex/auth.json"
 	credKind          string // "api-key" or "oauth-token"
 
+	usageReportMu      sync.Mutex
+	usageReportPending *usageReportRequest
+	usageReportRunning bool
+	usageReportDone    chan struct{}
+
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
 	viewers  map[string]*Viewer
@@ -868,6 +873,9 @@ func (h *SessionHost) Stop() {
 	h.stopPromptActivityRereport()
 	h.clearHarnessWork()
 	h.reportActivity("idle")
+	if !h.flushUsageReports(h.activityReportTimeout()) {
+		slog.Warn("usageReport: shutdown flush timed out")
+	}
 
 	// Cancel any pending auto-suspend timer.
 	h.viewerMu.Lock()

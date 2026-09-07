@@ -19,7 +19,7 @@ import {
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -49,6 +49,7 @@ import {
 } from '../services/credential-limit-events';
 
 const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
+type AnthropicProxyContext = Context<{ Bindings: Env }>;
 type AnthropicProxyAuth = Awaited<ReturnType<typeof verifyAIProxyAuth>>;
 
 // =============================================================================
@@ -60,11 +61,20 @@ function anthropicError(
   message: string,
   type: string,
   status: number,
+  headers?: HeadersInit
 ): Response {
+  const responseHeaders = new Headers(headers);
+  if (!responseHeaders.has('Content-Type')) responseHeaders.set('Content-Type', 'application/json');
   return new Response(
     JSON.stringify({ type: 'error', error: { type, message } }),
-    { status, headers: { 'Content-Type': 'application/json' } },
+    { status, headers: responseHeaders },
   );
+}
+
+function anthropicProviderErrorHeaders(upstreamHeaders: Headers): Headers {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  copyCredentialLimitHeaders(upstreamHeaders, headers);
+  return headers;
 }
 
 function anthropicUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-cap'): Response {
@@ -82,7 +92,18 @@ async function recordAnthropicPlatformLimitHeaders(input: {
   upstreamAuth: Awaited<ReturnType<typeof resolveUpstreamAuth>>;
   source: string;
 }): Promise<void> {
-  await updateAIProxyAgentCredentialAttribution(input.env, input.auth, input.upstreamAuth);
+  try {
+    await updateAIProxyAgentCredentialAttribution(input.env, input.auth, input.upstreamAuth);
+  } catch (error) {
+    log.warn('ai_proxy_anthropic.credential_attribution_update_failed', {
+      userId: input.auth.userId,
+      workspaceId: input.auth.workspaceId,
+      agentSessionId: input.auth.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.response.headers, {
     projectId: input.auth.projectId,
     userId: input.auth.userId,
@@ -97,6 +118,23 @@ async function recordAnthropicPlatformLimitHeaders(input: {
     source: input.source,
     responseStatus: input.response.status,
   });
+}
+
+function scheduleAnthropicPlatformLimitHeaders(
+  c: AnthropicProxyContext,
+  input: Parameters<typeof recordAnthropicPlatformLimitHeaders>[0]
+): void {
+  const telemetry = recordAnthropicPlatformLimitHeaders(input).catch((error) => {
+    log.warn('ai_proxy_anthropic.credential_limit_telemetry_failed', {
+      userId: input.auth.userId,
+      workspaceId: input.auth.workspaceId,
+      agentSessionId: input.auth.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  optionalExecutionContext(() => c.executionCtx)?.waitUntil(telemetry);
+  void telemetry;
 }
 
 // =============================================================================
@@ -268,7 +306,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
         status: upstreamResponse.status,
         body: errorText.slice(0, 500),
       });
-      await recordAnthropicPlatformLimitHeaders({
+      scheduleAnthropicPlatformLimitHeaders(c, {
         env: c.env,
         response: upstreamResponse,
         auth,
@@ -279,6 +317,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
         'api_error',
         upstreamResponse.status,
+        anthropicProviderErrorHeaders(upstreamResponse.headers)
       );
     }
 
@@ -291,7 +330,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     if (isStreaming) {
       responseHeaders.set('Cache-Control', 'no-cache');
     }
-    await recordAnthropicPlatformLimitHeaders({
+    scheduleAnthropicPlatformLimitHeaders(c, {
       env: c.env,
       response: upstreamResponse,
       auth,
@@ -462,7 +501,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
         status: upstreamResponse.status,
         body: errorText.slice(0, 500),
       });
-      await recordAnthropicPlatformLimitHeaders({
+      scheduleAnthropicPlatformLimitHeaders(c, {
         env: c.env,
         response: upstreamResponse,
         auth,
@@ -473,6 +512,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
         `Token counting failed (${upstreamResponse.status}). Please try again.`,
         'api_error',
         upstreamResponse.status,
+        anthropicProviderErrorHeaders(upstreamResponse.headers)
       );
     }
 
@@ -481,7 +521,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
       'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json',
     });
     copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
-    await recordAnthropicPlatformLimitHeaders({
+    scheduleAnthropicPlatformLimitHeaders(c, {
       env: c.env,
       response: upstreamResponse,
       auth,

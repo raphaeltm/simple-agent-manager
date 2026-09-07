@@ -40,6 +40,10 @@ import {
   readSubscriptionById,
 } from './project-events-storage-helpers';
 import { normalizeText, stableStringify } from './project-events-values';
+import {
+  agentCanSeeProjectEvent,
+  subscriptionCanMatchProjectEvent,
+} from './project-events-visibility';
 import type { Env } from './types';
 import { generateId } from './types';
 
@@ -100,6 +104,7 @@ export function getProjectEvent(
   if (!match) return NONDISCLOSING_EVENT_MISS;
   const event = readEventById(sql, projectId, eventId);
   const subscription = readSubscriptionById(sql, projectId, match.subscriptionId);
+  if (!eventVisibleToCaller(event, subscription, visibility)) return NONDISCLOSING_EVENT_MISS;
   const batch = ensurePullDeliveryBatch(sql, env, projectId, subscription, match, event, now);
   return eventForResponse(event, match, batch);
 }
@@ -165,11 +170,12 @@ export function listProjectEventSubscriptionEvents(
     .toArray();
 
   const page = rows.slice(0, limit);
-  const events = page.map((row) => {
+  const events = page.flatMap((row) => {
     const parsed = parseMatchEventRow(row);
     const event = mapProjectEvent(row);
+    if (!eventVisibleToCaller(event, subscription, visibility)) return [];
     const batch = ensurePullDeliveryBatch(sql, env, projectId, subscription, parsed, event, now);
-    return eventSummaryForResponse(event, parsed, batch);
+    return [eventSummaryForResponse(event, parsed, batch)];
   });
   const last = page.length > 0 ? parseMatchEventRow(page[page.length - 1]) : null;
 
@@ -342,7 +348,10 @@ function readVisibleDelivery(
     .toArray()[0];
   if (!row) return null;
   const batch = mapProjectEventDeliveryBatch(row);
-  return { batch, eventIds: readEventIdsForBatch(sql, projectId, batch.id) };
+  const subscription = readSubscriptionById(sql, projectId, batch.subscriptionId);
+  const events = readEventsForBatch(sql, projectId, batch.id);
+  if (events.some((event) => !eventVisibleToCaller(event, subscription, visibility))) return null;
+  return { batch, eventIds: events.map((event) => event.id) };
 }
 
 function visibilityParams(visibility: ProjectEventAgentVisibility): unknown[] {
@@ -354,6 +363,14 @@ function visibilityParams(visibility: ProjectEventAgentVisibility): unknown[] {
     visibility.target.sessionId ?? null,
     visibility.target.agentId ?? null,
   ];
+}
+
+function eventVisibleToCaller(
+  event: ProjectEventRecord,
+  subscription: ProjectEventSubscriptionRecord,
+  visibility: ProjectEventAgentVisibility
+): boolean {
+  return agentCanSeeProjectEvent(visibility, event) && subscriptionCanMatchProjectEvent(subscription, event);
 }
 
 function ensurePullDeliveryBatch(
@@ -474,21 +491,19 @@ function markBatchObservedForPull(
   return readBatchById(sql, projectId, batch.id);
 }
 
-function readEventIdsForBatch(sql: SqlStorage, projectId: string, batchId: string): string[] {
+function readEventsForBatch(
+  sql: SqlStorage,
+  projectId: string,
+  batchId: string
+): ProjectEventRecord[] {
   return sql
     .exec(
-      `SELECT event_id
-       FROM project_event_matches
-       WHERE project_id = ? AND batch_id = ?
-       ORDER BY matched_at ASC, id ASC`,
+      `SELECT e.*\n       FROM project_event_matches m\n       JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id\n       WHERE m.project_id = ? AND m.batch_id = ?\n       ORDER BY m.matched_at ASC, m.id ASC`,
       projectId,
       batchId
     )
     .toArray()
-    .filter(
-      (row): row is { event_id: string } => isJsonRecord(row) && typeof row.event_id === 'string'
-    )
-    .map((row) => row.event_id);
+    .map(mapProjectEvent);
 }
 
 function parseMatchEventRow(row: unknown): MatchCursor {
@@ -597,6 +612,7 @@ function normalizeVisibility(
 ): ProjectEventAgentVisibility {
   return {
     owner: normalizeOwner(visibility.owner, maxBytes),
+    userId: normalizeNullableVisibilityText(visibility.userId ?? null, 'userId', maxBytes),
     target: {
       sessionId: normalizeNullableVisibilityText(
         visibility.target.sessionId,

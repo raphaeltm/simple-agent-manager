@@ -189,6 +189,7 @@ async function persistAgentCredentialAttribution(
               agent_credential_reference = ?,
               agent_credential_provider = ?,
               agent_provider_mode = ?,
+              agent_credential_generation = agent_credential_generation + 1,
               updated_at = ?
         WHERE id = ?
           AND workspace_id = ?
@@ -242,6 +243,7 @@ async function persistAgentCredentialAttribution(
             agent_credential_reference = ?,
             agent_credential_provider = ?,
             agent_provider_mode = ?,
+            agent_credential_generation = agent_credential_generation + 1,
             updated_at = ?
       WHERE id = ?`
   )
@@ -265,9 +267,17 @@ function credentialAttributionFromData(
   return {
     credentialSource: credentialData.credentialSource,
     credentialReference: credentialData.credentialReference,
-    credentialProvider: credentialData.credentialProvider ?? agentType,
+    credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(agentType),
     providerMode,
   };
+}
+
+function agentCredentialProviderFallback(agentType: string): string {
+  if (agentType === 'claude-code' || agentType.includes('claude')) return 'anthropic';
+  if (agentType === 'openai-codex' || agentType.includes('codex') || agentType.includes('openai')) {
+    return 'openai';
+  }
+  return agentType;
 }
 
 function platformProxyAttribution(agentType: string): AgentCredentialAttribution {
@@ -920,7 +930,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       credentialKind: credentialData.credentialKind,
       credentialSource: credentialData.credentialSource,
       credentialReference: credentialData.credentialReference,
-      credentialProvider: credentialData.credentialProvider ?? body.agentType,
+      credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
       providerMode: credentialProviderMode,
     });
   }
@@ -1041,7 +1051,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         credentialKind: credentialData.credentialKind,
         credentialSource: credentialData.credentialSource,
         credentialReference: credentialData.credentialReference,
-        credentialProvider: credentialData.credentialProvider ?? credentialData.providerDialect ?? body.agentType,
+        credentialProvider: credentialData.credentialProvider ?? credentialData.providerDialect ?? agentCredentialProviderFallback(body.agentType),
         providerMode: 'proxy-passthrough',
         inferenceConfig,
       });
@@ -1073,7 +1083,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         credentialKind: credentialData.credentialKind,
         credentialSource: credentialData.credentialSource,
         credentialReference: credentialData.credentialReference,
-        credentialProvider: credentialData.credentialProvider ?? body.agentType,
+        credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
         providerMode: credentialProviderMode,
       });
     }
@@ -1180,7 +1190,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     credentialKind: credentialData.credentialKind,
     credentialSource: credentialData.credentialSource,
     credentialReference: credentialData.credentialReference,
-    credentialProvider: credentialData.credentialProvider ?? body.agentType,
+    credentialProvider: credentialData.credentialProvider ?? agentCredentialProviderFallback(body.agentType),
     providerMode: credentialProviderMode,
   });
 });

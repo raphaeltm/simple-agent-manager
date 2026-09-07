@@ -261,7 +261,18 @@ async function recordPlatformProxyLimitHeaders(input: {
   attribution: AIProxyCredentialAttribution;
   source: string;
 }): Promise<void> {
-  await updateAIProxyAgentCredentialAttribution(input.env, input.prepared, input.attribution);
+  try {
+    await updateAIProxyAgentCredentialAttribution(input.env, input.prepared, input.attribution);
+  } catch (error) {
+    log.warn('ai_proxy.credential_attribution_update_failed', {
+      userId: input.prepared.userId,
+      workspaceId: input.prepared.workspaceId,
+      agentSessionId: input.prepared.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.response.headers, {
     projectId: input.prepared.projectId,
     userId: input.prepared.userId,
@@ -276,6 +287,27 @@ async function recordPlatformProxyLimitHeaders(input: {
     source: input.source,
     responseStatus: input.response.status,
   });
+}
+
+function schedulePlatformProxyLimitHeaders(
+  c: AIProxyContext,
+  input: Parameters<typeof recordPlatformProxyLimitHeaders>[0]
+): void {
+  const telemetry = recordPlatformProxyLimitHeaders(input).catch((error) => {
+    log.warn('ai_proxy.credential_limit_telemetry_failed', {
+      userId: input.prepared.userId,
+      workspaceId: input.prepared.workspaceId,
+      agentSessionId: input.prepared.agentSessionId ?? null,
+      source: input.source,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  try {
+    c.executionCtx.waitUntil(telemetry);
+  } catch {
+    /* no execution context in tests */
+  }
+  void telemetry;
 }
 
 function accountingResponse(
@@ -418,7 +450,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
     });
 
     if (provider === 'anthropic' && anthropicAuth) {
-      await recordPlatformProxyLimitHeaders({
+      schedulePlatformProxyLimitHeaders(c, {
         env: c.env,
         response,
         prepared,
@@ -427,7 +459,7 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         source: 'ai-proxy.anthropic.chat_completions',
       });
     } else if (provider === 'openai' && openaiCredential) {
-      await recordPlatformProxyLimitHeaders({
+      schedulePlatformProxyLimitHeaders(c, {
         env: c.env,
         response,
         prepared,
@@ -536,7 +568,7 @@ aiProxyRoutes.post('/responses', async (c) => {
       status: response.status,
     });
 
-    await recordPlatformProxyLimitHeaders({
+    schedulePlatformProxyLimitHeaders(c, {
       env: c.env,
       response,
       prepared,
