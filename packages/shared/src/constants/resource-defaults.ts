@@ -323,7 +323,11 @@ export function resolveResourceReservation(
 function validatedExplicitLayer(
   layer: ResolutionLayer
 ): { requirements: ResourceRequirements; provenance: ResourceRequirementProvenance } | null {
-  const explicit = validateResourceRequirementsLayer(layer.source, layer.sourceId, layer.requirements);
+  const explicit = validateResourceRequirementsLayer(
+    layer.source,
+    layer.sourceId,
+    layer.requirements
+  );
   if (!explicit) return null;
   const provenance: ResourceRequirementProvenance = {};
   let hasValue = false;

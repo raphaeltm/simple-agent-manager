@@ -7,7 +7,10 @@ import {
   CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
   externalCapacitySourceCredentialId,
 } from './default-capacity-pool-helpers';
-import type { CredentialCapacitySeed, DefaultCapacityPoolsBackfillOptions } from './default-capacity-pools';
+import type {
+  CredentialCapacitySeed,
+  DefaultCapacityPoolsBackfillOptions,
+} from './default-capacity-pools';
 import {
   buildProviderCatalogForCredential,
   getStaticProviderCatalogOfferings,

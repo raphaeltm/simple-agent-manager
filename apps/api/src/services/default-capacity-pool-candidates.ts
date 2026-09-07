@@ -11,6 +11,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
+import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { providerInstanceOfferingDbValues } from './default-capacity-pool-candidate-values';
 import { defaultCandidateId, legacyDefaultCandidateId } from './default-capacity-pool-helpers';
 
@@ -39,7 +40,7 @@ export async function ensureCandidatesForSource(
   offerings: ProviderInstanceOffering[],
   options: { refreshStartedAt?: string } = {}
 ): Promise<void> {
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   const existingStatuses = await readExistingCandidateStatuses(db, poolId, sourceId);
   const selectableOfferings = offerings.filter(isCurrentlySelectableOffering);
   const candidateIds: string[] = [];
@@ -126,7 +127,14 @@ export async function ensureCandidatesForSource(
       });
   }
 
-  await markMissingCandidatesForSource(db, poolId, sourceId, existingStatuses, candidateIds, options);
+  await markMissingCandidatesForSource(
+    db,
+    poolId,
+    sourceId,
+    existingStatuses,
+    candidateIds,
+    options
+  );
 }
 
 function isCurrentlySelectableOffering(offering: ProviderInstanceOffering): boolean {
@@ -222,7 +230,7 @@ async function markMissingCandidatesForSource(
   activeCandidateIds: string[],
   options: { refreshStartedAt?: string } = {}
 ): Promise<void> {
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   const nextCandidateIds = new Set(activeCandidateIds);
   const missingCandidateIds = [...existingStatuses.keys()].filter(
     (id) => !nextCandidateIds.has(id)
@@ -251,6 +259,5 @@ async function markMissingCandidatesForSource(
           inArray(schema.capacityPoolCandidates.id, chunk)
         )
       );
-
   }
 }

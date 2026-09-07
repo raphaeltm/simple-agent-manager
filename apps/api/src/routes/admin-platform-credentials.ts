@@ -226,10 +226,11 @@ adminPlatformCredentialRoutes.delete('/:id', async (c) => {
     .where(eq(schema.platformCredentials.id, credentialId))
     .returning();
 
-  if (result.length === 0) {
+  const deletedCredential = result[0];
+  if (!deletedCredential) {
     throw errors.notFound('Platform credential');
   }
-  if (result[0].credentialType === 'cloud-provider') {
+  if (deletedCredential.credentialType === 'cloud-provider') {
     await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'installation' });
   }
 

@@ -63,12 +63,7 @@ export async function resolveCapacityPoolPlacementSettings(
       updatedAt: schema.platformSettings.updatedAt,
     })
     .from(schema.platformSettings)
-    .where(
-      eq(
-        schema.platformSettings.key,
-        CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_SETTING_KEY
-      )
-    );
+    .where(eq(schema.platformSettings.key, CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_SETTING_KEY));
   const selectionRows = await db
     .select({
       key: schema.platformSettings.key,
@@ -131,7 +126,10 @@ function parseLegacyWorkloadMapping(
   raw: string | null | undefined,
   source: 'persisted' | 'environment',
   diagnostics: string[]
-): { source: 'persisted' | 'environment'; mapping: Record<VMSize, Required<ResourceRequirements>> } | null {
+): {
+  source: 'persisted' | 'environment';
+  mapping: Record<VMSize, Required<ResourceRequirements>>;
+} | null {
   const parsed = parseJsonRecord(raw, `${source}:legacyWorkloadMapping`, diagnostics);
   if (!parsed) return null;
 
@@ -164,9 +162,11 @@ function parseSelectionSettings(
   raw: string | null | undefined,
   source: 'persisted' | 'environment',
   diagnostics: string[]
-): Pick<CapacityPoolPlacementSettings, 'selectionWeights' | 'rolloutCohortPercent'> & {
-  source: 'persisted' | 'environment';
-} | null {
+):
+  | (Pick<CapacityPoolPlacementSettings, 'selectionWeights' | 'rolloutCohortPercent'> & {
+      source: 'persisted' | 'environment';
+    })
+  | null {
   const parsed = parseJsonRecord(raw, `${source}:selectionSettings`, diagnostics);
   if (!parsed) return null;
 
@@ -278,7 +278,7 @@ function stablePositiveHash(value: string): number {
     hash ^= value.charCodeAt(i);
     hash = Math.imul(hash, 16777619);
   }
-  return (hash >>> 0) || DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.sourceGeneration;
+  return hash >>> 0 || DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.sourceGeneration;
 }
 
 function positiveFiniteNumber(value: unknown): number | null {

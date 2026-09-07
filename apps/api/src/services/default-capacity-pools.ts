@@ -9,7 +9,7 @@ import type {
   DefaultCapacityPoolSummary,
   ProviderInstanceOffering,
 } from '@simple-agent-manager/shared';
-import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -19,6 +19,7 @@ import {
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
 } from './capacity-pools';
+import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import { ensureCandidatesForSource } from './default-capacity-pool-candidates';
 import {
   defaultCapacitySourceId,
@@ -63,6 +64,12 @@ interface ReadDefaultPoolSummaryOptions {
    * last active candidate.
    */
   includeDisabled?: boolean;
+}
+
+interface PoolPublicationGuard {
+  revision: number;
+  updatedAt: string;
+  status: string;
 }
 
 export interface CredentialCapacitySeed extends ScopeIdentity {
@@ -371,7 +378,7 @@ async function readBackfillCursor(db: Db, key: string): Promise<string | null> {
 }
 
 async function writeBackfillCursor(db: Db, key: string, cursor: string | null): Promise<void> {
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   if (cursor === null) {
     await db.delete(schema.platformSettings).where(eq(schema.platformSettings.key, key));
     return;
@@ -478,8 +485,14 @@ async function ensureDefaultPoolForCredentialSeeds(
       ...scope,
       createdBy: activeSeeds[0]?.createdBy ?? null,
     }));
+  const poolGuard: PoolPublicationGuard = {
+    revision: pool.revision,
+    updatedAt: pool.updatedAt,
+    status: pool.status,
+  };
 
   for (const seed of seeds) {
+    const refreshStartedAt = nextCapacityPoolTimestamp();
     const materializedSeed = seed.active
       ? await materializeCapacitySourceCredential(db, seed)
       : seed;
@@ -490,11 +503,13 @@ async function ensureDefaultPoolForCredentialSeeds(
     }
 
     const source = existingSource
-      ? await updateCapacitySourceForSeed(db, existingSource.id, materializedSeed)
+      ? await updateCapacitySourceForSeed(db, existingSource.id, materializedSeed, refreshStartedAt)
       : await insertCapacitySourceForSeed(db, materializedSeed);
+    if (source.status !== ACTIVE_STATUS) continue;
 
-    const refreshStartedAt = new Date().toISOString();
     const resolvedOfferings = await resolveOfferingsForSeed(materializedSeed, options);
+    const sourceStillCurrent = await isCapacitySourceRefreshCurrent(db, source);
+    if (!sourceStillCurrent) continue;
     if (resolvedOfferings.refreshSucceeded) {
       await ensureCandidatesForSource(
         db,
@@ -513,7 +528,7 @@ async function ensureDefaultPoolForCredentialSeeds(
     scope,
     await Promise.all(activeSeeds.map((seed) => materializeCapacitySourceCredential(db, seed)))
   );
-  await reconcileDefaultPoolStatus(db, pool.id);
+  await reconcileDefaultPoolStatus(db, pool.id, poolGuard);
   return readDefaultPoolSummary(db, scope, { includeDisabled: true });
 }
 
@@ -534,7 +549,7 @@ async function createDefaultPoolIfAbsent(
   input: ScopeIdentity & { createdBy: string | null }
 ): Promise<schema.CapacityPool> {
   const id = defaultPoolId(input);
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   await db
     .insert(schema.capacityPools)
     .values({
@@ -570,12 +585,12 @@ async function createDefaultPoolIfAbsent(
   try {
     await db
       .update(schema.capacityPools)
-    .set({
-      isDefault: true,
-      status: ACTIVE_STATUS,
-      configurationState: 'migration-pending',
-      updatedAt: now,
-    })
+      .set({
+        isDefault: true,
+        status: ACTIVE_STATUS,
+        configurationState: 'migration-pending',
+        updatedAt: now,
+      })
       .where(eq(schema.capacityPools.id, deterministicPool.id));
   } catch (error) {
     const racedPool = await findDefaultPool(db, input);
@@ -623,7 +638,7 @@ async function insertCapacitySourceForSeed(
   seed: CredentialCapacitySeed
 ): Promise<schema.CapacitySource> {
   const id = defaultCapacitySourceId(seed);
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   await db
     .insert(schema.capacitySources)
     .values({
@@ -671,9 +686,10 @@ async function insertCapacitySourceForSeed(
 async function updateCapacitySourceForSeed(
   db: Db,
   sourceId: string,
-  seed: CredentialCapacitySeed
+  seed: CredentialCapacitySeed,
+  refreshStartedAt: string
 ): Promise<schema.CapacitySource> {
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   await db
     .update(schema.capacitySources)
     .set({
@@ -687,7 +703,12 @@ async function updateCapacitySourceForSeed(
       status: ACTIVE_STATUS,
       updatedAt: now,
     })
-    .where(eq(schema.capacitySources.id, sourceId));
+    .where(
+      and(
+        eq(schema.capacitySources.id, sourceId),
+        lte(schema.capacitySources.updatedAt, refreshStartedAt)
+      )
+    );
 
   const [source] = await db
     .select()
@@ -698,12 +719,24 @@ async function updateCapacitySourceForSeed(
   return source;
 }
 
+async function isCapacitySourceRefreshCurrent(
+  db: Db,
+  source: schema.CapacitySource
+): Promise<boolean> {
+  const [current] = await db
+    .select({ status: schema.capacitySources.status, updatedAt: schema.capacitySources.updatedAt })
+    .from(schema.capacitySources)
+    .where(eq(schema.capacitySources.id, source.id))
+    .limit(1);
+  return current?.status === source.status && current.updatedAt === source.updatedAt;
+}
+
 async function disableCapacitySourceAvailability(
   db: Db,
   _poolId: string,
   sourceId: string
 ): Promise<void> {
-  const now = new Date().toISOString();
+  const now = nextCapacityPoolTimestamp();
   await db
     .update(schema.capacitySources)
     .set({ status: DISABLED_STATUS, updatedAt: now })
@@ -772,7 +805,11 @@ async function disableDefaultPoolAvailability(db: Db, poolId: string): Promise<v
   await reconcileDefaultPoolStatus(db, poolId);
 }
 
-export async function reconcileDefaultPoolStatus(db: Db, poolId: string): Promise<void> {
+export async function reconcileDefaultPoolStatus(
+  db: Db,
+  poolId: string,
+  guard?: PoolPublicationGuard
+): Promise<void> {
   const rows = await db
     .select({
       sourceStatus: schema.capacitySources.status,
@@ -812,16 +849,25 @@ export async function reconcileDefaultPoolStatus(db: Db, poolId: string): Promis
     configurationState = 'configured-ready';
   }
 
+  const predicates = [eq(schema.capacityPools.id, poolId)];
+  if (guard) {
+    predicates.push(
+      eq(schema.capacityPools.revision, guard.revision),
+      eq(schema.capacityPools.updatedAt, guard.updatedAt),
+      eq(schema.capacityPools.status, guard.status)
+    );
+  }
+
   await db
     .update(schema.capacityPools)
     .set({
       status: ACTIVE_STATUS,
       configurationState,
       migrationState: 'complete',
-      lastReconciledAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      lastReconciledAt: nextCapacityPoolTimestamp(),
+      updatedAt: nextCapacityPoolTimestamp(),
     })
-    .where(eq(schema.capacityPools.id, poolId));
+    .where(and(...predicates));
 }
 
 export async function readDefaultPoolSummary(
@@ -920,7 +966,11 @@ function defaultPoolEffectiveState(
   if (pool.configurationState === 'source-disabled') return 'source-disabled';
   if (pool.configurationState === 'migration-pending') return 'migration-pending';
   if (pool.status !== ACTIVE_STATUS) return 'source-disabled';
-  if (counts.sourceCount === 0 || counts.candidateCount === 0 || counts.activeCandidateCount === 0) {
+  if (
+    counts.sourceCount === 0 ||
+    counts.candidateCount === 0 ||
+    counts.activeCandidateCount === 0
+  ) {
     return 'configured-empty';
   }
   if (counts.availableCandidateCount === 0) return 'catalog-unavailable';
@@ -967,7 +1017,9 @@ function sourceScopePredicates(scope: ScopeIdentity) {
 }
 
 function resolveBackfillScopeBatchSize(options: DefaultCapacityPoolsBackfillOptions): number {
-  const configured = options.scopeBatchSize ?? numberFromString(options.env?.CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE);
+  const configured =
+    options.scopeBatchSize ??
+    numberFromString(options.env?.CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE);
   if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
     return Math.min(Math.floor(configured), MAX_BACKFILL_SCOPE_BATCH_SIZE);
   }
