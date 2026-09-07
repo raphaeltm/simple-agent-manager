@@ -297,7 +297,10 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
   });
   for (const scope of scopes) {
     if (await findDefaultPool(db, scope)) {
-      return readDefaultPoolSummary(db, scope, { includeDisabled: true, workloadRoles: input.workloadRoles });
+      return readDefaultPoolSummary(db, scope, {
+        includeDisabled: true,
+        workloadRoles: input.workloadRoles,
+      });
     }
   }
 
@@ -767,6 +770,7 @@ async function ensureDefaultPoolForCredentialSeeds(
     status: pool.status,
   };
   const activeSeedKeys = new Set<string>();
+  let publicationComplete = true;
 
   for (const seed of seeds) {
     if (seed.active && !(await isCapacitySeedStillCurrent(db, seed))) continue;
@@ -804,8 +808,20 @@ async function ensureDefaultPoolForCredentialSeeds(
     const resolvedOfferings = await resolveOfferingsForSeed(materializedSeed, options);
     const sourceStillCurrent = await isCapacitySourceRefreshCurrent(db, publication);
     if (!sourceStillCurrent || !(await isCapacitySeedStillCurrent(db, seed))) continue;
-    if (resolvedOfferings.refreshSucceeded) {
-      await ensureCandidatesForSource(
+    const [existingCandidate] = await db
+      .select({ id: schema.capacityPoolCandidates.id })
+      .from(schema.capacityPoolCandidates)
+      .where(
+        and(
+          eq(schema.capacityPoolCandidates.poolId, pool.id),
+          eq(schema.capacityPoolCandidates.capacitySourceId, publication.source.id)
+        )
+      )
+      .limit(1);
+    // Failed catalogs can seed a newly created source only. Existing sources retain
+    // known-empty API catalogs and explicit membership, including deleted candidates.
+    if (resolvedOfferings.refreshSucceeded || (!existingSource && !existingCandidate)) {
+      const result = await ensureCandidatesForSource(
         db,
         pool.id,
         publication.source.id,
@@ -814,16 +830,21 @@ async function ensureDefaultPoolForCredentialSeeds(
         {
           sourceGeneration: publication.generation,
           sourceAuthorityGeneration: publication.source.authorityGeneration,
-          catalogComplete: resolvedOfferings.catalogComplete !== false,
+          catalogComplete:
+            resolvedOfferings.refreshSucceeded && resolvedOfferings.catalogComplete !== false,
           publishBatchSize: resolveCandidatePublishBatchSize(options),
           cursorStore: platformSettingsCursorStore(db),
         }
       );
+      publicationComplete &&= result.publicationComplete;
+    } else {
+      // A failed refresh cannot certify completion of an earlier bounded publication.
+      publicationComplete &&= pool.migrationState === 'complete';
     }
   }
 
   await disableCapacitySourcesMissingFromSeeds(db, scope, activeSeedKeys, seedSnapshotGeneration);
-  await reconcileDefaultPoolStatus(db, pool.id, poolGuard);
+  await reconcileDefaultPoolStatus(db, pool.id, poolGuard, { publicationComplete });
   return readDefaultPoolSummary(db, scope, { includeDisabled: true });
 }
 
@@ -1462,6 +1483,7 @@ export interface ReconcileDefaultPoolStatusOptions {
    * so one operator edit costs exactly one revision.
    */
   selectionRevisionAlreadyBumped?: boolean;
+  publicationComplete?: boolean;
 }
 
 export async function reconcileDefaultPoolStatus(
@@ -1541,18 +1563,20 @@ export async function reconcileDefaultPoolStatus(
     .select({
       revision: schema.capacityPools.revision,
       selectionDigest: schema.capacityPools.selectionDigest,
+      configurationState: schema.capacityPools.configurationState,
     })
     .from(schema.capacityPools)
     .where(eq(schema.capacityPools.id, poolId))
     .limit(1);
 
   const selectionDigest = capacityPoolSelectionDigest(rows);
-  // First reconcile after upgrade only RECORDS the digest: bumping on a null baseline would
-  // mass-invalidate healthy in-flight plans that never saw a selection change.
+  // A NULL upgrade baseline cannot prove unchanged selection. Invalidate once rather
+  // than retain plans across a first-refresh price or membership change.
   const selectionChanged =
     options.selectionRevisionAlreadyBumped !== true &&
-    currentPool?.selectionDigest != null &&
-    currentPool.selectionDigest !== selectionDigest;
+    (currentPool?.selectionDigest != null ||
+      currentPool?.configurationState !== 'migration-pending') &&
+    currentPool?.selectionDigest !== selectionDigest;
 
   const predicates = [eq(schema.capacityPools.id, poolId)];
   if (guard) {
@@ -1573,10 +1597,8 @@ export async function reconcileDefaultPoolStatus(
       // pool's selection-affecting state changed, so an identical refresh stays stable but a
       // ranking change (including a price-only one on a competing candidate) invalidates
       // plans authorized against the old ordering.
-      ...(selectionChanged
-        ? { revision: sql`${schema.capacityPools.revision} + 1` }
-        : {}),
-      migrationState: 'complete',
+      ...(selectionChanged ? { revision: sql`${schema.capacityPools.revision} + 1` } : {}),
+      migrationState: options.publicationComplete === false ? 'pending' : 'complete',
       lastReconciledAt: nextCapacityPoolTimestamp(),
       updatedAt: nextCapacityPoolTimestamp(),
     })

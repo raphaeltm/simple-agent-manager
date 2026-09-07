@@ -16,6 +16,7 @@ import { capacityCandidateAuthorityGeneration } from './capacity-pool-authority'
 import { nextCapacityPoolTimestamp } from './capacity-pool-clock';
 import {
   CAPACITY_POOL_MATERIALIZED_WORKLOAD_ROLES,
+  capacityCandidateBaseId,
   capacityCandidateIdForRole,
   PRIMARY_CAPACITY_WORKLOAD_ROLE,
 } from './capacity-pool-workload-roles';
@@ -30,20 +31,6 @@ const DEFAULT_MACHINE_CLASS = 'shared-vm';
 const ACTIVE_STATUS = 'active' satisfies CapacityPoolStatus;
 const DISABLED_STATUS = 'disabled' satisfies CapacityPoolStatus;
 const DELETED_STATUS = 'deleted' satisfies CapacityPoolStatus;
-
-/**
- * Columns bound per row by the bulk (unguarded) insert path. Kept in sync with the value
- * object built in {@link candidateValueForOffering}; an undercount silently exceeds D1's
- * 100-bound-parameter ceiling on a large catalog (.claude/rules/69).
- */
-const CANDIDATE_INSERT_BIND_COUNT = 34;
-const CANDIDATE_UPSERT_UPDATE_BIND_COUNT = 1;
-const CANDIDATE_UPSERT_CHUNK_SIZE = Math.max(
-  1,
-  Math.floor(
-    (D1_MAX_BOUND_PARAMETERS - CANDIDATE_UPSERT_UPDATE_BIND_COUNT) / CANDIDATE_INSERT_BIND_COUNT
-  )
-);
 
 /**
  * Fixed binds in the missing-candidate UPDATE before the `id IN (...)` list:
@@ -100,7 +87,7 @@ type ExistingCandidateRecord = Pick<
 >;
 
 interface PublicationCursor {
-  /** Digest of the ordered candidate-id list this progress belongs to. */
+  /** Digest of semantic source authority and the ordered candidate content. */
   digest: string;
   /** Number of rows already published for that exact catalog. */
   published: number;
@@ -177,7 +164,7 @@ export async function ensureCandidatesForSource(
   }
 
   const cursorKey = candidatePublicationCursorKey(poolId, sourceId);
-  const digest = candidateSetDigest(candidateIds);
+  const digest = await candidateSetDigest(candidateValues, options.sourceAuthorityGeneration);
   const progress = await readPublicationProgress(options.cursorStore, cursorKey, digest);
   const alreadyPublished = progress.published;
   const batchSize = Math.max(
@@ -188,9 +175,9 @@ export async function ensureCandidatesForSource(
   const publishTo = Math.min(publishFrom + batchSize, candidateValues.length);
   const pending = candidateValues.slice(publishFrom, publishTo);
 
-  await publishCandidateValues(db, pending, options, now);
+  const published = await publishCandidateValues(db, pending, options);
 
-  const publishedTotal = publishTo;
+  const publishedTotal = publishFrom + published;
   const publicationComplete = publishedTotal >= candidateValues.length;
   // The common case is a small catalog that completes in one pass with no cursor to clear.
   // Writing (then deleting) a cursor row for every source on every reconciliation pass would
@@ -221,7 +208,7 @@ export async function ensureCandidatesForSource(
 
   return {
     totalCandidates: candidateValues.length,
-    publishedCandidates: pending.length,
+    publishedCandidates: published,
     publicationComplete,
     markedMissing,
   };
@@ -307,57 +294,14 @@ function candidateValueForOffering(input: {
 async function publishCandidateValues(
   db: Db,
   values: schema.NewCapacityPoolCandidate[],
-  options: EnsureCandidatesForSourceOptions,
-  now: string
-): Promise<void> {
-  if (values.length === 0) return;
-
-  if (typeof options.sourceGeneration === 'number' || options.catalogComplete === false) {
-    for (const candidateValue of values) {
-      await upsertCandidateIfSourceGenerationCurrent(db, candidateValue, options);
-    }
-    return;
+  options: EnsureCandidatesForSourceOptions
+): Promise<number> {
+  let published = 0;
+  for (const value of values) {
+    if (!(await upsertCandidateIfSourceGenerationCurrent(db, value, options))) break;
+    published += 1;
   }
-
-  for (let offset = 0; offset < values.length; offset += CANDIDATE_UPSERT_CHUNK_SIZE) {
-    const chunk = values.slice(offset, offset + CANDIDATE_UPSERT_CHUNK_SIZE);
-    await db
-      .insert(schema.capacityPoolCandidates)
-      .values(chunk)
-      .onConflictDoUpdate({
-        target: schema.capacityPoolCandidates.id,
-        set: {
-          provider: sql`excluded.provider`,
-          location: sql`excluded.location`,
-          workloadRole: sql`excluded.workload_role`,
-          runtime: sql`excluded.runtime`,
-          machineClass: sql`excluded.machine_class`,
-          machineSize: sql`excluded.machine_size`,
-          providerInstanceType: sql`excluded.provider_instance_type`,
-          providerInstanceSku: sql`excluded.provider_instance_sku`,
-          providerInstanceDisplayName: sql`excluded.provider_instance_display_name`,
-          providerInstanceVcpuCount: sql`excluded.provider_instance_vcpu_count`,
-          providerInstanceMemoryMb: sql`excluded.provider_instance_memory_mb`,
-          providerInstanceDiskGb: sql`excluded.provider_instance_disk_gb`,
-          // COALESCE, never plain `excluded`: the catalog cannot supply these, so an
-          // unconditional overwrite erases explicit operator configuration.
-          providerInstanceBootDiskSizeGb: sql`COALESCE(excluded.provider_instance_boot_disk_size_gb, capacity_pool_candidates.provider_instance_boot_disk_size_gb)`,
-          providerInstanceImage: sql`COALESCE(excluded.provider_instance_image, capacity_pool_candidates.provider_instance_image)`,
-          providerInstanceArchitecture: sql`COALESCE(excluded.provider_instance_architecture, capacity_pool_candidates.provider_instance_architecture)`,
-          providerInstancePriceDisplay: sql`excluded.provider_instance_price_display`,
-          providerInstancePriceCurrency: sql`excluded.provider_instance_price_currency`,
-          providerInstancePriceMonthlyCents: sql`excluded.provider_instance_price_monthly_cents`,
-          providerInstancePriceHourlyMicros: sql`excluded.provider_instance_price_hourly_micros`,
-          providerInstanceCatalogSource: sql`excluded.provider_instance_catalog_source`,
-          providerInstanceCatalogLastSeenAt: sql`excluded.provider_instance_catalog_last_seen_at`,
-          catalogAvailability: 'available',
-          catalogReturnedAt: now,
-          catalogGeneration: sql`excluded.catalog_generation`,
-          authorityGeneration: sql`excluded.authority_generation`,
-          updatedAt: now,
-        },
-      });
-  }
+  return published;
 }
 
 function candidatePublicationCursorKey(poolId: string, sourceId: string): string {
@@ -365,18 +309,37 @@ function candidatePublicationCursorKey(poolId: string, sourceId: string): string
 }
 
 /**
- * Stable digest of the ordered candidate-id list. Progress is only resumed for a catalog
+ * Stable digest of the ordered candidate content. Progress is only resumed for a catalog
  * that is byte-identical to the one that produced it; any catalog change restarts publication
  * rather than resuming at a meaningless offset.
  */
-function candidateSetDigest(candidateIds: readonly string[]): string {
-  let hash = 2166136261;
-  const value = `${candidateIds.length}:${candidateIds.join(' ')}`;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
+async function candidateSetDigest(
+  values: schema.NewCapacityPoolCandidate[],
+  sourceAuthority: number | undefined
+): Promise<string> {
+  // Refresh timestamps/epochs change every tick; semantic authority and full catalog
+  // content bind resumable progress without preventing a large inventory from finishing.
+  const serialized = JSON.stringify([
+    sourceAuthority ?? 0,
+    values.map((value) => {
+      const {
+        createdAt,
+        updatedAt,
+        catalogReturnedAt,
+        catalogGeneration,
+        providerInstanceCatalogLastSeenAt,
+        ...semantic
+      } = value;
+      void createdAt;
+      void updatedAt;
+      void catalogReturnedAt;
+      void catalogGeneration;
+      void providerInstanceCatalogLastSeenAt;
+      return semantic;
+    }),
+  ]);
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(serialized));
+  return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function readPublicationProgress(
@@ -424,7 +387,7 @@ async function upsertCandidateIfSourceGenerationCurrent(
   db: Db,
   value: schema.NewCapacityPoolCandidate,
   options: EnsureCandidatesForSourceOptions
-): Promise<void> {
+): Promise<boolean> {
   const sourceGeneration = options.sourceGeneration;
   const catalogGeneration =
     typeof sourceGeneration === 'number' ? sourceGeneration : value.catalogGeneration;
@@ -449,7 +412,16 @@ async function upsertCandidateIfSourceGenerationCurrent(
         )
           AND capacity_pool_candidates.catalog_generation <= excluded.catalog_generation`
       : sql`capacity_pool_candidates.catalog_generation <= excluded.catalog_generation`;
-  await (db as RunnableDb).run(sql`
+  const primaryId = capacityCandidateBaseId(value.id);
+  const membership =
+    value.workloadRole === PRIMARY_CAPACITY_WORKLOAD_ROLE
+      ? sql`${value.status}`
+      : sql`COALESCE((SELECT status FROM capacity_pool_candidates WHERE id = ${primaryId}
+        AND pool_id = ${value.poolId} AND capacity_source_id = ${value.capacitySourceId}
+        AND provider = ${value.provider} AND location = ${value.location}
+        AND provider_instance_type IS ${value.providerInstanceType}
+        AND provider_instance_sku IS ${value.providerInstanceSku}), 'disabled')`;
+  const result = await (db as RunnableDb).run(sql`
     INSERT INTO capacity_pool_candidates (
       id,
       pool_id,
@@ -518,7 +490,7 @@ async function upsertCandidateIfSourceGenerationCurrent(
       ${value.authorityGeneration ?? 0},
       ${value.priority},
       ${value.candidateOrder},
-      ${value.status},
+      ${membership},
       ${value.createdAt},
       ${value.updatedAt}
     WHERE ${insertGuard}
@@ -535,18 +507,9 @@ async function upsertCandidateIfSourceGenerationCurrent(
       provider_instance_vcpu_count = excluded.provider_instance_vcpu_count,
       provider_instance_memory_mb = excluded.provider_instance_memory_mb,
       provider_instance_disk_gb = excluded.provider_instance_disk_gb,
-      provider_instance_boot_disk_size_gb = COALESCE(
-        excluded.provider_instance_boot_disk_size_gb,
-        capacity_pool_candidates.provider_instance_boot_disk_size_gb
-      ),
-      provider_instance_image = COALESCE(
-        excluded.provider_instance_image,
-        capacity_pool_candidates.provider_instance_image
-      ),
-      provider_instance_architecture = COALESCE(
-        excluded.provider_instance_architecture,
-        capacity_pool_candidates.provider_instance_architecture
-      ),
+      provider_instance_boot_disk_size_gb = capacity_pool_candidates.provider_instance_boot_disk_size_gb,
+      provider_instance_image = capacity_pool_candidates.provider_instance_image,
+      provider_instance_architecture = capacity_pool_candidates.provider_instance_architecture,
       provider_instance_price_display = excluded.provider_instance_price_display,
       provider_instance_price_currency = excluded.provider_instance_price_currency,
       provider_instance_price_monthly_cents = excluded.provider_instance_price_monthly_cents,
@@ -557,10 +520,15 @@ async function upsertCandidateIfSourceGenerationCurrent(
       catalog_returned_at = excluded.catalog_returned_at,
       catalog_generation = excluded.catalog_generation,
       authority_generation = excluded.authority_generation,
+      status = CASE WHEN excluded.workload_role = 'deployment' THEN excluded.status ELSE capacity_pool_candidates.status END,
       updated_at = excluded.updated_at
     WHERE ${updateGuard}
+      AND capacity_pool_candidates.provider_instance_boot_disk_size_gb IS ${value.providerInstanceBootDiskSizeGb ?? null}
+      AND capacity_pool_candidates.provider_instance_image IS ${value.providerInstanceImage ?? null}
+      AND capacity_pool_candidates.provider_instance_architecture IS ${value.providerInstanceArchitecture ?? null}
       AND ${catalogSourceReplacementGuard(options.catalogComplete)}
   `);
+  return (result as D1Result<unknown>).meta.changes === 1;
 }
 
 function catalogSourceReplacementGuard(catalogComplete: boolean | undefined) {
@@ -660,8 +628,7 @@ async function readExistingCandidates(
       status: schema.capacityPoolCandidates.status,
       providerInstanceCatalogSource: schema.capacityPoolCandidates.providerInstanceCatalogSource,
       catalogAvailability: schema.capacityPoolCandidates.catalogAvailability,
-      providerInstanceBootDiskSizeGb:
-        schema.capacityPoolCandidates.providerInstanceBootDiskSizeGb,
+      providerInstanceBootDiskSizeGb: schema.capacityPoolCandidates.providerInstanceBootDiskSizeGb,
       providerInstanceImage: schema.capacityPoolCandidates.providerInstanceImage,
       providerInstanceArchitecture: schema.capacityPoolCandidates.providerInstanceArchitecture,
     })

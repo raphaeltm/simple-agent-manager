@@ -29,7 +29,10 @@ export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS = `
   placement_explanation_json
 `;
 
-export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS = `?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`;
+export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS =
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS.split(',')
+    .map(() => '?')
+    .join(', ');
 
 export const CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS = `
   capacity_pool_id = ?,

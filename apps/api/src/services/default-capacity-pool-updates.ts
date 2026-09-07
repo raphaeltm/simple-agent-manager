@@ -4,7 +4,7 @@ import type {
   CapacityPoolStrategy,
   DefaultCapacityPoolCandidateCatalogAddition,
 } from '@simple-agent-manager/shared';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -59,12 +59,13 @@ const READ_SOURCE_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 3;
 
 /**
  * Binds consumed by an atomic candidate UPDATE before its `id IN (...)` list:
- * `status`, `updated_at` (SET) plus `pool_id` and the fence's `id` + `revision`.
+ * `status`, `updated_at` (SET), `pool_id`, role suffix and the fence's `id` + `revision`.
+ * Each candidate id is bound twice: its direct update and current coupled-mirror lookup.
  */
-const ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 5;
+const ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 6;
 const ATOMIC_CANDIDATE_ID_CHUNK_SIZE = Math.max(
   1,
-  D1_MAX_BOUND_PARAMETERS - ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT
+  Math.floor((D1_MAX_BOUND_PARAMETERS - ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT) / 2)
 );
 /**
  * The batch must stay a bounded unit of work (.claude/rules/47). Candidate writes are grouped
@@ -235,7 +236,24 @@ async function publishPoolEditAtomically(
           .where(
             and(
               eq(schema.capacityPoolCandidates.poolId, input.poolId),
-              inArray(schema.capacityPoolCandidates.id, chunk),
+              or(
+                inArray(schema.capacityPoolCandidates.id, chunk),
+                // Include a mirror materialized AFTER the editor read its sibling list.
+                // Match exact native identity; legacy null-typed rows never couple.
+                sql`EXISTS (SELECT 1 FROM capacity_pool_candidates AS primary_member
+                  WHERE primary_member.id IN (${sql.join(
+                    chunk.map((id) => sql`${id}`),
+                    sql`, `
+                  )})
+                    AND primary_member.id || ${capacityCandidateIdForRole('', 'deployment')} = capacity_pool_candidates.id
+                    AND primary_member.pool_id = capacity_pool_candidates.pool_id
+                    AND primary_member.capacity_source_id = capacity_pool_candidates.capacity_source_id
+                    AND primary_member.provider = capacity_pool_candidates.provider
+                    AND primary_member.location = capacity_pool_candidates.location
+                    AND primary_member.provider_instance_type IS NOT NULL
+                    AND primary_member.provider_instance_type = capacity_pool_candidates.provider_instance_type
+                    AND primary_member.provider_instance_sku IS capacity_pool_candidates.provider_instance_sku)`
+              ),
               poolRevisionFence
             )
           )
@@ -263,21 +281,12 @@ async function publishPoolEditAtomically(
       )
   );
 
-  await db.batch(statements as SqliteBatch);
+  const results = await db.batch(statements as SqliteBatch);
 
-  // Read back rather than trusting a driver-specific `changes` shape. Comparing BOTH the
-  // revision and the exact timestamp this edit wrote narrows the ABA window (a concurrent
-  // editor that also advanced guardRevision -> guardRevision + 1) to another isolate writing
-  // in the same millisecond; nextCapacityPoolTimestamp is strictly monotonic within one.
-  const [after] = await db
-    .select({
-      revision: schema.capacityPools.revision,
-      updatedAt: schema.capacityPools.updatedAt,
-    })
-    .from(schema.capacityPools)
-    .where(eq(schema.capacityPools.id, input.poolId))
-    .limit(1);
-  return after?.revision === nextRevision && after.updatedAt === now;
+  // D1 returns each statement's result from the same atomic batch. A later editor
+  // cannot turn a winning edit into a conflict, and same-clock losers cannot claim success.
+  const publication = results.at(-1) as D1Result<unknown>;
+  return publication.meta.changes === 1;
 }
 
 async function resolveCatalogAdditionUpdates(

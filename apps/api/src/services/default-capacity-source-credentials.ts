@@ -1,8 +1,9 @@
 import type { ProviderInstanceOffering } from '@simple-agent-manager/shared';
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log, serializeError } from '../lib/logger';
 import {
   CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
@@ -121,10 +122,18 @@ export async function scrubCapacitySourceCredentialSecrets(
   db: Db,
   options: { batchSize?: number } = {}
 ): Promise<ScrubCapacitySourceCredentialSecretsResult> {
+  // UPDATE reserves three binds for type and empty secret fields.
+  const requested = options.batchSize ?? DEFAULT_CAPACITY_SOURCE_CREDENTIAL_SCRUB_BATCH_SIZE;
   const batchSize = Math.max(
     1,
-    options.batchSize ?? DEFAULT_CAPACITY_SOURCE_CREDENTIAL_SCRUB_BATCH_SIZE
+    Math.min(
+      D1_MAX_BOUND_PARAMETERS - 3,
+      Number.isFinite(requested)
+        ? Math.floor(requested)
+        : DEFAULT_CAPACITY_SOURCE_CREDENTIAL_SCRUB_BATCH_SIZE
+    )
   );
+  const unreferenced = sql`NOT EXISTS (SELECT 1 FROM capacity_sources WHERE credential_id = credentials.id)`;
   const anchors = await db
     .select({
       id: schema.credentials.id,
@@ -132,7 +141,17 @@ export async function scrubCapacitySourceCredentialSecrets(
       iv: schema.credentials.iv,
     })
     .from(schema.credentials)
-    .where(eq(schema.credentials.credentialType, CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE))
+    .where(
+      and(
+        eq(schema.credentials.credentialType, CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE),
+        or(
+          ne(schema.credentials.encryptedToken, ANCHOR_EMPTY_SECRET),
+          ne(schema.credentials.iv, ANCHOR_EMPTY_SECRET),
+          unreferenced
+        )
+      )
+    )
+    .orderBy(asc(schema.credentials.id))
     .limit(batchSize + 1);
   if (anchors.length === 0) {
     return { scrubbedAnchors: 0, deletedUnreferencedAnchors: 0, hasMore: false };
@@ -157,33 +176,22 @@ export async function scrubCapacitySourceCredentialSecrets(
       );
   }
 
-  const referenced = await db
-    .select({ credentialId: schema.capacitySources.credentialId })
-    .from(schema.capacitySources)
+  // Reference exclusion belongs in the DELETE itself: checking it in a prior read
+  // allows a newly attached source to be destroyed by the anchor's cascading FK.
+  const deleted = await db
+    .delete(schema.credentials)
     .where(
       and(
-        isNotNull(schema.capacitySources.credentialId),
-        inArray(schema.capacitySources.credentialId, anchorIds)
+        eq(schema.credentials.credentialType, CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE),
+        inArray(schema.credentials.id, anchorIds),
+        unreferenced
       )
-    );
-  const referencedIds = new Set(
-    referenced.flatMap((row) => (row.credentialId ? [row.credentialId] : []))
-  );
-  const orphans = anchorIds.filter((id) => !referencedIds.has(id));
-  if (orphans.length > 0) {
-    await db
-      .delete(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.credentialType, CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE),
-          inArray(schema.credentials.id, orphans)
-        )
-      );
-  }
+    )
+    .returning({ id: schema.credentials.id });
 
   return {
     scrubbedAnchors: leaking.length,
-    deletedUnreferencedAnchors: orphans.length,
+    deletedUnreferencedAnchors: deleted.length,
     hasMore,
   };
 }
@@ -214,10 +222,7 @@ function catalogCacheKey(seed: CredentialCapacitySeed): string {
   return `${seed.provider}:${seed.credentialSource}:${seed.credentialReference}:${seed.externalSourceRef ?? ''}:${seed.stateFingerprint}`;
 }
 
-function readCachedCatalog(
-  key: string,
-  now: number
-): DefaultCapacityPoolOfferingResolution | null {
+function readCachedCatalog(key: string, now: number): DefaultCapacityPoolOfferingResolution | null {
   const entry = catalogCache.get(key);
   if (!entry) return null;
   if (entry.expiresAt <= now) {
@@ -305,7 +310,11 @@ export async function resolveOfferingsForSeed(
         credentialSource: seed.credentialSource,
         ...serializeError(error),
       });
-      return { offerings: [], refreshSucceeded: false };
+      return {
+        offerings: getStaticProviderCatalogOfferings(seed.provider),
+        refreshSucceeded: false,
+        catalogComplete: false,
+      };
     }
   }
 

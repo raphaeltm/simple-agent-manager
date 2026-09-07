@@ -893,69 +893,73 @@ describe('default capacity pool creation', () => {
 
   // 26 projects x composable credential decryption x 5 reconciliation passes. This fixture is
   // deliberately heavy (it proves the scope batching bound), so it needs more than the 5s default.
-  it('continues credential lifecycle work for more than 25 project attachments through scheduled backfill', { timeout: 60_000 }, async () => {
-    createDb();
-    const encrypted = await encrypt('vultr-token-for-scheduled-backfill', TEST_ENCRYPTION_KEY);
-    const insertProject = sqlite!.prepare(
-      `
+  it(
+    'continues credential lifecycle work for more than 25 project attachments through scheduled backfill',
+    { timeout: 60_000 },
+    async () => {
+      createDb();
+      const encrypted = await encrypt('vultr-token-for-scheduled-backfill', TEST_ENCRYPTION_KEY);
+      const insertProject = sqlite!.prepare(
+        `
         INSERT INTO projects (id, user_id, name, normalized_name, installation_id, repository, created_by)
         VALUES (?, 'user-1', ?, ?, 'installation-1', ?, 'user-1')
       `
-    );
+      );
 
-    for (let index = 1; index <= 26; index += 1) {
-      const projectId = `overflow-project-${String(index).padStart(3, '0')}`;
-      insertProject.run(projectId, `Overflow ${index}`, projectId, `repo-overflow-${index}`);
-      seedComposableCloudCredential({
-        credentialId: `cc-overflow-cred-${String(index).padStart(3, '0')}`,
-        configurationId: `cc-overflow-cfg-${String(index).padStart(3, '0')}`,
-        attachmentId: `cc-overflow-att-${String(index).padStart(3, '0')}`,
-        projectId,
-        provider: 'vultr',
-        encryptedToken: encrypted.ciphertext,
-        iv: encrypted.iv,
-        updatedAt: `2026-08-28T00:${String(index).padStart(2, '0')}:00.000Z`,
-      });
-    }
+      for (let index = 1; index <= 26; index += 1) {
+        const projectId = `overflow-project-${String(index).padStart(3, '0')}`;
+        insertProject.run(projectId, `Overflow ${index}`, projectId, `repo-overflow-${index}`);
+        seedComposableCloudCredential({
+          credentialId: `cc-overflow-cred-${String(index).padStart(3, '0')}`,
+          configurationId: `cc-overflow-cfg-${String(index).padStart(3, '0')}`,
+          attachmentId: `cc-overflow-att-${String(index).padStart(3, '0')}`,
+          projectId,
+          provider: 'vultr',
+          encryptedToken: encrypted.ciphertext,
+          iv: encrypted.iv,
+          updatedAt: `2026-08-28T00:${String(index).padStart(2, '0')}:00.000Z`,
+        });
+      }
 
-    const env = {
-      ...catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
-      CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE: '8',
-    } as Env;
+      const env = {
+        ...catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+        CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE: '8',
+      } as Env;
 
-    await reconcileCapacityPoolsForCredentialMutation(env, { scope: 'user', userId: 'user-1' });
+      await reconcileCapacityPoolsForCredentialMutation(env, { scope: 'user', userId: 'user-1' });
 
-    expect(getCount('capacity_pools', "scope = 'project'")).toBe(25);
-    expect(
-      getCount(
-        'capacity_sources',
-        "owner_project_id = 'overflow-project-026' AND status = 'active'"
-      )
-    ).toBe(0);
+      expect(getCount('capacity_pools', "scope = 'project'")).toBe(25);
+      expect(
+        getCount(
+          'capacity_sources',
+          "owner_project_id = 'overflow-project-026' AND status = 'active'"
+        )
+      ).toBe(0);
 
-    const scheduledResults = [];
-    for (let run = 0; run < 4; run += 1) {
-      scheduledResults.push(await runScheduledCapacityPoolReconciliation(env));
-    }
+      const scheduledResults = [];
+      for (let run = 0; run < 4; run += 1) {
+        scheduledResults.push(await runScheduledCapacityPoolReconciliation(env));
+      }
 
-    expect(scheduledResults.map((result) => result.projectsEnsured)).toEqual([8, 8, 8, 2]);
-    expect(scheduledResults.every((result) => result.projectsEnsured <= 8)).toBe(true);
-    expect(getCount('capacity_pools', "scope = 'project'")).toBe(26);
-    expect(
-      getCount(
-        'capacity_sources',
-        "owner_project_id = 'overflow-project-026' AND status = 'active'"
-      )
-    ).toBe(1);
-    expect(
-      getRows<{ status: string; count: number }>(`
+      expect(scheduledResults.map((result) => result.projectsEnsured)).toEqual([8, 8, 8, 2]);
+      expect(scheduledResults.every((result) => result.projectsEnsured <= 8)).toBe(true);
+      expect(getCount('capacity_pools', "scope = 'project'")).toBe(26);
+      expect(
+        getCount(
+          'capacity_sources',
+          "owner_project_id = 'overflow-project-026' AND status = 'active'"
+        )
+      ).toBe(1);
+      expect(
+        getRows<{ status: string; count: number }>(`
         SELECT status, COUNT(*) AS count
         FROM capacity_sources
         WHERE owner_project_id LIKE 'overflow-project-%'
         GROUP BY status
       `)
-    ).toEqual([{ status: 'active', count: 26 }]);
-  });
+      ).toEqual([{ status: 'active', count: 26 }]);
+    }
+  );
 
   it('keeps project backfill cursor scans bounded by covering indexes', () => {
     createDb();
@@ -1419,7 +1423,7 @@ describe('default capacity pool creation', () => {
     expectCpx62CatalogCandidate(expect.any(String));
   });
 
-  it('reports provider catalog failures without seeding static Hetzner rows', async () => {
+  it('reports provider catalog failures while safely seeding a new source from static metadata', async () => {
     const db = createDb();
     const encrypted = await encrypt('live-hetzner-token', TEST_ENCRYPTION_KEY);
     seedUserCredential({
@@ -1446,7 +1450,7 @@ describe('default capacity pool creation', () => {
     expect(warningPayloads.length).toBeGreaterThan(0);
     expect(warningPayloads[0]).toContain('hetzner catalog API unavailable');
     expect(warningPayloads.join('\n')).not.toContain('live-hetzner-token');
-    expect(result.user?.effectiveState).toBe('configured-empty');
+    expect(result.user?.effectiveState).toBe('configured-ready');
     expect(
       getRows<{ provider_instance_catalog_source: string }>(`
         SELECT provider_instance_catalog_source
@@ -1454,7 +1458,7 @@ describe('default capacity pool creation', () => {
         WHERE provider_instance_type = 'cx23'
         LIMIT 1
       `)[0]
-    ).toBeUndefined();
+    ).toEqual({ provider_instance_catalog_source: 'static' });
   });
 
   it('disables failed-refresh sources with no candidates when the backing credential is disabled', async () => {
@@ -4606,8 +4610,16 @@ describe('capacity pool review findings', () => {
       seedUserCredential({ id: 'user-hetzner' });
       const db = poolDb();
       await ensureUserPool(db, [
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx33', displayName: 'CX33' }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx33',
+          displayName: 'CX33',
+        }),
       ]);
       return db;
     }
@@ -4730,12 +4742,12 @@ describe('capacity pool review findings', () => {
       expect(result.summary).toBeNull();
       // The concurrent editor's intent survives untouched.
       expect(
-        (
-          sqlite?.prepare("SELECT strategy, revision FROM capacity_pools WHERE scope = 'user'").get() as {
-            strategy: string;
-            revision: number;
-          }
-        )
+        sqlite
+          ?.prepare("SELECT strategy, revision FROM capacity_pools WHERE scope = 'user'")
+          .get() as {
+          strategy: string;
+          revision: number;
+        }
       ).toEqual({ strategy: 'pack', revision: revisionBefore + 1 });
       expect(candidateRow(ids[0])?.status).not.toBe('deleted');
     });
@@ -4750,8 +4762,16 @@ describe('capacity pool review findings', () => {
       seedUserCredential({ id: 'user-hetzner' });
       const db = poolDb();
       const offerings = [
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cpx62', displayName: 'CPX62' }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cpx62',
+          displayName: 'CPX62',
+        }),
       ];
       await ensureUserPool(db, offerings);
       const selectedId = workspaceCandidateIds().find((id) => id.includes('cx23'));
@@ -4782,7 +4802,11 @@ describe('capacity pool review findings', () => {
       seedUserCredential({ id: 'user-hetzner' });
       const db = poolDb();
       await ensureUserPool(db, [
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
       ]);
 
       await ensureUserPool(db, [], {
@@ -4805,8 +4829,16 @@ describe('capacity pool review findings', () => {
       seedUserCredential({ id: 'user-hetzner' });
       const db = poolDb();
       const both = [
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx33', displayName: 'CX33' }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx33',
+          displayName: 'CX33',
+        }),
       ];
       await ensureUserPool(db, both);
       const removedId = workspaceCandidateIds().find((id) => id.includes('cx33'))!;
@@ -4869,7 +4901,11 @@ describe('capacity pool review findings', () => {
       seedUserCredential({ id: 'user-hetzner' });
       const db = poolDb();
       const offerings = [
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
       ];
       await ensureUserPool(db, offerings);
       const id = workspaceCandidateIds()[0];
@@ -4912,7 +4948,11 @@ describe('capacity pool review findings', () => {
       });
       const db = poolDb();
       await ensureUserPool(db, [
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
       ]);
 
       const source = getRows<{
@@ -4934,9 +4974,7 @@ describe('capacity pool review findings', () => {
       expect(anchors[0].encrypted_token).toBe('');
       expect(anchors[0].iv).toBe('');
       // The canary never appears anywhere in the legacy credentials table.
-      expect(
-        getCount('credentials', "encrypted_token = 'REAL-CIPHERTEXT-CANARY'")
-      ).toBe(0);
+      expect(getCount('credentials', "encrypted_token = 'REAL-CIPHERTEXT-CANARY'")).toBe(0);
     });
 
     it('scrubs a pre-existing copied secret without cascading the capacity source away', async () => {
@@ -4950,7 +4988,11 @@ describe('capacity pool review findings', () => {
       });
       const db = poolDb();
       await ensureUserPool(db, [
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
       ]);
       const anchorId = getRows<{ id: string }>(
         "SELECT id FROM credentials WHERE credential_type = 'capacity-source-external-ref'"
@@ -4982,7 +5024,11 @@ describe('capacity pool review findings', () => {
       });
       const db = poolDb();
       await ensureUserPool(db, [
-        liveHetznerOffering({ location: 'fsn1', providerInstanceType: 'cx23', displayName: 'CX23' }),
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        }),
       ]);
       const anchorId = getRows<{ id: string }>(
         "SELECT id FROM credentials WHERE credential_type = 'capacity-source-external-ref'"
@@ -5277,12 +5323,16 @@ describe('workload-role eligibility contract', () => {
     });
     expect(summary).not.toBeNull();
 
-    const deployment = buildCapacityPoolSelection(summary!, hetznerTaskStartPlacement(), 'deployment');
+    const deployment = buildCapacityPoolSelection(
+      summary!,
+      hetznerTaskStartPlacement(),
+      'deployment'
+    );
 
     expect(deployment?.candidates.length).toBeGreaterThan(0);
-    expect(deployment?.candidates.every((candidate) => candidate.workloadRole === 'deployment')).toBe(
-      true
-    );
+    expect(
+      deployment?.candidates.every((candidate) => candidate.workloadRole === 'deployment')
+    ).toBe(true);
     expect(deployment?.candidates[0]?.providerInstanceType).toBe('cx23');
   });
 
@@ -5296,7 +5346,11 @@ describe('workload-role eligibility contract', () => {
       workloadRoles: 'all',
     });
 
-    const workspace = buildCapacityPoolSelection(summary!, hetznerTaskStartPlacement(), 'workspace');
+    const workspace = buildCapacityPoolSelection(
+      summary!,
+      hetznerTaskStartPlacement(),
+      'workspace'
+    );
 
     expect(workspace?.candidates.length).toBeGreaterThan(0);
     expect(workspace?.candidates.every((candidate) => candidate.workloadRole === 'workspace')).toBe(
@@ -5308,7 +5362,9 @@ describe('workload-role eligibility contract', () => {
     const db = await seedRoleCapablePool();
     // Remove the coupled deployment rows: a deployment placement must then find NOTHING
     // rather than falling back to a workspace-role candidate.
-    sqlite?.prepare("DELETE FROM capacity_pool_candidates WHERE workload_role = 'deployment'").run();
+    sqlite
+      ?.prepare("DELETE FROM capacity_pool_candidates WHERE workload_role = 'deployment'")
+      .run();
     const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
       userId: 'user-1',
       projectId: null,
@@ -5317,7 +5373,11 @@ describe('workload-role eligibility contract', () => {
       workloadRoles: 'all',
     });
 
-    const deployment = buildCapacityPoolSelection(summary!, hetznerTaskStartPlacement(), 'deployment');
+    const deployment = buildCapacityPoolSelection(
+      summary!,
+      hetznerTaskStartPlacement(),
+      'deployment'
+    );
 
     expect(deployment?.candidates).toEqual([]);
     // Discriminating control: the workspace role still resolves, so "empty" is not just a

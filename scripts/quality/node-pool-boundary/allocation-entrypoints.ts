@@ -1,5 +1,6 @@
 import ts from 'typescript';
 
+import { createBindings } from './bindings';
 import {
   enclosingFunctionName,
   parseSourceFile,
@@ -22,6 +23,7 @@ export const ALLOCATION_ENTRYPOINT_CALLS = [
   'reserveWorkspacePlacement',
   'createWorkspaceOnNode',
   'startComputeTracking',
+  'createVM',
 ] as const;
 
 export type AllocationEntrypointCall = (typeof ALLOCATION_ENTRYPOINT_CALLS)[number];
@@ -49,24 +51,19 @@ export function scanAllocationEntrypoints(
 
 function scanAllocationEntrypointFile(file: SourceFileInput): AllocationEntrypointCallsite[] {
   const sourceFile = parseSourceFile(file);
+  const bindings = createBindings(sourceFile);
   const callsites: AllocationEntrypointCallsite[] = [];
   const seen = new Set<string>();
 
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
-      const name = ts.isIdentifier(callee)
-        ? callee.text
-        : ts.isPropertyAccessExpression(callee)
-          ? callee.name.text
-          : null;
+      const name = bindings.symbolName(callee, ENTRYPOINT_SET);
       if (name && ENTRYPOINT_SET.has(name)) {
         const { line, column } = positionOf(sourceFile, callee);
         const owner = enclosingFunctionName(node);
         const key = `${line}:${column}:${name}`;
-        // A module calling its own exported entrypoint is the definition site,
-        // not a second allocation entrypoint.
-        if (!seen.has(key) && owner !== name) {
+        if (!seen.has(key)) {
           seen.add(key);
           callsites.push({
             filePath: file.filePath,

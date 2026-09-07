@@ -74,7 +74,9 @@ export function capacityPoolSnapshotForPool(
     workloadRole: selection.workloadRole,
     exhaustionPolicy: selection.exhaustionPolicy,
     effectivePoolState: selection.effectiveState,
-    selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
+    selectionSettingsVersion: (
+      selection.selectionSettings ?? DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS
+    ).sourceGeneration,
     capacityAuthorityGeneration: authorityGeneration,
     sourceGeneration: authorityGeneration,
     placementExplanationJson: buildCapacityPlacementExplanation(selection),
@@ -195,7 +197,9 @@ export function capacityPlacementSnapshotForCandidate(
       providerInstancePriceHourlyMicros: candidate.providerInstancePriceHourlyMicros,
       exhaustionPolicy: selection.exhaustionPolicy,
       effectivePoolState: selection.effectiveState,
-      selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
+      selectionSettingsVersion: (
+        selection.selectionSettings ?? DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS
+      ).sourceGeneration,
       capacityAuthorityGeneration: authorityGeneration,
       sourceGeneration: authorityGeneration,
       placementExplanationJson: buildCapacityPlacementExplanation(selection, candidate),
@@ -307,10 +311,12 @@ function normalizeCapacityCandidate(
 
   const capacityPoolProjectId =
     pool.scope === 'project' ? (pool.ownerProjectId ?? placement.projectId) : null;
-  const capacitySourceGeneration = timestampVersion(source.updatedAt ?? source.createdAt);
   const sourceAuthorityGeneration = normalizeCapacityAuthorityGeneration(
     source.authorityGeneration
   );
+  // Refresh epochs fence catalog writers; only semantic authority changes invalidate placement.
+  const capacitySourceGeneration =
+    sourceAuthorityGeneration || timestampVersion(source.updatedAt ?? source.createdAt);
   const candidateAuthorityGeneration = normalizeCapacityAuthorityGeneration(
     candidate.authorityGeneration
   );
@@ -779,7 +785,8 @@ function selectionCapacityAuthorityGeneration(
   return capacityPlacementAuthorityGeneration({
     poolRevision: selection.revision,
     selectionSettingsGeneration:
-      selection.selectionSettings.sourceGeneration ?? selection.selectionSettings.version,
+      (selection.selectionSettings ?? DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS).sourceGeneration ??
+      (selection.selectionSettings ?? DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS).version,
     sourceAuthorityGeneration: candidate?.sourceAuthorityGeneration ?? 0,
     candidateAuthorityGeneration: candidate?.candidateAuthorityGeneration ?? 0,
   });
@@ -906,7 +913,9 @@ function buildCapacityPlacementExplanation(
     providerInstancePriceHourlyMicros: candidate?.providerInstancePriceHourlyMicros ?? null,
     exhaustionPolicy: selection.exhaustionPolicy,
     effectivePoolState: selection.effectiveState,
-    selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
+    selectionSettingsVersion: (
+      selection.selectionSettings ?? DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS
+    ).sourceGeneration,
     sourceAuthorityGeneration: candidate?.sourceAuthorityGeneration ?? null,
     candidateAuthorityGeneration: candidate?.candidateAuthorityGeneration ?? null,
     capacityAuthorityGeneration: authorityGeneration,

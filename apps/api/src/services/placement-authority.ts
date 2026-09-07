@@ -8,6 +8,7 @@ import {
   type ProjectCapability,
   projectMemberRolesWithCapability,
 } from '../middleware/project-auth';
+import { capacityCandidateSatisfiesWorkloadRole } from './capacity-pool-workload-roles';
 import {
   buildAnyDefaultCapacityPoolExclusionSql,
   buildHigherPrecedenceDefaultCapacityPoolExclusionSql,
@@ -227,7 +228,8 @@ export function buildPlacementAuthoritySqlPredicate(
         AND s.credential_source = ${nodeAlias}.placement_credential_source
         AND s.credential_reference = ${nodeAlias}.placement_credential_reference
         AND s.credential_version = ${nodeAlias}.placement_credential_version
-        AND ${sqliteTimestampVersion('s.updated_at')} = ${nodeAlias}.capacity_source_generation
+        AND (CASE WHEN s.authority_generation > 0 THEN s.authority_generation
+             ELSE ${sqliteTimestampVersion('s.updated_at')} END) = ${nodeAlias}.capacity_source_generation
         AND s.external_source_ref IS ${nodeAlias}.capacity_source_external_ref
         ${sourceScope.sql}
         AND c.status = 'active'
@@ -261,10 +263,7 @@ export function capacityCandidateWorkloadRoleEligible(
   candidateRole: string | null | undefined,
   requestedRole: CapacityWorkloadRole
 ): boolean {
-  if (requestedRole === 'deployment') {
-    return candidateRole === 'deployment' || candidateRole === 'workspace';
-  }
-  return candidateRole === 'workspace';
+  return capacityCandidateSatisfiesWorkloadRole(candidateRole, requestedRole);
 }
 
 export function capacityCandidateWorkloadRoleSql(
@@ -275,7 +274,7 @@ export function capacityCandidateWorkloadRoleSql(
     throw new Error(`Unsafe capacity candidate role SQL column: ${candidateColumnSql}`);
   }
   return requestedRole === 'deployment'
-    ? `${candidateColumnSql} IN ('deployment', 'workspace')`
+    ? `${candidateColumnSql} = 'deployment'`
     : `${candidateColumnSql} = 'workspace'`;
 }
 

@@ -226,6 +226,28 @@ describe('node allocation plan guard', () => {
     ).rejects.toThrow('Node allocation plan is no longer current');
   });
 
+  it('keeps semantic source authority stable across a catalog refresh', async () => {
+    const env = makeEnv();
+    seedCurrentPlan();
+    sqlite?.exec(`
+      UPDATE capacity_sources SET authority_generation = 101 WHERE id = 'source-1';
+      UPDATE nodes SET capacity_source_generation = 101 WHERE id = 'node-1';
+    `);
+    await expect(
+      assertNodeAllocationPlanCurrent(env, 'node-1', 'user-1', 'project-1')
+    ).resolves.toBeUndefined();
+    sqlite?.exec(
+      "UPDATE capacity_sources SET updated_at = '2030-01-01T00:00:00.000Z' WHERE id = 'source-1'"
+    );
+    await expect(
+      assertNodeAllocationPlanCurrent(env, 'node-1', 'user-1', 'project-1')
+    ).resolves.toBeUndefined();
+    sqlite?.exec("UPDATE capacity_sources SET authority_generation = 102 WHERE id = 'source-1'");
+    await expect(
+      assertNodeAllocationPlanCurrent(env, 'node-1', 'user-1', 'project-1')
+    ).rejects.toThrow('Node allocation plan is no longer current');
+  });
+
   it('rejects when current semantic capacity authority no longer matches the planned snapshot', async () => {
     const env = makeEnv();
     seedCurrentPlan();
@@ -247,7 +269,7 @@ describe('node allocation plan guard', () => {
       ?.prepare(
         `
         UPDATE nodes
-        SET selection_settings_version = ?, capacity_authority_generation = ?
+        SET capacity_source_generation = 101, selection_settings_version = ?, capacity_authority_generation = ?
         WHERE id = 'node-1'
       `
       )

@@ -187,14 +187,6 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     requiredEvidence: [{ kind: 'property', name: 'runtime', value: 'cf-container' }],
   },
   {
-    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
-    table: 'workspaces',
-    owner: 'handleWorkspaceCreation',
-    role: 'trial runtime workspace adapter',
-    canonicalService: 'explicit trial runtime adapter',
-    requiredEvidence: [{ kind: 'call', name: 'createWorkspaceOnNode' }],
-  },
-  {
     filePath: 'apps/api/src/services/workspace-placement.ts',
     table: 'workspaces',
     owner: 'reserveWorkspacePlacement',
@@ -220,7 +212,41 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
 
 export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInventoryEntry[] = [
   {
-    filePath: 'apps/api/src/durable-objects/task-runner/node-steps.ts',
+    filePath: 'apps/api/src/services/nodes.ts',
+    owner: 'provisionNode',
+    entrypoint: 'createVM',
+    scope: 'service',
+    role: 'workspace',
+    admission:
+      'canonical paid VM boundary validates current node allocation authority and applies the persisted native plan before provider allocation',
+    status: 'canonical',
+    requiredEvidence: [
+      { kind: 'call', name: 'assertNodeAllocationPlanCurrent' },
+      { kind: 'call', name: 'applyNativePlanToVmConfig' },
+    ],
+  },
+  {
+    filePath: 'apps/api/src/routes/workspaces/crud.ts',
+    owner: 'post /',
+    entrypoint: 'reserveWorkspacePlacement',
+    scope: 'route',
+    role: 'workspace',
+    admission:
+      'direct workspace route delegates its final atomic reservation to the canonical capacity and authority boundary',
+    status: 'canonical',
+  },
+  {
+    filePath: 'apps/api/src/durable-objects/trial-orchestrator/steps.ts',
+    owner: 'handleWorkspaceCreation',
+    entrypoint: 'reserveWorkspacePlacement',
+    scope: 'trial-orchestrator',
+    role: 'trial',
+    admission:
+      'trial workspace creation delegates its final atomic reservation to the canonical capacity and authority boundary',
+    status: 'canonical',
+  },
+  {
+    filePath: 'apps/api/src/durable-objects/task-runner/node-provisioning-step.ts',
     owner: 'handleNodeProvisioning',
     entrypoint: 'createNodeRecord',
     scope: 'task-runner',
@@ -234,7 +260,7 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     ],
   },
   {
-    filePath: 'apps/api/src/durable-objects/task-runner/node-steps.ts',
+    filePath: 'apps/api/src/durable-objects/task-runner/node-provisioning-step.ts',
     owner: 'handleNodeProvisioning',
     entrypoint: 'provisionNode',
     scope: 'task-runner',
@@ -277,8 +303,9 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     scope: 'route',
     role: 'workspace',
     admission:
-      'cloud credential resolution + monthly compute quota only; writes a null capacity snapshot, so no pool membership, revision or aggregate admission is checked',
-    status: 'unreviewed-bypass',
+      'canonical VM allocation plan selects current pool/source/credential authority; node creation persists its snapshot for paid-boundary revalidation',
+    status: 'role-adapter',
+    requiredEvidence: [{ kind: 'call', name: 'resolveCanonicalVmAllocationPlan' }],
   },
   {
     filePath: 'apps/api/src/routes/nodes.ts',
@@ -286,8 +313,10 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     entrypoint: 'provisionNode',
     scope: 'route',
     role: 'workspace',
-    admission: 'paid provisioning of the unpooled node created above; no admission lease',
-    status: 'unreviewed-bypass',
+    admission:
+      'provisionNode revalidates the persisted canonical allocation plan at the paid provider boundary; the route does not hold a provisioning lease',
+    status: 'role-adapter',
+    requiredEvidence: [{ kind: 'call', name: 'resolveCanonicalVmAllocationPlan' }],
   },
   {
     filePath: 'apps/api/src/routes/workspaces/crud.ts',
@@ -296,8 +325,12 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     scope: 'route',
     role: 'workspace',
     admission:
-      'per-user node count cap + credential resolution; explicit-node reuse revalidates the allocation plan, but the provisioning branch takes no capacity-pool selection or admission lease',
-    status: 'unreviewed-bypass',
+      'fresh node uses the canonical VM allocation plan, and workspace creation passes through the final atomic reservation',
+    status: 'role-adapter',
+    requiredEvidence: [
+      { kind: 'call', name: 'resolveCanonicalVmAllocationPlan' },
+      { kind: 'call', name: 'reserveWorkspacePlacement' },
+    ],
   },
   {
     filePath: 'apps/api/src/routes/workspaces/crud.ts',
@@ -305,8 +338,10 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     entrypoint: 'provisionNode',
     scope: 'route',
     role: 'workspace',
-    admission: 'paid provisioning of the node created above; no admission lease',
-    status: 'unreviewed-bypass',
+    admission:
+      'provisionNode revalidates the persisted canonical allocation plan for the node whose workspace was atomically reserved',
+    status: 'role-adapter',
+    requiredEvidence: [{ kind: 'call', name: 'reserveWorkspacePlacement' }],
   },
   {
     filePath: 'apps/api/src/routes/workspaces/crud.ts',
@@ -363,8 +398,9 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     scope: 'service',
     role: 'recovery-relay',
     admission:
-      'credential resolution + monthly compute quota only; copies the source node capacity snapshot without revalidating pool revision, membership or aggregate capacity',
-    status: 'unreviewed-bypass',
+      'relay uses a fresh canonical VM allocation plan and persists its current pool/source/credential snapshot; it does not copy source-node authority',
+    status: 'role-adapter',
+    requiredEvidence: [{ kind: 'call', name: 'resolveCanonicalVmAllocationPlan', scope: 'module' }],
   },
   {
     filePath: 'apps/api/src/services/session-snapshot-upload-relay.ts',
@@ -372,8 +408,10 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     entrypoint: 'provisionNode',
     scope: 'service',
     role: 'recovery-relay',
-    admission: 'paid provisioning of the relay node created above; no admission lease',
-    status: 'unreviewed-bypass',
+    admission:
+      'paid provisioning checks the canonical node plan and caller-supplied source/session relay authority, with scoped compensation after a fresh allocation fails',
+    status: 'role-adapter',
+    requiredEvidence: [{ kind: 'call', name: 'assertRelayProvisioningAuthority' }],
   },
   {
     filePath: 'apps/api/src/services/instant-session.ts',

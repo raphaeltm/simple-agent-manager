@@ -104,7 +104,10 @@ export async function listProviderCatalogOfferings(
     // static offerings, which are the same shape and are what preferApi:false
     // returns. Only a failure of BOTH is fatal.
     try {
-      return await provider.listInstanceOfferings({ preferApi: false });
+      return {
+        offerings: await provider.listInstanceOfferings({ preferApi: false }),
+        refreshStatus: { succeeded: false, origin: 'static', complete: false },
+      };
     } catch (staticError) {
       log.warn('catalog.static_offerings_failed', {
         provider: providerName,

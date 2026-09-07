@@ -62,7 +62,7 @@ afterEach(() => {
 });
 
 describe('default capacity pool route real provider fallback contract', () => {
-  it('does not resurrect static Hetzner candidates when server_types refresh fails', async () => {
+  it('seeds a new source on outage but does not resurrect removed candidates on another failed refresh', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');
     const encrypted = await encrypt('live-hetzner-token-canary', TEST_ENCRYPTION_KEY);
@@ -95,33 +95,28 @@ describe('default capacity pool route real provider fallback contract', () => {
     const text = await res.text();
     expect(text).not.toContain('live-hetzner-token-canary');
     const body = JSON.parse(text);
-    expect(body.effectiveSummary).toEqual({
-      scope: 'user',
-      state: 'configured-empty',
-      strategy: 'balanced',
-      exhaustionPolicy: 'queue',
-      availableCandidateCount: 0,
-      reason: 'configured-default-pool-has-no-active-candidates',
-    });
-    expect(body.effective.candidates).toEqual([]);
+    expect(body.effectiveSummary).toMatchObject({ scope: 'user', state: 'configured-ready' });
+    const seeded = sqlite.prepare('SELECT count(*) count FROM capacity_pool_candidates').get() as {
+      count: number;
+    };
+    expect(seeded.count).toBeGreaterThan(0);
+    sqlite.exec("UPDATE capacity_pool_candidates SET status='deleted'");
+    const retry = await createApp().request(
+      '/api/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(retry.status).toBe(200);
+    const retried = (await retry.json()) as { effectiveSummary: { state: string } };
+    expect(retried.effectiveSummary.state).toBe('configured-empty');
     expect(
       sqlite
-        .prepare(
-          `SELECT COUNT(*) AS count
-           FROM capacity_pool_candidates
-           WHERE provider_instance_type = 'cx23'`
-        )
+        .prepare("SELECT count(*) count FROM capacity_pool_candidates WHERE status <> 'deleted'")
         .get()
     ).toEqual({ count: 0 });
-    expect(
-      sqlite
-        .prepare(
-          `SELECT status, source_generation
-           FROM capacity_sources
-           WHERE credential_id = 'hetzner-api-failure'`
-        )
-        .get()
-    ).toEqual({ status: 'active', source_generation: 1 });
+    expect(sqlite.prepare('SELECT count(*) count FROM capacity_pool_candidates').get()).toEqual(
+      seeded
+    );
     expect(warnSpy.mock.calls.map(([payload]) => String(payload)).join('\n')).toContain(
       'hetzner catalog API unavailable'
     );

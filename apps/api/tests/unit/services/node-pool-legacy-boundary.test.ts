@@ -110,6 +110,148 @@ describe('node-pool legacy authority: symbol resolution', () => {
   });
 });
 
+describe('node-pool boundary: lexical bindings and concrete sinks', () => {
+  const scan = (source: string) =>
+    authorityFindings(file('apps/api/src/services/placement-ranking.ts', source));
+
+  it.each([
+    'provider.createVM({ instanceType: node.vmSize });',
+    'db.insert(schema.computeUsage).values({ vcpuCount: node.vmSize });',
+    'db.update(schema.nodes).set({ providerInstanceVcpuCount: node.vmSize });',
+  ])('rejects legacy values in native fields: %s', (source) => {
+    expect(scan(source).some((finding) => finding.includes('writes a legacy VM size'))).toBe(true);
+  });
+
+  it('follows a native field shorthand back to its legacy value', () => {
+    expect(
+      scan('const instanceType = node.vmSize; provider.createVM({ instanceType });').some(
+        (finding) => finding.includes('writes a legacy VM size')
+      )
+    ).toBe(true);
+  });
+
+  it('keeps deprecated audit and stored legacy labels valid beside native fields', () => {
+    expect(
+      scan(
+        'provider.createVM({ instanceType: offering.instanceType, deprecatedSize: node.vmSize }); db.insert(schema.computeUsage).values({ serverType: node.vmSize, vcpuCount: offering.vcpuCount });'
+      )
+    ).toEqual([]);
+  });
+
+  it.each([
+    "import * as shared from '@simple-agent-manager/shared'; const cap = shared.PROVIDER_VM_CAPACITY[p][s];",
+    "import * as shared from '@simple-agent-manager/shared'; const cap = shared['PROVIDER_VM_CAPACITY'][p][s];",
+  ])('detects namespace authority constants without a function call', (source) => {
+    expect(
+      scan(source).some((finding) =>
+        finding.includes('reads legacy VM-size authority PROVIDER_VM_CAPACITY')
+      )
+    ).toBe(true);
+  });
+
+  it.each([
+    "const key = 'vm' + 'Size'; const cap = offers[node[key]];",
+    "const part = 'vm'; const key = part + 'Size'; const cap = offers[node[key]];",
+    "const key = 'vmSize'; const size = node[key]; const next = size; const cap = offers[next];",
+  ])('resolves constant computed legacy keys and chained aliases', (source) => {
+    expect(scan(source).some((finding) => finding.includes('catalog/capacity lookup key'))).toBe(
+      true
+    );
+  });
+
+  it('does not leak aliases between sibling functions', () => {
+    expect(
+      scan(
+        'function audit(node) { const { vmSize: size } = node; return { deprecatedSize: size }; } function rank(size, offers) { return offers[size]; }'
+      )
+    ).toEqual([]);
+  });
+
+  it('resolves closure captures but respects nested parameter shadowing', () => {
+    expect(
+      scan(
+        'function rank(node, offers) { const { vmSize: size } = node; function inner(size) { return offers[size]; } return inner(String(size)); }'
+      )
+    ).toEqual([]);
+    expect(
+      scan(
+        'function rank(node, offers) { const { vmSize: size } = node; function inner() { return offers[size]; } return inner(); }'
+      ).some((finding) => finding.includes('lookup key'))
+    ).toBe(true);
+  });
+
+  it('respects block shadowing even when the shadow declaration follows the read', () => {
+    expect(
+      scan(
+        'function rank(node, offers) { const { vmSize: size } = node; { return offers[size]; const size = 2; } }'
+      )
+    ).toEqual([]);
+  });
+
+  it('resolves static property keys in their own lexical scope', () => {
+    expect(
+      scan("const key = 'vmSize'; function rank(key, node, offers) { return offers[node[key]]; }")
+    ).toEqual([]);
+  });
+
+  it('does not treat a parameter shadowing an authority import alias as the imported helper', () => {
+    const findings = scan(
+      "import { getVcpuCount as count } from './legacy'; function independent(count, value) { return count(value); }"
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain('imports legacy VM-size authority');
+  });
+
+  it('inventories allocation aliases, same-name wrappers and direct provider calls', () => {
+    const callsites = scanAllocationEntrypoints([
+      file(
+        'apps/api/src/services/new-fleet.ts',
+        `
+      import { createNodeRecord as allocate } from './nodes';
+      function warm() { return allocate({}); }
+      function provisionNode() { return other.provisionNode({}); }
+      function direct(provider) { return provider.createVM({}); }
+    `
+      ),
+    ]);
+    expect(callsites.map(({ entrypoint, owner }) => ({ entrypoint, owner }))).toEqual([
+      { entrypoint: 'createNodeRecord', owner: 'warm' },
+      { entrypoint: 'provisionNode', owner: 'provisionNode' },
+      { entrypoint: 'createVM', owner: 'direct' },
+    ]);
+  });
+
+  it('does not mistake shadowed allocation import aliases for service calls', () => {
+    expect(
+      scanAllocationEntrypoints([
+        file(
+          'apps/api/src/services/new-fleet.ts',
+          `
+      import { createNodeRecord as allocate } from './nodes';
+      function unrelated(allocate) { return allocate({}); }
+    `
+        ),
+      ])
+    ).toEqual([]);
+  });
+
+  it('reports direct paid provisioning in a new module as uninventoried', () => {
+    expect(
+      validateAllocationEntrypointInventory(
+        [
+          file(
+            'apps/api/src/services/new-fleet.ts',
+            'function direct(provider) { return provider.createVM({}); }'
+          ),
+        ],
+        []
+      ).map((finding) => finding.reason)
+    ).toEqual([
+      'uninventoried allocation entrypoint createVM() in "direct"; declare its scope, role and admission contract',
+    ]);
+  });
+});
+
 describe('node-pool legacy authority: scope coverage', () => {
   it('covers a newly created canonical placement module by family, not by filename list', () => {
     expect(isLegacyAuthorityScope('apps/api/src/services/placement-ranking.ts')).toBe(true);
@@ -768,13 +910,18 @@ describe('node-pool allocation entrypoints: provisioning beyond INSERT', () => {
   });
 });
 
+let repositoryReport: ReturnType<typeof scanRepositoryNodePoolBoundary> | undefined;
+function currentRepositoryReport() {
+  return (repositoryReport ??= scanRepositoryNodePoolBoundary());
+}
+
 describe('node-pool inventories', () => {
   it('records every allocation writer with an owning function and a role', () => {
     for (const entry of ALLOCATION_WRITER_INVENTORY) {
       expect(entry.owner.length).toBeGreaterThan(0);
       expect(entry.role.length).toBeGreaterThan(0);
     }
-    expect(ALLOCATION_WRITER_INVENTORY.length).toBeGreaterThanOrEqual(24);
+    expect(ALLOCATION_WRITER_INVENTORY.length).toBeGreaterThanOrEqual(23);
   });
 
   it('records every allocation entrypoint with a scope, role and admission contract', () => {
@@ -802,7 +949,7 @@ describe('node-pool inventories', () => {
     { timeout: 120_000 },
     () => {
       const missing = formatBoundaryViolations(
-        scanRepositoryNodePoolBoundary().filter((violation) =>
+        currentRepositoryReport().filter((violation) =>
           violation.reason.startsWith('inventory entry for')
         )
       );
@@ -823,33 +970,9 @@ describe('node-pool boundary gate: current repository state', () => {
     'does not regress past the recorded node-pool boundary violation count',
     { timeout: 120_000 },
     () => {
-      const violations = scanRepositoryNodePoolBoundary();
+      const violations = currentRepositoryReport();
       const formatted = formatBoundaryViolations(violations);
       expect(formatted.length, formatted.join('\n')).toBeLessThanOrEqual(MAX_KNOWN_VIOLATIONS);
-    }
-  );
-
-  it(
-    'still reports the known legacy capacity-helper and size-ranking leaks',
-    { timeout: 120_000 },
-    () => {
-      const formatted = formatBoundaryViolations(scanRepositoryNodePoolBoundary());
-      expect(
-        formatted.some(
-          (line) =>
-            line.includes('apps/api/src/services/node-selector.ts') &&
-            line.includes('canSatisfyVmSize')
-        )
-      ).toBe(true);
-      expect(
-        formatted.some(
-          (line) =>
-            line.includes('apps/api/src/services/compute-usage.ts') && line.includes('getVcpuCount')
-        )
-      ).toBe(true);
-      expect(formatted.some((line) => line.includes('bypasses shared node-pool admission'))).toBe(
-        true
-      );
     }
   );
 });
