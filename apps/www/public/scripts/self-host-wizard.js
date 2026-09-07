@@ -262,6 +262,52 @@
     if (el) el.textContent = value;
   }
 
+  // --- GitHub App setup link ---
+  function generateAppLink() {
+    var domain = getDomain();
+    if (!isValidDomain(domain)) {
+      goTo(STEP_IDS.indexOf('domain'));
+      flash(fieldEl('sh-domain'));
+      return;
+    }
+    if (!state.webhookSecret) {
+      state.webhookSecret = generateWebhookSecret();
+    }
+    var appName = getField('sh-app-name') || 'SAM';
+    var org = state.accountType === 'org' ? getField('sh-org') : '';
+    var url = buildGitHubAppUrl(domain, appName, org);
+
+    var link = document.getElementById('sh-app-link');
+    if (link) link.href = safeHttpsUrl([url]) || '#';
+
+    var secretEl = document.getElementById('sh-webhook-secret');
+    if (secretEl) secretEl.textContent = state.webhookSecret;
+
+    var preview = document.getElementById('sh-app-preview');
+    if (preview) {
+      preview.replaceChildren();
+      addPreviewRow(preview, 'Name', appName);
+      addPreviewRow(preview, 'Homepage URL', 'https://app.' + domain);
+      addPreviewRow(preview, 'Callback URL', 'https://api.' + domain + '/api/auth/callback/github');
+      addPreviewRow(preview, 'Setup URL', 'https://api.' + domain + '/api/github/callback');
+      addPreviewRow(preview, 'Redirect on update', 'Enabled');
+      addPreviewRow(preview, 'Webhook URL', 'https://api.' + domain + '/api/github/webhook');
+      addPreviewRow(
+        preview,
+        'Permissions',
+        'Contents: write · Metadata: read · Emails: read · Issues: read · Pull requests: read · Checks: read · Actions: read'
+      );
+      addPreviewRow(
+        preview,
+        'Events',
+        'check_run, check_suite, issues, issue_comment, pull_request, pull_request_review, pull_request_review_comment, push, repository, workflow_run'
+      );
+    }
+
+    var result = document.getElementById('sh-app-result');
+    if (result) result.hidden = false;
+  }
+
   // --- Passphrase ---
   function ensurePassphrase() {
     if (!state.passphrase) {
