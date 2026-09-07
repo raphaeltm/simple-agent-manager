@@ -58,12 +58,20 @@ const READ_CANDIDATE_STATUS_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 1;
 const READ_SOURCE_CHUNK_SIZE = D1_MAX_BOUND_PARAMETERS - 3;
 
 /**
- * Statements per candidate row in the atomic edit batch. D1 caps a BATCH at the same
- * bound-parameter budget per statement, not per batch, but the batch itself must stay a
- * bounded unit of work (.claude/rules/47), so a very large edit is rejected rather than
- * silently split into non-atomic pieces.
+ * Binds consumed by an atomic candidate UPDATE before its `id IN (...)` list:
+ * `status`, `updated_at` (SET) plus `pool_id` and the fence's `id` + `revision`.
  */
-const MAX_ATOMIC_CANDIDATE_STATEMENTS = 200;
+const ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT = 5;
+const ATOMIC_CANDIDATE_ID_CHUNK_SIZE = Math.max(
+  1,
+  D1_MAX_BOUND_PARAMETERS - ATOMIC_CANDIDATE_UPDATE_FIXED_BIND_COUNT
+);
+/**
+ * The batch must stay a bounded unit of work (.claude/rules/47). Candidate writes are grouped
+ * by target status and chunked under the bind ceiling, so this caps a genuinely enormous edit
+ * rather than silently splitting it into non-atomic pieces.
+ */
+const MAX_ATOMIC_BATCH_STATEMENTS = 64;
 
 interface CandidateIdentityRow {
   id: string;
@@ -162,12 +170,6 @@ export async function updateDefaultCapacityPool(
     });
   }
 
-  if (candidateResult.changedUpdates.length > MAX_ATOMIC_CANDIDATE_STATEMENTS) {
-    throw new Error(
-      `Capacity pool edit exceeds the atomic batch budget (${candidateResult.changedUpdates.length} > ${MAX_ATOMIC_CANDIDATE_STATEMENTS} candidate rows)`
-    );
-  }
-
   const published = await publishPoolEditAtomically(db, {
     poolId: pool.id,
     guardRevision: pool.revision,
@@ -179,7 +181,11 @@ export async function updateDefaultCapacityPool(
   }
 
   if (candidatesChanged) {
-    await reconcileDefaultPoolStatus(db, pool.id);
+    // The atomic edit already published this change's revision bump; reconciliation records
+    // the resulting configuration state and selection digest without a second bump.
+    await reconcileDefaultPoolStatus(db, pool.id, undefined, {
+      selectionRevisionAlreadyBumped: true,
+    });
   }
 
   return emptyUpdateResult({
@@ -211,18 +217,36 @@ async function publishPoolEditAtomically(
     WHERE id = ${input.poolId} AND revision = ${input.guardRevision}
   )`;
 
-  const statements: BatchItem<'sqlite'>[] = input.candidateUpdates.map((candidate) =>
-    db
-      .update(schema.capacityPoolCandidates)
-      .set({ status: candidate.status, updatedAt: now })
-      .where(
-        and(
-          eq(schema.capacityPoolCandidates.poolId, input.poolId),
-          eq(schema.capacityPoolCandidates.id, candidate.id),
-          poolRevisionFence
-        )
-      )
-  );
+  // One statement per (target status, bind-safe id chunk) rather than one per row: a
+  // "select every offering" edit is a few statements, not hundreds.
+  const idsByStatus = new Map<CapacityPoolStatus, string[]>();
+  for (const candidate of input.candidateUpdates) {
+    idsByStatus.set(candidate.status, [...(idsByStatus.get(candidate.status) ?? []), candidate.id]);
+  }
+
+  const statements: BatchItem<'sqlite'>[] = [];
+  for (const [status, ids] of idsByStatus) {
+    for (let offset = 0; offset < ids.length; offset += ATOMIC_CANDIDATE_ID_CHUNK_SIZE) {
+      const chunk = ids.slice(offset, offset + ATOMIC_CANDIDATE_ID_CHUNK_SIZE);
+      statements.push(
+        db
+          .update(schema.capacityPoolCandidates)
+          .set({ status, updatedAt: now })
+          .where(
+            and(
+              eq(schema.capacityPoolCandidates.poolId, input.poolId),
+              inArray(schema.capacityPoolCandidates.id, chunk),
+              poolRevisionFence
+            )
+          )
+      );
+    }
+  }
+  if (statements.length + 1 > MAX_ATOMIC_BATCH_STATEMENTS) {
+    throw new Error(
+      `Capacity pool edit exceeds the atomic batch budget (${statements.length + 1} > ${MAX_ATOMIC_BATCH_STATEMENTS} statements)`
+    );
+  }
   statements.push(
     db
       .update(schema.capacityPools)

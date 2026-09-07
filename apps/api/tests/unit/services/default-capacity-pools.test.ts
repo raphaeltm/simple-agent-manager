@@ -196,7 +196,17 @@ function createDb() {
   `);
   seedIdentity();
   applyCapacityPoolSchemaMigrations(sqlite);
-  return drizzle(sqlite, { schema });
+  return poolDb();
+}
+
+/**
+ * Production always drives these services through the D1 driver, so the fixture must too:
+ * the better-sqlite3 driver has no `batch()`, and an atomic pool edit is exactly the thing a
+ * substituting harness cannot observe (.claude/rules/69). The bind limit is enforced at the
+ * same 100-parameter ceiling Cloudflare applies.
+ */
+function poolDb() {
+  return drizzleD1(createSqliteD1WithBindLimit(sqlite!, 100), { schema });
 }
 
 function seedIdentity(): void {
@@ -412,6 +422,18 @@ function getCandidateStatusRows(providerInstanceTypes: string[]): CandidateStatu
     SELECT location, machine_size, provider_instance_type, status
     FROM capacity_pool_candidates
     WHERE provider_instance_type IN (${providerInstanceTypes.map((type) => `'${type}'`).join(', ')})
+      AND workload_role = 'workspace'
+    ORDER BY provider_instance_type, location
+  `);
+}
+
+/** Rows for the placement-only coupled role that mirrors each editor-visible candidate. */
+function getDeploymentCandidateStatusRows(providerInstanceTypes: string[]): CandidateStatusRow[] {
+  return getRows<CandidateStatusRow>(`
+    SELECT location, machine_size, provider_instance_type, status
+    FROM capacity_pool_candidates
+    WHERE provider_instance_type IN (${providerInstanceTypes.map((type) => `'${type}'`).join(', ')})
+      AND workload_role = 'deployment'
     ORDER BY provider_instance_type, location
   `);
 }
@@ -756,7 +778,14 @@ describe('default capacity pool creation', () => {
 
     expect(getCount('capacity_pools')).toBe(3);
     expect(getCount('capacity_sources')).toBe(3);
-    expect(getCount('capacity_pool_candidates')).toBe(expectedCandidateCount('hetzner') * 3);
+    expect(getCount('capacity_pool_candidates', "workload_role = 'workspace'")).toBe(
+      expectedCandidateCount('hetzner') * 3
+    );
+    // Every editor-visible offering is coupled to a placement-only deployment row, so
+    // deployment provisioning has an eligible candidate without any public role editing.
+    expect(getCount('capacity_pool_candidates', "workload_role = 'deployment'")).toBe(
+      expectedCandidateCount('hetzner') * 3
+    );
     expect(
       getRows<{
         scope: string;
@@ -1048,6 +1077,7 @@ describe('default capacity pool creation', () => {
           provider_instance_catalog_last_seen_at,
           candidate_order
         FROM capacity_pool_candidates
+        WHERE workload_role = 'workspace'
         ORDER BY candidate_order
         LIMIT 3
       `)
@@ -1197,7 +1227,9 @@ describe('default capacity pool creation', () => {
     });
 
     expect(result.user?.activeCandidateCount).toBe(3);
-    expect(getCount('capacity_pool_candidates')).toBe(liveOfferings.length);
+    expect(getCount('capacity_pool_candidates', "workload_role = 'workspace'")).toBe(
+      liveOfferings.length
+    );
     expect(getCandidateStatusRows(['cx23', 'cx33', 'cx43', 'cpx62', 'ccx63'])).toEqual([
       {
         location: 'hel1',
@@ -1291,6 +1323,7 @@ describe('default capacity pool creation', () => {
         FROM capacity_pools pool
         JOIN capacity_pool_candidates cand ON cand.pool_id = pool.id
         WHERE cand.provider_instance_type IN ('cx23', 'cpx62')
+          AND cand.workload_role = 'workspace'
         GROUP BY pool.scope, cand.provider_instance_type, cand.status
         ORDER BY pool.scope, cand.provider_instance_type, cand.status
       `)
@@ -1509,6 +1542,7 @@ describe('default capacity pool creation', () => {
                provider_instance_catalog_source
         FROM capacity_pool_candidates
         WHERE provider_instance_type IN ('cx23', 'cx33')
+          AND workload_role = 'workspace'
         ORDER BY provider_instance_type
       `)
     ).toEqual([
@@ -1710,11 +1744,13 @@ describe('default capacity pool creation', () => {
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
+      candidatePublishBatchSize: 1000,
       offeringResolver: async () => initialOfferings,
     });
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
+      candidatePublishBatchSize: 1000,
       offeringResolver: async () => updatedOfferings,
     });
 
@@ -1722,6 +1758,7 @@ describe('default capacity pool creation', () => {
       getRows<{ status: string; count: number }>(`
         SELECT status, COUNT(*) AS count
         FROM capacity_pool_candidates
+        WHERE workload_role = 'workspace'
         GROUP BY status
         ORDER BY status
       `)
@@ -1730,6 +1767,7 @@ describe('default capacity pool creation', () => {
       getRows<{ provider_instance_catalog_source: string | null; count: number }>(`
         SELECT provider_instance_catalog_source, COUNT(*) AS count
         FROM capacity_pool_candidates
+        WHERE workload_role = 'workspace'
         GROUP BY provider_instance_catalog_source
         ORDER BY provider_instance_catalog_source
       `)
@@ -1738,6 +1776,7 @@ describe('default capacity pool creation', () => {
       getRows<{ catalog_availability: string; count: number }>(`
         SELECT catalog_availability, COUNT(*) AS count
         FROM capacity_pool_candidates
+        WHERE workload_role = 'workspace'
         GROUP BY catalog_availability
         ORDER BY catalog_availability
       `)
@@ -1756,6 +1795,7 @@ describe('default capacity pool creation', () => {
     const ensured = await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
+      candidatePublishBatchSize: 1000,
       offeringResolver: async () => offerings,
     });
     expect(ensured.user?.effectiveState).toBe('configured-empty');
@@ -1781,15 +1821,21 @@ describe('default capacity pool creation', () => {
 
     expect(update.missingCandidateIds).toEqual([]);
     expect(update.unavailableCandidateIds).toEqual([]);
+    expect(update.conflict).toBe(false);
     expect(update.summary?.activeCandidateCount).toBe(0);
     expect(
-      getRows<{ status: string; count: number }>(`
-        SELECT status, COUNT(*) AS count
+      getRows<{ workload_role: string; status: string; count: number }>(`
+        SELECT workload_role, status, COUNT(*) AS count
         FROM capacity_pool_candidates
-        GROUP BY status
-        ORDER BY status
+        GROUP BY workload_role, status
+        ORDER BY workload_role, status
       `)
-    ).toEqual([{ status: 'deleted', count: 150 }]);
+      // A deliberate removal of every editor-visible offering also removes its coupled
+      // placement-only deployment row: a removed offering cannot be resurrected by role.
+    ).toEqual([
+      { workload_role: 'deployment', status: 'deleted', count: 150 },
+      { workload_role: 'workspace', status: 'deleted', count: 150 },
+    ]);
   });
 
   it('seeds user and project pools from composable compute credentials', async () => {
@@ -3092,7 +3138,7 @@ describe('default capacity pool creation', () => {
     await vi.waitFor(() => expect(releaseOlderRefresh).toBeTypeOf('function'));
 
     seedUserCredential({ id: 'user-hetzner-b' });
-    const newerDb = drizzle(sqlite!, { schema });
+    const newerDb = poolDb();
     await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -3150,7 +3196,7 @@ describe('default capacity pool creation', () => {
     await vi.waitFor(() => expect(releaseOlderCleanup).toBeTypeOf('function'));
 
     seedUserCredential({ id: 'user-hetzner-b' });
-    const newerDb = drizzle(sqlite!, { schema });
+    const newerDb = poolDb();
     await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -3229,7 +3275,7 @@ describe('default capacity pool creation', () => {
     sqlite
       ?.prepare("UPDATE credentials SET is_active = 1, updated_at = ? WHERE id = 'user-hetzner-b'")
       .run('2026-08-28T02:00:00.000Z');
-    const newerDb = drizzle(sqlite!, { schema });
+    const newerDb = poolDb();
     await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -3303,7 +3349,7 @@ describe('default capacity pool creation', () => {
       `
       )
       .run();
-    const newerDb = drizzle(sqlite!, { schema });
+    const newerDb = poolDb();
     await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -3392,7 +3438,7 @@ describe('default capacity pool creation', () => {
       `
       )
       .run();
-    const newerDb = drizzle(sqlite!, { schema });
+    const newerDb = poolDb();
     await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -3470,7 +3516,7 @@ describe('default capacity pool creation', () => {
       `
       )
       .run();
-    const newerDb = drizzle(sqlite!, { schema });
+    const newerDb = poolDb();
     await ensureDefaultCapacityPoolsForExistingCredentials(newerDb as never, {
       userId: 'user-1',
       includeInstallation: false,
@@ -3510,6 +3556,7 @@ describe('default capacity pool creation', () => {
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
+      candidatePublishBatchSize: 1000,
       offeringResolver: async () =>
         Array.from({ length: 101 }, (_, index) =>
           liveHetznerOffering({
@@ -3523,6 +3570,7 @@ describe('default capacity pool creation', () => {
     const [deletedCandidate, disabledCandidate] = getRows<{ id: string }>(`
       SELECT id
       FROM capacity_pool_candidates
+      WHERE workload_role = 'workspace'
       ORDER BY id
       LIMIT 2
     `);
@@ -3536,12 +3584,15 @@ describe('default capacity pool creation', () => {
     await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
       userId: 'user-1',
       includeInstallation: false,
+      candidatePublishBatchSize: 1000,
       offeringResolver: async () => [],
     });
 
+    // 101 offerings x 2 materialized workload roles: every row is chunked under the D1 bind
+    // ceiling and marked unavailable, and none of them was skipped.
     expect(
       getCount('capacity_pool_candidates', "catalog_availability = 'last-known-unavailable'")
-    ).toBe(101);
+    ).toBe(202);
     expect(
       getRows<{ status: string; count: number }>(`
         SELECT status, COUNT(*) AS count
@@ -4054,7 +4105,7 @@ describe('default capacity pool creation', () => {
     sqlite?.prepare("DELETE FROM platform_credentials WHERE id = 'platform-hetzner'").run();
     await requestDefaultCapacityPoolBackfillRetry(db as never, { users: true, projects: true });
 
-    const restartedDb = drizzle(sqlite!, { schema });
+    const restartedDb = poolDb();
     const backfill = await backfillDefaultCapacityPoolsForExistingCredentials(
       restartedDb as never,
       {

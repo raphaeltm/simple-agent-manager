@@ -38,8 +38,9 @@ import {
   timestampVersion,
 } from './default-capacity-pool-helpers';
 import {
+  ensureCapacitySourceCredentialAnchor,
   resolveOfferingsForSeed,
-  retireSyntheticCapacitySourceCredentials,
+  scrubCapacitySourceCredentialSecrets,
 } from './default-capacity-source-credentials';
 import {
   catalogSeedStateFingerprint,
@@ -151,8 +152,8 @@ export interface DefaultCapacityPoolsBackfillOptions {
   scopeBatchSize?: number;
   /** Candidate ROWS published per source per pass before the durable cursor defers the rest. */
   candidatePublishBatchSize?: number;
-  /** Synthetic legacy credential mirrors retired per backfill pass. */
-  credentialMirrorRetirementBatchSize?: number;
+  /** Secret-free credential anchors scrubbed/pruned per backfill pass. */
+  credentialAnchorScrubBatchSize?: number;
   beforeSourcePublication?: (input: {
     seed: CredentialCapacitySeed;
     existingSource: schema.CapacitySource | null;
@@ -188,8 +189,8 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
   installation: CapacityPoolSummary | null;
   usersEnsured: number;
   projectsEnsured: number;
-  credentialMirrorsRetired: number;
-  credentialMirrorsPending: boolean;
+  credentialAnchorsScrubbed: number;
+  credentialAnchorsPending: boolean;
 }> {
   const installation =
     options.includeInstallation === false ? null : await ensureInstallationDefaultPool(db, options);
@@ -216,21 +217,21 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
     if (!options.projectId) await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, projectId);
   }
 
-  const credentialMirrors = await retireSyntheticCapacitySourceCredentials(db, {
-    batchSize: options.credentialMirrorRetirementBatchSize,
+  const anchors = await scrubCapacitySourceCredentialSecrets(db, {
+    batchSize: options.credentialAnchorScrubBatchSize,
   }).catch((error: unknown) => {
-    // Retirement is best-effort cleanup of SAM-generated mirrors; it must never block
-    // pool reconciliation. The next pass retries because the rows are still present.
-    log.warn('default_capacity_pools.credential_mirror_retirement_failed', serializeError(error));
-    return { detachedSources: 0, deletedCredentials: 0, hasMore: true };
+    // Best-effort cleanup of SAM-generated anchors; it must never block pool reconciliation.
+    // The next pass retries because the rows are still present.
+    log.warn('default_capacity_pools.credential_anchor_scrub_failed', serializeError(error));
+    return { scrubbedAnchors: 0, deletedUnreferencedAnchors: 0, hasMore: true };
   });
 
   return {
     installation,
     usersEnsured,
     projectsEnsured,
-    credentialMirrorsRetired: credentialMirrors.deletedCredentials,
-    credentialMirrorsPending: credentialMirrors.hasMore,
+    credentialAnchorsScrubbed: anchors.scrubbedAnchors,
+    credentialAnchorsPending: anchors.hasMore,
   };
 }
 
@@ -766,9 +767,13 @@ async function ensureDefaultPoolForCredentialSeeds(
 
   for (const seed of seeds) {
     if (seed.active && !(await isCapacitySeedStillCurrent(db, seed))) continue;
-    // No credential copy: a composable-backed source binds to the EXACT credential via
-    // credential_source + credential_reference + external_source_ref + credential_version.
-    const materializedSeed = seed;
+    // No credential copy: the anchor row carries no secret. The source binds to the EXACT
+    // credential via credential_source + credential_reference + external_source_ref +
+    // credential_version; the anchor only satisfies the shipped capacity_sources CHECK.
+    const materializedSeed = seed.active
+      ? await ensureCapacitySourceCredentialAnchor(db, seed)
+      : seed;
+    if (materializedSeed.active && !(await isCapacitySeedStillCurrent(db, seed))) continue;
     const existingSource = await findCapacitySourceForCredential(db, materializedSeed);
     if (!materializedSeed.active) {
       if (
@@ -1447,10 +1452,20 @@ async function disableDefaultPoolAvailability(
   await reconcileDefaultPoolStatus(db, poolId);
 }
 
+export interface ReconcileDefaultPoolStatusOptions {
+  /**
+   * Set by a caller that already published a revision bump for the same change (the atomic
+   * pool edit). Reconciliation then RECORDS the new selection digest without bumping again,
+   * so one operator edit costs exactly one revision.
+   */
+  selectionRevisionAlreadyBumped?: boolean;
+}
+
 export async function reconcileDefaultPoolStatus(
   db: Db,
   poolId: string,
-  guard?: PoolPublicationGuard
+  guard?: PoolPublicationGuard,
+  options: ReconcileDefaultPoolStatusOptions = {}
 ): Promise<void> {
   const [pool] = await db
     .select({
@@ -1532,7 +1547,9 @@ export async function reconcileDefaultPoolStatus(
   // First reconcile after upgrade only RECORDS the digest: bumping on a null baseline would
   // mass-invalidate healthy in-flight plans that never saw a selection change.
   const selectionChanged =
-    currentPool?.selectionDigest != null && currentPool.selectionDigest !== selectionDigest;
+    options.selectionRevisionAlreadyBumped !== true &&
+    currentPool?.selectionDigest != null &&
+    currentPool.selectionDigest !== selectionDigest;
 
   const predicates = [eq(schema.capacityPools.id, poolId)];
   if (guard) {

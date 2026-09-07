@@ -52,6 +52,14 @@ export function assertDefaultCapacityPoolUpdateResult(
       unavailableCatalogAdditions: result.unavailableCatalogAdditions,
     });
   }
+  if (result.conflict) {
+    // The pool advanced between this edit's read and its fenced write. Nothing was published,
+    // so the caller must re-read and retry rather than have a stale edit silently overwrite
+    // the concurrent editor's intent.
+    throw errors.conflict(
+      'Default capacity pool changed while this edit was in flight; reload and retry'
+    );
+  }
 
   return;
 }

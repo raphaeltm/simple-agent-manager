@@ -4,7 +4,10 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { log, serializeError } from '../lib/logger';
-import { CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE } from './default-capacity-pool-helpers';
+import {
+  CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
+  externalCapacitySourceCredentialId,
+} from './default-capacity-pool-helpers';
 import type {
   CredentialCapacitySeed,
   DefaultCapacityPoolOfferingResolution,
@@ -17,66 +20,172 @@ import {
 
 type Db = ReturnType<typeof drizzle>;
 
-/** Synthetic mirror rows retired per bounded pass. */
-export const DEFAULT_CAPACITY_SOURCE_CREDENTIAL_RETIREMENT_BATCH_SIZE = 50;
+/**
+ * A capacity-source credential ANCHOR carries no secret material at all.
+ *
+ * Why an anchor row exists: migration 0125 shipped a CHECK on `capacity_sources` requiring
+ * `credential_id IS NOT NULL` for every user/project-scoped cloud-provider source, and
+ * `capacity_sources` is a foreign-key CASCADE parent of `capacity_pool_candidates`, so that
+ * CHECK cannot be widened without a table rebuild — exactly what .claude/rules/31 forbids.
+ *
+ * What changed: the earlier bridge COPIED the composable credential's ciphertext and IV into
+ * this row, duplicating a secret and giving the row borrowed personal authority. The anchor
+ * now stores empty strings, so it is structurally sufficient for the FK/CHECK and completely
+ * unusable as a credential. The source's real, exact binding is
+ * `credential_source` + `credential_reference` ('cc_credentials:<id>') +
+ * `external_source_ref` ('cc_attachments:<id>') + `credential_version`, which is the same
+ * binding `createProviderForUser`/`exactCredentialBindingForResolved` mints independently.
+ *
+ * Nothing resolves anchors as usable credentials: every catalog/provider seed query filters
+ * `credential_type = 'cloud-provider'`, and the anchor's type is distinct.
+ */
+const ANCHOR_EMPTY_SECRET = '';
 
-export interface RetireSyntheticCapacitySourceCredentialsResult {
-  detachedSources: number;
-  deletedCredentials: number;
+/** Anchors scrubbed/pruned per bounded pass. */
+export const DEFAULT_CAPACITY_SOURCE_CREDENTIAL_SCRUB_BATCH_SIZE = 50;
+
+export interface ScrubCapacitySourceCredentialSecretsResult {
+  scrubbedAnchors: number;
+  deletedUnreferencedAnchors: number;
   hasMore: boolean;
 }
 
 /**
- * Retire the synthetic legacy `credentials` rows that earlier revisions minted to give a
- * composable-credential-backed capacity source a `credential_id` FK target.
+ * Bind a composable-credential-backed seed to its secret-free anchor row.
  *
- * That bridge COPIED encrypted provider credential material into a second row, duplicating a
- * secret and lending a source borrowed personal authority. Capacity sources now carry the
- * exact reference instead (`credential_source` + `credential_reference` = `cc_credentials:<id>`
- * + `external_source_ref` = `cc_attachments:<id>` + `credential_version`), which is the same
- * binding `createProviderForUser`/`exactCredentialBindingForResolved` mints independently.
- *
- * Ordering matters: `capacity_sources.credential_id` references `credentials.id` ON DELETE
- * CASCADE, so the referencing sources are detached BEFORE the mirror row is deleted. Deleting
- * first would cascade real capacity sources away.
- *
- * Only rows carrying the SAM-generated marker credential type are touched; no user or platform
- * credential is ever in scope.
+ * The anchor id is unchanged from the previous bridge, so an upgrade reuses the existing row
+ * (no source re-keying, no authority churn) and the conflict branch overwrites any previously
+ * copied ciphertext with empty strings — the secret copy is erased on the first reconcile.
  */
-export async function retireSyntheticCapacitySourceCredentials(
+export async function ensureCapacitySourceCredentialAnchor(
+  db: Db,
+  seed: CredentialCapacitySeed
+): Promise<CredentialCapacitySeed> {
+  if (seed.credentialId || seed.platformCredentialId || !seed.externalSourceRef) return seed;
+
+  const ownerUserId = seed.createdBy ?? seed.ownerUserId;
+  if (!ownerUserId) {
+    throw new Error(`External capacity source seed ${seed.id} has no owning user`);
+  }
+
+  const credentialId = externalCapacitySourceCredentialId(
+    seed.externalSourceRef,
+    seed.credentialVersion
+  );
+  const now =
+    typeof seed.credentialVersion === 'number' && Number.isFinite(seed.credentialVersion)
+      ? new Date(seed.credentialVersion).toISOString()
+      : new Date().toISOString();
+  await db
+    .insert(schema.credentials)
+    .values({
+      id: credentialId,
+      userId: ownerUserId,
+      projectId: seed.scope === 'project' ? seed.ownerProjectId : null,
+      provider: seed.provider,
+      credentialType: CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
+      credentialKind: 'api-key',
+      isActive: seed.active,
+      encryptedToken: ANCHOR_EMPTY_SECRET,
+      iv: ANCHOR_EMPTY_SECRET,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: schema.credentials.id,
+      set: {
+        userId: ownerUserId,
+        projectId: seed.scope === 'project' ? seed.ownerProjectId : null,
+        provider: seed.provider,
+        credentialType: CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE,
+        credentialKind: 'api-key',
+        isActive: seed.active,
+        encryptedToken: ANCHOR_EMPTY_SECRET,
+        iv: ANCHOR_EMPTY_SECRET,
+        updatedAt: now,
+      },
+    });
+
+  return { ...seed, credentialId };
+}
+
+/**
+ * Bounded cleanup for anchors that reconciliation may not revisit.
+ *
+ * 1. Scrub any anchor that still holds copied ciphertext from the previous bridge.
+ * 2. Delete anchors no capacity source references at all (credential rotation mints a new
+ *    anchor id and orphans the old one). Referenced anchors are NEVER deleted: the FK is
+ *    ON DELETE CASCADE, so deleting a referenced anchor would destroy real capacity sources.
+ */
+export async function scrubCapacitySourceCredentialSecrets(
   db: Db,
   options: { batchSize?: number } = {}
-): Promise<RetireSyntheticCapacitySourceCredentialsResult> {
+): Promise<ScrubCapacitySourceCredentialSecretsResult> {
   const batchSize = Math.max(
     1,
-    options.batchSize ?? DEFAULT_CAPACITY_SOURCE_CREDENTIAL_RETIREMENT_BATCH_SIZE
+    options.batchSize ?? DEFAULT_CAPACITY_SOURCE_CREDENTIAL_SCRUB_BATCH_SIZE
   );
-  const mirrors = await db
-    .select({ id: schema.credentials.id })
+  const anchors = await db
+    .select({
+      id: schema.credentials.id,
+      encryptedToken: schema.credentials.encryptedToken,
+      iv: schema.credentials.iv,
+    })
     .from(schema.credentials)
     .where(eq(schema.credentials.credentialType, CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE))
     .limit(batchSize + 1);
-  if (mirrors.length === 0) {
-    return { detachedSources: 0, deletedCredentials: 0, hasMore: false };
+  if (anchors.length === 0) {
+    return { scrubbedAnchors: 0, deletedUnreferencedAnchors: 0, hasMore: false };
   }
 
-  const hasMore = mirrors.length > batchSize;
-  const mirrorIds = mirrors.slice(0, batchSize).map((row) => row.id);
+  const hasMore = anchors.length > batchSize;
+  const page = anchors.slice(0, batchSize);
+  const anchorIds = page.map((row) => row.id);
 
-  const detached = await db
-    .update(schema.capacitySources)
-    .set({ credentialId: null })
+  const leaking = page
+    .filter((row) => row.encryptedToken !== ANCHOR_EMPTY_SECRET || row.iv !== ANCHOR_EMPTY_SECRET)
+    .map((row) => row.id);
+  if (leaking.length > 0) {
+    await db
+      .update(schema.credentials)
+      .set({ encryptedToken: ANCHOR_EMPTY_SECRET, iv: ANCHOR_EMPTY_SECRET })
+      .where(
+        and(
+          eq(schema.credentials.credentialType, CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE),
+          inArray(schema.credentials.id, leaking)
+        )
+      );
+  }
+
+  const referenced = await db
+    .select({ credentialId: schema.capacitySources.credentialId })
+    .from(schema.capacitySources)
     .where(
       and(
         isNotNull(schema.capacitySources.credentialId),
-        inArray(schema.capacitySources.credentialId, mirrorIds)
+        inArray(schema.capacitySources.credentialId, anchorIds)
       )
-    )
-    .returning({ id: schema.capacitySources.id });
+    );
+  const referencedIds = new Set(
+    referenced.flatMap((row) => (row.credentialId ? [row.credentialId] : []))
+  );
+  const orphans = anchorIds.filter((id) => !referencedIds.has(id));
+  if (orphans.length > 0) {
+    await db
+      .delete(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.credentialType, CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE),
+          inArray(schema.credentials.id, orphans)
+        )
+      );
+  }
 
-  await db.delete(schema.credentials).where(inArray(schema.credentials.id, mirrorIds));
-
-  return { detachedSources: detached.length, deletedCredentials: mirrorIds.length, hasMore };
+  return {
+    scrubbedAnchors: leaking.length,
+    deletedUnreferencedAnchors: orphans.length,
+    hasMore,
+  };
 }
 
 /** Default TTL for the per-isolate, credential-scoped provider catalog cache. */
