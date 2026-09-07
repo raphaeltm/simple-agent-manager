@@ -269,7 +269,7 @@ export async function enqueueProjectEventSourceIntent(
   await projectEventSourceOutboxInsertStatement(env, input, options).run();
   const intentById = options.id ? await loadIntentById(env, options.id) : null;
   const intent =
-    intentById?.projectId === input.projectId
+    intentById && replayConflict(intentById, input) === null
       ? intentById
       : await loadIntentByDelivery(env, input);
   if (!intent) throw new Error('Project event source outbox intent was not persisted');

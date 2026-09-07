@@ -81,10 +81,14 @@ CREATE INDEX idx_project_event_source_outbox_processing_lease
   ON project_event_source_outbox(state, processing_lease_expires_at, id);
 CREATE INDEX idx_project_event_source_outbox_active_expiry
   ON project_event_source_outbox(state, expires_at, id);
+CREATE INDEX idx_project_event_source_outbox_active_attempts
+  ON project_event_source_outbox(state, attempt_count, id);
 CREATE INDEX idx_project_event_source_outbox_exhausted_ready
   ON project_event_source_outbox(state, (attempt_count >= max_attempts), processing_lease_expires_at, id);
 CREATE INDEX idx_project_event_source_outbox_terminal_retention
   ON project_event_source_outbox(state, terminalized_at, id);
+CREATE INDEX idx_project_event_source_outbox_project_subject
+  ON project_event_source_outbox(project_id, subject_type, subject_id, state);
 `;
 
 const ENCRYPTION_KEY = 'integration-test-webhook-hmac-key';
