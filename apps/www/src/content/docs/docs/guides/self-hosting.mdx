@@ -79,7 +79,7 @@ If you prefer to create the GitHub App first, use the wizard below to create it 
 
 <GitHubAppSetup />
 
-The GitHub App needs **Pull requests: Read-only** because it subscribes to the `pull_request` webhook event. Enable **Redirect on update** under the Setup URL settings so repository access changes return users to SAM.
+The GitHub App needs **Pull requests: Read-only** for pull request and review webhooks, **Checks: Read-only** for `check_run`/`check_suite`, and **Actions: Read-only** for `workflow_run`. Subscribe it to `push`, `pull_request`, `issue_comment`, `repository`, `check_run`, `check_suite`, `workflow_run`, `pull_request_review`, and `pull_request_review_comment`. Enable **Redirect on update** under the Setup URL settings so repository access changes return users to SAM.
 
 :::caution
 "Request user authorization (OAuth) during installation" must be **unchecked** on the GitHub form. When checked, it disables the Setup URL and breaks post-installation redirects.
