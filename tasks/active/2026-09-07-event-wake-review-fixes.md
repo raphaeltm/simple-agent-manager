@@ -63,3 +63,13 @@ This checkpoint remains unintegrated and CHANGES REQUIRED. Independent reviewers
 - **Still reproduced:** Verified caller resolution without an agent-session ID yields legacy owner `T`, and rejects the historical `T:C` identity. Preserve the exact pre-upgrade fallback for v1 access only.
 
 The new server-derived `ownerTaskId` and MCP override rejection are useful, but do not repair these paths. C2 audience checks must extend A3's current helper bodies. Two actual MCP/alarm/recovery/read-ack cycles remain required. These probes substitute external boundaries and do not allocate compute or constitute staging evidence.
+
+## Parent re-review of A3 `963d61f9c`
+
+Independent actual-function/SQLite probes verify that the simple synthetic retry-zero case now reclaims, and the actual alarm wrapper proceeds past blocked target A to ready B while later invocations retain persisted backoff. The earlier cross-phase retention continuation repair remains intact.
+
+The real checkpoint callback sequence `retry → accepted → acknowledged` still pins terminal history: retention deletes the accepted attempt but leaves completed physical retry attempt one (`completed_at=100`), synthetic retry zero and the acknowledged batch. Five limit-one passes report no continuation. The new retention predicate treats every historical physical retry as active despite its completion timestamp. Reclaim completed retry history only when its parent is safely terminal, preserve genuinely active delivery, and test this callback sequence rather than successful first-attempt delivery alone.
+
+The other three Cloudflare findings are unchanged and reproduced again: a project mailbox cap occupied by another session is missed; delivered/unacknowledged target occupancy ends at delivery TTL despite a longer live read grace; and scheduler matched-history grouping costs 17,105 versus 340,105 SQLite instructions for 1,000 versus 20,000 matched rows. These remain blockers.
+
+This commit changes only alarm/materialization/retention code and related tests. It does not modify the previously reproduced security/lifecycle defects in the final post-D1 cancellation check, recovery event authority and second-generation handoff, or historical `task:chat` fallback ownership. Child-reported security approval cannot close those unchanged paths. The current source still returns directly from the asynchronous source guard after the local check. All remaining supplemental criteria must be reconciled before A3 is accepted or dependent feature validation claims same-chat recovery.
