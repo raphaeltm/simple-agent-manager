@@ -205,9 +205,9 @@ Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of t
 | `REQUIRE_APPROVAL`                              | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access).                                                                                      |
 | `TRIAL_ANONYMOUS_USER_ID`                       | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                                                                                                      |
 | `CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE`       | `25`                      | Maximum user scopes and maximum project scopes reconciled by one unscoped capacity-pool backfill pass. Values above `200` are capped; rerun the backfill to continue.                                                                                                                                                                                                                                             |
-| `CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON`    | built-in slices           | Environment fallback for the versioned legacy `small`/`medium`/`large` to workload requirements adapter. Persisted `platform_settings.capacityPools.legacyWorkloadMapping.v1` wins when present. Values are workload slices, not old whole-VM shapes.                                                                                              |
-| `CAPACITY_POOL_PLATFORM_DEFAULTS_JSON`          | built-in defaults         | Environment fallback for platform resource requirement defaults used when no task/trigger/skill/profile/project/user layer sets a field. Persisted `platform_settings.capacityPools.platformDefaults.v1` wins when present. Values are validated by the shared `ResourceRequirements` validator and must provide every field.                         |
-| `CAPACITY_POOL_SELECTION_SETTINGS_JSON`         | built-in scoring weights  | Environment fallback for default capacity-pool selection weights and ranking rollout. Persisted `platform_settings.capacityPools.selectionSettings.v1` wins when present. Candidate priority remains explicit pool policy; price comparisons are normalized by unit and currency, with unknown price sorted after known comparable prices.          |
+| `CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON`    | built-in slices           | Environment fallback for the versioned legacy `small`/`medium`/`large` to workload requirements adapter. Persisted `platform_settings.capacityPools.legacyWorkloadMapping.v1` wins when present. Values are workload slices, not old whole-VM shapes.                                                                                                                                                             |
+| `CAPACITY_POOL_PLATFORM_DEFAULTS_JSON`          | built-in defaults         | Environment fallback for platform resource requirement defaults used when no task/trigger/skill/profile/project/user layer sets a field. Persisted `platform_settings.capacityPools.platformDefaults.v1` wins when present. Values are validated by the shared `ResourceRequirements` validator and must provide every field.                                                                                     |
+| `CAPACITY_POOL_SELECTION_SETTINGS_JSON`         | built-in scoring weights  | Environment fallback for default capacity-pool selection weights and ranking rollout. Persisted `platform_settings.capacityPools.selectionSettings.v1` wins when present. Candidate priority remains explicit pool policy; price comparisons are normalized by unit and currency, with unknown price sorted after known comparable prices.                                                                        |
 | `ORIGIN_CA_CERT_VALIDITY_DAYS`                  | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                                                                                                        |
 
 The `rolloutCohortPercent` field in capacity-pool selection settings accepts 0–100
@@ -220,6 +220,48 @@ credential generation, workload role, aggregate reservations, and paid allocatio
 fences remain enforced at every percentage. Reducing rollout changes ranking;
 it never restores legacy size labels as allocation authority. Settings and plan
 columns remain additive, and readers accept plans without rollout diagnostics.
+
+### Upgrading existing compute pools
+
+Deploy the normal additive migrations before starting the updated Worker. Existing
+tasks, workspaces, credentials, and recorded hardware remain in place. Background
+reconciliation creates missing default pools from existing credentials and resumes
+in bounded batches; opening the settings page is not required. Larger installations
+may need several scheduled passes before every scope is ready.
+
+In project Infrastructure settings, inspect the effective default pool before
+starting new work. A project default takes precedence over a personal default,
+which takes precedence over installation capacity. These states need different
+responses:
+
+| Pool state          | What to do                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Migration pending   | Allow reconciliation to finish; if it persists, check scheduled reconciliation errors and the affected credential. |
+| Configured empty    | Select a supported offering in that pool. An empty configured pool intentionally blocks new allocation.            |
+| Source disabled     | Re-enable or replace the pool's credential source.                                                                 |
+| Catalog unavailable | Check provider access and retry after inventory refresh. A failed refresh preserves the last valid inventory.      |
+| Configured ready    | Start a small test workload and check its requested resources and provider-native hardware in the node details.    |
+
+An administrator can verify completion in D1 by inspecting `capacity_pools`:
+`migration_state` must be `complete` for the affected pool. The durable user and
+project backfill cursors are stored in `platform_settings` under
+`capacityPools.backfill.userCursor.v1` and `capacityPools.backfill.projectCursor.v1`.
+Their presence indicates resumable progress, not an error. Do not delete pools or
+reset cursors to resolve an unavailable credential.
+
+Existing nodes without verified pool and provider identity may finish their
+current work but are not automatically treated as eligible pool capacity. New
+work must pass the current pool, credential, and resource checks. Previously
+recorded hardware remains visible even if an offering is later removed. Old
+browser, API, CLI, and MCP size fields remain accepted as compatibility inputs;
+new resource fields take precedence at the same configuration layer. Saved
+reservations survive retry rather than adopting changed defaults.
+
+For a ranking rollback, reduce `rolloutCohortPercent` in the effective selection
+settings. This uses balanced ranking for the excluded cohort while retaining
+pool authorization and capacity checks. It does not roll back migrations, revive
+removed offerings, or permit reuse of unverified nodes. Keep the additive schema
+and saved plans; do not drop columns or recreate tables as a rollback step.
 
 Activity coalescing and binding caches are per Worker isolate, so burst reduction scales with the number of active isolates for the same session. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
 
@@ -290,22 +332,22 @@ Google login and Google infrastructure authorization are independent credential 
 
 Configuring one family never enables or modifies the other. Users who choose service-account JSON do not need either infrastructure OAuth variable.
 
-| Variable                             | Default                                          | Description                                                                                 |
-| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` | `65536`                                          | Maximum UTF-8 byte size accepted by `PUT /api/gcp/service-account`                          |
-| `GCP_DEFAULT_ZONE`                   | `us-central1-a`                                  | Default Compute zone                                                                        |
-| `GCP_IMAGE_FAMILY`                   | `ubuntu-2404-lts-amd64`                          | Compute image family. Native image overrides may be a family name or a Compute Engine image/family reference. |
-| `GCP_IMAGE_PROJECT`                  | `ubuntu-os-cloud`                                | Compute image project                                                                       |
+| Variable                             | Default                                          | Description                                                                                                                                                                                       |
+| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` | `65536`                                          | Maximum UTF-8 byte size accepted by `PUT /api/gcp/service-account`                                                                                                                                |
+| `GCP_DEFAULT_ZONE`                   | `us-central1-a`                                  | Default Compute zone                                                                                                                                                                              |
+| `GCP_IMAGE_FAMILY`                   | `ubuntu-2404-lts-amd64`                          | Compute image family. Native image overrides may be a family name or a Compute Engine image/family reference.                                                                                     |
+| `GCP_IMAGE_PROJECT`                  | `ubuntu-os-cloud`                                | Compute image project                                                                                                                                                                             |
 | `GCP_DISK_SIZE_GB`                   | `50`                                             | Default boot disk size for GCP legacy callers and native requests without `bootDiskSizeGb`. A native VM request with `bootDiskSizeGb` overrides this value before the Compute Engine insert call. |
-| `GCP_TOKEN_CACHE_TTL_SECONDS`        | `3300`                                           | Maximum derivative access-token cache TTL; actual TTL is capped by Google's returned expiry |
-| `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS`  | `600`                                            | SAM identity-token lifetime for WIF                                                         |
-| `GCP_OPERATION_POLL_TIMEOUT_MS`      | `300000`                                         | Maximum wait for GCP asynchronous operations                                                |
-| `GCP_API_TIMEOUT_MS`                 | `30000`                                          | GCP OAuth, IAM, and Compute request timeout                                                 |
-| `GCP_STS_SCOPE`                      | `https://www.googleapis.com/auth/cloud-platform` | WIF STS exchange scope                                                                      |
-| `GCP_SA_IMPERSONATION_SCOPES`        | `https://www.googleapis.com/auth/compute`        | Comma-separated scopes for WIF service-account impersonation                                |
-| `GCP_SA_TOKEN_LIFETIME_SECONDS`      | `3600`                                           | WIF impersonated access-token lifetime                                                      |
-| `GCP_STS_TOKEN_URL`                  | `https://sts.googleapis.com/v1/token`            | WIF STS endpoint override for controlled environments                                       |
-| `GCP_IAM_CREDENTIALS_BASE_URL`       | Google IAM Credentials API                       | WIF impersonation base URL override                                                         |
+| `GCP_TOKEN_CACHE_TTL_SECONDS`        | `3300`                                           | Maximum derivative access-token cache TTL; actual TTL is capped by Google's returned expiry                                                                                                       |
+| `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS`  | `600`                                            | SAM identity-token lifetime for WIF                                                                                                                                                               |
+| `GCP_OPERATION_POLL_TIMEOUT_MS`      | `300000`                                         | Maximum wait for GCP asynchronous operations                                                                                                                                                      |
+| `GCP_API_TIMEOUT_MS`                 | `30000`                                          | GCP OAuth, IAM, and Compute request timeout                                                                                                                                                       |
+| `GCP_STS_SCOPE`                      | `https://www.googleapis.com/auth/cloud-platform` | WIF STS exchange scope                                                                                                                                                                            |
+| `GCP_SA_IMPERSONATION_SCOPES`        | `https://www.googleapis.com/auth/compute`        | Comma-separated scopes for WIF service-account impersonation                                                                                                                                      |
+| `GCP_SA_TOKEN_LIFETIME_SECONDS`      | `3600`                                           | WIF impersonated access-token lifetime                                                                                                                                                            |
+| `GCP_STS_TOKEN_URL`                  | `https://sts.googleapis.com/v1/token`            | WIF STS endpoint override for controlled environments                                                                                                                                             |
+| `GCP_IAM_CREDENTIALS_BASE_URL`       | Google IAM Credentials API                       | WIF impersonation base URL override                                                                                                                                                               |
 
 The service-account JWT bearer flow always uses `https://oauth2.googleapis.com/token`; it has no endpoint override, and uploaded `token_uri` values are ignored. Source credentials are encrypted in D1. Only derivative short-lived tokens are cached.
 

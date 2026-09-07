@@ -1,4 +1,3 @@
-import { gcpInstanceToVM, resolveGcpSourceImage } from './gcp-native-instance';
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 
 import {
@@ -18,6 +17,7 @@ import {
   SAM_NETWORK_TAG,
   SIZE_MAP,
 } from './gcp-metadata';
+import { gcpInstanceToVM, resolveGcpSourceImage } from './gcp-native-instance';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
 import {
@@ -42,6 +42,7 @@ import type {
 } from './types';
 import { ProviderError } from './types';
 import {
+  type GcpInstancePayload,
   parseProviderJson,
   validateGcpAggregatedInstances,
   validateGcpInstance,
