@@ -5,7 +5,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
-import type { ResourceRequirementsFormState } from '../resource-requirements';
+import type { ResourceRequirementsFormState, ResourceValidationErrors } from '../resource-requirements';
 import { ResourceRequirementsInput } from '../resource-requirements';
 import { FOCUS_RING } from './trigger-form-support';
 import { TriggerProfileSelect } from './TriggerProfileSelect';
@@ -23,6 +23,7 @@ interface TriggerAdvancedOptionsProps {
   open: boolean;
   profiles: AgentProfile[];
   resourceReqs: ResourceRequirementsFormState;
+  resourceErrors?: ResourceValidationErrors;
   skipIfRunning: boolean;
   sourceType: TriggerSourceType;
   taskMode: 'task' | 'conversation';
@@ -42,6 +43,7 @@ export function TriggerAdvancedOptions({
   open,
   profiles,
   resourceReqs,
+  resourceErrors,
   skipIfRunning,
   sourceType,
   taskMode,
@@ -108,6 +110,7 @@ export function TriggerAdvancedOptions({
             legacyVmSize={legacyVmSize}
             inheritLabel="profile default"
             hideDisk
+            errors={resourceErrors}
           />
 
           <div>

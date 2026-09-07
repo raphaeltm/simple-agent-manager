@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   startTaskRunnerDO: vi.fn(),
   ensureTaskRunnerStarted: vi.fn(),
   generateTaskTitle: vi.fn(),
+  resolveSkillProfile: vi.fn(),
+  parseSkillResourceRequirementsJson: vi.fn(),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -42,8 +44,8 @@ vi.mock('../../../src/services/agent-profiles', () => ({
 }));
 
 vi.mock('../../../src/services/skills', () => ({
-  resolveSkillProfile: vi.fn().mockResolvedValue(null),
-  parseSkillResourceRequirementsJson: vi.fn(() => ({})),
+  resolveSkillProfile: mocks.resolveSkillProfile,
+  parseSkillResourceRequirementsJson: mocks.parseSkillResourceRequirementsJson,
 }));
 
 const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
@@ -122,6 +124,8 @@ describe('submitTriggeredTask capacity-pool integration', () => {
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);
     mocks.ensureTaskRunnerStarted.mockResolvedValue(false);
     mocks.generateTaskTitle.mockResolvedValue('Triggered capacity task');
+    mocks.resolveSkillProfile.mockResolvedValue(null);
+    mocks.parseSkillResourceRequirementsJson.mockReturnValue({});
   });
 
   it('uses centralized placement to persist concrete pool snapshots and start TaskRunner', async () => {
@@ -320,6 +324,194 @@ describe('submitTriggeredTask capacity-pool integration', () => {
       expect.objectContaining({
         resourceRequirements: { minMemoryGb: 4 },
         resolvedReservation: expect.objectContaining({ source: 'trigger' }),
+      })
+    );
+  });
+
+  it('persists trigger, skill, profile, and project layers in the versioned plan', async () => {
+    const { sqlite, env } = createEnv();
+    seedTriggerRows(sqlite);
+    sqlite
+      .prepare(`UPDATE projects SET resource_requirements_json = ? WHERE id = 'project-1'`)
+      .run(JSON.stringify({ exclusiveNode: false }));
+    mocks.resolveSkillProfile.mockResolvedValueOnce({
+      profileId: 'profile-1',
+      skillId: 'skill-1',
+      agentType: 'claude-code',
+      model: null,
+      effort: 'auto',
+      permissionMode: null,
+      systemPromptAppend: null,
+      vmSizeOverride: null,
+      skillVmSizeOverride: null,
+      agentProfileVmSizeOverride: null,
+      provider: null,
+      vmLocation: null,
+      workspaceProfile: null,
+      runtime: null,
+      devcontainerConfigName: null,
+      taskMode: null,
+      resourceRequirementsJson: JSON.stringify({ minMemoryGb: 12 }),
+      agentProfileResourceRequirementsJson: JSON.stringify({ minDiskGb: 0 }),
+    });
+    await seedProjectDefaultPool(env);
+
+    await submitTriggeredTask(env, {
+      triggerId: 'trigger-1',
+      triggerExecutionId: 'exec-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+      renderedPrompt: 'Run the scheduled job',
+      triggeredBy: 'cron',
+      agentProfileId: 'profile-1',
+      skillId: 'skill-1',
+      taskMode: 'task',
+      vmSizeOverride: null,
+      resourceRequirementsJson: JSON.stringify({ minVcpu: 4 }),
+      triggerName: 'Scheduled Capacity',
+    });
+
+    const taskRow = sqlite
+      .prepare(
+        `SELECT resource_requirements_json, resource_requirement_plan_json,
+          resource_requirements_source, resolved_reservation_json
+         FROM tasks
+         WHERE project_id = 'project-1'`
+      )
+      .get() as {
+      resource_requirements_json: string | null;
+      resource_requirement_plan_json: string;
+      resource_requirements_source: string | null;
+      resolved_reservation_json: string;
+    };
+    expect(JSON.parse(taskRow.resource_requirements_json ?? '{}')).toEqual({ minVcpu: 4 });
+    expect(taskRow.resource_requirements_source).toBe('trigger');
+    const plan = JSON.parse(taskRow.resource_requirement_plan_json) as {
+      intent: Record<string, unknown>;
+    };
+    expect(plan.intent).toMatchObject({
+      trigger: { minVcpu: 4 },
+      skill: { minMemoryGb: 12 },
+      agentProfile: { minDiskGb: 0 },
+      project: { exclusiveNode: false },
+    });
+    const reservation = JSON.parse(taskRow.resolved_reservation_json) as {
+      cpuMillis: number;
+      memoryMb: number;
+      diskMb: number;
+      exclusiveNode: boolean;
+      fieldProvenance: Record<string, { source: string; value: unknown }>;
+    };
+    expect(reservation).toMatchObject({
+      cpuMillis: 4000,
+      memoryMb: 12 * 1024,
+      diskMb: 0,
+      exclusiveNode: false,
+    });
+    expect(reservation.fieldProvenance.minVcpu).toMatchObject({
+      source: 'trigger',
+      value: 4,
+    });
+    expect(reservation.fieldProvenance.minMemoryGb).toMatchObject({
+      source: 'skill',
+      value: 12,
+    });
+    expect(reservation.fieldProvenance.minDiskGb).toMatchObject({
+      source: 'agent-profile',
+      value: 0,
+    });
+  });
+
+  it('rejects removed trigger execution principals before task/session/runner side effects', async () => {
+    const { sqlite, env } = createEnv();
+    seedTriggerRows(sqlite);
+    sqlite
+      .prepare(
+        `UPDATE project_members
+         SET status = 'removed'
+         WHERE project_id = 'project-1' AND user_id = 'user-1'`
+      )
+      .run();
+
+    await expect(
+      submitTriggeredTask(env, {
+        triggerId: 'trigger-1',
+        triggerExecutionId: 'exec-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        renderedPrompt: 'Run the scheduled job',
+        triggeredBy: 'cron',
+        agentProfileId: null,
+        skillId: null,
+        taskMode: 'task',
+        vmSizeOverride: null,
+        resourceRequirementsJson: null,
+        triggerName: 'Scheduled Capacity',
+      })
+    ).rejects.toThrow(/execution principal is not a current project member/);
+
+    expect(mocks.resolveSkillProfile).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
+    expect(mocks.requireRepositoryOwnerAccess).not.toHaveBeenCalled();
+    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 });
+  });
+
+  it('allows active trigger execution principals to use shared project credentials', async () => {
+    const { sqlite, env } = createEnv();
+    seedTriggerRows(sqlite);
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, email, name, role, status, github_id)
+         VALUES ('member-1', 'member-1@example.com', 'Member One', 'user', 'active', '67890')`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO project_members (project_id, user_id, role, status)
+         VALUES ('project-1', 'member-1', 'maintainer', 'active')`
+      )
+      .run();
+    await seedProjectDefaultPool(env);
+
+    await submitTriggeredTask(env, {
+      triggerId: 'trigger-1',
+      triggerExecutionId: 'exec-1',
+      projectId: 'project-1',
+      userId: 'member-1',
+      renderedPrompt: 'Run the scheduled job',
+      triggeredBy: 'cron',
+      agentProfileId: null,
+      skillId: null,
+      taskMode: 'task',
+      vmSizeOverride: null,
+      resourceRequirementsJson: null,
+      triggerName: 'Scheduled Capacity',
+    });
+
+    const taskRow = sqlite
+      .prepare(
+        `SELECT user_id, credential_attribution_user_id, credential_attribution_project_id,
+          credential_attribution_source, placement_credential_source
+         FROM tasks
+         WHERE project_id = 'project-1'`
+      )
+      .get() as Record<string, unknown>;
+    expect(taskRow).toMatchObject({
+      user_id: 'member-1',
+      credential_attribution_user_id: 'member-1',
+      credential_attribution_project_id: 'project-1',
+      credential_attribution_source: 'project',
+      placement_credential_source: 'project',
+    });
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        userId: 'member-1',
+        credentialAttributionUserId: 'member-1',
+        credentialAttributionProjectId: 'project-1',
+        credentialAttributionSource: 'project',
       })
     );
   });

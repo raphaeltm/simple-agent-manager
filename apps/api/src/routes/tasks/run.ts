@@ -14,7 +14,8 @@ import type { RunTaskResponse, TaskStatus, VMSize } from '@simple-agent-manager/
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
-import { type InferOutput, safeParse } from 'valibot';
+import type { InferOutput } from 'valibot';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
@@ -36,8 +37,13 @@ import {
 import * as projectDataService from '../../services/project-data';
 import {
   collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
   firstResourceRequirementLayer,
+  mergeResourceRequirementLayers,
   normalizeResourceRequirementsInput,
+  parseLegacyVmSize,
+  parseResourceRequirementsSource,
+  readPersistedTaskResourcePlan,
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
 import { isTaskBlocked } from '../../services/task-graph';
@@ -47,24 +53,28 @@ import { requireRepositoryUserAccess } from '../projects/_helpers';
 import { requireProjectTaskById } from './_helpers';
 
 const runRoutes = new Hono<{ Bindings: Env }>();
-type RunTaskBody = InferOutput<typeof RunTaskSchema>;
+type RunTaskBody = Partial<InferOutput<typeof RunTaskSchema>>;
 
-// Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
-// See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
-
+/**
+ * An absent/unparseable body means "no overrides" ({}), but a PRESENT body that fails
+ * the schema is rejected with 400 rather than silently degraded to defaults.
+ */
 async function parseRunTaskBody(req: Request): Promise<RunTaskBody> {
   let raw: unknown;
   try {
     raw = await req.json();
   } catch {
-    return {} as RunTaskBody;
+    return {};
   }
-  const result = safeParse(RunTaskSchema, raw);
+  const result = v.safeParse(RunTaskSchema, raw);
   if (!result.success) {
     throw errors.badRequest(formatIssues(result.issues));
   }
   return result.output;
 }
+
+// Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
+// See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
 
 /**
  * POST /projects/:projectId/tasks/:taskId/run
@@ -141,12 +151,11 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     resourceRequirementLayers,
     persistedResourceRequirementsJson,
     taskRunnerResourceRequirements,
+    resolvedReservationOverride,
+    requestedVmSize,
+    requestedVmSizeSource,
   } = (() => {
     try {
-      const layers = collectStoredResourceRequirementLayers({
-        task: task.resourceRequirementsJson,
-        project: project.resourceRequirementsJson,
-      });
       let nextTaskResourceRequirements = undefined as
         | ReturnType<typeof normalizeResourceRequirementsInput>
         | null
@@ -156,12 +165,46 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
           body.resourceRequirements === null
             ? null
             : normalizeResourceRequirementsInput(body.resourceRequirements);
+      }
+
+      const storedPlan = readPersistedTaskResourcePlan(
+        {
+          taskId: task.id,
+          triggerId: task.triggerId,
+          skillId: task.skillId,
+          agentProfileId: task.agentProfileHint,
+          projectId,
+          userId: task.userId,
+          resourceRequirementPlanJson: task.resourceRequirementPlanJson,
+          resourceRequirementsJson: task.resourceRequirementsJson,
+          resourceRequirementsSource: task.resourceRequirementsSource,
+          resolvedReservationJson: task.resolvedReservationJson,
+          requestedVmSize: task.requestedVmSize,
+          requestedVmSizeSource: task.requestedVmSizeSource,
+        },
+        { ignoreLegacyResourceRequirementsJson: resourceRequirementsProvided }
+      );
+      const currentProjectLayers = collectStoredResourceRequirementLayers({
+        project: project.resourceRequirementsJson,
+      });
+      const layers =
+        resourceRequirementsProvided ||
+        storedPlan.source === 'legacy-source-json' ||
+        storedPlan.source === 'empty'
+          ? mergeResourceRequirementLayers(currentProjectLayers, storedPlan.layers)
+          : { ...storedPlan.layers };
+      if (resourceRequirementsProvided) {
         if (nextTaskResourceRequirements === null) {
           delete layers.task;
         } else {
           layers.task = nextTaskResourceRequirements;
         }
       }
+      const storedRequestedVmSize = storedPlan.requestedVmSize ?? parseLegacyVmSize(task.requestedVmSize);
+      const storedRequestedVmSizeSource =
+        storedPlan.requestedVmSizeSource ?? parseResourceRequirementsSource(task.requestedVmSizeSource);
+      const requestedVmSize = body.vmSize ?? storedRequestedVmSize;
+      const requestedVmSizeSource = body.vmSize ? 'task' : storedRequestedVmSizeSource;
       return {
         resourceRequirementLayers: layers,
         persistedResourceRequirementsJson: resourceRequirementsProvided
@@ -170,6 +213,10 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
             : JSON.stringify(nextTaskResourceRequirements)
           : task.resourceRequirementsJson,
         taskRunnerResourceRequirements: firstResourceRequirementLayer(layers),
+        resolvedReservationOverride:
+          resourceRequirementsProvided || body.vmSize ? null : storedPlan.resolvedReservation,
+        requestedVmSize,
+        requestedVmSizeSource,
       };
     } catch (err) {
       if (err instanceof ResourceRequirementsValidationError) {
@@ -199,8 +246,8 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
         userId,
         project,
         explicit: {
-          vmSize: body.vmSize ?? null,
-          vmSizeSource: 'task',
+          vmSize: requestedVmSize,
+          vmSizeSource: requestedVmSizeSource ?? 'task',
           vmLocation: body.vmLocation ?? null,
           workspaceProfile: body.workspaceProfile ?? null,
           devcontainerConfigName: body.devcontainerConfigName,
@@ -208,6 +255,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
         credentialProjectPolicy: 'current-project',
         taskModeDefault: 'task',
         resourceRequirements: resourceRequirementLayers,
+        resolvedReservationOverride,
       });
     } catch (err) {
       if (err instanceof PlacementResolutionError) {
@@ -262,6 +310,12 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     agentType,
     resolvedReservation,
   } = placement;
+  const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+    layers: resourceRequirementLayers,
+    resolvedReservation,
+    requestedVmSize: vmSize,
+    requestedVmSizeSource: vmSizeSource,
+  });
 
   // Explicit run branch means "continue work from this branch". Otherwise,
   // use the task output branch when present so VM-agent completion pushes cannot
@@ -284,6 +338,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
          requested_vm_size = ?,
          requested_vm_size_source = ?,
          resource_requirements_json = ?,
+         resource_requirement_plan_json = ?,
          resource_requirements_source = ?,
          resolved_reservation_json = ?,
          credential_attribution_user_id = ?,
@@ -297,6 +352,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       vmSize,
       vmSizeSource,
       persistedResourceRequirementsJson,
+      persistedResourceRequirementPlanJson,
       resolvedReservation.source,
       JSON.stringify(resolvedReservation),
       credentialAttributionUserId,

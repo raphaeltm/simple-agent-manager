@@ -1,0 +1,161 @@
+---
+import { KINDS, SCENARIOS } from './model';
+---
+<p class="explorer-intro">Submit a chat, a code change, and a review at once. Where do they run? What if the cloud is full? Step inside SAM’s scheduler and try it.</p>
+<scheduler-explorer class="scheduler-lab" aria-label="Interactive SAM scheduler lab">
+  <div class="lab-heading">
+    <div><span class="eyebrow">SAM / SYSTEMS LAB 001</span><h2>Make room for the work.</h2></div>
+    <span class="lab-badge"><i></i> INTERACTIVE EXPLAINER</span>
+  </div>
+  <noscript><p>Enable JavaScript to run the lab. The full explanation and source links are below.</p></noscript>
+  <div class="lab-controls" hidden>
+    <div class="scenarios" aria-label="Guided scenarios">
+      {Object.entries(SCENARIOS).map(([key], index) => <button data-scenario={key} aria-pressed={index === 0}><span>0{index + 1}</span> {['Mixed burst', 'Cold start', 'No capacity', 'Sleep & reuse'][index]}</button>)}
+    </div>
+    <div class="scenario-copy"><h3 data-title>{SCENARIOS.mixed.title}</h3><p data-hint>{SCENARIOS.mixed.hint}</p></div>
+    <div class="submit-row"><button class="primary" data-action="burst">＋ Send mixed burst</button><div class="task-buttons" aria-label="Submit a single task">{Object.entries(KINDS).map(([kind, info]) => <button data-kind={kind} title={info.detail}><span>{info.glyph}</span> {info.label}</button>)}</div></div>
+  </div>
+  <div class="system-map">
+    <div class="map-label"><span>CONTROL PLANE → COMPUTE</span><span data-clock>STEP 00</span></div>
+    <svg viewBox="0 0 960 410" role="img" aria-labelledby="scheduler-map-title scheduler-map-desc">
+      <title id="scheduler-map-title">SAM routes tasks to VM workspaces or an explicit Cloudflare container</title>
+      <desc id="scheduler-map-desc">The durable control plane holds task state and admission decisions. Three illustrated VM nodes show available, booting, active, or warm compute. Equivalent live status appears in the cards below.</desc>
+      <defs>
+        <pattern id="scheduler-grid" width="40" height="24" patternUnits="userSpaceOnUse" patternTransform="skewX(-30)"><path d="M40 0H0V24" fill="none" stroke="#74ffaa" stroke-opacity=".09" /></pattern>
+        <filter id="scheduler-glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="4" /></filter>
+        <linearGradient id="scheduler-top" x2="1" y2="1"><stop stop-color="#214f3c"/><stop offset="1" stop-color="#102f25"/></linearGradient>
+        <radialGradient id="scheduler-halo"><stop stop-color="#3dff91" stop-opacity=".16"/><stop offset="1" stop-color="#3dff91" stop-opacity="0"/></radialGradient>
+      </defs>
+      <ellipse cx="540" cy="210" rx="370" ry="180" fill="url(#scheduler-halo)"/>
+      <path d="M40 260 510 15 930 230 450 405Z" fill="url(#scheduler-grid)"/>
+      <g class="wires" fill="none" stroke="#69fba4" stroke-width="2">
+        <path d="M202 201 322 201 385 167"/><path d="M452 184 533 230 650 230"/><path d="M452 184 570 122 665 122"/><path d="M452 184 510 290 704 290"/>
+      </g>
+      <g class="wire-glow" fill="none" stroke="#69fba4" stroke-width="4" filter="url(#scheduler-glow)"><path d="M202 201 322 201 385 167 452 184 570 122 665 122"/></g>
+      <g transform="translate(88 159)"><path d="M0 25 57 0 114 25 57 53Z" fill="#173c2b" stroke="#4da975"/><path d="M0 25v43l57 29V53Z" fill="#0e2119" stroke="#31533f"/><path d="M57 53 114 25v43L57 97Z" fill="#142c21" stroke="#31533f"/><text x="57" y="31" text-anchor="middle" class="svg-icon">↗</text><text x="57" y="125" text-anchor="middle">TASKS</text><text x="57" y="144" text-anchor="middle" class="svg-muted">intent, saved first</text></g>
+      <g transform="translate(337 105)"><ellipse cx="63" cy="110" rx="100" ry="50" fill="url(#scheduler-halo)"/><path d="M0 47 63 15 126 47v52l-63 33L0 99Z" fill="#0b241a" stroke="#65df98"/><path d="M0 47 63 15 126 47 63 81Z" fill="url(#scheduler-top)" stroke="#86ffc0"/><path d="M63 81v51" stroke="#65df98"/><path d="M15 78 49 96m-34-8 34 18m30-12 31-16" stroke="#67fda5" opacity=".65"/><text x="63" y="57" text-anchor="middle" class="core-text">SAM</text><text x="63" y="162" text-anchor="middle">DURABLE CONTROL</text><text x="63" y="181" text-anchor="middle" class="svg-muted">resolve · admit · retry</text></g>
+      {[{ x: 604, y: 51 }, { x: 640, y: 185 }, { x: 791, y: 250 }].map(({ x, y }, index) => <g data-rack={index + 1} transform={`translate(${x} ${y})`}>
+        <ellipse cx="51" cy="86" rx="73" ry="30" fill="url(#scheduler-halo)"/>
+        <path class="rack-top" d="M0 22 51 0 102 22 51 46Z"/>
+        <path class="rack-front" d="M0 22v53l51 25V46Z"/>
+        <path class="rack-side" d="M51 46 102 22v53L51 100Z"/>
+        <path class="rack-light" d="M10 44 40 59m-30 1 30 15m23-17 28-14m-28 30 28-14"/>
+        <text x="51" y="28" text-anchor="middle" class="rack-number">0{index + 1}</text>
+        <text x="51" y="122" text-anchor="middle">VM 0{index + 1}</text>
+        <text data-rack-status x="51" y="140" text-anchor="middle" class="svg-muted">{index < 2 ? 'warm · ready to reuse' : 'not provisioned'}</text>
+      </g>)}
+      <g transform="translate(73 50)"><rect width="198" height="51" rx="10" fill="#15172c" stroke="#9990d3"/><text x="99" y="22" text-anchor="middle" fill="#d4c8ff">ϟ CLOUDFLARE CONTAINER</text><text x="99" y="40" text-anchor="middle" class="svg-muted">explicit Instant runtime</text><path d="M198 26H255L318 60" fill="none" stroke="#aa9cf0" stroke-dasharray="4 5"/></g>
+    </svg>
+    <div class="map-caption"><span><i class="green-dot"></i> Green: VM path</span><span><i class="purple-dot"></i> Violet: explicit Instant path</span><span>Illustration · not live telemetry</span></div>
+  </div>
+  <div class="lab-controls" hidden>
+    <div class="transport"><div><button class="primary" data-action="step">Step →</button><button data-action="play" aria-pressed="false">Play</button><button data-action="reset">Reset</button></div><button data-action="sleep" disabled>Sleep idle chat</button></div>
+    <div class="conditions"><label><input type="checkbox" data-provider checked /> Provider has capacity</label><label>VM node limit <select data-limit aria-label="VM node limit"><option>1</option><option>2</option><option selected>3</option></select></label><span>2 workspace slots / VM · toy limits</span></div>
+    <div class="node-cards" data-nodes></div>
+    <div class="readout"><div class="queue"><div class="section-label"><h3>Work ledger</h3><span data-count>0 accepted</span></div><div data-tasks tabindex="0" role="region" aria-label="Task ledger"><p class="empty">Your fleet is ready. Send some work.</p></div></div><div class="decisions"><h3>Why this happened</h3><p class="live-summary" role="status" aria-live="polite" aria-atomic="true" data-summary>Ready. Choose a workload and advance one step.</p><ol data-events aria-label="Recent scheduling decisions"></ol></div></div>
+    <p class="model-note">A small teaching model: one user and compatible pool, admission enforced, compressed time. Workload sizes are example requests, not rules attached to task names. Read the real boundaries below.</p>
+  </div>
+</scheduler-explorer>
+<script>
+  import './explorer';
+</script>
+<style>
+  .explorer-intro { font-size: 1.16rem; color: var(--color-fg-muted); }
+  .scheduler-lab { --lab-green: #9dffb8; display: block; width: min(1080px, calc(100vw - 48px)); margin: 36px 0 48px; margin-left: 50%; transform: translateX(-50%); color: #e6f2ee; color-scheme: dark; border: 1px solid #365a46; border-radius: 22px; overflow: hidden; background: #09130f; box-shadow: 0 30px 110px #0004, 0 0 70px #22c55e0a; font-size: 14px; line-height: 1.5; }
+  .lab-heading { padding: 28px 30px 22px; display: flex; justify-content: space-between; align-items: center; gap: 14px; background: radial-gradient(ellipse at 70% 0, #2b5d3338, transparent 65%); }
+  .eyebrow, .map-label, .lab-badge, .section-label > span { font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; color: #b1c5b8; }
+  .eyebrow { color: var(--lab-green); }
+  .scheduler-lab h2 { margin: 8px 0 0; font-family: var(--font-display); font-size: clamp(23px, 4vw, 34px); line-height: 1.2; color: #e6f2ee; }
+  .lab-badge { border: 1px solid #324635; border-radius: 50px; padding: 7px 11px; white-space: nowrap; }
+  .lab-badge i, .green-dot, .purple-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #9dffb8; margin-right: 6px; box-shadow: 0 0 9px #59ff8f; }
+  .purple-dot { background: #c8b7ff; box-shadow: 0 0 9px #b9a3ff; }
+  .scenarios { display: grid; grid-template-columns: repeat(4, 1fr); padding: 0 28px; gap: 8px; }
+  .scheduler-lab button, .scheduler-lab select { font: inherit; font-size: 13px; padding: 9px 12px; border: 1px solid #3b5848; background: #11251a; color: #dcece1; border-radius: 8px; cursor: pointer; transition: background .15s, border-color .15s; }
+  .scheduler-lab button:hover { background: #203d2b; border-color: #84d99a; }
+  .scheduler-lab [tabindex]:focus-visible, .scheduler-lab button:focus-visible, .scheduler-lab select:focus-visible, .scheduler-lab input:focus-visible { outline: 2px solid #c6ffcf; outline-offset: 3px; }
+  .scheduler-lab button:disabled { opacity: .45; cursor: default; }
+  .scenarios button { text-align: left; background: #0d1b14; }
+  .scenarios button span { color: #9dbaaa; margin-right: 7px; font: 11px var(--font-mono); }
+  .scenarios button[aria-pressed='true'] { border-color: #9dffb8; background: #1d3825; color: #b5ffca; box-shadow: inset 0 0 20px #8bffab09; }
+  .scenario-copy { padding: 22px 30px 4px; min-height: 106px; }
+  .scheduler-lab h3 { font: 600 15px var(--font-display); margin: 0 0 8px; color: #e6f2ee; }
+  .scheduler-lab p { margin: 0; }
+  .scenario-copy p { max-width: 850px; color: #adbfaf; font-size: 14px; }
+  .submit-row { display: flex; flex-wrap: wrap; gap: 12px; padding: 16px 30px 22px; }
+  .scheduler-lab .primary { background: #abffbd; border-color: #abffbd; color: #082011; font-weight: 650; }
+  .scheduler-lab .primary:hover { background: #cdffd9; }
+  .task-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+  .task-buttons button span { color: #abffbd; padding-right: 5px; }
+  .task-buttons button[data-kind='instant'] span { color: #c8b7ff; }
+  .system-map { position: relative; background: radial-gradient(ellipse at center, #15362288, #070f0c 70%); border-block: 1px solid #2a4434; }
+  .map-label { display: flex; justify-content: space-between; padding: 17px 25px 0; font-size: 10px; }
+  svg { width: 100%; height: auto; display: block; }
+  svg text { font: 11px var(--font-mono); fill: #c9e3d1; letter-spacing: .04em; }
+  svg .svg-muted { font-size: 10px; fill: #a2c0ae; letter-spacing: 0; }
+  svg .svg-icon { font-size: 32px; fill: #9dffb8; }
+  svg .core-text { font: 700 23px var(--font-display); fill: #cbffdc; }
+  .wires { stroke-dasharray: 5 7; opacity: .55; }
+  .scheduler-lab[data-playing='true'] .wires { animation: flow 2s linear infinite; }
+  @keyframes flow { to { stroke-dashoffset: -48; } }
+  .rack-top { fill: url(#scheduler-top); stroke: #7ccc91; }
+  .rack-front { fill: #10281b; stroke: #50795b; }
+  .rack-side { fill: #0b1d14; stroke: #50795b; }
+  .rack-light { fill: none; stroke: #82ffa3; stroke-width: 3px; filter: drop-shadow(0 0 4px #63ff92); }
+  [data-state='absent'] { opacity: .4; }
+  [data-state='absent'] .rack-light { stroke: #637a6e; filter: none; }
+  [data-state='booting'] .rack-light { stroke: #ffcf86; }
+  .map-caption { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 23px; padding: 0 15px 17px; color: #a9bdaf; font-size: 11px; }
+  .transport { padding: 20px 30px 12px; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
+  .transport > div { display: flex; gap: 7px; }
+  .conditions { display: flex; align-items: center; flex-wrap: wrap; gap: 13px 23px; padding: 0 30px 20px; color: #b2c6b9; font-size: 12px; }
+  .conditions label { display: flex; align-items: center; gap: 7px; }
+  .conditions input { accent-color: #94ffb0; }
+  .conditions select { padding: 4px 10px; }
+  .node-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; padding: 0 30px 22px; }
+  .node-cards :global(.node-card) { background: #0e2017; border: 1px solid #33513e; border-radius: 9px; padding: 12px; }
+  .node-cards :global(.node-card strong) { display: block; font-size: 12px; color: #d9e9df; }
+  .node-cards :global(.node-card small) { color: #b1c9b9; font-size: 11px; }
+  .node-cards :global(.slots) { display: flex; gap: 5px; margin: 10px 0 6px; }
+  .node-cards :global(.slot) { height: 5px; flex: 1; border-radius: 4px; background: #304536; }
+  .node-cards :global(.slot.filled) { background: #9dffb8; box-shadow: 0 0 10px #77ff9150; }
+  .node-cards :global(.instant-card) { border-color: #5d5277; }
+  .readout { display: grid; grid-template-columns: 1.1fr 1fr; border-top: 1px solid #2a4434; }
+  .queue, .decisions { padding: 22px 30px; min-width: 0; }
+  .queue { border-right: 1px solid #2a4434; }
+  .section-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  [data-tasks] { max-height: 225px; overflow-y: auto; scrollbar-color: #486952 #0a1710; }
+  .queue :global(.task) { border-bottom: 1px solid #24382a; padding: 10px 0; }
+  .queue :global(.task-head) { display: flex; gap: 8px; justify-content: space-between; color: #e6f2ee; font-size: 12px; }
+  .queue :global(.task small) { font-size: 11px; display: block; margin-top: 4px; color: #acc3b2; overflow-wrap: anywhere; }
+  .queue :global(.task[data-status='queued'] .task-status) { color: #ffce8b; }
+  .queue :global(.task[data-status='failed'] .task-status) { color: #ffa8a8; }
+  .queue :global(.task[data-status='completed'] .task-status) { color: #a5fdbb; }
+  .empty { padding: 22px 0; color: #a9c0ae; font-size: 13px; }
+  .live-summary { color: #c7ffd6; font-size: 13px; min-height: 60px; }
+  .decisions ol { list-style: none; padding: 0; margin: 12px 0 0; }
+  .decisions :global(li) { color: #a6bfae; border-left: 1px solid #3e654a; padding-left: 12px; margin-bottom: 10px; font-size: 11px; }
+  .scheduler-lab .model-note { color: #a8bdaf; font-size: 11px; padding: 15px 30px; border-top: 1px solid #2a4434; background: #0b1811; }
+  noscript p { padding: 15px 30px; }
+  @media(max-width: 650px) {
+    .scheduler-lab { width: calc(100vw - 24px); border-radius: 14px; }
+    .lab-heading { padding: 20px 16px; }
+    .lab-badge { display: none; }
+    .scenarios { grid-template-columns: 1fr 1fr; padding: 0 16px; gap: 6px; }
+    .scenario-copy { padding: 18px 16px 0; min-height: 142px; }
+    .submit-row { padding: 16px; gap: 9px; }
+    .task-buttons { gap: 5px; }
+    .task-buttons button { padding: 7px 9px; font-size: 12px; }
+    .system-map svg { min-height: 190px; }
+    .map-label { padding: 14px 12px 0; font-size: 8px; }
+    .map-caption { font-size: 9px; gap: 5px 12px; }
+    .transport { padding: 16px 16px 12px; }
+    .conditions { padding: 0 16px 16px; gap: 10px; font-size: 11px; }
+    .node-cards { padding: 0 16px 18px; grid-template-columns: 1fr 1fr; }
+    .readout { grid-template-columns: 1fr; }
+    .queue, .decisions { padding: 18px 16px; }
+    .queue { border-right: 0; border-bottom: 1px solid #2a4434; }
+    .live-summary { min-height: 0; }
+    .scheduler-lab .model-note { padding: 14px 16px; }
+  }
+  @media(prefers-reduced-motion: reduce) { .scheduler-lab .wires { animation: none !important; } .scheduler-lab button { transition: none; } }
+</style>
