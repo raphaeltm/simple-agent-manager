@@ -9,12 +9,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -125,7 +126,14 @@ type DockerContainerStats struct {
 const (
 	defaultDockerStatsMaxContainers = 8
 	defaultDockerCommandMaxBytes    = 64 * 1024
+	defaultDockerCommandWaitDelay   = 500 * time.Millisecond
 )
+
+var dockerCommandSecretPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)[^\s]+`),
+	regexp.MustCompile(`(?i)((?:token|secret|password|credential|api[_-]?key)\s*[=:]\s*)[^\s]+`),
+	regexp.MustCompile(`(?i)([?&](?:access_token|api[_-]?key|token|secret)=)[^&#\s]+`),
+}
 
 type DockerContainerStatsOptions struct {
 	Timeout        time.Duration
@@ -617,7 +625,7 @@ func CollectDockerContainerStatsForLabelsBounded(
 	defer cancel()
 
 	labelTemplate := fmt.Sprintf(
-		`{"id":"{{.ID}}","names":"{{.Names}}","labelValue":{{json (index .Labels %q)}}}`,
+		`{"id":"{{.ID}}","names":"{{.Names}}","labelValue":{{json (.Label %q)}}}`,
 		labelKey,
 	)
 	out, err := dockerCommandOutput(ctx, opts.MaxOutputBytes, "ps", "--filter", "label="+labelKey, "--format", labelTemplate)
@@ -659,36 +667,149 @@ func dockerCommandOutput(ctx context.Context, maxOutputBytes int64, args ...stri
 	if maxOutputBytes <= 0 {
 		maxOutputBytes = defaultDockerCommandMaxBytes
 	}
-	cmd := exec.CommandContext(ctx, container.DockerCLIPath(), args...)
-	stdout, err := cmd.StdoutPipe()
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	stdout := newBoundedCommandOutput(maxOutputBytes, cancel)
+	stderr := newBoundedCommandOutput(maxOutputBytes, cancel)
+	cmd := exec.CommandContext(runCtx, container.DockerCLIPath(), args...)
+	configureDockerCommand(cmd)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	err := cmd.Run()
+	if stdout.exceededLimit() {
+		_ = terminateDockerCommand(cmd)
+		return nil, fmt.Errorf("%s stdout exceeded %d bytes", dockerCommandSummary(args), maxOutputBytes)
+	}
+	if stderr.exceededLimit() {
+		_ = terminateDockerCommand(cmd)
+		return nil, fmt.Errorf("%s stderr exceeded %d bytes", dockerCommandSummary(args), maxOutputBytes)
+	}
 	if err != nil {
-		return nil, err
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	out, readErr := io.ReadAll(io.LimitReader(stdout, maxOutputBytes+1))
-	if int64(len(out)) > maxOutputBytes {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		return nil, fmt.Errorf("docker %s output exceeded %d bytes", strings.Join(args, " "), maxOutputBytes)
-	}
-	waitErr := cmd.Wait()
-	if readErr != nil {
-		return nil, readErr
-	}
-	if waitErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
+			_ = terminateDockerCommand(cmd)
 			return nil, ctxErr
 		}
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("%w: %s", waitErr, msg)
+		if errors.Is(err, exec.ErrWaitDelay) {
+			_ = terminateDockerCommand(cmd)
+			return nil, fmt.Errorf("%s output pipes did not close before wait delay", dockerCommandSummary(args))
 		}
-		return nil, waitErr
+		if msg := sanitizeDockerCommandOutput(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("%w: %s", err, msg)
+		}
+		return nil, err
 	}
-	return out, nil
+	return stdout.Bytes(), nil
+}
+
+type boundedCommandOutput struct {
+	mu         sync.Mutex
+	buf        bytes.Buffer
+	maxBytes   int64
+	exceeded   bool
+	onExceeded func()
+}
+
+func newBoundedCommandOutput(maxBytes int64, onExceeded func()) *boundedCommandOutput {
+	return &boundedCommandOutput{maxBytes: maxBytes, onExceeded: onExceeded}
+}
+
+func (b *boundedCommandOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	remaining := int(b.maxBytes + 1 - int64(b.buf.Len()))
+	if remaining > 0 {
+		if remaining > len(p) {
+			remaining = len(p)
+		}
+		_, _ = b.buf.Write(p[:remaining])
+	}
+	overLimit := int64(b.buf.Len()) > b.maxBytes || remaining < len(p)
+	firstOverLimit := overLimit && !b.exceeded
+	if overLimit {
+		b.exceeded = true
+	}
+	onExceeded := b.onExceeded
+	b.mu.Unlock()
+
+	if firstOverLimit && onExceeded != nil {
+		onExceeded()
+	}
+	return len(p), nil
+}
+
+func (b *boundedCommandOutput) Bytes() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := append([]byte(nil), b.buf.Bytes()...)
+	if int64(len(out)) > b.maxBytes {
+		out = out[:b.maxBytes]
+	}
+	return out
+}
+
+func (b *boundedCommandOutput) String() string {
+	return string(b.Bytes())
+}
+
+func (b *boundedCommandOutput) exceededLimit() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.exceeded
+}
+
+func configureDockerCommand(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return terminateDockerCommand(cmd)
+	}
+	cmd.WaitDelay = defaultDockerCommandWaitDelay
+}
+
+func terminateDockerCommand(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return os.ErrProcessDone
+	}
+	if cmd.SysProcAttr != nil && cmd.SysProcAttr.Setpgid {
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return os.ErrProcessDone
+			}
+			return err
+		}
+		return nil
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		if errors.Is(err, os.ErrProcessDone) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	return nil
+}
+
+func dockerCommandSummary(args []string) string {
+	if len(args) == 0 {
+		return "docker"
+	}
+	switch args[0] {
+	case "ps", "stats", "version":
+		return "docker " + args[0]
+	default:
+		return "docker command"
+	}
+}
+
+func sanitizeDockerCommandOutput(value string) string {
+	value = strings.TrimSpace(value)
+	for _, pattern := range dockerCommandSecretPatterns {
+		value = pattern.ReplaceAllString(value, "${1}[redacted]")
+	}
+	const maxErrorOutputBytes = 2048
+	if len(value) > maxErrorOutputBytes {
+		value = value[:maxErrorOutputBytes] + "...[truncated]"
+	}
+	return value
 }
 
 // collectDocker queries Docker CLI for version and container info.
