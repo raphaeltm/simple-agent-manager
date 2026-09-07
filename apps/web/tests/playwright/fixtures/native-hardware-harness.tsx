@@ -1,22 +1,24 @@
 /** Browser-only harness for the actual shipped components; never routed by the app. */
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router';
-import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { NodeCard } from '../../../src/components/node/NodeCard';
-import { NodeOverviewSection } from '../../../src/components/node/NodeOverviewSection';
-import { WorkspaceCard } from '../../../src/components/WorkspaceCard';
-import { WorkspaceSidebar } from '../../../src/components/WorkspaceSidebar';
-import { SessionHeaderInfrastructure } from '../../../src/components/project-message-view/SessionHeaderInfrastructure';
-import { NodeSection } from '../../../src/pages/ProjectDeploymentEnvironmentDetail';
-import { UserDetail } from '../../../src/pages/AdminComputeUsage';
-import { SettingsComputeUsage } from '../../../src/pages/SettingsComputeUsage';
-import type { ChatSessionResponse } from '../../../src/lib/api';
-import type { DeploymentEnvironment } from '../../../src/lib/api/deployment';
 import '../../../src/app.css';
 import '../../../src/index.css';
 import '../../../src/styles/acp-chat.css';
 import '../../../src/styles/workspace-chrome.css';
+
+import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router';
+
+import { NodeCard } from '../../../src/components/node/NodeCard';
+import { NodeOverviewSection } from '../../../src/components/node/NodeOverviewSection';
+import { SessionHeaderInfrastructure } from '../../../src/components/project-message-view/SessionHeaderInfrastructure';
+import { WorkspaceCard } from '../../../src/components/WorkspaceCard';
+import { WorkspaceSidebar } from '../../../src/components/WorkspaceSidebar';
+import type { ChatSessionResponse } from '../../../src/lib/api';
+import type { DeploymentEnvironment } from '../../../src/lib/api/deployment';
+import { UserDetail } from '../../../src/pages/AdminComputeUsage';
+import { NodeSection } from '../../../src/pages/ProjectDeploymentEnvironmentDetail';
+import { SettingsComputeUsage } from '../../../src/pages/SettingsComputeUsage';
 
 const params = new URLSearchParams(location.search);
 const scenario = params.get('scenario');

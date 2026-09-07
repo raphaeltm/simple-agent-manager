@@ -10,12 +10,11 @@ export type Hardware = Pick<
   | 'providerInstanceDiskGb'
   | 'providerInstanceBootDiskSizeGb'
   | 'providerInstanceArchitecture'
-  | 'cloudProvider'
   | 'observedProviderInstanceType'
   | 'observedProviderInstanceVcpuCount'
   | 'observedProviderInstanceMemoryMb'
   | 'observedProviderInstanceDiskGb'
-> & { vmSize?: string | null };
+> & { vmSize?: string | null; cloudProvider?: string | null };
 
 function amount(value: number | null | undefined, unit: string, divisor = 1): string {
   return typeof value === 'number' && Number.isFinite(value) && value > 0

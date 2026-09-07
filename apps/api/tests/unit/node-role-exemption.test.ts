@@ -231,7 +231,10 @@ describe('task-runner node-steps — node_role filtering', () => {
 describe('workspace creation node quota — node_role filtering', () => {
   it('workspace CRUD node count excludes deployment nodes', async () => {
     const fs = await import('fs');
-    const source = fs.readFileSync(path.join(SRC_DIR, 'routes/workspaces/workspace-create.ts'), 'utf-8');
+    const source = fs.readFileSync(
+      path.join(SRC_DIR, 'routes/workspaces/workspace-create.ts'),
+      'utf-8'
+    );
 
     // The node count for workspace creation quota must filter by nodeRole
     const countSection = source.slice(

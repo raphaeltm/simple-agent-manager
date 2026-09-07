@@ -385,7 +385,6 @@ export function CreateWorkspace() {
         repository: repo,
         branch,
         installationId,
-        ...(!selectedNodeId ? { vmSize: 'medium' } : {}),
         vmLocation: effectiveVmLocation || undefined,
         ...(userReqs && !selectedNodeId ? { resourceRequirements: userReqs } : {}),
         ...(selectedProvider && !selectedNodeId

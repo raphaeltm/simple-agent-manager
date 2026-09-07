@@ -1,6 +1,7 @@
-import { renderHook, waitFor } from '@testing-library/react';
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+
 import { useSessionInfrastructure } from '../../src/components/project-message-view/useSessionInfrastructure';
 const api = vi.hoisted(() => ({ getWorkspace: vi.fn(), getNode: vi.fn() }));
 vi.mock('../../src/lib/api', () => api);

@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
+
+import { expect, test } from '@playwright/test';
 
 test.skip(
   !process.env.NATIVE_HARDWARE_BROWSER_AUDIT,
@@ -186,6 +187,13 @@ for (const surface of surfaces) {
           path: `../../.codex/tmp/playwright-screenshots/native-hardware/${surface}-${scenario}-${testInfo.project.name.startsWith('Desktop') ? 'desktop' : testInfo.project.name.startsWith('Narrow') ? '320' : 'mobile'}.png`,
           fullPage: true,
         });
+        if (surface === 'usage') {
+          const activeNodes = page.getByText('Active Nodes', { exact: true }).locator('..');
+          await activeNodes.scrollIntoViewIfNeeded();
+          await activeNodes.screenshot({
+            path: `../../.codex/tmp/playwright-screenshots/native-hardware/usage-hardware-${scenario}-${testInfo.project.name.startsWith('Desktop') ? 'desktop' : testInfo.project.name.startsWith('Narrow') ? '320' : 'mobile'}.png`,
+          });
+        }
       }
     });
   }

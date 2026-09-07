@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { hardwareRows, requestedResources } from '../../src/components/hardware/HardwareDetails';
 import { parsePlacementDecision } from '../../src/components/hardware/PlacementDecisionSummary';
 
