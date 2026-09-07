@@ -22,28 +22,13 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
 
-vi.mock('@simple-agent-manager/shared', () => ({
-  COMMENT_STATUSES: ['open', 'sent', 'resolved'],
-  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 500,
-  DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,
-  DEFAULT_CHAT_COMPACT_MODE: true,
-  DEFAULT_WORKSPACE_PROFILE: 'full',
-  DEFAULT_DURABLE_PROMPT_DELIVERY_ENABLED: true,
-  DEFAULT_PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED: false,
-  DEFAULT_ACP_LONG_TURN_SUPERVISOR_ENABLED: false,
-  DEFAULT_ACP_LONG_TURN_CHECKPOINT_MS: 18_000_000,
-  DEFAULT_ACP_CHECKPOINT_PREEMPT_GRACE_MS: 30_000,
-  DEFAULT_PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM: 5,
-  DEFAULT_PROMPT_DELIVERY_MAX_ATTEMPTS: 5,
-  DEFAULT_PROMPT_DELIVERY_RETRY_BASE_MS: 5_000,
-  DEFAULT_PROMPT_DELIVERY_RETRY_MAX_MS: 300_000,
-  DEFAULT_PROMPT_DELIVERY_TTL_MS: 3_600_000,
-  DEFAULT_PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS: 30_000,
-  DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS: 5_000,
-  DEFAULT_PROMPT_DELIVERY_MIN_ALARM_DELAY_MS: 1_000,
-  isTaskExecutionStep: () => true,
-  isTaskMode: (v: unknown) => v === 'task' || v === 'conversation',
-}));
+vi.mock('@simple-agent-manager/shared', async (importActual) => {
+  const actual = await importActual<typeof import('@simple-agent-manager/shared')>();
+  return {
+    ...actual,
+    isTaskExecutionStep: () => true,
+  };
+});
 
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),

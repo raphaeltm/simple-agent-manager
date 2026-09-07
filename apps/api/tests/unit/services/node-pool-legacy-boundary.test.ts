@@ -10,6 +10,7 @@ import {
   ALLOCATION_WRITER_INVENTORY,
   type AllocationEntrypointInventoryEntry,
   type AllocationWriterInventoryEntry,
+  findRepoRoot,
   formatBoundaryViolations,
   isLegacyAuthorityScope,
   listRepositorySourceFiles,
@@ -17,7 +18,7 @@ import {
   scanAllocationEntrypoints,
   scanAllocationWriters,
   scanLegacyAuthority,
-  scanRepositoryNodePoolBoundary,
+  type scanRepositoryNodePoolBoundary,
   type SourceFileInput,
   sqlInsertTables,
   validateAllocationEntrypointInventory,
@@ -1104,7 +1105,23 @@ describe('node-pool allocation entrypoints: provisioning beyond INSERT', () => {
 
 let repositoryReport: ReturnType<typeof scanRepositoryNodePoolBoundary> | undefined;
 function currentRepositoryReport() {
-  return (repositoryReport ??= scanRepositoryNodePoolBoundary());
+  // Keep the repository-wide integration audit outside Vitest's V8 coverage
+  // session: instrumenting TypeScript's AST traversal makes this scan exceed
+  // its deadline in the full suite. The synthetic scanner tests above still
+  // run in-process, and this invokes the same scanner over every source file.
+  return (repositoryReport ??= JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        '--input-type=module',
+        '--eval',
+        "import { scanRepositoryNodePoolBoundary } from './scripts/quality/node-pool-boundary.ts'; console.log(JSON.stringify(scanRepositoryNodePoolBoundary()));",
+      ],
+      { cwd: findRepoRoot(), encoding: 'utf8', timeout: 120_000 }
+    )
+  ));
 }
 
 describe('node-pool source discovery', () => {

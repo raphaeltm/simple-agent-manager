@@ -66,16 +66,13 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
 }));
 
-vi.mock('@simple-agent-manager/shared', () => ({
-  COMMENT_STATUSES: ['open', 'sent', 'resolved'],
-  DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT: 5000,
-  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 500,
-  DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,
-  DEFAULT_CHAT_COMPACT_MODE: true,
-  DEFAULT_WORKSPACE_PROFILE: 'full',
-  isTaskExecutionStep: () => true,
-  isTaskMode: (v: unknown) => v === 'task' || v === 'conversation',
-}));
+vi.mock('@simple-agent-manager/shared', async (importActual) => {
+  const actual = await importActual<typeof import('@simple-agent-manager/shared')>();
+  return {
+    ...actual,
+    isTaskExecutionStep: () => true,
+  };
+});
 
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((c: unknown, next: () => Promise<void>) => next()),
