@@ -239,3 +239,111 @@ recovery integration, native resource/effective-pool diagnostics, comprehensive
 compatibility/upgrade gates, documentation, final specialist reviews, and one
 coordinated staging sweep. Every original criterion remains required. The final
 deliverable is one green **open** PR; no merge is authorized by this request.
+
+## E1 boundary-gate checkpoint — 2026-09-07
+
+This checkpoint adds an executable architecture gate for section E without
+checking off section E acceptance. The gate lives in
+`scripts/quality/node-pool-boundary.ts`, is runnable with
+`pnpm quality:node-pool-boundary`, and is exercised by
+`apps/api/tests/unit/services/node-pool-legacy-boundary.test.ts`.
+
+Accepted exclusions are narrow and source-parsed:
+
+- named compatibility modules:
+  `apps/api/src/services/legacy-node-pool-compatibility.ts`,
+  `packages/providers/src/native-vm-config.ts`,
+  `packages/providers/src/instance-offerings.ts`, and
+  `packages/providers/src/types.ts`
+- historical display lines only when the nearby source is explicitly labeled
+  `node-pool-boundary: historical display` or
+  `node-pool-boundary: compatibility estimate`
+- historical migrations and test fixtures are excluded by the scanner roots;
+  injected fixture tests still pass through the real scanner
+- unrelated responsive CSS is excluded by AST identifier matching rather than a
+  broad text scan
+
+Checked allocation writer inventory:
+
+| Table           | Entrypoint                                                         | Role / canonical boundary                                                           |
+| --------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `tasks`         | `apps/api/src/routes/tasks/submit.ts`                              | user task submit route adapter; `resolveTaskStartPlacement` -> `startTaskRunnerDO`  |
+| `tasks`         | `apps/api/src/routes/mcp/dispatch-tool.ts`                         | MCP dispatch adapter; `resolveTaskStartPlacement` -> `startTaskRunnerDO`            |
+| `tasks`         | `apps/api/src/routes/mcp/orchestration-tools.ts`                   | MCP orchestration retry adapter; `resolveTaskStartPlacement` -> `startTaskRunnerDO` |
+| `tasks`         | `apps/api/src/services/trigger-submit.ts`                          | trigger submission adapter; `resolveTaskStartPlacement` -> `startTaskRunnerDO`      |
+| `tasks`         | `apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts`  | SAM session dispatch adapter; `resolveTaskStartPlacement` -> `startTaskRunnerDO`    |
+| `tasks`         | `apps/api/src/durable-objects/sam-session/tools/retry-subtask.ts`  | SAM session retry adapter; `resolveTaskStartPlacement` -> `startTaskRunnerDO`       |
+| `tasks`         | `apps/api/src/services/session-recovery.ts`                        | sleeping wake recovery adapter; `resolveTaskStartPlacement` -> `startTaskRunnerDO`  |
+| `tasks`         | `apps/api/src/routes/workspaces/crud.ts`                           | explicit legacy direct workspace route adapter                                      |
+| `tasks`         | `apps/api/src/routes/tasks/crud.ts`                                | explicit non-running task metadata adapter                                          |
+| `tasks`         | `apps/api/src/routes/chat.ts`                                      | explicit conversation task compatibility adapter                                    |
+| `tasks`         | `apps/api/src/routes/chat-start.ts`                                | explicit conversation-start compatibility adapter                                   |
+| `tasks`         | `apps/api/src/routes/mcp/idea-tools.ts`                            | explicit idea materialization adapter                                               |
+| `tasks`         | `apps/api/src/durable-objects/sam-session/tools/create-idea.ts`    | explicit idea materialization adapter                                               |
+| `tasks`         | `apps/api/src/services/debug-agent.ts`                             | explicit diagnostic adapter                                                         |
+| `tasks`         | `apps/api/src/services/platform-feedback-triage/runner.ts`         | explicit feedback triage adapter                                                    |
+| `tasks`         | `apps/api/src/services/platform-feedback-incidents/user-report.ts` | explicit feedback incident adapter                                                  |
+| `tasks`         | `apps/api/src/services/trial/trial-runner.ts`                      | explicit trial runtime adapter                                                      |
+| `tasks`         | `apps/api/src/services/session-task-repair.ts`                     | explicit repair adapter                                                             |
+| `nodes`         | `apps/api/src/services/nodes.ts`                                   | canonical node row writer: `createNodeRecord`                                       |
+| `workspaces`    | `apps/api/src/services/workspace-placement.ts`                     | canonical final placement writer: `reserveWorkspacePlacement`                       |
+| `workspaces`    | `apps/api/src/routes/workspaces/crud.ts`                           | explicit legacy direct workspace route adapter                                      |
+| `workspaces`    | `apps/api/src/services/instant-session.ts`                         | explicit `cf-container` runtime adapter                                             |
+| `workspaces`    | `apps/api/src/durable-objects/trial-orchestrator/steps.ts`         | explicit trial runtime adapter                                                      |
+| `compute_usage` | `apps/api/src/services/compute-usage.ts`                           | canonical metering writer: `startComputeTracking`                                   |
+
+Remaining upgrade / capability test matrix:
+
+| Scenario                       | Existing tests found                                                                                                                                                                                                                            | Missing before section E can be accepted                                                                                                        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| pre-pool rows                  | `apps/api/tests/unit/db/capacity-pool-migration.test.ts`, `apps/api/tests/integration/workspace-dispatch-race.test.ts`, `packages/shared/tests/unit/resource-defaults.test.ts`                                                                  | end-to-end upgrade fixture proving task/node/workspace row and FK preservation through provider/atomic reservation                              |
+| abstract candidate rows        | `packages/shared/tests/unit/capacity-pool.test.ts`, `apps/api/tests/unit/services/capacity-pools.test.ts`, `apps/api/tests/unit/routes/project-capacity-pools.test.ts`                                                                          | migration-stage fixture for abstract candidate -> native candidate resolution and resumable CAS                                                 |
+| native removal / catalog drift | `packages/providers/tests/unit/provider-native-vm-contract.test.ts`, `packages/providers/tests/unit/instance-offerings.test.ts`, `apps/api/tests/unit/services/runtime-allocation.test.ts`                                                      | fixture proving old native plan survives when a later catalog removes or renames the offering                                                   |
+| old queued plan                | `apps/api/tests/unit/routes/mcp.test.ts`, `apps/api/tests/integration/node-selection.test.ts`, `apps/api/tests/unit/services/trigger-submit-capacity-pools.test.ts`                                                                             | queued-task fixture through actual TaskRunner provider/atomic reservation after pool/settings edits                                             |
+| old agent                      | `apps/api/tests/unit/routes/node-lifecycle-byo.test.ts`, `apps/api/tests/unit/node-callback-scope-enforcement.test.ts`, `apps/api/tests/unit/routes/node-acp-heartbeat.test.ts`                                                                 | capability fixture proving old agent payloads preserve native placement snapshots and do not reintroduce legacy authority                       |
+| sleeping wake                  | `apps/api/tests/unit/services/session-recovery.test.ts`, `apps/api/tests/unit/services/project-data-snapshot-recovery-wake.test.ts`, `apps/api/tests/unit/wake-progress.test.ts`, `apps/api/tests/integration/session-recovery-handoff.test.ts` | sleeping wake through actual provider/atomic reservation with old plan and source-affinity constraints                                          |
+| installation credentials       | `apps/api/tests/workers/composable-credentials-wiring.test.ts`, `apps/api/tests/integration/composable-credentials-routes.test.ts`, `apps/api/tests/unit/resolve-credential-source.test.ts`                                                     | clean installation-only pool fixture through node-pool placement and metering attribution                                                       |
+| personal credentials           | `apps/api/tests/unit/routes/credentials.test.ts`, `apps/api/tests/unit/routes/providers-scopes-real-sql.test.ts`, `apps/api/tests/workers/composable-credentials-wiring.test.ts`                                                                | personal pool fixture with no project override, proving old and native payload parity through placement                                         |
+| multi-member credentials       | `apps/api/tests/unit/services/workspace-runtime-assets-shared-project.test.ts`, `apps/api/tests/unit/services/project-multiplayer.test.ts`                                                                                                      | multi-member project-scoped pool fixture proving shared project resource access, user-scoped node isolation, and correct credential attribution |
+
+E2 remains dependent work: full capability instrumentation, shadow rollout and
+structured difference diagnostics, public/operator documentation, final local
+specialist review evidence, full quality suite, and one coordinated staging
+sweep on the integrated candidate.
+
+Current `pnpm quality:node-pool-boundary` violations at this checkpoint: 76
+legacy-authority findings, no unexpected allocation-writer findings.
+
+- `apps/api/src/durable-objects/task-runner/node-provisioning-admission.ts`:
+  line 63 reads `state.config.vmSize` in provisioning admission diagnostics.
+- `apps/api/src/durable-objects/task-runner/node-provisioning-target.ts`: line
+  15 reads/writes `state.config.vmSize` while adapting a selected candidate.
+- `apps/api/src/durable-objects/task-runner/node-selection.ts`: line 8 imports
+  `canSatisfyVmSize`; lines 295, 296, 503, 525, 526, 566 and 597 read
+  `vmSize`; line 597 calls `canSatisfyVmSize`.
+- `apps/api/src/durable-objects/task-runner/node-steps.ts`: line 9 imports
+  `vmSizeFallbackChain`; lines 185, 250, 313, 314, 322 and 766 read/write
+  `vmSize`; line 535 calls `vmSizeFallbackChain`.
+- `apps/api/src/durable-objects/task-runner/workspace-steps.ts`: lines 227 and
+  388 read `state.config.vmSize` for workspace placement/metering handoff.
+- `apps/api/src/services/compute-usage.ts`: line 8 imports `getVcpuCount`;
+  line 55 calls `getVcpuCount` and reads `input.vmSize`; line 63 stores
+  `serverType` from `input.vmSize`.
+- `apps/api/src/services/deployment-provisioning.ts`: lines 131, 177, 178,
+  239 and 395 read `placement.vmSize` / candidate `vmSize` in deployment
+  placement/provisioning.
+- `apps/api/src/services/node-selector.ts`: line 3 imports
+  `canSatisfyVmSize`; lines 164, 185, 187, 188, 243, 281, 309, 332 and 333
+  read `vmSize`; lines 185 and 281 call `canSatisfyVmSize`.
+- `apps/api/src/services/node-usage.ts`: line 9 imports `getVcpuCount`; line
+  123 includes `vmSize` in the selected node type; lines 156, 233, 275, 312,
+  313, 317, 346 and 350 read `vmSize`; lines 156, 317 and 350 call
+  `getVcpuCount`.
+- `apps/api/src/services/nodes.ts`: lines 272, 298, 527, 674 and 693 read
+  `vmSize` in canonical node/provisioning code.
+- `apps/api/src/services/placement-resolver-capacity.ts`: lines 421, 424 and
+  449 read node `vmSize` as fallback capacity evidence.
+- `apps/api/src/services/placement-resolver.ts`: lines 139, 140, 225 and 526
+  read explicit/profile/project `vmSize` values in the canonical resolver.
+- `apps/api/src/services/workspace-placement.ts`: line 224 writes
+  `input.vmSize` into the workspace placement insert.
