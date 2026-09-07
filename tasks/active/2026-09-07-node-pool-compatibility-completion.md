@@ -239,3 +239,43 @@ recovery integration, native resource/effective-pool diagnostics, comprehensive
 compatibility/upgrade gates, documentation, final specialist reviews, and one
 coordinated staging sweep. Every original criterion remains required. The final
 deliverable is one green **open** PR; no merge is authorized by this request.
+
+## A4 resume checkpoint — 2026-09-07 (branch `sam/resume-failed-pool-reconciliation-qzjgqc`)
+
+Replacement for the terminal A4 task `01M1X7ZB3XMVY1C037FGH1FJZ9` (Codex
+`usageLimitExceeded`). Its final unpublished delta was never committed anywhere — the last
+remote head was `4a21532a5` and the workspace belongs to another host — so the
+role-materialization/coupling work was re-implemented from the two coordination messages
+rather than recovered. Root `eb89a8370` is merged into this branch (`18054bfc3`).
+
+### Disposition of the six independent findings against `4a21532a5`
+
+| # | Finding | Disposition | Implementation | Discriminating proof |
+|---|---------|-------------|----------------|----------------------|
+| 1 | P1 non-atomic membership/policy/revision edit | Fixed | `default-capacity-pool-updates.ts` `publishPoolEditAtomically`: one D1 batch, every statement fenced on the same pre-read `revision`, grouped by target status and chunked under the bind ceiling; read-back on `(revision, updatedAt)` closes the ABA window; losing editors return `conflict` → HTTP 409 | Mid-batch failure rolls back; stale concurrent edit cannot overwrite the winner; both proven red when the fence or the batch is removed |
+| 2 | P2 empty successful API catalog misclassified | Fixed | `Provider.instanceOfferingApiBacked` (Hetzner declares it); `refreshStatusForOfferings` carries transport provenance instead of inferring from members. Empty static lists stay incomplete (fail-safe) | Real `HetznerProvider` + mocked `/server_types` returning `[]`; plus a full credential-backed reconciliation proving prior offerings become `last-known-unavailable` while membership survives |
+| 3 | P2 price-only ranking change kept plan authority | Fixed | Price currency/monthly/hourly added to `capacityCandidateAuthorityGeneration` (`:v2`); new `capacity_pools.selection_digest` (migration **0153**, additive) drives a revision bump from `reconcileDefaultPoolStatus` only when selection-affecting state changed | Identical refresh keeps the revision stable; two comparable offerings swapping cheapest position bumps it |
+| 4 | P2 refresh cleared persisted native config | Fixed | Effective boot disk/image/architecture read from the persisted row and re-published, plus `COALESCE(excluded.…, current)` in both upsert paths | Same-inventory refresh preserves all three fields AND the authority generation |
+| 5 | No-credential-copy invariant | Fixed | `materializeCapacitySourceCredential` removed. The source binds by exact reference (`credential_source` + `cc_credentials:<id>` + `cc_attachments:<id>` + version). A **secret-free** anchor row remains only because migration 0125's shipped `capacity_sources` CHECK requires a non-null `credential_id` and the table is an FK CASCADE parent (rule 31 forbids the rebuild). `scrubCapacitySourceCredentialSecrets` erases previously copied ciphertext and prunes only unreferenced anchors | Canary ciphertext never reaches `credentials`; upgraded copies are scrubbed; the referenced anchor is never deleted and no capacity source is cascaded away |
+| 6 | Bounded/resumable catalog publication | Fixed | Durable per-(pool, source) publication cursor in `platform_settings`, keyed by a digest of the ordered candidate set; missing-offering cleanup requires BOTH a complete catalog and a complete publication. Per-isolate credential-scoped catalog cache (`CAPACITY_POOL_CATALOG_CACHE_TTL_MS`), successful+complete refreshes only | Multi-pass publication with a NEW db handle per pass proves durable resumption; partial passes never mark missing; a failed refresh never marks missing; one provider request per credential per TTL, with a cleared-cache control |
+
+### Deployment workload-role regression (message `01M1XA6V7V35Y51P6R8GJK71QX`)
+
+Reconciliation materialized only `workload_role='workspace'`, so every deployment placement was
+rejected. Reconciliation now materializes a coupled pair per offering: the editor-visible
+`workspace` row keeps the unchanged candidate id (upgrade-safe) and a hidden
+`…#role=deployment` mirror carries the same provider-native identity. Editor surfaces and all
+user-visible counts stay per-offering; `readDefaultPoolSummary`/
+`resolveEffectiveDefaultCapacityPoolSummary` accept `workloadRoles: 'all'` for placement.
+Status edits propagate to the mirror **only** on exact provider-native identity; legacy rows
+with a NULL `provider_instance_type` are addressable by exact id and never fuzzy-coupled.
+`capacity-pool-workload-roles.ts` is the single shared contract C3a's final fence consumes.
+
+### Known non-regressions inherited from the merge base
+
+Three tests already fail at `18054bfc3` (verified by checking that commit out and re-running):
+`capacity-pools.test.ts > maps nullable placement snapshots for legacy rows` and two
+`placement-resolver.test.ts > capacity-aware reusable node resolution` cases, the latter from
+`placement-resolver-capacity.ts:707 selectionCapacityAuthorityGeneration` dereferencing
+`selection.selectionSettings` without a guard. Both files are outside A4's ownership; reported
+to the coordinator rather than edited here.
