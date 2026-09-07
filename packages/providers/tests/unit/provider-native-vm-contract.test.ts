@@ -61,6 +61,31 @@ function normalizeBody(body: unknown): unknown {
   return text ? JSON.parse(text) : undefined;
 }
 
+function mockGcpCreateVm(bodies: unknown[], machineType = 'native-exact-type'): void {
+  globalThis.fetch = vi.fn(async (input, init = {}) => {
+    const url = String(input);
+    if (url.endsWith('/global/firewalls') && init.method === 'POST') {
+      return json({ error: { code: 409, message: 'already exists' } }, 409);
+    }
+    if (url.endsWith('/instances') && init.method === 'POST') {
+      bodies.push(normalizeBody(init.body));
+      return json({ name: 'operation-1', status: 'PENDING' });
+    }
+    if (url.includes('/operations/')) return json({ name: 'operation-1', status: 'DONE' });
+    if (url.includes('/instances/sam-native-node')) {
+      return json({
+        id: 'instance-1',
+        name: 'sam-native-node',
+        status: 'RUNNING',
+        machineType: `zones/us-central1-a/machineTypes/${machineType}`,
+        creationTimestamp: '2026-09-07T00:00:00Z',
+        networkInterfaces: [{ accessConfigs: [{ natIP: '203.0.113.10' }] }],
+      });
+    }
+    throw new Error(`Unexpected request ${url}`);
+  }) as typeof fetch;
+}
+
 describe('provider native VM request contracts', () => {
   it('Hetzner uses native server_type and ignores contradictory legacy size', async () => {
     const bodies: unknown[] = [];
@@ -474,6 +499,76 @@ describe('provider native VM request contracts', () => {
     );
   });
 
+  it.each([
+    {
+      name: 'matching legacy-mapped top-level instanceType without size',
+      config: { instanceType: 'e2-medium' },
+    },
+    {
+      name: 'matching legacy-mapped top-level instanceType with conflicting size',
+      config: { size: 'large' as VMConfig['size'], instanceType: 'e2-medium' },
+    },
+    {
+      name: 'arbitrary top-level instanceType without size',
+      config: { instanceType: 'c4-standard-7' },
+    },
+    {
+      name: 'arbitrary top-level instanceType with conflicting size',
+      config: { size: 'small' as VMConfig['size'], instanceType: 'c4-standard-7' },
+    },
+  ])('GCP keeps provider disk defaults for $name', async ({ config }) => {
+    const bodies: unknown[] = [];
+    mockGcpCreateVm(bodies, config.instanceType);
+
+    const provider = new GcpProvider(
+      'project',
+      async () => 'token',
+      'us-central1-a',
+      'ubuntu-2404-lts-amd64',
+      'ubuntu-os-cloud',
+      200
+    );
+    await provider.createVM({
+      name: 'sam-native-node',
+      location: 'us-central1-a',
+      userData: '#cloud-config\n',
+      ...config,
+    });
+
+    const body = bodies[0] as {
+      machineType: string;
+      disks: Array<{ initializeParams: { diskSizeGb: string } }>;
+    };
+    expect(body.machineType).toContain(`/machineTypes/${config.instanceType}`);
+    expect(body.disks[0]?.initializeParams.diskSizeGb).toBe('200');
+  });
+
+  it('GCP keeps explicit native boot disk authoritative over provider defaults', async () => {
+    const bodies: unknown[] = [];
+    mockGcpCreateVm(bodies, 'c4-standard-7');
+
+    const provider = new GcpProvider(
+      'project',
+      async () => 'token',
+      'us-central1-a',
+      'ubuntu-2404-lts-amd64',
+      'ubuntu-os-cloud',
+      200
+    );
+    await provider.createVM({
+      ...nativeConfig('small'),
+      location: 'us-central1-a',
+      native: {
+        instanceType: 'c4-standard-7',
+        bootDiskSizeGb: 96,
+        resources: { vcpuCount: 7, memoryMb: 14_336, diskGb: 96 },
+      },
+    });
+
+    const body = bodies[0] as { disks: Array<{ initializeParams: { diskSizeGb: string } }> };
+    expect(body.disks[0]?.initializeParams.diskSizeGb).toBe('96');
+  });
+
   it('GCP resolves configured image family names and native family references', async () => {
     const bodies: unknown[] = [];
     globalThis.fetch = vi.fn(async (input, init = {}) => {
@@ -513,6 +608,87 @@ describe('provider native VM request contracts', () => {
     expect(body.disks[0]?.initializeParams.sourceImage).toBe(
       'projects/ubuntu-os-cloud/global/images/family/debian-12'
     );
+  });
+
+  it.each([
+    {
+      image: 'ubuntu-2404-lts-amd64',
+      expected: 'projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64',
+    },
+    {
+      image: 'family/debian-12',
+      expected: 'projects/ubuntu-os-cloud/global/images/family/debian-12',
+    },
+    {
+      image: 'images/custom-image',
+      expected: 'projects/ubuntu-os-cloud/global/images/custom-image',
+    },
+    {
+      image: 'global/images/custom-image',
+      expected: 'global/images/custom-image',
+    },
+    {
+      image: 'global/images/family/custom-family',
+      expected: 'global/images/family/custom-family',
+    },
+    {
+      image: 'projects/custom-images/global/images/custom-image',
+      expected: 'projects/custom-images/global/images/custom-image',
+    },
+    {
+      image: 'projects/custom-images/global/images/family/custom-family',
+      expected: 'projects/custom-images/global/images/family/custom-family',
+    },
+    {
+      image: 'https://www.googleapis.com/compute/v1/projects/custom-images/global/images/custom-image',
+      expected: 'https://www.googleapis.com/compute/v1/projects/custom-images/global/images/custom-image',
+    },
+    {
+      image: 'https://compute.googleapis.com/compute/v1/projects/custom-images/global/images/family/custom-family',
+      expected: 'https://compute.googleapis.com/compute/v1/projects/custom-images/global/images/family/custom-family',
+    },
+  ])('GCP normalizes image reference $image', async ({ image, expected }) => {
+    const bodies: unknown[] = [];
+    mockGcpCreateVm(bodies);
+
+    const provider = new GcpProvider('project', async () => 'token', 'us-central1-a');
+    await provider.createVM({
+      ...nativeOnlyConfig({
+        instanceType: 'native-exact-type',
+        bootDiskSizeGb: 64,
+        image,
+        resources: { vcpuCount: 2, memoryMb: 4096, diskGb: 64 },
+      }),
+      location: 'us-central1-a',
+    });
+
+    const body = bodies[0] as { disks: Array<{ initializeParams: { sourceImage: string } }> };
+    expect(body.disks[0]?.initializeParams.sourceImage).toBe(expected);
+  });
+
+  it.each([
+    'images/custom-image/extra',
+    'family/debian-12/extra',
+    'global/family/debian-12',
+    'projects/custom-images/zones/us-central1-a/images/custom-image',
+    'https://example.com/compute/v1/projects/custom-images/global/images/custom-image',
+  ])('GCP rejects malformed image reference %s', async (image) => {
+    const bodies: unknown[] = [];
+    mockGcpCreateVm(bodies);
+
+    const provider = new GcpProvider('project', async () => 'token', 'us-central1-a');
+    await expect(
+      provider.createVM({
+        ...nativeOnlyConfig({
+          instanceType: 'native-exact-type',
+          bootDiskSizeGb: 64,
+          image,
+          resources: { vcpuCount: 2, memoryMb: 4096, diskGb: 64 },
+        }),
+        location: 'us-central1-a',
+      })
+    ).rejects.toThrow('GCP image must be an image family name or a Compute Engine image/family reference');
+    expect(bodies).toEqual([]);
   });
 
   it('Infomaniak resolves native flavor names without legacy size authority', async () => {

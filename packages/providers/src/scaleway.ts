@@ -187,7 +187,7 @@ export class ScalewayProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: this.imageName,
     });
-    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
+    assertIncludedBootDiskCapacity(this.name, nativeConfig);
 
     // Resolve image UUID by name for the target zone
     const imageId = await this.resolveImageId(

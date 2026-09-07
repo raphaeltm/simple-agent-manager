@@ -114,12 +114,11 @@ export function topLevelInstanceTypeToNativeVMConfig(
 
 export function assertIncludedBootDiskCapacity(
   providerName: string,
-  config: Pick<ResolvedNativeVMConfig, 'instanceType' | 'bootDiskSizeGb' | 'resources'>,
-  legacySizes: Readonly<Record<string, SizeConfig>>
+  config: Pick<ResolvedNativeVMConfig, 'instanceType' | 'bootDiskSizeGb' | 'resources'>
 ): void {
   if (config.bootDiskSizeGb === undefined) return;
 
-  const includedDiskGb = resolveIncludedDiskGb(config, legacySizes);
+  const includedDiskGb = resolveIncludedDiskGb(config);
   if (includedDiskGb === undefined) {
     throw new ProviderError(
       providerName,
@@ -218,7 +217,7 @@ function normalizeNativeVMConfig(
   }
 
   const bootDiskSizeGb =
-    source === 'legacy-size' &&
+    source !== 'native' &&
     options.legacyBootDiskSizeAuthority === 'provider-default' &&
     options.defaultBootDiskSizeGb !== undefined
       ? options.defaultBootDiskSizeGb
@@ -267,15 +266,10 @@ function validateResources(resources: VMHardwareResources, providerName: string)
 }
 
 function resolveIncludedDiskGb(
-  config: Pick<ResolvedNativeVMConfig, 'instanceType' | 'resources'>,
-  legacySizes: Readonly<Record<string, SizeConfig>>
+  config: Pick<ResolvedNativeVMConfig, 'resources'>
 ): number | undefined {
   if (config.resources?.diskGb !== undefined) return config.resources.diskGb;
-
-  const matchedLegacySize = Object.values(legacySizes).find((sizeConfig) => {
-    return sizeConfig.type === config.instanceType;
-  });
-  return matchedLegacySize?.storageGb;
+  return undefined;
 }
 
 function validateImageArchitecture(

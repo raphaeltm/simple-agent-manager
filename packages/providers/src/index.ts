@@ -11,6 +11,7 @@ import { VultrProvider } from './vultr';
 // Re-export types
 export {
   assertBootDiskSizeGb,
+  assertIncludedBootDiskCapacity,
   legacySizeToNativeVMConfig,
   type NativeVMResolveOptions,
   observedHardware,

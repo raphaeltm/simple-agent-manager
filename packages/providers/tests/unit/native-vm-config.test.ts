@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { SizeConfig, VMConfig } from '../../src';
 import {
+  assertIncludedBootDiskCapacity,
   legacySizeToNativeVMConfig,
   ProviderError,
   resolveVMConfigWithLegacySizeAdapter,
@@ -44,6 +45,23 @@ describe('native VM config resolver', () => {
     expect(resolved.resources).toEqual({ vcpuCount: 1, memoryMb: 2048, diskGb: 20 });
   });
 
+  it('applies provider default boot disk sizing to top-level instanceType compatibility callers', () => {
+    const resolved = resolveVMConfigWithLegacySizeAdapter(
+      { ...baseConfig, size: 'large', instanceType: 'legacy-small' },
+      {
+        providerName: 'gcp',
+        defaultLocation: 'region-default',
+        legacySizes,
+        defaultBootDiskSizeGb: 200,
+        legacyBootDiskSizeAuthority: 'provider-default',
+      }
+    );
+
+    expect(resolved.instanceType).toBe('legacy-small');
+    expect(resolved.bootDiskSizeGb).toBe(200);
+    expect(resolved.resources).toEqual({ vcpuCount: 1, memoryMb: 2048, diskGb: 20 });
+  });
+
   it('lets exact native configuration work without a legacy size', () => {
     const resolved = resolveVMConfigWithLegacySizeAdapter(
       {
@@ -76,6 +94,26 @@ describe('native VM config resolver', () => {
         native: { instanceType: 'provider-exact-42', bootDiskSizeGb: 64 },
       } as VMConfig,
       { providerName: 'test', defaultLocation: 'region-default', legacySizes }
+    );
+
+    expect(resolved.instanceType).toBe('provider-exact-42');
+    expect(resolved.bootDiskSizeGb).toBe(64);
+  });
+
+  it('keeps explicit native boot disk sizing authoritative over provider default overrides', () => {
+    const resolved = resolveVMConfigWithLegacySizeAdapter(
+      {
+        ...baseConfig,
+        size: 'small',
+        native: { instanceType: 'provider-exact-42', bootDiskSizeGb: 64 },
+      },
+      {
+        providerName: 'gcp',
+        defaultLocation: 'region-default',
+        legacySizes,
+        defaultBootDiskSizeGb: 200,
+        legacyBootDiskSizeAuthority: 'provider-default',
+      }
     );
 
     expect(resolved.instanceType).toBe('provider-exact-42');
@@ -134,5 +172,59 @@ describe('native VM config resolver', () => {
         { providerName: 'test', defaultLocation: 'region-default', legacySizes }
       )
     ).toThrow('native.resources.vcpuCount');
+  });
+
+  it('validates fixed-root native boot disk requests only from concrete resource metadata', () => {
+    const nativeRequest = {
+      ...baseConfig,
+      native: { instanceType: 'example-type', bootDiskSizeGb: 80 },
+    };
+    const legacyWithSmallDisk: Readonly<Record<string, SizeConfig>> = {
+      ...legacySizes,
+      small: { ...legacySizes.small!, type: 'example-type', storageGb: 40 },
+    };
+    const legacyWithLargeDisk: Readonly<Record<string, SizeConfig>> = {
+      ...legacySizes,
+      small: { ...legacySizes.small!, type: 'example-type', storageGb: 160 },
+    };
+
+    for (const sizes of [legacyWithSmallDisk, legacyWithLargeDisk, {}]) {
+      const resolved = resolveVMConfigWithLegacySizeAdapter(nativeRequest, {
+        providerName: 'fixed-root',
+        defaultLocation: 'region-default',
+        legacySizes: sizes,
+      });
+
+      expect(() => assertIncludedBootDiskCapacity('fixed-root', resolved)).toThrow(
+        'does not expose included root disk capacity'
+      );
+    }
+
+    const resolvedWithConcreteMetadata = resolveVMConfigWithLegacySizeAdapter(
+      {
+        ...baseConfig,
+        native: {
+          instanceType: 'example-type',
+          bootDiskSizeGb: 80,
+          resources: { vcpuCount: 2, memoryMb: 4096, diskGb: 80 },
+        },
+      },
+      {
+        providerName: 'fixed-root',
+        defaultLocation: 'region-default',
+        legacySizes: legacyWithSmallDisk,
+      }
+    );
+    expect(() =>
+      assertIncludedBootDiskCapacity('fixed-root', resolvedWithConcreteMetadata)
+    ).not.toThrow();
+
+    const oversized = {
+      ...resolvedWithConcreteMetadata,
+      bootDiskSizeGb: 81,
+    };
+    expect(() => assertIncludedBootDiskCapacity('fixed-root', oversized)).toThrow(
+      'includes 80GB root disk'
+    );
   });
 });

@@ -140,7 +140,7 @@ export class HetznerProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: DEFAULT_HETZNER_IMAGE,
     });
-    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
+    assertIncludedBootDiskCapacity(this.name, nativeConfig);
 
     const deadline = Date.now() + this.capacityRetryBudgetMs;
     let lastCapacityError: ProviderError | undefined;

@@ -125,7 +125,7 @@ export class VultrProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: this.osName,
     });
-    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
+    assertIncludedBootDiskCapacity(this.name, nativeConfig);
     const osId = await this.resolveOsId(nativeConfig.image, nativeConfig.architecture, context);
     throwIfProviderRequestAborted(context);
 

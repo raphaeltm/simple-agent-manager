@@ -812,18 +812,22 @@ function resolveGcpSourceImage(image: string, imageProject: string): string {
   const trimmed = image.trim();
   const projectScopedImageRef = /^projects\/[^/]+\/global\/images\/(?:family\/)?[^/]+$/;
   const globalImageRef = /^global\/images\/(?:family\/)?[^/]+$/;
-  const shortImageRef = /^(?:family|images)\/[^/]+$/;
+  const shortFamilyRef = /^family\/[^/]+$/;
+  const shortImageRef = /^images\/[^/]+$/;
   const familyName = /^[a-z]([-a-z0-9]*[a-z0-9])?$/;
 
   if (
-    /^https:\/\/(?:www\.)?googleapis\.com\/compute\/v1\/projects\/[^/]+\/global\/images\/(?:family\/)?[^/]+$/.test(
+    /^https:\/\/(?:(?:www|compute)\.)googleapis\.com\/compute\/v1\/projects\/[^/]+\/global\/images\/(?:family\/)?[^/]+$/.test(
       trimmed
     )
   ) {
     return trimmed;
   }
   if (projectScopedImageRef.test(trimmed) || globalImageRef.test(trimmed)) return trimmed;
-  if (shortImageRef.test(trimmed)) return `projects/${imageProject}/global/images/${trimmed}`;
+  if (shortFamilyRef.test(trimmed)) return `projects/${imageProject}/global/images/${trimmed}`;
+  if (shortImageRef.test(trimmed)) {
+    return `projects/${imageProject}/global/${trimmed}`;
+  }
   if (familyName.test(trimmed)) return `projects/${imageProject}/global/images/family/${trimmed}`;
 
   throw new ProviderError(

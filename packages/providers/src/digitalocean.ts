@@ -146,7 +146,7 @@ export class DigitalOceanProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: this.image,
     });
-    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
+    assertIncludedBootDiskCapacity(this.name, nativeConfig);
 
     const response = await this.doFetch(
       '/droplets',

@@ -430,7 +430,7 @@ export class InfomaniakProvider implements Provider {
       legacySizes: this.sizes,
       defaultImage: this.imageName,
     });
-    assertIncludedBootDiskCapacity(this.name, nativeConfig, this.sizes);
+    assertIncludedBootDiskCapacity(this.name, nativeConfig);
     if (nativeConfig.location !== this.region)
       throw new ProviderError(
         'infomaniak',
