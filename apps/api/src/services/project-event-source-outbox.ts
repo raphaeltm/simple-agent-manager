@@ -5,22 +5,22 @@ import { createModuleLogger } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import * as projectDataService from './project-data';
 import {
+  assertProjectEventSourceOutboxCaptureMatchesInput,
   PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES,
   PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES,
-  assertProjectEventSourceOutboxCaptureMatchesInput,
   type ProjectEventSourceAdmissionResult,
   ProjectEventSourceAdmissionTimeoutError,
   type ProjectEventSourceAdmissionTiming,
   type ProjectEventSourceOutboxActiveState,
   type ProjectEventSourceOutboxConfig,
   type ProjectEventSourceOutboxInsertOptions,
+  projectEventSourceOutboxInsertValues,
   type ProjectEventSourceOutboxIntent,
+  projectEventSourceOutboxReplayConflict,
   type ProjectEventSourceOutboxState,
   type ProjectEventSourceOutboxStats,
   type ProjectEventSourceOutboxSupersedeInput,
   type ProjectEventSourceOutboxTerminalState,
-  projectEventSourceOutboxInsertValues,
-  projectEventSourceOutboxReplayConflict,
   resolveProjectEventSourceOutboxConfig,
 } from './project-event-source-outbox-contract';
 
