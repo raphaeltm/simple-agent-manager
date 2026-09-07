@@ -62,10 +62,10 @@ A owns append-only DO migration IDs in wave one. B reserves D1 migration 0144 if
 
 ### C. Credential-limit awareness
 
-- [x] Trace credential selection through VM and container/harness/proxy boundaries. Attach limit observations to the credential/account actually used, never merely a provider/profile label or caller-supplied credential ID.
-- [x] Implement a real authenticated telemetry-to-event path using supported provider/harness limit evidence. Include window, reset, source, observation time and freshness; unsupported telemetry is explicitly unknown.
-- [x] Emit warning/critical/rejected/reset transitions with stable identity and duplicate suppression. Keep raw per-token/sampling streams outside ProjectData event storage; bound state retention and retries.
-- [x] Restrict visibility to affected authorized projects/sessions, redact secrets, and test identity forgery, project isolation, stale/out-of-order samples and repeated threshold crossings.
+- [ ] Trace credential selection through VM and container/harness/proxy boundaries. Attach limit observations to the credential/account actually used, never merely a provider/profile label or caller-supplied credential ID.
+- [ ] Implement a real authenticated telemetry-to-event path using supported provider/harness limit evidence. Include window, reset, source, observation time and freshness; unsupported telemetry is explicitly unknown.
+- [ ] Emit warning/critical/rejected/reset transitions with stable identity and duplicate suppression. Keep raw per-token/sampling streams outside ProjectData event storage; bound state retention and retries.
+- [ ] Restrict visibility to affected authorized projects/sessions, redact secrets, and test identity forgery, project isolation, stale/out-of-order samples and repeated threshold crossings.
 
 ### D. One-off schedules and standing watches
 
