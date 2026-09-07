@@ -36,6 +36,8 @@ The request must use `Content-Type: application/json`, and the top-level value m
 
 Successful admission returns HTTP `202`. The response indicates whether the delivery created an execution, was filtered, was a duplicate, or was skipped by trigger policy. Invalid credentials return a uniform `404`; overload protection can return `429`, and a durable submission failure returns `503`.
 
+After authentication and delivery reservation, SAM also records a canonical ProjectData event under source `webhook` with event types such as `webhook.accepted`, `webhook.filtered`, `webhook.still_running`, `webhook.concurrent_limit`, and `webhook.inactive`. The event subject is the webhook trigger ID. Metadata includes the delivery ID, trigger identity, optional source label, linked execution ID when one exists, selected safe headers, and a bounded copy of the JSON body with common secret-keyed fields redacted. If immediate ProjectData admission fails, a bounded D1 source intent retries later under the same delivery key instead of resubmitting the task.
+
 ## Template Context
 
 Webhook templates can interpolate:
@@ -72,7 +74,7 @@ Only explicitly configured headers are copied into template context. SAM rejects
 
 Tokens contain 32 random bytes and use the `sam_wh_` prefix. SAM stores a keyed hash, never the raw token. Rotating a credential invalidates the previous token immediately and shows the replacement once.
 
-SAM does not retain raw request bodies, arbitrary request headers, bearer tokens, idempotency keys, or rendered prompts in webhook delivery history. The audit contains outcome, HTTP status, byte count, timestamps, and linked execution/error identifiers. Audit records expire automatically; the default retention is seven days.
+SAM does not retain raw request bodies, arbitrary request headers, bearer tokens, idempotency keys, or rendered prompts in webhook delivery history. The audit contains outcome, HTTP status, byte count, timestamps, and linked execution/error identifiers. Canonical ProjectData webhook events retain only bounded, redacted facts for subscription matching and delivery. Audit records expire automatically; the default retention is seven days.
 
 Disabling or pausing a trigger prevents new webhook work. Best-effort IP and per-trigger request damping reduces bursts; because Cloudflare KV counters are eventually consistent, it is not a strict distributed quota. The shared trigger admission path enforces skip-if-running, concurrency, durable execution reservation, failure tracking, and task submission for cron, GitHub, webhook, and manual sources.
 

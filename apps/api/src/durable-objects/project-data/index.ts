@@ -105,6 +105,45 @@ export class ProjectData extends DurableObject<Env> {
     return this.cachedProjectId;
   }
 
+  private runSessionCreatedHooks(input: {
+    id: string;
+    workspaceId: string | null;
+    taskId: string | null;
+    createdByUserId: string | null;
+    topic: string | null;
+    now: number;
+  }): void {
+    if (input.workspaceId) {
+      this.recalculateAlarm().catch((err) =>
+        log.warn('schedule_workspace_idle_alarm_failed', {
+          workspaceId: input.workspaceId,
+          ...serializeError(err),
+        })
+      );
+    }
+    activity.recordActivityEventInternal(
+      this.sql,
+      'session.started',
+      input.createdByUserId ? 'user' : 'system',
+      input.createdByUserId,
+      input.workspaceId,
+      input.id,
+      input.taskId,
+      null
+    );
+    this.scheduleSummarySync();
+    this.broadcastEvent('session.created', {
+      id: input.id,
+      workspaceId: input.workspaceId,
+      taskId: input.taskId,
+      createdByUserId: input.createdByUserId,
+      topic: input.topic,
+      status: 'active',
+      messageCount: 0,
+      createdAt: input.now,
+    });
+  }
+
   /**
    * Persist this DO's projectId so it can identify itself with no inbound RPC.
    *
@@ -163,33 +202,78 @@ export class ProjectData extends DurableObject<Env> {
       taskId,
       createdByUserId
     );
-    if (workspaceId) {
-      this.recalculateAlarm().catch((err) =>
-        log.warn('schedule_workspace_idle_alarm_failed', { workspaceId, ...serializeError(err) })
+    this.runSessionCreatedHooks({ id, workspaceId, taskId, createdByUserId, topic, now });
+    return id;
+  }
+
+  async createReservedTaskSessionWithInitialMessage(
+    input: sessions.CreateReservedTaskSessionWithInitialMessageInput
+  ): Promise<sessions.CreateReservedTaskSessionWithInitialMessageResult> {
+    let created: {
+      session: sessions.CreateReservedTaskSessionResult;
+      message: ReturnType<typeof messages.persistMessage>;
+    } | null = null;
+    try {
+      created = this.ctx.storage.transactionSync(() => {
+        const session = sessions.createReservedTaskSession(this.sql, this.env, input);
+        const message = messages.persistMessage(
+          this.sql,
+          this.env,
+          input.sessionId,
+          input.initialMessageRole,
+          input.initialMessageContent,
+          input.initialMessageToolMetadata,
+          input.initialMessageId
+        );
+        return { session, message };
+      });
+    } catch (error) {
+      if (error instanceof sessions.ReservedTaskSessionConflictError) {
+        return {
+          outcome: 'conflict',
+          reason: error.reason,
+          message: error.message,
+        };
+      }
+      if (error instanceof Error && error.message.includes('already belongs to a different')) {
+        return {
+          outcome: 'conflict',
+          reason: 'initial_message_conflict',
+          message: error.message,
+        };
+      }
+      throw error;
+    }
+
+    if (created.session.inserted) {
+      this.runSessionCreatedHooks({
+        id: input.sessionId,
+        workspaceId: input.workspaceId,
+        taskId: input.taskId,
+        createdByUserId: input.createdByUserId,
+        topic: input.topic,
+        now: created.session.now,
+      });
+    }
+    if (created.message.inserted) {
+      await messagePersistence.runPersistedMessageSideEffects(
+        this.sql,
+        this.env,
+        this.messagePersistenceHooks(),
+        input.sessionId,
+        input.initialMessageRole,
+        input.initialMessageContent,
+        created.message
       );
     }
-    activity.recordActivityEventInternal(
-      this.sql,
-      'session.started',
-      createdByUserId ? 'user' : 'system',
-      createdByUserId,
-      workspaceId,
-      id,
-      taskId,
-      null
-    );
-    this.scheduleSummarySync();
-    this.broadcastEvent('session.created', {
-      id,
-      workspaceId,
-      taskId,
-      createdByUserId,
-      topic,
-      status: 'active',
-      messageCount: 0,
-      createdAt: now,
-    });
-    return id;
+
+    return {
+      outcome: 'created',
+      sessionId: input.sessionId,
+      initialMessageId: input.initialMessageId,
+      sessionInserted: created.session.inserted,
+      initialMessageInserted: created.message.inserted,
+    };
   }
   async linkSessionToTask(sessionId: string, taskId: string): Promise<boolean> {
     const updated = sessions.linkSessionToTask(this.sql, sessionId, taskId);
@@ -930,18 +1014,32 @@ export class ProjectData extends DurableObject<Env> {
     input: projectEvents.AdmitProjectEventInput
   ): projectEvents.ProjectEventAdmissionResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       projectEvents.admitProjectEvent(this.sql, this.env, this.getProjectId(), input)
     );
+    this.recalculateAlarm().catch((err) =>
+      log.warn('schedule_project_event_alarm_failed', {
+        projectId: input.projectId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+    return result;
   }
 
   createProjectEventSubscription(
     input: projectEvents.CreateProjectEventSubscriptionInput
   ): projectEvents.ProjectEventSubscriptionMutationResult {
     this.ensureProjectId(input.projectId);
-    return this.ctx.storage.transactionSync(() =>
+    const result = this.ctx.storage.transactionSync(() =>
       projectEvents.createProjectEventSubscription(this.sql, this.env, this.getProjectId(), input)
     );
+    this.recalculateAlarm().catch((err) =>
+      log.warn('schedule_project_event_subscription_alarm_failed', {
+        projectId: input.projectId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+    return result;
   }
 
   listProjectEventSubscriptions(
@@ -1626,138 +1724,200 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  private async runProjectEventWakeMaterializationAlarm(): Promise<void> {
+    const result = this.ctx.storage.transactionSync(() =>
+      projectEvents.runProjectEventWakeMaterializationBatch(this.sql, this.env, this.getProjectId())
+    );
+    for (const item of result.accepted) {
+      await durability.finalizeAcceptedPromptDelivery(
+        this.sql,
+        this.env,
+        this.durabilityHooks(),
+        item.input,
+        item.accepted
+      );
+    }
+  }
+
+  private runProjectEventRetentionAlarm(): void {
+    const projectId = this.getProjectId();
+    if (!projectId) return;
+    if (!projectEvents.isProjectEventRetentionDue(this.sql, this.env, projectId)) return;
+    this.ctx.storage.transactionSync(() =>
+      projectEvents.runProjectEventRetention(this.sql, this.env, this.getProjectId(), {
+        projectId,
+        refreshAccounting: false,
+      })
+    );
+  }
+
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectData')) return;
-
-    const timedOut = await checkRuntimeHeartbeatTimeouts(
-      this.sql,
-      this.env,
-      this.transitionAcpSession.bind(this),
-      this.getProjectId()
-    );
-
-    await stopTimedOutConversationWorkspaces(this.env, timedOut);
-
-    // Storage safety is the DO quota firebreak. Run it before the heavier
-    // lifecycle maintenance sections so a large project can still reclaim bytes
-    // even when idle/reconciliation work has accumulated.
     try {
-      await this.runStorageSafetyAlarmLocked();
-    } catch (err) {
-      log.error('alarm.storage_safety_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    await idleCleanup.checkWorkspaceIdleTimeouts(
-      this.sql,
-      this.env,
-      this.getProjectId(),
-      (workspaceId, projectId) =>
-        idleCleanup.deleteWorkspaceInD1(this.env.DATABASE, workspaceId, projectId),
-      (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-      () => this.scheduleSummarySync()
-    );
-    await idleCleanup.processExpiredCleanups(
-      this.sql,
-      this.env,
-      this.getProjectId(),
-      async (workspaceId, projectId) => {
-        await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId, projectId);
-        // Schedule automatic deletion after TTL (best-effort)
-        try {
-          const workerEnv = this.env as unknown as import('../../env').Env;
-          const wsRow = await workerEnv.DATABASE.prepare(
-            'SELECT node_id, user_id FROM workspaces WHERE id = ? AND project_id = ?'
-          )
-            .bind(workspaceId, projectId)
-            .first<{ node_id: string | null; user_id: string }>();
-          if (wsRow?.node_id) {
-            const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
-            const stub = workerEnv.NODE_LIFECYCLE.get(doId);
-            await (
-              stub as unknown as import('../node-lifecycle').NodeLifecycle
-            ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
-          }
-        } catch {
-          // Best-effort — cron safety-net will catch it
-        }
-      },
-      (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-      () => this.scheduleSummarySync()
-    );
-
-    // Task-mode reconciliation: check-in on idle task agents
-    try {
-      await reconciliation.processReconciliationCandidates(
+      const timedOut = await checkRuntimeHeartbeatTimeouts(
         this.sql,
         this.env,
+        this.transitionAcpSession.bind(this),
+        this.getProjectId()
+      );
+
+      await stopTimedOutConversationWorkspaces(this.env, timedOut);
+
+      // Storage safety is the DO quota firebreak. Run it before the heavier
+      // lifecycle maintenance sections so a large project can still reclaim bytes
+      // even when idle/reconciliation work has accumulated.
+      try {
+        await this.runStorageSafetyAlarmLocked();
+      } catch (err) {
+        log.error('alarm.storage_safety_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      await idleCleanup.checkWorkspaceIdleTimeouts(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        (workspaceId, projectId) =>
+          idleCleanup.deleteWorkspaceInD1(this.env.DATABASE, workspaceId, projectId),
         (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+        () => this.scheduleSummarySync()
+      );
+      await idleCleanup.processExpiredCleanups(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        async (workspaceId, projectId) => {
+          await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId, projectId);
+          // Schedule automatic deletion after TTL (best-effort)
+          try {
+            const workerEnv = this.env as unknown as import('../../env').Env;
+            const wsRow = await workerEnv.DATABASE.prepare(
+              'SELECT node_id, user_id FROM workspaces WHERE id = ? AND project_id = ?'
+            )
+              .bind(workspaceId, projectId)
+              .first<{ node_id: string | null; user_id: string }>();
+            if (wsRow?.node_id) {
+              const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
+              const stub = workerEnv.NODE_LIFECYCLE.get(doId);
+              await (
+                stub as unknown as import('../node-lifecycle').NodeLifecycle
+              ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
+            }
+          } catch {
+            // Best-effort — cron safety-net will catch it
+          }
+        },
+        (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+        () => this.scheduleSummarySync()
+      );
+
+      // Task-mode reconciliation: check-in on idle task agents
+      try {
+        await reconciliation.processReconciliationCandidates(
+          this.sql,
+          this.env,
+          (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+          {
+            waitUntil: (promise) => this.ctx.waitUntil(promise),
+            projectId: this.getProjectId(),
+            scheduleSummarySync: () => this.scheduleSummarySync(),
+          }
+        );
+      } catch (err) {
+        log.error('alarm.reconciliation_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      await attentionExpiry.processExpiredAttentionMarkers(
+        this.sql,
+        this.env,
+        async (sessionId, errorMessage) => {
+          await this.failSession(sessionId, errorMessage);
+        },
         {
-          waitUntil: (promise) => this.ctx.waitUntil(promise),
           projectId: this.getProjectId(),
           scheduleSummarySync: () => this.scheduleSummarySync(),
         }
       );
-    } catch (err) {
-      log.error('alarm.reconciliation_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
 
-    await attentionExpiry.processExpiredAttentionMarkers(
-      this.sql,
-      this.env,
-      async (sessionId, errorMessage) => {
-        await this.failSession(sessionId, errorMessage);
-      },
-      {
-        projectId: this.getProjectId(),
-        scheduleSummarySync: () => this.scheduleSummarySync(),
+      // Session state staleness is reconciled only against the authoritative
+      // SessionHost inventory. Local SQL mirrors and VM heartbeats cannot prove a
+      // turn ended.
+      const staleThresholdMs = sessionState.parseActivityStaleThreshold(
+        this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
+      );
+      // Network I/O stays OFF the alarm's critical path — rule 47.
+      this.ctx.waitUntil(
+        sessionActivityReconciliation
+          .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {
+            thresholdMs: staleThresholdMs,
+            projectId: this.getProjectId(),
+          })
+          .catch((err) => {
+            log.error('alarm.session_activity_probe_failed', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          })
+      );
+
+      // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
+      const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
+      const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
+      mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+
+      try {
+        await this.runProjectEventWakeMaterializationAlarm();
+      } catch (err) {
+        log.error('alarm.project_event_wake_materialization_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.ctx.storage.transactionSync(() =>
+          projectEvents.recordSchedulerFailure(
+            this.sql,
+            this.env,
+            this.getProjectId(),
+            'materialization',
+            err
+          )
+        );
       }
-    );
 
-    // Session state staleness is reconciled only against the authoritative
-    // SessionHost inventory. Local SQL mirrors and VM heartbeats cannot prove a
-    // turn ended.
-    const staleThresholdMs = sessionState.parseActivityStaleThreshold(
-      this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
-    );
-    // Network I/O stays OFF the alarm's critical path — rule 47.
-    this.ctx.waitUntil(
-      sessionActivityReconciliation
-        .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {
-          thresholdMs: staleThresholdMs,
-          projectId: this.getProjectId(),
-        })
-        .catch((err) => {
-          log.error('alarm.session_activity_probe_failed', {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        })
-    );
+      // Resolve due waits before claiming prompt deliveries so a newly enqueued
+      // parent wake can be dispatched in this same alarm turn.
+      try {
+        await this.reconcileTaskWaits();
+      } catch (err) {
+        log.error('alarm.task_wait_reconciliation_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
 
-    // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
-    const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
-    const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
-    mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+      // Claims persist before bounded adapter I/O continues through waitUntil.
+      durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());
 
-    // Resolve due waits before claiming prompt deliveries so a newly enqueued
-    // parent wake can be dispatched in this same alarm turn.
-    try {
-      await this.reconcileTaskWaits();
-    } catch (err) {
-      log.error('alarm.task_wait_reconciliation_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      try {
+        this.runProjectEventRetentionAlarm();
+      } catch (err) {
+        log.error('alarm.project_event_retention_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        this.ctx.storage.transactionSync(() =>
+          projectEvents.recordSchedulerFailure(
+            this.sql,
+            this.env,
+            this.getProjectId(),
+            'retention',
+            err
+          )
+        );
+      }
+    } finally {
+      await this.recalculateAlarm();
     }
-
-    // Claims persist before bounded adapter I/O continues through waitUntil.
-    durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());
-
-    await this.recalculateAlarm();
   }
 
   // --- Hibernatable WebSocket Support ---

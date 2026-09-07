@@ -265,6 +265,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ACP_ACTIVITY_COALESCE_MAX_PENDING?: string; // Max pending coalesced activity reports per Worker isolate (default: 512)
   ACP_ACTIVITY_BINDING_CACHE_TTL_MS?: string; // Short-lived authorized ACP binding cache TTL (default: 30000)
   ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES?: string; // Max cached ACP activity bindings per Worker isolate (default: 2048)
+  CREDENTIAL_LIMIT_WARNING_PERCENT?: string; // Advisory credential quota warning threshold (default: 75)
+  CREDENTIAL_LIMIT_CRITICAL_PERCENT?: string; // Advisory credential quota critical threshold (default: 90)
   ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS?: string; // Durable parent-wait D1 reconciliation interval (default: 30000)
   ORCHESTRATOR_WAIT_MAX_CHILDREN?: string; // Max same-project task IDs in one wait_for_subtasks call (default: 20)
   ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT?: string; // Max active parent waits per project (default: 100)
@@ -686,6 +688,27 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_EVENT_RECENT_STATUS_LIMIT?: string;
   PROJECT_EVENT_RETENTION_DAYS?: string;
   PROJECT_EVENT_RETENTION_BATCH_ROWS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_MAX_ATTEMPTS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_TTL_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_RETRY_BASE_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS?: string;
+  PROJECT_EVENT_RETENTION_INTERVAL_MS?: string;
+  PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS?: string;
+  PROJECT_EVENT_WAKE_ENABLED?: string;
+  PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS?: string;
+  PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS?: string;
+  PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS?: string;
+  PROJECT_EVENT_WAKE_PROMPT_TTL_MS?: string;
+  PROJECT_EVENT_WAKE_READ_GRACE_MS?: string;
+  PROJECT_EVENT_WAKE_TARGET_COOLDOWN_MS?: string;
+  PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS?: string;
+  PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS?: string;
+  PROJECT_EVENT_WAKE_MAX_PER_SUBSCRIPTION?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_SWEEP_WALL_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_ADMISSION_TIMEOUT_MS?: string;
+  PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_RETENTION_MS?: string;
   MESSAGE_SIZE_THRESHOLD?: string;
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;

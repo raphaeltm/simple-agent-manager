@@ -11,6 +11,7 @@ const mockIncrementProviderUsage = vi.fn();
 const mockResolveUpstreamAuth = vi.fn();
 const mockGetPlatformAgentCredential = vi.fn();
 const mockFetch = vi.fn();
+const mockUpdateAIProxyAgentCredentialAttribution = vi.fn();
 
 vi.stubGlobal('fetch', mockFetch);
 
@@ -26,6 +27,8 @@ vi.mock('../../../src/services/ai-proxy-shared', () => {
 
   return {
     verifyAIProxyAuth: (...args: unknown[]) => mockVerifyAIProxyAuth(...args),
+    updateAIProxyAgentCredentialAttribution: (...args: unknown[]) =>
+      mockUpdateAIProxyAgentCredentialAttribution(...args),
     extractCallbackToken: (authorization?: string, apiKey?: string) => (
       authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : apiKey ?? null
     ),
@@ -134,6 +137,10 @@ function allowAnthropicPlatformAuth() {
   mockResolveUpstreamAuth.mockResolvedValueOnce({
     headers: { 'x-api-key': 'platform-key' },
     billingMode: 'platform-key',
+    credentialReference: 'platform_credentials:anthropic-1',
+    credentialSource: 'platform',
+    credentialProvider: 'anthropic',
+    providerMode: 'platform-key',
   });
 }
 
@@ -151,7 +158,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockCheckAiUsageGate.mockResolvedValue({ allowed: true });
   mockCheckMonthlyCostCap.mockResolvedValue({ allowed: true, costUsd: 0, capUsd: null });
-  mockGetPlatformAgentCredential.mockResolvedValue({ credential: 'openai-key' });
+  mockGetPlatformAgentCredential.mockResolvedValue({
+    credential: 'openai-key',
+    credentialKind: 'api-key',
+    credentialId: 'openai-1',
+  });
 });
 
 describe('OpenAI-compatible AI proxy token accounting', () => {

@@ -54,6 +54,7 @@ func (c *sessionHostClient) SessionUpdate(_ context.Context, params acpsdk.Sessi
 	if c.host.applyACPToolCallLifecycle(params) {
 		c.host.nudgeHarnessActivityReport()
 	}
+	c.host.captureSessionUsageUpdate(params)
 
 	data, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",

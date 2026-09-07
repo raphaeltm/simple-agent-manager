@@ -129,6 +129,7 @@ export function normalizeProjectEventInput(
   input: AdmitProjectEventInput,
   limits: ProjectEventLimits
 ): NormalizedProjectEventInput {
+  const now = Date.now();
   const projectId = normalizeProjectId(input.projectId, limits);
   const source = normalizeText(input.source, 'source', limits.maxFilterStringBytes);
   const eventType = normalizeText(input.eventType, 'eventType', limits.maxFilterStringBytes);
@@ -162,11 +163,8 @@ export function normalizeProjectEventInput(
   const rawPayloadRef = normalizeRawPayloadRef(input.rawPayloadRef ?? null, limits);
   const rawPayloadRefJson = rawPayloadRef ? stableStringify(rawPayloadRef) : null;
   const rawPayloadRefBytes = rawPayloadRefJson ? byteLength(rawPayloadRefJson) : 0;
-  const occurredAt = normalizeTimestamp(
-    input.occurredAt ?? input.receivedAt ?? Date.now(),
-    'occurredAt'
-  );
-  const receivedAt = normalizeTimestamp(input.receivedAt ?? Date.now(), 'receivedAt');
+  const occurredAt = normalizeTimestamp(input.occurredAt ?? input.receivedAt ?? now, 'occurredAt');
+  const receivedAt = Math.min(normalizeTimestamp(input.receivedAt ?? now, 'receivedAt'), now);
 
   return {
     projectId,

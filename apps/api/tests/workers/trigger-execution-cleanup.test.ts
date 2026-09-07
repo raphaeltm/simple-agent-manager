@@ -94,6 +94,7 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
         staleQueuedRecovered: 0,
         retentionPurged: 0,
         webhookDeliveriesPurged: 0,
+        projectEventSourceOutboxAdmitted: 0,
         errors: 0,
       });
     });

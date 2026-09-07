@@ -34,6 +34,7 @@ import {
   buildAnthropicGatewayUrl,
   extractCallbackToken,
   isAnthropicModel,
+  updateAIProxyAgentCredentialAttribution,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import { checkAiUsageGate } from '../services/ai-token-budget';
@@ -42,8 +43,13 @@ import {
   estimateInputTokensFromMessages,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
+import {
+  copyCredentialLimitHeaders,
+  recordProxyCredentialLimitObservationsFromHeaders,
+} from '../services/credential-limit-events';
 
 const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
+type AnthropicProxyAuth = Awaited<ReturnType<typeof verifyAIProxyAuth>>;
 
 // =============================================================================
 // Anthropic Error Format
@@ -67,6 +73,30 @@ function anthropicUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-ca
   }
 
   return anthropicError('Monthly cost cap exceeded. Adjust your cap in Settings > Usage.', 'rate_limit_error', 429);
+}
+
+async function recordAnthropicPlatformLimitHeaders(input: {
+  env: Env;
+  response: Response;
+  auth: AnthropicProxyAuth;
+  upstreamAuth: Awaited<ReturnType<typeof resolveUpstreamAuth>>;
+  source: string;
+}): Promise<void> {
+  await updateAIProxyAgentCredentialAttribution(input.env, input.auth, input.upstreamAuth);
+  await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.response.headers, {
+    projectId: input.auth.projectId,
+    userId: input.auth.userId,
+    workspaceId: input.auth.workspaceId,
+    chatSessionId: input.auth.chatSessionId,
+    agentSessionId: input.auth.agentSessionId,
+    agentType: input.auth.agentType,
+    credentialReference: input.upstreamAuth.credentialReference,
+    credentialSource: input.upstreamAuth.credentialSource,
+    provider: 'anthropic',
+    providerMode: input.upstreamAuth.providerMode,
+    source: input.source,
+    responseStatus: input.response.status,
+  });
 }
 
 // =============================================================================
@@ -238,6 +268,13 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
         status: upstreamResponse.status,
         body: errorText.slice(0, 500),
       });
+      await recordAnthropicPlatformLimitHeaders({
+        env: c.env,
+        response: upstreamResponse,
+        auth,
+        upstreamAuth,
+        source: 'ai-proxy-anthropic.messages',
+      });
       return anthropicError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
         'api_error',
@@ -249,10 +286,18 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     const responseHeaders = new Headers();
     const contentType = upstreamResponse.headers.get('content-type');
     if (contentType) responseHeaders.set('Content-Type', contentType);
+    copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
 
     if (isStreaming) {
       responseHeaders.set('Cache-Control', 'no-cache');
     }
+    await recordAnthropicPlatformLimitHeaders({
+      env: c.env,
+      response: upstreamResponse,
+      auth,
+      upstreamAuth,
+      source: 'ai-proxy-anthropic.messages',
+    });
 
     return attachUpstreamTokenUsageAccounting(upstreamResponse, {
       env: c.env,
@@ -417,6 +462,13 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
         status: upstreamResponse.status,
         body: errorText.slice(0, 500),
       });
+      await recordAnthropicPlatformLimitHeaders({
+        env: c.env,
+        response: upstreamResponse,
+        auth,
+        upstreamAuth,
+        source: 'ai-proxy-anthropic.count_tokens',
+      });
       return anthropicError(
         `Token counting failed (${upstreamResponse.status}). Please try again.`,
         'api_error',
@@ -425,9 +477,20 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     }
 
     const responseText = await upstreamResponse.text();
+    const responseHeaders = new Headers({
+      'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json',
+    });
+    copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
+    await recordAnthropicPlatformLimitHeaders({
+      env: c.env,
+      response: upstreamResponse,
+      auth,
+      upstreamAuth,
+      source: 'ai-proxy-anthropic.count_tokens',
+    });
     return new Response(responseText, {
       status: 200,
-      headers: { 'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json' },
+      headers: responseHeaders,
     });
   } catch (err) {
     log.error('ai_proxy_anthropic.count_tokens_error', {

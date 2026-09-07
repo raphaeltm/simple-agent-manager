@@ -28,6 +28,7 @@ export interface TaskTerminalTransitionEvent {
   taskId: string;
   projectId: string;
   parentTaskId: string | null;
+  projectEventSourceIntentId?: string | null;
   status: TaskTerminalStatus;
   reason: string | null;
   occurredAt: string;

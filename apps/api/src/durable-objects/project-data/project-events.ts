@@ -18,6 +18,7 @@ import {
 } from './project-events-contracts';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEventSubscription } from './project-events-mappers';
+import { ensureProjectEventRetentionScheduled } from './project-events-materialization';
 import {
   assertProjectBinding,
   normalizeListLimit,
@@ -99,6 +100,20 @@ export {
   type ResolveProjectEventDeliveryInput,
 } from './project-events-delivery-resolver';
 export { resolveProjectEventLimits } from './project-events-limits';
+export {
+  type AcceptedProjectEventWake,
+  advanceProjectEventPromptAttemptCheckpoint,
+  computeProjectEventMaterializationAlarmTime,
+  computeProjectEventRetentionAlarmTime,
+  ensureProjectEventRetentionScheduled,
+  hasProjectEventWakeLease,
+  invalidProjectEventWakeDeliveryTargetResult,
+  isProjectEventRetentionDue,
+  type ProjectEventWakeMaterializationResult,
+  readProjectEventWakeLeaseUntil,
+  recordSchedulerFailure,
+  runProjectEventWakeMaterializationBatch,
+} from './project-events-materialization';
 export { compileProjectEventFilter } from './project-events-normalization';
 export {
   ackProjectEventDelivery,
@@ -128,6 +143,7 @@ export function admitProjectEvent(
     eventInput.deliveryKey
   );
   if (existing) {
+    ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
     if (existing.payloadFingerprint === eventInput.payloadFingerprint) {
       sql.exec(
         `UPDATE project_events
@@ -202,6 +218,7 @@ export function admitProjectEvent(
 
   const event = readEventById(sql, eventInput.projectId, eventId);
   const matches = createMatchesForEvent(sql, event, eventInput.receivedAt, limits);
+  ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
   return { outcome: 'created', event, matches };
 }
 
@@ -241,16 +258,26 @@ export function createProjectEventSubscription(
   );
 
   const subscriptionId = generateId();
+  const deliveryLifetimeExpiresAt =
+    normalized.deliveryPreference.resolved === 'queued_for_prompt_delivery'
+      ? Math.min(
+          normalized.expiresAt ?? now + limits.wakeSubscriptionLifetimeMs,
+          now + limits.wakeSubscriptionLifetimeMs
+        )
+      : normalized.expiresAt;
   sql.exec(
     `INSERT INTO project_event_subscriptions
      (id, project_id, contract_version, owner_type, owner_id, owner_name, idempotency_key,
       idempotency_fingerprint, filter_version, filter_json, filter_fingerprint, match_key_count,
       requested_delivery, resolved_delivery, target_session_id, target_task_id, target_runtime_id,
-      target_agent_id, lifecycle_state, reason, created_at, updated_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      target_agent_id, lifecycle_state, reason, created_at, updated_at, expires_at,
+      owner_version, owner_project_id, owner_chat_session_id, owner_task_id, owner_runtime_id,
+      prompt_delivery_count, prompt_delivery_last_at, delivery_cooldown_until,
+      delivery_lifetime_expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     subscriptionId,
     normalized.projectId,
-    1,
+    normalized.deliveryPreference.resolved === 'queued_for_prompt_delivery' ? 2 : 1,
     normalized.owner.type,
     normalized.owner.id,
     normalized.owner.name,
@@ -270,7 +297,18 @@ export function createProjectEventSubscription(
     normalized.reason,
     now,
     now,
-    normalized.expiresAt
+    normalized.expiresAt,
+    normalized.deliveryPreference.resolved === 'queued_for_prompt_delivery' ? 2 : 1,
+    normalized.projectId,
+    normalized.deliveryPreference.target?.sessionId ?? null,
+    normalized.deliveryPreference.target?.taskId ?? null,
+    normalized.deliveryPreference.target?.runtimeId ??
+      normalized.deliveryPreference.target?.agentId ??
+      null,
+    0,
+    null,
+    null,
+    deliveryLifetimeExpiresAt
   );
   for (const key of normalized.compiledFilter.matchKeys) {
     sql.exec(
@@ -369,7 +407,7 @@ export function cancelProjectEventSubscription(
   const now = Date.now();
   expireDueSubscriptions(sql, projectId, now, limits.retentionBatchRows);
   const subscription = getRequiredSubscription(sql, projectId, subscriptionId);
-  if (subscription.state !== 'active') {
+  if (subscription.state === 'cancelled') {
     return { subscription, idempotent: true, changed: false };
   }
   sql.exec(
@@ -381,7 +419,7 @@ export function cancelProjectEventSubscription(
          cancelled_by_name = ?,
          cancel_reason = ?,
          updated_at = ?
-     WHERE project_id = ? AND id = ? AND lifecycle_state = 'active'`,
+     WHERE project_id = ? AND id = ? AND lifecycle_state != 'cancelled'`,
     now,
     cancelledBy.type,
     cancelledBy.id,
@@ -400,6 +438,41 @@ export function cancelProjectEventSubscription(
        AND state = 'matched'`,
     now,
     'subscription cancelled',
+    projectId,
+    subscriptionId
+  );
+  sql.exec(
+    `UPDATE project_event_delivery_batches
+     SET state = 'cancelled',
+         readable_until = NULL,
+         updated_at = ?,
+         terminal_at = COALESCE(terminal_at, ?),
+         terminal_reason = COALESCE(terminal_reason, ?)
+     WHERE project_id = ?
+       AND subscription_id = ?
+       AND delivery_channel = 'prompt_queue'
+       AND state IN ('pending', 'delivered')`,
+    now,
+    now,
+    'subscription cancelled',
+    projectId,
+    subscriptionId
+  );
+  sql.exec(
+    `UPDATE session_inbox
+     SET delivery_state = 'failed',
+         terminal_reason = 'subscription_cancelled',
+         last_error = 'Project event wake subscription was cancelled',
+         next_attempt_at = NULL,
+         attempt_started_at = NULL
+     WHERE source_kind = 'project_event_wake'
+       AND id IN (
+         SELECT id FROM project_event_delivery_batches
+         WHERE project_id = ?
+           AND subscription_id = ?
+           AND delivery_channel = 'prompt_queue'
+       )
+       AND delivery_state IN ('queued', 'retry_wait', 'delivering', 'delivered')`,
     projectId,
     subscriptionId
   );
