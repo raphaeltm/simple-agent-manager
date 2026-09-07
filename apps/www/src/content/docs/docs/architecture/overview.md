@@ -138,7 +138,7 @@ Before a deploy applies D1 migrations, SAM records per-table counts and a time-t
 | Binding                         | Scope       | Purpose                                                                  |
 | ------------------------------- | ----------- | ------------------------------------------------------------------------ |
 | `PROJECT_DATA`                  | Per project | Chat sessions, messages, activity events, ACP sessions (embedded SQLite) |
-| `NODE_LIFECYCLE`                | Per node    | Warm pool state machine (active → warm → destroying)                     |
+| `NODE_LIFECYCLE`                | Per node    | Warm pool state plus durable proof-bearing workspace deletion retries    |
 | `TASK_RUNNER`                   | Per task    | Multi-step task execution orchestration via alarm callbacks              |
 | `ADMIN_LOGS`                    | Singleton   | Real-time log broadcast to admin WebSocket clients                       |
 | `NOTIFICATION`                  | Per user    | Notification delivery and state management                               |
@@ -331,7 +331,23 @@ stateDiagram-v2
 
 - `markIdle(nodeId, userId)` — transitions to warm, schedules cleanup alarm
 - `tryClaim(taskId)` — atomically claims a warm node for reuse (single-threaded, no races)
-- `alarm()` — fires after warm timeout, triggers node destruction
+- `scheduleWorkspaceDeletion(...)` — retains the exact workspace/node/user/project/session/runtime incarnation and the next bounded retry time
+- `claimWorkspaceDeletionAttempt(...)` — atomically records the point of no return before VM network I/O; restart/rebuild cancellation is refused afterward
+- `confirmWorkspaceDeletion(...)` — removes queue state only after VM-confirmed absence/success or strict provider/container termination proof
+- `alarm()` — claims and dispatches due workspace deletions through `waitUntil`, then handles the independent warm-node timeout
+
+A VM timeout, transport error, or unknown response is never deletion proof. The queue keeps
+the workspace quarantined in `stopping` and retries with bounded exponential backoff. Every
+attempt revalidates the complete workspace and node incarnation immediately before the VM
+request and again before a VM-confirmed terminal write. Identity changes and exhausted
+residence are dead-lettered for investigation rather than silently discarded; a plain D1
+`nodes.status = 'deleted'` value is not terminal proof.
+
+Live attempts also maintain a compact lexicographically ordered due-time index. A bounded,
+resumable per-DO backfill makes pre-index attempts discoverable during rollout. Alarm reads
+are limited to the configured batch and the next indexed deadline, so retained dead letters
+never cause an all-payload queue scan. The default batch is three, keeping the worst successful path
+within the Cloudflare Free-plan D1 query budget; paid deployments can override it deliberately.
 
 ### TaskRunner DO
 
@@ -350,6 +366,25 @@ graph LR
 ```
 
 Cross-DO coordination with NodeLifecycle (for warm node claims) and ProjectData (for session linkage). Exponential backoff on transient errors.
+
+VM node reuse is reservation-aware. `resolveTaskStartPlacement()` in
+`apps/api/src/services/placement-resolver.ts` produces one concrete CPU, memory, disk, and
+exclusivity snapshot; TaskRunner carries that same snapshot into the workspace row.
+`findNodeWithCapacity()` in
+`apps/api/src/durable-objects/task-runner/node-selection.ts` subtracts reservations for
+`running`, `creating`, and `recovery` workspaces from provider-native node capacity. The final
+`reserveWorkspacePlacement()` `INSERT ... SELECT` in
+`apps/api/src/services/workspace-placement.ts` repeats the aggregate check atomically together
+with node state, ownership, and compute-pool scope, so concurrent placements cannot both consume
+the last capacity.
+
+`hasWorkspaceReservationCapacity()` in
+`apps/api/src/services/workspace-resource-capacity.ts` makes legacy capacity intentionally
+conservative: an empty otherwise-compatible node may accept one workspace when provider-native
+capacity is unavailable, but an occupied node is not reused unless CPU, memory, disk, and every
+active reservation are valid and known. Exclusive requests require an empty node, and an active
+exclusive workspace prevents any additional placement. `MAX_WORKSPACES_PER_NODE` remains an
+additional hard safety cap rather than the primary capacity model.
 
 ## ACP Session Lifecycle
 

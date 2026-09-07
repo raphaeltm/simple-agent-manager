@@ -57,6 +57,7 @@ export const UpdateProjectSchema = v.object({
   maxWorkspacesPerNode: v.optional(v.nullable(v.number())),
   nodeCpuThresholdPercent: v.optional(v.nullable(v.number())),
   nodeMemoryThresholdPercent: v.optional(v.nullable(v.number())),
+  maxTriggers: v.optional(v.nullable(v.number())),
 });
 
 export const UpsertProjectRuntimeEnvVarSchema = v.object({

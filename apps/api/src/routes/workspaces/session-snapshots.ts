@@ -36,6 +36,7 @@ import {
   type SessionSnapshotStatus,
 } from '../../services/session-snapshots';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
+import type { WorkspaceDeletionCallbackKind } from '../../services/workspace-deletion-callback-signal';
 import { assertWorkspaceCallbackResourceById, verifyWorkspaceCallbackAuth } from './_helpers';
 
 const sessionSnapshotRoutes = new Hono<{ Bindings: Env }>();
@@ -155,7 +156,7 @@ function containsOnlyRegenerableOpenCodeSkips(manifest: SessionSnapshotManifest)
 async function requireWorkspace(
   c: SnapshotRouteContext,
   workspaceId: string,
-  callback = 'session_snapshot'
+  callback: WorkspaceDeletionCallbackKind = 'session_snapshot'
 ) {
   const db = drizzle(c.env.DATABASE, { schema });
   const rows = await db

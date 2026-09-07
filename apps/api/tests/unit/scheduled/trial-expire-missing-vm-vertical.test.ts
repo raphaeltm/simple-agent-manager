@@ -37,8 +37,30 @@ vi.mock('drizzle-orm/d1', () => ({
     update: () => ({
       set: (values: Record<string, unknown>) => ({
         where: () => {
-          drizzleUpdates.push(values);
-          return Promise.resolve();
+          let execution: Promise<{ meta: { changes: number } }> | undefined;
+          const execute = () => {
+            if (!execution) {
+              drizzleUpdates.push(values);
+              if (
+                nodeRows[0] &&
+                (typeof values.runtimeTerminationConfirmedAt === 'string' ||
+                  (values.status === 'destroying' && values.healthStatus === 'stale'))
+              ) {
+                nodeRows[0] = { ...nodeRows[0], ...values };
+              }
+              execution = Promise.resolve({ meta: { changes: 1 } });
+            }
+            return execution;
+          };
+          return {
+            run: execute,
+            then: <TResult1 = { meta: { changes: number } }, TResult2 = never>(
+              onfulfilled?:
+                | ((value: { meta: { changes: number } }) => TResult1 | PromiseLike<TResult1>)
+                | null,
+              onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+            ) => execute().then(onfulfilled, onrejected),
+          };
         },
       }),
     }),
@@ -47,7 +69,20 @@ vi.mock('drizzle-orm/d1', () => ({
 
 vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: (...args: unknown[]) => createProviderForUser(...args),
-  exactProviderCredentialBindingFromPlacementSnapshot: () => null,
+  exactProviderCredentialBindingFromPlacementSnapshot: (snapshot: {
+    placementCredentialSource?: string | null;
+    placementCredentialReference?: string | null;
+    placementCredentialVersion?: number | null;
+    placementCredentialFingerprint?: string | null;
+  }) =>
+    snapshot.placementCredentialSource && snapshot.placementCredentialReference
+      ? {
+          credentialSource: snapshot.placementCredentialSource,
+          credentialReference: snapshot.placementCredentialReference,
+          credentialVersion: snapshot.placementCredentialVersion ?? null,
+          credentialFingerprint: snapshot.placementCredentialFingerprint ?? null,
+        }
+      : null,
 }));
 vi.mock('../../../src/lib/secrets', () => ({ getCredentialEncryptionKey: () => 'test-key' }));
 vi.mock('../../../src/services/dns', () => ({
@@ -69,7 +104,7 @@ vi.mock('../../../src/lib/logger', () => ({
 
 const { runTrialExpireSweep } = await import('../../../src/scheduled/trial-expire');
 
-describe('expired-trial conclusive provider absence vertical slice', () => {
+describe('expired-trial exact provider deletion vertical slice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     nodeRows.length = 0;
@@ -77,12 +112,20 @@ describe('expired-trial conclusive provider absence vertical slice', () => {
     nodeRows.push({
       id: 'node-old',
       userId: 'system_anonymous_trials',
+      status: 'destroying',
+      nodeClass: 'managed',
+      runtime: 'vm',
+      runtimeIncarnationId: 'runtime-old',
       providerInstanceId: 'vm-missing',
-      cloudProvider: null,
+      cloudProvider: 'hetzner',
       backendDnsRecordId: 'dns-old',
       credentialAttributionUserId: null,
       credentialAttributionProjectId: null,
       credentialAttributionSource: null,
+      placementCredentialSource: 'platform',
+      placementCredentialReference: 'platform_credentials:platform-hetzner',
+      placementCredentialVersion: null,
+      placementCredentialFingerprint: 'sha256:fixture-provider-generation',
     });
     providerGetVM.mockResolvedValue(null);
     createProviderForUser.mockImplementation(async (...args: unknown[]) => {
@@ -147,10 +190,19 @@ describe('expired-trial conclusive provider absence vertical slice', () => {
     const result = await runTrialExpireSweep(env, 1_700_000_000_000);
 
     expect(result).toMatchObject({ workspacesDeleted: 1, nodesDeleted: 1, cleanupErrors: 0 });
-    expect(providerGetVM).toHaveBeenCalledWith('vm-missing');
-    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(providerGetVM).not.toHaveBeenCalled();
+    expect(providerDeleteVM).toHaveBeenCalledWith('vm-missing');
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-old', env);
-    expect(drizzleUpdates).toEqual([]);
+    expect(drizzleUpdates).toEqual(
+      expect.arrayContaining([
+        { runtimeTerminationConfirmedAt: expect.any(String) },
+        expect.objectContaining({
+          status: 'deleted',
+          runtimeDeletionConfirmedAt: expect.any(String),
+          runtimeDeletionProof: 'node_runtime_terminated',
+        }),
+      ])
+    );
     expect(calls.some(({ sql }) => sql.includes('UPDATE agent_sessions'))).toBe(true);
     expect(calls.some(({ sql }) => sql.includes('UPDATE compute_usage'))).toBe(true);
     expect(

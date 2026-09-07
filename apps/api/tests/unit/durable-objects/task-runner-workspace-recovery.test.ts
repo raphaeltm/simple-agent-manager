@@ -6,9 +6,32 @@ import type {
 } from '../../../src/durable-objects/task-runner/types';
 import { handleWorkspaceCreation } from '../../../src/durable-objects/task-runner/workspace-steps';
 
+const RESOLVED_RESERVATION = {
+  cpuMillis: 2_000,
+  memoryMb: 4_096,
+  diskMb: 40_960,
+  exclusiveNode: false,
+  maxCoTenants: 4,
+  source: 'project' as const,
+  sourceId: 'project-1',
+  version: 1,
+};
+
 const ensureBranchExistsOnRemote = vi.fn();
 vi.mock('../../../src/durable-objects/task-runner/workspace-branch', () => ({
   ensureBranchExistsOnRemote: (...args: unknown[]) => ensureBranchExistsOnRemote(...args),
+}));
+
+const reserveWorkspacePlacement = vi.fn();
+vi.mock('../../../src/services/workspace-placement', () => ({
+  reserveWorkspacePlacement: (...args: unknown[]) => reserveWorkspacePlacement(...args),
+}));
+
+vi.mock('../../../src/services/workspace-names', () => ({
+  resolveUniqueWorkspaceDisplayName: vi.fn().mockResolvedValue({
+    displayName: 'Task workspace',
+    normalizedDisplayName: 'task-workspace',
+  }),
 }));
 
 const markVmAdmissionPlaced = vi.fn();
@@ -17,7 +40,7 @@ vi.mock('../../../src/services/vm-admission-control', () => ({
   releaseVmProvisioningLease: vi.fn(),
 }));
 
-function createDatabase() {
+function createDatabase(workspaceId: string | null = 'workspace-1') {
   const runCalls: Array<{ sql: string; bound: unknown[] }> = [];
   return {
     runCalls,
@@ -32,7 +55,7 @@ function createDatabase() {
           first() {
             if (sql.includes('workspace_id AS workspaceId')) {
               return Promise.resolve({
-                workspaceId: 'workspace-1',
+                workspaceId,
                 status: 'delegated',
                 capacityPoolId: 'pool-user',
                 capacityPoolScope: 'user',
@@ -136,6 +159,7 @@ function createState(): TaskRunnerState {
       projectScaling: null,
       capacityPoolSelection: null,
       vmSizeSource: 'project',
+      resolvedReservation: RESOLVED_RESERVATION,
     },
     retryCount: 0,
     workspaceReadyReceived: false,
@@ -161,6 +185,7 @@ function createState(): TaskRunnerState {
 describe('TaskRunner workspace recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    reserveWorkspacePlacement.mockResolvedValue(true);
   });
 
   it('rehydrates concrete provider offering metadata from the task placement snapshot', async () => {
@@ -184,5 +209,21 @@ describe('TaskRunner workspace recovery', () => {
       providerInstancePriceHourlyMicros: 25329,
     });
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_dispatch');
+  });
+
+  it('passes the unchanged TaskRunner reservation snapshot into the workspace write', async () => {
+    const { database } = createDatabase(null);
+    const rc = createContext(database);
+    const state = createState();
+    const expectedReservation = state.config.resolvedReservation;
+
+    await handleWorkspaceCreation(state, rc);
+
+    expect(reserveWorkspacePlacement).toHaveBeenCalledOnce();
+    const placementInput = reserveWorkspacePlacement.mock.calls[0]?.[1] as {
+      resolvedReservation: unknown;
+    };
+    expect(placementInput.resolvedReservation).toBe(expectedReservation);
+    expect(placementInput.resolvedReservation).toEqual(RESOLVED_RESERVATION);
   });
 });

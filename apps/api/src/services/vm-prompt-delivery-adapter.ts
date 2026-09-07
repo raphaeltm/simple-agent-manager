@@ -83,6 +83,12 @@ export interface VmPromptDeliveryAdapterInput {
   claim: PromptDeliveryClaim;
   allowLegacyVm: boolean;
   requestTimeoutMs: number;
+  /**
+   * Authoritative target already resolved by a shared runtime-liveness adapter.
+   * This is used by reconciliation so a suspect D1 health mirror cannot undo
+   * the probe-backed delivery verdict by being interpreted a second time here.
+   */
+  resolvedTarget?: VmPromptDeliveryTarget;
   /** Revalidates a parent wake immediately before recovery/container/VM mutations. */
   beforeSideEffect?: () => Promise<PromptDeliveryResult | null>;
   /** Makes snapshot recovery's D1 claim conditional on the source parent. */
@@ -133,11 +139,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   constructor(private readonly env: Env) {}
 
   async submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
-    const resolution = await this.resolveTarget(
-      input.projectId,
-      input.claim.message.targetSessionId,
-      input
-    );
+    const resolution: TargetResolution = input.resolvedTarget
+      ? { kind: 'ready', target: input.resolvedTarget }
+      : await this.resolveTarget(input.projectId, input.claim.message.targetSessionId, input);
     if (resolution.kind === 'guarded') return resolution.result;
     if (resolution.kind === 'failed') {
       return {
@@ -318,21 +322,14 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           capabilities,
         };
       }
-      return this.reconcileAfterAmbiguousSubmit(
-        target,
-        input,
-        capabilities,
-        error
-      );
+      return this.reconcileAfterAmbiguousSubmit(target, input, capabilities, error);
     }
   }
 
   async reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
-    const resolution = await this.resolveTarget(
-      input.projectId,
-      input.claim.message.targetSessionId,
-      input
-    );
+    const resolution: TargetResolution = input.resolvedTarget
+      ? { kind: 'ready', target: input.resolvedTarget }
+      : await this.resolveTarget(input.projectId, input.claim.message.targetSessionId, input);
     if (resolution.kind === 'guarded') return resolution.result;
     if (resolution.kind === 'failed') {
       return {

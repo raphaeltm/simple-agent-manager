@@ -12,6 +12,10 @@ import { signCallbackToken, verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
 import { nodeStatusTerminatesCallbacks } from '../../services/node-callback-auth';
 import {
+  signalWorkspaceDeletionUnconfirmedCallback,
+  type WorkspaceDeletionCallbackKind,
+} from '../../services/workspace-deletion-callback-signal';
+import {
   resolveWorkspaceGitSource,
   type WorkspaceGitSourceProject,
 } from '../../services/workspace-git-source';
@@ -27,20 +31,32 @@ export const WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES: ReadonlySet<strin
   'error',
 ]);
 
+export interface WorkspaceCallbackIdentitySnapshot {
+  workspaceId: string;
+  userId: string;
+  projectId: string | null;
+  chatSessionId: string | null;
+  status: string;
+  nodeId: string | null;
+  nodeStatus: string | null;
+}
+
 export function isActiveWorkspaceStatus(status: string): boolean {
   return ACTIVE_WORKSPACE_STATUSES.has(status as 'running' | 'recovery');
 }
 
-export function assertWorkspaceAcceptsCallback<
+export async function assertWorkspaceAcceptsCallback<
   T extends { status: string; nodeId: string | null; nodeStatus: string | null },
 >(
+  env: Env,
   workspace: T | null | undefined,
   workspaceId: string,
-  callback: string,
+  callback: WorkspaceDeletionCallbackKind,
   allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
-): asserts workspace is T {
+): Promise<T> {
   if (!workspace || !allowedStatuses.has(workspace.status)) {
     const observedStatus = workspace?.status ?? 'missing';
+    await signalWorkspaceDeletionUnconfirmedCallback(env, workspaceId, callback);
     log.info('workspace_callback.terminal_resource', {
       workspaceId,
       status: observedStatus,
@@ -66,17 +82,30 @@ export function assertWorkspaceAcceptsCallback<
     });
     throw errors.gone(`Workspace node is ${observedNodeStatus}; callback resource is gone`);
   }
+  return workspace;
 }
 
 export async function assertWorkspaceCallbackResourceById(
   env: Env,
   workspaceId: string,
-  callback: string,
+  callback: WorkspaceDeletionCallbackKind,
   allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
-): Promise<void> {
+): Promise<WorkspaceCallbackIdentitySnapshot> {
+  const workspace = await loadWorkspaceCallbackIdentity(env, workspaceId);
+  return assertWorkspaceAcceptsCallback(env, workspace, workspaceId, callback, allowedStatuses);
+}
+
+export async function loadWorkspaceCallbackIdentity(
+  env: Env,
+  workspaceId: string
+): Promise<WorkspaceCallbackIdentitySnapshot | null> {
   const db = drizzle(env.DATABASE, { schema });
-  const workspace = await db
+  const rows = await db
     .select({
+      workspaceId: schema.workspaces.id,
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
       nodeStatus: schema.nodes.status,
@@ -84,8 +113,129 @@ export async function assertWorkspaceCallbackResourceById(
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
-    .get();
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, callback, allowedStatuses);
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+export function sameWorkspaceCallbackIdentity(
+  current: WorkspaceCallbackIdentitySnapshot,
+  expected: WorkspaceCallbackIdentitySnapshot
+): boolean {
+  return (
+    current.workspaceId === expected.workspaceId &&
+    current.userId === expected.userId &&
+    current.projectId === expected.projectId &&
+    current.chatSessionId === expected.chatSessionId &&
+    current.status === expected.status &&
+    current.nodeId === expected.nodeId &&
+    current.nodeStatus === expected.nodeStatus
+  );
+}
+
+interface WorkspaceCallbackTransitionValues {
+  status: string;
+  updatedAt: string;
+  lastActivityAt?: string;
+  errorMessage?: string | null;
+  workspaceProfile?: 'full' | 'lightweight';
+}
+
+/** Exact D1 CAS for callback-driven workspace transitions. */
+export async function transitionWorkspaceFromCallback(
+  env: Env,
+  expected: WorkspaceCallbackIdentitySnapshot,
+  callback: WorkspaceDeletionCallbackKind,
+  values: WorkspaceCallbackTransitionValues,
+  allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
+): Promise<WorkspaceCallbackIdentitySnapshot> {
+  const assignments = ['status = ?', 'updated_at = ?'];
+  const bindings: Array<string | null> = [values.status, values.updatedAt];
+  if (values.lastActivityAt !== undefined) {
+    assignments.push('last_activity_at = ?');
+    bindings.push(values.lastActivityAt);
+  }
+  if (values.errorMessage !== undefined) {
+    assignments.push('error_message = ?');
+    bindings.push(values.errorMessage);
+  }
+  if (values.workspaceProfile !== undefined) {
+    assignments.push('workspace_profile = ?');
+    bindings.push(values.workspaceProfile);
+  }
+
+  const result = await env.DATABASE.prepare(
+    `UPDATE workspaces
+        SET ${assignments.join(', ')}
+      WHERE id = ?
+        AND user_id = ?
+        AND project_id IS ?
+        AND chat_session_id IS ?
+        AND node_id IS ?
+        AND status = ?
+        AND EXISTS (
+          SELECT 1 FROM nodes
+           WHERE nodes.id = workspaces.node_id
+             AND nodes.status = ?
+        )`
+  )
+    .bind(
+      ...bindings,
+      expected.workspaceId,
+      expected.userId,
+      expected.projectId,
+      expected.chatSessionId,
+      expected.nodeId,
+      expected.status,
+      expected.nodeStatus
+    )
+    .run();
+  if ((result.meta.changes ?? 0) !== 1) {
+    await assertWorkspaceCallbackIdentityCurrent(env, expected, callback, allowedStatuses);
+    throw errors.gone('Workspace callback state changed; callback resource is gone');
+  }
+  return { ...expected, status: values.status };
+}
+
+/**
+ * Rule 49 callback fence: re-read the complete workspace incarnation at the
+ * final side-effect/secret-delivery boundary. A callback authenticated before
+ * deletion began must not act on a now-stopping (or reassigned) workspace.
+ */
+export async function assertWorkspaceCallbackIdentityCurrent(
+  env: Env,
+  expected: WorkspaceCallbackIdentitySnapshot,
+  callback: WorkspaceDeletionCallbackKind,
+  allowedStatuses: ReadonlySet<string> = WORKSPACE_CALLBACK_ACTIVE_STATUSES
+): Promise<WorkspaceCallbackIdentitySnapshot> {
+  const current = await loadWorkspaceCallbackIdentity(env, expected.workspaceId);
+  const active = await assertWorkspaceAcceptsCallback(
+    env,
+    current,
+    expected.workspaceId,
+    callback,
+    allowedStatuses
+  );
+  if (!sameWorkspaceCallbackIdentity(active, expected)) {
+    log.info('workspace_callback.incarnation_changed', {
+      workspaceId: expected.workspaceId,
+      expectedUserId: expected.userId,
+      currentUserId: active.userId,
+      expectedProjectId: expected.projectId,
+      currentProjectId: active.projectId,
+      expectedChatSessionId: expected.chatSessionId,
+      currentChatSessionId: active.chatSessionId,
+      expectedNodeId: expected.nodeId,
+      currentNodeId: active.nodeId,
+      expectedWorkspaceStatus: expected.status,
+      currentWorkspaceStatus: active.status,
+      expectedNodeStatus: expected.nodeStatus,
+      currentNodeStatus: active.nodeStatus,
+      callback,
+      action: 'terminal_gone',
+    });
+    throw errors.gone('Workspace callback identity changed; callback resource is gone');
+  }
+  return active;
 }
 
 /** Parse a JSON string into a plain object, returning null on failure or prototype pollution. */
@@ -119,7 +269,8 @@ export function normalizeWorkspaceReadyStatus(status: unknown): 'running' | 'rec
 export async function getOwnedWorkspace(
   db: ReturnType<typeof drizzle<typeof schema>>,
   workspaceId: string,
-  userId: string
+  userId: string,
+  options: { includeDeleted?: boolean } = {}
 ): Promise<schema.Workspace> {
   const rows = await db
     .select()
@@ -128,7 +279,7 @@ export async function getOwnedWorkspace(
     .limit(1);
 
   const workspace = rows[0];
-  if (!workspace || workspace.status === 'deleted') {
+  if (!workspace || (workspace.status === 'deleted' && !options.includeDeleted)) {
     throw errors.notFound('Workspace');
   }
 

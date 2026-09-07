@@ -18,6 +18,7 @@ let workspaceRows: Array<{
   nodeId?: string | null;
   nodeStatus?: string | null;
 }> = [];
+let workspaceReadResponses: Array<typeof workspaceRows> = [];
 let policyResult: { environmentId: string } | { error: string } = { environmentId: 'env-1' };
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
@@ -51,6 +52,7 @@ const createUploadsMock = vi.hoisted(() =>
       }))
   )
 );
+const signalCallbackMock = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
@@ -67,11 +69,11 @@ vi.mock('drizzle-orm/d1', () => ({
       from: vi.fn().mockReturnValue({
         leftJoin: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue(workspaceRows),
+            limit: vi.fn(async () => workspaceReadResponses.shift() ?? workspaceRows),
           }),
         }),
         where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue(workspaceRows),
+          limit: vi.fn(async () => workspaceReadResponses.shift() ?? workspaceRows),
         }),
       }),
     })),
@@ -98,6 +100,9 @@ vi.mock('../../../src/services/compose-image-artifacts', async (importOriginal) 
 
 vi.mock('../../../src/lib/logger', () => ({
   log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+}));
+vi.mock('../../../src/services/workspace-deletion-callback-signal', () => ({
+  signalWorkspaceDeletionUnconfirmedCallback: signalCallbackMock,
 }));
 
 async function buildApp() {
@@ -144,6 +149,7 @@ describe('compose-image-artifacts callback (vertical slice)', () => {
         nodeStatus: 'running',
       },
     ];
+    workspaceReadResponses = [];
     policyResult = { environmentId: 'env-1' };
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
   });
@@ -223,6 +229,23 @@ describe('compose-image-artifacts callback (vertical slice)', () => {
       expect(res.status).toBe(400);
       expect(createUploadsMock).not.toHaveBeenCalled();
     });
+
+    it('does not create or return upload targets when deletion starts after auth', async () => {
+      const active = workspaceRows;
+      workspaceReadResponses = [active, [{ ...active[0]!, status: 'stopping' }]];
+      const app = await buildApp();
+
+      const res = await request(app, 'proj-1', 'init', {
+        ...validInit,
+        services: [
+          { serviceName: 'web', sourceRef: 'workspace-web', token: 'must-not-be-telemetry' },
+        ],
+      });
+
+      expect(res.status, await res.clone().text()).toBe(410);
+      expect(createUploadsMock).not.toHaveBeenCalled();
+      expect(JSON.stringify(signalCallbackMock.mock.calls)).not.toContain('must-not-be-telemetry');
+    });
   });
 
   describe('POST /complete', () => {
@@ -272,6 +295,37 @@ describe('compose-image-artifacts callback (vertical slice)', () => {
         serviceName: 'web',
         r2Key: 'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
       });
+    });
+
+    it('does not inspect R2 when the workspace is reassigned after auth', async () => {
+      const active = workspaceRows;
+      workspaceReadResponses = [active, [{ ...active[0]!, nodeId: 'node-2' }]];
+      const r2 = { head: vi.fn() };
+      const app = await buildApp();
+      const res = await request(
+        app,
+        'proj-1',
+        'complete',
+        {
+          ...validCompleteBase,
+          artifacts: [
+            {
+              serviceName: 'web',
+              sourceRef: 'workspace-web',
+              localImageRef: 'workspace-web',
+              r2Key: 'compose-image-artifacts/proj-1/env-1/ws-1/upload-1/web.docker-save.tar',
+              sizeBytes: 42,
+              archiveSha256: `sha256:${'a'.repeat(64)}`,
+              archiveType: 'docker-save',
+              mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+            },
+          ],
+        },
+        { R2: r2 }
+      );
+
+      expect(res.status, await res.clone().text()).toBe(410);
+      expect(r2.head).not.toHaveBeenCalled();
     });
 
     it('rejects an artifact with a malformed archiveSha256', async () => {

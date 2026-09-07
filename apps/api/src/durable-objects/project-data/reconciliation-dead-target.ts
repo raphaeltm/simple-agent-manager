@@ -51,7 +51,7 @@ export async function terminallyFailDeadTarget(
   candidate: DeadTargetCandidate,
   targetResult: DeadTargetResult,
   hooks: ReconciliationProcessingHooks
-): Promise<void> {
+): Promise<boolean> {
   const errorMessage = `Agent workspace unavailable during reconciliation (${targetResult.reason})`;
   const projectId = hooks.projectId ?? targetResult.projectId ?? null;
 
@@ -76,7 +76,7 @@ export async function terminallyFailDeadTarget(
       reason: targetResult.reason,
       transitionOutcome,
     });
-    return;
+    return false;
   }
   sessions.failSession(sql, candidate.sessionId);
   // This path writes `chat_sessions` directly rather than through the DO's
@@ -119,6 +119,7 @@ export async function terminallyFailDeadTarget(
     reason: targetResult.reason,
     nodeId: targetResult.nodeId,
   });
+  return true;
 }
 
 async function cleanupTaskRun(env: DOEnv, workspaceId: string, taskId: string): Promise<void> {

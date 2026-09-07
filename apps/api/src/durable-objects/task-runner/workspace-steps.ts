@@ -25,6 +25,7 @@ import {
   releaseVmProvisioningLease,
 } from '../../services/vm-admission-control';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
+import { isResolvedResourceReservation } from '../../services/workspace-resource-capacity';
 import {
   computeBackoffMs,
   getRecoverySourceTaskGuard,
@@ -193,6 +194,12 @@ async function createAndProvisionWorkspace(
   if (!nodeId) {
     throw new Error('No nodeId in state — cannot create workspace');
   }
+  const resolvedReservation = state.config.resolvedReservation;
+  if (!isResolvedResourceReservation(resolvedReservation)) {
+    throw Object.assign(new Error('Task placement is missing a valid resource reservation'), {
+      permanent: true,
+    });
+  }
   const workspaceId = ulid();
   const workspaceName = `Task: ${state.config.taskTitle.slice(0, 50)}`;
   const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
@@ -223,6 +230,7 @@ async function createAndProvisionWorkspace(
       workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
       devcontainerConfigName: state.config.devcontainerConfigName ?? null,
       agentProfileHint: state.config.agentProfileHint ?? null,
+      resolvedReservation,
       capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
       createdAt: now,
     },

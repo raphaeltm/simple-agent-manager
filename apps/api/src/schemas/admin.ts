@@ -32,9 +32,10 @@ export const ProjectDataStorageReliefMeasureSchema = v.object({
       ),
       toolPayload: v.optional(
         v.object({
+          rowId: v.pipe(v.number(), v.integer(), v.minValue(1)),
           sessionId: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
           createdAt: v.pipe(v.number(), v.integer(), v.minValue(0)),
-          sequence: v.pipe(v.number(), v.integer(), v.minValue(0)),
+          sequence: v.pipe(v.number(), v.integer(), v.minValue(-1)),
           messageId: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
         })
       ),

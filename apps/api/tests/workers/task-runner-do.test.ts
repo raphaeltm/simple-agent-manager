@@ -24,6 +24,8 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import { encrypt } from '../../src/services/encryption';
+import { assertReplacementDeletionConfirmed } from '../../src/services/replacement-deletion-fence';
+import { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from '../../src/services/workspace-deletion';
 import {
   seedInstallation,
   seedNode,
@@ -216,6 +218,61 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
         recoverySourceTaskId: null,
       },
     });
+  });
+
+  it('fences an unguarded recovery at TaskRunner start when predecessor deletion becomes unconfirmed', async () => {
+    await seedTestData();
+    const sourceTaskId = 'tr-human-recovery-delete-source';
+    const recoveryTaskId = 'tr-human-recovery-delete-replacement';
+    const workspaceId = 'tr-human-recovery-delete-workspace';
+    await seedWorkspace(workspaceId, null, TEST_USER_ID, {
+      projectId: TEST_PROJECT_ID,
+      status: 'sleeping',
+    });
+    await seedTask(sourceTaskId, TEST_PROJECT_ID, TEST_USER_ID, {
+      status: 'completed',
+      workspaceId,
+      taskMode: 'conversation',
+    });
+    await seedTestTask(recoveryTaskId);
+
+    // This is the session-recovery preflight. The race begins after it passes.
+    await expect(
+      assertReplacementDeletionConfirmed(env, {
+        sourceTaskId,
+        projectId: TEST_PROJECT_ID,
+        userId: TEST_USER_ID,
+      })
+    ).resolves.toBeUndefined();
+
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET status = 'stopping', error_message = ? WHERE id = ?`
+    )
+      .bind(`${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}timeout`, workspaceId)
+      .run();
+
+    const input = buildStartInput(recoveryTaskId);
+    input.config.chatSessionId = 'tr-human-recovery-delete-chat';
+    input.config.resumeSnapshotChatSessionId = 'tr-human-recovery-delete-chat';
+    input.config.recoverySourceTaskId = null;
+    input.config.retrySourceTaskId = sourceTaskId;
+    input.config.taskMode = 'conversation';
+    const stub = getStub(recoveryTaskId);
+
+    await runInDurableObject(stub, async (instance) => {
+      await expect(instance.start(input)).rejects.toThrow(
+        `Replacement is fenced while workspace ${workspaceId} deletion is unconfirmed`
+      );
+      expect(await instance.ctx.storage.get('state')).toBeUndefined();
+      expect(await instance.ctx.storage.getAlarm()).toBeNull();
+    });
+
+    expect(await stub.getStatus()).toBeNull();
+    expect(
+      await env.DATABASE.prepare(`SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?`)
+        .bind(TEST_USER_ID)
+        .first<{ count: number }>()
+    ).toEqual({ count: 0 });
   });
 
   it('rejects a recovery whose source authority is revoked at the start boundary', async () => {

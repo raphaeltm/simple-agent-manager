@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "--version" ]]; then
-  echo "Claude Code 2.1.258"
+  echo "Claude Code 2.1.260"
   exit 0
 fi
 

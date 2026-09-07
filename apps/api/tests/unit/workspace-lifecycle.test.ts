@@ -283,7 +283,7 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
   });
 
   it('updates D1 workspace status before notifying DO', () => {
-    const updateIdx = readyHandler.indexOf('.update(schema.workspaces)');
+    const updateIdx = readyHandler.indexOf('transitionWorkspaceFromCallback');
     const doNotifyIdx = readyHandler.indexOf('advanceTaskRunnerWorkspaceReady');
     expect(updateIdx).toBeGreaterThan(-1);
     expect(doNotifyIdx).toBeGreaterThan(updateIdx);
@@ -294,7 +294,8 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
   });
 
   it('returns terminal gone if the callback workspace is missing or inactive', () => {
-    expect(readyHandler).toContain('assertWorkspaceAcceptsCallback');
+    expect(readyHandler).toContain('assertWorkspaceCallbackResourceById');
+    expect(readyHandler).toContain('transitionWorkspaceFromCallback');
   });
 });
 
@@ -383,8 +384,8 @@ describe('/provisioning-failed route — inline DO notification (TDF-5)', () => 
 
   it('only processes workspaces in creating or error status (allows retries)', () => {
     expect(failedHandler).toContain("workspace.status === 'creating'");
-    expect(failedHandler).toContain("workspace.status !== 'error'");
-    expect(failedHandler).toContain("reason: 'workspace_not_creating'");
+    expect(failedHandler).toContain('WORKSPACE_CALLBACK_PROVISIONING_FAILURE_STATUSES');
+    expect(failedHandler).toContain('transitionWorkspaceFromCallback');
   });
 
   it('uses provided error message or default', () => {

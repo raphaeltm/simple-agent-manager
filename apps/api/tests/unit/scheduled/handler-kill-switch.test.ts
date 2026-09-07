@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { enabledMock, isolateMock, logInfoMock, sessionSleepLifecycleRepairMock, sessionSleepMock } =
   vi.hoisted(() => ({
-  enabledMock: vi.fn(),
-  isolateMock: vi.fn(async () => undefined),
-  logInfoMock: vi.fn(),
-  sessionSleepLifecycleRepairMock: vi.fn(),
-  sessionSleepMock: vi.fn(),
-}));
+    enabledMock: vi.fn(),
+    isolateMock: vi.fn(async () => undefined),
+    logInfoMock: vi.fn(),
+    sessionSleepLifecycleRepairMock: vi.fn(),
+    sessionSleepMock: vi.fn(),
+  }));
 
 vi.mock('../../../src/services/operational-kill-switch', () => ({
   isOperationalLoopEnabled: enabledMock,
@@ -65,6 +65,7 @@ describe('scheduled operational sweep kill switch', () => {
     expect(sweepNames).toContain('deployment_release_retention');
     expect(sweepNames).toContain('session_snapshot_purge');
     expect(sweepNames).toContain('terminal_session_ledger_reconciliation');
+    expect(sweepNames).toContain('project_data_storage_relief_preflight');
     expect(sweepNames.indexOf('session_sleep_lifecycle_repair')).toBeLessThan(
       sweepNames.indexOf('node_cleanup')
     );
@@ -72,7 +73,25 @@ describe('scheduled operational sweep kill switch', () => {
       sweepNames.indexOf('terminal_session_ledger_reconciliation')
     );
     expect(sweepNames.indexOf('terminal_session_ledger_reconciliation')).toBeLessThan(
-      sweepNames.indexOf('session_sleep')
+      sweepNames.indexOf('project_data_archive_sharding')
+    );
+    // Archive sharding copies whole sessions between ProjectData objects when its cadence is
+    // due; it runs after every lifecycle sweep (session_sleep, trial_expire) so that copy budget
+    // cannot push them back (`.claude/rules/47`). Only the relief preflight runs later.
+    expect(sweepNames.indexOf('session_sleep')).toBeLessThan(
+      sweepNames.indexOf('project_data_archive_sharding')
+    );
+    expect(sweepNames.indexOf('trial_expire')).toBeLessThan(
+      sweepNames.indexOf('project_data_archive_sharding')
+    );
+    expect(sweepNames.indexOf('project_data_archive_sharding')).toBe(sweepNames.length - 2);
+    // The relief preflight runs LAST. Its run budget is operator-tuned into the minutes
+    // while an emergency plan converges, so anywhere earlier it would push every later
+    // lifecycle sweep — session_sleep above all — back by that budget on every tick
+    // (`.claude/rules/47`). Pinned as an ordering invariant, not an incidental position.
+    expect(sweepNames.indexOf('project_data_storage_relief_preflight')).toBe(sweepNames.length - 1);
+    expect(sweepNames.indexOf('session_sleep')).toBeLessThan(
+      sweepNames.indexOf('project_data_storage_relief_preflight')
     );
     expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
       sweepNames.indexOf('compose_artifact_cleanup')
@@ -92,6 +111,41 @@ describe('scheduled operational sweep kill switch', () => {
     expect(logInfoMock).toHaveBeenCalledWith(
       'cron.completed',
       expect.objectContaining({ type: 'sweep', failedSweeps: [] })
+    );
+  });
+
+  it('carries the archive-sharding refused count into cron.completed', async () => {
+    enabledMock.mockResolvedValue(true);
+    isolateMock.mockImplementation(async (name: string) =>
+      name === 'project_data_archive_sharding'
+        ? {
+            enabled: true,
+            skipped: false,
+            skipReason: null,
+            selected: 3,
+            migrated: 1,
+            recoveredCrashGaps: 0,
+            refused: 2,
+            failed: 0,
+            poisoned: 0,
+            chunksCopied: 4,
+            rowsCopied: 40,
+          }
+        : undefined
+    );
+
+    await scheduled(controller, env, context);
+
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        projectDataArchiveShardingEnabled: true,
+        projectDataArchiveShardingSkipped: false,
+        projectDataArchiveShardingSelected: 3,
+        projectDataArchiveShardingMigrated: 1,
+        projectDataArchiveShardingRefused: 2,
+        projectDataArchiveShardingFailed: 0,
+      })
     );
   });
 });

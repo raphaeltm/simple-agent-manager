@@ -8,11 +8,15 @@ interface TriggerConfigurationProps {
 
 function sourceRows(trigger: TriggerResponse): Array<[string, string]> {
   if (trigger.sourceType === 'github') {
+    const commandPrefix =
+      trigger.githubConfig?.eventType === 'issue_comment'
+        ? trigger.githubConfig.filters.commandPrefix
+        : undefined;
     return [
       ['GitHub Event', trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? '—'],
       ['Actions', trigger.githubConfig?.filters.actions?.join(', ') ?? 'Any'],
       ['Required Labels', trigger.githubConfig?.filters.labels?.join(', ') ?? 'None'],
-      ['Command Prefix', trigger.githubConfig?.filters.commandPrefix ?? 'None'],
+      ['Command Prefix', commandPrefix ?? 'None'],
       ['Branches', trigger.githubConfig?.filters.branches?.join(', ') ?? 'Any'],
       ['Ignored Actors', trigger.githubConfig?.filters.ignoreActors?.join(', ') ?? 'None'],
     ];

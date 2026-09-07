@@ -1,11 +1,11 @@
-import type { NodeHealthStatus, NodeResponse } from '@simple-agent-manager/shared';
 import {
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
   getLocationsForProvider,
+  isUserOwnedNodeClass,
   isValidLocationForProvider,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray, ne } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -33,6 +33,7 @@ import {
   listNodeContainersFromNode,
 } from '../services/node-agent-diagnostics';
 import { finalizeDeletion as finalizeNodeLifecycleDeletion } from '../services/node-lifecycle';
+import type { DeleteNodeResourcesResult } from '../services/node-resource-deletion';
 import {
   createNodeRecord,
   deleteNodeResources,
@@ -41,6 +42,11 @@ import {
   stopNodeResources,
 } from '../services/nodes';
 import { recordNodeRoutingMetric } from '../services/telemetry';
+import {
+  loadDeploymentEnvironmentSummaries,
+  refreshNodeHealth,
+  toNodeResponse,
+} from './nodes/response';
 
 const nodesRoutes = new Hono<{ Bindings: Env }>();
 
@@ -67,129 +73,106 @@ nodesRoutes.use('/*', async (c, next) => {
   });
 });
 
-function deriveHealthStatus(node: schema.Node, now: number): NodeHealthStatus {
-  if (node.status !== 'running') {
-    return (node.healthStatus as NodeHealthStatus) || 'stale';
-  }
+type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
 
-  if (!node.lastHeartbeatAt) {
-    return 'stale';
-  }
-
-  const lastHeartbeat = Date.parse(node.lastHeartbeatAt);
-  if (Number.isNaN(lastHeartbeat)) {
-    return 'unhealthy';
-  }
-
-  const ageSeconds = Math.max(0, Math.floor((now - lastHeartbeat) / 1000));
-  const staleThreshold = Math.max(1, node.heartbeatStaleAfterSeconds || 180);
-
-  if (ageSeconds <= staleThreshold) {
-    return 'healthy';
-  }
-  if (ageSeconds <= staleThreshold * 2) {
-    return 'stale';
-  }
-  return 'unhealthy';
-}
-
-type DeploymentEnvironmentNodeSummary = NonNullable<NodeResponse['deploymentEnvironments']>[number];
-
-function toNodeResponse(
-  node: schema.Node,
-  deploymentEnvironments: DeploymentEnvironmentNodeSummary[] = []
-): NodeResponse {
-  let lastMetrics: NodeResponse['lastMetrics'] = null;
-  if (node.lastMetrics) {
-    try {
-      lastMetrics = JSON.parse(node.lastMetrics);
-    } catch {
-      // Ignore malformed JSON in lastMetrics
-    }
-  }
-
-  return {
-    id: node.id,
-    name: node.name,
-    status: node.status as NodeResponse['status'],
-    healthStatus: node.healthStatus as NodeResponse['healthStatus'],
-    cloudProvider: (node.cloudProvider as NodeResponse['cloudProvider']) ?? null,
-    vmSize: node.vmSize as NodeResponse['vmSize'],
-    vmLocation: node.vmLocation as NodeResponse['vmLocation'],
-    providerInstanceType: node.providerInstanceType ?? null,
-    providerInstanceVcpuCount: node.providerInstanceVcpuCount ?? null,
-    providerInstanceMemoryMb: node.providerInstanceMemoryMb ?? null,
-    providerInstanceDiskGb: node.providerInstanceDiskGb ?? null,
-    providerInstancePriceDisplay: node.providerInstancePriceDisplay ?? null,
-    providerInstancePriceCurrency: node.providerInstancePriceCurrency ?? null,
-    providerInstancePriceMonthlyCents: node.providerInstancePriceMonthlyCents ?? null,
-    providerInstancePriceHourlyMicros: node.providerInstancePriceHourlyMicros ?? null,
-    nodeRole: (node.nodeRole ?? 'workspace') as NodeResponse['nodeRole'],
-    nodeClass: (node.nodeClass ?? 'managed') as NodeResponse['nodeClass'],
-    transport: (node.transport as NodeResponse['transport']) ?? null,
-    tunnelName: node.tunnelName ?? null,
-    ipAddress: node.ipAddress,
-    lastHeartbeatAt: node.lastHeartbeatAt,
-    heartbeatStaleAfterSeconds: node.heartbeatStaleAfterSeconds,
-    lastMetrics,
-    deploymentEnvironments,
-    errorMessage: node.errorMessage,
-    createdAt: node.createdAt,
-    updatedAt: node.updatedAt,
-  };
-}
-
-async function loadDeploymentEnvironmentSummaries(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  nodeIds: string[]
-): Promise<Map<string, DeploymentEnvironmentNodeSummary[]>> {
-  if (nodeIds.length === 0) return new Map();
-
-  const rows = await db
-    .select({
-      id: schema.deploymentEnvironments.id,
-      projectId: schema.deploymentEnvironments.projectId,
-      name: schema.deploymentEnvironments.name,
-      nodeId: schema.deploymentEnvironments.nodeId,
-    })
+async function cleanupHostedDeploymentRouteDns(
+  db: NodesDb,
+  env: Env,
+  nodeId: string
+): Promise<void> {
+  const hostedEnvs = await db
+    .select({ id: schema.deploymentEnvironments.id })
     .from(schema.deploymentEnvironments)
-    .where(inArray(schema.deploymentEnvironments.nodeId, nodeIds));
+    .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
 
-  const byNode = new Map<string, DeploymentEnvironmentNodeSummary[]>();
-  for (const row of rows) {
-    if (!row.nodeId) continue;
-    const existing = byNode.get(row.nodeId) ?? [];
-    existing.push({ id: row.id, projectId: row.projectId, name: row.name });
-    byNode.set(row.nodeId, existing);
+  for (const envRow of hostedEnvs) {
+    const releases = await db
+      .select({ manifest: schema.deploymentReleases.manifest })
+      .from(schema.deploymentReleases)
+      .where(eq(schema.deploymentReleases.environmentId, envRow.id));
+    const hostnames = collectEnvironmentRouteHostnames(
+      releases.map((release) => release.manifest),
+      {
+        environmentId: envRow.id,
+        baseDomain: env.BASE_DOMAIN,
+        routePortBase: env.DEPLOYMENT_ROUTE_PORT_BASE,
+        routePortSpan: env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      }
+    );
+    const dnsRecordsDeleted = await cleanupAppRouteDNSRecords(hostnames, env);
+    log.info('node.deployment_dns_cleaned_up', {
+      nodeId,
+      environmentId: envRow.id,
+      dnsRecordsDeleted,
+    });
   }
-  for (const environments of byNode.values()) {
-    environments.sort((a, b) => a.name.localeCompare(b.name));
-  }
-  return byNode;
 }
 
-async function refreshNodeHealth(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  node: schema.Node
-): Promise<schema.Node> {
-  const computedHealth = deriveHealthStatus(node, Date.now());
-  if (computedHealth === node.healthStatus) {
-    return node;
+async function removeManagedNodeRecords(
+  db: NodesDb,
+  nodeId: string,
+  userId: string,
+  cleanup: DeleteNodeResourcesResult
+): Promise<void> {
+  if (!cleanup.runtimeTerminationConfirmedAt) {
+    throw errors.conflict('Managed node deletion proof is unavailable');
   }
-
   await db
-    .update(schema.nodes)
-    .set({
-      healthStatus: computedHealth,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.nodes.id, node.id));
+    .delete(schema.workspaces)
+    .where(
+      and(
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.runtimeDeletionConfirmedAt, cleanup.runtimeTerminationConfirmedAt)
+      )
+    );
+  const deletedNode = await db
+    .delete(schema.nodes)
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        eq(schema.nodes.userId, userId),
+        sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${cleanup.runtimeTerminationConfirmedAt}`,
+        sql`${schema.nodes.runtimeIncarnationId} IS ${cleanup.runtimeIncarnationId}`
+      )
+    )
+    .run();
+  if ((deletedNode.meta.changes ?? 0) !== 1) {
+    throw errors.conflict('Managed node incarnation changed after deletion proof');
+  }
+}
 
-  return {
-    ...node,
-    healthStatus: computedHealth,
-    updatedAt: new Date().toISOString(),
-  };
+async function removeDeletedNodeRecords(input: {
+  db: NodesDb;
+  env: Env;
+  nodeId: string;
+  userId: string;
+  nodeRole: string | null;
+  nodeClass: string | null;
+  cleanup: DeleteNodeResourcesResult;
+}): Promise<void> {
+  if ((input.nodeRole ?? 'workspace') === 'deployment') {
+    await retireDeletedDeploymentNodeRecord(
+      input.db,
+      input.env,
+      input.nodeId,
+      input.userId,
+      input.cleanup
+    );
+    return;
+  }
+  if (isUserOwnedNodeClass(input.nodeClass)) {
+    await input.db
+      .delete(schema.workspaces)
+      .where(
+        and(eq(schema.workspaces.nodeId, input.nodeId), eq(schema.workspaces.userId, input.userId))
+      );
+    await input.db
+      .delete(schema.nodes)
+      .where(and(eq(schema.nodes.id, input.nodeId), eq(schema.nodes.userId, input.userId)));
+    return;
+  }
+  await removeManagedNodeRecords(input.db, input.nodeId, input.userId, input.cleanup);
 }
 
 nodesRoutes.get('/', async (c) => {
@@ -369,50 +352,25 @@ nodesRoutes.delete('/:id', async (c) => {
       `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`
     );
   }
+  if (!cleanup.runtimeTerminationConfirmed) {
+    throw errors.conflict(
+      `Node runtime termination is not confirmed: ${cleanup.errors.join('; ') || 'cleanup remains pending'}`
+    );
+  }
 
   // Deprovision app-route DNS records for any deployment environments hosted on
   // this node. The environment rows survive (nodeId is set null by the FK), but
   // their grey-cloud A records would otherwise point at the now-freed VM IP.
-  const hostedEnvs = await db
-    .select({ id: schema.deploymentEnvironments.id })
-    .from(schema.deploymentEnvironments)
-    .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
-
-  for (const envRow of hostedEnvs) {
-    const releases = await db
-      .select({ manifest: schema.deploymentReleases.manifest })
-      .from(schema.deploymentReleases)
-      .where(eq(schema.deploymentReleases.environmentId, envRow.id));
-
-    const hostnames = collectEnvironmentRouteHostnames(
-      releases.map((r) => r.manifest),
-      {
-        environmentId: envRow.id,
-        baseDomain: c.env.BASE_DOMAIN,
-        routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
-        routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-      }
-    );
-
-    const dnsRecordsDeleted = await cleanupAppRouteDNSRecords(hostnames, c.env);
-    log.info('node.deployment_dns_cleaned_up', {
-      nodeId,
-      environmentId: envRow.id,
-      dnsRecordsDeleted,
-    });
-  }
-
-  if ((node.nodeRole ?? 'workspace') === 'deployment') {
-    await retireDeletedDeploymentNodeRecord(db, c.env, nodeId, userId);
-  } else {
-    await db
-      .delete(schema.workspaces)
-      .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
-
-    await db
-      .delete(schema.nodes)
-      .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
-  }
+  await cleanupHostedDeploymentRouteDns(db, c.env, nodeId);
+  await removeDeletedNodeRecords({
+    db,
+    env: c.env,
+    nodeId,
+    userId,
+    nodeRole: node.nodeRole,
+    nodeClass: node.nodeClass,
+    cleanup,
+  });
 
   await finalizeNodeLifecycleDeletion(c.env, nodeId, userId);
 

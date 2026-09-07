@@ -71,6 +71,11 @@ describe('workspace lifecycle finalizer vertical slices', () => {
   it('stopNodeResources closes running agent sessions for deleted node workspaces', async () => {
     const ids = await seedBase(`stop-node-${crypto.randomUUID()}`);
     await seedComputeUsage(`${ids.workspaceId}-usage`, ids.userId, ids.workspaceId, ids.nodeId);
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET runtime_termination_confirmed_at = datetime('now') WHERE id = ?`
+    )
+      .bind(ids.nodeId)
+      .run();
 
     await stopNodeResources(ids.nodeId, ids.userId, env as unknown as Env);
 
@@ -96,15 +101,58 @@ describe('workspace lifecycle finalizer vertical slices', () => {
     expect(await countRunningAgentSessions(ids.workspaceId)).toBe(0);
   });
 
-  it('deleteNodeResources closes running agent sessions for deleted node workspaces', async () => {
+  it('stopNodeResources keeps managed records and sessions quarantined without strict proof', async () => {
+    const ids = await seedBase(`failed-node-stop-${crypto.randomUUID()}`);
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET cloud_provider = 'hetzner', provider_instance_id = 'unconfirmed-vm' WHERE id = ?`
+    )
+      .bind(ids.nodeId)
+      .run();
+
+    await expect(stopNodeResources(ids.nodeId, ids.userId, env as unknown as Env)).rejects.toThrow(
+      'Managed node teardown remains unconfirmed'
+    );
+
+    const workspace = await env.DATABASE.prepare(
+      `SELECT status, error_message FROM workspaces WHERE id = ?`
+    )
+      .bind(ids.workspaceId)
+      .first<{ status: string; error_message: string | null }>();
+    const node = await env.DATABASE.prepare(
+      `SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = ?`
+    )
+      .bind(ids.nodeId)
+      .first<{ status: string; runtime_termination_confirmed_at: string | null }>();
+
+    expect(workspace).toEqual({
+      status: 'stopping',
+      error_message: expect.stringMatching(/^Workspace deletion unconfirmed:/),
+    });
+    expect(node).toEqual({ status: 'destroying', runtime_termination_confirmed_at: null });
+    expect(await getAgentSession(ids.agentSessionId)).toMatchObject({
+      status: 'running',
+      stopped_at: null,
+    });
+  });
+
+  it('deleteNodeResources closes sessions only after a strict runtime marker exists', async () => {
     const ids = await seedBase(`delete-node-${crypto.randomUUID()}`);
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET runtime_termination_confirmed_at = datetime('now') WHERE id = ?`
+    )
+      .bind(ids.nodeId)
+      .run();
 
     const result = await deleteNodeResources(ids.nodeId, ids.userId, env as unknown as Env);
 
     const workspace = await env.DATABASE.prepare(`SELECT status FROM workspaces WHERE id = ?`)
       .bind(ids.workspaceId)
       .first<{ status: string }>();
-    expect(result).toMatchObject({ nodeFound: true, errors: [] });
+    expect(result).toMatchObject({
+      nodeFound: true,
+      runtimeTerminationConfirmed: true,
+      errors: [],
+    });
     expect(workspace).toEqual({ status: 'deleted' });
     expect(await getAgentSession(ids.agentSessionId)).toMatchObject({
       status: 'completed',
@@ -113,9 +161,50 @@ describe('workspace lifecycle finalizer vertical slices', () => {
     expect(await countRunningAgentSessions(ids.workspaceId)).toBe(0);
   });
 
+  it('keeps managed workspace, session, and node records quarantined without termination proof', async () => {
+    const ids = await seedBase(`failed-node-delete-${crypto.randomUUID()}`);
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET cloud_provider = 'hetzner', provider_instance_id = 'unconfirmed-vm' WHERE id = ?`
+    )
+      .bind(ids.nodeId)
+      .run();
+
+    const result = await deleteNodeResources(ids.nodeId, ids.userId, env as unknown as Env);
+
+    const workspace = await env.DATABASE.prepare(
+      `SELECT status, error_message FROM workspaces WHERE id = ?`
+    )
+      .bind(ids.workspaceId)
+      .first<{ status: string; error_message: string | null }>();
+    const node = await env.DATABASE.prepare(
+      `SELECT status, runtime_termination_confirmed_at FROM nodes WHERE id = ?`
+    )
+      .bind(ids.nodeId)
+      .first<{ status: string; runtime_termination_confirmed_at: string | null }>();
+
+    expect(result).toMatchObject({
+      nodeFound: true,
+      runtimeTerminationConfirmed: false,
+      providerVmDeleted: false,
+    });
+    expect(result.errors).not.toHaveLength(0);
+    expect(workspace).toEqual({
+      status: 'stopping',
+      error_message: expect.stringMatching(/^Workspace deletion unconfirmed:/),
+    });
+    expect(node).toEqual({ status: 'destroying', runtime_termination_confirmed_at: null });
+    expect(await getAgentSession(ids.agentSessionId)).toMatchObject({
+      status: 'running',
+      stopped_at: null,
+    });
+    expect(await countRunningAgentSessions(ids.workspaceId)).toBe(1);
+  });
+
   it('cleanupWorkspaceForDeletion leaves no running agent session after hard workspace deletion', async () => {
     const ids = await seedBase(`hard-delete-ws-${crypto.randomUUID()}`);
-    await env.DATABASE.prepare(`UPDATE workspaces SET node_id = NULL WHERE id = ?`)
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET node_id = NULL, status = 'pending' WHERE id = ?`
+    )
       .bind(ids.workspaceId)
       .run();
     const db = drizzle(env.DATABASE, { schema });

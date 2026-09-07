@@ -22,6 +22,7 @@ import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
 import * as projectDataService from './project-data';
 import { cancelScheduledSessionSleep } from './session-snapshots';
 import { recordAcpActivityCallbackMetric } from './telemetry';
+import { signalWorkspaceDeletionUnconfirmedCallback } from './workspace-deletion-callback-signal';
 
 const ACP_ACTIVITY_WORKSPACE_CALLBACK_ACTIVE_STATUSES: ReadonlySet<string> = new Set([
   'creating',
@@ -56,9 +57,7 @@ export function activityReportExtra(
   };
 }
 
-export function reportedHarnessWorkKeepsRuntimeActive(
-  body: AcpActivityCallbackReport
-): boolean {
+export function reportedHarnessWorkKeepsRuntimeActive(body: AcpActivityCallbackReport): boolean {
   return (
     body.activity === 'idle' &&
     (body.runtimeWorkState === 'active' || body.runtimeWorkState === 'settling')
@@ -106,6 +105,7 @@ export async function assertAcpActivityCallbackResourcesActive(
     .get();
   if (!workspace || !ACP_ACTIVITY_WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(workspace.status)) {
     const observedStatus = workspace?.status ?? 'missing';
+    await signalWorkspaceDeletionUnconfirmedCallback(env, input.workspaceId, 'acp_activity');
     log.info('acp_activity.terminal_workspace', {
       projectId: input.projectId,
       sessionId: input.sessionId,
@@ -150,13 +150,12 @@ export async function cancelSleepForActiveActivity(input: {
   sessionId: string;
   chatSessionId: string;
   body: AcpActivityCallbackReport;
+  beforeSideEffect?: () => Promise<void>;
 }): Promise<void> {
-  if (
-    input.body.activity !== 'prompting' &&
-    !reportedHarnessWorkKeepsRuntimeActive(input.body)
-  ) {
+  if (input.body.activity !== 'prompting' && !reportedHarnessWorkKeepsRuntimeActive(input.body)) {
     return;
   }
+  await input.beforeSideEffect?.();
   await cancelScheduledSessionSleep(
     drizzle(input.env.DATABASE, { schema }),
     input.chatSessionId
@@ -234,8 +233,10 @@ export async function persistIntermediateActivity(input: {
   admissionReason: string;
   waitUntil: WaitUntilFn;
   flush: (snapshot: AcpActivityPendingSnapshot) => Promise<AcpActivityFlushResult>;
+  beforeSideEffect?: () => Promise<void>;
 }): Promise<'persisted' | 'coalesced'> {
   try {
+    await input.beforeSideEffect?.();
     const applied = await projectDataService.reportAcpSessionActivity(
       input.env,
       input.projectId,
@@ -326,10 +327,25 @@ export async function flushCoalescedAcpActivity(
       sessionId: snapshot.sessionId,
       chatSessionId: binding.chatSessionId,
       body: snapshot.report,
+      beforeSideEffect: () =>
+        assertAcpActivityCallbackResourcesActive(env, {
+          projectId: snapshot.projectId,
+          sessionId: snapshot.sessionId,
+          nodeId: binding.nodeId,
+          workspaceId: binding.workspaceId,
+          chatSessionId: binding.chatSessionId,
+        }),
     });
     if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
       return { action: 'rejected', reason: 'pending_superseded' };
     }
+    await assertAcpActivityCallbackResourcesActive(env, {
+      projectId: snapshot.projectId,
+      sessionId: snapshot.sessionId,
+      nodeId: binding.nodeId,
+      workspaceId: binding.workspaceId,
+      chatSessionId: binding.chatSessionId,
+    });
     const applied = await projectDataService.reportAcpSessionActivity(
       env,
       snapshot.projectId,

@@ -3,10 +3,14 @@
  * is already terminal. This closes the accounting/session side effects without
  * waking or replaying work.
  */
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { findRestorableOrInFlightSleepSnapshot } from '../services/session-snapshot-sleep-predicate';
-import { finalizeWorkspaceLifecycleClosure } from '../services/workspace-lifecycle-finalizer';
+import { cleanupWorkspaceForDeletion } from '../services/workspace-cleanup';
+import type { FinalizeWorkspaceLifecycleClosureResult } from '../services/workspace-lifecycle-finalizer';
 import { parsePositiveInt } from './node-cleanup/shared';
 
 interface TerminalNodeWorkspaceRow {
@@ -14,6 +18,8 @@ interface TerminalNodeWorkspaceRow {
   node_id: string;
   project_id: string | null;
   chat_session_id: string | null;
+  user_id: string;
+  status: string;
 }
 
 export interface TerminalNodeLifecycleRepairStats {
@@ -34,7 +40,13 @@ const DEFAULT_TERMINAL_NODE_LIFECYCLE_REPAIR_BATCH_SIZE = 25;
 const DEFAULT_TERMINAL_NODE_LIFECYCLE_REPAIR_WALL_BUDGET_MS = 10_000;
 const MAX_TERMINAL_NODE_LIFECYCLE_REPAIR_BATCH_SIZE = 100;
 const MAX_TERMINAL_NODE_LIFECYCLE_REPAIR_WALL_BUDGET_MS = 30_000;
-const ACTIVE_WORKSPACE_STATUSES = ['pending', 'creating', 'running', 'recovery'] as const;
+const ACTIVE_WORKSPACE_STATUSES = [
+  'pending',
+  'creating',
+  'running',
+  'recovery',
+  'stopping',
+] as const;
 
 function repairBatchSize(env: Env): number {
   return Math.min(
@@ -62,26 +74,9 @@ function repairWallBudgetMs(env: Env): number {
   );
 }
 
-export async function runTerminalNodeLifecycleRepair(
-  env: Env
-): Promise<TerminalNodeLifecycleRepairStats> {
-  const startedAt = Date.now();
-  const limit = repairBatchSize(env);
-  const rows = await env.DATABASE.prepare(
-    `SELECT w.id AS workspace_id, w.node_id AS node_id,
-            w.project_id AS project_id, w.chat_session_id AS chat_session_id
-       FROM workspaces w
-       INNER JOIN nodes n ON n.id = w.node_id
-      WHERE n.status IN ('stopped', 'deleted', 'destroyed', 'error')
-        AND w.status IN (${ACTIVE_WORKSPACE_STATUSES.map(() => '?').join(', ')})
-      ORDER BY w.updated_at ASC
-      LIMIT ?`
-  )
-    .bind(...ACTIVE_WORKSPACE_STATUSES, limit)
-    .all<TerminalNodeWorkspaceRow>();
-
-  const stats: TerminalNodeLifecycleRepairStats = {
-    selected: rows.results.length,
+function createRepairStats(selected: number): TerminalNodeLifecycleRepairStats {
+  return {
+    selected,
     skippedProtectedSleep: 0,
     workspacesTerminalized: 0,
     agentSessionsClosed: 0,
@@ -93,55 +88,110 @@ export async function runTerminalNodeLifecycleRepair(
     errors: 0,
     budgetExhausted: false,
   };
+}
 
-  for (const row of rows.results) {
-    if (Date.now() - startedAt >= repairWallBudgetMs(env)) {
-      stats.budgetExhausted = true;
-      break;
-    }
-    try {
-      if (row.project_id && row.chat_session_id) {
-        const protectedSleep = await findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
-          projectId: row.project_id,
-          workspaceId: row.workspace_id,
-          chatSessionId: row.chat_session_id,
-        });
-        if (protectedSleep) {
-          stats.skippedProtectedSleep++;
-          continue;
-        }
-      }
-      const result = await finalizeWorkspaceLifecycleClosure(env, {
-        workspaceIds: [row.workspace_id],
-        agentSessionStatus: 'stopped',
-        workspaceStatus: 'stopped',
-        reason: 'terminal_node_lifecycle_repair',
-      });
-      stats.workspacesTerminalized += result.workspacesTerminalized;
-      stats.agentSessionsClosed += result.agentSessionsClosed;
-      stats.computeUsageClosed += result.computeUsageClosed;
-      stats.projectSessionsClosed += result.projectSessionsClosed;
-      stats.projectSessionErrors += result.projectSessionErrors;
-      stats.workspaceActivityCleaned += result.workspaceActivityCleaned;
-      stats.workspaceActivityErrors += result.workspaceActivityErrors;
-    } catch (error) {
-      stats.errors++;
-      log.warn('terminal_node_lifecycle_repair.workspace_failed', {
-        workspaceId: row.workspace_id,
-        nodeId: row.node_id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
+function recordConfirmedRepair(
+  stats: TerminalNodeLifecycleRepairStats,
+  lifecycle: FinalizeWorkspaceLifecycleClosureResult | undefined
+): void {
+  stats.workspacesTerminalized++;
+  stats.agentSessionsClosed += lifecycle?.agentSessionsClosed ?? 0;
+  stats.computeUsageClosed += lifecycle?.computeUsageClosed ?? 0;
+  stats.projectSessionsClosed += lifecycle?.projectSessionsClosed ?? 0;
+  stats.projectSessionErrors += lifecycle?.projectSessionErrors ?? 0;
+  stats.workspaceActivityCleaned += lifecycle?.workspaceActivityCleaned ?? 0;
+  stats.workspaceActivityErrors += lifecycle?.workspaceActivityErrors ?? 0;
+}
 
-  if (
+function shouldLogRepairStats(stats: TerminalNodeLifecycleRepairStats): boolean {
+  return (
     stats.workspacesTerminalized > 0 ||
     stats.agentSessionsClosed > 0 ||
     stats.computeUsageClosed > 0 ||
     stats.projectSessionsClosed > 0 ||
     stats.errors > 0 ||
     stats.budgetExhausted
-  ) {
+  );
+}
+
+async function hasProtectedSleep(env: Env, row: TerminalNodeWorkspaceRow): Promise<boolean> {
+  if (!row.project_id || !row.chat_session_id) return false;
+  return Boolean(
+    await findRestorableOrInFlightSleepSnapshot(env.DATABASE, env, {
+      projectId: row.project_id,
+      workspaceId: row.workspace_id,
+      chatSessionId: row.chat_session_id,
+    })
+  );
+}
+
+async function repairTerminalNodeWorkspace(
+  env: Env,
+  row: TerminalNodeWorkspaceRow,
+  stats: TerminalNodeLifecycleRepairStats
+): Promise<void> {
+  try {
+    if (await hasProtectedSleep(env, row)) {
+      stats.skippedProtectedSleep++;
+      return;
+    }
+    const outcome = await cleanupWorkspaceForDeletion({
+      db: drizzle(env.DATABASE, { schema }),
+      env,
+      workspace: {
+        id: row.workspace_id,
+        nodeId: row.node_id,
+        userId: row.user_id,
+        projectId: row.project_id,
+        chatSessionId: row.chat_session_id,
+        status: row.status,
+      } as schema.Workspace,
+      userId: row.user_id,
+      deleteConfirmedRow: false,
+      logContext: { closePath: 'terminal_node_lifecycle_repair' },
+    });
+    if (outcome.status === 'confirmed') recordConfirmedRepair(stats, outcome.lifecycle);
+    else stats.errors++;
+  } catch (error) {
+    stats.errors++;
+    log.warn('terminal_node_lifecycle_repair.workspace_failed', {
+      workspaceId: row.workspace_id,
+      nodeId: row.node_id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+export async function runTerminalNodeLifecycleRepair(
+  env: Env
+): Promise<TerminalNodeLifecycleRepairStats> {
+  const startedAt = Date.now();
+  const limit = repairBatchSize(env);
+  const rows = await env.DATABASE.prepare(
+    `SELECT w.id AS workspace_id, w.node_id AS node_id, w.user_id AS user_id,
+            w.project_id AS project_id, w.chat_session_id AS chat_session_id,
+            w.status AS status
+      FROM workspaces w
+      INNER JOIN nodes n ON n.id = w.node_id
+      WHERE n.status IN ('stopped', 'deleted', 'destroyed', 'error')
+        AND w.status IN (${ACTIVE_WORKSPACE_STATUSES.map(() => '?').join(', ')})
+      ORDER BY w.updated_at ASC
+      LIMIT ?`
+  )
+    .bind(...ACTIVE_WORKSPACE_STATUSES, limit)
+    .all<TerminalNodeWorkspaceRow>();
+
+  const stats = createRepairStats(rows.results.length);
+
+  for (const row of rows.results) {
+    if (Date.now() - startedAt >= repairWallBudgetMs(env)) {
+      stats.budgetExhausted = true;
+      break;
+    }
+    await repairTerminalNodeWorkspace(env, row, stats);
+  }
+
+  if (shouldLogRepairStats(stats)) {
     log.info('terminal_node_lifecycle_repair.completed', { ...stats });
   }
 

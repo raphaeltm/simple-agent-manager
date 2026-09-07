@@ -99,16 +99,21 @@ func (f *fakeACPServer) serve(reader *io.PipeReader, writer *io.PipeWriter) {
 	}()
 }
 
-// installFakeAgentBinary places a no-op executable named command on PATH so
-// installAgentBinaryLocal's exec.LookPath fast-path treats the agent as already
-// installed. The binary is never executed — StartProcess supplies the fake
-// process — it only needs to resolve on PATH. Uses t.Setenv, so callers must not
+// installFakeAgentBinary places the requested adapter and any version-validated
+// companion on PATH. StartProcess supplies the fake process; these scripts only
+// satisfy the production installation check. Uses t.Setenv, so callers must not
 // run in parallel.
 func installFakeAgentBinary(t *testing.T, command string) {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, command), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatal(err)
+	}
+	if command == "claude-agent-acp" {
+		versionScript := "#!/bin/sh\nprintf '%s\\n' '" + claudeCodeMinVersion + " (Claude Code)'\n"
+		if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(versionScript), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

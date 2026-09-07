@@ -1,7 +1,6 @@
 import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
-  DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
@@ -15,6 +14,7 @@ import {
   cronToNextFire,
   validateCronExpression,
 } from '../../services/cron-utils';
+import { loadProjectMaxTriggersOverride,resolveMaxTriggersPerProject } from '../../services/trigger-limits';
 import {
   INVALID_PARAMS,
   jsonRpcError,
@@ -125,9 +125,10 @@ export async function handleCreateTrigger(
     );
   }
 
-  const maxTriggers = parsePositiveInt(
-    env.MAX_TRIGGERS_PER_PROJECT,
-    DEFAULT_MAX_TRIGGERS_PER_PROJECT
+  const projectMaxTriggers = await loadProjectMaxTriggersOverride(env.DATABASE, tokenData.projectId);
+  const maxTriggers = resolveMaxTriggersPerProject(
+    projectMaxTriggers,
+    env.MAX_TRIGGERS_PER_PROJECT
   );
   const countResult = await env.DATABASE.prepare(
     'SELECT COUNT(*) as cnt FROM triggers WHERE project_id = ?'

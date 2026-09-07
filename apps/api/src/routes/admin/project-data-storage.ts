@@ -5,6 +5,7 @@ import { ProjectDataManualToolPayloadCleanupStateError } from '../../durable-obj
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import {
+  abandonProjectDataArchiveMigration,
   copyBackProjectDataArchiveMigration,
   getProjectDataArchiveFrozenIntentInspectionConfig,
   inspectFrozenProjectDataArchiveIntents,
@@ -390,7 +391,7 @@ adminProjectDataStorageRoutes.post(
  * POST /api/admin/project-data/storage/:projectId/archive-sharding/unfreeze
  *
  * Alias for closing the project circuit breaker. Frozen migration rows remain
- * frozen until copy-back or a later explicit thaw operation exists.
+ * frozen until copy-back (source already deleted) or abandon (source intact) resolves them.
  */
 adminProjectDataStorageRoutes.post(
   '/:projectId/archive-sharding/unfreeze',
@@ -447,6 +448,45 @@ adminProjectDataStorageRoutes.post(
       throw error;
     }
     return c.json({ result });
+  }
+);
+
+/**
+ * POST /api/admin/project-data/storage/:projectId/archive-sharding/migrations/:migrationId/abandon
+ *
+ * Abandon a migration that never reached source deletion: drops the partial shard copy and
+ * the root source intent, freezes the journal as `operator_abandoned`, and returns the
+ * session location to `root` so the session reads again. Migrations past source deletion
+ * are refused; those need copy-back.
+ */
+adminProjectDataStorageRoutes.post(
+  '/:projectId/archive-sharding/migrations/:migrationId/abandon',
+  jsonValidator(ProjectDataArchiveRecoveryControlSchema),
+  async (c) => {
+    const projectId = assertProjectId(c.req.param('projectId'));
+    const migrationId = c.req.param('migrationId')?.trim();
+    if (!migrationId) throw errors.badRequest('migrationId is required');
+    const body = c.req.valid('json');
+    try {
+      const result = await abandonProjectDataArchiveMigration(c.env, {
+        projectId,
+        migrationId,
+        reason: body.reason.trim(),
+      });
+      return c.json({ result });
+    } catch (error) {
+      if (
+        error instanceof ProjectDataArchiveCoordinatorStateError &&
+        (error.reason === 'abandon_reason_required' ||
+          error.reason === 'abandon_requires_source_intact' ||
+          error.reason === 'abandon_requires_expired_lease' ||
+          error.reason === 'migration_project_mismatch' ||
+          error.reason === 'journal_missing')
+      ) {
+        throw errors.badRequest(error.message);
+      }
+      throw error;
+    }
   }
 );
 

@@ -21,6 +21,10 @@ import {
 import { resolveTaskStartPlacementCredentialAttribution } from '../../../services/placement-resolver';
 import { resolveProjectAgentDefault } from '../../../services/project-agent-defaults';
 import * as projectDataService from '../../../services/project-data';
+import {
+  assertReplacementDeletionConfirmed,
+  WorkspaceDeletionUnconfirmedError,
+} from '../../../services/replacement-deletion-fence';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../../services/skills';
 import { startTaskRunnerDO } from '../../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../../services/task-title';
@@ -49,6 +53,23 @@ export const retrySubtaskDef: AnthropicToolDef = {
     required: ['taskId'],
   },
 };
+
+async function replacementDeletionError(
+  env: Env,
+  sourceTaskId: string,
+  projectId: string,
+  userId: string
+): Promise<{ error: string } | null> {
+  try {
+    await assertReplacementDeletionConfirmed(env, { sourceTaskId, projectId, userId });
+    return null;
+  } catch (error) {
+    if (error instanceof WorkspaceDeletionUnconfirmedError) {
+      return { error: error.message };
+    }
+    throw error;
+  }
+}
 
 export async function retrySubtask(
   input: { taskId: string; newDescription?: string },
@@ -110,6 +131,9 @@ export async function retrySubtask(
       error: `Task is in '${original.status}' status — only failed or cancelled tasks can be retried.`,
     };
   }
+
+  const deletionError = await replacementDeletionError(env, taskId, original.projectId, ctx.userId);
+  if (deletionError) return deletionError;
 
   // Use new description or fall back to original
   const description = input.newDescription?.trim() || original.description;
@@ -350,6 +374,7 @@ export async function retrySubtask(
       resolvedReservation,
       capacityPoolSelection,
       vmSizeSource,
+      retrySourceTaskId: taskId,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

@@ -19,6 +19,7 @@ let workspaceRows: Array<{
   nodeId?: string | null;
   nodeStatus?: string | null;
 }> = [];
+let workspaceReadResponses: Array<typeof workspaceRows> = [];
 let jobRows: Array<{ environmentId: string; nodeId: string; status: string }> = [];
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
@@ -27,10 +28,12 @@ let verifiedPayload: { workspace: string; type: string; scope?: string } = {
 };
 let waitUntilMock = vi.fn();
 
-const { appendMock, recordDeploymentPublishJobLifecycleEventBestEffort } = vi.hoisted(() => ({
-  appendMock: vi.fn(async () => undefined),
-  recordDeploymentPublishJobLifecycleEventBestEffort: vi.fn(async () => undefined),
-}));
+const { appendMock, recordDeploymentPublishJobLifecycleEventBestEffort, signalCallbackMock } =
+  vi.hoisted(() => ({
+    appendMock: vi.fn(async () => undefined),
+    recordDeploymentPublishJobLifecycleEventBestEffort: vi.fn(async () => undefined),
+    signalCallbackMock: vi.fn(async () => undefined),
+  }));
 
 vi.mock('drizzle-orm', () => ({
   and: (...conds: unknown[]) => ({ op: 'and', conds }),
@@ -51,11 +54,11 @@ vi.mock('drizzle-orm/d1', () => ({
           return {
             leftJoin: vi.fn().mockReturnValue({
               where: vi.fn().mockReturnValue({
-                limit: vi.fn().mockResolvedValue(workspaceRows),
+                limit: vi.fn(async () => workspaceReadResponses.shift() ?? workspaceRows),
               }),
             }),
             where: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue(workspaceRows),
+              limit: vi.fn(async () => workspaceReadResponses.shift() ?? workspaceRows),
             }),
           };
         }
@@ -78,6 +81,9 @@ vi.mock('../../../src/services/deployment-publish-jobs', () => ({
 }));
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
   recordDeploymentPublishJobLifecycleEventBestEffort,
+}));
+vi.mock('../../../src/services/workspace-deletion-callback-signal', () => ({
+  signalWorkspaceDeletionUnconfirmedCallback: signalCallbackMock,
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
@@ -134,6 +140,7 @@ describe('deployment-publish-job-callback (vertical slice)', () => {
         nodeStatus: 'running',
       },
     ];
+    workspaceReadResponses = [];
     jobRows = [{ environmentId: 'env-1', nodeId: 'node-1', status: 'queued' }];
     verifiedPayload = { workspace: 'ws-1', type: 'callback', scope: 'workspace' };
     waitUntilMock = vi.fn();
@@ -249,5 +256,24 @@ describe('deployment-publish-job-callback (vertical slice)', () => {
       expect.anything(),
       expect.not.objectContaining({ unexpectedField: expect.anything() })
     );
+  });
+
+  it.each([
+    ['deletion', { status: 'stopping' }],
+    ['node reassignment', { nodeId: 'node-2' }],
+  ])('suppresses the event when %s wins after callback auth', async (_case, change) => {
+    const active = workspaceRows;
+    workspaceReadResponses = [active, [{ ...active[0]!, ...change }]];
+    const app = await buildApp();
+
+    const res = await request(app, 'proj-1', 'job-1', {
+      ...validEvent,
+      detail: { token: 'must-not-be-telemetry' },
+    });
+
+    expect(res.status).toBe(410);
+    expect(appendMock).not.toHaveBeenCalled();
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).not.toHaveBeenCalled();
+    expect(JSON.stringify(signalCallbackMock.mock.calls)).not.toContain('must-not-be-telemetry');
   });
 });

@@ -69,11 +69,32 @@ Checkpoint the workspace's agent HOME, harness identity, and repository work in 
 
 ### `POST /api/workspaces/:id/restart`
 
-Restart a stopped or errored workspace. Provisions a new VM and recreates the container.
+Restart a stopped or errored workspace. Provisions a new VM and recreates the container. A
+restart can cancel an unclaimed pending deletion, but returns `409` once a deletion attempt
+has started or if the workspace identity changes before runtime recreation.
+
+### `POST /api/workspaces/:id/rebuild`
+
+Rebuild a running, recovering, or errored workspace on its assigned node. Returns `202` with
+`{ "status": "rebuilding" }` after the exact workspace transition is claimed. Rebuild uses
+the same deletion fence as restart: it cannot cancel or cross a deletion attempt that has
+already started, and the VM request is refused if the workspace identity or status changes.
 
 ### `DELETE /api/workspaces/:id`
 
-Permanently delete a workspace, its retained session snapshot, and all associated resources.
+Permanently request deletion of a workspace, its retained session snapshot, and associated
+resources. A confirmed deletion returns `200` with
+`{ "success": true, "deletionStatus": "confirmed" }`. If VM deletion is not yet proven,
+the endpoint returns `202` with
+`{ "success": true, "deletionStatus": "pending", "workspaceStatus": "stopping", "reason": "..." }`.
+The `202` response is not deletion proof: SAM keeps the workspace quarantined and retries from
+durable state until VM absence/success or strict provider/container termination is confirmed.
+The same `202` is returned for an idempotent repeat while that exact durable attempt is already
+in flight, or when VM proof arrived but a concurrent state write requires terminalization to
+converge on a later retry.
+If the exact deletion target is missing, active, or reassigned before a durable attempt is
+retained, the endpoint returns `409` with `deletionStatus: "rejected"`; it never labels that
+rejection as a pending deletion.
 
 ### `GET /api/workspaces/:id/boot-log`
 

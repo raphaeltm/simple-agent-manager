@@ -121,6 +121,22 @@ passes the same controls to child sessions or subagents. A runtime discriminator
 such as an empty container ID must have a regression test that would fail if an
 early return were moved back above the generated-config writer.
 
+#### Adapter and Companion Runtime Resolution
+
+When an agent adapter launches a companion runtime (for example, `codex-acp`
+launching Codex), the adapter/runtime pair is one executable contract:
+
+- Inspect a clean published dependency tree and apply zero-major semver rules;
+  a separately installed newer CLI is not evidence that the adapter uses it.
+- Verify the executable path the adapter actually resolves. If the wrapper can
+  select a companion explicitly, set that selection in every runtime path and
+  test the exact launch environment.
+- Validate both adapter and companion versions before skipping installation so
+  stale workspaces refresh the complete pair.
+- For a model or capability bump, exercise the real adapter session-selection
+  request. Assert the requested value reaches the adapter and that rejection
+  fails closed when silently retaining a default would misrepresent execution.
+
 ### Runtime Exit and Diagnostic Correlation Boundaries
 
 Task lifecycle and diagnostic ingestion are also cross-service contracts. When a

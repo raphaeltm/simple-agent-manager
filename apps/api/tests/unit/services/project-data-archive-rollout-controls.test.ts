@@ -51,7 +51,15 @@ function seedMigration(
           error_code, error_message, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, 1, 0, 1, 'test_error', 'test message', 900, ?)`
     )
-    .run(migrationId, projectId, sessionId, state, projectId, `${projectId}:archive:g1:s1`, updatedAt);
+    .run(
+      migrationId,
+      projectId,
+      sessionId,
+      state,
+      projectId,
+      `${projectId}:archive:g1:s1`,
+      updatedAt
+    );
   sqlite
     .prepare(
       `INSERT INTO project_data_session_locations
@@ -198,6 +206,65 @@ describe('ProjectData archive rollout controls service', () => {
     }
   });
 
+  it('lists self-healing precopy_refused rows after rows that need a human', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createTables(sqlite);
+      // The refusal is the OLDEST row; oldest-first alone would put it in front of the page.
+      seedMigration(sqlite, {
+        migrationId: 'migration-refused',
+        sessionId: 'session-refused',
+        state: 'frozen',
+        locationState: 'root',
+        updatedAt: 100,
+      });
+      sqlite
+        .prepare(
+          `UPDATE project_data_archive_migrations SET error_code = 'precopy_refused' WHERE migration_id = 'migration-refused'`
+        )
+        .run();
+      seedMigration(sqlite, {
+        migrationId: 'migration-abandoned',
+        sessionId: 'session-abandoned',
+        state: 'frozen',
+        locationState: 'root',
+        updatedAt: 200,
+      });
+      sqlite
+        .prepare(
+          `UPDATE project_data_archive_migrations SET error_code = 'operator_abandoned' WHERE migration_id = 'migration-abandoned'`
+        )
+        .run();
+      seedMigration(sqlite, {
+        migrationId: 'migration-failed',
+        sessionId: 'session-failed',
+        state: 'failed',
+        updatedAt: 300,
+      });
+
+      const page = await listProjectDataArchiveProblemMigrations(makeEnv(sqlite), {
+        projectId: 'project-archive',
+        limit: 2,
+      });
+      expect(page.migrations.map((migration) => migration.migrationId)).toEqual([
+        'migration-abandoned',
+        'migration-failed',
+      ]);
+      // Still listed — after the actionable rows, not hidden.
+      const all = await listProjectDataArchiveProblemMigrations(makeEnv(sqlite), {
+        projectId: 'project-archive',
+        limit: 10,
+      });
+      expect(all.migrations.map((migration) => migration.migrationId)).toEqual([
+        'migration-abandoned',
+        'migration-failed',
+        'migration-refused',
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('isolates malformed rollout rows while preserving usable state and problem lists', async () => {
     const sqlite = new Database(':memory:');
     try {
@@ -278,14 +345,20 @@ describe('ProjectData archive rollout controls service', () => {
             surface: 'migration_state_counts',
             skippedRows: 1,
             examples: [
-              { rowIndex: expect.any(Number), reason: 'Invalid ProjectData archive migration count state' },
+              {
+                rowIndex: expect.any(Number),
+                reason: 'Invalid ProjectData archive migration count state',
+              },
             ],
           },
           {
             surface: 'location_state_counts',
             skippedRows: 1,
             examples: [
-              { rowIndex: expect.any(Number), reason: 'Invalid ProjectData archive location count state' },
+              {
+                rowIndex: expect.any(Number),
+                reason: 'Invalid ProjectData archive location count state',
+              },
             ],
           },
           {

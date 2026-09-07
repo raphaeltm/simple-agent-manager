@@ -118,6 +118,7 @@ vi.mock('../../../src/services/task-status', () => ({
 
 vi.mock('../../../src/routes/tasks/_helpers', () => ({
   computeBlockedForTask: mocks.computeBlockedForTask.mockResolvedValue(false),
+  updateTaskExecutionStepFromCallback: vi.fn(),
   setTaskStatus: mocks.setTaskStatus.mockImplementation(
     async (_db, task, toStatus, _source, _workspace, options) => ({
       ...task,

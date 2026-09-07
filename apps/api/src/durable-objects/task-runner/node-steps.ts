@@ -46,6 +46,7 @@ import {
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import {
   findNodeWithCapacity,
+  hasReusableNodeReservationCapacity,
   nodeSatisfiesTaskResources,
   releaseClaimedWarmNode,
   type ReusableNodeSelection,
@@ -172,6 +173,11 @@ export async function handleNodeSelection(
     });
     if (capacityPlacementSnapshot === undefined) {
       throw Object.assign(new Error('Specified node is outside the selected capacity pool'), {
+        permanent: true,
+      });
+    }
+    if (!(await hasReusableNodeReservationCapacity(state, rc, node))) {
+      throw Object.assign(new Error('Specified node lacks available resource capacity'), {
         permanent: true,
       });
     }

@@ -138,6 +138,17 @@ describe('formatTriggerSource', () => {
     ).toBe('GitHub issue comment: /sam');
   });
 
+  it('does not show a stored command prefix for non-comment GitHub events', () => {
+    expect(
+      formatTriggerSource(
+        makeTrigger({
+          sourceType: 'github',
+          githubConfig: { eventType: 'issues', filters: { commandPrefix: '/sam' } },
+        })
+      )
+    ).toBe('GitHub issues');
+  });
+
   describe('webhook', () => {
     const webhookConfig = (overrides: Record<string, unknown>) =>
       ({

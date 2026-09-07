@@ -165,13 +165,13 @@ func TestApplySessionSettingsNilSafety(t *testing.T) {
 	h := &SessionHost{}
 
 	// nil settings — should not panic
-	h.applySessionSettings(context.Background(), nil)
+	_ = h.applySessionSettings(context.Background(), nil)
 
 	// non-nil settings but no acpConn — should not panic
-	h.applySessionSettings(context.Background(), &agentSettingsPayload{Model: "sonnet"})
+	_ = h.applySessionSettings(context.Background(), &agentSettingsPayload{Model: "sonnet"})
 
 	// non-nil settings with empty sessionID — should not panic
-	h.applySessionSettings(context.Background(), &agentSettingsPayload{PermissionMode: "plan"})
+	_ = h.applySessionSettings(context.Background(), &agentSettingsPayload{PermissionMode: "plan"})
 }
 
 func TestApplySessionSettingsSkipsDefault(t *testing.T) {
@@ -185,5 +185,5 @@ func TestApplySessionSettingsSkipsDefault(t *testing.T) {
 		PermissionMode: "default",
 	}
 	// Should not panic or attempt any ACP calls
-	h.applySessionSettings(context.Background(), settings)
+	_ = h.applySessionSettings(context.Background(), settings)
 }

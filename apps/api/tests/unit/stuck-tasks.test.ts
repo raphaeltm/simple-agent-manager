@@ -596,19 +596,19 @@ describe('recoverStuckTasks', () => {
       expect(result.heartbeatSkipped).toBe(1);
     });
 
-    it('fails a stale-heartbeat task through the cron sweep when the node health probe fails', async () => {
+    it('preserves a stale-heartbeat task through the cron sweep when the node health probe fails', async () => {
       const env = createMockEnv(staleRunningWorkspaceResponses('task-probe-failed'));
       fetchWithTimeoutMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
 
       const result = await recoverStuckTasks(env);
 
-      expect(result.failedInProgress).toBe(1);
+      expect(result.failedInProgress).toBe(0);
       expect(result.heartbeatSkipped).toBe(0);
-      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalledWith(
         env.DATABASE,
         'task-probe-failed',
         'failed',
-        expect.stringContaining('node_not_live')
+        expect.any(String)
       );
     });
 
@@ -772,7 +772,7 @@ describe('recoverStuckTasks', () => {
       expect(result.heartbeatSkipped).toBe(1);
     });
 
-    it('fails in_progress tasks when node heartbeat is stale and the node health probe fails', async () => {
+    it('preserves in_progress tasks when node heartbeat is stale and the node health probe fails', async () => {
       const now = Date.now();
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
       const updatedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
@@ -823,25 +823,18 @@ describe('recoverStuckTasks', () => {
       responses.set('status, health_status FROM nodes', {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
-      // Task update (mark as failed)
-      responses.set("UPDATE tasks SET status = 'failed'", {
-        results: [],
-        changes: 1,
-      });
-
       const env = createMockEnv(responses);
       fetchWithTimeoutMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
       const result = await recoverStuckTasks(env);
 
-      expect(result.failedInProgress).toBe(1);
+      expect(result.failedInProgress).toBe(0);
       expect(result.heartbeatSkipped).toBe(0);
 
-      // Verify trigger execution sync was called for the failed task
-      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalledWith(
         env.DATABASE,
         'task-1',
         'failed',
-        expect.stringContaining('runtime is no longer live')
+        expect.any(String)
       );
     });
 
@@ -1311,7 +1304,7 @@ describe('recoverStuckTasks', () => {
       expect(result.failedInProgress).toBe(0);
     });
 
-    it('terminates tasks in soft-hard window with stale heartbeat after failed node health probe', async () => {
+    it('preserves tasks in the soft-hard window after a failed node health probe', async () => {
       const now = Date.now();
       // Task started 5 hours ago (past 4h soft, before 8h hard)
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
@@ -1361,18 +1354,19 @@ describe('recoverStuckTasks', () => {
       responses.set('status, health_status FROM nodes', {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
-      responses.set("UPDATE tasks SET status = 'failed'", {
-        results: [],
-        changes: 1,
-      });
-
       const env = createMockEnv(responses);
       fetchWithTimeoutMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
       const result = await recoverStuckTasks(env);
 
-      // Stale heartbeat in the 4h-8h window — task should be terminated
-      expect(result.failedInProgress).toBe(1);
+      // Failed reachability is inconclusive even after the soft timeout.
+      expect(result.failedInProgress).toBe(0);
       expect(result.heartbeatSkipped).toBe(0);
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-stale-grace',
+        'failed',
+        expect.any(String)
+      );
     });
 
     it('respects custom hard timeout from env var in the failure threshold', async () => {

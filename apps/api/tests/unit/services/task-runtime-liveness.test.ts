@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  classifyTaskRuntimeDelivery,
   classifyTaskRuntimeLiveness,
   needsNodeHealthProbe,
   needsSessionResumabilityProbe,
@@ -23,6 +24,7 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
       status: 'running',
       chatSessionId: 'chat-1',
       nodeId: 'node-1',
+      userId: 'user-1',
       nodeRuntime: 'vm',
       nodeStatus: 'running',
       nodeHealthStatus: 'healthy',
@@ -74,6 +76,7 @@ describe('classifyTaskRuntimeLiveness', () => {
       workspaceStatus: 'running',
       nodeId: 'node-1',
       activeAcpSessionId: 'acp-1',
+      deliveryTarget: { nodeId: 'node-1', userId: 'user-1' },
     });
   });
 
@@ -179,7 +182,7 @@ describe('classifyTaskRuntimeLiveness', () => {
     });
   });
 
-  it('treats stale heartbeat with running workspaces as conclusive after failed node probe', () => {
+  it('treats a failed stale-node health response as inconclusive', () => {
     const base = signals();
     expect(
       classifyTaskRuntimeLiveness(
@@ -196,8 +199,8 @@ describe('classifyTaskRuntimeLiveness', () => {
       )
     ).toMatchObject({
       live: false,
-      conclusive: true,
-      reason: 'node_not_live',
+      conclusive: false,
+      reason: 'node_health_probe_failed',
     });
   });
 
@@ -288,6 +291,80 @@ describe('classifyTaskRuntimeLiveness', () => {
       conclusive: true,
       reason: 'task_acp_session_terminal',
       activeAcpSessionId: 'acp-completed',
+    });
+  });
+
+  it('does not let a historical terminal ACP session kill the expected running owner', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          expectedAcpSessionId: 'acp-current',
+          acpSessions: [
+            {
+              id: 'acp-historical',
+              status: 'completed',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW,
+              updatedAt: NOW,
+              startedAt: NOW - 4_000,
+              createdAt: NOW - 5_000,
+            },
+            {
+              id: 'acp-current',
+              status: 'running',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW - STALE_MS - 1,
+              updatedAt: NOW - STALE_MS - 1,
+              startedAt: NOW - 2_000,
+              createdAt: NOW - 3_000,
+            },
+          ],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'task_acp_session_stale',
+    });
+  });
+
+  it('accepts terminal ACP evidence only for the expected current owner', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          expectedAcpSessionId: 'acp-current',
+          acpSessions: [
+            {
+              id: 'acp-current',
+              status: 'completed',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW,
+              updatedAt: NOW,
+              startedAt: NOW - 1_000,
+              createdAt: NOW - 2_000,
+            },
+          ],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'task_acp_session_terminal',
+      activeAcpSessionId: 'acp-current',
+    });
+  });
+
+  it('treats a rebound workspace chat as inconclusive', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          expectedChatSessionId: 'chat-expected',
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'workspace_chat_session_mismatch',
     });
   });
 
@@ -404,6 +481,72 @@ describe('classifyTaskRuntimeLiveness', () => {
       conclusive: true,
       reason: 'cf_container_error',
     });
+  });
+});
+
+describe('classifyTaskRuntimeDelivery', () => {
+  const target = { nodeId: 'node-1', userId: 'user-1' };
+
+  it('delivers when live runtime evidence and a scoped target agree', () => {
+    expect(
+      classifyTaskRuntimeDelivery({
+        live: true,
+        conclusive: true,
+        reason: 'task_acp_session_live',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+        activeAcpSessionId: 'acp-1',
+        deliveryTarget: target,
+      })
+    ).toEqual({ kind: 'deliverable', target });
+  });
+
+  it.each(['task_acp_session_missing', 'task_acp_session_stale', 'task_acp_session_suspect'])(
+    'permits one bounded delivery probe for %s',
+    (reason) => {
+      expect(
+        classifyTaskRuntimeDelivery({
+          live: false,
+          conclusive: false,
+          reason,
+          workspaceStatus: 'running',
+          nodeId: 'node-1',
+          activeAcpSessionId: null,
+          deliveryTarget: target,
+        })
+      ).toEqual({ kind: 'deliverable', target });
+    }
+  );
+
+  it.each(['node_health_probe_failed', 'node_health_probe_timeout', 'node_health_probe_error'])(
+    'defers delivery when node reachability is %s',
+    (reason) => {
+      expect(
+        classifyTaskRuntimeDelivery({
+          live: false,
+          conclusive: false,
+          reason,
+          workspaceStatus: 'running',
+          nodeId: 'node-1',
+          activeAcpSessionId: null,
+          deliveryTarget: target,
+        })
+      ).toEqual({ kind: 'inconclusive', reason });
+    }
+  );
+
+  it('routes explicit terminal ownership evidence to canonical convergence', () => {
+    expect(
+      classifyTaskRuntimeDelivery({
+        live: false,
+        conclusive: true,
+        reason: 'task_acp_session_terminal',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+        activeAcpSessionId: 'acp-1',
+        deliveryTarget: target,
+      })
+    ).toEqual({ kind: 'terminal', reason: 'task_acp_session_terminal', nodeId: 'node-1' });
   });
 });
 

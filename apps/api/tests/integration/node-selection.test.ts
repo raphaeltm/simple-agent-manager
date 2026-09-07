@@ -60,10 +60,7 @@ const retrySubtaskSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/sam-session/tools/retry-subtask.ts'),
   'utf8'
 );
-const taskRunSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/tasks/run.ts'),
-  'utf8'
-);
+const taskRunSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
 const mcpOrchestrationToolsSource = readFileSync(
   resolve(process.cwd(), 'src/routes/mcp/orchestration-tools.ts'),
   'utf8'
@@ -239,7 +236,7 @@ describe('placement resolution entry points', () => {
 
   it('keeps TaskRunner final placement reservation centralized in reserveWorkspacePlacement', () => {
     expect(taskRunnerSource).toContain('reserveWorkspacePlacement(');
-    expect(taskRunnerSource).toContain("workspace_placement_lost");
+    expect(taskRunnerSource).toContain('workspace_placement_lost');
     expect(taskRunnerSource).not.toContain('INSERT INTO workspaces');
   });
 });
@@ -348,17 +345,6 @@ describe('capacity scoring consistency', () => {
       taskRunnerSource.indexOf('async function findNodeWithCapacity(')
     );
     expect(trSection).toContain("health_status != 'unhealthy'");
-  });
-
-  it('both enforce hard workspace count limit (MAX_WORKSPACES_PER_NODE)', () => {
-    // node-selector.ts
-    expect(selectorSource).toContain('activeCount >= maxWorkspacesPerNode');
-
-    // task-runner.ts
-    const trSection = taskRunnerSource.slice(
-      taskRunnerSource.indexOf('async function findNodeWithCapacity(')
-    );
-    expect(trSection).toContain('>= maxWorkspaces');
   });
 
   it('both use DEFAULT_MAX_WORKSPACES_PER_NODE as fallback', () => {

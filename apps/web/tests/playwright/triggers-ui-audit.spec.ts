@@ -82,6 +82,18 @@ interface TriggerOverrides {
   sourceType?: 'cron' | 'github' | 'webhook' | 'incident';
   promptTemplate?: string;
   agentProfileId?: string | null;
+  githubConfig?: {
+    eventType: 'issue_comment' | 'issues' | 'pull_request' | 'push';
+    filters: {
+      actions?: string[];
+      labels?: string[];
+      ignoreActors?: string[];
+      commandPrefix?: string;
+      bodyContains?: string;
+      branches?: string[];
+      ignoreDrafts?: boolean;
+    };
+  };
   webhookConfig?: {
     sourceLabel: string | null;
     filterMode: 'all' | 'any';
@@ -199,6 +211,41 @@ const LONG_TEXT_TRIGGERS = [
     description:
       'Unicode: 🚀🎉💻 and HTML: &amp; &lt; &gt; and URL: https://example.com/very/long/path/that/should/not/break/layout',
     status: 'paused',
+  }),
+];
+
+const GITHUB_SOURCE_TRIGGERS = [
+  makeTrigger({
+    id: 'gh-issues-1',
+    name: 'Issue Reviewer with a deliberately long name that should wrap cleanly while hiding an inactive stale command prefix',
+    description:
+      'Production-shaped GitHub issue trigger carrying a stored /sam prefix that must not be rendered for issues events.',
+    sourceType: 'github',
+    triggerCount: 0,
+    nextFireAt: null,
+    githubConfig: {
+      eventType: 'issues',
+      filters: {
+        actions: ['opened'],
+        ignoreActors: ['dependabot[bot]', 'simple-agent-manager[bot]'],
+        commandPrefix: '/sam',
+      },
+    },
+  }),
+  makeTrigger({
+    id: 'gh-comment-1',
+    name: 'Comment command router /sam with a long unicode suffix 日本語 🚀',
+    description: 'In-scope issue_comment trigger where the command prefix remains visible.',
+    sourceType: 'github',
+    triggerCount: 17,
+    nextFireAt: null,
+    githubConfig: {
+      eventType: 'issue_comment',
+      filters: {
+        actions: ['created'],
+        commandPrefix: '/sam',
+      },
+    },
   }),
 ];
 
@@ -585,13 +632,13 @@ async function setupApiMocks(
 // Screenshot helper
 // ---------------------------------------------------------------------------
 
-async function screenshot(page: Page, name: string) {
+async function screenshot(page: Page, name: string, fullPage = true) {
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `${viewport.width}x${viewport.height}` : 'unknown';
   await page.screenshot({
     path: `../../.codex/tmp/playwright-screenshots/${name}-${suffix}.png`,
-    fullPage: true,
+    fullPage,
   });
 }
 
@@ -703,13 +750,163 @@ async function verifyIncidentTriggerDetail(page: Page, screenshotPrefix: string)
   await expect(page.getByRole('dialog', { name: /edit trigger/i })).toBeVisible();
   await expect(page.getByText('Run from grouped feedback incidents')).toBeVisible();
   await expect(page.getByText('Manual preview/run actions are disabled server-side')).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: '{{incident.backlogSummary}}' })
-  ).toBeVisible();
+  await expect(page.getByRole('button', { name: '{{incident.backlogSummary}}' })).toBeVisible();
   await screenshot(page, `${screenshotPrefix}-edit-form`);
   await assertNoOverflow(page);
   await assertNoClippedOverflow(page);
 }
+
+async function verifyGitHubIssuesForm(page: Page, screenshotName: string) {
+  await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
+  await page.goto('/projects/proj-test-1/triggers');
+  await page.waitForSelector('text=Issue Reviewer');
+  await page.click('text=New Trigger');
+  await page.click('role=button[name=/GitHub event/]');
+  await page.getByLabel('GitHub event').selectOption('issues');
+  await page
+    .getByRole('textbox', { name: 'Actions' })
+    .fill('opened, reopened, labeled, assigned, transferred, milestoned');
+  await page
+    .getByRole('textbox', { name: 'Ignore actors' })
+    .fill('dependabot[bot], simple-agent-manager[bot], github-actions[bot]');
+  await page
+    .getByRole('textbox', { name: 'Required labels' })
+    .fill('needs-agent, regression, customer-visible, very-long-label-name-that-wraps');
+  await page
+    .getByRole('textbox', { name: 'Text contains' })
+    .fill('a deliberately long keyword phrase that should wrap without clipping 日本語 🚀');
+  await expect(page.locator('#github-command-prefix')).toHaveCount(0);
+  await assertTriggerFormChrome(page, true);
+  await screenshot(page, screenshotName, false);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function openNewTriggerDialog(page: Page, triggers: ReturnType<typeof makeTrigger>[]) {
+  await setupApiMocks(page, { triggers });
+  await page.goto('/projects/proj-test-1/triggers');
+  if (triggers.length > 0) {
+    await page.waitForSelector(`text=${triggers[0].name.split(' ')[0]}`);
+    await page.click('text=New Trigger');
+  } else {
+    await page.waitForSelector('text=No triggers yet');
+    await page.click('text=Create your first trigger');
+  }
+  await page.waitForSelector('text=New Trigger');
+}
+
+async function verifyGitHubSourceLabels(page: Page, screenshotName: string) {
+  await setupApiMocks(page, { triggers: GITHUB_SOURCE_TRIGGERS });
+  await page.goto('/projects/proj-test-1/triggers');
+  await page.waitForSelector('text=Issue Reviewer');
+  await expect(page.getByText('GitHub issues: /sam')).toHaveCount(0);
+  await expect(page.getByText('GitHub issues', { exact: true })).toBeVisible();
+  await expect(page.getByText('GitHub issue comment: /sam', { exact: true })).toBeVisible();
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function assertTriggerFormChrome(page: Page, scrollToEnd = false) {
+  const scrollBody = page.getByTestId('trigger-form-scroll-body');
+
+  if (scrollToEnd) {
+    const scrollTop = await scrollBody.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement && element.contains(focused)) {
+        focused.scrollIntoView({ block: 'nearest' });
+      }
+      return element.scrollTop;
+    });
+    expect(scrollTop).toBeGreaterThan(0);
+  }
+
+  const geometry = await page.evaluate(() => {
+    const header = document.querySelector<HTMLElement>('[data-testid="trigger-form-header"]');
+    const body = document.querySelector<HTMLElement>('[data-testid="trigger-form-scroll-body"]');
+    const footer = document.querySelector<HTMLElement>('[data-testid="trigger-form-footer"]');
+    const focused = document.activeElement as HTMLElement | null;
+
+    if (!header || !body || !footer || !focused) {
+      throw new Error('Trigger form chrome or focused element was not found');
+    }
+
+    return {
+      header: header.getBoundingClientRect().toJSON(),
+      body: body.getBoundingClientRect().toJSON(),
+      footer: footer.getBoundingClientRect().toJSON(),
+      focused: focused.getBoundingClientRect().toJSON(),
+      focusedInBody: body.contains(focused),
+      focusedInFooter: footer.contains(focused),
+      viewportHeight: window.innerHeight,
+    };
+  });
+
+  expect(geometry.header.top).toBeGreaterThanOrEqual(-1);
+  expect(geometry.header.bottom).toBeLessThanOrEqual(geometry.body.top + 1);
+  expect(geometry.body.bottom).toBeLessThanOrEqual(geometry.footer.top + 1);
+  expect(geometry.footer.top).toBeGreaterThanOrEqual(0);
+  expect(geometry.footer.bottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+  expect(geometry.focused.top).toBeGreaterThanOrEqual(geometry.body.top - 1);
+  expect(geometry.focused.bottom).toBeLessThanOrEqual(geometry.footer.top + 1);
+  expect(geometry.focusedInBody || geometry.focusedInFooter).toBe(true);
+}
+
+async function verifyGitHubIssuesDetail(page: Page, screenshotName: string) {
+  const trigger = GITHUB_SOURCE_TRIGGERS[0];
+  await setupApiMocks(page, {
+    triggers: GITHUB_SOURCE_TRIGGERS,
+    triggerDetail: trigger,
+    executions: [],
+  });
+  await page.goto(`/projects/proj-test-1/triggers/${trigger.id}`);
+  await expect(page.getByRole('heading', { name: trigger.name })).toBeVisible();
+
+  const label = page.getByText('Command Prefix', { exact: true });
+  const row = label.locator('..');
+  await expect(row.getByText('None', { exact: true })).toBeVisible();
+  await expect(row.getByText('/sam', { exact: true })).toHaveCount(0);
+  await row.scrollIntoViewIfNeeded();
+  await screenshot(page, screenshotName, false);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+async function verifyGitHubCommentForm(
+  page: Page,
+  screenshotName: string,
+  triggers: ReturnType<typeof makeTrigger>[]
+) {
+  await openNewTriggerDialog(page, triggers);
+  await page.click('role=button[name=/GitHub event/]');
+  const commandPrefix = page.locator('#github-command-prefix');
+  await expect(commandPrefix).toBeVisible();
+  await commandPrefix.focus();
+  await commandPrefix.scrollIntoViewIfNeeded();
+  await assertTriggerFormChrome(page);
+  await screenshot(page, screenshotName, false);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+}
+
+test.describe('GitHub command-prefix event scoping', () => {
+  test('source labels hide inactive command prefix', async ({ page }) => {
+    await verifyGitHubSourceLabels(page, 'triggers-list-github-source-labels');
+  });
+
+  test('issues detail hides inactive command prefix', async ({ page }) => {
+    await verifyGitHubIssuesDetail(page, 'trigger-detail-github-issues');
+  });
+
+  test('issue comment form shows command prefix field', async ({ page }) => {
+    await verifyGitHubCommentForm(page, 'trigger-form-github-comment', GITHUB_SOURCE_TRIGGERS);
+  });
+
+  test('issues form hides command prefix field', async ({ page }) => {
+    await verifyGitHubIssuesForm(page, 'trigger-form-github-issues');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Tests: Triggers List — Mobile
@@ -998,18 +1195,6 @@ test.describe('Trigger Form — Mobile', () => {
     await assertNoClippedOverflow(page);
   });
 
-  test('GitHub event trigger form renders', async ({ page }) => {
-    await setupApiMocks(page, { triggers: [] });
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForSelector('text=No triggers yet');
-    await page.click('text=Create your first trigger');
-    await page.click('role=button[name=/GitHub event/]');
-    await page.waitForSelector('text=Command prefix');
-    await screenshot(page, 'trigger-form-github-mobile');
-    await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
-  });
-
   test('webhook form creates one-time credential', async ({ page }) => {
     await verifyWebhookCreation(page, 'trigger-webhook-credential-mobile');
   });
@@ -1048,18 +1233,6 @@ test.describe('Trigger Form — Desktop', () => {
     await page.click('role=tab[name="Advanced"]');
     await screenshot(page, 'trigger-form-advanced-desktop');
 
-    await assertNoOverflow(page);
-    await assertNoClippedOverflow(page);
-  });
-
-  test('new GitHub event trigger form', async ({ page }) => {
-    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
-    await page.goto('/projects/proj-test-1/triggers');
-    await page.waitForSelector('text=Daily Code Review');
-    await page.click('text=New Trigger');
-    await page.click('role=button[name=/GitHub event/]');
-    await page.waitForSelector('text=GitHub event');
-    await screenshot(page, 'trigger-form-github-desktop');
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
   });

@@ -245,6 +245,7 @@ describe('cf-container runtime spike contracts', () => {
     const sandboxDockerfile = readPackage('Dockerfile.sandbox');
     const bootstrap = readPackage('container-entrypoints/vm-agent-bootstrap.sh');
     const claudeCodeCliPackage = getPinnedAgentNpmCompanion('claude-code');
+    const codexCliPackage = getPinnedAgentNpmCompanion('openai-codex');
     const codexACPWrapperPackage = getPinnedAgentPackage('openai-codex');
 
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]');
@@ -258,6 +259,12 @@ describe('cf-container runtime spike contracts', () => {
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
     expect(dockerfile).toContain(claudeCodeCliPackage);
     expect(sandboxDockerfile).toContain(claudeCodeCliPackage);
+    // The sandbox image spawns the codex CLI for guided device auth; keep its
+    // pin aligned with the manifest companion so it cannot silently drift
+    // (it had drifted to 0.142.5 before the 2026-09-04 client refresh).
+    expect(sandboxDockerfile).toContain(codexCliPackage);
+    // The deprecated Zed ACP adapter must not return to the sandbox image.
+    expect(sandboxDockerfile).not.toContain('@zed-industries/claude-agent-acp');
     expect(dockerfile).toContain(codexACPWrapperPackage);
     const vmGateway = readFileSync(
       join(apiPackageRoot, '../../packages/vm-agent/internal/acp/gateway.go'),

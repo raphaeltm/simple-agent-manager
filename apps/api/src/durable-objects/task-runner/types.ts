@@ -105,9 +105,9 @@ export interface TaskRunConfig {
     nodeMemoryThresholdPercent?: number | null;
     warmNodeTimeoutMs?: number | null;
   } | null;
-  /** Resolved resource requirements (audit-only, Phase 0). */
+  /** Raw resolved inputs retained for audit and provenance. */
   resourceRequirements?: ResourceRequirements | null;
-  /** Resolved reservation in scheduler units (audit-only, Phase 0). */
+  /** Immutable scheduler reservation used for node selection and final workspace placement. */
   resolvedReservation?: ResolvedResourceReservation | null;
   /** Effective one-pool placement selection for VM tasks. Null preserves legacy placement. */
   capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
@@ -117,6 +117,8 @@ export interface TaskRunConfig {
   resumeSnapshotChatSessionId?: string | null;
   /** Live source parent that revocably authorizes a snapshot-recovery TaskRunner. */
   recoverySourceTaskId?: string | null;
+  /** Failed/stopped predecessor whose workspace deletion must be confirmed before replacement. */
+  retrySourceTaskId?: string | null;
 }
 
 export interface TaskRunnerState {

@@ -192,6 +192,7 @@ export function ScalingSettings({
       'maxConcurrentTasks',
       'maxDispatchDepth',
       'maxSubTasksPerTask',
+      'maxTriggers',
     ].includes(p.key)
   );
   // Node scheduling params

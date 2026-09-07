@@ -85,6 +85,11 @@ export class ProjectDataTestDouble extends ProjectData {
     await this.runSummarySyncLocked();
   }
 
+  /** Drive the production storage-safety path through its rule-45 cleanup mutex. */
+  async runStorageSafetyAlarmForTest(): Promise<void> {
+    await this.runStorageSafetyAlarmLocked();
+  }
+
   /**
    * Same, with env overrides applied for the duration of the sync — so a test can
    * exercise a row cap it would otherwise need thousands of sessions to hit.

@@ -7,6 +7,7 @@ const {
   failSessionSnapshotRecoveryMock,
   selectQueue,
   startTaskRunnerDOMock,
+  assertReplacementDeletionConfirmedMock,
 } = vi.hoisted(() => {
   const selectQueue: unknown[] = [];
   let batchInsertChanges = 1;
@@ -56,6 +57,7 @@ const {
     failSessionSnapshotRecoveryMock: vi.fn(async () => undefined),
     selectQueue,
     startTaskRunnerDOMock: vi.fn(async () => undefined),
+    assertReplacementDeletionConfirmedMock: vi.fn(async () => undefined),
   };
 });
 
@@ -77,6 +79,11 @@ vi.mock('../../../src/services/session-snapshots', () => ({
 vi.mock('../../../src/services/task-runner-do', () => ({
   ensureTaskRunnerStarted: vi.fn(async () => false),
   startTaskRunnerDO: startTaskRunnerDOMock,
+}));
+
+vi.mock('../../../src/services/replacement-deletion-fence', () => ({
+  assertReplacementDeletionConfirmed: assertReplacementDeletionConfirmedMock,
+  WorkspaceDeletionUnconfirmedError: class WorkspaceDeletionUnconfirmedError extends Error {},
 }));
 
 vi.mock('../../../src/services/placement-resolver', async (importOriginal) => {
@@ -167,6 +174,74 @@ describe('ensureSessionRecovery', () => {
       status: 'claimed',
       taskId: 'recovery-task-1',
     });
+    assertReplacementDeletionConfirmedMock.mockResolvedValue(undefined);
+  });
+
+  it('fences an unconfirmed predecessor before claiming or creating recovery state', async () => {
+    const { WorkspaceDeletionUnconfirmedError } =
+      await import('../../../src/services/replacement-deletion-fence');
+    selectQueue.push(
+      {
+        id: 'snapshot-1',
+        projectId: 'project-1',
+        workspaceId: 'workspace-sleeping',
+        userId: 'user-1',
+        runtime: 'vm',
+        sleepingAt: '2026-08-15T13:11:53.580Z',
+        manifestJson: JSON.stringify({ agentType: 'claude-code' }),
+      },
+      {
+        id: 'project-1',
+        defaultLocation: 'nbg1',
+        defaultBranch: 'main',
+        repository: 'owner/repo',
+        installationId: 'install-1',
+      },
+      {
+        id: 'workspace-sleeping',
+        ...emptyCapacityPlacement,
+        userId: 'user-1',
+        vmSize: 'small',
+        vmLocation: 'nbg1',
+        branch: 'main',
+        workspaceProfile: 'lightweight',
+        devcontainerConfigName: null,
+        agentProfileHint: null,
+      },
+      {
+        id: 'user-1',
+        name: 'Test User',
+        email: 'test@example.com',
+        githubId: 'gh-1',
+      },
+      {
+        id: 'source-task-unconfirmed',
+        recoverySourceTaskId: null,
+        workspaceId: 'workspace-unconfirmed',
+        title: 'Unsafe predecessor',
+      }
+    );
+    assertReplacementDeletionConfirmedMock.mockRejectedValueOnce(
+      new WorkspaceDeletionUnconfirmedError('workspace-unconfirmed')
+    );
+
+    await expect(
+      ensureSessionRecovery(
+        { DATABASE: databaseMock, BASE_DOMAIN: 'example.test' } as never,
+        'project-1',
+        'chat-1'
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'workspace_deletion_unconfirmed' });
+
+    expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
+      sourceTaskId: 'source-task-unconfirmed',
+      projectId: 'project-1',
+      userId: 'user-1',
+    });
+    expect(claimSessionSnapshotRecoveryMock).not.toHaveBeenCalled();
+    expect(dbMock.insert).not.toHaveBeenCalled();
+    expect(databaseMock.batch).not.toHaveBeenCalled();
+    expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
   });
 
   it('creates recovery tasks with a wake-specific prompt instead of rerunning the source task title', async () => {
@@ -255,6 +330,11 @@ describe('ensureSessionRecovery', () => {
     );
 
     expect(result).toEqual({ status: 'waking', taskId: 'recovery-task-1' });
+    expect(assertReplacementDeletionConfirmedMock).toHaveBeenCalledWith(expect.anything(), {
+      sourceTaskId: 'source-task-1',
+      projectId: 'project-1',
+      userId: 'user-1',
+    });
     expect(databaseMock.batch).toHaveBeenCalledTimes(1);
     expect(startTaskRunnerDOMock).toHaveBeenCalledWith(
       expect.anything(),
@@ -263,6 +343,8 @@ describe('ensureSessionRecovery', () => {
         taskTitle: 'Original task title that must not become the fresh wake prompt',
         taskDescription: SESSION_RECOVERY_INITIAL_PROMPT,
         resumeSnapshotChatSessionId: 'chat-1',
+        recoverySourceTaskId: null,
+        retrySourceTaskId: 'source-task-1',
       })
     );
   });

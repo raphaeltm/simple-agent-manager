@@ -2,7 +2,7 @@
 // Task Run Defaults (Autonomous Execution)
 // =============================================================================
 
-/** Default max workspaces per node. Hard ceiling regardless of CPU/memory metrics.
+/** Additional hard workspace-count ceiling after reservation capacity checks.
  * Override via MAX_WORKSPACES_PER_NODE env var. */
 export const DEFAULT_MAX_WORKSPACES_PER_NODE = 3;
 

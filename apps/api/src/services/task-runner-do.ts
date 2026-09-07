@@ -26,6 +26,7 @@ import type {
   TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
 } from './placement-resolver';
+import { assertReplacementDeletionConfirmed } from './replacement-deletion-fence';
 
 const TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES = 96 * 1024;
 
@@ -183,10 +184,10 @@ export async function startTaskRunnerDO(
       nodeMemoryThresholdPercent?: number | null;
       warmNodeTimeoutMs?: number | null;
     } | null;
-    /** Resolved resource requirements (audit-only, Phase 0). */
+    /** Raw resolved inputs retained for audit and provenance. */
     resourceRequirements?: ResourceRequirements | null;
-    /** Resolved reservation in scheduler units (audit-only, Phase 0). */
-    resolvedReservation?: ResolvedResourceReservation | null;
+    /** Immutable scheduler reservation used for node selection and final workspace placement. */
+    resolvedReservation: ResolvedResourceReservation;
     /** Effective one-pool capacity selection for VM task placement. */
     capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
     /** Where the VM size came from in the precedence chain. */
@@ -195,8 +196,18 @@ export async function startTaskRunnerDO(
     resumeSnapshotChatSessionId?: string | null;
     /** Original parent whose live status authorizes this snapshot-recovery runner. */
     recoverySourceTaskId?: string | null;
+    /** Original attempt whose runtime deletion fences this replacement. */
+    retrySourceTaskId?: string | null;
   }
 ): Promise<void> {
+  const deletionSourceTaskId = input.retrySourceTaskId ?? input.recoverySourceTaskId ?? null;
+  if (deletionSourceTaskId) {
+    await assertReplacementDeletionConfirmed(env, {
+      sourceTaskId: deletionSourceTaskId,
+      projectId: input.projectId,
+      userId: input.userId,
+    });
+  }
   const stub = getStub(env, input.taskId);
   const capacityPoolSelection = capacityPoolSelectionForStart(input);
   const initialCapacityCandidate = capacityPoolSelection?.candidates[0] ?? null;
@@ -249,11 +260,12 @@ export async function startTaskRunnerDO(
       attachments: input.attachments ?? null,
       projectScaling: input.projectScaling ?? null,
       resourceRequirements: input.resourceRequirements ?? null,
-      resolvedReservation: input.resolvedReservation ?? null,
+      resolvedReservation: input.resolvedReservation,
       capacityPoolSelection,
       vmSizeSource: input.vmSizeSource ?? null,
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
       recoverySourceTaskId: input.recoverySourceTaskId ?? null,
+      retrySourceTaskId: input.retrySourceTaskId ?? null,
     },
   };
 

@@ -157,12 +157,7 @@ export function recordDurableExecutionMetric(metric: DurableExecutionMetric, _en
   log.info('durable_execution.telemetry', { ...metric });
 }
 
-export type AcpActivityCallbackOutcome =
-  | 'admitted'
-  | 'coalesced'
-  | 'healed'
-  | 'rejected'
-  | 'forced_terminal';
+export type AcpActivityCallbackOutcome = 'admitted' | 'coalesced' | 'healed' | 'rejected';
 
 export interface AcpActivityCallbackMetric {
   metric: 'acp_activity_callback';

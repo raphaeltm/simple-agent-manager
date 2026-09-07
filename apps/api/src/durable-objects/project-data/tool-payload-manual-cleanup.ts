@@ -134,6 +134,20 @@ function resolveBudgets(
 function buildFingerprint(input: {
   reason: string;
   budgets: ProjectDataManualToolPayloadCleanupBudgets;
+  cutoffCreatedAt: number | null;
+}): string {
+  return JSON.stringify({
+    reason: input.reason,
+    cutoffCreatedAt: input.cutoffCreatedAt,
+    batchRows: input.budgets.batchRows,
+    batchBytes: input.budgets.batchBytes,
+    wallTimeMs: input.budgets.wallTimeMs,
+  });
+}
+
+function buildLegacyFingerprint(input: {
+  reason: string;
+  budgets: ProjectDataManualToolPayloadCleanupBudgets;
 }): string {
   return JSON.stringify({
     reason: input.reason,
@@ -335,7 +349,15 @@ export async function runProjectDataManualToolPayloadCleanup(
     'idempotencyKey',
     MAX_MANUAL_CLEANUP_IDEMPOTENCY_KEY_LENGTH
   );
-  const fingerprint = buildFingerprint({ reason, budgets });
+  const fingerprint = buildFingerprint({
+    reason,
+    budgets,
+    cutoffCreatedAt: config.toolPayloadCleanupCutoffCreatedAt,
+  });
+  const compatibleLegacyFingerprint =
+    config.toolPayloadCleanupCutoffCreatedAt === null
+      ? buildLegacyFingerprint({ reason, budgets })
+      : null;
   const beforeBytes = sql.databaseSize;
   const resolvedProjectId = projectId?.trim() || '';
   if (!resolvedProjectId) {
@@ -354,7 +376,13 @@ export async function runProjectDataManualToolPayloadCleanup(
   const existingKey = readMeta(sql, META_MANUAL_CLEANUP_IDEMPOTENCY_KEY);
   const existingFingerprint = readMeta(sql, META_MANUAL_CLEANUP_FINGERPRINT);
   if (existingKey === idempotencyKey) {
-    if (existingFingerprint !== fingerprint) {
+    // `compatibleLegacyFingerprint` is null whenever an exact cutoff is configured.
+    // Comparing against it directly would let a MISSING stored fingerprint (also null)
+    // silently pass as compatible, so a reused key could replay or start cleanup with
+    // different inputs. Require a real legacy fingerprint before accepting it.
+    const matchesLegacyFingerprint =
+      compatibleLegacyFingerprint !== null && existingFingerprint === compatibleLegacyFingerprint;
+    if (existingFingerprint !== fingerprint && !matchesLegacyFingerprint) {
       throw new ProjectDataManualToolPayloadCleanupStateError(
         'idempotency_conflict',
         'idempotencyKey was already used with different manual cleanup input'
@@ -414,6 +442,19 @@ export async function runProjectDataManualToolPayloadCleanup(
   );
   const completedAt = input.nowMs?.() ?? Date.now();
   const afterBytes = sql.databaseSize;
+  // The cooldown reservation above is taken BEFORE the pass on purpose — it doubles as the
+  // overlap guard. But a pass that built no plan at all did nothing: no candidate read, no
+  // R2 traffic, no cursor advanced. Charging it the full manual cooldown turns a
+  // half-applied operator config into a 24-hour lockout, which during a capacity emergency
+  // can cost more headroom than the pass would have reclaimed. Release the reservation for
+  // that case only, so the operator can retry as soon as they fix the configuration. A pass
+  // that ran — including one that failed rows — keeps its cooldown.
+  const effectiveNextAllowedAt = cleanup ? newNextAllowedAt : now;
+  if (!cleanup) {
+    transactionSync(() =>
+      writeMeta(sql, META_MANUAL_CLEANUP_NEXT_ALLOWED_AT, String(effectiveNextAllowedAt))
+    );
+  }
   const result: ProjectDataManualToolPayloadCleanupResult = {
     version: MANUAL_CLEANUP_RESULT_VERSION,
     projectId: resolvedProjectId,
@@ -425,7 +466,7 @@ export async function runProjectDataManualToolPayloadCleanup(
     startedAt: now,
     completedAt,
     budgets,
-    cooldown: buildCooldown(newNextAllowedAt, budgets.recheckMs, completedAt),
+    cooldown: buildCooldown(effectiveNextAllowedAt, budgets.recheckMs, completedAt),
     telemetry: telemetryFromCleanup(cleanup, {
       beforeBytes,
       afterBytes,

@@ -84,7 +84,7 @@ export function evaluateFilters(
   }
 
   // Command prefix filter (for issue_comment events)
-  if (filters.commandPrefix) {
+  if (event.event === 'issue_comment' && filters.commandPrefix) {
     const commentBody = event.comment?.body?.trim() ?? '';
     if (!commentBody.startsWith(filters.commandPrefix)) {
       return { matched: false, reason: `comment does not start with '${filters.commandPrefix}'` };

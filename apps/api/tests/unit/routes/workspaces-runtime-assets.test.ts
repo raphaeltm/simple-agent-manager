@@ -43,14 +43,27 @@ describe('workspaces runtime-assets callback route', () => {
       runtimeBindings
     );
 
-  function makeWorkspaceStatusDb(status: string) {
+  function workspaceRow(status: string) {
+    return {
+      workspaceId: 'WS_1',
+      userId: 'user-1',
+      projectId: 'project-1',
+      chatSessionId: 'session-1',
+      status,
+      nodeId: 'node-1',
+      nodeStatus: 'running',
+    };
+  }
+
+  function makeWorkspaceStatusDb(...statuses: string[]) {
+    const queued = statuses.map(workspaceRow);
     return {
       select: vi.fn(() => ({
         from: vi.fn(() => {
           const query = {
             leftJoin: vi.fn(() => query),
             where: vi.fn(() => ({
-              get: vi.fn(async () => ({ status, nodeId: 'node-1', nodeStatus: 'running' })),
+              limit: vi.fn(async () => [queued.shift() ?? workspaceRow('running')]),
             })),
           };
           return query;
@@ -112,6 +125,16 @@ describe('workspaces runtime-assets callback route', () => {
 
     expect(res.status).toBe(410);
     expect(mocks.getWorkspaceRuntimeAssets).not.toHaveBeenCalled();
+  });
+
+  it('returns 410 without a secret when deletion starts while assets are resolving', async () => {
+    (drizzle as any).mockReturnValue(makeWorkspaceStatusDb('running', 'stopping'));
+
+    const res = await requestRuntimeAssets();
+
+    expect(mocks.getWorkspaceRuntimeAssets).toHaveBeenCalledOnce();
+    expect(res.status).toBe(410);
+    expect(await res.text()).not.toContain('decrypted-secret');
   });
 
   it('rejects node-scoped callback tokens', async () => {

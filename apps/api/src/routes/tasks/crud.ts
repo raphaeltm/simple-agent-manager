@@ -793,7 +793,6 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
         env: c.env,
         workspace,
         userId,
-        waitUntil: (promise) => c.executionCtx.waitUntil(promise),
         logContext: { taskId, projectId, closePath: 'conversation' },
       });
     } else {

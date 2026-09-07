@@ -1,5 +1,6 @@
 import type {
   CapacityPlacementSnapshot,
+  ResolvedResourceReservation,
   VMLocation,
   VMSize,
   WorkspaceProfile,
@@ -10,6 +11,11 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+  isResolvedResourceReservation,
+  RESOURCE_REQUIREMENTS_SOURCE_SQL,
+} from './workspace-resource-capacity';
 
 export interface WorkspacePlacementInput {
   id: string;
@@ -27,6 +33,7 @@ export interface WorkspacePlacementInput {
   workspaceProfile: WorkspaceProfile;
   devcontainerConfigName: string | null;
   agentProfileHint: string | null;
+  resolvedReservation: ResolvedResourceReservation;
   capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
   createdAt: string;
 }
@@ -45,32 +52,106 @@ export async function reserveWorkspacePlacement(
   input: WorkspacePlacementInput,
   maxWorkspaces: number
 ): Promise<boolean> {
+  if (
+    !isResolvedResourceReservation(input.resolvedReservation) ||
+    !Number.isInteger(maxWorkspaces) ||
+    maxWorkspaces <= 0
+  ) {
+    return false;
+  }
   const capacityPredicate = buildCapacityPlacementPredicate(input);
+  const reservationJson = JSON.stringify(input.resolvedReservation);
   const result = await database
     .prepare(
-      `INSERT INTO workspaces
+      `WITH requested_reservation AS (
+         SELECT ? AS cpu_millis,
+                ? AS memory_mb,
+                ? AS disk_mb,
+                ? AS exclusive_node,
+                ? AS max_co_tenants
+       ), active_reservation_json AS (
+         SELECT CASE
+                  WHEN active.resolved_reservation_json IS NOT NULL
+                       AND json_valid(active.resolved_reservation_json)
+                    THEN active.resolved_reservation_json
+                  ELSE '{}'
+                END AS reservation_json
+         FROM workspaces active
+         WHERE active.node_id = ?
+           AND active.status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL})
+       ), validated_active_reservations AS (
+         SELECT reservation_json,
+                CASE WHEN ${validReservationJsonSql('reservation_json')} THEN 1 ELSE 0 END AS valid
+         FROM active_reservation_json
+       ), active_reservations AS (
+         SELECT COUNT(*) AS active_count,
+                COALESCE(SUM(CASE WHEN valid = 0 THEN 1 ELSE 0 END), 0) AS invalid_count,
+                COALESCE(SUM(CASE WHEN valid = 1
+                  THEN json_extract(reservation_json, '$.cpuMillis') ELSE 0 END), 0) AS cpu_millis,
+                COALESCE(SUM(CASE WHEN valid = 1
+                  THEN json_extract(reservation_json, '$.memoryMb') ELSE 0 END), 0) AS memory_mb,
+                COALESCE(SUM(CASE WHEN valid = 1
+                  THEN json_extract(reservation_json, '$.diskMb') ELSE 0 END), 0) AS disk_mb,
+                COALESCE(SUM(CASE WHEN valid = 1
+                  THEN json_extract(reservation_json, '$.exclusiveNode') ELSE 0 END), 0) AS exclusive_count,
+                MIN(CASE WHEN valid = 1
+                  THEN json_extract(reservation_json, '$.maxCoTenants') END) AS minimum_max_co_tenants
+         FROM validated_active_reservations
+       )
+       INSERT INTO workspaces
          (id, node_id, project_id, user_id, installation_id, name, display_name,
           normalized_display_name, repository, branch, status, vm_size, vm_location,
           workspace_profile, devcontainer_config_name, agent_profile_hint,
+          resolved_reservation_json,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
           created_at, updated_at)
        SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
+          ?,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
           ?, ?
-       FROM nodes n
+       FROM nodes n, requested_reservation requested, active_reservations active
        WHERE n.id = ?
          AND n.user_id = ?
          AND n.status = 'running'
          AND n.node_role = 'workspace'
          ${capacityPredicate.sql}
+         AND active.active_count < ?
+         AND active.active_count + 1 <= requested.max_co_tenants
          AND (
-           SELECT COUNT(*)
-           FROM workspaces active
-           WHERE active.node_id = n.id
-             AND active.status IN ('running', 'creating', 'recovery')
-         ) < ?`
+           active.minimum_max_co_tenants IS NULL
+           OR active.active_count + 1 <= active.minimum_max_co_tenants
+         )
+         AND (requested.exclusive_node = 0 OR active.active_count = 0)
+         AND active.exclusive_count = 0
+         AND (
+           (
+             active.active_count = 0
+             AND (${unknownOrFitsSql('n.provider_instance_vcpu_count', 'requested.cpu_millis', 1_000)})
+             AND (${unknownOrFitsSql('n.provider_instance_memory_mb', 'requested.memory_mb', 1)})
+             AND (${unknownOrFitsSql('n.provider_instance_disk_gb', 'requested.disk_mb', 1_024)})
+           )
+           OR (
+             active.active_count > 0
+             AND active.invalid_count = 0
+             AND ${knownCapacitySql('n.provider_instance_vcpu_count')}
+             AND ${knownCapacitySql('n.provider_instance_memory_mb')}
+             AND ${knownCapacitySql('n.provider_instance_disk_gb')}
+             AND active.cpu_millis + requested.cpu_millis
+               <= n.provider_instance_vcpu_count * 1000
+             AND active.memory_mb + requested.memory_mb
+               <= n.provider_instance_memory_mb
+             AND active.disk_mb + requested.disk_mb
+               <= n.provider_instance_disk_gb * 1024
+           )
+         )`
     )
     .bind(
+      input.resolvedReservation.cpuMillis,
+      input.resolvedReservation.memoryMb,
+      input.resolvedReservation.diskMb,
+      input.resolvedReservation.exclusiveNode ? 1 : 0,
+      input.resolvedReservation.maxCoTenants,
+      input.nodeId,
       input.id,
       input.nodeId,
       input.projectId,
@@ -86,6 +167,7 @@ export async function reserveWorkspacePlacement(
       input.workspaceProfile,
       input.devcontainerConfigName,
       input.agentProfileHint,
+      reservationJson,
       ...capacityPlacementSnapshotSqlValues(input.capacityPlacementSnapshot),
       input.createdAt,
       input.createdAt,
@@ -97,6 +179,31 @@ export async function reserveWorkspacePlacement(
     .run();
 
   return (result.meta.changes ?? 0) > 0;
+}
+
+function validReservationJsonSql(column: string): string {
+  return `json_type(${column}, '$.cpuMillis') = 'integer'
+    AND json_extract(${column}, '$.cpuMillis') > 0
+    AND json_type(${column}, '$.memoryMb') = 'integer'
+    AND json_extract(${column}, '$.memoryMb') > 0
+    AND json_type(${column}, '$.diskMb') = 'integer'
+    AND json_extract(${column}, '$.diskMb') > 0
+    AND json_type(${column}, '$.exclusiveNode') IN ('true', 'false')
+    AND json_type(${column}, '$.maxCoTenants') = 'integer'
+    AND json_extract(${column}, '$.maxCoTenants') > 0
+    AND json_type(${column}, '$.source') = 'text'
+    AND json_extract(${column}, '$.source') IN (${RESOURCE_REQUIREMENTS_SOURCE_SQL})
+    AND json_type(${column}, '$.sourceId') = 'text'
+    AND json_type(${column}, '$.version') = 'integer'
+    AND json_extract(${column}, '$.version') > 0`;
+}
+
+function knownCapacitySql(column: string): string {
+  return `typeof(${column}) = 'integer' AND ${column} > 0`;
+}
+
+function unknownOrFitsSql(column: string, requestColumn: string, multiplier: number): string {
+  return `NOT (${knownCapacitySql(column)}) OR ${requestColumn} <= ${column} * ${multiplier}`;
 }
 
 function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
@@ -144,7 +251,11 @@ function buildCapacityPlacementPredicate(input: WorkspacePlacementInput): {
       AND n.capacity_pool_id = ?
       AND n.capacity_source_id = ?
       ${concretePredicate?.sql ?? ''}`,
-    binds: [snapshot.capacityPoolId, snapshot.capacitySourceId, ...(concretePredicate?.binds ?? [])],
+    binds: [
+      snapshot.capacityPoolId,
+      snapshot.capacitySourceId,
+      ...(concretePredicate?.binds ?? []),
+    ],
   };
 }
 

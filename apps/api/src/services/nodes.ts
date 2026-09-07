@@ -10,10 +10,11 @@ import {
   type CapacityPlacementSnapshot,
   type CredentialProvider,
   type CredentialSource,
+  DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH,
   isUserOwnedNodeClass,
   type TaskMode,
 } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -35,10 +36,26 @@ import {
   createProviderForUser,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
-import { destroyVmAgentContainer } from './vm-agent-container';
+import { deleteNodeResourcesStrict } from './strict-node-deletion';
+import { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from './workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
+
+function managedNodeStopDiagnostic(env: Env): string {
+  const configuredMaxLength = Number.parseInt(
+    env.WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH ?? '',
+    10
+  );
+  const maxLength =
+    Number.isInteger(configuredMaxLength) && configuredMaxLength > 0
+      ? configuredMaxLength
+      : DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH;
+  return `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: managed node teardown pending`.slice(
+    0,
+    maxLength
+  );
+}
 
 export interface CreateNodeInput {
   userId: string;
@@ -126,6 +143,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     nodeRole: input.nodeRole ?? 'workspace',
     nodeMode: input.nodeMode ?? 'shared',
     runtime: input.runtime ?? 'vm',
+    runtimeIncarnationId: crypto.randomUUID(),
     ...capacitySnapshotValues,
     providerInstanceType: input.providerInstanceType ?? capacitySnapshotValues.providerInstanceType,
     createdAt: now,
@@ -235,6 +253,7 @@ export async function provisionNode(
 
     // Persist the resolved provider identity before external provisioning so
     // cleanup never has to guess which third-party API owns the VM.
+    const runtimeIncarnationId = crypto.randomUUID();
     await db
       .update(schema.nodes)
       .set({
@@ -244,6 +263,19 @@ export async function provisionNode(
         credentialAttributionProjectId:
           providerResult.credentialSource === 'project' ? attributionProjectId : null,
         credentialAttributionSource: providerResult.credentialSource,
+        placementCredentialSource:
+          providerResult.exactCredentialBinding?.credentialSource ?? node.placementCredentialSource,
+        placementCredentialReference:
+          providerResult.exactCredentialBinding?.credentialReference ??
+          node.placementCredentialReference,
+        placementCredentialVersion:
+          providerResult.exactCredentialBinding?.credentialVersion ??
+          node.placementCredentialVersion,
+        placementCredentialFingerprint:
+          providerResult.exactCredentialBinding?.credentialFingerprint ??
+          node.placementCredentialFingerprint,
+        runtimeIncarnationId,
+        runtimeTerminationConfirmedAt: null,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.nodes.id, node.id));
@@ -349,6 +381,7 @@ export async function provisionNode(
       .set({
         providerInstanceId: vm.id,
         ipAddress: vm.ip || null,
+        runtimeTerminationConfirmedAt: null,
         status: 'creating',
         updatedAt: new Date().toISOString(),
       })
@@ -373,6 +406,7 @@ export async function provisionNode(
             providerResult.credentialSource === 'project' ? attributionProjectId : null,
           credentialAttributionSource: providerResult.credentialSource,
           providerInstanceId: vm.id,
+          runtimeTerminationConfirmedAt: null,
           status: 'creating',
           errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
           updatedAt: new Date().toISOString(),
@@ -406,6 +440,7 @@ export async function provisionNode(
           providerResult.credentialSource === 'project' ? attributionProjectId : null,
         credentialAttributionSource: providerResult.credentialSource,
         providerInstanceId: vm.id,
+        runtimeTerminationConfirmedAt: null,
         ipAddress: vm.ip,
         backendDnsRecordId,
         status: dnsErrorMessage ? 'error' : 'running',
@@ -541,47 +576,51 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     return;
   }
 
-  if (node.runtime === 'cf-container') {
-    await destroyVmAgentContainer(env, node.id).catch((err) => {
-      log.error('node_stop.cf_container_destroy_failed', { nodeId, ...serializeError(err) });
-      throw err;
-    });
+  // A managed stop is terminal only after the strict provider/container boundary
+  // supplies proof. Persist quarantine before I/O so timeouts, provider errors,
+  // and process interruption cannot strand a workspace in an apparently terminal state.
+  const nodeClaim = await db
+    .update(schema.nodes)
+    .set({ status: 'destroying', healthStatus: 'stale', updatedAt: now })
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        eq(schema.nodes.userId, userId),
+        sql`${schema.nodes.status} IS ${node.status}`,
+        sql`${schema.nodes.runtime} IS ${node.runtime}`,
+        sql`${schema.nodes.providerInstanceId} IS ${node.providerInstanceId}`,
+        sql`${schema.nodes.runtimeIncarnationId} IS ${node.runtimeIncarnationId}`
+      )
+    )
+    .run();
+  if ((nodeClaim.meta.changes ?? 0) !== 1) {
+    throw new Error('Managed node changed before teardown could be claimed');
   }
+  await db
+    .update(schema.workspaces)
+    .set({ status: 'stopping', errorMessage: managedNodeStopDiagnostic(env), updatedAt: now })
+    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
-  // Delete the cloud provider server since stopped nodes cannot be restarted
-  if (node.providerInstanceId) {
-    const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const attributionUserId = node.credentialAttributionUserId ?? userId;
-    const attributionProjectId =
-      node.credentialAttributionSource === 'project'
-        ? (node.credentialAttributionProjectId ?? null)
-        : null;
-    const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
-    const providerResult = await createProviderForUser(
-      db,
-      attributionUserId,
-      getCredentialEncryptionKey(env),
-      env,
-      targetProvider,
-      attributionProjectId,
-      exactCredential
-    );
-    if (providerResult) {
-      try {
-        await providerResult.provider.deleteVM(node.providerInstanceId);
-      } catch (err) {
-        log.error('node_stop.delete_vm_failed', { nodeId, ...serializeError(err) });
-      }
-    } else if (exactCredential) {
-      log.error('node_stop.exact_credential_missing_vm_orphaned', {
-        nodeId,
-        userId,
+  let strictDeletion;
+  try {
+    strictDeletion = await deleteNodeResourcesStrict(nodeId, userId, env, {
+      cleanupDns: false,
+      expectedRuntime: {
+        userId: node.userId,
+        runtime: node.runtime,
         providerInstanceId: node.providerInstanceId,
-        cloudProvider: node.cloudProvider,
-        credentialSource: exactCredential.credentialSource,
-        credentialReference: exactCredential.credentialReference,
-      });
-    }
+        runtimeIncarnationId: node.runtimeIncarnationId,
+      },
+    });
+  } catch (err) {
+    log.error('node_stop.runtime_termination_unconfirmed', {
+      nodeId,
+      ...serializeError(err),
+    });
+    throw new Error('Managed node teardown remains unconfirmed');
+  }
+  if (!strictDeletion.runtimeTerminationConfirmedAt) {
+    throw new Error('Managed node teardown returned no strict termination proof');
   }
 
   // Delete the DNS record since the node is being permanently stopped
@@ -593,155 +632,107 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     }
   }
 
-  // Mark node and workspaces as deleted since stopped nodes are non-recoverable
-  await db
-    .update(schema.workspaces)
-    .set({
-      status: 'deleted',
-      updatedAt: now,
-    })
-    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
-
-  await finalizeWorkspaceLifecycleClosure(env, {
-    nodeId,
-    userId,
-    agentSessionStatus: 'stopped',
-    nowIso: now,
-    reason: 'stop_node_resources',
-  });
-
-  await db
+  // The node may have been reprovisioned while the provider call was in flight.
+  // Only the exact incarnation carrying strict proof may cross the terminal fence.
+  const terminalNode = await db
     .update(schema.nodes)
     .set({
       status: 'deleted',
       healthStatus: 'stale',
       updatedAt: now,
     })
-    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
-}
-
-export interface DeleteNodeResourcesResult {
-  nodeFound: boolean;
-  providerVmDeleted: boolean;
-  providerVmDeleteSkippedReason: string | null;
-  backendDnsDeleted: boolean;
-  errors: string[];
-}
-
-export async function deleteNodeResources(
-  nodeId: string,
-  userId: string,
-  env: Env
-): Promise<DeleteNodeResourcesResult> {
-  const db = drizzle(env.DATABASE, { schema });
-  const result: DeleteNodeResourcesResult = {
-    nodeFound: false,
-    providerVmDeleted: false,
-    providerVmDeleteSkippedReason: null,
-    backendDnsDeleted: false,
-    errors: [],
-  };
-
-  const rows = await db
-    .select()
-    .from(schema.nodes)
-    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)))
-    .limit(1);
-
-  const node = rows[0];
-  if (!node) {
-    return result;
-  }
-  result.nodeFound = true;
-
-  // Mirror stopNodeResources: cf-container nodes must destroy their Sandbox container here too.
-  // deleteNodeResources previously had no container branch, leaking the container on delete.
-  // User-owned (BYO) nodes are never cf-container — the explicit guard makes that invariant
-  // enforced rather than implicit. See architecture-critique #2 (cf-container asymmetry).
-  if (!isUserOwnedNodeClass(node.nodeClass) && node.runtime === 'cf-container') {
-    await destroyVmAgentContainer(env, node.id).catch((err) => {
-      result.errors.push(err instanceof Error ? err.message : String(err));
-      log.error('node_delete.cf_container_destroy_failed', { nodeId, ...serializeError(err) });
-    });
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        eq(schema.nodes.userId, userId),
+        eq(schema.nodes.status, 'destroying'),
+        sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${strictDeletion.runtimeTerminationConfirmedAt}`,
+        sql`${schema.nodes.runtimeIncarnationId} IS ${strictDeletion.runtimeIncarnationId}`
+      )
+    )
+    .run();
+  if ((terminalNode.meta.changes ?? 0) !== 1) {
+    throw new Error('Managed node teardown proof no longer matches the current incarnation');
   }
 
-  // User-owned (BYO) machines have no SAM-provisioned cloud VM: "delete" = deregister the SAM
-  // record (tunnel teardown lands in Phase 1). NEVER call provider.deleteVM against the user's
-  // hardware, even defensively if a providerInstanceId were somehow set. See architecture-critique #2.
-  if (isUserOwnedNodeClass(node.nodeClass)) {
-    result.providerVmDeleteSkippedReason = 'user-owned node — no cloud VM to delete';
-  } else if (node.providerInstanceId) {
-    const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const attributionUserId = node.credentialAttributionUserId ?? userId;
-    const attributionProjectId =
-      node.credentialAttributionSource === 'project'
-        ? (node.credentialAttributionProjectId ?? null)
-        : null;
-    const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
-    const providerResult2 = await createProviderForUser(
-      db,
-      attributionUserId,
-      getCredentialEncryptionKey(env),
-      env,
-      targetProvider,
-      attributionProjectId,
-      exactCredential
-    );
-    if (providerResult2) {
-      try {
-        await providerResult2.provider.deleteVM(node.providerInstanceId);
-        result.providerVmDeleted = true;
-      } catch (err) {
-        result.errors.push(err instanceof Error ? err.message : String(err));
-        log.error('node_delete.delete_vm_failed', { nodeId, ...serializeError(err) });
-      }
-    } else {
-      result.providerVmDeleteSkippedReason = 'cloud provider credential unavailable';
-      result.errors.push('Cloud provider credential unavailable; provider VM may still exist.');
-      log.error('node_cleanup.credential_missing_vm_orphaned', {
-        nodeId,
-        userId,
-        providerInstanceId: node.providerInstanceId,
-        cloudProvider: node.cloudProvider,
-      });
-    }
-  }
-
-  if (node.backendDnsRecordId) {
-    try {
-      await deleteDNSRecord(node.backendDnsRecordId, env);
-      result.backendDnsDeleted = true;
-    } catch (err) {
-      result.errors.push(err instanceof Error ? err.message : String(err));
-      log.error('node_delete.delete_dns_failed', { nodeId, ...serializeError(err) });
-    }
-  }
-
-  // Cascade workspace status: mark all workspaces on this node as deleted
-  const now = new Date().toISOString();
   await db
     .update(schema.workspaces)
-    .set({ status: 'deleted', updatedAt: now })
-    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+    .set({
+      status: 'deleted',
+      errorMessage: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.status, 'stopping'),
+        eq(
+          schema.workspaces.runtimeDeletionConfirmedAt,
+          strictDeletion.runtimeTerminationConfirmedAt
+        )
+      )
+    );
 
+  const confirmedWorkspaces = await db
+    .select({ id: schema.workspaces.id })
+    .from(schema.workspaces)
+    .where(
+      and(
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.userId, userId),
+        eq(
+          schema.workspaces.runtimeDeletionConfirmedAt,
+          strictDeletion.runtimeTerminationConfirmedAt
+        )
+      )
+    );
   await finalizeWorkspaceLifecycleClosure(env, {
-    nodeId,
+    workspaceIds: confirmedWorkspaces.map((workspace) => workspace.id),
     userId,
-    agentSessionStatus: 'completed',
+    agentSessionStatus: 'stopped',
     nowIso: now,
-    reason: 'delete_node_resources',
+    reason: 'stop_node_resources',
   });
-
-  return result;
 }
 
 export async function retireDeletedDeploymentNodeRecord(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
   nodeId: string,
-  userId: string
+  userId: string,
+  proof: { runtimeTerminationConfirmedAt: string | null; runtimeIncarnationId: string | null }
 ): Promise<void> {
   const now = new Date().toISOString();
+
+  const terminalNode = await db
+    .update(schema.nodes)
+    .set({
+      status: 'deleted',
+      healthStatus: 'stale',
+      providerInstanceId: null,
+      backendDnsRecordId: null,
+      ipAddress: null,
+      errorMessage: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        eq(schema.nodes.userId, userId),
+        eq(schema.nodes.nodeRole, 'deployment'),
+        proof.runtimeTerminationConfirmedAt
+          ? and(
+              sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${proof.runtimeTerminationConfirmedAt}`,
+              sql`${schema.nodes.runtimeIncarnationId} IS ${proof.runtimeIncarnationId}`
+            )
+          : eq(schema.nodes.nodeClass, 'user-owned')
+      )
+    )
+    .run();
+  if ((terminalNode.meta.changes ?? 0) !== 1) {
+    throw new Error('Deployment node terminal proof no longer matches the current incarnation');
+  }
 
   await db
     .update(schema.deploymentEnvironments)
@@ -758,7 +749,15 @@ export async function retireDeletedDeploymentNodeRecord(
   await db
     .update(schema.workspaces)
     .set({ status: 'deleted', updatedAt: now })
-    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+    .where(
+      and(
+        eq(schema.workspaces.nodeId, nodeId),
+        eq(schema.workspaces.userId, userId),
+        proof.runtimeTerminationConfirmedAt
+          ? eq(schema.workspaces.runtimeDeletionConfirmedAt, proof.runtimeTerminationConfirmedAt)
+          : undefined
+      )
+    );
 
   await finalizeWorkspaceLifecycleClosure(env, {
     nodeId,
@@ -767,25 +766,6 @@ export async function retireDeletedDeploymentNodeRecord(
     nowIso: now,
     reason: 'retire_deleted_deployment_node_record',
   });
-
-  await db
-    .update(schema.nodes)
-    .set({
-      status: 'deleted',
-      healthStatus: 'stale',
-      providerInstanceId: null,
-      backendDnsRecordId: null,
-      ipAddress: null,
-      errorMessage: null,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId),
-        eq(schema.nodes.nodeRole, 'deployment')
-      )
-    );
 }
 
 function truncateNodeErrorMessage(message: string): string {
@@ -794,5 +774,7 @@ function truncateNodeErrorMessage(message: string): string {
     : message;
 }
 
+export type { DeleteNodeResourcesResult } from './node-resource-deletion';
+export { deleteNodeResources } from './node-resource-deletion';
 export type { StrictNodeDeletionResult } from './strict-node-deletion';
 export { deleteNodeResourcesStrict } from './strict-node-deletion';

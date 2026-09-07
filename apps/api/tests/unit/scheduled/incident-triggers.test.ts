@@ -12,7 +12,7 @@ function setup(options: { withTrigger?: boolean } = {}) {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
     CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT, updated_by TEXT);
-    CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL);
+    CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, max_triggers INTEGER);
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
       title TEXT NOT NULL, description TEXT, status TEXT NOT NULL, priority INTEGER NOT NULL,
@@ -59,7 +59,7 @@ function setup(options: { withTrigger?: boolean } = {}) {
       resolved_at INTEGER, resolved_by_task_id TEXT, resolution_note TEXT,
       resolution_references TEXT, expired_at INTEGER,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP);
-    INSERT INTO projects VALUES ('feedback-project', 'owner-1', 'Private Feedback');
+    INSERT INTO projects VALUES ('feedback-project', 'owner-1', 'Private Feedback', NULL);
   `);
   if (options.withTrigger !== false) {
     sqlite.exec(`

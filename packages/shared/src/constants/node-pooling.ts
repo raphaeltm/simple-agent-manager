@@ -106,6 +106,30 @@ export const DEFAULT_PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS = 60 * 60 * 1000; // 
 /** Default TTL (ms) before a stopped workspace is automatically deleted. Override via WORKSPACE_STOPPED_TTL_MS env var. */
 export const DEFAULT_WORKSPACE_STOPPED_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+/** Initial delay before retrying an unconfirmed VM workspace deletion. */
+export const DEFAULT_WORKSPACE_DELETION_RETRY_BASE_MS = 60 * 1000; // 1 minute
+
+/** Maximum exponential backoff for an unconfirmed VM workspace deletion. */
+export const DEFAULT_WORKSPACE_DELETION_RETRY_MAX_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Maximum time an unconfirmed deletion remains on the hot retry alarm before it is retained as
+ * an operator-visible dead letter. The workspace remains quarantined and replacement-fenced.
+ */
+export const DEFAULT_WORKSPACE_DELETION_MAX_RESIDENCE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Maximum due workspace deletions processed by one NodeLifecycle alarm. */
+export const DEFAULT_WORKSPACE_DELETION_ALARM_BATCH_SIZE = 3;
+
+/** Per-workspace/callback throttle for deletion-unconfirmed telemetry. */
+export const DEFAULT_WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS = 5 * 60;
+
+/** Maximum expired callback throttle claims pruned by one signal attempt. */
+export const DEFAULT_WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT = 25;
+
+/** Maximum sanitized diagnostic length stored on a stopping workspace. */
+export const DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH = 500;
+
 // =============================================================================
 // Workspace Idle Timeout (Compute Lifecycle Management)
 // =============================================================================

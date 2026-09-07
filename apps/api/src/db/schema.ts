@@ -413,6 +413,8 @@ export const projects = sqliteTable(
     maxWorkspacesPerNode: integer('max_workspaces_per_node'),
     nodeCpuThresholdPercent: integer('node_cpu_threshold_percent'),
     nodeMemoryThresholdPercent: integer('node_memory_threshold_percent'),
+    /** Per-project max triggers override. null = use platform default (MAX_TRIGGERS_PER_PROJECT). */
+    maxTriggers: integer('max_triggers'),
     status: text('status').notNull().default('active'),
     lastActivityAt: text('last_activity_at'),
     activeSessionCount: integer('active_session_count').notNull().default(0),
@@ -1238,6 +1240,16 @@ export const nodes = sqliteTable(
     /** Cloudflare Tunnel display name for user-owned tunnel nodes. Null otherwise. */
     tunnelName: text('tunnel_name'),
     errorMessage: text('error_message'),
+    /** Written only after strict provider/container teardown confirms the runtime is absent. */
+    runtimeTerminationConfirmedAt: text('runtime_termination_confirmed_at'),
+    /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
+    runtimeIncarnationId: text('runtime_incarnation_id'),
+    /**
+     * SHA-256 fingerprint of the encrypted provider credential used for this runtime. The
+     * fingerprint is pinned before provider I/O so strict deletion cannot follow a mutable
+     * credential row into a different provider account.
+     */
+    placementCredentialFingerprint: text('placement_credential_fingerprint'),
     /** Candidate-page escape after cleanup failure; ISO-8601 UTC timestamp. */
     cleanupBackoffUntil: text('cleanup_backoff_until'),
     createdAt: text('created_at')
@@ -1303,6 +1315,10 @@ export const workspaces = sqliteTable(
       .notNull()
       .default(false),
     errorMessage: text('error_message'),
+    /** Set only after VM-agent absence/success or strict node-runtime termination proof. */
+    runtimeDeletionConfirmedAt: text('runtime_deletion_confirmed_at'),
+    /** Proof classifier paired with runtimeDeletionConfirmedAt. */
+    runtimeDeletionProof: text('runtime_deletion_proof'),
     dispatchedAt: text('dispatched_at'),
     /** Agent profile ID used for this workspace's task — drives GitHub CLI policy enforcement. */
     agentProfileHint: text('agent_profile_hint'),
@@ -1355,6 +1371,25 @@ export const workspaces = sqliteTable(
     capacityPoolProjectIdx: index('idx_workspaces_capacity_pool_project')
       .on(table.capacityPoolProjectId)
       .where(sql`capacity_pool_project_id IS NOT NULL`),
+  })
+);
+
+/** Atomic throttle claims for payload-free callbacks observed during deletion quarantine. */
+export const workspaceCallbackSignalClaims = sqliteTable(
+  'workspace_callback_signal_claims',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    callbackKind: text('callback_kind').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.callbackKind] }),
+    expiresAtIdx: index('idx_workspace_callback_signal_claims_expires_at').on(table.expiresAt),
   })
 );
 
@@ -2928,6 +2963,63 @@ export const projectDataArchiveGlobalSweepCadence = sqliteTable(
 
 export type ProjectDataArchiveGlobalSweepCadenceRow =
   typeof projectDataArchiveGlobalSweepCadence.$inferSelect;
+
+export const projectDataStorageReliefPreflights = sqliteTable(
+  'project_data_storage_relief_preflights',
+  {
+    planId: text('plan_id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: ['running', 'complete', 'truncated', 'failed'] })
+      .notNull()
+      .default('running'),
+    cutoffCreatedAt: integer('cutoff_created_at').notNull(),
+    configJson: text('config_json').notNull(),
+    cursorJson: text('cursor_json'),
+    batchesStarted: integer('batches_started').notNull().default(0),
+    rowsExamined: integer('rows_examined').notNull().default(0),
+    eligibleRows: integer('eligible_rows').notNull().default(0),
+    eligibleBytes: integer('eligible_bytes').notNull().default(0),
+    legacyOversizedRows: integer('legacy_oversized_rows').notNull().default(0),
+    legacyOversizedBytes: integer('legacy_oversized_bytes').notNull().default(0),
+    rearchivableOversizedRows: integer('rearchivable_oversized_rows').notNull().default(0),
+    rearchivableOversizedBytes: integer('rearchivable_oversized_bytes').notNull().default(0),
+    oversizedRows: integer('oversized_rows').notNull().default(0),
+    oversizedBytes: integer('oversized_bytes').notNull().default(0),
+    archivedRows: integer('archived_rows').notNull().default(0),
+    skippedRows: integer('skipped_rows').notNull().default(0),
+    sessionCount: integer('session_count').notNull().default(0),
+    sessionsJson: text('sessions_json').notNull().default('{}'),
+    sessionsSha256: text('sessions_sha256'),
+    targetBatchesJson: text('target_batches_json').notNull().default('[]'),
+    targetManifestKey: text('target_manifest_key'),
+    targetManifestBytes: integer('target_manifest_bytes'),
+    targetManifestSha256: text('target_manifest_sha256'),
+    databaseSizeBytes: integer('database_size_bytes'),
+    nextEligibleAt: integer('next_eligible_at').notNull().default(0),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    startedAt: integer('started_at').notNull(),
+    completedAt: integer('completed_at'),
+    lastError: text('last_error'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    projectStatusIdx: index('idx_project_data_storage_relief_preflights_project_status').on(
+      table.projectId,
+      table.status,
+      table.updatedAt
+    ),
+    nextEligibleIdx: index('idx_project_data_storage_relief_preflights_next_eligible').on(
+      table.status,
+      table.nextEligibleAt
+    ),
+  })
+);
+
+export type ProjectDataStorageReliefPreflightRow =
+  typeof projectDataStorageReliefPreflights.$inferSelect;
 
 export const projectDataArchiveMigrations = sqliteTable(
   'project_data_archive_migrations',

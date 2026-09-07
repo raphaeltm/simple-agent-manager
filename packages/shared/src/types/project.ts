@@ -63,6 +63,8 @@ export interface Project {
   maxWorkspacesPerNode?: number | null;
   nodeCpuThresholdPercent?: number | null;
   nodeMemoryThresholdPercent?: number | null;
+  /** Per-project max triggers override. null = use platform default (MAX_TRIGGERS_PER_PROJECT). */
+  maxTriggers?: number | null;
   status?: ProjectStatus;
   /** Server-computed shared-project transition state. False for solo projects. */
   multiplayerActive?: boolean;
@@ -145,6 +147,8 @@ export interface UpdateProjectRequest {
   maxWorkspacesPerNode?: number | null;
   nodeCpuThresholdPercent?: number | null;
   nodeMemoryThresholdPercent?: number | null;
+  /** Per-project max triggers override. null = reset to platform default. */
+  maxTriggers?: number | null;
 }
 
 export interface ProjectRuntimeEnvVarResponse {

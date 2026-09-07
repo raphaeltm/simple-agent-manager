@@ -11,6 +11,7 @@ import { createSqlStorage } from './sql-storage-test-utils';
 class MockSqlStorage {
   private tables = new Map<string, Record<string, unknown>[]>();
   private execLog: string[] = [];
+  private toolPayloadArchiveColumns = new Set(['message_id']);
 
   exec(query: string, ...params: unknown[]): { toArray: () => Record<string, unknown>[] } {
     this.execLog.push(query.trim());
@@ -32,6 +33,17 @@ class MockSqlStorage {
         this.tables.set(tableMatch[1], []);
       }
       return { toArray: () => [] };
+    }
+
+    if (normalized.startsWith('ALTER TABLE TOOL_PAYLOAD_ARCHIVES ADD COLUMN')) {
+      const column = query.match(/ADD COLUMN\s+(\w+)/i)?.[1];
+      if (column) this.toolPayloadArchiveColumns.add(column);
+      return { toArray: () => [] };
+    }
+
+    if (normalized.startsWith('PRAGMA TABLE_INFO(TOOL_PAYLOAD_ARCHIVES)')) {
+      const columns = [...this.toolPayloadArchiveColumns].map((name) => ({ name }));
+      return { toArray: () => columns };
     }
 
     // Handle SELECT name FROM migrations
@@ -82,6 +94,48 @@ describe('DO Migrations', () => {
         expect(migration.name.length).toBeGreaterThan(0);
         expect(typeof migration.run).toBe('function');
       }
+    });
+  });
+
+  describe('044-tool-payload-archive-verification-proof migration', () => {
+    const migration = MIGRATIONS.find(
+      (candidate) => candidate.name === '044-tool-payload-archive-verification-proof'
+    );
+
+    it('is idempotent only for exact duplicate-column errors', () => {
+      expect(migration).toBeDefined();
+      const db = new Database(':memory:');
+      try {
+        const sql = createSqlStorage(db);
+        db.exec('CREATE TABLE tool_payload_archives (message_id TEXT PRIMARY KEY)');
+        migration!.run(sql);
+        expect(() => migration!.run(sql)).not.toThrow();
+        const columns = db.prepare('PRAGMA table_info(tool_payload_archives)').all() as Array<{
+          name: string;
+        }>;
+        expect(columns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'archive_body_bytes',
+            'archive_body_sha256',
+            'root_object_bytes',
+            'root_object_sha256',
+            'verified_object_count',
+            'source_tool_metadata_sha256',
+          ])
+        );
+      } finally {
+        db.close();
+      }
+    });
+
+    it('rethrows unrelated ALTER TABLE failures', () => {
+      expect(migration).toBeDefined();
+      const sql = {
+        exec: () => {
+          throw new Error('database or disk is full');
+        },
+      } as unknown as SqlStorage;
+      expect(() => migration!.run(sql)).toThrow('database or disk is full');
     });
   });
 

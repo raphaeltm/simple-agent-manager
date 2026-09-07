@@ -70,6 +70,8 @@ describe('MCP create_trigger tool', () => {
   it('creates a trigger successfully with required fields', async () => {
     // Name uniqueness check: no existing trigger
     mockD1._stmt.first.mockResolvedValueOnce(null);
+    // Project lookup: no per-project max_triggers override
+    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
     // Count check: below limit
     mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
 
@@ -209,8 +211,10 @@ describe('MCP create_trigger tool', () => {
   it('rejects when max triggers reached', async () => {
     // Name uniqueness: no conflict
     mockD1._stmt.first.mockResolvedValueOnce(null);
-    // Count check: at limit (default 25)
-    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 25 });
+    // Project lookup: no override (default 20)
+    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
+    // Count check: at limit (default 20)
+    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 20 });
 
     const result = await handleCreateTrigger(
       'req-1',
@@ -223,8 +227,47 @@ describe('MCP create_trigger tool', () => {
     expect(result.error?.message).toContain('Maximum triggers per project');
   });
 
+  it('uses the per-project max_triggers override when set', async () => {
+    // Name uniqueness: no conflict
+    mockD1._stmt.first.mockResolvedValueOnce(null);
+    // Project lookup: per-project override of 5 (below the default 20)
+    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: 5 });
+    // Count check: at the per-project limit
+    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 5 });
+
+    const result = await handleCreateTrigger(
+      'req-1',
+      { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
+      tokenData,
+      env as Env,
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('Maximum triggers per project');
+  });
+
+  it('uses the per-project max_triggers override to allow more than the default', async () => {
+    // Name uniqueness: no conflict
+    mockD1._stmt.first.mockResolvedValueOnce(null);
+    // Project lookup: per-project override raised to 30
+    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: 30 });
+    // Count check: 25 triggers (above default 20, below override 30) → allowed
+    mockD1._stmt.first.mockResolvedValueOnce({ cnt: 25 });
+
+    const result = await handleCreateTrigger(
+      'req-1',
+      { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
+      tokenData,
+      env as Env,
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.result).toBeDefined();
+  });
+
   it('uses default UTC timezone when not specified', async () => {
     mockD1._stmt.first.mockResolvedValueOnce(null);
+    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
     mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
 
     const result = await handleCreateTrigger(
@@ -245,6 +288,8 @@ describe('MCP create_trigger tool', () => {
     mockD1._stmt.first.mockResolvedValueOnce({ id: 'profile-1' });
     // Name uniqueness: no conflict
     mockD1._stmt.first.mockResolvedValueOnce(null);
+    // Project lookup: no override
+    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
     // Count check: below limit
     mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
 
@@ -271,6 +316,7 @@ describe('MCP create_trigger tool', () => {
 
   it('ignores invalid vmSizeOverride values', async () => {
     mockD1._stmt.first.mockResolvedValueOnce(null);
+    mockD1._stmt.first.mockResolvedValueOnce({ maxTriggers: null });
     mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
 
     const result = await handleCreateTrigger(

@@ -5,6 +5,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { timestampVersion } from './default-capacity-pool-helpers';
 import { decrypt } from './encryption';
 import { extractCloudProviderToken } from './provider-credential-codecs';
 
@@ -12,13 +13,17 @@ export type ProviderResolutionResult = {
   provider: Provider;
   providerName: CredentialProvider;
   credentialSource: CredentialSource;
+  /** Exact persisted account binding used to construct this provider. */
+  exactCredentialBinding?: ExactProviderCredentialBinding;
 };
 
 export interface ExactProviderCredentialBinding {
   credentialSource: CredentialSource;
   credentialReference: string | null | undefined;
-  /** Audit-only until durable provider credential version history exists. */
+  /** Updated-at snapshot used to fence placement before a runtime exists. */
   credentialVersion?: number | null;
+  /** Immutable content fingerprint required when deleting an existing runtime. */
+  credentialFingerprint?: string | null;
 }
 
 export interface ProviderCredentialPlacementSnapshot {
@@ -26,6 +31,7 @@ export interface ProviderCredentialPlacementSnapshot {
   placementCredentialSource?: string | null;
   placementCredentialReference?: string | null;
   placementCredentialVersion?: number | null;
+  placementCredentialFingerprint?: string | null;
 }
 
 type ParsedProviderCredentialReference =
@@ -69,11 +75,50 @@ function isExactCredentialSource(value: string | null | undefined): value is Cre
   return value === 'user' || value === 'project' || value === 'platform';
 }
 
+/**
+ * Return a non-secret, immutable identity for one stored ciphertext generation. Re-encrypting
+ * the same provider token intentionally changes this value because strict teardown must never
+ * assume that a mutable credential-row ID still names the account used for provisioning.
+ */
+export async function fingerprintEncryptedProviderCredential(
+  encryptedToken: string,
+  iv: string
+): Promise<string> {
+  const encoded = new TextEncoder().encode(`provider-credential-v1\0${iv}\0${encryptedToken}`);
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+async function exactCredentialGenerationMatches(
+  exactCredential: ExactProviderCredentialBinding,
+  row: { encryptedToken: string; iv: string; createdAt?: string | null; updatedAt?: string | null }
+): Promise<{ matches: boolean; fingerprint: string }> {
+  const fingerprint = await fingerprintEncryptedProviderCredential(row.encryptedToken, row.iv);
+  if (exactCredential.credentialFingerprint) {
+    return { matches: fingerprint === exactCredential.credentialFingerprint, fingerprint };
+  }
+
+  const currentVersion = timestampVersion(row.updatedAt ?? row.createdAt);
+  return {
+    matches:
+      exactCredential.credentialVersion != null &&
+      currentVersion != null &&
+      currentVersion === exactCredential.credentialVersion,
+    fingerprint,
+  };
+}
+
+function withCredentialFingerprint(
+  exactCredential: ExactProviderCredentialBinding,
+  credentialFingerprint: string
+): ExactProviderCredentialBinding {
+  return { ...exactCredential, credentialFingerprint };
+}
+
 export function exactProviderCredentialBindingFromPlacementSnapshot(
   snapshot: ProviderCredentialPlacementSnapshot
 ): ExactProviderCredentialBinding | null {
   if (
-    !snapshot.capacityPoolId ||
     !isExactCredentialSource(snapshot.placementCredentialSource) ||
     !snapshot.placementCredentialReference
   ) {
@@ -84,6 +129,7 @@ export function exactProviderCredentialBindingFromPlacementSnapshot(
     credentialSource: snapshot.placementCredentialSource,
     credentialReference: snapshot.placementCredentialReference,
     credentialVersion: snapshot.placementCredentialVersion ?? null,
+    credentialFingerprint: snapshot.placementCredentialFingerprint ?? null,
   };
 }
 
@@ -117,8 +163,14 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       .limit(1);
 
     if (!platformCred?.provider) return null;
-    const decryptedToken = await decrypt(platformCred.encryptedToken, platformCred.iv, encryptionKey);
-    return createProviderFromDecryptedToken(
+    const generation = await exactCredentialGenerationMatches(exactCredential, platformCred);
+    if (!generation.matches) return null;
+    const decryptedToken = await decrypt(
+      platformCred.encryptedToken,
+      platformCred.iv,
+      encryptionKey
+    );
+    const result = await createProviderFromDecryptedToken(
       platformCred.provider as CredentialProvider,
       decryptedToken,
       'platform',
@@ -126,11 +178,15 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       projectId ?? null,
       env
     );
+    return {
+      ...result,
+      exactCredentialBinding: withCredentialFingerprint(exactCredential, generation.fingerprint),
+    };
   }
 
   if (exactCredential.credentialSource === 'user') {
     if (reference.kind === 'ccCredential') {
-      return createProviderForExactComposableCredential(
+      const result = await createProviderForExactComposableCredential(
         db,
         userId,
         encryptionKey,
@@ -139,8 +195,10 @@ export async function createProviderForExactCredential<TEnv extends Env>(
         projectId ?? null,
         reference.id,
         'user',
+        exactCredential,
         createProviderFromDecryptedToken
       );
+      return result;
     }
     if (reference.kind !== 'credential') return null;
     const [cred] = await db
@@ -159,8 +217,10 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       .limit(1);
 
     if (!cred) return null;
+    const generation = await exactCredentialGenerationMatches(exactCredential, cred);
+    if (!generation.matches) return null;
     const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
-    return createProviderFromDecryptedToken(
+    const result = await createProviderFromDecryptedToken(
       cred.provider as CredentialProvider,
       decryptedToken,
       'user',
@@ -168,12 +228,16 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       projectId ?? null,
       env
     );
+    return {
+      ...result,
+      exactCredentialBinding: withCredentialFingerprint(exactCredential, generation.fingerprint),
+    };
   }
 
   if (exactCredential.credentialSource === 'project') {
     if (reference.kind === 'ccCredential') {
       if (!projectId) return null;
-      return createProviderForExactComposableCredential(
+      const result = await createProviderForExactComposableCredential(
         db,
         userId,
         encryptionKey,
@@ -182,8 +246,10 @@ export async function createProviderForExactCredential<TEnv extends Env>(
         projectId,
         reference.id,
         'project',
+        exactCredential,
         createProviderFromDecryptedToken
       );
+      return result;
     }
     if (reference.kind !== 'credential' || !projectId) return null;
     const [cred] = await db
@@ -201,8 +267,10 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       .limit(1);
 
     if (!cred) return null;
+    const generation = await exactCredentialGenerationMatches(exactCredential, cred);
+    if (!generation.matches) return null;
     const decryptedToken = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
-    return createProviderFromDecryptedToken(
+    const result = await createProviderFromDecryptedToken(
       cred.provider as CredentialProvider,
       decryptedToken,
       'project',
@@ -210,6 +278,10 @@ export async function createProviderForExactCredential<TEnv extends Env>(
       projectId,
       env
     );
+    return {
+      ...result,
+      exactCredentialBinding: withCredentialFingerprint(exactCredential, generation.fingerprint),
+    };
   }
 
   return null;
@@ -224,6 +296,7 @@ async function createProviderForExactComposableCredential<TEnv extends Env>(
   projectId: string | null,
   credentialId: string,
   credentialSource: 'user' | 'project',
+  exactCredential: ExactProviderCredentialBinding,
   createProviderFromDecryptedToken: ProviderFactory<TEnv>
 ): Promise<ProviderResolutionResult | null> {
   const attachmentPredicates = [
@@ -245,6 +318,8 @@ async function createProviderForExactComposableCredential<TEnv extends Env>(
     .select({
       encryptedToken: schema.ccCredentials.encryptedToken,
       iv: schema.ccCredentials.iv,
+      createdAt: schema.ccCredentials.createdAt,
+      updatedAt: schema.ccCredentials.updatedAt,
     })
     .from(schema.ccCredentials)
     .innerJoin(
@@ -269,9 +344,11 @@ async function createProviderForExactComposableCredential<TEnv extends Env>(
     .limit(1);
 
   if (!row) return null;
+  const generation = await exactCredentialGenerationMatches(exactCredential, row);
+  if (!generation.matches) return null;
   const decryptedToken = await decrypt(row.encryptedToken, row.iv, encryptionKey);
   const providerToken = extractCloudProviderToken(targetProvider, decryptedToken);
-  return createProviderFromDecryptedToken(
+  const result = await createProviderFromDecryptedToken(
     targetProvider,
     providerToken,
     credentialSource,
@@ -279,4 +356,8 @@ async function createProviderForExactComposableCredential<TEnv extends Env>(
     projectId,
     env
   );
+  return {
+    ...result,
+    exactCredentialBinding: withCredentialFingerprint(exactCredential, generation.fingerprint),
+  };
 }

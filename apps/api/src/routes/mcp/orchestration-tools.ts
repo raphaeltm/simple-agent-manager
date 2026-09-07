@@ -18,6 +18,10 @@ import {
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
+import {
+  assertReplacementDeletionConfirmed,
+  WorkspaceDeletionUnconfirmedError,
+} from '../../services/replacement-deletion-fence';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
@@ -83,6 +87,19 @@ export async function handleRetrySubtask(
       INVALID_PARAMS,
       'Only the direct parent task can retry a subtask'
     );
+  }
+
+  try {
+    await assertReplacementDeletionConfirmed(env, {
+      sourceTaskId: childTaskId,
+      projectId: tokenData.projectId,
+      userId: childTask.userId,
+    });
+  } catch (error) {
+    if (error instanceof WorkspaceDeletionUnconfirmedError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, error.message);
+    }
+    throw error;
   }
 
   // Check retry limit — counts ALL children of the parent, not just retries of this specific child.
@@ -405,6 +422,7 @@ export async function handleRetrySubtask(
       resolvedReservation,
       capacityPoolSelection,
       vmSizeSource,
+      retrySourceTaskId: childTaskId,
     });
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

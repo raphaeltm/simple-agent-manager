@@ -55,6 +55,13 @@ function mockOwnSetup({ agentActive }: { agentActive: boolean }) {
 
 const STORAGE_KEY = 'sam-onboarding-wizard-dismissed-user_123';
 
+async function expectReadyOverlay(state: 'open' | 'closed') {
+  await waitFor(() => {
+    expect(screen.getByTestId('loading')).toHaveTextContent('ready');
+    expect(screen.getByTestId('overlay')).toHaveTextContent(state);
+  });
+}
+
 function setUrl(search: string) {
   window.history.replaceState({}, '', search);
 }
@@ -80,8 +87,7 @@ describe('OnboardingProvider', () => {
 
   it('auto-opens the overlay on first visit when the user has no setup of their own', async () => {
     renderProvider();
-    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
-    expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+    await expectReadyOverlay('open');
   });
 
   it('does NOT auto-complete onboarding when the user lacks their own agent/cloud creds', async () => {
@@ -89,16 +95,17 @@ describe('OnboardingProvider', () => {
     // status is consulted, so the overlay must still appear.
     mocks.listGitHubInstallations.mockResolvedValue([{ id: 'inst-1' }]);
     renderProvider();
-    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
-    expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+    await expectReadyOverlay('open');
   });
 
   it('auto-dismisses when the user has their own agent + cloud + GitHub', async () => {
     mockOwnSetup({ agentActive: true });
     renderProvider();
-    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
-    expect(screen.getByTestId('overlay')).toHaveTextContent('closed');
-    expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('ready');
+      expect(screen.getByTestId('overlay')).toHaveTextContent('closed');
+      expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
+    });
   });
 
   it('keeps the overlay open when the only agent credential is inactive', async () => {
@@ -107,8 +114,7 @@ describe('OnboardingProvider', () => {
     // so this isolates the agent branch: onboarding must still appear.
     mockOwnSetup({ agentActive: false });
     renderProvider();
-    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
-    expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+    await expectReadyOverlay('open');
     // The user never dismissed, so no flag should have been written.
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
@@ -116,16 +122,14 @@ describe('OnboardingProvider', () => {
   it('does not auto-open when the user previously dismissed', async () => {
     localStorage.setItem(STORAGE_KEY, 'true');
     renderProvider();
-    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
-    expect(screen.getByTestId('overlay')).toHaveTextContent('closed');
+    await expectReadyOverlay('closed');
   });
 
   it('re-opens via ?onboarding even when the user previously dismissed', async () => {
     localStorage.setItem(STORAGE_KEY, 'true');
     setUrl('/?onboarding');
     renderProvider();
-    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
-    expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+    await expectReadyOverlay('open');
     // ?onboarding resets in-memory `dismissed` so the overlay re-shows, but it
     // MUST NOT clear the persisted dismissal flag — re-navigating without the
     // param keeps the overlay closed.
@@ -136,8 +140,7 @@ describe('OnboardingProvider', () => {
     mockOwnSetup({ agentActive: true });
     setUrl('/?onboarding');
     renderProvider();
-    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('ready'));
-    expect(screen.getByTestId('overlay')).toHaveTextContent('open');
+    await expectReadyOverlay('open');
   });
 
   it('shows the overlay immediately when forced via ?onboarding, before the status fetch resolves', () => {

@@ -93,6 +93,8 @@ export class ProjectData extends DurableObject<Env> {
   private summarySyncLock: Promise<unknown> = Promise.resolve();
   /** Serializes archive source hash/finalize awaits against local transcript writers (rule 45). */
   private archiveTranscriptLock: Promise<unknown> = Promise.resolve();
+  /** Serializes cleanup state reads, external R2 work, and final progress writes (rule 45). */
+  private toolPayloadCleanupLock: Promise<unknown> = Promise.resolve();
   private cachedProjectId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -621,11 +623,33 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  /**
+   * Rows per statement for the streaming terminal-version hash and grouped-row loops.
+   * Resolved here, at the DO boundary, so the coordinator never has to know it: the
+   * memory ceiling this bounds belongs to this object, not to the Worker calling it.
+   */
+  private archiveHashPageRows(): number {
+    return archiveSharding.resolveArchiveHashPageRows(this.env);
+  }
+
   async archiveSourcePrepareIntent(
     input: archiveSharding.ArchiveSourcePrepareInput
-  ): Promise<archiveSharding.ArchiveSourcePrepareResult> {
+  ): Promise<archiveSharding.ArchiveSourcePrepareOutcome> {
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.prepareArchiveSourceIntent(this.sql, input)
+      archiveSharding.prepareArchiveSourceIntentOrRefuse(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
+    );
+  }
+
+  archiveSourceAbandonIntent(
+    input: archiveSharding.ArchiveSourceAbandonIntentInput
+  ): Promise<archiveSharding.ArchiveSourceAbandonIntentResult> {
+    return this.withArchiveTranscriptLock(async () =>
+      this.ctx.storage.transactionSync(() =>
+        archiveSharding.abandonArchiveSourceIntent(this.sql, input)
+      )
     );
   }
 
@@ -672,7 +696,10 @@ export class ProjectData extends DurableObject<Env> {
     input: archiveSharding.ArchiveSourceFinalizeDeleteInput
   ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.finalizeSourceDelete(this.sql, input)
+      archiveSharding.finalizeSourceDelete(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
     );
   }
 
@@ -694,9 +721,13 @@ export class ProjectData extends DurableObject<Env> {
     sourceIntentToken: string;
     expectedTerminalVersionSha256: string;
     now: number;
+    hashPageRows?: number;
   }): Promise<boolean> {
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.markSourceCopyBackRestored(this.sql, input)
+      archiveSharding.markSourceCopyBackRestored(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
     );
   }
 
@@ -779,7 +810,21 @@ export class ProjectData extends DurableObject<Env> {
   async archiveTargetSeal(
     input: archiveSharding.ArchiveTargetSealInput
   ): Promise<archiveSharding.ArchiveTargetSealResult> {
-    return archiveSharding.sealArchiveTarget(this.sql, input);
+    return archiveSharding.sealArchiveTarget(this.sql, {
+      ...input,
+      hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+    });
+  }
+
+  archiveTargetAbandonSession(
+    input: archiveSharding.ArchiveTargetAbandonInput
+  ): archiveSharding.ArchiveTargetAbandonResult {
+    return this.ctx.storage.transactionSync(() =>
+      archiveSharding.abandonArchiveTargetSession(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
+    );
   }
 
   archiveTargetInspectSession(
@@ -891,6 +936,7 @@ export class ProjectData extends DurableObject<Env> {
     const archived = await toolPayloadArchive.readArchivedMessageToolContent(
       this.sql,
       this.env,
+      this.getProjectId() ?? '',
       sessionId,
       messageId
     );
@@ -1618,13 +1664,22 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
-  measureStorageRelief(
+  async measureStorageRelief(
     input: storageReliefMeasurement.ProjectDataStorageReliefMeasureInput = {}
-  ): storageReliefMeasurement.ProjectDataStorageReliefMeasureResult {
-    return storageReliefMeasurement.measureProjectDataStorageReliefSlice(
-      this.sql,
-      storageSafety.resolveStorageSafetyConfig(this.env),
-      input
+  ): Promise<storageReliefMeasurement.ProjectDataStorageReliefMeasureResult> {
+    // Read-only, but it shares the cleanup mutex on purpose. The measurement reads a
+    // candidate window and then re-reads each row's tool_metadata across an await to hash
+    // it; a concurrent cleanup pass stripping that row in between would make the preflight
+    // hash and size an already-stripped payload, so the eligible-byte total a human
+    // approves against would be wrong. Execution still re-verifies the live hash, so this
+    // protects evidence accuracy rather than data safety.
+    return await this.withToolPayloadCleanupLock(() =>
+      storageReliefMeasurement.measureProjectDataStorageReliefSlice(
+        this.sql,
+        this.env,
+        storageSafety.resolveStorageSafetyConfig(this.env),
+        input
+      )
     );
   }
 
@@ -1648,17 +1703,36 @@ export class ProjectData extends DurableObject<Env> {
   async runManualToolPayloadCleanup(
     input: ProjectDataManualToolPayloadCleanupInput
   ): Promise<ProjectDataManualToolPayloadCleanupResult> {
-    const result = await toolPayloadManualCleanup.runProjectDataManualToolPayloadCleanup(
-      this.sql,
-      this.env,
-      this.getProjectId(),
-      input,
-      {
-        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
-      }
+    const result = await this.withToolPayloadCleanupLock(() =>
+      toolPayloadManualCleanup.runProjectDataManualToolPayloadCleanup(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input,
+        {
+          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        }
+      )
     );
     await this.recalculateAlarm();
     return result;
+  }
+
+  private withToolPayloadCleanupLock<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.toolPayloadCleanupLock.then(operation);
+    this.toolPayloadCleanupLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  protected runStorageSafetyAlarmLocked(): Promise<storageSafety.ProjectDataStorageAlarmResult> {
+    return this.withToolPayloadCleanupLock(() =>
+      storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId(), {
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+      })
+    );
   }
 
   // --- DO Alarm Handler ---
@@ -1679,14 +1753,7 @@ export class ProjectData extends DurableObject<Env> {
     // lifecycle maintenance sections so a large project can still reclaim bytes
     // even when idle/reconciliation work has accumulated.
     try {
-      await storageSafety.runProjectDataStorageSafetyAlarm(
-        this.sql,
-        this.env,
-        this.getProjectId(),
-        {
-          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
-        }
-      );
+      await this.runStorageSafetyAlarmLocked();
     } catch (err) {
       log.error('alarm.storage_safety_failed', {
         error: err instanceof Error ? err.message : String(err),
@@ -1761,29 +1828,13 @@ export class ProjectData extends DurableObject<Env> {
       }
     );
 
-    // Session state staleness: auto-heal stuck "prompting" states
+    // Session state staleness is reconciled only against the authoritative
+    // SessionHost inventory. Local SQL mirrors and VM heartbeats cannot prove a
+    // turn ended.
     const staleThresholdMs = sessionState.parseActivityStaleThreshold(
       this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
     );
-    try {
-      const healedSessionIds = sessionState.reconcileStaleActivity(this.sql, staleThresholdMs);
-      for (const healedId of healedSessionIds) {
-        const healedChatId = sessionState.resolveActivityChatSessionId(this.sql, healedId);
-        await sessionActivityReconciliation.publishTurnEnd(
-          this.sessionActivityHooks(),
-          healedChatId,
-          { kind: 'idle' }
-        );
-      }
-    } catch (err) {
-      log.error('alarm.stale_activity_reconciliation_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Probe-backed reconciliation for stale working states the SQL-only heal
-    // cannot resolve (an awake, heartbeating agent that simply is not
-    // prompting). Network I/O stays OFF the alarm's critical path — rule 47.
+    // Network I/O stays OFF the alarm's critical path — rule 47.
     this.ctx.waitUntil(
       sessionActivityReconciliation
         .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {

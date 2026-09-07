@@ -129,7 +129,8 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
           credentialKind: 'api-key',
           isActive: true,
         },
-      ]
+      ],
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }]
     );
 
     mockDecrypt.mockResolvedValueOnce('dedicated-opencode-key');
@@ -141,6 +142,27 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     expect(json.apiKey).toBe('dedicated-opencode-key');
     expect(json.credentialKind).toBe('api-key');
     expect(json.inferenceConfig).toBeUndefined();
+  });
+
+  it('does not return a decrypted key when deletion starts before delivery', async () => {
+    queueLimitResponses(
+      [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }],
+      [
+        {
+          encryptedToken: 'encrypted-dedicated',
+          iv: 'iv-dedicated',
+          credentialKind: 'api-key',
+          isActive: true,
+        },
+      ],
+      [{ userId: 'user-1', status: 'stopping', nodeId: 'node-1', nodeStatus: 'running' }]
+    );
+    mockDecrypt.mockResolvedValueOnce('must-not-be-returned');
+
+    const resp = await postAgentKey({ agentType: 'opencode' });
+
+    expect(resp.status).toBe(410);
+    expect(await resp.text()).not.toContain('must-not-be-returned');
   });
 
   it('returns 404 for default OpenCode Zen when AI proxy is enabled or disabled', async () => {
@@ -185,7 +207,8 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
             credentialKind: 'api-key',
             isActive: true,
           },
-        ]
+        ],
+        [{ userId: 'user-1', status: 'running', nodeId: 'node-1', nodeStatus: 'running' }]
       );
       mockDecrypt.mockResolvedValueOnce(decryptedKey);
 

@@ -85,6 +85,15 @@ The CI quality check (`pnpm quality:wrangler-bindings`) verifies:
 1. No `[env.*]` sections exist in checked-in `wrangler.toml` files
 2. All required binding types are present at the top level
 
+### GitHub Environment variables override checked-in `[vars]`
+
+Every name in the optional list that `getOptionalProcessEnvVars` reads is taken from the GitHub
+Environment (via `wrangler_sync_env`) when set, and that value REPLACES the top-level `wrangler.toml`
+value for the generated environment. Flipping a value in `wrangler.toml` therefore ships nothing if
+an Environment variable of the same name still pins the old value. The sync script prints every
+such override that differs from `wrangler.toml`; before merging a var change, list the overrides
+and verify the deployed value afterwards. See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+
 ### Required action when adding a Worker var consumed by sync-wrangler-config
 
 If `scripts/deploy/sync-wrangler-config.ts` reads a GitHub Environment variable from `process.env` to generate Worker `[vars]`, add it to the centralized `wrangler_sync_env` mapping in `.github/workflows/deploy-reusable.yml`. Do not add ad hoc per-step sync env blocks. First deploys run the sync script twice (initial sync, then tail-consumer re-sync), and both invocations must receive identical optional Worker env inputs so the second sync cannot silently drop operator overrides or restore script defaults.

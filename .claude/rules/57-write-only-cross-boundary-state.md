@@ -6,12 +6,16 @@ Any control-plane value that answers a question about **another process's curren
 internal state** — "is this agent mid-prompt", "is this container still building",
 "does this node still hold the lock" — where:
 
-1. the remote side is the only writer (it *reports*; we *store*), and
+1. the remote side is, or historically was, the only writer (it _reports_; we
+   _store_), and
 2. more than one consumer branches on the stored value.
 
-The canonical example is `session_state.activity` in the ProjectData DO: written
-exclusively by the vm-agent's `reportActivity` callbacks, read by the stop-button
-UI, by durable-message delivery gating, and by idle/sleep scheduling.
+The canonical example is `session_state.activity` in the ProjectData DO. The
+vm-agent's `reportActivity` callbacks are the authority for remote work
+inventory, while the control plane also records transitions it positively
+observes, including accepted prompt epochs and identity-fenced turn ends. The
+value is read by the stop-button UI, durable-message delivery gating, and
+idle/sleep scheduling.
 
 ## Why This Rule Exists
 
@@ -25,11 +29,11 @@ together and in different directions:
 - the sleep scheduler refused to sleep the session, so it never got an idle timer
   and leaked toward the 45-min / 24-h backstops (real compute cost)
 
-There *was* a staleness heal. It could never fire: it refused to heal while the
-ACP session was heartbeating, and a vm-agent heartbeats whether or not a prompt
-is running. The guard's own predicate was unsatisfiable for exactly the
-population it existed to catch (the rule-53 liveness-as-idleness trap), so the
-report-only design had no backstop at all. The suspected lossy path was a
+There _was_ a SQL-only staleness heal. It was unsafe in both directions. A fresh
+ACP heartbeat kept a truly wedged mirror alive because heartbeats prove process
+liveness, not prompt work; a stale heartbeat let the same heuristic erase a
+real long-running prompt. The control plane cannot infer either `working` or
+`not_working` from its own stale mirrors. The suspected lossy path was a
 cancel/interrupt turn ending, which wrote nothing on the control-plane side.
 
 ## Class of Bug
@@ -50,42 +54,54 @@ silently for months (rule 34) while logging at Debug (rule 39).
    evidence. Route every terminal write through ONE helper so a new path cannot
    record a partial transition.
 
-2. **State older than a staleness bound is unproven, not true.** Pick an
+2. **State older than a staleness bound is unproven, not false.** Pick an
    env-configurable bound with a `DEFAULT_*` constant. Past it, with no progress
-   evidence, the stored value may not be trusted by any consumer.
+   evidence, the stored value triggers an authority probe; age alone must never
+   manufacture a terminal transition.
 
 3. **Reconcile by probing the authority, not by inferring from a proxy.** Ask the
    process that actually owns the state. Prefer an endpoint that already exists
    on deployed agents so no rollout is coupled to the fix (rule 54). The probe is
    a background control-loop call: short env-configurable timeout, bounded
    candidates per pass, off the alarm's synchronous critical path, and every
-   candidate gets an escape path (rule 47). An unreachable authority is not
-   "still working" — after a bounded number of failed probes, terminalize.
+   candidate gets an escape path (rule 47). Only a reachable, well-formed,
+   identity-matched response may end a turn. Timeout, transport error, malformed
+   inventory, a missing identity, duplicate identity, or workspace mismatch is
+   inconclusive—not terminal evidence.
 
-4. **A probe that confirms the working state must refresh it.** Otherwise a
+4. **Bounded silence quarantines; it does not terminalize.** After the configured
+   attempt budget, saturate/back off the row outside the hot candidate set and
+   emit an alert/activity event. Preserve the working mirror and any possible
+   in-flight work. A later authoritative activity report resets quarantine.
+
+5. **A probe that confirms the working state must refresh it.** Otherwise a
    legitimately long turn is re-probed on every tick and, worse, invites a
    heuristic that would eventually flip it. Positive proof is evidence too.
 
-5. **Every consumer reads the reconciled value, and a terminal transition fans
+6. **Every consumer reads the reconciled value, and a terminal transition fans
    out to all of them in one place.** If the fan-out lives in each consumer, the
    next consumer added inherits the bug. Put broadcast + queue release + timer
    re-arm behind a single `publishTurnEnd`-style function.
 
-6. **Capture the observation instant before the slow call** and compare-and-set
+7. **Capture the observation instant before the slow call** and compare-and-set
    against it (rule 49). A prompt that started after you observed the ending
    belongs to a newer turn and must never be stomped.
 
 ## Required Tests
 
 - **The wedge, reproduced**: remote state stale, remote process alive and
-  heartbeating. Assert the pre-existing heal does NOT fire (this documents why
-  the probe is needed) and that the probe reconciles it.
+  heartbeating. Assert local mirrors cannot heal it and that a reachable,
+  well-formed authoritative `not_working` response reconciles it.
 - **Every consumer**: one test per consumer proving it observes the transition —
   not just that the stored value changed.
 - **The control case**: the remote process genuinely IS working. Assert it is NOT
   flipped. Without this, an over-eager reconciler silently kills live turns.
-- **Bounded escape**: run the sweep twice against a permanently unreachable
-  target; assert it leaves the candidate set.
+- **Bounded escape**: run the sweep through its configured budget against a
+  permanently unreachable target; assert it leaves the hot candidate set via
+  quarantine without changing activity, publishing turn-end, or creating a
+  failure-capable marker.
+- **Malformed/identity ambiguity**: malformed entries, missing/duplicate session
+  IDs, and workspace mismatches remain inconclusive and follow quarantine.
 - **CAS discrimination**: a newer working state started after the observation
   instant is not stomped. Verify this test fails when the `<= observedAt`
   predicate is deleted.
@@ -95,7 +111,8 @@ silently for months (rule 34) while logging at Debug (rule 39).
 - [ ] Control-plane-observable transitions are written by the control plane too
 - [ ] All terminal writes go through one helper; all consumers through one fan-out
 - [ ] Staleness bound + probe timeout + candidate cap are env-configurable `DEFAULT_*`
-- [ ] The probe asks the authority; the unreachable case terminalizes after a bound
+- [ ] The probe asks the authority; only a matched, well-formed answer may end work
+- [ ] Unreachable/malformed/ambiguous cases quarantine after a bound without terminalizing
 - [ ] A confirmed working state refreshes rather than re-queues
 - [ ] Observation instant captured pre-call; CAS guard proven discriminating
 

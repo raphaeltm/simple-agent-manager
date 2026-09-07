@@ -25,6 +25,7 @@ import {
   scheduleHourlyPlatformMaintenance,
 } from './platform-feedback-hourly';
 import { runProjectDataArchiveSharding } from './project-data-archive-sharding';
+import { runProjectDataStorageReliefPreflight } from './project-data-storage-relief-preflight';
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
 import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
@@ -162,9 +163,6 @@ export async function scheduled(
   const terminalSessionLedger = await sweeps.isolate('terminal_session_ledger_reconciliation', () =>
     runTerminalSessionLedgerReconciliation(env)
   );
-  const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
-    runProjectDataArchiveSharding(env)
-  );
   const sessionSleep = await sweeps.isolate('session_sleep', () =>
     runSessionSleepSweep(env, new Date(), ctx)
   );
@@ -186,6 +184,27 @@ export async function scheduled(
     runComputeUsageCleanup(env)
   );
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
+
+  // Runs after every lifecycle sweep on purpose. When its persisted cadence is due it copies
+  // whole terminal sessions between ProjectData objects under PROJECT_DATA_ARCHIVE_WALL_TIME_MS
+  // (checked only between candidates, so one large session can run well past it). Earlier in
+  // the chain that budget would delay session_sleep and the other lifecycle sweeps on every
+  // tick the cadence fires (`.claude/rules/47`); on the ticks it is not due it costs two D1
+  // statements.
+  const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
+    runProjectDataArchiveSharding(env)
+  );
+
+  // Runs LAST on purpose. The relief preflight is read-only, but it is the only
+  // sweep whose run budget is operator-tuned into the minutes
+  // (PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS / _SLICES_PER_RUN) while an
+  // emergency plan is converging. Anywhere earlier in the chain it would push every
+  // later lifecycle sweep — session_sleep above all — back by its whole run budget on
+  // every tick (`.claude/rules/47`).
+  const projectDataStorageReliefPreflight = await sweeps.isolate(
+    'project_data_storage_relief_preflight',
+    () => runProjectDataStorageReliefPreflight(env)
+  );
 
   const failedSweeps = sweeps.failedSweeps();
   const failureNotifications = await notifyFailedSweeps(env, failedSweeps).catch((err) => {
@@ -223,6 +242,7 @@ export async function scheduled(
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
+    stoppedWorkspacesQueued: nodeCleanup?.stoppedWorkspacesQueued,
     stoppedWorkspacesDeleted: nodeCleanup?.stoppedWorkspacesDeleted,
     cfContainersDestroyed: nodeCleanup?.cfContainersDestroyed,
     providerOrphansScanned: providerOrphans?.scanned,
@@ -284,7 +304,8 @@ export async function scheduled(
       terminalNodeLifecycleRepair?.skippedProtectedSleep,
     terminalNodeLifecycleRepairWorkspacesTerminalized:
       terminalNodeLifecycleRepair?.workspacesTerminalized,
-    terminalNodeLifecycleRepairAgentSessionsClosed: terminalNodeLifecycleRepair?.agentSessionsClosed,
+    terminalNodeLifecycleRepairAgentSessionsClosed:
+      terminalNodeLifecycleRepair?.agentSessionsClosed,
     terminalNodeLifecycleRepairComputeUsageClosed: terminalNodeLifecycleRepair?.computeUsageClosed,
     terminalNodeLifecycleRepairProjectSessionsClosed:
       terminalNodeLifecycleRepair?.projectSessionsClosed,
@@ -297,12 +318,25 @@ export async function scheduled(
     terminalSessionSummarySkipped: terminalSessionLedger?.summarySkipped,
     terminalSessionSummaryErrors: terminalSessionLedger?.summaryErrors,
     terminalSessionSummaryRemaining: terminalSessionLedger?.remainingCandidateSummaries,
+    projectDataStorageReliefPreflightEnabled: projectDataStorageReliefPreflight?.enabled,
+    projectDataStorageReliefPreflightSkipped: projectDataStorageReliefPreflight?.skipped,
+    projectDataStorageReliefPreflightSkipReason: projectDataStorageReliefPreflight?.skipReason,
+    projectDataStorageReliefPreflightPlanId: projectDataStorageReliefPreflight?.planId,
+    projectDataStorageReliefPreflightStatus: projectDataStorageReliefPreflight?.status,
+    projectDataStorageReliefPreflightRowsExamined: projectDataStorageReliefPreflight?.rowsExamined,
+    projectDataStorageReliefPreflightEligibleRows: projectDataStorageReliefPreflight?.eligibleRows,
+    projectDataStorageReliefPreflightEligibleBytes:
+      projectDataStorageReliefPreflight?.eligibleBytes,
+    projectDataStorageReliefPreflightSessionCount: projectDataStorageReliefPreflight?.sessionCount,
+    projectDataStorageReliefPreflightSessionManifestSha256:
+      projectDataStorageReliefPreflight?.sessionManifestSha256,
     projectDataArchiveShardingEnabled: projectDataArchiveSharding?.enabled,
     projectDataArchiveShardingSkipped: projectDataArchiveSharding?.skipped,
     projectDataArchiveShardingSkipReason: projectDataArchiveSharding?.skipReason,
     projectDataArchiveShardingSelected: projectDataArchiveSharding?.selected,
     projectDataArchiveShardingMigrated: projectDataArchiveSharding?.migrated,
     projectDataArchiveShardingRecoveredCrashGaps: projectDataArchiveSharding?.recoveredCrashGaps,
+    projectDataArchiveShardingRefused: projectDataArchiveSharding?.refused,
     projectDataArchiveShardingFailed: projectDataArchiveSharding?.failed,
     projectDataArchiveShardingChunksCopied: projectDataArchiveSharding?.chunksCopied,
     projectDataArchiveShardingRowsCopied: projectDataArchiveSharding?.rowsCopied,

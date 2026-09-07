@@ -8,7 +8,6 @@ import type {
 import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
-  DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
@@ -35,6 +34,7 @@ import {
   clearProjectMultiplayerStateCache,
   getProjectMultiplayerState,
 } from '../../services/project-multiplayer';
+import { resolveMaxTriggersPerProject } from '../../services/trigger-limits';
 import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
 import {
   getWebhookTriggerLimits,
@@ -211,11 +211,12 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
       .get(),
   ]);
   if (sameName) throw errors.conflict(`Trigger "${name}" already exists in this project`);
-  if (
-    (total?.count ?? 0) >=
-    parsePositiveInt(c.env.MAX_TRIGGERS_PER_PROJECT, DEFAULT_MAX_TRIGGERS_PER_PROJECT)
-  ) {
-    throw errors.badRequest('Maximum triggers per project reached');
+  const maxTriggers = resolveMaxTriggersPerProject(
+    project.maxTriggers,
+    c.env.MAX_TRIGGERS_PER_PROJECT
+  );
+  if ((total?.count ?? 0) >= maxTriggers) {
+    throw errors.badRequest(`Maximum triggers per project (${maxTriggers}) reached`);
   }
   const maxConcurrent = body.maxConcurrent ?? DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT;
   const maxConcurrentLimit = parsePositiveInt(

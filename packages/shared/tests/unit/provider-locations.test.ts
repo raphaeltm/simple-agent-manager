@@ -143,8 +143,8 @@ describe('resolveProjectScalingConfig', () => {
 });
 
 describe('SCALING_PARAMS registry', () => {
-  it('has 8 scaling parameters', () => {
-    expect(SCALING_PARAMS).toHaveLength(8);
+  it('has 9 scaling parameters', () => {
+    expect(SCALING_PARAMS).toHaveLength(9);
   });
 
   it('every param has valid min < max', () => {

@@ -2,7 +2,13 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
-import { runProjectDataArchiveSharding } from '../../src/scheduled/project-data-archive-sharding';
+import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
+import {
+  abandonProjectDataArchiveMigration,
+  copyBackProjectDataArchiveMigration,
+  runProjectDataArchiveSharding,
+  runScopedProjectDataArchiveCanary,
+} from '../../src/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import {
@@ -51,6 +57,68 @@ async function withArchiveEnv<T>(
 
 function largeMessage(index: number): string {
   return `archive bridge payload ${index} ${'x'.repeat(24 * 1024)}`;
+}
+
+/**
+ * One chunk holding more rows than Cloudflare will bind in a single statement.
+ * 201 spans two full sub-batches plus a remainder, so an off-by-one in the
+ * batching arithmetic cannot pass by landing on an exact multiple.
+ *
+ * Production ran at PROJECT_DATA_ARCHIVE_CHUNK_ROWS=500 and every session above
+ * 100 messages died on `too many SQL variables at offset 421`.
+ *
+ * Deriving this from the constant is deliberate but is NOT a guard: any
+ * `x * 2 + 1 > x` assertion would be a tautology. What actually keeps the
+ * fixture discriminating is the real runtime — if workerd's true ceiling ever
+ * diverged from D1_MAX_BOUND_PARAMETERS downward, these tests would fail
+ * outright rather than quietly stop testing anything.
+ */
+const OVER_BIND_LIMIT_ROWS = D1_MAX_BOUND_PARAMETERS * 2 + 1;
+
+/** Small bodies: this fixture stresses the bind count, not the byte budget. */
+function seedMessages(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    messageId: `bind-limit-message-${String(index).padStart(4, '0')}`,
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    content: `bind limit payload ${index}`,
+    toolMetadata: null,
+    timestamp: new Date(1_000_000 + index * 1_000).toISOString(),
+    sequence: index + 1,
+  }));
+}
+
+async function seedTerminalSessionWithMessages(
+  projectId: string,
+  count: number
+): Promise<{ source: DurableObjectStub<ProjectDataTestDouble>; sessionId: string }> {
+  await seedProjectGraph(projectId);
+  const source = projectDataStub(projectId);
+  await source.ensureProjectId(projectId);
+  const sessionId = await source.createSession(null, 'Bind limit transcript');
+  await source.persistMessageBatch(sessionId, seedMessages(count));
+  await source.stopSession(sessionId);
+  await source.runSummarySyncForTest();
+  return { source, sessionId };
+}
+
+async function countTargetGroupedMessages(ownerName: string, sessionId: string): Promise<number> {
+  const target = projectDataStub(ownerName);
+  return runInDurableObject(target, async (_instance, state) => {
+    const row = state.storage.sql
+      .exec('SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?', sessionId)
+      .toArray()[0] as { count: number };
+    return row.count;
+  });
+}
+
+async function countTargetMessages(ownerName: string, sessionId: string): Promise<number> {
+  const target = projectDataStub(ownerName);
+  return runInDurableObject(target, async (_instance, state) => {
+    const row = state.storage.sql
+      .exec('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', sessionId)
+      .toArray()[0] as { count: number };
+    return row.count;
+  });
 }
 
 async function readLocation(projectId: string, sessionId: string) {
@@ -136,6 +204,42 @@ async function seedSourceDeletedCrashGap(
     ),
   ]);
 }
+
+/**
+ * Seed a failed pre-copy journal for an existing root session: the exact production shape
+ * left behind when the terminal-version hash reset the object mid-prepare (journal `failed`,
+ * location `migrating`, no source intent, nothing on the shard).
+ */
+async function seedFailedPreCopyMigration(
+  projectId: string,
+  sessionId: string,
+  migrationId: string
+): Promise<{ targetOwnerName: string }> {
+  const sourceOwnerName = projectId;
+  const targetOwnerName = `${projectId}:archive:g1:s9`;
+  await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `INSERT INTO project_data_archive_migrations (
+         migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
+         source_generation, target_generation, lease_epoch, attempt_count, error_code,
+         error_message, candidate_at, created_at, updated_at
+       )
+       VALUES (?, ?, ?, 'failed', ?, ?, 0, 1, 1, 1, 'Error',
+               'Durable Object''s isolate exceeded its memory limit and was reset.', 1000, 1000, 1000)`
+    ).bind(migrationId, projectId, sessionId, sourceOwnerName, targetOwnerName),
+    env.DATABASE.prepare(
+      `INSERT INTO project_data_session_locations (
+         project_id, session_id, location_state, owner_kind, owner_name, generation,
+         migration_id, source_owner_name, target_owner_name, routing_schema_version, updated_at
+       )
+       VALUES (?, ?, 'migrating', 'archive_shard', ?, 1, ?, ?, ?, 1, 1000)`
+    ).bind(projectId, sessionId, targetOwnerName, migrationId, sourceOwnerName, targetOwnerName),
+  ]);
+  return { targetOwnerName };
+}
+
+/** Two full default hash pages plus a remainder, so every archive table streams three pages. */
+const MULTI_PAGE_MESSAGES = 1_001;
 
 describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
   it('migrates a terminal transcript through real DO SQLite, publishes archive routing, and records databaseSize reclaim evidence', async () => {
@@ -332,6 +436,140 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     );
   });
 
+  // Regression: production archive-sharding canary runs failed with
+  // `too many SQL variables at offset 421: SQLITE_ERROR` for every session above
+  // 100 messages. readCommittedRowsForChunk bound one placeholder per chunk row,
+  // and Cloudflare's SQL surfaces reject the 101st bound parameter.
+  //
+  // These MUST live in the Workers pool. The DO unit suite runs on better-sqlite3,
+  // whose bind ceiling is far above 100, so it cannot reproduce this at any fixture
+  // size — which is exactly why a 12-row suite stayed green while production failed.
+  it('migrates a chunk holding more rows than the Cloudflare SQL bind-parameter ceiling', async () => {
+    await clearArchiveCadence();
+    const projectId = `archive-bind-limit-${crypto.randomUUID()}`;
+    const { sessionId } = await seedTerminalSessionWithMessages(projectId, OVER_BIND_LIMIT_ROWS);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+      },
+      async () => {
+        // The exact entry point the production canary used, at the production
+        // chunk-row setting, so the whole transcript lands in ONE chunk.
+        const result = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'bind-variable-limit regression',
+          limit: 5,
+          chunkRows: 500,
+          nowDate: new Date(Date.now() + 60_000),
+        });
+
+        expect(result.stats).toMatchObject({ selected: 1, migrated: 1, failed: 0 });
+
+        const location = await readLocation(projectId, sessionId);
+        expect(location).toMatchObject({
+          location_state: 'archive_shard',
+          owner_kind: 'archive_shard',
+        });
+        expect(await countTargetMessages(location!.owner_name, sessionId)).toBe(
+          OVER_BIND_LIMIT_ROWS
+        );
+
+        // The fixture alternates roles, so materializeSession groups nothing and
+        // chat_messages_grouped also lands above the ceiling. That makes this one run
+        // cover TWO of the three archive tables through the same sub-batched read,
+        // not just chat_messages.
+        const groupedRows = await countTargetGroupedMessages(location!.owner_name, sessionId);
+        expect(groupedRows).toBe(OVER_BIND_LIMIT_ROWS);
+        expect(groupedRows).toBeGreaterThan(D1_MAX_BOUND_PARAMETERS);
+
+        // Order is load-bearing: the committed rows are re-hashed against the
+        // source chunk hash, so a batch concatenated out of order would have
+        // failed the migration above. Assert the transcript reads back in order.
+        const routed = await projectDataService.getMessages(
+          testEnv,
+          projectId,
+          sessionId,
+          OVER_BIND_LIMIT_ROWS,
+          null,
+          null,
+          undefined,
+          false,
+          'asc'
+        );
+        expect(routed.messages).toHaveLength(OVER_BIND_LIMIT_ROWS);
+        expect(routed.messages[0]?.content).toBe('bind limit payload 0');
+        expect(routed.messages[OVER_BIND_LIMIT_ROWS - 1]?.content).toBe(
+          `bind limit payload ${OVER_BIND_LIMIT_ROWS - 1}`
+        );
+      }
+    );
+  }, 120_000);
+
+  // The rollback path shares readCommittedRowsForChunk via restoreSourceArchiveChunk
+  // and was broken identically. Recovery failing is strictly worse than the forward
+  // copy failing, so it gets its own real-trigger test rather than riding on the fix.
+  it('copies a chunk back above the bind-parameter ceiling during rollback recovery', async () => {
+    await clearArchiveCadence();
+    const projectId = `archive-bind-limit-copyback-${crypto.randomUUID()}`;
+    const { source, sessionId } = await seedTerminalSessionWithMessages(
+      projectId,
+      OVER_BIND_LIMIT_ROWS
+    );
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+      },
+      async () => {
+        const migrated = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'bind-variable-limit copy-back regression',
+          limit: 5,
+          chunkRows: 500,
+          nowDate: new Date(Date.now() + 60_000),
+        });
+        expect(migrated.stats).toMatchObject({ migrated: 1, failed: 0 });
+
+        const location = await readLocation(projectId, sessionId);
+        expect(location?.migration_id).toBeTruthy();
+
+        // Source transcript rows were deleted by the forward migration.
+        const sourceRowsAfterMigrate = await runInDurableObject(
+          source,
+          async (_instance, state) => {
+            const row = state.storage.sql
+              .exec('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', sessionId)
+              .toArray()[0] as { count: number };
+            return row.count;
+          }
+        );
+        expect(sourceRowsAfterMigrate).toBe(0);
+
+        const copyBack = await copyBackProjectDataArchiveMigration(testEnv, {
+          migrationId: location!.migration_id!,
+          projectId,
+          reason: 'bind-variable-limit copy-back regression',
+        });
+        expect(copyBack.rowsCopied).toBeGreaterThanOrEqual(OVER_BIND_LIMIT_ROWS);
+
+        const restored = await runInDurableObject(source, async (_instance, state) => {
+          const row = state.storage.sql
+            .exec('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', sessionId)
+            .toArray()[0] as { count: number };
+          return row.count;
+        });
+        expect(restored).toBe(OVER_BIND_LIMIT_ROWS);
+      }
+    );
+  }, 120_000);
+
   it('fails closed for DO-local transcript writes after a source archive intent is prepared', async () => {
     const projectId = `archive-local-fence-${crypto.randomUUID()}`;
     await seedProjectGraph(projectId);
@@ -360,6 +598,221 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     expect(captured).toMatchObject({
       threw: true,
       code: 'PROJECT_DATA_TRANSCRIPT_WRITE_FENCED',
+    });
+  });
+  it('migrates a session larger than one hash page through the real DO, streaming every terminal-version proof', async () => {
+    const projectId = `archive-multipage-${crypto.randomUUID()}`;
+    const { sessionId } = await seedTerminalSessionWithMessages(projectId, MULTI_PAGE_MESSAGES);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '500',
+        PROJECT_DATA_ARCHIVE_CHUNK_BYTES: String(4 * 1024 * 1024),
+        PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS: '500',
+      },
+      async () => {
+        const result = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'multi-page streaming hash canary',
+          limit: 1,
+          wallTimeMs: 15_000,
+          nowDate: new Date(Date.now() + 60_000),
+        });
+        expect(result.stats).toMatchObject({ selected: 1, migrated: 1, failed: 0, poisoned: 0 });
+
+        const location = await readLocation(projectId, sessionId);
+        expect(location).toMatchObject({ location_state: 'archive_shard', generation: 1 });
+        expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(
+          MULTI_PAGE_MESSAGES
+        );
+        expect(await countTargetMessages(location!.owner_name, sessionId)).toBe(
+          MULTI_PAGE_MESSAGES
+        );
+        const journal = await env.DATABASE.prepare(
+          `SELECT state, error_message FROM project_data_archive_migrations
+           WHERE project_id = ? AND session_id = ?`
+        )
+          .bind(projectId, sessionId)
+          .first<{ state: string; error_message: string | null }>();
+        expect(journal).toMatchObject({ state: 'published', error_message: null });
+      }
+    );
+  });
+
+  it('leaves a session the root object refuses at prepare readable in root, then migrates it once the refusal clears', async () => {
+    const projectId = `archive-refusal-${crypto.randomUUID()}`;
+    const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 5);
+    // The refusal condition the D1 candidate query cannot see: a live `session_state` row
+    // (production `ea87d375`). Reported through the real RPC, exactly as the vm-agent does.
+    await source.reportActivity(sessionId, 'prompting', { promptStartedAt: Date.now() });
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '4',
+      },
+      async () => {
+        // Project-scoped, not session-scoped: the session is discovered by the same D1
+        // candidate query the sweep uses (an explicit sessionId would bypass the refusal
+        // window below), and the refusal crosses the real Durable Object RPC boundary as a
+        // returned value. The shared test D1 carries other files' sessions, which is why the
+        // unscoped scheduled entry point is not used here.
+        const nowDate = new Date(Date.now() + 60_000);
+        const first = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          dryRun: false,
+          reason: 'refusal canary',
+          limit: 4,
+          nowDate,
+        });
+        expect(first.selected.map((candidate) => candidate.sessionId)).toEqual([sessionId]);
+        expect(first.stats).toMatchObject({
+          selected: 1,
+          refused: 1,
+          migrated: 0,
+          failed: 0,
+          poisoned: 0,
+        });
+
+        expect(await readLocation(projectId, sessionId)).toMatchObject({
+          location_state: 'root',
+          owner_kind: 'root',
+          owner_name: projectId,
+          generation: 0,
+          migration_id: null,
+        });
+        // Readable through exact routing in the same tick — no abandon needed.
+        expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(5);
+        const journal = await env.DATABASE.prepare(
+          `SELECT state, error_code, error_message, attempt_count
+           FROM project_data_archive_migrations
+           WHERE project_id = ? AND session_id = ?`
+        )
+          .bind(projectId, sessionId)
+          .first<{
+            state: string;
+            error_code: string;
+            error_message: string;
+            attempt_count: number;
+          }>();
+        expect(journal).toMatchObject({
+          state: 'frozen',
+          error_code: 'precopy_refused',
+          attempt_count: 1,
+        });
+        expect(journal?.error_message).toContain('active_session_state');
+        const breaker = await env.DATABASE.prepare(
+          'SELECT state FROM project_data_archive_circuit_breakers WHERE project_id = ?'
+        )
+          .bind(projectId)
+          .first<{ state: string }>();
+        expect(breaker).toBeNull();
+        const rootIntent = await runInDurableObject(source, async (_instance, state) => {
+          const row = state.storage.sql
+            .exec(
+              'SELECT COUNT(*) AS count FROM project_data_archive_source_intents WHERE session_id = ?',
+              sessionId
+            )
+            .toArray()[0] as { count: number };
+          return row.count;
+        });
+        expect(rootIntent).toBe(0);
+
+        // Inside the retry window the same candidate query does not re-select it, so the next
+        // tick cannot spend a slot on it again.
+        const later = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          dryRun: true,
+          limit: 4,
+          nowDate: new Date(nowDate.getTime() + 1_000),
+        });
+        expect(later.selected).toEqual([]);
+
+        // Owner control: once the refusal condition clears, the operator-scoped canary (which
+        // bypasses the window) migrates the very same session.
+        await source.reportActivity(sessionId, 'idle', { observedAt: Date.now() });
+        const result = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'post-refusal re-migration',
+          limit: 1,
+          nowDate: new Date(Date.now() + 120_000),
+        });
+        expect(result.stats).toMatchObject({ migrated: 1, refused: 0, failed: 0 });
+        expect(await readLocation(projectId, sessionId)).toMatchObject({
+          location_state: 'archive_shard',
+        });
+        expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(5);
+      }
+    );
+  });
+
+  it('abandon returns a fenced pre-copy migration to root so the session reads again', async () => {
+    const projectId = `archive-abandon-${crypto.randomUUID()}`;
+    const { sessionId } = await seedTerminalSessionWithMessages(projectId, 5);
+    const migrationId = crypto.randomUUID();
+    await seedFailedPreCopyMigration(projectId, sessionId, migrationId);
+
+    await withArchiveEnv({ PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true' }, async () => {
+      // Fenced: the exact read owner is neither root nor a published shard.
+      await expect(
+        projectDataService.getMessageCount(testEnv, projectId, sessionId)
+      ).rejects.toMatchObject({ code: 'PROJECT_DATA_ARCHIVE_ROUTING_UNSAFE' });
+
+      const abandoned = await abandonProjectDataArchiveMigration(testEnv, {
+        projectId,
+        migrationId,
+        reason: 'memory reset during prepare; hash now streams',
+      });
+      expect(abandoned).toMatchObject({
+        previousState: 'failed',
+        journalFrozen: true,
+        restoredToRoot: true,
+        sourceIntentRemoved: false,
+        targetRemoved: false,
+        targetRowsDeleted: 0,
+      });
+
+      expect(await readLocation(projectId, sessionId)).toMatchObject({
+        location_state: 'root',
+        owner_kind: 'root',
+        owner_name: projectId,
+        generation: 0,
+        migration_id: null,
+      });
+      expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId)).toBe(5);
+      const journal = await env.DATABASE.prepare(
+        `SELECT state, error_code FROM project_data_archive_migrations WHERE migration_id = ?`
+      )
+        .bind(migrationId)
+        .first<{ state: string; error_code: string }>();
+      expect(journal).toEqual({ state: 'frozen', error_code: 'operator_abandoned' });
+
+      // Discriminating control: the same session migrates cleanly afterwards.
+      await withArchiveEnv(
+        { PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1', PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '3' },
+        async () => {
+          const result = await runScopedProjectDataArchiveCanary(testEnv, {
+            projectId,
+            sessionId,
+            dryRun: false,
+            reason: 'post-abandon re-migration',
+            limit: 1,
+            nowDate: new Date(Date.now() + 60_000),
+          });
+          expect(result.stats).toMatchObject({ migrated: 1, failed: 0 });
+          expect(await readLocation(projectId, sessionId)).toMatchObject({
+            location_state: 'archive_shard',
+          });
+        }
+      );
     });
   });
 });

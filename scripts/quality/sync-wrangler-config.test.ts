@@ -5,6 +5,7 @@ import {
   detectArtifactsAvailable,
   ensureTomlMap,
   generateApiWorkerEnv,
+  listEnvironmentVarOverrides,
   resolveArtifactsBindingEnabled,
 } from '../deploy/sync-wrangler-config.js';
 import type { PulumiOutputs, WranglerToml } from '../deploy/types.js';
@@ -65,6 +66,49 @@ describe('sync wrangler config', () => {
       DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES: '2',
       DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES: '1',
     });
+  });
+
+  it('logs every GitHub Environment override that differs from the checked-in wrangler.toml value', () => {
+    // PR #2023 flipped this var to "true" in wrangler.toml while the production Environment
+    // still pinned "false"; the Worker shipped "false" and nothing in the deploy log said so.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED', 'false');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS', '10');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS', '3600000');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const topLevel: WranglerToml = {
+      vars: {
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
+      },
+    };
+
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null);
+
+    // The override still wins (that is the designed emergency-brake path)...
+    expect(envConfig.vars).toMatchObject({
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'false',
+      PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: '3600000',
+    });
+    // ...but it is now visible in the deploy log, and only when it actually differs.
+    const lines = log.mock.calls.map((call) => call.map(String).join(' '));
+    expect(lines).toContainEqual(
+      expect.stringContaining(
+        'Environment override: PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED="false" replaces wrangler.toml "true"'
+      )
+    );
+    expect(lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS'))).toEqual(
+      []
+    );
+    // A var absent from wrangler.toml is an addition, not an override.
+    expect(
+      lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS'))
+    ).toEqual([]);
+    expect(
+      listEnvironmentVarOverrides({ A: 'true', B: 'same' }, { A: 'false', B: 'same', C: 'added' })
+    ).toEqual([{ name: 'A', checkedIn: 'true', override: 'false' }]);
+    expect(listEnvironmentVarOverrides(undefined, { A: 'false' })).toEqual([]);
   });
 
   it('propagates the top-level CPU limit into generated deployment environments', () => {

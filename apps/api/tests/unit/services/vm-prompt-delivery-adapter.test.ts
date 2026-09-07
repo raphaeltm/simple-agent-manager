@@ -157,6 +157,41 @@ describe('VM prompt delivery adapter', () => {
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
+  it('uses a probe-resolved target without reinterpreting a suspect D1 health mirror', async () => {
+    const adapterEnv = envWithTarget({
+      ...targetRow,
+      node_health_status: 'unhealthy',
+    });
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockResolvedValue({
+      status: 'accepted',
+      sessionId: 'acp-1',
+      receipt: {
+        deliveryId: 'delivery-1',
+        state: 'accepted',
+        runtimeIdentity: 'runtime-vm-01',
+        acceptedAt: 1,
+        completedAt: null,
+      },
+    });
+    const adapterInput = input(false);
+    adapterInput.resolvedTarget = {
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+      workspaceId: 'workspace-1',
+      nodeId: 'node-1',
+      agentSessionId: 'acp-1',
+      userId: 'user-1',
+      runtimeIdentity: 'node-1:acp-1',
+      runtime: 'vm',
+    };
+
+    const result = await new DefaultVmPromptDeliveryAdapter(adapterEnv).submit(adapterInput);
+
+    expect(result).toMatchObject({ kind: 'accepted', runtimeIdentity: 'runtime-vm-01' });
+    expect(adapterEnv.DATABASE.prepare).not.toHaveBeenCalled();
+  });
+
   it('marks a transient capability failure during reconciliation ambiguous', async () => {
     mocks.nodeAgentRequest.mockRejectedValue(new Error('connection timeout'));
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
@@ -297,13 +332,15 @@ describe('VM prompt delivery adapter', () => {
   it('carries the source guard through capability, prompt, and receipt requests', async () => {
     mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
     mocks.sendPromptToAgentOnNode.mockRejectedValue(new Error('connection reset'));
-    mocks.nodeAgentRequest.mockResolvedValueOnce(protocolFixture.capabilities).mockResolvedValueOnce({
-      deliveryId: 'delivery-1',
-      state: 'accepted',
-      runtimeIdentity: 'runtime-vm-01',
-      acceptedAt: 500,
-      completedAt: null,
-    });
+    mocks.nodeAgentRequest
+      .mockResolvedValueOnce(protocolFixture.capabilities)
+      .mockResolvedValueOnce({
+        deliveryId: 'delivery-1',
+        state: 'accepted',
+        runtimeIdentity: 'runtime-vm-01',
+        acceptedAt: 500,
+        completedAt: null,
+      });
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
     const request = input(false);
     request.sourceTaskGuard = {

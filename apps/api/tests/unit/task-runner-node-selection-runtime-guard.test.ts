@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { handleNodeSelection } from '../../src/durable-objects/task-runner/node-steps';
-import type { TaskRunnerContext, TaskRunnerState } from '../../src/durable-objects/task-runner/types';
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner/types';
 
 // Task-runner node reuse must never select cf-container (instant-session)
 // nodes: the standalone vm-agent hosts exactly one lightweight workspace and
@@ -35,7 +38,20 @@ describe('handleNodeSelection runtime guards', () => {
     const state = {
       taskId: 'task-1',
       userId: 'user-1',
-      config: { vmSize: 'small', vmLocation: 'fsn1' },
+      config: {
+        vmSize: 'small',
+        vmLocation: 'fsn1',
+        resolvedReservation: {
+          cpuMillis: 2_000,
+          memoryMb: 4_096,
+          diskMb: 40_960,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+          source: 'platform',
+          sourceId: 'platform',
+          version: 1,
+        },
+      },
       stepResults: {},
     } as unknown as TaskRunnerState;
 

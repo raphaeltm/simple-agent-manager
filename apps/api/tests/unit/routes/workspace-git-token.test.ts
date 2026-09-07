@@ -74,6 +74,8 @@ vi.mock('../../../src/services/gitlab', () => ({
 describe('workspace git-token GitHub scoping', () => {
   let app: Hono<{ Bindings: Env }>;
   let limitResponses: Array<unknown[] | ((whereClause: unknown) => unknown[])>;
+  let currentWorkspaceIdentity: Record<string, unknown>;
+  let jitIdentityResponses: Array<Record<string, unknown>>;
   // Responses for queries that await `.where()` directly without `.limit()`
   // (e.g. resolveAdditionalRepositoryIds). Kept separate from limitResponses so
   // the legacy `.limit(1)` tests are unaffected. Defaults to [] when empty.
@@ -126,8 +128,10 @@ describe('workspace git-token GitHub scoping', () => {
   function workspaceRow(overrides: Record<string, unknown> = {}) {
     return {
       id: 'ws-1',
+      workspaceId: 'ws-1',
       installationId: 'inst-row-111',
       projectId: 'proj-1',
+      chatSessionId: 'session-1',
       userId: 'user-1',
       status: 'running',
       nodeId: 'node-1',
@@ -166,6 +170,8 @@ describe('workspace git-token GitHub scoping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     limitResponses = [];
+    currentWorkspaceIdentity = workspaceRow();
+    jitIdentityResponses = [];
     whereResponses = [];
     mocks.verifyWorkspaceCallbackAuth.mockResolvedValue(undefined);
     mocks.getGitHubUserAccessTokenForOwner.mockResolvedValue('github-user-oauth-token');
@@ -205,7 +211,7 @@ describe('workspace git-token GitHub scoping', () => {
       defaultBranch: 'main',
     });
 
-    const makeSelectBuilder = () => {
+    const makeSelectBuilder = (selection?: Record<string, unknown>) => {
       let whereClause: unknown = null;
       const resolveQueued = (
         queue: Array<unknown[] | ((whereClause: unknown) => unknown[])>
@@ -220,7 +226,26 @@ describe('workspace git-token GitHub scoping', () => {
           whereClause = clause;
           return builder;
         }),
-        limit: vi.fn(() => Promise.resolve(resolveQueued(limitResponses))),
+        limit: vi.fn(() => {
+          const isJitIdentityRead =
+            selection !== undefined &&
+            'workspaceId' in selection &&
+            'chatSessionId' in selection &&
+            !('installationId' in selection);
+          if (isJitIdentityRead) {
+            return Promise.resolve([jitIdentityResponses.shift() ?? currentWorkspaceIdentity]);
+          }
+          const rows = resolveQueued(limitResponses);
+          if (
+            selection &&
+            'installationId' in selection &&
+            'chatSessionId' in selection &&
+            rows[0]
+          ) {
+            currentWorkspaceIdentity = rows[0] as Record<string, unknown>;
+          }
+          return Promise.resolve(rows);
+        }),
         // Thenable: queries that await `.where()` directly (no `.limit()`) resolve
         // from whereResponses. The `.limit()` chains never trigger this because the
         // builder itself is not awaited — only the Promise returned by `.limit()`.
@@ -233,7 +258,7 @@ describe('workspace git-token GitHub scoping', () => {
       return builder;
     };
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      select: vi.fn(() => makeSelectBuilder()),
+      select: vi.fn((selection?: Record<string, unknown>) => makeSelectBuilder(selection)),
     });
 
     app = new Hono<{ Bindings: Env }>();
@@ -444,6 +469,28 @@ describe('workspace git-token GitHub scoping', () => {
       cloneUrl: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
     });
     expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('does not return an artifacts token when deletion wins after minting', async () => {
+    const createToken = vi.fn().mockResolvedValue({
+      plaintext: 'must-not-be-returned?expires=ignored',
+      expiresAt: '2026-06-06T20:00:00.000Z',
+    });
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({ remote: 'https://artifacts.test/repo.git', createToken }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+    jitIdentityResponses.push(workspaceRow(), workspaceRow({ status: 'stopping' }));
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(createToken).toHaveBeenCalledOnce();
+    expect(res.status).toBe(410);
+    expect(await res.text()).not.toContain('must-not-be-returned');
   });
 
   it('falls back to Artifacts snake_case token expiry from beta binding shape', async () => {
