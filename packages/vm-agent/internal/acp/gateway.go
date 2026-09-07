@@ -497,8 +497,12 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 
 // agentCredential holds the credential and its type returned from the control plane.
 type agentCredential struct {
-	credential     string
-	credentialKind string // "api-key" or "oauth-token"
+	credential          string
+	credentialKind      string // "api-key" or "oauth-token"
+	credentialSource    string
+	credentialReference string
+	credentialProvider  string
+	providerMode        string
 	// AI proxy fields (set for claude-code/openai-codex when the AI proxy is
 	// enabled and the user has no dedicated agent key). OpenCode is always
 	// bring-your-own-key and never uses these.

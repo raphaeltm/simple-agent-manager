@@ -123,6 +123,7 @@ import {
 } from './routes/project-deployment';
 import { projectsRoutes } from './routes/projects';
 import { agentActivityCallbackRoute } from './routes/projects/agent-activity-callback';
+import { agentUsageCallbackRoute } from './routes/projects/agent-usage-callback';
 import { buildStartedCallbackRoute } from './routes/projects/build-started-callback';
 import { composeImageArtifactsCallbackRoute } from './routes/projects/compose-image-artifacts-callback';
 import { composePublishReleaseCallbackRoute } from './routes/projects/compose-publish-release-callback';
@@ -806,6 +807,7 @@ app.route('/api/webhooks', triggerWebhookRoutes);
 app.route('/api/projects', deploymentIdentityTokenRoute);
 app.route('/api/projects', nodeAcpHeartbeatRoute);
 app.route('/api/projects', agentActivityCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
+app.route('/api/projects', agentUsageCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', buildStartedCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', taskCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', registryPushCredentialsCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth

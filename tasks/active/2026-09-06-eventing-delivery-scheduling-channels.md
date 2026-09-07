@@ -62,10 +62,10 @@ A owns append-only DO migration IDs in wave one. B reserves D1 migration 0144 if
 
 ### C. Credential-limit awareness
 
-- [ ] Trace credential selection through VM and container/harness/proxy boundaries. Attach limit observations to the credential/account actually used, never merely a provider/profile label or caller-supplied credential ID.
-- [ ] Implement a real authenticated telemetry-to-event path using supported provider/harness limit evidence. Include window, reset, source, observation time and freshness; unsupported telemetry is explicitly unknown.
-- [ ] Emit warning/critical/rejected/reset transitions with stable identity and duplicate suppression. Keep raw per-token/sampling streams outside ProjectData event storage; bound state retention and retries.
-- [ ] Restrict visibility to affected authorized projects/sessions, redact secrets, and test identity forgery, project isolation, stale/out-of-order samples and repeated threshold crossings.
+- [x] Trace credential selection through VM and container/harness/proxy boundaries. Attach limit observations to the credential/account actually used, never merely a provider/profile label or caller-supplied credential ID.
+- [x] Implement a real authenticated telemetry-to-event path using supported provider/harness limit evidence. Include window, reset, source, observation time and freshness; unsupported telemetry is explicitly unknown.
+- [x] Emit warning/critical/rejected/reset transitions with stable identity and duplicate suppression. Keep raw per-token/sampling streams outside ProjectData event storage; bound state retention and retries.
+- [x] Restrict visibility to affected authorized projects/sessions, redact secrets, and test identity forgery, project isolation, stale/out-of-order samples and repeated threshold crossings.
 
 ### D. One-off schedules and standing watches
 
@@ -107,7 +107,9 @@ The source report deferred broad email integration, arbitrary workflow DAG editi
 
 ## Validation record
 
-Pending implementation. Baseline at `a82e1adbb`: frozen-lockfile install passed; `pnpm lint` passed all 13 packages with existing warnings; `pnpm exec turbo run typecheck --concurrency=1` passed all 19 tasks. An initial concurrent typecheck/build process exited 137; serialized execution passed. No feature verification claimed.
+Pre-slice baseline at `a82e1adbb`/retry base `a6c764206`: frozen-lockfile install passed; `pnpm lint` passed all 13 packages with existing warnings; `pnpm exec turbo run typecheck --concurrency=1` passed all 19 tasks. An initial concurrent typecheck/build process exited 137; serialized execution passed. No feature verification claimed before slice C.
+
+Slice C retry 1 on `sam/recover-credential-limit-event-d8sstv` from `a6c764206`: implemented actual-credential limit telemetry with D1 migration `0145_credential_limit_windows`, server-verified VM/container/proxy credential attribution, OpenAI/Anthropic header extraction, Claude ACP `_claude/rateLimit` callback ingestion, edge-only `credential.limit.warning|critical|rejected|reset` project events, bounded per-credential window state, stale/duplicate suppression, and redacted session-scoped callback authorization. Current supported telemetry paths are Anthropic/OpenAI upstream rate-limit response headers through SAM proxy/container routes and Claude Code ACP `_meta._claude/rateLimit` via VM callback. Codex ACP account rate-limit events are not forwarded by `@agentclientprotocol/codex-acp@1.10.0`; Codex is supported only when traffic crosses the SAM OpenAI proxy headers in this slice. Token/context usage without provider window/reset evidence remains explicitly unsupported for limit events. Validation: `pnpm --filter @simple-agent-manager/api typecheck`; `pnpm --filter @simple-agent-manager/api lint`; `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/credential-limit-events.test.ts tests/unit/ai-proxy-passthrough.test.ts tests/unit/routes/ai-proxy-accounting.test.ts` (3 files, 29 tests); `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/routes/ai-proxy.test.ts tests/unit/routes/ai-proxy-anthropic.test.ts` (2 files, 58 tests); `pnpm --filter @simple-agent-manager/shared build`; `PATH=... GOTOOLCHAIN=local go test ./internal/acp -run 'Test(FetchAgentKeyPropagatesAgentSessionAndCredentialAttribution|UsageReportFromClaudeRateLimitUsesStoredCredentialAttribution|UsageReportSkipsContextUsageWithoutRateLimitMetadata)'`; `PATH=... GOTOOLCHAIN=local go test ./internal/acp`; `git diff --check`. No child PR, staging mutation, merge, or main push.
 
 ## References
 

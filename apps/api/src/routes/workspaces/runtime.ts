@@ -3,6 +3,7 @@ import {
   AI_PROXY_DEFAULT_MODEL_KV_KEY,
   type AIProxyConfig,
   type BootstrapTokenData,
+  type CredentialSource,
   DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
   DEFAULT_AI_PROXY_MODEL,
   DEFAULT_AI_PROXY_OPENAI_MODEL,
@@ -60,7 +61,7 @@ import {
   type WorkspaceDeletionCallbackKind,
 } from '../../services/workspace-deletion-callback-signal';
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
-import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
+import { getDecryptedAgentKey, getDecryptedCredentialRecord } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
   assertWorkspaceAcceptsCallback,
@@ -160,6 +161,124 @@ type MessageRouteContext = {
   sessionId: string;
   messageCount: number;
 };
+
+type AgentCredentialAttribution = {
+  credentialSource: CredentialSource;
+  credentialReference: string;
+  credentialProvider?: string | null;
+  providerMode?: string | null;
+};
+
+async function persistAgentCredentialAttribution(
+  env: Env,
+  workspace: WorkspaceCallbackIdentitySnapshot,
+  input: {
+    workspaceId: string;
+    agentSessionId?: string | null;
+    agentType: string;
+    attribution: AgentCredentialAttribution;
+  }
+): Promise<string | null> {
+  await assertWorkspaceCallbackIdentityCurrent(env, workspace, 'agent_key');
+
+  const now = new Date().toISOString();
+  if (input.agentSessionId) {
+    const update = await env.DATABASE.prepare(
+      `UPDATE agent_sessions
+          SET agent_credential_source = ?,
+              agent_credential_reference = ?,
+              agent_credential_provider = ?,
+              agent_provider_mode = ?,
+              updated_at = ?
+        WHERE id = ?
+          AND workspace_id = ?
+          AND user_id = ?
+          AND (agent_type IS NULL OR agent_type = ?)`
+    )
+      .bind(
+        input.attribution.credentialSource,
+        input.attribution.credentialReference,
+        input.attribution.credentialProvider ?? null,
+        input.attribution.providerMode ?? null,
+        now,
+        input.agentSessionId,
+        input.workspaceId,
+        workspace.userId,
+        input.agentType
+      )
+      .run();
+
+    if ((update.meta.changes ?? 0) !== 1) {
+      throw errors.forbidden('Agent session does not match workspace callback identity');
+    }
+    return input.agentSessionId;
+  }
+
+  const target = await env.DATABASE.prepare(
+    `SELECT id
+       FROM agent_sessions
+      WHERE workspace_id = ?
+        AND user_id = ?
+        AND status IN ('running', 'recovery')
+        AND (agent_type IS NULL OR agent_type = ?)
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT 1`
+  )
+    .bind(input.workspaceId, workspace.userId, input.agentType)
+    .first<{ id: string }>();
+
+  if (!target) {
+    log.warn('agent_key.credential_attribution_session_missing', {
+      workspaceId: input.workspaceId,
+      userId: workspace.userId,
+      agentType: input.agentType,
+    });
+    return null;
+  }
+
+  await env.DATABASE.prepare(
+    `UPDATE agent_sessions
+        SET agent_credential_source = ?,
+            agent_credential_reference = ?,
+            agent_credential_provider = ?,
+            agent_provider_mode = ?,
+            updated_at = ?
+      WHERE id = ?`
+  )
+    .bind(
+      input.attribution.credentialSource,
+      input.attribution.credentialReference,
+      input.attribution.credentialProvider ?? null,
+      input.attribution.providerMode ?? null,
+      now,
+      target.id
+    )
+    .run();
+  return target.id;
+}
+
+function credentialAttributionFromData(
+  credentialData: NonNullable<Awaited<ReturnType<typeof getDecryptedAgentKey>>>,
+  agentType: string,
+  providerMode: string
+): AgentCredentialAttribution {
+  return {
+    credentialSource: credentialData.credentialSource,
+    credentialReference: credentialData.credentialReference,
+    credentialProvider: credentialData.credentialProvider ?? agentType,
+    providerMode,
+  };
+}
+
+function platformProxyAttribution(agentType: string): AgentCredentialAttribution {
+  const credentialProvider = agentType === 'claude-code' ? 'anthropic' : 'openai';
+  return {
+    credentialSource: 'platform',
+    credentialReference: `platform_proxy:${credentialProvider}`,
+    credentialProvider,
+    providerMode: 'sam-proxy',
+  };
+}
 
 function waitUntilIfAvailable(
   c: { executionCtx: { waitUntil(promise: Promise<unknown>): void } },
@@ -741,6 +860,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     encryptionKey,
     workspace.projectId
   );
+  let credentialProviderMode = 'direct';
 
   // SECURITY: Never return raw platform-managed credentials to tenant workspaces.
   // Platform credentials are control-plane secrets and must only be used via
@@ -757,20 +877,23 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     : undefined;
   const fallbackCloudProvider = agentDef?.fallbackCloudProvider;
   if (!credentialData && fallbackCloudProvider) {
-    const scalewayToken = await getDecryptedCredential(
+    const fallbackCredential = await getDecryptedCredentialRecord(
       db,
       workspace.userId,
       fallbackCloudProvider,
       encryptionKey
     );
-    if (scalewayToken) {
-      const secretKey = extractScalewaySecretKey(scalewayToken);
+    if (fallbackCredential) {
+      const secretKey = extractScalewaySecretKey(fallbackCredential.credential);
       if (secretKey) {
         credentialData = {
           credential: secretKey,
           credentialKind: 'api-key',
           credentialSource: 'user',
+          credentialReference: fallbackCredential.credentialReference,
+          credentialProvider: fallbackCredential.credentialProvider,
         };
+        credentialProviderMode = 'fallback-cloud-provider';
       } else {
         log.warn('agent_key.scaleway_credential_missing_secret_key', {
           workspaceId,
@@ -782,9 +905,23 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   }
 
   if (credentialData && opencodeRequiresDedicatedCredential) {
+    await persistAgentCredentialAttribution(c.env, workspace, {
+      workspaceId,
+      agentSessionId: body.agentSessionId,
+      agentType: body.agentType,
+      attribution: credentialAttributionFromData(
+        credentialData,
+        body.agentType,
+        credentialProviderMode
+      ),
+    });
     return callbackJsonWithJit(c, workspace, 'agent_key', {
       apiKey: credentialData.credential,
       credentialKind: credentialData.credentialKind,
+      credentialSource: credentialData.credentialSource,
+      credentialReference: credentialData.credentialReference,
+      credentialProvider: credentialData.credentialProvider ?? body.agentType,
+      providerMode: credentialProviderMode,
     });
   }
 
@@ -892,10 +1029,20 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
           .where(eq(schema.tasks.id, task.id));
       }
 
+      await persistAgentCredentialAttribution(c.env, workspace, {
+        workspaceId,
+        agentSessionId: body.agentSessionId,
+        agentType: body.agentType,
+        attribution: credentialAttributionFromData(credentialData, body.agentType, 'proxy-passthrough'),
+      });
+
       return callbackJsonWithJit(c, workspace, 'agent_key', {
         apiKey: '__sam_proxy__',
         credentialKind: credentialData.credentialKind,
         credentialSource: credentialData.credentialSource,
+        credentialReference: credentialData.credentialReference,
+        credentialProvider: credentialData.credentialProvider ?? credentialData.providerDialect ?? body.agentType,
+        providerMode: 'proxy-passthrough',
         inferenceConfig,
       });
     }
@@ -911,9 +1058,23 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
 
     if (credentialData) {
+      await persistAgentCredentialAttribution(c.env, workspace, {
+        workspaceId,
+        agentSessionId: body.agentSessionId,
+        agentType: body.agentType,
+        attribution: credentialAttributionFromData(
+          credentialData,
+          body.agentType,
+          credentialProviderMode
+        ),
+      });
       return callbackJsonWithJit(c, workspace, 'agent_key', {
         apiKey: credentialData.credential,
         credentialKind: credentialData.credentialKind,
+        credentialSource: credentialData.credentialSource,
+        credentialReference: credentialData.credentialReference,
+        credentialProvider: credentialData.credentialProvider ?? body.agentType,
+        providerMode: credentialProviderMode,
       });
     }
 
@@ -967,10 +1128,21 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         .where(eq(schema.tasks.id, task.id));
     }
 
+    const platformAttribution = platformProxyAttribution(body.agentType);
+    await persistAgentCredentialAttribution(c.env, workspace, {
+      workspaceId,
+      agentSessionId: body.agentSessionId,
+      agentType: body.agentType,
+      attribution: platformAttribution,
+    });
+
     return callbackJsonWithJit(c, workspace, 'agent_key', {
       apiKey: '__platform_proxy__',
       credentialKind: 'api-key' as const,
       credentialSource: 'platform' as const,
+      credentialReference: platformAttribution.credentialReference,
+      credentialProvider: platformAttribution.credentialProvider,
+      providerMode: platformAttribution.providerMode,
       inferenceConfig,
     });
   }
@@ -996,9 +1168,20 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
+  await persistAgentCredentialAttribution(c.env, workspace, {
+    workspaceId,
+    agentSessionId: body.agentSessionId,
+    agentType: body.agentType,
+    attribution: credentialAttributionFromData(credentialData, body.agentType, credentialProviderMode),
+  });
+
   return callbackJsonWithJit(c, workspace, 'agent_key', {
     apiKey: credentialData.credential,
     credentialKind: credentialData.credentialKind,
+    credentialSource: credentialData.credentialSource,
+    credentialReference: credentialData.credentialReference,
+    credentialProvider: credentialData.credentialProvider ?? body.agentType,
+    providerMode: credentialProviderMode,
   });
 });
 

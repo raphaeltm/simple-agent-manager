@@ -267,6 +267,9 @@ type SessionHost struct {
 	// to viewers, buffered for late-join, or re-persisted with fresh UUIDs.
 	// Lock-free atomic so SessionUpdate never blocks on h.mu during a load.
 	replaySuppressed atomic.Bool
+	// credentialAttribution stores non-secret server-selected credential identity
+	// for usage callbacks. It is lock-free so SessionUpdate never waits on h.mu.
+	credentialAttribution atomic.Value
 
 	// Credential injection metadata (set during startAgent, read during stop).
 	// These track whether the agent used file-based credential injection so

@@ -25,6 +25,11 @@ export interface UpstreamAuth {
   headers: Record<string, string>;
   /** The resolved billing mode that was used. */
   billingMode: BillingMode;
+  /** Non-secret credential/account reference actually used for provider calls. */
+  credentialReference: string;
+  credentialSource: 'platform';
+  credentialProvider: 'anthropic';
+  providerMode: 'unified-billing' | 'platform-key';
 }
 
 /**
@@ -84,6 +89,10 @@ export async function resolveUpstreamAuth(
     return {
       headers: { 'cf-aig-authorization': `Bearer ${cfToken}` },
       billingMode: 'unified',
+      credentialReference: 'platform_proxy:cloudflare-ai-gateway',
+      credentialSource: 'platform',
+      credentialProvider: 'anthropic',
+      providerMode: 'unified-billing',
     };
   }
 
@@ -93,6 +102,10 @@ export async function resolveUpstreamAuth(
       return {
         headers: { 'cf-aig-authorization': `Bearer ${cfToken}` },
         billingMode: 'unified',
+        credentialReference: 'platform_proxy:cloudflare-ai-gateway',
+        credentialSource: 'platform',
+        credentialProvider: 'anthropic',
+        providerMode: 'unified-billing',
       };
     }
     // Fall back to platform credential
@@ -115,5 +128,9 @@ async function resolvePlatformKeyAuth(
   return {
     headers: { 'x-api-key': cred.credential },
     billingMode: 'platform-key',
+    credentialReference: `platform_credentials:${cred.credentialId}`,
+    credentialSource: 'platform',
+    credentialProvider: 'anthropic',
+    providerMode: 'platform-key',
   };
 }

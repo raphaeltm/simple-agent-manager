@@ -60,7 +60,13 @@ func (h *SessionHost) reportEvent(level, eventType, message string, detail map[s
 func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*agentCredential, error) {
 	url := fmt.Sprintf("%s/api/workspaces/%s/agent-key", h.config.ControlPlaneURL, h.config.WorkspaceID)
 
-	body, err := json.Marshal(map[string]string{"agentType": agentType})
+	body, err := json.Marshal(struct {
+		AgentType      string `json:"agentType"`
+		AgentSessionID string `json:"agentSessionId,omitempty"`
+	}{
+		AgentType:      agentType,
+		AgentSessionID: h.config.SessionID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -86,9 +92,13 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	}
 
 	var result struct {
-		APIKey          string           `json:"apiKey"`
-		CredentialKind  string           `json:"credentialKind"`
-		InferenceConfig *inferenceConfig `json:"inferenceConfig,omitempty"`
+		APIKey              string           `json:"apiKey"`
+		CredentialKind      string           `json:"credentialKind"`
+		CredentialSource    string           `json:"credentialSource"`
+		CredentialReference string           `json:"credentialReference"`
+		CredentialProvider  string           `json:"credentialProvider"`
+		ProviderMode        string           `json:"providerMode"`
+		InferenceConfig     *inferenceConfig `json:"inferenceConfig,omitempty"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
@@ -104,9 +114,13 @@ func (h *SessionHost) fetchAgentKey(ctx context.Context, agentType string) (*age
 	}
 
 	return &agentCredential{
-		credential:      result.APIKey,
-		credentialKind:  result.CredentialKind,
-		inferenceConfig: result.InferenceConfig,
+		credential:          result.APIKey,
+		credentialKind:      result.CredentialKind,
+		credentialSource:    result.CredentialSource,
+		credentialReference: result.CredentialReference,
+		credentialProvider:  result.CredentialProvider,
+		providerMode:        result.ProviderMode,
+		inferenceConfig:     result.InferenceConfig,
 	}, nil
 }
 

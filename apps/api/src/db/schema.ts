@@ -1412,6 +1412,12 @@ export const agentSessions = sqliteTable(
     agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
       onDelete: 'set null',
     }),
+    agentCredentialSource: text('agent_credential_source', {
+      enum: ['user', 'project', 'platform'],
+    }).default('user'),
+    agentCredentialReference: text('agent_credential_reference'),
+    agentCredentialProvider: text('agent_credential_provider'),
+    agentProviderMode: text('agent_provider_mode'),
     skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     worktreePath: text('worktree_path'),
     stoppedAt: text('stopped_at'),
@@ -1429,6 +1435,9 @@ export const agentSessions = sqliteTable(
     workspaceIdIdx: index('idx_agent_sessions_workspace_id').on(table.workspaceId),
     userIdIdx: index('idx_agent_sessions_user_id').on(table.userId),
     agentProfileIdIdx: index('idx_agent_sessions_agent_profile_id').on(table.agentProfileId),
+    credentialReferenceIdx: index('idx_agent_sessions_credential_reference').on(
+      table.agentCredentialReference
+    ).where(sql`agent_credential_reference IS NOT NULL`),
     skillIdIdx: index('idx_agent_sessions_skill_id').on(table.skillId),
     // Compound index for filtered session queries (P2 fix).
     workspaceUserStatusIdx: index('idx_agent_sessions_ws_user_status').on(
@@ -1436,6 +1445,62 @@ export const agentSessions = sqliteTable(
       table.userId,
       table.status
     ),
+  })
+);
+
+// =============================================================================
+// Credential Limit Observation Windows
+// =============================================================================
+export const credentialLimitWindows = sqliteTable(
+  'credential_limit_windows',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    credentialReference: text('credential_reference').notNull(),
+    windowType: text('window_type').notNull(),
+    credentialSource: text('credential_source', { enum: ['user', 'project', 'platform'] }).notNull(),
+    provider: text('provider').notNull(),
+    providerMode: text('provider_mode').notNull(),
+    agentType: text('agent_type'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    agentSessionId: text('agent_session_id').references(() => agentSessions.id, {
+      onDelete: 'set null',
+    }),
+    chatSessionId: text('chat_session_id'),
+    source: text('source').notNull(),
+    status: text('status', {
+      enum: ['allowed', 'allowed_warning', 'rejected', 'unknown'],
+    }).notNull(),
+    lastEventLevel: text('last_event_level', {
+      enum: ['ok', 'warning', 'critical', 'rejected'],
+    })
+      .notNull()
+      .default('ok'),
+    utilizationPercent: real('utilization_percent'),
+    limitAmount: integer('limit_amount'),
+    remainingAmount: integer('remaining_amount'),
+    windowMinutes: integer('window_minutes'),
+    resetsAt: integer('resets_at'),
+    observedAt: integer('observed_at').notNull(),
+    freshnessMs: integer('freshness_ms').notNull().default(0),
+    lastEventDeliveryKey: text('last_event_delivery_key'),
+    duplicateSampleCount: integer('duplicate_sample_count').notNull().default(0),
+    staleSampleCount: integer('stale_sample_count').notNull().default(0),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.credentialReference, table.windowType] }),
+    projectSessionIdx: index('idx_credential_limit_windows_project_session').on(
+      table.projectId,
+      table.workspaceId,
+      table.agentSessionId
+    ),
+    observedAtIdx: index('idx_credential_limit_windows_observed_at').on(table.observedAt),
   })
 );
 
@@ -2085,6 +2150,8 @@ export type Workspace = typeof workspaces.$inferSelect;
 export type NewWorkspace = typeof workspaces.$inferInsert;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
+export type CredentialLimitWindow = typeof credentialLimitWindows.$inferSelect;
+export type NewCredentialLimitWindow = typeof credentialLimitWindows.$inferInsert;
 export type SessionSnapshot = typeof sessionSnapshots.$inferSelect;
 export type NewSessionSnapshot = typeof sessionSnapshots.$inferInsert;
 export type UIStandard = typeof uiStandards.$inferSelect;

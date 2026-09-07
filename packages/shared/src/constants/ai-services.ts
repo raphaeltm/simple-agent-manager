@@ -702,6 +702,12 @@ export const DEFAULT_AI_PROXY_STREAM_TIMEOUT_MS = 120_000;
 /** Default rate limit window in seconds. Override via AI_PROXY_RATE_LIMIT_WINDOW_SECONDS env var. */
 export const DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS = 60;
 
+/** Default advisory warning threshold for credential provider quota windows. */
+export const DEFAULT_CREDENTIAL_LIMIT_WARNING_PERCENT = 75;
+
+/** Default advisory critical threshold for credential provider quota windows. */
+export const DEFAULT_CREDENTIAL_LIMIT_CRITICAL_PERCENT = 90;
+
 // =============================================================================
 // User Budget Settings
 // =============================================================================

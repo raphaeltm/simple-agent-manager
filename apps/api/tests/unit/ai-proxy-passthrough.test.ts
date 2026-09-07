@@ -17,6 +17,8 @@ const mockIncrementTokenUsage = vi.fn();
 const mockIncrementProviderUsage = vi.fn();
 const mockResolveForConsumer = vi.fn();
 const mockLogError = vi.fn();
+const mockUpdateAIProxyAgentCredentialAttribution = vi.fn();
+const mockRecordProxyCredentialLimitObservationsFromHeaders = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({}),
@@ -26,6 +28,8 @@ vi.mock('../../src/db/schema', () => ({}));
 
 vi.mock('../../src/services/ai-proxy-shared', () => ({
   verifyAIProxyAuth: (...args: unknown[]) => mockVerifyAIProxyAuth(...args),
+  updateAIProxyAgentCredentialAttribution: (...args: unknown[]) =>
+    mockUpdateAIProxyAgentCredentialAttribution(...args),
   AIProxyAuthError: class extends Error {
     statusCode: number;
     constructor(message: string, statusCode: number) {
@@ -38,6 +42,18 @@ vi.mock('../../src/services/ai-proxy-shared', () => ({
   buildAnthropicGatewayUrl: () => 'https://gateway.example.com/anthropic/v1/messages',
   buildAnthropicCountTokensUrl: () => 'https://gateway.example.com/anthropic/v1/messages/count_tokens',
   isAnthropicModel: (id: string) => id.startsWith('claude-'),
+}));
+
+vi.mock('../../src/services/credential-limit-events', () => ({
+  copyCredentialLimitHeaders: (source: Headers, target: Headers) => {
+    source.forEach((value, name) => {
+      if (name.includes('ratelimit') || name === 'retry-after') {
+        target.set(name, value);
+      }
+    });
+  },
+  recordProxyCredentialLimitObservationsFromHeaders: (...args: unknown[]) =>
+    mockRecordProxyCredentialLimitObservationsFromHeaders(...args),
 }));
 
 vi.mock('../../src/middleware/rate-limit', () => ({
@@ -169,7 +185,10 @@ beforeEach(() => {
         configuration: {
           settings: { baseUrl: 'https://anthropic-alt.example/anthropic', dialect: 'anthropic' },
         },
-        credential: { secret: { kind: 'api-key', apiKey: 'sk-ant-resolved-key' } },
+        credential: {
+          id: 'cred-anthropic-default',
+          secret: { kind: 'api-key', apiKey: 'sk-ant-resolved-key' },
+        },
         source: 'user-attachment',
       });
     }
@@ -177,6 +196,7 @@ beforeEach(() => {
       consumer,
       configuration: { settings: { providerId: 'custom-openai', providerName: 'Custom OpenAI' } },
       credential: {
+        id: 'cred-openai-default',
         secret: {
           kind: 'openai-compatible',
           apiKey: 'sk-resolved-openai',
@@ -220,7 +240,10 @@ describe('AI Proxy Passthrough Routes', () => {
         configuration: {
           settings: { baseUrl: 'https://anthropic-alt.example/anthropic', dialect: 'anthropic' },
         },
-        credential: { secret: { kind: 'api-key', apiKey: 'sk-ant-resolved-key' } },
+        credential: {
+          id: 'cred-project-anthropic',
+          secret: { kind: 'api-key', apiKey: 'sk-ant-resolved-key' },
+        },
         source: 'project-attachment',
       });
       mockSuccessfulFetch('{"id":"msg_1"}');
@@ -235,6 +258,76 @@ describe('AI Proxy Passthrough Routes', () => {
       expect(headers['x-api-key']).toBe('sk-ant-resolved-key');
       expect(headers['Authorization']).toBeUndefined();
       expectNoSAMMetadataHeaders(headers);
+    });
+
+    it('records provider limit headers against the resolved credential and agent session', async () => {
+      mockVerifyAIProxyAuth.mockResolvedValueOnce({
+        userId: 'user1',
+        workspaceId: 'ws1',
+        projectId: 'proj1',
+        chatSessionId: 'chat1',
+        agentType: 'claude-code',
+        agentSessionId: 'agent-session-1',
+      });
+      mockAllowedRateLimit();
+      mockResolveForConsumer.mockResolvedValueOnce({
+        consumer: { kind: 'agent', agentType: 'claude-code' },
+        configuration: {
+          settings: { baseUrl: 'https://anthropic-alt.example/anthropic', dialect: 'anthropic' },
+        },
+        credential: {
+          id: 'cred-project-anthropic',
+          secret: { kind: 'api-key', apiKey: 'sk-ant-resolved-key' },
+        },
+        source: 'project-attachment',
+      });
+      mockFetch.mockResolvedValueOnce(new Response('{"id":"msg_1"}', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'anthropic-ratelimit-tokens-limit': '1000',
+          'anthropic-ratelimit-tokens-remaining': '100',
+          'anthropic-ratelimit-tokens-reset': '2026-09-07T12:00:00Z',
+        },
+      }));
+
+      const res = await postJson(ANTHROPIC_MESSAGES_PATH, anthropicMessagesBody());
+      expect(res.status).toBe(200);
+      expect(res.headers.get('anthropic-ratelimit-tokens-remaining')).toBe('100');
+
+      expect(mockUpdateAIProxyAgentCredentialAttribution).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          userId: 'user1',
+          workspaceId: 'ws1',
+          agentSessionId: 'agent-session-1',
+          agentType: 'claude-code',
+        }),
+        expect.objectContaining({
+          credentialReference: 'cc_credentials:cred-project-anthropic',
+          credentialSource: 'project',
+          credentialProvider: 'anthropic',
+          providerMode: 'proxy-passthrough',
+        }),
+      );
+      expect(mockRecordProxyCredentialLimitObservationsFromHeaders).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(Headers),
+        expect.objectContaining({
+          projectId: 'proj1',
+          userId: 'user1',
+          workspaceId: 'ws1',
+          chatSessionId: 'chat1',
+          agentSessionId: 'agent-session-1',
+          agentType: 'claude-code',
+          credentialReference: 'cc_credentials:cred-project-anthropic',
+          credentialSource: 'project',
+          provider: 'anthropic',
+          providerMode: 'proxy-passthrough',
+          source: 'ai-proxy-passthrough.anthropic.messages',
+          responseStatus: 200,
+        }),
+      );
     });
 
     it('increments token usage after a successful Anthropic response', async () => {

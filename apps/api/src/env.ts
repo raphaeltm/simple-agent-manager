@@ -265,6 +265,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ACP_ACTIVITY_COALESCE_MAX_PENDING?: string; // Max pending coalesced activity reports per Worker isolate (default: 512)
   ACP_ACTIVITY_BINDING_CACHE_TTL_MS?: string; // Short-lived authorized ACP binding cache TTL (default: 30000)
   ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES?: string; // Max cached ACP activity bindings per Worker isolate (default: 2048)
+  CREDENTIAL_LIMIT_WARNING_PERCENT?: string; // Advisory credential quota warning threshold (default: 75)
+  CREDENTIAL_LIMIT_CRITICAL_PERCENT?: string; // Advisory credential quota critical threshold (default: 90)
   ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS?: string; // Durable parent-wait D1 reconciliation interval (default: 30000)
   ORCHESTRATOR_WAIT_MAX_CHILDREN?: string; // Max same-project task IDs in one wait_for_subtasks call (default: 20)
   ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT?: string; // Max active parent waits per project (default: 100)

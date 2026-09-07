@@ -34,6 +34,7 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
 import {
   AIProxyAuthError,
+  updateAIProxyAgentCredentialAttribution,
   verifyAIProxyAuth,
 } from '../services/ai-proxy-shared';
 import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
@@ -44,6 +45,10 @@ import {
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
+import {
+  copyCredentialLimitHeaders,
+  recordProxyCredentialLimitObservationsFromHeaders,
+} from '../services/credential-limit-events';
 
 const aiProxyPassthroughRoutes = new Hono<{ Bindings: Env }>();
 type ProxyContext = Context<{ Bindings: Env }>;
@@ -93,6 +98,11 @@ interface PassthroughAuthResult {
   chatSessionId?: string | null;
   trialId?: string;
   agentType?: string | null;
+  agentSessionId?: string | null;
+  agentCredentialReference?: string | null;
+  agentCredentialSource?: 'user' | 'project' | 'platform' | null;
+  agentCredentialProvider?: string | null;
+  agentProviderMode?: string | null;
 }
 
 interface ResolvedProxyUpstream {
@@ -102,6 +112,10 @@ interface ResolvedProxyUpstream {
   apiKey: string;
   baseUrl: string;
   provider: AiProviderUsageAttribution;
+  credentialReference: string;
+  credentialSource: 'user' | 'project' | 'platform';
+  credentialProvider: string;
+  providerMode: 'proxy-passthrough';
 }
 
 interface PreparedProxyRequest extends PassthroughAuthResult {
@@ -265,6 +279,12 @@ function credentialSupportsDialect(
   return secret.kind === 'openai-compatible' && dialect === 'openai-compatible';
 }
 
+function credentialSourceFromResolution(source: string): 'user' | 'project' | 'platform' {
+  if (source === 'project-attachment') return 'project';
+  if (source === 'user-attachment') return 'user';
+  return 'platform';
+}
+
 async function resolveProxyUpstream(input: {
   env: Env;
   userId: string;
@@ -296,9 +316,43 @@ async function resolveProxyUpstream(input: {
       apiKey,
       baseUrl,
       provider: resolveProviderAttribution({ baseUrl, dialect: input.dialect, settings }),
+      credentialReference: `cc_credentials:${resolved.credential.id}`,
+      credentialSource: credentialSourceFromResolution(resolved.source),
+      credentialProvider: input.dialect,
+      providerMode: 'proxy-passthrough',
     };
   }
   return null;
+}
+
+async function recordPassthroughLimitHeaders(input: {
+  env: Env;
+  headers: Headers;
+  prepared: PreparedProxyRequest;
+  provider: 'anthropic' | 'openai';
+  source: string;
+  responseStatus: number;
+}): Promise<void> {
+  await updateAIProxyAgentCredentialAttribution(input.env, input.prepared, {
+    credentialReference: input.prepared.upstream.credentialReference,
+    credentialSource: input.prepared.upstream.credentialSource,
+    credentialProvider: input.prepared.upstream.credentialProvider,
+    providerMode: input.prepared.upstream.providerMode,
+  });
+  await recordProxyCredentialLimitObservationsFromHeaders(input.env, input.headers, {
+    projectId: input.prepared.projectId,
+    userId: input.prepared.userId,
+    workspaceId: input.prepared.workspaceId,
+    chatSessionId: input.prepared.chatSessionId,
+    agentSessionId: input.prepared.agentSessionId,
+    agentType: input.prepared.upstream.agentType,
+    credentialReference: input.prepared.upstream.credentialReference,
+    credentialSource: input.prepared.upstream.credentialSource,
+    provider: input.provider,
+    providerMode: input.prepared.upstream.providerMode,
+    source: input.source,
+    responseStatus: input.responseStatus,
+  });
 }
 
 function buildUpstreamAuthHeaders(upstream: ResolvedProxyUpstream): Record<string, string> {
@@ -519,6 +573,14 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
         workspaceId,
         modelId,
       });
+      await recordPassthroughLimitHeaders({
+        env: c.env,
+        headers: upstreamResponse.headers,
+        prepared: prepared.value,
+        provider: 'anthropic',
+        source: 'ai-proxy-passthrough.anthropic.messages',
+        responseStatus: upstreamResponse.status,
+      });
       return anthropicError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
         'api_error', upstreamResponse.status,
@@ -528,7 +590,16 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages', async (c) => {
     const responseHeaders = new Headers();
     const contentType = upstreamResponse.headers.get('content-type');
     if (contentType) responseHeaders.set('Content-Type', contentType);
+    copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
     if (isStreaming) responseHeaders.set('Cache-Control', 'no-cache');
+    await recordPassthroughLimitHeaders({
+      env: c.env,
+      headers: upstreamResponse.headers,
+      prepared: prepared.value,
+      provider: 'anthropic',
+      source: 'ai-proxy-passthrough.anthropic.messages',
+      responseStatus: upstreamResponse.status,
+    });
 
     return attachUpstreamTokenUsageAccounting(upstreamResponse, {
       env: c.env,
@@ -581,13 +652,33 @@ aiProxyPassthroughRoutes.post('/:wstoken/anthropic/v1/messages/count_tokens', as
         modelId,
         status: upstreamResponse.status,
       });
+      await recordPassthroughLimitHeaders({
+        env: c.env,
+        headers: upstreamResponse.headers,
+        prepared: prepared.value,
+        provider: 'anthropic',
+        source: 'ai-proxy-passthrough.anthropic.count_tokens',
+        responseStatus: upstreamResponse.status,
+      });
       return anthropicError(`Token counting failed (${upstreamResponse.status}).`, 'api_error', upstreamResponse.status);
     }
 
     const responseText = await upstreamResponse.text();
+    const responseHeaders = new Headers({
+      'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json',
+    });
+    copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
+    await recordPassthroughLimitHeaders({
+      env: c.env,
+      headers: upstreamResponse.headers,
+      prepared: prepared.value,
+      provider: 'anthropic',
+      source: 'ai-proxy-passthrough.anthropic.count_tokens',
+      responseStatus: upstreamResponse.status,
+    });
     return new Response(responseText, {
       status: 200,
-      headers: { 'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json' },
+      headers: responseHeaders,
     });
   } catch (err) {
     log.error('ai_proxy_passthrough.anthropic.count_tokens_fetch_error', {
@@ -638,6 +729,14 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
         workspaceId,
         modelId,
       });
+      await recordPassthroughLimitHeaders({
+        env: c.env,
+        headers: upstreamResponse.headers,
+        prepared: prepared.value,
+        provider: 'openai',
+        source: 'ai-proxy-passthrough.openai.chat_completions',
+        responseStatus: upstreamResponse.status,
+      });
       return openaiError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
         'server_error', upstreamResponse.status,
@@ -647,11 +746,20 @@ aiProxyPassthroughRoutes.post('/:wstoken/openai/v1/chat/completions', async (c) 
     const responseHeaders = new Headers();
     const contentType = upstreamResponse.headers.get('content-type');
     if (contentType) responseHeaders.set('Content-Type', contentType);
+    copyCredentialLimitHeaders(upstreamResponse.headers, responseHeaders);
     if (body.stream) {
       responseHeaders.set('Cache-Control', 'no-cache');
       responseHeaders.set('Connection', 'keep-alive');
       responseHeaders.set('X-Accel-Buffering', 'no');
     }
+    await recordPassthroughLimitHeaders({
+      env: c.env,
+      headers: upstreamResponse.headers,
+      prepared: prepared.value,
+      provider: 'openai',
+      source: 'ai-proxy-passthrough.openai.chat_completions',
+      responseStatus: upstreamResponse.status,
+    });
 
     return attachUpstreamTokenUsageAccounting(upstreamResponse, {
       env: c.env,
