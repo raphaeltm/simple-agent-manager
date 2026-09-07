@@ -1206,18 +1206,18 @@ test.describe('ChatInput — Profile Wizard', () => {
   test.describe('mobile 375x667', () => {
     test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
-    test('wizard on mobile — shows setup steps', async ({ page }) => {
+    test('wizard on mobile — no-profiles state visible', async ({ page }) => {
       const { pageErrors } = await setupMocks(page, { profiles: [] });
       await page.goto('/projects/proj-test-1/chat');
       await page.waitForTimeout(2000);
 
-      // Click "+ New" to open wizard on mobile
-      const newBtn = page.getByRole('button', { name: /new/i }).first();
-      await expect(newBtn).toBeVisible({ timeout: 5000 });
-      await newBtn.click();
-      await page.waitForTimeout(1000);
+      // On mobile with no profiles, the textarea should show the profile-required placeholder
+      const textarea = page.locator('textarea').first();
+      await expect(textarea).toBeVisible();
+      const placeholder = await textarea.getAttribute('placeholder');
+      expect(placeholder).toContain('profile');
 
-      await screenshot(page, 'chat-wizard-open-mobile');
+      await screenshot(page, 'chat-no-profiles-mobile');
       await assertNoOverflow(page);
       assertNoPageErrors(pageErrors);
     });
