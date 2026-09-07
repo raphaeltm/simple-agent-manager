@@ -52,6 +52,32 @@ export async function credentialLimitIntentSuperseded(
   return Boolean(newer);
 }
 
+export function credentialLimitAdmissionGuard(
+  intent: ProjectEventSourceOutboxIntent,
+  payload: Omit<AdmitProjectEventInput, 'projectId'>
+): { sql: string; values: readonly unknown[] } | null {
+  const window = credentialLimitWindowFromIntent(intent, payload);
+  if (!window) return null;
+  return {
+    sql: `AND NOT EXISTS (
+      SELECT 1
+        FROM credential_limit_windows
+       WHERE project_id = ?
+         AND credential_reference = ?
+         AND window_type = ?
+         AND observed_at > ?
+         AND (last_event_delivery_key IS NULL OR last_event_delivery_key != ?)
+    )`,
+    values: [
+      intent.projectId,
+      intent.subjectId,
+      window.windowType,
+      window.observedAt,
+      intent.deliveryKey,
+    ],
+  };
+}
+
 export function credentialLimitSupersededUpdate(now: Date): {
   sqlSet: string;
   values: readonly unknown[];

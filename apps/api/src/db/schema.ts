@@ -1565,6 +1565,15 @@ export const credentialLimitWindows = sqliteTable(
       table.agentSessionId
     ),
     observedAtIdx: index('idx_credential_limit_windows_observed_at').on(table.observedAt),
+    projectUpdatedIdx: index('idx_credential_limit_windows_project_updated').on(
+      table.projectId,
+      table.updatedAt,
+      table.credentialReference,
+      table.windowType
+    ),
+    projectDeliveryIdx: index('idx_credential_limit_windows_project_delivery')
+      .on(table.projectId, table.lastEventDeliveryKey)
+      .where(sql`last_event_delivery_key IS NOT NULL`),
   })
 );
 

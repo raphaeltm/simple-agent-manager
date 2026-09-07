@@ -16,6 +16,7 @@ import {
   ProjectEventIdempotencyConflictError,
   ProjectEventValidationError,
 } from './project-events-contracts';
+import { findNewerCredentialLimitEvent } from './project-events-credential-supersession';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEventSubscription } from './project-events-mappers';
 import { ensureProjectEventRetentionScheduled } from './project-events-materialization';
@@ -182,6 +183,30 @@ export function admitProjectEvent(
       conflict: {
         deliveryKey: eventInput.deliveryKey,
         existingFingerprint: existing.payloadFingerprint,
+        incomingFingerprint: eventInput.payloadFingerprint,
+      },
+    };
+  }
+
+  const newerCredentialEvent = findNewerCredentialLimitEvent(
+    sql,
+    eventInput,
+    limits.retentionBatchRows
+  );
+  if (newerCredentialEvent) {
+    ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
+    return {
+      outcome: 'conflict',
+      event: newerCredentialEvent,
+      matches: listMatchesForEvent(
+        sql,
+        eventInput.projectId,
+        newerCredentialEvent.id,
+        limits.listLimitMax
+      ),
+      conflict: {
+        deliveryKey: eventInput.deliveryKey,
+        existingFingerprint: newerCredentialEvent.payloadFingerprint,
         incomingFingerprint: eventInput.payloadFingerprint,
       },
     };
