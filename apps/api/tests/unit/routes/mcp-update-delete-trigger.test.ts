@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
+import { INVALID_PARAMS, type McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { handleDeleteTrigger, handleUpdateTrigger } from '../../../src/routes/mcp/trigger-tools';
 
 function createTestD1(sqlite: Database.Database): D1Database {
@@ -54,6 +54,14 @@ function createTestD1(sqlite: Database.Database): D1Database {
     },
   } as unknown as D1Database;
 }
+
+const invalidModernResourceRequirementValues: Array<[string, unknown]> = [
+  ['empty string', ''],
+  ['whitespace string', '   '],
+  ['JSON object string', '{"minVcpu":2}'],
+  ['array', [{ minVcpu: 2 }]],
+  ['number', 2],
+];
 
 interface TriggerRow {
   id: string;
@@ -131,7 +139,11 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
     sqlite.close();
   });
 
-  function insertTrigger(id: string, projectId = tokenData.projectId): void {
+  function insertTrigger(
+    id: string,
+    projectId = tokenData.projectId,
+    resourceRequirementsJson: string | null = null
+  ): void {
     sqlite
       .prepare(
         `INSERT INTO triggers (
@@ -139,7 +151,7 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
         cron_expression, cron_timezone, skip_if_running, prompt_template,
         agent_profile_id, skill_id, task_mode, vm_size_override, resource_requirements_json, max_concurrent,
         next_fire_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, NULL, 'active', 'cron', '0 9 * * *', 'UTC', 1, ?, NULL, NULL, 'task', NULL, NULL, 1, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, NULL, 'active', 'cron', '0 9 * * *', 'UTC', 1, ?, NULL, NULL, 'task', NULL, ?, 1, ?, ?, ?)`
       )
       .run(
         id,
@@ -147,6 +159,7 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
         projectId === tokenData.projectId ? tokenData.userId : 'other-user',
         `Trigger ${id}`,
         'Original prompt',
+        resourceRequirementsJson,
         '2000-01-01T00:00:00.000Z',
         '2026-01-01T00:00:00.000Z',
         '2026-01-01T00:00:00.000Z'
@@ -243,6 +256,76 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
 
     expect(response.error?.message).toContain('exclusiveNode must be a boolean');
     expect(row.resource_requirements_json).toBeNull();
+  });
+
+  it.each(invalidModernResourceRequirementValues)(
+    'rejects modern resourceRequirements %s without mutating the trigger',
+    async (_label, resourceRequirements) => {
+      insertTrigger('trigger-modern-invalid', tokenData.projectId, '{"minVcpu":2}');
+
+      const response = await handleUpdateTrigger(
+        'req-1',
+        {
+          triggerId: 'trigger-modern-invalid',
+          name: 'Should not change',
+          resourceRequirements,
+          resourceRequirementsJson: '{"minVcpu":8}',
+        },
+        tokenData,
+        env
+      );
+      const row = sqlite
+        .prepare('SELECT * FROM triggers WHERE id = ?')
+        .get('trigger-modern-invalid') as TriggerRow;
+
+      expect(response.error?.code).toBe(INVALID_PARAMS);
+      expect(response.error?.message).toContain('resourceRequirements must be a JSON object');
+      expect(row.name).toBe('Trigger trigger-modern-invalid');
+      expect(row.resource_requirements_json).toBe('{"minVcpu":2}');
+    }
+  );
+
+  it('accepts compatibility JSON strings through resourceRequirementsJson updates', async () => {
+    insertTrigger('trigger-legacy-resources');
+
+    const response = await handleUpdateTrigger(
+      'req-1',
+      {
+        triggerId: 'trigger-legacy-resources',
+        resourceRequirementsJson: '{"minVcpu":3,"exclusiveNode":false}',
+      },
+      tokenData,
+      env
+    );
+    const payload = parseContent(response);
+    const row = sqlite
+      .prepare('SELECT * FROM triggers WHERE id = ?')
+      .get('trigger-legacy-resources') as TriggerRow;
+
+    expect(row.resource_requirements_json).toBe('{"minVcpu":3,"exclusiveNode":false}');
+    expect(payload.resourceRequirementsJson).toBe(row.resource_requirements_json);
+  });
+
+  it('keeps modern resourceRequirements precedence over resourceRequirementsJson updates', async () => {
+    insertTrigger('trigger-modern-precedence');
+
+    const response = await handleUpdateTrigger(
+      'req-1',
+      {
+        triggerId: 'trigger-modern-precedence',
+        resourceRequirements: { minVcpu: 4, exclusiveNode: false },
+        resourceRequirementsJson: '{"minVcpu":8}',
+      },
+      tokenData,
+      env
+    );
+    const payload = parseContent(response);
+    const row = sqlite
+      .prepare('SELECT * FROM triggers WHERE id = ?')
+      .get('trigger-modern-precedence') as TriggerRow;
+
+    expect(row.resource_requirements_json).toBe('{"minVcpu":4,"exclusiveNode":false}');
+    expect(payload.resourceRequirementsJson).toBe(row.resource_requirements_json);
   });
 
   it('deletes a trigger and cascades GitHub config and executions', async () => {

@@ -64,6 +64,14 @@ export function serializeResourceRequirementsInput(
   return JSON.stringify(normalizeResourceRequirementsInput(value, fieldName));
 }
 
+export function serializeModernResourceRequirementsInput(
+  value: unknown,
+  fieldName = 'resourceRequirements'
+): string | null {
+  if (value === null) return null;
+  return JSON.stringify(normalizeResourceRequirementsInput(value, fieldName));
+}
+
 export function parseStoredResourceRequirementsJson(
   value: string | null | undefined,
   fieldName = 'resourceRequirementsJson'

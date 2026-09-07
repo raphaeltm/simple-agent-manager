@@ -4,10 +4,11 @@
  * Tests input validation and successful creation flow.
  * Uses direct D1 mock since the handler uses raw SQL (not Drizzle ORM).
  */
+import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
+import { INVALID_PARAMS, type McpTokenData } from '../../../src/routes/mcp/_helpers';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,56 @@ function createMockD1() {
   };
 }
 
+function createSqliteD1(sqlite: Database.Database): D1Database {
+  const normalize = (params: unknown[]): unknown[] =>
+    params.map((p) => (p === undefined ? null : p));
+
+  const makeBound = (sql: string, params: unknown[]) => ({
+    async run() {
+      const info = sqlite.prepare(sql).run(...normalize(params));
+      return {
+        success: true,
+        meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid) },
+        results: [],
+      };
+    },
+    async all() {
+      const results = sqlite.prepare(sql).all(...normalize(params));
+      return { success: true, results, meta: {} };
+    },
+    async first(col?: string) {
+      const row = sqlite.prepare(sql).get(...normalize(params)) as
+        | Record<string, unknown>
+        | undefined;
+      if (col != null) return row ? (row[col] ?? null) : null;
+      return row ?? null;
+    },
+  });
+
+  const makeStmt = (sql: string) => ({
+    bind: (...params: unknown[]) => makeBound(sql, params),
+    run: () => makeBound(sql, []).run(),
+    all: () => makeBound(sql, []).all(),
+    first: (col?: string) => makeBound(sql, []).first(col),
+  });
+
+  return {
+    prepare: (sql: string) => makeStmt(sql),
+    async batch(stmts: Array<{ run: () => Promise<unknown> }>) {
+      const out = [];
+      for (const stmt of stmts) out.push(await stmt.run());
+      return out;
+    },
+    async exec(sql: string) {
+      sqlite.exec(sql);
+      return { count: 0, duration: 0 };
+    },
+    async dump() {
+      return new ArrayBuffer(0);
+    },
+  } as unknown as D1Database;
+}
+
 // ─── Test setup ─────────────────────────────────────────────────────────────
 
 import { handleCreateTrigger } from '../../../src/routes/mcp/trigger-tools';
@@ -53,6 +104,77 @@ const tokenData: McpTokenData = {
   workspaceId: 'ws-001',
   createdAt: new Date().toISOString(),
 };
+
+function createSqliteTriggerEnv(): { sqlite: Database.Database; env: Env } {
+  const sqlite = new Database(':memory:');
+  sqlite.exec(`
+    CREATE TABLE projects (id TEXT PRIMARY KEY, max_triggers INTEGER);
+    CREATE TABLE triggers (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      cron_expression TEXT,
+      cron_timezone TEXT,
+      skip_if_running INTEGER NOT NULL DEFAULT 1,
+      prompt_template TEXT NOT NULL,
+      agent_profile_id TEXT,
+      skill_id TEXT,
+      task_mode TEXT,
+      vm_size_override TEXT,
+      resource_requirements_json TEXT,
+      max_concurrent INTEGER,
+      next_fire_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE agent_profiles (id TEXT PRIMARY KEY, project_id TEXT);
+  `);
+  sqlite
+    .prepare('INSERT INTO projects (id, max_triggers) VALUES (?, NULL)')
+    .run(tokenData.projectId);
+
+  return {
+    sqlite,
+    env: {
+      DATABASE: createSqliteD1(sqlite),
+      CRON_TEMPLATE_MAX_LENGTH: undefined,
+      MAX_TRIGGERS_PER_PROJECT: undefined,
+      CRON_MIN_INTERVAL_MINUTES: undefined,
+      TRIGGER_NAME_MAX_LENGTH: undefined,
+    } as Env,
+  };
+}
+
+function insertExistingTrigger(
+  sqlite: Database.Database,
+  resourceRequirementsJson = '{"minVcpu":2,"exclusiveNode":false}'
+): void {
+  sqlite
+    .prepare(
+      `INSERT INTO triggers (
+        id, project_id, user_id, name, description, status, source_type,
+        cron_expression, cron_timezone, skip_if_running, prompt_template,
+        agent_profile_id, skill_id, task_mode, vm_size_override, resource_requirements_json,
+        max_concurrent, next_fire_at, created_at, updated_at
+      ) VALUES ('existing-trigger', ?, ?, 'Existing trigger', NULL, 'active', 'cron',
+        '0 9 * * *', 'UTC', 1, 'Existing prompt', NULL, NULL, 'task', NULL, ?,
+        1, '2000-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z',
+        '2026-01-01T00:00:00.000Z')`
+    )
+    .run(tokenData.projectId, tokenData.userId, resourceRequirementsJson);
+}
+
+const invalidModernResourceRequirementValues: Array<[string, unknown]> = [
+  ['empty string', ''],
+  ['whitespace string', '   '],
+  ['JSON object string', '{"minVcpu":2}'],
+  ['array', [{ minVcpu: 2 }]],
+  ['number', 2],
+];
 
 describe('MCP create_trigger tool', () => {
   let mockD1: ReturnType<typeof createMockD1>;
@@ -309,7 +431,7 @@ describe('MCP create_trigger tool', () => {
         agentProfileId: 'profile-1',
         taskMode: 'conversation',
         vmSizeOverride: 'large',
-        resourceRequirements: { minVcpu: 4, exclusiveNode: false, maxCoTenants: 0 },
+        resourceRequirements: { minVcpu: 4, exclusiveNode: false, maxCoTenants: 2 },
       },
       tokenData,
       env as Env
@@ -321,7 +443,7 @@ describe('MCP create_trigger tool', () => {
     expect(parsed.taskMode).toBe('conversation');
     expect(parsed.vmSizeOverride).toBe('large');
     expect(parsed.resourceRequirementsJson).toBe(
-      '{"minVcpu":4,"exclusiveNode":false,"maxCoTenants":0}'
+      '{"minVcpu":4,"exclusiveNode":false,"maxCoTenants":2}'
     );
   });
 
@@ -360,6 +482,75 @@ describe('MCP create_trigger tool', () => {
     );
 
     expect(result.error).toBeDefined();
-    expect(result.error?.message).toContain('finite non-negative number');
+    expect(result.error?.message).toContain('finite positive number');
+  });
+
+  it.each(invalidModernResourceRequirementValues)(
+    'rejects modern resourceRequirements %s before mutating trigger rows',
+    async (_label, resourceRequirements) => {
+      const { sqlite, env: sqliteEnv } = createSqliteTriggerEnv();
+      try {
+        insertExistingTrigger(sqlite);
+
+        const result = await handleCreateTrigger(
+          'req-1',
+          {
+            name: 'Invalid modern resources',
+            cronExpression: '0 9 * * *',
+            promptTemplate: 'Do stuff',
+            resourceRequirements,
+            resourceRequirementsJson: '{"minVcpu":8}',
+          },
+          tokenData,
+          sqliteEnv
+        );
+
+        expect(result.error?.code).toBe(INVALID_PARAMS);
+        expect(result.error?.message).toContain('resourceRequirements must be a JSON object');
+        expect(sqlite.prepare('SELECT COUNT(*) AS count FROM triggers').get()).toEqual({
+          count: 1,
+        });
+        expect(
+          sqlite
+            .prepare(
+              "SELECT name, resource_requirements_json FROM triggers WHERE id = 'existing-trigger'"
+            )
+            .get()
+        ).toEqual({
+          name: 'Existing trigger',
+          resource_requirements_json: '{"minVcpu":2,"exclusiveNode":false}',
+        });
+      } finally {
+        sqlite.close();
+      }
+    }
+  );
+
+  it('accepts compatibility JSON strings through resourceRequirementsJson', async () => {
+    const { sqlite, env: sqliteEnv } = createSqliteTriggerEnv();
+    try {
+      const result = await handleCreateTrigger(
+        'req-1',
+        {
+          name: 'Legacy resources',
+          cronExpression: '0 9 * * *',
+          promptTemplate: 'Do stuff',
+          resourceRequirementsJson: '{"minVcpu":2,"exclusiveNode":false}',
+        },
+        tokenData,
+        sqliteEnv
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(
+        sqlite
+          .prepare("SELECT resource_requirements_json FROM triggers WHERE id = 'trigger-001'")
+          .get()
+      ).toEqual({
+        resource_requirements_json: '{"minVcpu":2,"exclusiveNode":false}',
+      });
+    } finally {
+      sqlite.close();
+    }
   });
 });
