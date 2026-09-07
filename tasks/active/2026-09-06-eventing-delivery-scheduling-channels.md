@@ -38,20 +38,22 @@ A owns append-only DO migration IDs in wave one. B reserves D1 migration 0144 if
 
 ### A. Bounded retention and durable same-chat event delivery
 
-- [x] Chunk every variable SQL statement by its own remaining bind budget; verify 97/98/99/100/500 boundaries in real workerd.
-- [x] Replace retention hot-path aggregates with bounded incremental accounting and indexed candidates; use one overall mutation budget, dependency-safe cleanup, monotonic missing-batch repair, and exact eligible-work `hasMore` semantics. Daily maintenance by default; any bounded continuation must not become an unbounded hot loop.
-- [x] Clamp admission control timestamps to one captured server time; preserve source occurrence time only as evidence. Add additive migrations/indexes and verify both fresh and upgrade paths.
-- [x] Add independent materialization and retention candidates to the shared alarm scheduler with persisted retry checkpoints, bounded backoff, failure isolation and outer-finally re-arming. No network work in local materialization transactions.
-- [x] Introduce versioned stable `(projectId, chatSessionId)` ownership with task/runtime provenance and lineage guards; preserve bounded legacy pull compatibility without making legacy subscriptions wake-capable.
-- [x] Make finite self-chat `existing_session_prompt` subscriptions operational and return truthful checkpoint/end-turn instructions. No-match expiry is silent; it does not keep compute awake.
-- [x] Extract transaction-internal prompt acceptance and shared post-commit finalization. Preserve transcript-inserted gating for idle cleanup, human attention, workspace activity, summary and `message.new`; retain unconditional `mailbox.enqueued`; recalculate alarms in `finally`; no hooks on rollback.
-- [x] Atomically claim matches, create a ULID batch, accept inbox/transcript, and account for capacity. Share the claim primitive with pull; typed capacity deferral rolls back without failure backoff.
-- [x] Project mailbox state monotonically into batch/attempt state using additive transport columns and internal checkpoint upserts. Keep public append-only attempt fingerprints compatible; distinguish synthetic attempt zero from physical attempt limits.
-- [x] Define pull-versus-wake behavior for queued, delivering, delivered, ambiguous and acknowledged states. Revoke a queued prompt atomically when pulled; never blindly replay ambiguous receipt to another runtime.
-- [x] Preserve read/ack grace for accepted batches after natural subscription expiry. Cancellation, terminalization, authorization loss, target changes and kill-switch changes prevent physical side effects; recheck before recovery and physical submission.
-- [x] Enforce real mailbox/storage caps, batch limits, one in-flight wake per target, per-target/subscription cooldown and lifetime limits.
-- [x] Keep finite event leases out of sleep/idleness predicates; use them to prevent reconciliation check-ins and false terminalization while durably waiting.
-- [x] Wake messages contain only fixed platform wording and IDs. Event reads fence external content as untrusted evidence; do not log event-controlled strings as operational messages.
+- [ ] Chunk every variable SQL statement by its own remaining bind budget; verify 97/98/99/100/500 boundaries in real workerd.
+- [ ] Replace retention hot-path aggregates with bounded incremental accounting and indexed candidates; use one overall mutation budget, dependency-safe cleanup, monotonic missing-batch repair, and exact eligible-work `hasMore` semantics. Daily maintenance by default; any bounded continuation must not become an unbounded hot loop.
+- [ ] Clamp admission control timestamps to one captured server time; preserve source occurrence time only as evidence. Add additive migrations/indexes and verify both fresh and upgrade paths.
+- [ ] Add independent materialization and retention candidates to the shared alarm scheduler with persisted retry checkpoints, bounded backoff, failure isolation and outer-finally re-arming. No network work in local materialization transactions.
+- [ ] Introduce versioned stable `(projectId, chatSessionId)` ownership with task/runtime provenance and lineage guards; preserve bounded legacy pull compatibility without making legacy subscriptions wake-capable.
+- [ ] Make finite self-chat `existing_session_prompt` subscriptions operational and return truthful checkpoint/end-turn instructions. No-match expiry is silent; it does not keep compute awake.
+- [ ] Extract transaction-internal prompt acceptance and shared post-commit finalization. Preserve transcript-inserted gating for idle cleanup, human attention, workspace activity, summary and `message.new`; retain unconditional `mailbox.enqueued`; recalculate alarms in `finally`; no hooks on rollback.
+- [ ] Atomically claim matches, create a ULID batch, accept inbox/transcript, and account for capacity. Share the claim primitive with pull; typed capacity deferral rolls back without failure backoff.
+- [ ] Project mailbox state monotonically into batch/attempt state using additive transport columns and internal checkpoint upserts. Keep public append-only attempt fingerprints compatible; distinguish synthetic attempt zero from physical attempt limits.
+- [ ] Define pull-versus-wake behavior for queued, delivering, delivered, ambiguous and acknowledged states. Revoke a queued prompt atomically when pulled; never blindly replay ambiguous receipt to another runtime.
+- [ ] Preserve read/ack grace for accepted batches after natural subscription expiry. Cancellation, terminalization, authorization loss, target changes and kill-switch changes prevent physical side effects; recheck before recovery and physical submission.
+- [ ] Enforce real mailbox/storage caps, batch limits, one in-flight wake per target, per-target/subscription cooldown and lifetime limits.
+- [ ] Keep finite event leases out of sleep/idleness predicates; use them to prevent reconciliation check-ins and false terminalization while durably waiting.
+- [ ] Wake messages contain only fixed platform wording and IDs. Event reads fence external content as untrusted evidence; do not log event-controlled strings as operational messages.
+
+Section A was reopened after independent Cloudflare/security review. Repair requirements and runtime evidence are tracked in `2026-09-07-event-wake-review-fixes.md`.
 
 ### B. Source reliability and CI/review/webhook events
 
