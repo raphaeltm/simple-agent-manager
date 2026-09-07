@@ -27,6 +27,14 @@ export const PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES = [
   'expired',
   'permanent_failed',
 ] as const;
+const PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_SOURCE = 'sam.credential_limit';
+const PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_SUBJECT_TYPE = 'credential';
+const PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_EVENT_TYPES = [
+  'credential.limit.warning',
+  'credential.limit.critical',
+  'credential.limit.rejected',
+  'credential.limit.reset',
+] as const;
 
 export class ProjectEventSourceAdmissionTimeoutError extends Error {
   constructor(timeoutMs: number) {
@@ -84,6 +92,7 @@ export interface ProjectEventSourceAdmissionResult {
   admissionOutcome?: ProjectEventAdmissionOutcome;
   eventId?: string;
   attemptCount?: number;
+  outboxMutations?: number;
   conflict?: {
     deliveryKey: string;
     existingFingerprint: string;
@@ -101,6 +110,7 @@ export interface ProjectEventSourceOutboxStats {
   skipped: number;
   terminalDeleted: number;
   timedOut: number;
+  outboxMutations: number;
   hasMore: boolean;
 }
 
@@ -130,11 +140,14 @@ export type ProjectEventSourceOutboxInsertOptions = {
   capture?: ProjectEventSourceOutboxCaptureGuard;
 };
 
-export type ProjectEventSourceOutboxSupersedeInput = {
+export type ProjectEventSourceOutboxReadByIdInput = {
   id: string;
   projectId: string;
   source: string;
   deliveryKey: string;
+};
+
+export type ProjectEventSourceOutboxSupersedeInput = ProjectEventSourceOutboxReadByIdInput & {
   now?: Date;
   reason?: string;
 };
@@ -145,6 +158,7 @@ export type ProjectEventSourceAdmissionTiming =
       now?: Date;
       clock?: () => Date;
       admissionTimeoutMs?: number;
+      deadlineMs?: number;
     };
 
 export function projectEventSourceOutboxPayload(input: AdmitProjectEventInput): string {
@@ -174,15 +188,55 @@ export function assertProjectEventSourceOutboxCaptureMatchesInput(
   input: AdmitProjectEventInput,
   capture: ProjectEventSourceOutboxCaptureGuard
 ): void {
+  const kind = (capture as { kind?: unknown }).kind;
+  if (kind === 'task_terminal_transition') {
+    const guard = capture as TaskTerminalCaptureGuard;
+    if (guard.projectId !== input.projectId) {
+      throw new Error('Project event source outbox capture project does not match intent project');
+    }
+    return;
+  }
+  if (kind === 'credential_limit_window_transition') {
+    assertCredentialLimitWindowCaptureMatchesInput(
+      input,
+      capture as CredentialLimitWindowCaptureGuard
+    );
+    return;
+  }
+  throw new Error('Unsupported project event source outbox capture kind');
+}
+
+function assertCredentialLimitWindowCaptureMatchesInput(
+  input: AdmitProjectEventInput,
+  capture: CredentialLimitWindowCaptureGuard
+): void {
   if (capture.projectId !== input.projectId) {
     throw new Error('Project event source outbox capture project does not match intent project');
   }
-  if (capture.kind !== 'credential_limit_window_transition') return;
+  if (input.source !== PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_SOURCE) {
+    throw new Error('Credential limit capture source does not match intent source');
+  }
+  if (input.subject.type !== PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_SUBJECT_TYPE) {
+    throw new Error('Credential limit capture subject type does not match intent subject');
+  }
   if (capture.credentialReference !== input.subject.id) {
     throw new Error('Credential limit capture credential does not match intent subject');
   }
+  if (
+    !PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_EVENT_TYPES.includes(
+      input.eventType as (typeof PROJECT_EVENT_SOURCE_OUTBOX_CREDENTIAL_EVENT_TYPES)[number]
+    )
+  ) {
+    throw new Error('Credential limit capture event type is not supported');
+  }
   if (!Number.isInteger(capture.observedAt) || capture.observedAt < 0) {
     throw new Error('Credential limit capture observedAt must be a non-negative integer');
+  }
+  if (input.metadata?.windowType !== capture.windowType) {
+    throw new Error('Credential limit capture window type does not match intent metadata');
+  }
+  if (input.metadata?.observedAt !== capture.observedAt) {
+    throw new Error('Credential limit capture observedAt does not match intent metadata');
   }
   if (
     !Number.isInteger(capture.maxActiveIntentsPerProject) ||
@@ -219,15 +273,67 @@ export function projectEventSourceOutboxInsertValues(
   ] as const;
 }
 
+export function projectEventSourceOutboxNextRetryAt(
+  now: Date,
+  attemptCount: number,
+  config: ProjectEventSourceOutboxConfig
+): Date {
+  const exponent = Math.min(Math.max(0, attemptCount - 1), 16);
+  const delay = Math.min(config.retryMaxMs, config.retryBaseMs * 2 ** exponent);
+  return new Date(now.getTime() + delay);
+}
+
+export function projectEventSourceOutboxErrorText(error: unknown): string {
+  const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return raw.slice(0, 1024);
+}
+
+export function projectEventSourceOutboxClockFrom(
+  input: ProjectEventSourceAdmissionTiming | undefined
+): () => Date {
+  if (input instanceof Date) return () => new Date(input.getTime());
+  if (input?.clock) return input.clock;
+  if (input?.now) return () => new Date(input.now?.getTime() ?? Date.now());
+  return () => new Date();
+}
+
+export function projectEventSourceAdmissionTimeoutMs(
+  config: ProjectEventSourceOutboxConfig,
+  admissionTimeoutMs?: number,
+  deadlineMs?: number
+): number {
+  const configured = Math.min(
+    config.admissionTimeoutMs,
+    Math.max(0, Math.floor(admissionTimeoutMs ?? config.admissionTimeoutMs))
+  );
+  return deadlineMs === undefined
+    ? configured
+    : Math.min(configured, Math.max(0, Math.floor(deadlineMs - Date.now())));
+}
+
+export function withProjectEventSourceAdmissionTimeout<T>(
+  createPromise: () => Promise<T>,
+  timeoutMs: number
+): Promise<T> {
+  if (timeoutMs <= 0) return Promise.reject(new ProjectEventSourceAdmissionTimeoutError(timeoutMs));
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(
+      () => reject(new ProjectEventSourceAdmissionTimeoutError(timeoutMs)),
+      timeoutMs
+    );
+    createPromise()
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timeout));
+  });
+}
+
 function parsePositiveInteger(value: string | undefined, fallback: number, min = 1): number {
   if (value === undefined || value.trim() === '') return fallback;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed >= min ? parsed : fallback;
 }
 
-export function resolveProjectEventSourceOutboxConfig(
-  env: Env
-): ProjectEventSourceOutboxConfig {
+export function resolveProjectEventSourceOutboxConfig(env: Env): ProjectEventSourceOutboxConfig {
   return {
     batchRows: parsePositiveInteger(
       env.PROJECT_EVENT_SOURCE_OUTBOX_BATCH_ROWS,

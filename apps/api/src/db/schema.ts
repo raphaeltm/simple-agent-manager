@@ -1479,6 +1479,7 @@ export const agentSessions = sqliteTable(
     agentCredentialReference: text('agent_credential_reference'),
     agentCredentialProvider: text('agent_credential_provider'),
     agentProviderMode: text('agent_provider_mode'),
+    agentCredentialGeneration: integer('agent_credential_generation').notNull().default(0),
     skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     worktreePath: text('worktree_path'),
     stoppedAt: text('stopped_at'),
@@ -1564,6 +1565,15 @@ export const credentialLimitWindows = sqliteTable(
       table.agentSessionId
     ),
     observedAtIdx: index('idx_credential_limit_windows_observed_at').on(table.observedAt),
+    projectUpdatedIdx: index('idx_credential_limit_windows_project_updated').on(
+      table.projectId,
+      table.updatedAt,
+      table.credentialReference,
+      table.windowType
+    ),
+    projectDeliveryIdx: index('idx_credential_limit_windows_project_delivery')
+      .on(table.projectId, table.lastEventDeliveryKey)
+      .where(sql`last_event_delivery_key IS NOT NULL`),
   })
 );
 
@@ -2593,6 +2603,8 @@ export const projectEventSourceOutbox = sqliteTable(
     admittedEventId: text('admitted_event_id'),
     admissionOutcome: text('admission_outcome'),
     lastError: text('last_error'),
+    credentialLimitWindowType: text('credential_limit_window_type'),
+    credentialLimitObservedAt: integer('credential_limit_observed_at'),
     terminalizedAt: text('terminalized_at'),
     createdAt: text('created_at')
       .notNull()
@@ -2651,6 +2663,19 @@ export const projectEventSourceOutbox = sqliteTable(
       table.subjectId,
       table.state
     ),
+    credentialLimitActiveIdx: index('idx_project_event_source_outbox_credential_limit_active')
+      .on(
+        table.projectId,
+        table.source,
+        table.subjectId,
+        table.credentialLimitWindowType,
+        table.state,
+        table.credentialLimitObservedAt,
+        table.id
+      )
+      .where(
+        sql`credential_limit_window_type IS NOT NULL AND credential_limit_observed_at IS NOT NULL`
+      ),
   })
 );
 

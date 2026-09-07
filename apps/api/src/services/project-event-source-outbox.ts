@@ -10,19 +10,30 @@ import {
   PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES,
   type ProjectEventSourceAdmissionResult,
   ProjectEventSourceAdmissionTimeoutError,
+  projectEventSourceAdmissionTimeoutMs,
   type ProjectEventSourceAdmissionTiming,
   type ProjectEventSourceOutboxActiveState,
-  type ProjectEventSourceOutboxConfig,
+  projectEventSourceOutboxClockFrom,
+  projectEventSourceOutboxErrorText,
   type ProjectEventSourceOutboxInsertOptions,
   projectEventSourceOutboxInsertValues,
   type ProjectEventSourceOutboxIntent,
+  projectEventSourceOutboxNextRetryAt,
+  type ProjectEventSourceOutboxReadByIdInput,
   projectEventSourceOutboxReplayConflict,
   type ProjectEventSourceOutboxState,
   type ProjectEventSourceOutboxStats,
   type ProjectEventSourceOutboxSupersedeInput,
   type ProjectEventSourceOutboxTerminalState,
   resolveProjectEventSourceOutboxConfig,
+  withProjectEventSourceAdmissionTimeout,
 } from './project-event-source-outbox-contract';
+import {
+  loadProjectEventSourceIntentByClaim,
+  loadProjectEventSourceIntentByDelivery,
+  loadProjectEventSourceIntentByIdentity,
+  loadProjectEventSourceIntentByInternalId,
+} from './project-event-source-outbox-storage';
 
 export type {
   ProjectEventSourceAdmissionResult,
@@ -31,6 +42,7 @@ export type {
   ProjectEventSourceOutboxConfig,
   ProjectEventSourceOutboxInsertOptions,
   ProjectEventSourceOutboxIntent,
+  ProjectEventSourceOutboxReadByIdInput,
   ProjectEventSourceOutboxState,
   ProjectEventSourceOutboxStats,
   ProjectEventSourceOutboxSupersedeInput,
@@ -44,6 +56,7 @@ export {
 const log = createModuleLogger('project_event_source_outbox');
 const ACTIVE_STATES = PROJECT_EVENT_SOURCE_OUTBOX_ACTIVE_STATES;
 const TERMINAL_STATES = PROJECT_EVENT_SOURCE_OUTBOX_TERMINAL_STATES;
+const CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS = 2;
 
 export function projectEventSourceOutboxInsertStatement(
   env: Env,
@@ -110,85 +123,18 @@ export function projectEventSourceOutboxInsertStatement(
   ).bind(...values);
 }
 
-async function loadIntentByDelivery(
-  env: Env,
-  input: Pick<AdmitProjectEventInput, 'projectId' | 'source' | 'deliveryKey'>
-): Promise<ProjectEventSourceOutboxIntent | null> {
-  return env.DATABASE.prepare(
-    `SELECT id, project_id AS projectId, source, event_type AS eventType,
-            subject_type AS subjectType, subject_id AS subjectId,
-            delivery_key AS deliveryKey, payload_fingerprint AS payloadFingerprint,
-            event_payload_json AS eventPayloadJson, state,
-            attempt_count AS attemptCount, max_attempts AS maxAttempts,
-            expires_at AS expiresAt, claim_token AS claimToken,
-            admitted_event_id AS admittedEventId, admission_outcome AS admissionOutcome,
-            last_error AS lastError,
-            terminalized_at AS terminalizedAt
-       FROM project_event_source_outbox
-      WHERE project_id = ? AND source = ? AND delivery_key = ?
-      LIMIT 1`
-  )
-    .bind(input.projectId, input.source, input.deliveryKey)
-    .first<ProjectEventSourceOutboxIntent>();
-}
-
-async function loadIntentById(
-  env: Env,
-  id: string
-): Promise<ProjectEventSourceOutboxIntent | null> {
-  return env.DATABASE.prepare(
-    `SELECT id, project_id AS projectId, source, event_type AS eventType,
-            subject_type AS subjectType, subject_id AS subjectId,
-            delivery_key AS deliveryKey, payload_fingerprint AS payloadFingerprint,
-            event_payload_json AS eventPayloadJson, state,
-            attempt_count AS attemptCount, max_attempts AS maxAttempts,
-            expires_at AS expiresAt, claim_token AS claimToken,
-            admitted_event_id AS admittedEventId, admission_outcome AS admissionOutcome,
-            last_error AS lastError,
-            terminalized_at AS terminalizedAt
-       FROM project_event_source_outbox
-      WHERE id = ?
-      LIMIT 1`
-  )
-    .bind(id)
-    .first<ProjectEventSourceOutboxIntent>();
-}
-
-async function loadIntentByClaim(
-  env: Env,
-  id: string,
-  claimToken: string
-): Promise<ProjectEventSourceOutboxIntent | null> {
-  return env.DATABASE.prepare(
-    `SELECT id, project_id AS projectId, source, event_type AS eventType,
-            subject_type AS subjectType, subject_id AS subjectId,
-            delivery_key AS deliveryKey, payload_fingerprint AS payloadFingerprint,
-            event_payload_json AS eventPayloadJson, state,
-            attempt_count AS attemptCount, max_attempts AS maxAttempts,
-            expires_at AS expiresAt, claim_token AS claimToken,
-            admitted_event_id AS admittedEventId, admission_outcome AS admissionOutcome,
-            last_error AS lastError,
-            terminalized_at AS terminalizedAt
-       FROM project_event_source_outbox
-      WHERE id = ? AND state = 'processing' AND claim_token = ?
-      LIMIT 1`
-  )
-    .bind(id, claimToken)
-    .first<ProjectEventSourceOutboxIntent>();
-}
-
 export async function readProjectEventSourceIntentByDelivery(
   env: Env,
   input: Pick<AdmitProjectEventInput, 'projectId' | 'source' | 'deliveryKey'>
 ): Promise<ProjectEventSourceOutboxIntent | null> {
-  return loadIntentByDelivery(env, input);
+  return loadProjectEventSourceIntentByDelivery(env, input);
 }
 
 export async function readProjectEventSourceIntentById(
   env: Env,
-  id: string
+  input: ProjectEventSourceOutboxReadByIdInput
 ): Promise<ProjectEventSourceOutboxIntent | null> {
-  return loadIntentById(env, id);
+  return loadProjectEventSourceIntentByIdentity(env, input);
 }
 
 export async function markProjectEventSourceIntentSuperseded(
@@ -218,7 +164,7 @@ export async function markProjectEventSourceIntentSuperseded(
       nowIso
     )
     .run();
-  return loadIntentById(env, input.id);
+  return loadProjectEventSourceIntentByIdentity(env, input);
 }
 
 async function markLocalReplayConflict(
@@ -265,11 +211,13 @@ export async function enqueueProjectEventSourceIntent(
   options: ProjectEventSourceOutboxInsertOptions = {}
 ): Promise<ProjectEventSourceOutboxIntent> {
   await projectEventSourceOutboxInsertStatement(env, input, options).run();
-  const intentById = options.id ? await loadIntentById(env, options.id) : null;
+  const intentById = options.id
+    ? await loadProjectEventSourceIntentByInternalId(env, options.id)
+    : null;
   const intent =
     intentById && projectEventSourceOutboxReplayConflict(intentById, input) === null
       ? intentById
-      : await loadIntentByDelivery(env, input);
+      : await loadProjectEventSourceIntentByDelivery(env, input);
   if (!intent) throw new Error('Project event source outbox intent was not persisted');
   const conflict = projectEventSourceOutboxReplayConflict(intent, input);
   if (conflict) {
@@ -279,30 +227,9 @@ export async function enqueueProjectEventSourceIntent(
   return intent;
 }
 
-function nextRetryAt(
-  now: Date,
-  attemptCount: number,
-  config: ProjectEventSourceOutboxConfig
-): Date {
-  const exponent = Math.min(Math.max(0, attemptCount - 1), 16);
-  const delay = Math.min(config.retryMaxMs, config.retryBaseMs * 2 ** exponent);
-  return new Date(now.getTime() + delay);
-}
-
-function errorText(error: unknown): string {
-  const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-  return raw.slice(0, 1024);
-}
-
-function clockFrom(input: ProjectEventSourceAdmissionTiming | undefined): () => Date {
-  if (input instanceof Date) return () => new Date(input.getTime());
-  if (input?.clock) return input.clock;
-  if (input?.now) return () => new Date(input.now?.getTime() ?? Date.now());
-  return () => new Date();
-}
-
 function resultFromIntent(
-  intent: ProjectEventSourceOutboxIntent
+  intent: ProjectEventSourceOutboxIntent,
+  outboxMutations = 0
 ): ProjectEventSourceAdmissionResult {
   return {
     intentId: intent.id,
@@ -310,12 +237,13 @@ function resultFromIntent(
     admissionOutcome: intent.admissionOutcome ?? undefined,
     eventId: intent.admittedEventId ?? undefined,
     attemptCount: intent.attemptCount,
+    outboxMutations,
   };
 }
 
-async function terminalizeIneligibleClaim(env: Env, id: string, now: Date): Promise<void> {
+async function terminalizeIneligibleClaim(env: Env, id: string, now: Date): Promise<number> {
   const nowIso = now.toISOString();
-  await env.DATABASE.prepare(
+  const expired = await env.DATABASE.prepare(
     `UPDATE project_event_source_outbox
         SET state = 'expired', processing_lease_expires_at = NULL, claim_token = NULL,
             terminalized_at = ?, last_error = COALESCE(last_error, 'Intent expired'), updated_at = ?
@@ -323,7 +251,7 @@ async function terminalizeIneligibleClaim(env: Env, id: string, now: Date): Prom
   )
     .bind(nowIso, nowIso, id, nowIso)
     .run();
-  await env.DATABASE.prepare(
+  const exhausted = await env.DATABASE.prepare(
     `UPDATE project_event_source_outbox
         SET state = 'permanent_failed', processing_lease_expires_at = NULL, claim_token = NULL,
             terminalized_at = ?, last_error = COALESCE(last_error, 'Max attempts exhausted'), updated_at = ?
@@ -339,13 +267,14 @@ async function terminalizeIneligibleClaim(env: Env, id: string, now: Date): Prom
   )
     .bind(nowIso, nowIso, id, nowIso)
     .run();
+  return Number(expired.meta.changes ?? 0) + Number(exhausted.meta.changes ?? 0);
 }
 
 async function claimIntent(
   env: Env,
   id: string,
   now: Date
-): Promise<ProjectEventSourceOutboxIntent | null> {
+): Promise<{ intent: ProjectEventSourceOutboxIntent | null; outboxMutations: number }> {
   const config = resolveProjectEventSourceOutboxConfig(env);
   const claimToken = ulid();
   const nowIso = now.toISOString();
@@ -365,10 +294,15 @@ async function claimIntent(
     .bind(claimToken, nowIso, leaseExpiresAt, nowIso, id, nowIso, nowIso, nowIso)
     .run();
   if (Number(result.meta.changes ?? 0) === 0) {
-    await terminalizeIneligibleClaim(env, id, now);
-    return null;
+    return {
+      intent: null,
+      outboxMutations: await terminalizeIneligibleClaim(env, id, now),
+    };
   }
-  return loadIntentByClaim(env, id, claimToken);
+  return {
+    intent: await loadProjectEventSourceIntentByClaim(env, id, claimToken),
+    outboxMutations: 1,
+  };
 }
 
 async function updateClaimedIntent(
@@ -383,9 +317,12 @@ async function updateClaimedIntent(
   )
     .bind(...values, intent.id, intent.claimToken)
     .run();
-  const current = await loadIntentById(env, intent.id);
-  if (Number(result.meta.changes ?? 0) === 0 && current) return resultFromIntent(current);
-  return current ? resultFromIntent(current) : { intentId: intent.id, state: 'permanent_failed' };
+  const current = await loadProjectEventSourceIntentByInternalId(env, intent.id);
+  const outboxMutations = Number(result.meta.changes ?? 0);
+  if (outboxMutations === 0 && current) return resultFromIntent(current, 0);
+  return current
+    ? resultFromIntent(current, outboxMutations)
+    : { intentId: intent.id, state: 'permanent_failed', outboxMutations };
 }
 
 async function markIntentFailed(
@@ -405,14 +342,23 @@ async function markIntentFailed(
       ? 'permanent_failed'
       : 'retryable_failed';
   const nextAttemptAt =
-    state === 'retryable_failed' ? nextRetryAt(now, intent.attemptCount, config) : now;
+    state === 'retryable_failed'
+      ? projectEventSourceOutboxNextRetryAt(now, intent.attemptCount, config)
+      : now;
   return updateClaimedIntent(
     env,
     intent,
     `SET state = ?, next_attempt_at = ?, processing_lease_expires_at = NULL,
          claim_token = NULL, terminalized_at = CASE WHEN ? = 'retryable_failed' THEN NULL ELSE ? END,
          last_error = ?, updated_at = ?`,
-    [state, nextAttemptAt.toISOString(), state, nowIso, errorText(error), nowIso]
+    [
+      state,
+      nextAttemptAt.toISOString(),
+      state,
+      nowIso,
+      projectEventSourceOutboxErrorText(error),
+      nowIso,
+    ]
   );
 }
 
@@ -437,22 +383,12 @@ function parseEventPayload(
   return eventPayload;
 }
 
-function withAdmissionTimeout<T>(createPromise: () => Promise<T>, timeoutMs: number): Promise<T> {
-  if (timeoutMs <= 0) return Promise.reject(new ProjectEventSourceAdmissionTimeoutError(timeoutMs));
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(
-      () => reject(new ProjectEventSourceAdmissionTimeoutError(timeoutMs)),
-      timeoutMs
-    );
-    createPromise().then(resolve, reject).finally(() => clearTimeout(timeout));
-  });
-}
-
 async function admitClaimedIntent(
   env: Env,
   intent: ProjectEventSourceOutboxIntent,
   clock: () => Date,
-  admissionTimeoutMs?: number
+  admissionTimeoutMs?: number,
+  deadlineMs?: number
 ): Promise<ProjectEventSourceAdmissionResult> {
   let payload: Omit<AdmitProjectEventInput, 'projectId'>;
   try {
@@ -463,22 +399,26 @@ async function admitClaimedIntent(
       intent,
       `SET state = 'permanent_failed', processing_lease_expires_at = NULL,
            claim_token = NULL, terminalized_at = ?, last_error = ?, updated_at = ?`,
-      [clock().toISOString(), errorText(error), clock().toISOString()]
+      [clock().toISOString(), projectEventSourceOutboxErrorText(error), clock().toISOString()]
     );
   }
 
   try {
     const config = resolveProjectEventSourceOutboxConfig(env);
-    const timeoutMs = Math.min(
-      config.admissionTimeoutMs,
-      Math.max(0, Math.floor(admissionTimeoutMs ?? config.admissionTimeoutMs))
+    const currentClaim = await loadProjectEventSourceIntentByClaim(
+      env,
+      intent.id,
+      intent.claimToken ?? ''
     );
-    const currentClaim = await loadIntentByClaim(env, intent.id, intent.claimToken ?? '');
     if (!currentClaim) {
-      const current = await loadIntentById(env, intent.id);
+      const current = await loadProjectEventSourceIntentByInternalId(env, intent.id);
       return current ? resultFromIntent(current) : resultFromIntent(intent);
     }
-    const result = await withAdmissionTimeout(
+    const timeoutMs = projectEventSourceAdmissionTimeoutMs(config, admissionTimeoutMs, deadlineMs);
+    if (timeoutMs <= 0) {
+      return markIntentFailed(env, intent, new ProjectEventSourceAdmissionTimeoutError(0), clock());
+    }
+    const result = await withProjectEventSourceAdmissionTimeout(
       () => projectDataService.admitProjectEvent(env, intent.projectId, payload),
       timeoutMs
     );
@@ -509,7 +449,7 @@ async function admitClaimedIntent(
       subjectType: intent.subjectType,
       subjectId: intent.subjectId,
       attemptCount: intent.attemptCount,
-      error: errorText(error),
+      error: projectEventSourceOutboxErrorText(error),
     });
     return markIntentFailed(env, intent, error, clock());
   }
@@ -520,15 +460,17 @@ export async function admitProjectEventSourceIntentById(
   id: string,
   timing?: ProjectEventSourceAdmissionTiming
 ): Promise<ProjectEventSourceAdmissionResult | null> {
-  const clock = clockFrom(timing);
-  const intent = await claimIntent(env, id, clock());
-  if (!intent) {
-    const existing = await loadIntentById(env, id);
-    return existing ? resultFromIntent(existing) : null;
+  const clock = projectEventSourceOutboxClockFrom(timing);
+  const claim = await claimIntent(env, id, clock());
+  if (!claim.intent) {
+    const existing = await loadProjectEventSourceIntentByInternalId(env, id);
+    return existing ? resultFromIntent(existing, claim.outboxMutations) : null;
   }
-  const admissionTimeoutMs =
-    timing instanceof Date ? undefined : timing?.admissionTimeoutMs;
-  return admitClaimedIntent(env, intent, clock, admissionTimeoutMs);
+  const admissionTimeoutMs = timing instanceof Date ? undefined : timing?.admissionTimeoutMs;
+  const deadlineMs = timing instanceof Date ? undefined : timing?.deadlineMs;
+  const result = await admitClaimedIntent(env, claim.intent, clock, admissionTimeoutMs, deadlineMs);
+  result.outboxMutations = (result.outboxMutations ?? 0) + claim.outboxMutations;
+  return result;
 }
 
 export async function enqueueAndAdmitProjectEventSourceIntent(
@@ -539,7 +481,7 @@ export async function enqueueAndAdmitProjectEventSourceIntent(
   try {
     intent = await enqueueProjectEventSourceIntent(env, input);
   } catch (error) {
-    const existing = await loadIntentByDelivery(env, input);
+    const existing = await loadProjectEventSourceIntentByDelivery(env, input);
     if (!existing) throw error;
     const reason = projectEventSourceOutboxReplayConflict(existing, input);
     if (!reason) throw error;
@@ -710,7 +652,9 @@ export async function reconcileProjectEventSourceOutbox(
 ): Promise<ProjectEventSourceOutboxStats> {
   const config = resolveProjectEventSourceOutboxConfig(env);
   const limit = Math.max(1, Math.min(options.limit ?? config.batchRows, config.batchRows));
-  const clock = clockFrom(options.clock ? { clock: options.clock } : options.now);
+  const clock = projectEventSourceOutboxClockFrom(
+    options.clock ? { clock: options.clock } : options.now
+  );
   const deadline = Date.now() + config.sweepWallMs;
   const stats: ProjectEventSourceOutboxStats = {
     attempted: 0,
@@ -721,12 +665,14 @@ export async function reconcileProjectEventSourceOutbox(
     skipped: 0,
     terminalDeleted: 0,
     timedOut: 0,
+    outboxMutations: 0,
     hasMore: false,
   };
-  let remaining = limit;
+  let remainingMutations = limit;
   const spend = (changedRows: number) => {
-    const before = remaining;
-    remaining = Math.max(0, remaining - changedRows);
+    const before = remainingMutations;
+    remainingMutations = Math.max(0, remainingMutations - changedRows);
+    stats.outboxMutations += changedRows;
     if (changedRows >= before) stats.hasMore = true;
   };
 
@@ -740,17 +686,17 @@ export async function reconcileProjectEventSourceOutbox(
       'expired',
       'Intent expired',
       clock(),
-      remaining
+      remainingMutations
     );
     stats.expired += changed;
     spend(changed);
-    if (remaining <= 0 || Date.now() >= deadline) return stats;
+    if (remainingMutations <= 0 || Date.now() >= deadline) return stats;
   }
   for (const state of ACTIVE_STATES) {
-    const changed = await terminalizeExhaustedRows(env, state, clock(), remaining);
+    const changed = await terminalizeExhaustedRows(env, state, clock(), remainingMutations);
     stats.permanentFailed += changed;
     spend(changed);
-    if (remaining <= 0 || Date.now() >= deadline) return stats;
+    if (remainingMutations <= 0 || Date.now() >= deadline) return stats;
   }
   if (config.terminalRetentionMs >= 0) {
     const cutoff = new Date(clock().getTime() - config.terminalRetentionMs).toISOString();
@@ -759,32 +705,36 @@ export async function reconcileProjectEventSourceOutbox(
         env,
         state,
         clock().toISOString(),
-        remaining
+        remainingMutations
       );
       spend(backfilled);
-      if (remaining <= 0 || Date.now() >= deadline) return stats;
-      const deleted = await deleteTerminalRows(env, state, cutoff, remaining);
+      if (remainingMutations <= 0 || Date.now() >= deadline) return stats;
+      const deleted = await deleteTerminalRows(env, state, cutoff, remainingMutations);
       stats.terminalDeleted += deleted;
       spend(deleted);
-      if (remaining <= 0 || Date.now() >= deadline) return stats;
+      if (remainingMutations <= 0 || Date.now() >= deadline) return stats;
     }
   }
 
-  const ids = await selectCandidateIds(env, clock().toISOString(), remaining);
-  stats.hasMore = stats.hasMore || ids.length >= remaining;
+  const candidateLimit = Math.floor(remainingMutations / CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS);
+  if (candidateLimit <= 0) {
+    stats.hasMore = true;
+    return stats;
+  }
+  const ids = await selectCandidateIds(env, clock().toISOString(), candidateLimit);
+  stats.hasMore = stats.hasMore || ids.length >= candidateLimit;
   for (const id of ids) {
-    if (Date.now() >= deadline) {
+    if (remainingMutations < CANDIDATE_ADMISSION_MIN_OUTBOX_MUTATIONS || Date.now() >= deadline) {
       stats.hasMore = true;
       break;
     }
-    const remainingWallMs = Math.max(0, deadline - Date.now());
     const result = await admitProjectEventSourceIntentById(env, id, {
       clock,
-      admissionTimeoutMs: remainingWallMs,
+      deadlineMs: deadline,
     });
-    spend(1);
+    spend(result?.outboxMutations ?? 0);
     if (result?.state === 'retryable_failed') {
-      const current = await loadIntentById(env, id);
+      const current = await loadProjectEventSourceIntentByInternalId(env, id);
       if (current?.claimToken === null && current.lastError?.includes('timed out'))
         stats.timedOut += 1;
     }

@@ -71,7 +71,8 @@ CREATE TABLE project_event_source_outbox (
   next_attempt_at TEXT NOT NULL, processing_lease_expires_at TEXT,
   claim_token TEXT, claimed_at TEXT, expires_at TEXT NOT NULL,
   admitted_event_id TEXT, admission_outcome TEXT, last_error TEXT,
-  terminalized_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  terminalized_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  credential_limit_window_type TEXT, credential_limit_observed_at INTEGER
 );
 CREATE UNIQUE INDEX idx_project_event_source_outbox_delivery
   ON project_event_source_outbox(project_id, source, delivery_key);
@@ -83,6 +84,9 @@ CREATE INDEX idx_project_event_source_outbox_active_expiry
   ON project_event_source_outbox(state, expires_at, id);
 CREATE INDEX idx_project_event_source_outbox_active_capacity
   ON project_event_source_outbox(project_id, source, state, expires_at, id);
+CREATE INDEX idx_project_event_source_outbox_credential_limit_active
+  ON project_event_source_outbox(project_id, source, subject_id, credential_limit_window_type, state, credential_limit_observed_at, id)
+  WHERE credential_limit_window_type IS NOT NULL AND credential_limit_observed_at IS NOT NULL;
 CREATE INDEX idx_project_event_source_outbox_active_attempts
   ON project_event_source_outbox(state, attempt_count, id);
 CREATE INDEX idx_project_event_source_outbox_exhausted_ready
