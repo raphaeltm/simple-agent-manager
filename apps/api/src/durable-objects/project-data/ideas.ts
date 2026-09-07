@@ -1,7 +1,7 @@
 /**
  * Session–Idea (task) linking — many-to-many associations.
  */
-import { parseIdeaSessionDetail,parseSessionIdeaLink } from './row-schemas';
+import { parseIdeaSessionDetail, parseSessionIdeaLink } from './row-schemas';
 
 export function linkSessionIdea(
   sql: SqlStorage,
@@ -9,9 +9,7 @@ export function linkSessionIdea(
   taskId: string,
   context: string | null
 ): void {
-  const session = sql
-    .exec('SELECT id FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
+  const session = sql.exec('SELECT id FROM chat_sessions WHERE id = ?', sessionId).toArray()[0];
   if (!session) {
     throw new Error(`Session not found: ${sessionId}`);
   }
@@ -26,11 +24,7 @@ export function linkSessionIdea(
   );
 }
 
-export function unlinkSessionIdea(
-  sql: SqlStorage,
-  sessionId: string,
-  taskId: string
-): void {
+export function unlinkSessionIdea(sql: SqlStorage, sessionId: string, taskId: string): void {
   sql.exec(
     'DELETE FROM chat_session_ideas WHERE session_id = ? AND task_id = ?',
     sessionId,

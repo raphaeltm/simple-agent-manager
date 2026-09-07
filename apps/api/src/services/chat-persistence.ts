@@ -22,7 +22,14 @@ export async function createChatSession(
   taskId: string,
   createdByUserId: string | null = null
 ): Promise<string> {
-  return projectDataService.createSession(env, projectId, workspaceId, topic, taskId, createdByUserId);
+  return projectDataService.createSession(
+    env,
+    projectId,
+    workspaceId,
+    topic,
+    taskId,
+    createdByUserId
+  );
 }
 
 /**

@@ -31,9 +31,8 @@ function makeTestEnv(overrides?: Partial<Env>): Env {
 
 describe('port access token — sign/verify', () => {
   it('round-trips successfully with correct claims', async () => {
-    const { signPortAccessToken, verifyPortAccessToken } = await import(
-      '../../../src/services/jwt'
-    );
+    const { signPortAccessToken, verifyPortAccessToken } =
+      await import('../../../src/services/jwt');
     const env = makeTestEnv();
     const token = await signPortAccessToken('user-1', 'ws-abc', 3000, env);
     const payload = await verifyPortAccessToken(token, env);
@@ -44,9 +43,8 @@ describe('port access token — sign/verify', () => {
   });
 
   it('payload reflects signed workspace claim (mismatch enforced by proxy)', async () => {
-    const { signPortAccessToken, verifyPortAccessToken } = await import(
-      '../../../src/services/jwt'
-    );
+    const { signPortAccessToken, verifyPortAccessToken } =
+      await import('../../../src/services/jwt');
     const env = makeTestEnv();
     const token = await signPortAccessToken('user-1', 'ws-abc', 3000, env);
     const payload = await verifyPortAccessToken(token, env);
@@ -56,9 +54,8 @@ describe('port access token — sign/verify', () => {
   });
 
   it('payload reflects signed port claim (mismatch enforced by proxy)', async () => {
-    const { signPortAccessToken, verifyPortAccessToken } = await import(
-      '../../../src/services/jwt'
-    );
+    const { signPortAccessToken, verifyPortAccessToken } =
+      await import('../../../src/services/jwt');
     const env = makeTestEnv();
     const token = await signPortAccessToken('user-1', 'ws-abc', 3000, env);
     const payload = await verifyPortAccessToken(token, env);
@@ -91,9 +88,7 @@ describe('port access token — sign/verify', () => {
 
 describe('port access token — audience isolation', () => {
   it('port-access token rejected by verifyTerminalToken', async () => {
-    const { signPortAccessToken, verifyTerminalToken } = await import(
-      '../../../src/services/jwt'
-    );
+    const { signPortAccessToken, verifyTerminalToken } = await import('../../../src/services/jwt');
     const env = makeTestEnv();
     const token = await signPortAccessToken('user-1', 'ws-abc', 3000, env);
 
@@ -101,9 +96,7 @@ describe('port access token — audience isolation', () => {
   });
 
   it('terminal token rejected by verifyPortAccessToken', async () => {
-    const { signTerminalToken, verifyPortAccessToken } = await import(
-      '../../../src/services/jwt'
-    );
+    const { signTerminalToken, verifyPortAccessToken } = await import('../../../src/services/jwt');
     const env = makeTestEnv();
     const { token } = await signTerminalToken('user-1', 'ws-abc', env);
 
@@ -111,9 +104,7 @@ describe('port access token — audience isolation', () => {
   });
 
   it('callback token rejected by verifyPortAccessToken', async () => {
-    const { signCallbackToken, verifyPortAccessToken } = await import(
-      '../../../src/services/jwt'
-    );
+    const { signCallbackToken, verifyPortAccessToken } = await import('../../../src/services/jwt');
     const env = makeTestEnv();
     const token = await signCallbackToken('ws-abc', env);
 

@@ -39,7 +39,7 @@ export const listIdeasDef: AnthropicToolDef = {
 
 export async function listIdeas(
   input: { projectId: string; status?: string; limit?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   const env = ctx.env as unknown as Env;
   const db = drizzle(env.DATABASE, { schema });
@@ -59,12 +59,7 @@ export async function listIdeas(
   const [project] = await db
     .select({ id: schema.projects.id })
     .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, input.projectId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   if (!project) {
@@ -82,12 +77,7 @@ export async function listIdeas(
       updatedAt: schema.tasks.updatedAt,
     })
     .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.projectId, input.projectId),
-        eq(schema.tasks.status, status),
-      ),
-    )
+    .where(and(eq(schema.tasks.projectId, input.projectId), eq(schema.tasks.status, status)))
     .orderBy(desc(schema.tasks.updatedAt))
     .limit(limit);
 

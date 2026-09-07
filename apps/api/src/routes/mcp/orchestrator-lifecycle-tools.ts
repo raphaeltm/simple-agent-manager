@@ -22,7 +22,7 @@ export async function handleGetOrchestratorStatus(
   requestId: string | number | null,
   _params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const status = await orchestratorService.getOrchestratorStatus(env, tokenData.projectId);
   return jsonRpcSuccess(requestId, {
@@ -36,7 +36,7 @@ export async function handleGetSchedulingQueue(
   requestId: string | number | null,
   _params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const queue = await orchestratorService.getSchedulingQueue(env, tokenData.projectId);
   return jsonRpcSuccess(requestId, {
@@ -50,7 +50,7 @@ export async function handlePauseMission(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const missionId = typeof params.missionId === 'string' ? params.missionId.trim() : '';
   if (!missionId) return jsonRpcError(requestId, INVALID_PARAMS, 'missionId is required');
@@ -59,7 +59,9 @@ export async function handlePauseMission(
   if (!ok) return jsonRpcError(requestId, INVALID_PARAMS, 'Mission not found or not active');
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ success: true, missionId, status: 'paused' }) }],
+    content: [
+      { type: 'text', text: JSON.stringify({ success: true, missionId, status: 'paused' }) },
+    ],
   });
 }
 
@@ -69,7 +71,7 @@ export async function handleResumeMission(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const missionId = typeof params.missionId === 'string' ? params.missionId.trim() : '';
   if (!missionId) return jsonRpcError(requestId, INVALID_PARAMS, 'missionId is required');
@@ -78,7 +80,9 @@ export async function handleResumeMission(
   if (!ok) return jsonRpcError(requestId, INVALID_PARAMS, 'Mission not found or not paused');
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ success: true, missionId, status: 'active' }) }],
+    content: [
+      { type: 'text', text: JSON.stringify({ success: true, missionId, status: 'active' }) },
+    ],
   });
 }
 
@@ -88,7 +92,7 @@ export async function handleCancelMission(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const missionId = typeof params.missionId === 'string' ? params.missionId.trim() : '';
   if (!missionId) return jsonRpcError(requestId, INVALID_PARAMS, 'missionId is required');
@@ -97,7 +101,9 @@ export async function handleCancelMission(
   if (!ok) return jsonRpcError(requestId, INVALID_PARAMS, 'Mission not found');
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ success: true, missionId, status: 'cancelled' }) }],
+    content: [
+      { type: 'text', text: JSON.stringify({ success: true, missionId, status: 'cancelled' }) },
+    ],
   });
 }
 
@@ -107,7 +113,7 @@ export async function handleOverrideTaskState(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const missionId = typeof params.missionId === 'string' ? params.missionId.trim() : '';
   const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
@@ -120,16 +126,21 @@ export async function handleOverrideTaskState(
   if (!reason) return jsonRpcError(requestId, INVALID_PARAMS, 'reason is required');
 
   if (!OVERRIDABLE_SCHEDULER_STATES.includes(newState as SchedulerState)) {
-    return jsonRpcError(requestId, INVALID_PARAMS,
-      `Invalid state: ${newState}. Must be one of: ${OVERRIDABLE_SCHEDULER_STATES.join(', ')}`);
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Invalid state: ${newState}. Must be one of: ${OVERRIDABLE_SCHEDULER_STATES.join(', ')}`
+    );
   }
 
   const targetTask = await env.DATABASE.prepare(
     `SELECT project_id AS projectId
      FROM tasks
      WHERE id = ? AND mission_id = ?
-     LIMIT 1`,
-  ).bind(taskId, missionId).first<{ projectId: string }>();
+     LIMIT 1`
+  )
+    .bind(taskId, missionId)
+    .first<{ projectId: string }>();
 
   if (!targetTask) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found', { httpStatus: 404 });
@@ -150,7 +161,12 @@ export async function handleOverrideTaskState(
   }
 
   const ok = await orchestratorService.overrideTaskState(
-    env, tokenData.projectId, missionId, taskId, newState as SchedulerState, reason,
+    env,
+    tokenData.projectId,
+    missionId,
+    taskId,
+    newState as SchedulerState,
+    reason
   );
   if (!ok) return jsonRpcError(requestId, INVALID_PARAMS, 'Task not found', { httpStatus: 404 });
 

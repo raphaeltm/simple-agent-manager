@@ -10,7 +10,9 @@ import { shouldRefreshCallbackToken } from '../../../src/services/jwt';
  */
 function makeTestToken(iat: number, exp: number): string {
   const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
-  const payload = Buffer.from(JSON.stringify({ iat, exp, workspace: 'test', type: 'callback' })).toString('base64url');
+  const payload = Buffer.from(
+    JSON.stringify({ iat, exp, workspace: 'test', type: 'callback' })
+  ).toString('base64url');
   const signature = '';
   return `${header}.${payload}.${signature}`;
 }

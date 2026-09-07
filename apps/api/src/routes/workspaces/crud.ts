@@ -1,7 +1,10 @@
 import {
+  type CapacityPlacementSnapshot,
   type CredentialSource,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
+  DEFAULT_WORKSPACE_PROFILE,
+  type ResolvedResourceReservation,
   type WorkspaceStatus,
 } from '@simple-agent-manager/shared';
 import { and, count, desc, eq, inArray, ne } from 'drizzle-orm';
@@ -12,7 +15,6 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { toWorkspaceResponse } from '../../lib/mappers';
-import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
@@ -23,6 +25,13 @@ import {
   UpdateWorkspacePortsPublicSchema,
   UpdateWorkspaceSchema,
 } from '../../schemas';
+import {
+  type CanonicalVmAllocationPlan,
+  placementProjectDefaultsFromRow,
+  resolveCanonicalVmAllocationPlan,
+} from '../../services/canonical-vm-allocation';
+import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
+import { toCapacityPlacementSnapshot } from '../../services/capacity-pools';
 import { startComputeTracking } from '../../services/compute-usage';
 import { signPortAccessToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
@@ -38,10 +47,23 @@ import {
   createNodeRecord,
   provisionNode,
 } from '../../services/nodes';
+import {
+  PlacementResolutionError,
+  resolveTaskStartPlacement,
+} from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
+import {
+  assertDirectWorkspaceProvisioningAuthority,
+  cleanupFreshProvisioningNode,
+} from '../../services/provisioning-authority';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
 import { cleanupWorkspaceForDeletion } from '../../services/workspace-cleanup';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
+import {
+  attachPrecreatedWorkspacePlacement,
+  reserveWorkspacePlacement,
+} from '../../services/workspace-placement';
+import { resolveWorkspaceAdmissionPolicy } from '../../services/workspace-resource-capacity';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 import { getOwnedNode, getOwnedWorkspace, scheduleWorkspaceCreateOnNode } from './_helpers';
 import {
@@ -64,6 +86,12 @@ function optionalPositiveInteger(value: number | undefined, field: string): numb
 function optionalTrimmedString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed || undefined;
+}
+
+function normalizeCredentialSource(value: string | null | undefined): CredentialSource | null {
+  return value === 'user' || value === 'project' || value === 'platform' || value === 'self-hosted'
+    ? value
+    : null;
 }
 
 async function startComputeTrackingForNode(
@@ -404,6 +432,99 @@ crudRoutes.post(
     const resourceRequirementsJson = body.resourceRequirements
       ? JSON.stringify(body.resourceRequirements)
       : null;
+    const allocationTaskId = ulid();
+    const projectDefaults = placementProjectDefaultsFromRow(linkedProject);
+    let nodeId = body.nodeId;
+    let mustProvisionNode = false;
+    let credentialAttributionUserId = userId;
+    let credentialAttributionProjectId: string | null = null;
+    let credentialAttributionSource: CredentialSource = 'user';
+    let capacityPlacementSnapshot: CapacityPlacementSnapshot | null = null;
+    let workspaceVmSize = vmSize;
+    let workspaceVmLocation = vmLocation;
+    let workspaceProviderInstanceType: string | null = providerInstanceType ?? null;
+    let workspaceProviderInstanceBootDiskSizeGb: number | null =
+      providerInstanceBootDiskSizeGb ?? null;
+    let workspaceProviderInstanceImage: string | null = providerInstanceImage;
+    let workspaceProviderInstanceArchitecture: string | null = providerInstanceArchitecture ?? null;
+    let requestedVmSizeSource: string | null = null;
+    let resolvedReservation: ResolvedResourceReservation;
+    let freshAllocation: CanonicalVmAllocationPlan | null = null;
+    let authorityNodeClass: 'managed' | 'user-owned' = 'managed';
+
+    if (nodeId) {
+      try {
+        const placement = resolveTaskStartPlacement({
+          entryPoint: 'direct-workspace',
+          taskId: allocationTaskId,
+          userId,
+          projectId: linkedProject.id,
+          project: projectDefaults,
+          explicit: {
+            vmSize,
+            provider: body.provider ?? null,
+            vmLocation,
+          },
+          credentialProjectPolicy: 'current-project',
+          taskModeDefault: 'workspace-profile',
+          resourceRequirements: body.resourceRequirements
+            ? { task: body.resourceRequirements }
+            : undefined,
+          workloadRole: 'workspace',
+        });
+        resolvedReservation = placement.resolvedReservation;
+        requestedVmSizeSource = placement.vmSizeSource;
+      } catch (err) {
+        if (err instanceof PlacementResolutionError) {
+          throw errors.badRequest(err.message);
+        }
+        throw err;
+      }
+    } else {
+      const allocation = await resolveCanonicalVmAllocationPlan(db, c.env, {
+        entryPoint: 'direct-workspace',
+        taskId: allocationTaskId,
+        userId,
+        projectId: linkedProject.id,
+        project: projectDefaults,
+        explicit: {
+          vmSize,
+          provider: body.provider ?? null,
+          vmLocation,
+          native: {
+            providerInstanceType,
+            providerInstanceBootDiskSizeGb,
+            providerInstanceImage,
+            providerInstanceArchitecture,
+          },
+        },
+        credentialProjectPolicy: 'current-project',
+        taskModeDefault: 'workspace-profile',
+        resourceRequirements: body.resourceRequirements
+          ? { task: body.resourceRequirements }
+          : undefined,
+        workloadRole: 'workspace',
+        credentialsRequiredMessage:
+          'Cloud provider credentials required. Connect your account in Settings.',
+      });
+      if ('error' in allocation) {
+        if (allocation.errorKind === 'credentials') throw errors.forbidden(allocation.error);
+        throw errors.badRequest(allocation.error);
+      }
+      freshAllocation = allocation;
+      resolvedReservation = allocation.placement.resolvedReservation;
+      requestedVmSizeSource = allocation.placement.vmSizeSource;
+      credentialAttributionUserId = allocation.credentialAttributionUserId;
+      credentialAttributionProjectId = allocation.credentialAttributionProjectId;
+      credentialAttributionSource = allocation.credentialAttributionSource;
+      capacityPlacementSnapshot = allocation.capacityPlacementSnapshot;
+      workspaceVmSize = allocation.vmSize;
+      workspaceVmLocation = allocation.vmLocation;
+      workspaceProviderInstanceType = allocation.providerInstanceType;
+      workspaceProviderInstanceBootDiskSizeGb = allocation.providerInstanceBootDiskSizeGb;
+      workspaceProviderInstanceImage = allocation.providerInstanceImage;
+      workspaceProviderInstanceArchitecture = allocation.providerInstanceArchitecture;
+    }
 
     // Validate branch name — reject shell metacharacters to prevent command injection.
     // Git branch names allow: alphanumeric, hyphens, underscores, slashes, dots.
@@ -416,10 +537,6 @@ crudRoutes.post(
     }
     const branch = resolvedBranch;
 
-    let nodeId = body.nodeId;
-    let mustProvisionNode = false;
-    let credentialAttributionSource: import('@simple-agent-manager/shared').CredentialSource =
-      'user';
     // Use COUNT instead of fetching all node IDs (P1 fix).
     // Exclude deleted/stopped nodes — only active ones count toward the limit.
     const [userNodeCount] = await db
@@ -436,69 +553,103 @@ crudRoutes.post(
 
     if (nodeId) {
       const node = await getOwnedNode(db, nodeId, userId);
-      if (node.status === 'stopped' || node.healthStatus === 'unhealthy') {
+      if (node.status !== 'running' || node.healthStatus === 'unhealthy') {
         throw errors.badRequest('Selected node is not ready for workspace creation');
+      }
+      if (
+        node.runtime !== 'vm' ||
+        node.nodeRole !== 'workspace' ||
+        (node.workloadRole ?? 'workspace') !== 'workspace'
+      ) {
+        throw errors.badRequest('Selected node is not eligible for workspace creation');
       }
       if (!isNodeAgentVersionCompatible(node.agentVersion, c.env.VM_AGENT_REQUIRED_VERSION)) {
         throw errors.badRequest('Selected node is running an incompatible VM agent build');
       }
-      await assertNodeAllocationPlanCurrent(c.env, nodeId, userId, linkedProject.id);
+      if (body.provider && node.cloudProvider !== body.provider) {
+        throw errors.badRequest('Selected node does not match the requested provider');
+      }
+      if (body.vmLocation && node.vmLocation !== vmLocation) {
+        throw errors.badRequest('Selected node does not match the requested VM location');
+      }
+      if (providerInstanceType && node.providerInstanceType !== providerInstanceType) {
+        throw errors.badRequest('Selected node does not match the requested native offering');
+      }
+      if (
+        providerInstanceBootDiskSizeGb !== undefined &&
+        node.providerInstanceBootDiskSizeGb !== providerInstanceBootDiskSizeGb
+      ) {
+        throw errors.badRequest('Selected node does not match the requested boot disk size');
+      }
+      if (providerInstanceImage && node.providerInstanceImage !== providerInstanceImage) {
+        throw errors.badRequest('Selected node does not match the requested image');
+      }
+      if (
+        providerInstanceArchitecture &&
+        node.providerInstanceArchitecture !== providerInstanceArchitecture
+      ) {
+        throw errors.badRequest('Selected node does not match the requested architecture');
+      }
+      authorityNodeClass = node.nodeClass === 'user-owned' ? 'user-owned' : 'managed';
+      if (authorityNodeClass === 'managed') {
+        await assertNodeAllocationPlanCurrent(c.env, nodeId, userId, linkedProject.id);
+        const nodeSnapshot = toCapacityPlacementSnapshot(node);
+        capacityPlacementSnapshot = nodeSnapshot.capacityPoolId ? nodeSnapshot : null;
+      } else {
+        capacityPlacementSnapshot = null;
+      }
+      credentialAttributionUserId = node.credentialAttributionUserId ?? userId;
+      credentialAttributionSource =
+        normalizeCredentialSource(node.credentialAttributionSource) ??
+        normalizeCredentialSource(node.credentialSource) ??
+        (authorityNodeClass === 'user-owned' ? 'self-hosted' : 'user');
+      credentialAttributionProjectId =
+        credentialAttributionSource === 'project'
+          ? (node.credentialAttributionProjectId ?? linkedProject.id)
+          : null;
+      workspaceVmSize = node.vmSize as typeof workspaceVmSize;
+      workspaceVmLocation = node.vmLocation;
+      workspaceProviderInstanceType = node.providerInstanceType;
+      workspaceProviderInstanceBootDiskSizeGb = node.providerInstanceBootDiskSizeGb;
+      workspaceProviderInstanceImage = node.providerInstanceImage;
+      workspaceProviderInstanceArchitecture = node.providerInstanceArchitecture;
     } else {
+      const allocation = freshAllocation;
+      if (!allocation) {
+        throw errors.internal('Failed to resolve node allocation');
+      }
       if (userNodeCountVal >= limits.maxNodesPerUser) {
         throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
       }
-
-      const { createProviderForUser } = await import('../../services/provider-credentials');
-      const providerResult = await createProviderForUser(
-        db,
-        userId,
-        getCredentialEncryptionKey(c.env),
-        c.env,
-        body.provider,
-        linkedProject.id
-      );
-      if (!providerResult) {
-        throw errors.forbidden(
-          'Cloud provider credentials required. Connect your account in Settings.'
-        );
+      if (
+        allocation.quotaCredentialSource === 'platform' &&
+        c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false'
+      ) {
+        const { checkQuotaForUser } = await import('../../services/compute-quotas');
+        const quotaCheck = await checkQuotaForUser(db, userId);
+        if (!quotaCheck.allowed) {
+          throw errors.forbidden(
+            `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
+              'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+          );
+        }
       }
-      credentialAttributionSource = providerResult.credentialSource;
-      const effectiveProvider = providerResult.providerName;
 
       const createdNode = await createNodeRecord(c.env, {
         userId,
-        credentialAttributionUserId: userId,
-        credentialAttributionProjectId:
-          credentialAttributionSource === 'project' ? linkedProject.id : null,
+        credentialAttributionUserId,
+        credentialAttributionProjectId,
         credentialAttributionSource,
         name: `${workspaceName} Node`,
-        vmSize,
-        vmLocation,
-        cloudProvider: effectiveProvider,
-        providerInstanceType,
-        providerInstanceBootDiskSizeGb,
-        providerInstanceImage,
-        providerInstanceArchitecture,
+        vmSize: allocation.vmSize,
+        vmLocation: allocation.vmLocation,
+        cloudProvider: allocation.effectiveProvider,
+        providerInstanceType: allocation.providerInstanceType,
+        providerInstanceBootDiskSizeGb: allocation.providerInstanceBootDiskSizeGb,
+        providerInstanceImage: allocation.providerInstanceImage,
+        providerInstanceArchitecture: allocation.providerInstanceArchitecture,
         heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
-        capacityPlacementSnapshot: {
-          capacityPoolId: null,
-          capacityPoolScope: null,
-          capacityPoolRevision: null,
-          capacitySourceId: null,
-          capacityPoolCandidateId: null,
-          placementCredentialSource:
-            providerResult.exactCredentialBinding?.credentialSource ?? null,
-          placementCredentialReference:
-            providerResult.exactCredentialBinding?.credentialReference ?? null,
-          placementCredentialVersion:
-            providerResult.exactCredentialBinding?.credentialVersion ?? null,
-          capacityPoolProjectId: null,
-          workloadRole: 'workspace',
-          providerInstanceType: providerInstanceType ?? null,
-          providerInstanceBootDiskSizeGb: providerInstanceBootDiskSizeGb ?? null,
-          providerInstanceImage,
-          providerInstanceArchitecture,
-        },
+        capacityPlacementSnapshot,
       });
 
       nodeId = createdNode.id;
@@ -527,28 +678,64 @@ crudRoutes.post(
 
     const workspaceId = ulid();
 
-    await db.insert(schema.workspaces).values({
-      id: workspaceId,
-      nodeId: targetNodeId,
-      projectId: linkedProject.id,
-      userId,
-      installationId: resolvedInstallationId,
-      name: workspaceName,
-      displayName: uniqueName.displayName,
-      normalizedDisplayName: uniqueName.normalizedDisplayName,
-      repository: resolvedRepository,
-      branch,
-      status: 'creating',
-      vmSize,
-      vmLocation,
-      providerInstanceType: providerInstanceType ?? null,
-      providerInstanceBootDiskSizeGb: providerInstanceBootDiskSizeGb ?? null,
-      providerInstanceImage,
-      providerInstanceArchitecture,
-      resourceRequirementsJson,
-      createdAt: now,
-      updatedAt: now,
-    });
+    const admissionPolicy = resolveWorkspaceAdmissionPolicy(c.env);
+    if (mustProvisionNode) {
+      await db.insert(schema.workspaces).values({
+        id: workspaceId,
+        nodeId: null,
+        projectId: linkedProject.id,
+        userId,
+        installationId: resolvedInstallationId,
+        name: workspaceName,
+        displayName: uniqueName.displayName,
+        normalizedDisplayName: uniqueName.normalizedDisplayName,
+        repository: resolvedRepository,
+        branch,
+        status: 'creating',
+        vmSize: workspaceVmSize,
+        vmLocation: workspaceVmLocation,
+        providerInstanceType: workspaceProviderInstanceType,
+        providerInstanceBootDiskSizeGb: workspaceProviderInstanceBootDiskSizeGb,
+        providerInstanceImage: workspaceProviderInstanceImage,
+        providerInstanceArchitecture: workspaceProviderInstanceArchitecture,
+        resourceRequirementsJson,
+        resolvedReservationJson: JSON.stringify(resolvedReservation),
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else {
+      const placementReserved = await reserveWorkspacePlacement(
+        c.env.DATABASE,
+        {
+          id: workspaceId,
+          nodeId: targetNodeId,
+          projectId: linkedProject.id,
+          userId,
+          installationId: resolvedInstallationId,
+          name: workspaceName,
+          displayName: uniqueName.displayName,
+          normalizedDisplayName: uniqueName.normalizedDisplayName,
+          repository: resolvedRepository,
+          branch,
+          vmSize: workspaceVmSize,
+          vmLocation: workspaceVmLocation,
+          workspaceProfile: DEFAULT_WORKSPACE_PROFILE,
+          devcontainerConfigName: null,
+          agentProfileHint: null,
+          resourceRequirementsJson,
+          capacityPlacementSnapshot,
+          authorityNodeClass,
+          resolvedReservation,
+          createdAt: now,
+        },
+        admissionPolicy
+      );
+      if (!placementReserved) {
+        throw errors.conflict(
+          'Selected node lost capacity or placement authority before workspace creation'
+        );
+      }
+    }
 
     const chatTaskId = ulid();
     await db.insert(schema.tasks).values({
@@ -561,18 +748,24 @@ crudRoutes.post(
       executionStep: 'workspace_creation',
       taskMode: 'conversation',
       triggeredBy: 'user',
-      credentialAttributionUserId: userId,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
       credentialAttributionSource,
+      requestedVmSize: workspaceVmSize,
+      requestedVmSizeSource,
       resourceRequirementsJson,
       resourceRequirementsSource: resourceRequirementsJson ? 'task' : null,
+      resolvedReservationJson: JSON.stringify(resolvedReservation),
+      ...capacityPlacementSnapshotDbValues(capacityPlacementSnapshot),
       createdBy: userId,
       createdAt: now,
       updatedAt: now,
     });
 
     // Create chat session in ProjectData DO (workspace always linked to project)
+    let chatSessionId: string | null = null;
     try {
-      const chatSessionId = await projectDataService.createSession(
+      chatSessionId = await projectDataService.createSession(
         c.env,
         linkedProject.id,
         workspaceId,
@@ -600,6 +793,28 @@ crudRoutes.post(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    const assertDirectWorkspacePlaceholderAuthority = async () => {
+      await assertDirectWorkspaceProvisioningAuthority(c.env, {
+        workspaceId,
+        taskId: chatTaskId,
+        userId,
+        projectId: linkedProject.id,
+        expectedNodeId: null,
+        chatSessionId,
+      });
+    };
+
+    const assertDirectWorkspaceDispatchAuthority = async () => {
+      await assertDirectWorkspaceProvisioningAuthority(c.env, {
+        workspaceId,
+        taskId: chatTaskId,
+        userId,
+        projectId: linkedProject.id,
+        expectedNodeId: targetNodeId,
+        chatSessionId,
+      });
+    };
 
     const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
     const reusedExistingNode = !mustProvisionNode;
@@ -632,16 +847,72 @@ crudRoutes.post(
       c.env
     );
 
-    if (!mustProvisionNode) {
+    if (!mustProvisionNode && authorityNodeClass !== 'user-owned') {
       // Existing nodes already carry provider metadata; meter before scheduling work onto them.
-      await startComputeTrackingForNode(db, { userId, workspaceId, nodeId: targetNodeId, vmSize });
+      await startComputeTrackingForNode(db, {
+        userId,
+        workspaceId,
+        nodeId: targetNodeId,
+        vmSize: workspaceVmSize,
+      });
     }
 
     c.executionCtx.waitUntil(
       (async () => {
         const innerDb = drizzle(c.env.DATABASE, { schema });
+        const markDirectWorkspaceProvisioningFailed = async (message: string) => {
+          const failedAt = new Date().toISOString();
+          const workspaceFailed = await c.env.DATABASE.prepare(
+            `UPDATE workspaces
+                SET status = 'error',
+                    error_message = ?,
+                    updated_at = ?
+              WHERE id = ?
+                AND user_id = ?
+                AND project_id = ?
+                AND node_id IS NULL
+                AND chat_session_id IS ?
+                AND status = 'creating'
+                AND runtime_deletion_confirmed_at IS NULL`
+          )
+            .bind(message, failedAt, workspaceId, userId, linkedProject.id, chatSessionId)
+            .run();
+          if ((workspaceFailed.meta?.changes ?? 0) !== 1) return;
+          await c.env.DATABASE.prepare(
+            `UPDATE tasks
+                SET status = 'failed',
+                    execution_step = 'workspace_creation',
+                    error_message = ?,
+                    completed_at = ?,
+                    updated_at = ?
+              WHERE id = ?
+                AND workspace_id = ?
+                AND user_id = ?
+                AND project_id = ?
+                AND status IN ('queued', 'in_progress')
+                AND task_mode = 'conversation'
+                AND triggered_by = 'user'`
+          )
+            .bind(message, failedAt, failedAt, chatTaskId, workspaceId, userId, linkedProject.id)
+            .run();
+        };
         if (mustProvisionNode) {
-          await provisionNode(targetNodeId, c.env);
+          await provisionNode(
+            targetNodeId,
+            c.env,
+            chatSessionId
+              ? {
+                  projectId: linkedProject.id,
+                  chatSessionId,
+                  taskId: chatTaskId,
+                  taskMode: 'conversation',
+                }
+              : undefined,
+            {
+              authorityProjectId: linkedProject.id,
+              assertExternalMutationAuthority: assertDirectWorkspacePlaceholderAuthority,
+            }
+          );
 
           const nodeRows = await innerDb
             .select({
@@ -654,14 +925,54 @@ crudRoutes.post(
 
           const provisionedNode = nodeRows[0];
           if (!provisionedNode || provisionedNode.status !== 'running') {
-            await innerDb
-              .update(schema.workspaces)
-              .set({
-                status: 'error',
-                errorMessage: provisionedNode?.errorMessage || 'Node provisioning failed',
-                updatedAt: new Date().toISOString(),
-              })
-              .where(eq(schema.workspaces.id, workspaceId));
+            await cleanupFreshProvisioningNode(c.env, {
+              nodeId: targetNodeId,
+              userId,
+              nodeRole: 'workspace',
+              reason: 'direct_workspace_node_not_running',
+            });
+            await markDirectWorkspaceProvisioningFailed(
+              provisionedNode?.errorMessage || 'Node provisioning failed'
+            );
+            return;
+          }
+
+          const placementAttached = await attachPrecreatedWorkspacePlacement(
+            c.env.DATABASE,
+            {
+              id: workspaceId,
+              nodeId: targetNodeId,
+              projectId: linkedProject.id,
+              userId,
+              installationId: resolvedInstallationId,
+              name: workspaceName,
+              displayName: uniqueName.displayName,
+              normalizedDisplayName: uniqueName.normalizedDisplayName,
+              repository: resolvedRepository,
+              branch,
+              vmSize: workspaceVmSize,
+              vmLocation: workspaceVmLocation,
+              workspaceProfile: DEFAULT_WORKSPACE_PROFILE,
+              devcontainerConfigName: null,
+              agentProfileHint: null,
+              resourceRequirementsJson,
+              capacityPlacementSnapshot,
+              authorityNodeClass,
+              resolvedReservation,
+              createdAt: now,
+            },
+            admissionPolicy
+          );
+          if (!placementAttached) {
+            await cleanupFreshProvisioningNode(c.env, {
+              nodeId: targetNodeId,
+              userId,
+              nodeRole: 'workspace',
+              reason: 'direct_workspace_final_admission_failed',
+            });
+            await markDirectWorkspaceProvisioningFailed(
+              'Node lost capacity or placement authority before workspace creation'
+            );
             return;
           }
 
@@ -689,7 +1000,7 @@ crudRoutes.post(
             userId,
             workspaceId,
             nodeId: targetNodeId,
-            vmSize,
+            vmSize: workspaceVmSize,
           });
         }
 
@@ -702,7 +1013,8 @@ crudRoutes.post(
           branch,
           linkedProject,
           auth.user.name,
-          auth.user.email
+          auth.user.email,
+          { beforeExternalMutation: assertDirectWorkspaceDispatchAuthority }
         );
       })()
     );

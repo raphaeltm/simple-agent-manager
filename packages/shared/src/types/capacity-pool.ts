@@ -146,6 +146,10 @@ export interface CapacityPlacementSnapshot {
   capacityPoolScope: CapacityPoolScope | null;
   capacityPoolRevision: number | null;
   capacitySourceId: string | null;
+  /** Source row generation used to detect source/attachment drift after placement. */
+  capacitySourceGeneration?: number | null;
+  /** Non-secret source attachment/reference snapshot, e.g. a composable attachment ref. */
+  capacitySourceExternalRef?: string | null;
   capacityPoolCandidateId: string | null;
   placementCredentialSource: CapacityPlacementCredentialSource | null;
   placementCredentialReference: string | null;

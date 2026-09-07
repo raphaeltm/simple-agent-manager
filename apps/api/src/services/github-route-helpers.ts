@@ -15,9 +15,7 @@ export function summarizeAccessibleInstallations(
   }));
 }
 
-export function summarizeInstallationRows(
-  installations: GitHubInstallationAccountRow[]
-): Array<{
+export function summarizeInstallationRows(installations: GitHubInstallationAccountRow[]): Array<{
   installationId: string;
   accountName: string;
 }> {

@@ -131,18 +131,30 @@ export async function startDiscoveryAgent(
   }
 
   // Chat session — groups messages/activity on the project page.
-  const [workspace] = await db.select({ userId: schema.workspaces.userId })
-    .from(schema.workspaces).where(eq(schema.workspaces.id, opts.workspaceId)).limit(1);
+  const [workspace] = await db
+    .select({ userId: schema.workspaces.userId })
+    .from(schema.workspaces)
+    .where(eq(schema.workspaces.id, opts.workspaceId))
+    .limit(1);
   if (!workspace) throw new Error('Trial workspace not found');
   const taskId = crypto.randomUUID();
   const now = new Date().toISOString();
   await db.insert(schema.tasks).values({
-    id: taskId, projectId: opts.projectId, userId: workspace.userId, workspaceId: opts.workspaceId,
-    title: opts.sessionTopic ?? 'Exploring repository', description: DISCOVERY_PROMPT,
-    status: 'in_progress', executionStep: 'trial_discovery', taskMode: 'conversation',
-    triggeredBy: 'trial', credentialAttributionUserId: workspace.userId,
-    credentialAttributionSource: 'platform', createdBy: workspace.userId,
-    createdAt: now, updatedAt: now,
+    id: taskId,
+    projectId: opts.projectId,
+    userId: workspace.userId,
+    workspaceId: opts.workspaceId,
+    title: opts.sessionTopic ?? 'Exploring repository',
+    description: DISCOVERY_PROMPT,
+    status: 'in_progress',
+    executionStep: 'trial_discovery',
+    taskMode: 'conversation',
+    triggeredBy: 'trial',
+    credentialAttributionUserId: workspace.userId,
+    credentialAttributionSource: 'platform',
+    createdBy: workspace.userId,
+    createdAt: now,
+    updatedAt: now,
   });
   const chatSessionId = await projectDataService.createSession(
     env,
@@ -154,7 +166,9 @@ export async function startDiscoveryAgent(
   );
 
   // ACP session — represents the agent run in the workspace.
-  await db.update(schema.tasks).set({ chatSessionId, updatedAt: now })
+  await db
+    .update(schema.tasks)
+    .set({ chatSessionId, updatedAt: now })
     .where(eq(schema.tasks.id, taskId));
 
   const acpSession = await projectDataService.createAcpSession(
@@ -200,11 +214,7 @@ import { readTrial, readTrialByProject } from './trial-store';
  * Safe to call from any code path — silently no-ops if the trial does not exist
  * or the bus is already closed (terminal event emitted).
  */
-export async function emitTrialEvent(
-  env: Env,
-  trialId: string,
-  event: TrialEvent
-): Promise<void> {
+export async function emitTrialEvent(env: Env, trialId: string, event: TrialEvent): Promise<void> {
   log.info('trial_event_bus.emit_begin', { trialId, type: event.type });
   try {
     const id = env.TRIAL_EVENT_BUS.idFromName(trialId);

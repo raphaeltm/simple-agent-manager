@@ -43,7 +43,9 @@ function getPeriodProjectionInfo(period: AdminCostPeriod): {
 } {
   const now = new Date();
   if (period === 'current-month') {
-    const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+    const daysInMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)
+    ).getUTCDate();
     return { daysElapsed: Math.max(1, now.getUTCDate()), daysInMonth, isCurrentMonth: true };
   }
   const days = period === '30d' ? 30 : 90;
@@ -122,7 +124,10 @@ adminCostRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())
 adminCostRoutes.get('/', async (c) => {
   const enabled = c.env.COST_MONITORING_ENABLED !== 'false';
   if (!enabled) {
-    return c.json({ error: 'cost_monitoring_disabled', message: 'Cost monitoring is disabled' }, 404);
+    return c.json(
+      { error: 'cost_monitoring_disabled', message: 'Cost monitoring is disabled' },
+      404
+    );
   }
 
   const period = parsePeriod(c.req.query('period'));
@@ -196,7 +201,13 @@ adminCostRoutes.get('/', async (c) => {
           userEntry.outputTokens += tokensOut;
           userEntry.costUsd += cost;
         } else {
-          userMap.set(userId, { userId, requests: 1, inputTokens: tokensIn, outputTokens: tokensOut, costUsd: cost });
+          userMap.set(userId, {
+            userId,
+            requests: 1,
+            inputTokens: tokensIn,
+            outputTokens: tokensOut,
+            costUsd: cost,
+          });
         }
       }
     });
@@ -212,7 +223,8 @@ adminCostRoutes.get('/', async (c) => {
   };
 
   // --- Compute Costs ---
-  const vcpuHourCost = parseFloat(c.env.COMPUTE_VCPU_HOUR_COST_USD || '') || DEFAULT_COMPUTE_VCPU_HOUR_COST_USD;
+  const vcpuHourCost =
+    parseFloat(c.env.COMPUTE_VCPU_HOUR_COST_USD || '') || DEFAULT_COMPUTE_VCPU_HOUR_COST_USD;
 
   let compute: ComputeCostSummary = {
     totalNodeHours: 0,
@@ -236,7 +248,9 @@ adminCostRoutes.get('/', async (c) => {
       vcpuHourCostUsd: vcpuHourCost,
     };
   } catch (err) {
-    log.error('admin_costs.compute_error', { error: err instanceof Error ? err.message : String(err) });
+    log.error('admin_costs.compute_error', {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   const summary: CostSummaryResponse = {

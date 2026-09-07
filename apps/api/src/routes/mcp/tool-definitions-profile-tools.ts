@@ -3,7 +3,10 @@
  *
  * Lets agents manage reusable agent profile configurations for their project.
  */
-import { SHARED_CONFIG_FIELD_PROPERTIES, VALID_VALUES_HINT } from './tool-definitions-shared-fields';
+import {
+  SHARED_CONFIG_FIELD_PROPERTIES,
+  VALID_VALUES_HINT,
+} from './tool-definitions-shared-fields';
 
 const PROFILE_FIELD_PROPERTIES = SHARED_CONFIG_FIELD_PROPERTIES;
 

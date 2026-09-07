@@ -82,7 +82,13 @@ export class MemoryFS {
   readonly promises: MemoryFS;
 
   constructor() {
-    this.m.set('/', { type: 'dir', mode: 0o040755, mtimeMs: Date.now(), ctimeMs: Date.now(), ino: 0 });
+    this.m.set('/', {
+      type: 'dir',
+      mode: 0o040755,
+      mtimeMs: Date.now(),
+      ctimeMs: Date.now(),
+      ino: 0,
+    });
     this.promises = this;
   }
 
@@ -110,13 +116,25 @@ export class MemoryFS {
       for (const s of segs) {
         cur += '/' + s;
         if (!this.m.has(cur)) {
-          this.m.set(cur, { type: 'dir', mode: 0o040755, mtimeMs: Date.now(), ctimeMs: Date.now(), ino: this.ino++ });
+          this.m.set(cur, {
+            type: 'dir',
+            mode: 0o040755,
+            mtimeMs: Date.now(),
+            ctimeMs: Date.now(),
+            ino: this.ino++,
+          });
         }
       }
       return;
     }
     this.ensureParentDir(path);
-    this.m.set(path, { type: 'dir', mode: 0o040755, mtimeMs: Date.now(), ctimeMs: Date.now(), ino: this.ino++ });
+    this.m.set(path, {
+      type: 'dir',
+      mode: 0o040755,
+      mtimeMs: Date.now(),
+      ctimeMs: Date.now(),
+      ino: this.ino++,
+    });
   }
 
   async rmdir(p: string): Promise<void> {
@@ -125,18 +143,34 @@ export class MemoryFS {
     this.m.delete(path);
   }
 
-  async writeFile(p: string, data: Uint8Array | string, opts: { mode?: number } | string = {}): Promise<void> {
+  async writeFile(
+    p: string,
+    data: Uint8Array | string,
+    opts: { mode?: number } | string = {}
+  ): Promise<void> {
     const path = normalize(p);
     this.ensureParentDir(path);
-    const content = typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
+    const content =
+      typeof data === 'string' ? new TextEncoder().encode(data) : new Uint8Array(data);
     const mode = (typeof opts === 'object' && opts.mode) || 0o100644;
-    this.m.set(path, { type: 'file', content, mode, mtimeMs: Date.now(), ctimeMs: Date.now(), ino: this.ino++ });
+    this.m.set(path, {
+      type: 'file',
+      content,
+      mode,
+      mtimeMs: Date.now(),
+      ctimeMs: Date.now(),
+      ino: this.ino++,
+    });
   }
 
-  async readFile(p: string, opts: { encoding?: string } | string = {}): Promise<Uint8Array | string> {
+  async readFile(
+    p: string,
+    opts: { encoding?: string } | string = {}
+  ): Promise<Uint8Array | string> {
     const node = this.get(p);
     if (!node) throw fsError('ENOENT', `no such file or directory, open '${p}'`);
-    if (node.type === 'dir') throw fsError('EISDIR', `illegal operation on a directory, read '${p}'`);
+    if (node.type === 'dir')
+      throw fsError('EISDIR', `illegal operation on a directory, read '${p}'`);
     const encoding = typeof opts === 'string' ? opts : opts.encoding;
     if (encoding) return new TextDecoder().decode(node.content);
     return node.content ?? new Uint8Array();
@@ -192,12 +226,20 @@ export class MemoryFS {
   async symlink(target: string, p: string): Promise<void> {
     const path = normalize(p);
     this.ensureParentDir(path);
-    this.m.set(path, { type: 'symlink', target: String(target), mode: 0o120000, mtimeMs: Date.now(), ctimeMs: Date.now(), ino: this.ino++ });
+    this.m.set(path, {
+      type: 'symlink',
+      target: String(target),
+      mode: 0o120000,
+      mtimeMs: Date.now(),
+      ctimeMs: Date.now(),
+      ino: this.ino++,
+    });
   }
 
   async readlink(p: string): Promise<string> {
     const node = this.get(p);
-    if (!node || node.type !== 'symlink') throw fsError('EINVAL', `invalid argument, readlink '${p}'`);
+    if (!node || node.type !== 'symlink')
+      throw fsError('EINVAL', `invalid argument, readlink '${p}'`);
     return node.target ?? '';
   }
 

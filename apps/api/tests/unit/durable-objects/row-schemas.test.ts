@@ -86,7 +86,9 @@ describe('parseRow', () => {
   });
 
   it('handles non-object row input', () => {
-    expect(() => parseRow(TestSchema, 'not-an-object', 'ctx')).toThrow(/Row validation failed \(ctx\)/);
+    expect(() => parseRow(TestSchema, 'not-an-object', 'ctx')).toThrow(
+      /Row validation failed \(ctx\)/
+    );
   });
 });
 
@@ -380,7 +382,11 @@ describe('parseChatSessionListRow', () => {
   });
 
   it('is not idle when status is stopped even with agent_completed_at', () => {
-    const result = parseChatSessionListRow({ ...baseRow, status: 'stopped', agent_completed_at: 1050 });
+    const result = parseChatSessionListRow({
+      ...baseRow,
+      status: 'stopped',
+      agent_completed_at: 1050,
+    });
     expect(result.isIdle).toBe(false);
   });
 });
@@ -418,7 +424,9 @@ describe('parseMaterializationCheck', () => {
   });
 
   it('handles null materialized_at', () => {
-    expect(parseMaterializationCheck({ materialized_at: null, status: 'active' }).materializedAt).toBeNull();
+    expect(
+      parseMaterializationCheck({ materialized_at: null, status: 'active' }).materializedAt
+    ).toBeNull();
   });
 });
 
@@ -717,6 +725,8 @@ describe('parseInboxMessageRow', () => {
   });
 
   it('throws on wrong type for content', () => {
-    expect(() => parseInboxMessageRow({ ...validRow, content: 123 })).toThrow(/Row validation failed/);
+    expect(() => parseInboxMessageRow({ ...validRow, content: 123 })).toThrow(
+      /Row validation failed/
+    );
   });
 });

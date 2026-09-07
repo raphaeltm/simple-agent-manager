@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
-import { requireApproved,requireAuth } from '../middleware/auth';
+import { requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 
 const log = createModuleLogger('transcribe');
@@ -104,8 +104,8 @@ transcribeRoutes.post('/', async (c) => {
   });
 
   // Determine model ID (configurable via env var, per Constitution Principle XI)
-  const modelId = (c.env.WHISPER_MODEL_ID || DEFAULT_WHISPER_MODEL) as
-    '@cf/openai/whisper-large-v3-turbo';
+  const modelId = (c.env.WHISPER_MODEL_ID ||
+    DEFAULT_WHISPER_MODEL) as '@cf/openai/whisper-large-v3-turbo';
   log.info('calling_workers_ai', { model: modelId });
 
   // Call Workers AI Whisper model

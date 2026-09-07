@@ -115,11 +115,9 @@ describe('Workspace profile precedence resolution', () => {
    */
   function resolveWorkspaceProfile(
     explicitProfile: WorkspaceProfile | undefined,
-    projectDefault: WorkspaceProfile | null,
+    projectDefault: WorkspaceProfile | null
   ): WorkspaceProfile {
-    return explicitProfile
-      ?? projectDefault
-      ?? DEFAULT_WORKSPACE_PROFILE;
+    return explicitProfile ?? projectDefault ?? DEFAULT_WORKSPACE_PROFILE;
   }
 
   it('explicit lightweight overrides project default full', () => {

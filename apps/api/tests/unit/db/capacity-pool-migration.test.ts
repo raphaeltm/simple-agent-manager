@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   candidateCatalogMetadataMigrationSql,
   candidateSnapshotMigrationSql,
+  capacityPoolPolicyContractMigrationSql,
+  capacitySourceAuthoritySnapshotsMigrationSql,
   capacitySourceExternalCredentialsMigrationSql,
   concreteOfferingMigrationSql,
   migrationSql,
@@ -933,5 +935,92 @@ describe('0146_runtime_native_observed_metadata migration', () => {
     expect(sql).not.toContain('DELETE FROM');
     expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
     expect(sql).toContain('ALTER TABLE NODES ADD COLUMN OBSERVED_PROVIDER_INSTANCE_TYPE');
+  });
+});
+
+describe('0148_capacity_source_authority_snapshots migration', () => {
+  function applyPriorCapacityMigrations(database: Database.Database): void {
+    database.exec(migrationSql);
+    database.exec(candidateSnapshotMigrationSql);
+    database.exec(concreteOfferingMigrationSql);
+    database.exec(candidateCatalogMetadataMigrationSql);
+    database.exec(capacitySourceExternalCredentialsMigrationSql);
+    database.exec(capacityPoolPolicyContractMigrationSql);
+    database.exec(runtimeNativeObservedMetadataMigrationSql);
+  }
+
+  it('adds authority snapshot columns on a fresh schema without FK violations', () => {
+    const database = db();
+    applyPriorCapacityMigrations(database);
+
+    database.exec(capacitySourceAuthoritySnapshotsMigrationSql);
+
+    for (const table of ['nodes', 'workspaces', 'tasks']) {
+      const columns = database
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .map((row) => (row as { name: string }).name);
+      expect(columns).toContain('capacity_source_generation');
+      expect(columns).toContain('capacity_source_external_ref');
+    }
+    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('preserves existing rows and initializes authority snapshot columns as null', () => {
+    const database = db();
+    applyPriorCapacityMigrations(database);
+    database.exec(`
+      INSERT INTO nodes (id, user_id, name, status)
+      VALUES ('node-existing', 'user-1', 'Existing node', 'running');
+
+      INSERT INTO workspaces
+        (id, node_id, project_id, user_id, name, repository, branch, status, vm_size, vm_location)
+      VALUES
+        ('workspace-existing', 'node-existing', 'project-1', 'user-1', 'Existing workspace', 'repo-1', 'main', 'running', 'medium', 'nbg1');
+
+      INSERT INTO tasks
+        (id, project_id, user_id, workspace_id, title, status, created_by)
+      VALUES
+        ('task-existing', 'project-1', 'user-1', 'workspace-existing', 'Existing task', 'queued', 'user-1');
+    `);
+
+    database.exec(capacitySourceAuthoritySnapshotsMigrationSql);
+
+    expect(
+      database
+        .prepare(
+          `SELECT capacity_source_generation, capacity_source_external_ref
+             FROM nodes
+            WHERE id = 'node-existing'`
+        )
+        .get()
+    ).toEqual({ capacity_source_generation: null, capacity_source_external_ref: null });
+    expect(
+      database
+        .prepare(
+          `SELECT capacity_source_generation, capacity_source_external_ref
+             FROM workspaces
+            WHERE id = 'workspace-existing'`
+        )
+        .get()
+    ).toEqual({ capacity_source_generation: null, capacity_source_external_ref: null });
+    expect(
+      database
+        .prepare(
+          `SELECT capacity_source_generation, capacity_source_external_ref
+             FROM tasks
+            WHERE id = 'task-existing'`
+        )
+        .get()
+    ).toEqual({ capacity_source_generation: null, capacity_source_external_ref: null });
+    expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
+  it('contains no destructive statements', () => {
+    const sql = capacitySourceAuthoritySnapshotsMigrationSql.toUpperCase();
+    expect(sql).not.toContain('DROP TABLE');
+    expect(sql).not.toContain('DELETE FROM');
+    expect(sql).not.toContain('PRAGMA FOREIGN_KEYS = OFF');
+    expect(sql).toContain('ALTER TABLE NODES ADD COLUMN CAPACITY_SOURCE_GENERATION');
   });
 });

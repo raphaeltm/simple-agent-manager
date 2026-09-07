@@ -48,7 +48,7 @@ function attachCreator(
   currentUserId: string
 ): Record<string, unknown> {
   const creatorId = typeof session.createdByUserId === 'string' ? session.createdByUserId : null;
-  const creator = creatorId ? creators.get(creatorId) ?? null : null;
+  const creator = creatorId ? (creators.get(creatorId) ?? null) : null;
   return {
     ...session,
     createdBy: creator,
@@ -91,8 +91,4 @@ async function requireSessionCreator(
   return session;
 }
 
-export {
-  enrichSessionsWithCreators,
-  getSessionListScope,
-  requireSessionCreator,
-};
+export { enrichSessionsWithCreators, getSessionListScope, requireSessionCreator };

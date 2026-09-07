@@ -224,7 +224,8 @@ describe('internal ProjectData event subscription surface', () => {
           owner: input.owner as ProjectEventSubscriptionOwner,
           idempotencyKey: input.idempotencyKey as string,
           filter: input.filter as ProjectEventFilterV1,
-          deliveryPreference: input.deliveryPreference as ProjectEventSubscriptionRecord['deliveryPreference'],
+          deliveryPreference:
+            input.deliveryPreference as ProjectEventSubscriptionRecord['deliveryPreference'],
           reason: input.reason as string | null,
           expiresAt: input.expiresAt as number | null,
         }),
@@ -265,37 +266,37 @@ describe('internal ProjectData event subscription surface', () => {
     });
 
     expect(response).toMatchObject({ callerKind: 'agent', changed: true, idempotent: false });
-    expect(projectDataMocks.createProjectEventSubscription).toHaveBeenCalledWith(
-      env,
-      'project-1',
-      {
-        owner: { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
-        idempotencyKey: 'idem-1',
-        filter,
-        deliveryPreference: {
-          requested: 'existing_session_prompt',
-          resolved: 'recorded_not_injected',
-          target: {
-            sessionId: 'session-1',
-            taskId: 'task-1',
-            runtimeId: null,
-            agentId: 'agent-session-1',
-          },
+    expect(projectDataMocks.createProjectEventSubscription).toHaveBeenCalledWith(env, 'project-1', {
+      owner: { type: 'agent', id: 'agent-session-1', name: 'agent-session-1' },
+      idempotencyKey: 'idem-1',
+      filter,
+      deliveryPreference: {
+        requested: 'existing_session_prompt',
+        resolved: 'recorded_not_injected',
+        target: {
+          sessionId: 'session-1',
+          taskId: 'task-1',
+          runtimeId: null,
+          agentId: 'agent-session-1',
         },
-        reason: 'watch CI',
-        expiresAt: now + 120_000,
-      }
-    );
+      },
+      reason: 'watch CI',
+      expiresAt: now + 120_000,
+    });
   });
 
   it('caps agent subscription expiry by the MCP token maximum lifetime', async () => {
     await expectAppError(
-      createProjectEventSubscriptionForCaller(makeEnv(), makeAgentCaller({ mcpTokenCreatedAt: null }), {
-        idempotencyKey: 'idem-1',
-        filter,
-        requestedDelivery: 'record_only',
-        expiresAt: now + 301_000,
-      }),
+      createProjectEventSubscriptionForCaller(
+        makeEnv(),
+        makeAgentCaller({ mcpTokenCreatedAt: null }),
+        {
+          idempotencyKey: 'idem-1',
+          filter,
+          requestedDelivery: 'record_only',
+          expiresAt: now + 301_000,
+        }
+      ),
       403,
       'token lifetime'
     );
@@ -351,11 +352,15 @@ describe('internal ProjectData event subscription surface', () => {
 
   it('rejects invalid caller project and workspace bindings before storage writes', async () => {
     await expectAppError(
-      createProjectEventSubscriptionForCaller(makeEnv(), makeAgentCaller({ projectId: 'project-2' }), {
-        idempotencyKey: 'idem-1',
-        filter,
-        requestedDelivery: 'record_only',
-      }),
+      createProjectEventSubscriptionForCaller(
+        makeEnv(),
+        makeAgentCaller({ projectId: 'project-2' }),
+        {
+          idempotencyKey: 'idem-1',
+          filter,
+          requestedDelivery: 'record_only',
+        }
+      ),
       404,
       'Calling task'
     );

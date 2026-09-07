@@ -1,6 +1,10 @@
-import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
+  type ResolvedResourceReservation,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 
 export const ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL = "'running', 'creating', 'recovery'";
 export const DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT = 100;
@@ -11,7 +15,7 @@ export const DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT = 40;
 export const DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT = 60;
 export const RESOURCE_REQUIREMENTS_SOURCE_SQL =
   "'task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'";
-const D1_BIND_LIMIT = 100;
+const D1_BIND_LIMIT = D1_MAX_BOUND_PARAMETERS;
 
 export interface WorkspaceAdmissionPolicy {
   maxWorkspaces: number;
@@ -53,11 +57,25 @@ export interface WorkspaceReservationCapacityResult {
 
 export interface WorkspaceResourceNode {
   id: string;
+  nodeClass?: string | null;
+  providerInstanceId?: string | null;
   providerInstanceVcpuCount?: number | null;
   providerInstanceMemoryMb?: number | null;
   providerInstanceDiskGb?: number | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareSource?: string | null;
   lastMetrics?: string | null;
   lastHeartbeatAt?: string | null;
+}
+
+export interface TrustedWorkspaceNodeCapacity {
+  vcpuCount: number | null;
+  memoryMb: number | null;
+  diskGb: number | null;
+  source: 'observed' | 'planned' | null;
+  reasons: string[];
 }
 
 export function resolveWorkspaceAdmissionPolicy(
@@ -105,7 +123,7 @@ export function resolveWorkspaceAdmissionPolicy(
   return {
     maxWorkspaces: positiveInt(
       scaling?.maxWorkspacesPerNode,
-      parseEnvInt(env.MAX_WORKSPACES_PER_NODE, 3)
+      parseEnvInt(env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE)
     ),
     cpuShareBudgetPercent: boundedInt(
       scaling?.nodeCpuShareBudgetPercent,
@@ -175,7 +193,7 @@ export function isResolvedResourceReservation(
     (record.version === 1 || record.version === 2) &&
     positiveInteger(record.cpuMillis) !== null &&
     positiveInteger(record.memoryMb) !== null &&
-    positiveInteger(record.diskMb) !== null &&
+    nonNegativeInteger(record.diskMb) !== null &&
     positiveInteger(record.maxCoTenants) !== null &&
     typeof record.exclusiveNode === 'boolean' &&
     typeof record.source === 'string' &&
@@ -244,7 +262,10 @@ export function parseWorkspaceAdmissionMetrics(
 
   return {
     cpuLoadAvg1,
-    cpuPercent: normalizeLoadAverageToCpuPercent(cpuLoadAvg1, node.providerInstanceVcpuCount),
+    cpuPercent: normalizeLoadAverageToCpuPercent(
+      cpuLoadAvg1,
+      resolveTrustedWorkspaceNodeCapacity(node).vcpuCount
+    ),
     memoryPercent,
     diskPercent,
     creatingWorkspaces,
@@ -261,6 +282,74 @@ export function normalizeLoadAverageToCpuPercent(
   const vcpu = positiveInteger(vcpuCount);
   if (loadAvg1 === null || vcpu === null) return null;
   return (loadAvg1 / vcpu) * 100;
+}
+
+/**
+ * The exact node columns `resolveTrustedWorkspaceNodeCapacity` reads, as an
+ * aliased SQL projection. Every node query whose rows feed capacity evaluation
+ * or legacy-adoption evaluation must include this fragment: a projection that
+ * omits it makes `providerInstanceId`/`observedHardwareSource` undefined, so
+ * every node resolves to "no trusted observed hardware" and is silently rejected
+ * — advisory selection then disagrees with the final admission SQL, which reads
+ * the same columns directly off the row.
+ */
+export function trustedWorkspaceNodeCapacityColumnsSql(alias = ''): string {
+  if (alias && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+    throw new Error(`Unsafe SQL alias: ${alias}`);
+  }
+  const prefix = alias ? `${alias}.` : '';
+  return `${prefix}node_class AS nodeClass,
+       ${prefix}provider_instance_id AS providerInstanceId,
+       ${prefix}observed_provider_instance_type AS observedProviderInstanceType,
+       ${prefix}observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
+       ${prefix}observed_provider_instance_memory_mb AS observedProviderInstanceMemoryMb,
+       ${prefix}observed_provider_instance_disk_gb AS observedProviderInstanceDiskGb,
+       ${prefix}observed_hardware_source AS observedHardwareSource`;
+}
+
+/** Row shape produced by `trustedWorkspaceNodeCapacityColumnsSql`. */
+export interface TrustedWorkspaceNodeCapacityRow {
+  nodeClass: string | null;
+  providerInstanceId: string | null;
+  observedProviderInstanceType: string | null;
+  observedProviderInstanceVcpuCount: number | null;
+  observedProviderInstanceMemoryMb: number | null;
+  observedProviderInstanceDiskGb: number | null;
+  observedHardwareSource: string | null;
+}
+
+export function resolveTrustedWorkspaceNodeCapacity(
+  node: WorkspaceResourceNode
+): TrustedWorkspaceNodeCapacity {
+  const reasons: string[] = [];
+  const observedVcpu = positiveInteger(node.observedProviderInstanceVcpuCount);
+  const observedMemoryMb = positiveInteger(node.observedProviderInstanceMemoryMb);
+  const observedDiskGb = positiveInteger(node.observedProviderInstanceDiskGb);
+  const hasProviderInstance =
+    typeof node.providerInstanceId === 'string' && node.providerInstanceId.trim().length > 0;
+  const isUserOwnedNode = node.nodeClass === 'user-owned';
+  const hasObservedSource = node.observedHardwareSource === 'observed';
+
+  if (hasProviderInstance || isUserOwnedNode) {
+    if (observedVcpu !== null && observedMemoryMb !== null && observedDiskGb !== null) {
+      if (!hasObservedSource) {
+        reasons.push('node observed hardware source is not verified');
+        return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
+      }
+      return {
+        vcpuCount: observedVcpu,
+        memoryMb: observedMemoryMb,
+        diskGb: observedDiskGb,
+        source: 'observed',
+        reasons,
+      };
+    }
+    reasons.push('node has no trusted observed hardware capacity');
+    return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
+  }
+
+  reasons.push('managed node has no provider runtime identity');
+  return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
 }
 
 export function scoreWorkspaceAdmissionMetrics(
@@ -354,34 +443,12 @@ export function evaluateWorkspaceReservationCapacity(
     reasons.push('active reservation snapshot is missing or malformed');
   }
 
-  const vcpu = positiveInteger(node.providerInstanceVcpuCount);
-  const memoryMb = positiveInteger(node.providerInstanceMemoryMb);
-  const diskGb = positiveInteger(node.providerInstanceDiskGb);
-  if (
-    node.providerInstanceVcpuCount !== null &&
-    node.providerInstanceVcpuCount !== undefined &&
-    vcpu === null
-  ) {
-    reasons.push('node CPU capacity shape is invalid');
-  }
-  if (
-    node.providerInstanceMemoryMb !== null &&
-    node.providerInstanceMemoryMb !== undefined &&
-    memoryMb === null
-  ) {
-    reasons.push('node memory capacity shape is invalid');
-  }
-  if (
-    node.providerInstanceDiskGb !== null &&
-    node.providerInstanceDiskGb !== undefined &&
-    diskGb === null
-  ) {
-    reasons.push('node disk capacity shape is invalid');
-  }
-  if (active.activeCount > 0) {
-    if (vcpu === null) reasons.push('occupied node has unknown CPU capacity');
-    if (memoryMb === null) reasons.push('occupied node has unknown memory capacity');
-    if (diskGb === null) reasons.push('occupied node has unknown disk capacity');
+  const trustedCapacity = resolveTrustedWorkspaceNodeCapacity(node);
+  const vcpu = trustedCapacity.vcpuCount;
+  const memoryMb = trustedCapacity.memoryMb;
+  const diskGb = trustedCapacity.diskGb;
+  if (trustedCapacity.source === null) {
+    reasons.push(...trustedCapacity.reasons);
   }
 
   const measuredAdmissionReason = measuredAdmissionDiagnostic(

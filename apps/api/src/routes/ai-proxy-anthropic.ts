@@ -25,7 +25,11 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readRequestJsonRecord } from '../lib/runtime-validation';
-import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  getCurrentWindowStart,
+} from '../middleware/rate-limit';
 import { resolveUpstreamAuth } from '../services/ai-billing';
 import {
   AIProxyAuthError,
@@ -50,23 +54,27 @@ const aiProxyAnthropicRoutes = new Hono<{ Bindings: Env }>();
 // =============================================================================
 
 /** Return an Anthropic-format error response. */
-function anthropicError(
-  message: string,
-  type: string,
-  status: number,
-): Response {
-  return new Response(
-    JSON.stringify({ type: 'error', error: { type, message } }),
-    { status, headers: { 'Content-Type': 'application/json' } },
-  );
+function anthropicError(message: string, type: string, status: number): Response {
+  return new Response(JSON.stringify({ type: 'error', error: { type, message } }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 function anthropicUsageGateError(reason: 'daily-token-budget' | 'monthly-cost-cap'): Response {
   if (reason === 'daily-token-budget') {
-    return anthropicError('Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429);
+    return anthropicError(
+      'Daily token budget exceeded. Resets at midnight UTC.',
+      'rate_limit_error',
+      429
+    );
   }
 
-  return anthropicError('Monthly cost cap exceeded. Adjust your cap in Settings > Usage.', 'rate_limit_error', 429);
+  return anthropicError(
+    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
+    'rate_limit_error',
+    429
+  );
 }
 
 // =============================================================================
@@ -80,15 +88,12 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   }
 
   // --- Auth: extract token from x-api-key or Authorization: Bearer ---
-  const token = extractCallbackToken(
-    c.req.header('Authorization'),
-    c.req.header('x-api-key'),
-  );
+  const token = extractCallbackToken(c.req.header('Authorization'), c.req.header('x-api-key'));
   if (!token) {
     return anthropicError(
       'Missing authentication. Provide x-api-key or Authorization: Bearer header.',
       'authentication_error',
-      401,
+      401
     );
   }
 
@@ -107,17 +112,19 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
   const { userId, workspaceId, projectId, chatSessionId, trialId } = auth;
 
   // --- Rate limit: per-user RPM (shared key with OpenAI proxy) ---
-  const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds = parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
+  const rpmLimit =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
+  const windowSeconds =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
+    DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
 
-  const { allowed: rpmAllowed, remaining, resetAt } = await checkRateLimit(
-    c.env.KV,
-    rateLimitKey,
-    rpmLimit,
-    windowSeconds,
-  );
+  const {
+    allowed: rpmAllowed,
+    remaining,
+    resetAt,
+  } = await checkRateLimit(c.env.KV, rateLimitKey, rpmLimit, windowSeconds);
 
   c.header('X-RateLimit-Limit', rpmLimit.toString());
   c.header('X-RateLimit-Remaining', remaining.toString());
@@ -146,7 +153,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     return anthropicError(
       `Model '${modelId}' is not supported on this endpoint. Only Anthropic models (claude-*) are accepted.`,
       'invalid_request_error',
-      400,
+      400
     );
   }
 
@@ -168,7 +175,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
     return anthropicError(
       'AI proxy is not configured. Contact an administrator.',
       'api_error',
-      503,
+      503
     );
   }
 
@@ -241,7 +248,7 @@ aiProxyAnthropicRoutes.post('/messages', async (c) => {
       return anthropicError(
         `AI inference failed (${upstreamResponse.status}). Please try again.`,
         'api_error',
-        upstreamResponse.status,
+        upstreamResponse.status
       );
     }
 
@@ -284,15 +291,12 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
   }
 
   // --- Auth ---
-  const token = extractCallbackToken(
-    c.req.header('Authorization'),
-    c.req.header('x-api-key'),
-  );
+  const token = extractCallbackToken(c.req.header('Authorization'), c.req.header('x-api-key'));
   if (!token) {
     return anthropicError(
       'Missing authentication. Provide x-api-key or Authorization: Bearer header.',
       'authentication_error',
-      401,
+      401
     );
   }
 
@@ -311,17 +315,19 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
   const { userId, workspaceId, projectId, chatSessionId, trialId } = auth;
 
   // --- Rate limit: per-user RPM (shared key with messages endpoint) ---
-  const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds = parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
+  const rpmLimit =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
+  const windowSeconds =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
+    DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
 
-  const { allowed: rpmAllowed, remaining, resetAt } = await checkRateLimit(
-    c.env.KV,
-    rateLimitKey,
-    rpmLimit,
-    windowSeconds,
-  );
+  const {
+    allowed: rpmAllowed,
+    remaining,
+    resetAt,
+  } = await checkRateLimit(c.env.KV, rateLimitKey, rpmLimit, windowSeconds);
 
   c.header('X-RateLimit-Limit', rpmLimit.toString());
   c.header('X-RateLimit-Remaining', remaining.toString());
@@ -349,7 +355,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     return anthropicError(
       `Model '${modelId}' is not supported. Only Anthropic models (claude-*) are accepted.`,
       'invalid_request_error',
-      400,
+      400
     );
   }
 
@@ -370,7 +376,7 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
     return anthropicError(
       'AI proxy is not configured. Contact an administrator.',
       'api_error',
-      503,
+      503
     );
   }
 
@@ -420,14 +426,16 @@ aiProxyAnthropicRoutes.post('/messages/count_tokens', async (c) => {
       return anthropicError(
         `Token counting failed (${upstreamResponse.status}). Please try again.`,
         'api_error',
-        upstreamResponse.status,
+        upstreamResponse.status
       );
     }
 
     const responseText = await upstreamResponse.text();
     return new Response(responseText, {
       status: 200,
-      headers: { 'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json' },
+      headers: {
+        'Content-Type': upstreamResponse.headers.get('content-type') || 'application/json',
+      },
     });
   } catch (err) {
     log.error('ai_proxy_anthropic.count_tokens_error', {

@@ -40,8 +40,6 @@ export async function generateSessionSnapshotDirectUploadUrl(
       env.SESSION_SNAPSHOT_UPLOAD_URL_TTL_SECONDS,
       DEFAULT_SESSION_SNAPSHOT_UPLOAD_URL_TTL_SECONDS
     ),
-    ...(input.checksumHeader
-      ? { unhoistableHeaders: new Set(['x-amz-checksum-sha256']) }
-      : {}),
+    ...(input.checksumHeader ? { unhoistableHeaders: new Set(['x-amz-checksum-sha256']) } : {}),
   });
 }

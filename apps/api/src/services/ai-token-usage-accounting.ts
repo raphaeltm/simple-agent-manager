@@ -29,7 +29,7 @@ export interface UpstreamTokenUsageAccountingOptions extends TokenUsageAccountin
 
 export async function accountTokenUsageFromJson(
   payload: unknown,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): Promise<void> {
   const usage = extractJsonTokenUsage(payload, options.format);
   await incrementExtractedUsage(usage, options);
@@ -37,18 +37,19 @@ export async function accountTokenUsageFromJson(
 
 export function accountTokenUsageFromStream(
   stream: ReadableStream<Uint8Array>,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): void {
   scheduleTokenAccounting(
-    collectStreamTokenUsage(stream, options.format)
-      .then((usage) => incrementExtractedUsage(usage, options)),
-    options,
+    collectStreamTokenUsage(stream, options.format).then((usage) =>
+      incrementExtractedUsage(usage, options)
+    ),
+    options
   );
 }
 
 export async function attachTokenUsageAccounting(
   response: Response,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): Promise<Response> {
   if (!response.ok) return response;
 
@@ -87,7 +88,7 @@ export async function attachTokenUsageAccounting(
 }
 
 export function optionalExecutionContext(
-  getExecutionCtx: () => Pick<ExecutionContext, 'waitUntil'>,
+  getExecutionCtx: () => Pick<ExecutionContext, 'waitUntil'>
 ): Pick<ExecutionContext, 'waitUntil'> | undefined {
   try {
     return getExecutionCtx();
@@ -98,20 +99,20 @@ export function optionalExecutionContext(
 
 export function attachUpstreamTokenUsageAccounting(
   upstreamResponse: Response,
-  options: UpstreamTokenUsageAccountingOptions,
+  options: UpstreamTokenUsageAccountingOptions
 ): Promise<Response> {
   return attachTokenUsageAccounting(
     new Response(upstreamResponse.body, {
       status: upstreamResponse.status,
       headers: options.headers,
     }),
-    options,
+    options
   );
 }
 
 export function extractJsonTokenUsage(
   payload: unknown,
-  format: TokenUsageFormat,
+  format: TokenUsageFormat
 ): ExtractedTokenUsage {
   const record = maybeJsonRecord(payload);
   const usage = maybeJsonRecord(record?.usage);
@@ -143,7 +144,7 @@ export function estimateInputTokensFromMessages(messages: unknown): number {
 
 export async function collectStreamTokenUsage(
   stream: ReadableStream<Uint8Array>,
-  format: TokenUsageFormat,
+  format: TokenUsageFormat
 ): Promise<ExtractedTokenUsage> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -172,19 +173,13 @@ export async function collectStreamTokenUsage(
 
 async function incrementExtractedUsage(
   usage: ExtractedTokenUsage,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): Promise<void> {
   const inputTokens = usage.inputTokens ?? options.fallbackInputTokens ?? 0;
   const outputTokens = usage.outputTokens ?? 0;
   if (inputTokens <= 0 && outputTokens <= 0) return;
 
-  await incrementTokenUsage(
-    options.env.KV,
-    options.userId,
-    inputTokens,
-    outputTokens,
-    options.env,
-  );
+  await incrementTokenUsage(options.env.KV, options.userId, inputTokens, outputTokens, options.env);
   if (options.provider) {
     await incrementProviderUsage(
       options.env.KV,
@@ -192,7 +187,7 @@ async function incrementExtractedUsage(
       options.provider,
       inputTokens,
       outputTokens,
-      options.env,
+      options.env
     );
   }
 }
@@ -200,7 +195,7 @@ async function incrementExtractedUsage(
 function processSseBuffer(
   buffer: string,
   format: TokenUsageFormat,
-  usage: ExtractedTokenUsage,
+  usage: ExtractedTokenUsage
 ): string {
   const events = buffer.split(/\r?\n\r?\n/);
   const remainder = events.pop() ?? '';
@@ -227,7 +222,7 @@ function processSseBuffer(
 function applyStreamUsage(
   payload: unknown,
   format: TokenUsageFormat,
-  usage: ExtractedTokenUsage,
+  usage: ExtractedTokenUsage
 ): void {
   const record = maybeJsonRecord(payload);
   if (!record) return;
@@ -248,7 +243,10 @@ function applyStreamUsage(
 
 function isStreamingResponse(response: Response): boolean {
   const contentType = response.headers.get('content-type') ?? '';
-  return contentType.includes('text/event-stream') || response.headers.get('cache-control') === 'no-cache';
+  return (
+    contentType.includes('text/event-stream') ||
+    response.headers.get('cache-control') === 'no-cache'
+  );
 }
 
 function numberValue(value: unknown): number | undefined {
@@ -271,7 +269,7 @@ function estimateContentChars(content: unknown): number {
 
 function scheduleTokenAccounting(
   promise: Promise<void>,
-  options: TokenUsageAccountingOptions,
+  options: TokenUsageAccountingOptions
 ): void {
   const logged = promise.catch((err) => {
     log.warn('ai_proxy.token_usage_increment_failed', {

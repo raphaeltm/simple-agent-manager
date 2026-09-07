@@ -20,13 +20,7 @@ export async function requireNodeOwnership(
   const result = await db
     .select()
     .from(nodes)
-    .where(
-      and(
-        eq(nodes.id, nodeId),
-        eq(nodes.userId, userId),
-        ne(nodes.status, 'deleted')
-      )
-    )
+    .where(and(eq(nodes.id, nodeId), eq(nodes.userId, userId), ne(nodes.status, 'deleted')))
     .limit(1);
 
   return result[0] ?? null;
@@ -47,12 +41,7 @@ export async function requireNodeScopedWorkspaceOwnership(
   const result = await db
     .select()
     .from(workspaces)
-    .where(
-      and(
-        eq(workspaces.id, workspaceId),
-        eq(workspaces.userId, userId)
-      )
-    )
+    .where(and(eq(workspaces.id, workspaceId), eq(workspaces.userId, userId)))
     .limit(1);
 
   const workspace = result[0];

@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { selectNodeForTaskRun } from '../../../src/services/node-selector';
+import { createSchemaTables } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/services/node-lifecycle', () => ({ tryClaim: vi.fn() }));
 
@@ -20,73 +21,11 @@ let sqlite: Database.Database | null = null;
 
 function createDb() {
   sqlite = new Database(':memory:');
-  sqlite.exec(`
-    CREATE TABLE nodes (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      vm_size TEXT NOT NULL DEFAULT 'medium',
-      vm_location TEXT NOT NULL DEFAULT 'nbg1',
-      cloud_provider TEXT,
-      provider_instance_id TEXT,
-      ip_address TEXT,
-      backend_dns_record_id TEXT,
-      last_heartbeat_at TEXT,
-      agent_ready_at TEXT,
-      agent_version TEXT,
-      health_status TEXT NOT NULL DEFAULT 'unhealthy',
-      heartbeat_stale_after_seconds INTEGER NOT NULL DEFAULT 180,
-      last_metrics TEXT,
-      warm_since TEXT,
-      credential_source TEXT DEFAULT 'user',
-      credential_attribution_user_id TEXT,
-      credential_attribution_project_id TEXT,
-      credential_attribution_source TEXT DEFAULT 'user',
-      capacity_pool_id TEXT,
-      capacity_pool_scope TEXT,
-      capacity_pool_revision INTEGER,
-      capacity_source_id TEXT,
-      capacity_pool_candidate_id TEXT,
-      placement_credential_source TEXT,
-      placement_credential_reference TEXT,
-      placement_credential_version INTEGER,
-      capacity_pool_project_id TEXT,
-      workload_role TEXT,
-      provider_instance_type TEXT,
-      provider_instance_vcpu_count INTEGER,
-      provider_instance_memory_mb INTEGER,
-      provider_instance_disk_gb INTEGER,
-      provider_instance_price_display TEXT,
-      provider_instance_price_currency TEXT,
-      provider_instance_price_monthly_cents INTEGER,
-      provider_instance_price_hourly_micros INTEGER,
-      placement_explanation_json TEXT,
-      offboarding_status TEXT,
-      offboarding_blocked_reason TEXT,
-      offboarding_blocked_at TEXT,
-      node_role TEXT NOT NULL DEFAULT 'workspace',
-      node_mode TEXT NOT NULL DEFAULT 'shared',
-      runtime TEXT NOT NULL DEFAULT 'vm',
-      runtime_incarnation_id TEXT,
-      node_class TEXT NOT NULL DEFAULT 'managed',
-      transport TEXT,
-      tunnel_id TEXT,
-      tunnel_name TEXT,
-      error_message TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      cleanup_backoff_until TEXT
-      ,runtime_termination_confirmed_at TEXT
-      ,placement_credential_fingerprint TEXT
-    );
-    CREATE TABLE workspaces (
-      id TEXT PRIMARY KEY,
-      node_id TEXT,
-      user_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'running'
-    );
-  `);
+  // Built from the drizzle definitions so the fixture cannot drift from the
+  // columns production placement queries actually select (observed hardware,
+  // node class, native offering identity). A hand-written CREATE TABLE here
+  // silently turned an unknown column into a bare string literal.
+  createSchemaTables(sqlite, [schema.nodes, schema.workspaces]);
   return drizzle(sqlite, { schema });
 }
 

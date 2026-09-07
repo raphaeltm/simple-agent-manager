@@ -70,6 +70,17 @@ type PlacementMetadataFields = {
   provider_instance_price_currency?: string | null;
   provider_instance_price_monthly_cents?: number | null;
   provider_instance_price_hourly_micros?: number | null;
+  // Trusted-capacity projection. Production node selection reads these columns
+  // (services/workspace-resource-capacity.ts trustedWorkspaceNodeCapacityColumnsSql);
+  // a fixture that omits them models a node with no verified hardware, which the
+  // real selector rejects.
+  node_class?: string | null;
+  provider_instance_id?: string | null;
+  observed_provider_instance_type?: string | null;
+  observed_provider_instance_vcpu_count?: number | null;
+  observed_provider_instance_memory_mb?: number | null;
+  observed_provider_instance_disk_gb?: number | null;
+  observed_hardware_source?: string | null;
 };
 
 type PlacementSeedFields = PlacementMetadataFields & {
@@ -97,8 +108,34 @@ type PlacementRowNodeSource = PlacementSeedFields & {
   warm_since?: string | null;
 };
 
+/**
+ * Concrete hardware a real running managed node of this legacy vm_size reports.
+ * Fixtures that only set vm_size still model a provisioned node with
+ * provider-observed hardware, which is what the production projection returns
+ * and what both advisory selection and the final admission SQL require.
+ */
+const LEGACY_SIZE_HARDWARE: Record<string, { vcpu: number; memoryMb: number; diskGb: number }> = {
+  small: { vcpu: 2, memoryMb: 4096, diskGb: 40 },
+  medium: { vcpu: 4, memoryMb: 8192, diskGb: 80 },
+  large: { vcpu: 8, memoryMb: 16384, diskGb: 160 },
+};
+
+function plannedHardware(node: PlacementRowNodeSource): {
+  vcpu: number | null;
+  memoryMb: number | null;
+  diskGb: number | null;
+} {
+  const fallback = LEGACY_SIZE_HARDWARE[node.vm_size] ?? null;
+  return {
+    vcpu: node.provider_instance_vcpu_count ?? fallback?.vcpu ?? null,
+    memoryMb: node.provider_instance_memory_mb ?? fallback?.memoryMb ?? null,
+    diskGb: node.provider_instance_disk_gb ?? fallback?.diskGb ?? null,
+  };
+}
+
 function toPlacementRow(node: PlacementRowNodeSource | null | undefined) {
   if (!node) return null;
+  const planned = plannedHardware(node);
   return {
     id: node.id,
     status: 'status' in node ? node.status : undefined,
@@ -127,6 +164,29 @@ function toPlacementRow(node: PlacementRowNodeSource | null | undefined) {
     providerInstancePriceMonthlyCents: node.provider_instance_price_monthly_cents ?? null,
     providerInstancePriceHourlyMicros: node.provider_instance_price_hourly_micros ?? null,
     placementExplanationJson: node.placement_explanation_json ?? null,
+    // A running managed node has a provider instance and provider-observed
+    // hardware; fixtures opt out explicitly (null) to model old/unverified nodes.
+    nodeClass: node.node_class === undefined ? 'managed' : node.node_class,
+    providerInstanceId:
+      node.provider_instance_id === undefined ? `server-${node.id}` : node.provider_instance_id,
+    observedProviderInstanceType:
+      node.observed_provider_instance_type === undefined
+        ? (node.provider_instance_type ?? null)
+        : node.observed_provider_instance_type,
+    observedProviderInstanceVcpuCount:
+      node.observed_provider_instance_vcpu_count === undefined
+        ? planned.vcpu
+        : node.observed_provider_instance_vcpu_count,
+    observedProviderInstanceMemoryMb:
+      node.observed_provider_instance_memory_mb === undefined
+        ? planned.memoryMb
+        : node.observed_provider_instance_memory_mb,
+    observedProviderInstanceDiskGb:
+      node.observed_provider_instance_disk_gb === undefined
+        ? planned.diskGb
+        : node.observed_provider_instance_disk_gb,
+    observedHardwareSource:
+      node.observed_hardware_source === undefined ? 'observed' : node.observed_hardware_source,
     agentVersion: node.agent_version ?? null,
     healthStatus:
       'health_status' in node ? (node as { health_status?: string }).health_status : undefined,
@@ -706,7 +766,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20, diskPercent: 20 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1.6, memoryPercent: 20, diskPercent: 20 }),
           last_heartbeat_at: now,
           agent_version: 'current-sha',
         },
@@ -944,7 +1004,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 40, memoryPercent: 40, diskPercent: 40 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 3.2, memoryPercent: 40, diskPercent: 40 }),
           last_heartbeat_at: now,
           agent_version: 'current-sha',
         },
@@ -990,7 +1050,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20, diskPercent: 20 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1.6, memoryPercent: 20, diskPercent: 20 }),
           last_heartbeat_at: now,
           agent_version: 'current-sha',
         },
@@ -1029,7 +1089,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_size: 'large',
           vm_location: 'fsn1',
           health_status: 'healthy',
-          last_metrics: JSON.stringify({ cpuLoadAvg1: 40, memoryPercent: 40, diskPercent: 40 }),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 3.2, memoryPercent: 40, diskPercent: 40 }),
           last_heartbeat_at: now,
           agent_version: 'current-sha',
         },

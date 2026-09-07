@@ -178,9 +178,7 @@ describe('diagnostic incident storage boundary', () => {
       count: 1,
     });
     expect(
-      sqlite
-        .prepare('SELECT id, occurrence_count, last_seen_at FROM diagnostic_incidents')
-        .get()
+      sqlite.prepare('SELECT id, occurrence_count, last_seen_at FROM diagnostic_incidents').get()
     ).toEqual({
       id: ids[0],
       occurrence_count: 100,

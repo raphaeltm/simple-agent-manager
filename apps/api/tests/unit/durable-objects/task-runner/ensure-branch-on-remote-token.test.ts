@@ -22,11 +22,21 @@ vi.mock('../../../../src/lib/logger', () => ({
 
 vi.mock('jose', () => {
   class MockSignJWT {
-    setProtectedHeader() { return this; }
-    setIssuedAt() { return this; }
-    setIssuer() { return this; }
-    setExpirationTime() { return this; }
-    async sign() { return 'mock-jwt'; }
+    setProtectedHeader() {
+      return this;
+    }
+    setIssuedAt() {
+      return this;
+    }
+    setIssuer() {
+      return this;
+    }
+    setExpirationTime() {
+      return this;
+    }
+    async sign() {
+      return 'mock-jwt';
+    }
   }
   return {
     importPKCS8: vi.fn().mockResolvedValue('mock-key'),
@@ -39,7 +49,10 @@ vi.mock('../../../../src/lib/runtime-validation', () => ({
   expectJsonRecord: vi.fn().mockImplementation((value: unknown) => value),
 }));
 
-import type { TaskRunnerContext, TaskRunnerState } from '../../../../src/durable-objects/task-runner/types';
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../../../src/durable-objects/task-runner/types';
 import { ensureBranchExistsOnRemote } from '../../../../src/durable-objects/task-runner/workspace-steps';
 
 function makeState(): TaskRunnerState {
@@ -107,9 +120,10 @@ describe('ensureBranchExistsOnRemote token path', () => {
   });
 
   it('passes the external GitHub installation id all the way to getInstallationToken', async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce(
-        Response.json({ token: 'test-installation-token', expires_at: '2026-12-31T00:00:00Z' }),
+        Response.json({ token: 'test-installation-token', expires_at: '2026-12-31T00:00:00Z' })
       )
       .mockResolvedValueOnce(Response.json({ name: 'feature/my-branch' }));
     vi.stubGlobal('fetch', fetchMock);
@@ -119,11 +133,11 @@ describe('ensureBranchExistsOnRemote token path', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       'https://api.github.com/app/installations/987654321/access_tokens',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({ method: 'POST' })
     );
     expect(fetchMock).not.toHaveBeenCalledWith(
       expect.stringContaining('01KTDBROW000000000000000001'),
-      expect.anything(),
+      expect.anything()
     );
   });
 });

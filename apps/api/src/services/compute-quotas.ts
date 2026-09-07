@@ -121,7 +121,7 @@ export async function checkQuotaForUser(
 export async function userHasOwnCloudCredentials(
   db: DrizzleD1Database<typeof schema>,
   userId: string,
-  targetProvider?: CredentialProvider,
+  targetProvider?: CredentialProvider
 ): Promise<boolean> {
   const conditions = [
     eq(schema.credentials.userId, userId),
@@ -256,18 +256,14 @@ export async function removeUserQuotaOverride(
 
   if (!existing) return false;
 
-  await db
-    .delete(schema.userQuotas)
-    .where(eq(schema.userQuotas.id, existing.id));
+  await db.delete(schema.userQuotas).where(eq(schema.userQuotas.id, existing.id));
 
   log.info('compute-quotas: user quota removed', { userId });
   return true;
 }
 
 /** List all user quota overrides with user info and current usage. */
-export async function listUserQuotasWithUsage(
-  db: DrizzleD1Database<typeof schema>
-): Promise<
+export async function listUserQuotasWithUsage(db: DrizzleD1Database<typeof schema>): Promise<
   Array<{
     userId: string;
     email: string | null;
@@ -291,9 +287,7 @@ export async function listUserQuotasWithUsage(
     .from(schema.computeUsage);
 
   // Get all user quota overrides
-  const overrides = await db
-    .select()
-    .from(schema.userQuotas);
+  const overrides = await db.select().from(schema.userQuotas);
 
   // Get the default quota
   const defaultQuota = await getDefaultQuota(db);
@@ -348,9 +342,7 @@ export async function listUserQuotasWithUsage(
         'platform'
       );
       const rounded = Math.round(currentUsage * 100) / 100;
-      const percentUsed = limit !== null && limit > 0
-        ? Math.round((rounded / limit) * 100)
-        : null;
+      const percentUsed = limit !== null && limit > 0 ? Math.round((rounded / limit) * 100) : null;
 
       return {
         userId,

@@ -67,9 +67,11 @@ describe('getInstallationToken KV cache', () => {
     const env = makeEnv();
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        Response.json({ token: 'fresh-token', expires_at: '2026-08-19T01:00:00Z' })
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ token: 'fresh-token', expires_at: '2026-08-19T01:00:00Z' })
+        )
     );
 
     await expect(getInstallationToken('inst-1', env as Env)).resolves.toEqual({
@@ -89,9 +91,11 @@ describe('getInstallationToken KV cache', () => {
     env.GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS = '0';
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        Response.json({ token: 'fresh-token', expires_at: '2026-08-19T01:00:00Z' })
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ token: 'fresh-token', expires_at: '2026-08-19T01:00:00Z' })
+        )
     );
 
     await getInstallationToken('inst-1', env as Env);

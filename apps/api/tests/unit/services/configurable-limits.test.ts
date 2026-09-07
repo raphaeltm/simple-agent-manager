@@ -10,8 +10,14 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_MAX_WORKSPACES_PER_NODE } from '@simple-agent-manager/shared';
+
 import { DEFAULT_RATE_LIMITS } from '../../../src/middleware/rate-limit';
 import { getRuntimeLimits } from '../../../src/services/limits';
+import {
+  evaluateWorkspaceReservationCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '../../../src/services/workspace-resource-capacity';
 
 // =============================================================================
 // getRuntimeLimits — behavioral tests for all 15 configurable limits
@@ -101,11 +107,15 @@ describe('getRuntimeLimits', () => {
     });
 
     it('respects MAX_AGENT_SESSIONS_PER_WORKSPACE', () => {
-      expect(getRuntimeLimits({ MAX_AGENT_SESSIONS_PER_WORKSPACE: '5' }).maxAgentSessionsPerWorkspace).toBe(5);
+      expect(
+        getRuntimeLimits({ MAX_AGENT_SESSIONS_PER_WORKSPACE: '5' }).maxAgentSessionsPerWorkspace
+      ).toBe(5);
     });
 
     it('respects NODE_HEARTBEAT_STALE_SECONDS', () => {
-      expect(getRuntimeLimits({ NODE_HEARTBEAT_STALE_SECONDS: '300' }).nodeHeartbeatStaleSeconds).toBe(300);
+      expect(
+        getRuntimeLimits({ NODE_HEARTBEAT_STALE_SECONDS: '300' }).nodeHeartbeatStaleSeconds
+      ).toBe(300);
     });
 
     it('respects MAX_PROJECTS_PER_USER', () => {
@@ -117,11 +127,15 @@ describe('getRuntimeLimits', () => {
     });
 
     it('respects MAX_TASK_DEPENDENCIES_PER_TASK', () => {
-      expect(getRuntimeLimits({ MAX_TASK_DEPENDENCIES_PER_TASK: '100' }).maxTaskDependenciesPerTask).toBe(100);
+      expect(
+        getRuntimeLimits({ MAX_TASK_DEPENDENCIES_PER_TASK: '100' }).maxTaskDependenciesPerTask
+      ).toBe(100);
     });
 
     it('respects TASK_LIST_DEFAULT_PAGE_SIZE', () => {
-      expect(getRuntimeLimits({ TASK_LIST_DEFAULT_PAGE_SIZE: '25' }).taskListDefaultPageSize).toBe(25);
+      expect(getRuntimeLimits({ TASK_LIST_DEFAULT_PAGE_SIZE: '25' }).taskListDefaultPageSize).toBe(
+        25
+      );
     });
 
     it('respects TASK_LIST_MAX_PAGE_SIZE', () => {
@@ -129,31 +143,50 @@ describe('getRuntimeLimits', () => {
     });
 
     it('respects MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT', () => {
-      expect(getRuntimeLimits({ MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT: '300' }).maxProjectRuntimeEnvVarsPerProject).toBe(300);
+      expect(
+        getRuntimeLimits({ MAX_PROJECT_RUNTIME_ENV_VARS_PER_PROJECT: '300' })
+          .maxProjectRuntimeEnvVarsPerProject
+      ).toBe(300);
     });
 
     it('respects MAX_PROJECT_RUNTIME_FILES_PER_PROJECT', () => {
-      expect(getRuntimeLimits({ MAX_PROJECT_RUNTIME_FILES_PER_PROJECT: '100' }).maxProjectRuntimeFilesPerProject).toBe(100);
+      expect(
+        getRuntimeLimits({ MAX_PROJECT_RUNTIME_FILES_PER_PROJECT: '100' })
+          .maxProjectRuntimeFilesPerProject
+      ).toBe(100);
     });
 
     it('respects MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES', () => {
-      expect(getRuntimeLimits({ MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES: '16384' }).maxProjectRuntimeEnvValueBytes).toBe(16384);
+      expect(
+        getRuntimeLimits({ MAX_PROJECT_RUNTIME_ENV_VALUE_BYTES: '16384' })
+          .maxProjectRuntimeEnvValueBytes
+      ).toBe(16384);
     });
 
     it('respects MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES', () => {
-      expect(getRuntimeLimits({ MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES: '262144' }).maxProjectRuntimeFileContentBytes).toBe(262144);
+      expect(
+        getRuntimeLimits({ MAX_PROJECT_RUNTIME_FILE_CONTENT_BYTES: '262144' })
+          .maxProjectRuntimeFileContentBytes
+      ).toBe(262144);
     });
 
     it('respects MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH', () => {
-      expect(getRuntimeLimits({ MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH: '512' }).maxProjectRuntimeFilePathLength).toBe(512);
+      expect(
+        getRuntimeLimits({ MAX_PROJECT_RUNTIME_FILE_PATH_LENGTH: '512' })
+          .maxProjectRuntimeFilePathLength
+      ).toBe(512);
     });
 
     it('respects TASK_CALLBACK_TIMEOUT_MS', () => {
-      expect(getRuntimeLimits({ TASK_CALLBACK_TIMEOUT_MS: '30000' }).taskCallbackTimeoutMs).toBe(30000);
+      expect(getRuntimeLimits({ TASK_CALLBACK_TIMEOUT_MS: '30000' }).taskCallbackTimeoutMs).toBe(
+        30000
+      );
     });
 
     it('respects TASK_CALLBACK_RETRY_MAX_ATTEMPTS', () => {
-      expect(getRuntimeLimits({ TASK_CALLBACK_RETRY_MAX_ATTEMPTS: '5' }).taskCallbackRetryMaxAttempts).toBe(5);
+      expect(
+        getRuntimeLimits({ TASK_CALLBACK_RETRY_MAX_ATTEMPTS: '5' }).taskCallbackRetryMaxAttempts
+      ).toBe(5);
     });
   });
 
@@ -163,7 +196,9 @@ describe('getRuntimeLimits', () => {
 
   describe('invalid env values use defaults', () => {
     it('ignores non-numeric string', () => {
-      expect(getRuntimeLimits({ MAX_PROJECTS_PER_USER: 'not-a-number' }).maxProjectsPerUser).toBe(100);
+      expect(getRuntimeLimits({ MAX_PROJECTS_PER_USER: 'not-a-number' }).maxProjectsPerUser).toBe(
+        100
+      );
     });
 
     it('ignores zero', () => {
@@ -175,7 +210,9 @@ describe('getRuntimeLimits', () => {
     });
 
     it('ignores empty string', () => {
-      expect(getRuntimeLimits({ NODE_HEARTBEAT_STALE_SECONDS: '' }).nodeHeartbeatStaleSeconds).toBe(180);
+      expect(getRuntimeLimits({ NODE_HEARTBEAT_STALE_SECONDS: '' }).nodeHeartbeatStaleSeconds).toBe(
+        180
+      );
     });
   });
 });
@@ -211,10 +248,7 @@ describe('DEFAULT_RATE_LIMITS', () => {
 // =============================================================================
 
 describe('task submit — configurable MAX_TASK_MESSAGE_LENGTH', () => {
-  const submitSource = readFileSync(
-    resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
-    'utf8'
-  );
+  const submitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
 
   it('reads max message length from MAX_TASK_MESSAGE_LENGTH env var', () => {
     expect(submitSource).toContain('c.env.MAX_TASK_MESSAGE_LENGTH');
@@ -285,7 +319,9 @@ describe('workspace messages — configurable MAX_MESSAGES_PAYLOAD_BYTES', () =>
 
   it('defaults to 256*1024 (256 KB) when env var is absent', () => {
     expect(runtimeSource).toContain('DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES = 256 * 1024');
-    expect(runtimeSource).toContain('parsePositiveInt(\n    c.env.MAX_MESSAGES_PAYLOAD_BYTES as string,\n    DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES\n  )');
+    expect(runtimeSource).toContain(
+      'parsePositiveInt(\n    c.env.MAX_MESSAGES_PAYLOAD_BYTES as string,\n    DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES\n  )'
+    );
   });
 
   it('uses configurable maxPayloadBytes in the comparison', () => {
@@ -312,7 +348,9 @@ describe('ACP sessions — configurable MAX_ACP_PROMPT_BYTES', () => {
   });
 
   it('uses configurable maxPromptBytes in the comparison', () => {
-    expect(acpSource).toContain('new TextEncoder().encode(body.initialPrompt).length > maxPromptBytes');
+    expect(acpSource).toContain(
+      'new TextEncoder().encode(body.initialPrompt).length > maxPromptBytes'
+    );
   });
 
   it('error message interpolates the configurable limit', () => {
@@ -341,11 +379,15 @@ describe('ACP sessions fork — configurable MAX_ACP_CONTEXT_BYTES', () => {
   });
 
   it('uses configurable maxContextBytes in the comparison', () => {
-    expect(acpSource).toContain('new TextEncoder().encode(body.contextSummary).length > maxContextBytes');
+    expect(acpSource).toContain(
+      'new TextEncoder().encode(body.contextSummary).length > maxContextBytes'
+    );
   });
 
   it('error message interpolates the configurable limit', () => {
-    expect(acpSource).toContain('`contextSummary exceeds maximum size of ${maxContextBytes} bytes`');
+    expect(acpSource).toContain(
+      '`contextSummary exceeds maximum size of ${maxContextBytes} bytes`'
+    );
   });
 });
 
@@ -412,7 +454,9 @@ describe('agent sessions — configurable MAX_AGENT_SESSION_LABEL_LENGTH', () =>
   });
 
   it('defaults label max length to 50 when env var is absent', () => {
-    expect(agentSessionsSource).toContain('parsePositiveInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH, 50)');
+    expect(agentSessionsSource).toContain(
+      'parsePositiveInt(c.env.MAX_AGENT_SESSION_LABEL_LENGTH, 50)'
+    );
   });
 
   it('uses configurable maxLabelLength in slice (not hardcoded 50)', () => {
@@ -425,10 +469,7 @@ describe('agent sessions — configurable MAX_AGENT_SESSION_LABEL_LENGTH', () =>
 // =============================================================================
 
 describe('Env interface — new configurable limit env vars', () => {
-  const indexSource = readFileSync(
-    resolve(process.cwd(), 'src/env.ts'),
-    'utf8'
-  );
+  const indexSource = readFileSync(resolve(process.cwd(), 'src/env.ts'), 'utf8');
 
   it('declares MAX_TASK_MESSAGE_LENGTH in Env', () => {
     expect(indexSource).toContain('MAX_TASK_MESSAGE_LENGTH');
@@ -476,10 +517,7 @@ describe('Env interface — new configurable limit env vars', () => {
 // =============================================================================
 
 describe('workspace create — count limit removed', () => {
-  const crudSource = readFileSync(
-    resolve(process.cwd(), 'src/routes/workspaces/crud.ts'),
-    'utf8'
-  );
+  const crudSource = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8');
 
   it('still counts active workspaces per node (for telemetry)', () => {
     expect(crudSource).toContain('nodeWorkspaceCount');
@@ -492,7 +530,9 @@ describe('workspace create — count limit removed', () => {
 
   it('keeps the count query filtered to active statuses', () => {
     // Count query still filters by active statuses — just no longer used for enforcement
-    expect(crudSource).toContain("inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])");
+    expect(crudSource).toContain(
+      "inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])"
+    );
   });
 });
 
@@ -500,33 +540,63 @@ describe('workspace create — count limit removed', () => {
 // Source contract: task-runner DO enforces workspace count limit
 // =============================================================================
 
-describe('task-runner DO — workspace count limit', () => {
-  const doSource = [
-    'index.ts',
-    'types.ts',
-    'node-steps.ts',
-    'node-selection.ts',
-    'workspace-steps.ts',
-    'agent-session-step.ts',
-    'state-machine.ts',
-    'helpers.ts',
-  ].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
-
-  it('references MAX_WORKSPACES_PER_NODE env var', () => {
-    expect(doSource).toContain('MAX_WORKSPACES_PER_NODE');
-  });
-
-  it('references DEFAULT_MAX_WORKSPACES_PER_NODE constant', () => {
-    expect(doSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
+describe('task-runner workspace count limit is configurable', () => {
+  // The per-node cap and node pressure thresholds moved out of the TaskRunner DO
+  // into the shared admission policy, so both advisory selection and the final
+  // admission SQL read one configuration. These assertions exercise that resolver
+  // rather than grepping the DO's source.
+  it('reads MAX_WORKSPACES_PER_NODE from env with the shared default', () => {
+    expect(resolveWorkspaceAdmissionPolicy({} as never).maxWorkspaces).toBe(
+      DEFAULT_MAX_WORKSPACES_PER_NODE
+    );
+    expect(
+      resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '9' } as never).maxWorkspaces
+    ).toBe(9);
   });
 
   it('still reads CPU and memory thresholds from env', () => {
-    expect(doSource).toContain('TASK_RUN_NODE_CPU_THRESHOLD_PERCENT');
-    expect(doSource).toContain('TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT');
+    const policy = resolveWorkspaceAdmissionPolicy({
+      TASK_RUN_NODE_CPU_THRESHOLD_PERCENT: '61',
+      TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT: '62',
+    } as never);
+    expect(policy.cpuThresholdPercent).toBe(61);
+    expect(policy.memoryThresholdPercent).toBe(62);
   });
 
-  it('queries workspace count per node for limit enforcement', () => {
-    const section = doSource.slice(doSource.indexOf('findNodeWithCapacity'));
-    expect(section).toContain('>= maxWorkspaces');
+  it('enforces the workspace count limit at the shared capacity evaluator', () => {
+    const policy = resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '1' } as never);
+    const node = {
+      id: 'node-1',
+      nodeClass: 'managed',
+      providerInstanceId: 'server-1',
+      observedProviderInstanceVcpuCount: 8,
+      observedProviderInstanceMemoryMb: 16_384,
+      observedProviderInstanceDiskGb: 160,
+      observedHardwareSource: 'observed',
+      lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+      lastHeartbeatAt: new Date().toISOString(),
+    };
+    const request = {
+      cpuMillis: 1000,
+      memoryMb: 1024,
+      diskMb: 1024,
+      exclusiveNode: false,
+      maxCoTenants: 4,
+      source: 'platform' as const,
+      sourceId: 'platform',
+      version: 1,
+    };
+    const usage = {
+      activeCount: 1,
+      invalidCount: 0,
+      exclusiveCount: 0,
+      minMaxCoTenants: null,
+      cpuMillis: 0,
+      memoryMb: 0,
+      diskMb: 0,
+    };
+    const result = evaluateWorkspaceReservationCapacity(node, usage, request, policy);
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('workspace count cap reached');
   });
 });

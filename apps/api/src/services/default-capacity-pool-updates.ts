@@ -278,7 +278,9 @@ async function updateCandidateStatuses(
     return { changed: false, missingCandidateIds: [], unavailableCandidateIds };
   }
 
-  const changedUpdates = updates.filter(({ id, status }) => existingById.get(id)?.status !== status);
+  const changedUpdates = updates.filter(
+    ({ id, status }) => existingById.get(id)?.status !== status
+  );
   if (changedUpdates.length === 0) {
     return { changed: false, missingCandidateIds: [], unavailableCandidateIds: [] };
   }
@@ -317,7 +319,8 @@ async function readCandidateStatuses(
         .select({
           id: schema.capacityPoolCandidates.id,
           status: schema.capacityPoolCandidates.status,
-          providerInstanceCatalogSource: schema.capacityPoolCandidates.providerInstanceCatalogSource,
+          providerInstanceCatalogSource:
+            schema.capacityPoolCandidates.providerInstanceCatalogSource,
           catalogAvailability: schema.capacityPoolCandidates.catalogAvailability,
         })
         .from(schema.capacityPoolCandidates)

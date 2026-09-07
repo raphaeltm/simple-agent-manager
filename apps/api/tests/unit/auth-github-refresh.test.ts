@@ -10,12 +10,19 @@ describe('refreshGitHubAccessToken', () => {
   } as Env;
 
   it('throws when GitHub returns HTTP 200 with an OAuth error body', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      Response.json({ error: 'bad_refresh_token', error_description: 'The refresh token is invalid' })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({
+          error: 'bad_refresh_token',
+          error_description: 'The refresh token is invalid',
+        })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(refreshGitHubAccessToken(env, 'refresh-token')).rejects.toThrow('GitHub OAuth refresh failed');
+    await expect(refreshGitHubAccessToken(env, 'refresh-token')).rejects.toThrow(
+      'GitHub OAuth refresh failed'
+    );
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(init.headers).toMatchObject({
@@ -31,14 +38,19 @@ describe('refreshGitHubAccessToken', () => {
   });
 
   it('maps successful GitHub refresh responses into BetterAuth token fields', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({
-      access_token: 'new-access-token',
-      refresh_token: 'new-refresh-token',
-      expires_in: 28_800,
-      refresh_token_expires_in: 15_768_000,
-      scope: 'read:user,user:email,read:org',
-      token_type: 'bearer',
-    })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          access_token: 'new-access-token',
+          refresh_token: 'new-refresh-token',
+          expires_in: 28_800,
+          refresh_token_expires_in: 15_768_000,
+          scope: 'read:user,user:email,read:org',
+          token_type: 'bearer',
+        })
+      )
+    );
 
     const result = await refreshGitHubAccessToken(env, 'refresh-token');
 

@@ -23,6 +23,11 @@ import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
 export type PlacementEntryPoint =
   | 'task-submit'
+  | 'direct-node'
+  | 'direct-workspace'
+  | 'deployment-provisioning'
+  | 'trial-orchestrator'
+  | 'session-snapshot-relay'
   | 'mcp-dispatch'
   | 'sam-session-dispatch'
   | 'trigger-submit'
@@ -108,6 +113,7 @@ export interface TaskStartPlacementInput {
   taskModeDefault: PlacementTaskModeDefault;
   profileVmSizeSource?: PlacementProfileVmSizeSource;
   resourceRequirements?: ResourceResolutionInput;
+  workloadRole?: CapacityWorkloadRole;
   resolvedReservationOverride?: ResolvedResourceReservation | null;
   placementSettings?: CapacityPoolPlacementSettings | null;
   legacyWorkloadMapping?: Record<VMSize, Required<ResourceRequirements>>;
@@ -144,6 +150,7 @@ export interface TaskStartPlacement {
   taskMode: TaskMode;
   agentType: string | null;
   resolvedReservation: ResolvedResourceReservation;
+  workloadRole: CapacityWorkloadRole;
   placementSettings?: CapacityPoolPlacementSettings | null;
   credentialLookup: PlacementCredentialLookup;
   inheritedCredentialAttribution: Required<PlacementCredentialAttributionInput>;
@@ -154,6 +161,8 @@ export interface TaskStartCapacityCandidate {
   id: string;
   poolId: string;
   capacitySourceId: string;
+  capacitySourceGeneration: number | null;
+  capacitySourceExternalRef: string | null;
   provider: CredentialProvider;
   location: VMLocation;
   workloadRole: CapacityWorkloadRole;
@@ -165,6 +174,9 @@ export interface TaskStartCapacityCandidate {
   providerInstanceVcpuCount: number;
   providerInstanceMemoryMb: number;
   providerInstanceDiskGb: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay: string | null;
   providerInstancePriceCurrency: string | null;
   providerInstancePriceMonthlyCents: number | null;
@@ -208,6 +220,8 @@ export interface CapacityAwareNodePlacementRow {
   capacityPoolScope: string | null;
   capacityPoolRevision?: number | null;
   capacitySourceId: string | null;
+  capacitySourceGeneration?: number | null;
+  capacitySourceExternalRef?: string | null;
   capacityPoolCandidateId?: string | null;
   placementCredentialSource?: string | null;
   placementCredentialReference?: string | null;

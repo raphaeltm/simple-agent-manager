@@ -12,11 +12,12 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getCredentialEncryptionKey } from '../lib/secrets';
+import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import { CreateNodeSchema, jsonValidator } from '../schemas';
+import { resolveCanonicalVmAllocationPlan } from '../services/canonical-vm-allocation';
 import { collectEnvironmentRouteHostnames } from '../services/deployment-routing';
 import { cleanupAppRouteDNSRecords } from '../services/dns';
 import { signNodeManagementToken } from '../services/jwt';
@@ -252,22 +253,42 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     );
   }
 
-  // Enforce compute quota when platform credentials will be used
-  const { createProviderForUser } = await import('../services/provider-credentials');
-  const providerResult = await createProviderForUser(
-    db,
-    userId,
-    getCredentialEncryptionKey(c.env),
-    c.env,
-    provider ?? undefined
+  const providerInstanceType =
+    optionalTrimmedString(body.providerInstanceType) ?? optionalTrimmedString(body.nativeOffering);
+  const providerInstanceBootDiskSizeGb = optionalPositiveInteger(
+    body.bootDiskSizeGb,
+    'bootDiskSizeGb'
   );
-  if (!providerResult) {
-    throw errors.forbidden(
-      'Cloud provider credentials required. Connect your account in Settings.'
-    );
+  const providerInstanceImage = optionalTrimmedString(body.image) ?? null;
+  const providerInstanceArchitecture = body.architecture ?? null;
+  const allocation = await resolveCanonicalVmAllocationPlan(db, c.env, {
+    entryPoint: 'direct-node',
+    taskId: ulid(),
+    userId,
+    projectId: null,
+    explicit: {
+      vmSize: body.vmSize ?? DEFAULT_VM_SIZE,
+      provider: provider ?? null,
+      vmLocation,
+      native: {
+        providerInstanceType,
+        providerInstanceBootDiskSizeGb,
+        providerInstanceImage,
+        providerInstanceArchitecture,
+      },
+    },
+    credentialProjectPolicy: 'inherited-or-none',
+    taskModeDefault: 'task',
+    workloadRole: 'workspace',
+    credentialsRequiredMessage:
+      'Cloud provider credentials required. Connect your account in Settings.',
+  });
+  if ('error' in allocation) {
+    if (allocation.errorKind === 'credentials') throw errors.forbidden(allocation.error);
+    throw errors.badRequest(allocation.error);
   }
   if (
-    providerResult.credentialSource === 'platform' &&
+    allocation.quotaCredentialSource === 'platform' &&
     c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false'
   ) {
     const { checkQuotaForUser } = await import('../services/compute-quotas');
@@ -280,34 +301,21 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     }
   }
 
-  const providerInstanceType =
-    optionalTrimmedString(body.providerInstanceType) ?? optionalTrimmedString(body.nativeOffering);
   const created = await createNodeRecord(c.env, {
     userId,
-    credentialAttributionUserId: userId,
-    credentialAttributionSource: providerResult.credentialSource,
+    credentialAttributionUserId: allocation.credentialAttributionUserId,
+    credentialAttributionProjectId: allocation.credentialAttributionProjectId,
+    credentialAttributionSource: allocation.credentialAttributionSource,
     name: body.name.trim(),
-    vmSize: body.vmSize ?? DEFAULT_VM_SIZE,
-    vmLocation,
-    cloudProvider: providerResult.providerName,
-    providerInstanceType,
-    providerInstanceBootDiskSizeGb: optionalPositiveInteger(body.bootDiskSizeGb, 'bootDiskSizeGb'),
-    providerInstanceImage: optionalTrimmedString(body.image),
-    providerInstanceArchitecture: body.architecture ?? null,
+    vmSize: allocation.vmSize,
+    vmLocation: allocation.vmLocation,
+    cloudProvider: allocation.effectiveProvider,
+    providerInstanceType: allocation.providerInstanceType,
+    providerInstanceBootDiskSizeGb: allocation.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: allocation.providerInstanceImage,
+    providerInstanceArchitecture: allocation.providerInstanceArchitecture,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
-    capacityPlacementSnapshot: {
-      capacityPoolId: null,
-      capacityPoolScope: null,
-      capacityPoolRevision: null,
-      capacitySourceId: null,
-      capacityPoolCandidateId: null,
-      placementCredentialSource: providerResult.exactCredentialBinding?.credentialSource ?? null,
-      placementCredentialReference:
-        providerResult.exactCredentialBinding?.credentialReference ?? null,
-      placementCredentialVersion: providerResult.exactCredentialBinding?.credentialVersion ?? null,
-      capacityPoolProjectId: null,
-      workloadRole: 'workspace',
-    },
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
   });
 
   recordNodeRoutingMetric(

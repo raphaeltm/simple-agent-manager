@@ -95,7 +95,7 @@ function isSecretRef(val: EnvValue): val is { secret: string } {
 function resolveEnvValue(
   val: EnvValue,
   resolvedSecrets: Record<string, string>,
-  missingSecrets: Set<string>,
+  missingSecrets: Set<string>
 ): string | undefined {
   if (typeof val === 'string') {
     return val;
@@ -144,7 +144,7 @@ function buildService(
   name: string,
   svc: DeploymentManifest['services'][string],
   buildCtx: ServiceBuildContext,
-  missingSecrets: Set<string>,
+  missingSecrets: Set<string>
 ): Record<string, unknown> {
   const service: Record<string, unknown> = {};
 
@@ -181,14 +181,13 @@ function buildService(
 
   // Volumes — bind named volumes under the host volume root
   if (svc.volumes.length > 0) {
-    service.volumes = svc.volumes.map(
-      (v) => {
-        const source = buildCtx.volumeRoot === resolveVolumeMountRoot(buildCtx.environmentId)
+    service.volumes = svc.volumes.map((v) => {
+      const source =
+        buildCtx.volumeRoot === resolveVolumeMountRoot(buildCtx.environmentId)
           ? resolveNamedVolumeBindSource(buildCtx.environmentId, v.name)
           : `${buildCtx.volumeRoot}/${v.name}/${NAMED_VOLUME_BIND_DATA_DIR}`;
-        return `${source}:${v.mountPath}`;
-      },
-    );
+      return `${source}:${v.mountPath}`;
+    });
   }
 
   // Deploy: resource limits
@@ -238,7 +237,7 @@ function renderComposeInternal(
   manifest: DeploymentManifest,
   ctx: ComposeRenderContext,
   secretInterpolationNames?: Record<string, string>,
-  interpolationEnv?: Record<string, string>,
+  interpolationEnv?: Record<string, string>
 ): ComposeApplyRenderResult {
   const networkName = `sam-internal-${ctx.environmentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   const buildCtx: ServiceBuildContext = {
@@ -268,7 +267,7 @@ function renderComposeInternal(
     const names = Array.from(missingSecrets).sort((a, b) => a.localeCompare(b));
     throw new Error(
       `Missing secrets for render: ${names.join(', ')}. ` +
-      `Set these secrets on the environment before creating a release.`,
+        `Set these secrets on the environment before creating a release.`
     );
   }
 
@@ -307,7 +306,7 @@ function renderComposeInternal(
 
 export function renderComposeForApply(
   manifest: DeploymentManifest,
-  ctx: ComposeRenderContext & { baseInterpolationEnv?: Record<string, string> },
+  ctx: ComposeRenderContext & { baseInterpolationEnv?: Record<string, string> }
 ): ComposeApplyRenderResult {
   const secretNames = collectSecretNames(manifest);
   const secretInterpolationNames = buildLegacySecretInterpolationNames(secretNames);
@@ -332,7 +331,8 @@ function buildLegacySecretInterpolationNames(secretNames: string[]): Record<stri
   return result;
 }
 
-const INTERPOLATION_PATTERN = /(?<!\$)\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::[-?][^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))/g;
+const INTERPOLATION_PATTERN =
+  /(?<!\$)\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?::[-?][^}]*)?\}|([A-Za-z_][A-Za-z0-9_]*))/g;
 
 function collectInterpolationKeys(value: string): string[] {
   const keys = new Set<string>();

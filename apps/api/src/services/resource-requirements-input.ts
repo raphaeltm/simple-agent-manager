@@ -21,15 +21,16 @@ type StoredResourceLayerName = (typeof RESOURCE_LAYER_ORDER)[number];
 
 export const PERSISTED_TASK_RESOURCE_PLAN_VERSION = 1;
 
-const SOURCE_TO_RESOURCE_LAYER: Partial<Record<ResourceRequirementsSource, StoredResourceLayerName>> =
-  {
-    task: 'task',
-    trigger: 'trigger',
-    skill: 'skill',
-    'agent-profile': 'agentProfile',
-    project: 'project',
-    user: 'user',
-  };
+const SOURCE_TO_RESOURCE_LAYER: Partial<
+  Record<ResourceRequirementsSource, StoredResourceLayerName>
+> = {
+  task: 'task',
+  trigger: 'trigger',
+  skill: 'skill',
+  'agent-profile': 'agentProfile',
+  project: 'project',
+  user: 'user',
+};
 
 const RESOURCE_REQUIREMENTS_SOURCES = new Set<ResourceRequirementsSource>([
   'task',
@@ -102,12 +103,7 @@ export interface PersistedTaskResourcePlanReadResult {
   resolvedReservation: ResolvedResourceReservation | null;
   requestedVmSize: VMSize | null;
   requestedVmSizeSource: ResourceRequirementsSource | null;
-  source:
-    | 'plan-v1'
-    | 'reservation-provenance'
-    | 'legacy-source-json'
-    | 'legacy-vm-size'
-    | 'empty';
+  source: 'plan-v1' | 'reservation-provenance' | 'legacy-source-json' | 'legacy-vm-size' | 'empty';
 }
 
 export class ResourceRequirementsValidationError extends Error {
@@ -250,7 +246,10 @@ export function readPersistedTaskResourcePlan(
   const requestedVmSizeSource = parseResourceRequirementsSource(input.requestedVmSizeSource);
 
   if (input.resourceRequirementPlanJson) {
-    const parsed = parseStoredJson(input.resourceRequirementPlanJson, 'resourceRequirementPlanJson');
+    const parsed = parseStoredJson(
+      input.resourceRequirementPlanJson,
+      'resourceRequirementPlanJson'
+    );
     const plan = normalizePersistedTaskResourcePlan(parsed);
     return {
       layers: layersFromIntent(plan.intent),
@@ -323,7 +322,10 @@ export function normalizeResourceRequirementLayers(
   for (const layer of RESOURCE_LAYER_ORDER) {
     const requirements = layers[layer];
     if (requirements === undefined) continue;
-    normalized[layer] = normalizeResourceRequirementsInput(requirements, `${layer}.resourceRequirements`);
+    normalized[layer] = normalizeResourceRequirementsInput(
+      requirements,
+      `${layer}.resourceRequirements`
+    );
   }
   return normalized;
 }
@@ -354,7 +356,10 @@ function parseLegacyResourceRequirementsJson(
   ) {
     return undefined;
   }
-  return parseStoredResourceRequirementsJson(input.resourceRequirementsJson, 'resourceRequirementsJson');
+  return parseStoredResourceRequirementsJson(
+    input.resourceRequirementsJson,
+    'resourceRequirementsJson'
+  );
 }
 
 /**
@@ -383,7 +388,9 @@ function normalizePersistedTaskResourcePlan(value: unknown): PersistedTaskResour
   }
   const intentValue = value.intent;
   if (!isPlainObject(intentValue)) {
-    throw new ResourceRequirementsValidationError('resourceRequirementPlanJson.intent must be an object');
+    throw new ResourceRequirementsValidationError(
+      'resourceRequirementPlanJson.intent must be an object'
+    );
   }
   const reservation = normalizeResolvedReservation(
     value.resolvedReservation,
@@ -450,10 +457,7 @@ function normalizeResolvedReservation(
   return reservation;
 }
 
-function normalizeReservationDiagnostics(
-  value: unknown,
-  fieldName: string
-): string[] | undefined {
+function normalizeReservationDiagnostics(value: unknown, fieldName: string): string[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) {
     throw new ResourceRequirementsValidationError(`${fieldName}.diagnostics must be an array`);
@@ -494,9 +498,10 @@ function normalizeReservationFieldProvenance(
     const fieldProvenance: ResourceRequirementFieldProvenance = {
       source,
       sourceId: stringOrUndefined(raw.sourceId) ?? '',
-      value: field === 'exclusiveNode'
-        ? booleanField(raw.value, `${fieldName}.fieldProvenance.${field}.value`)
-        : numberField(raw.value, `${fieldName}.fieldProvenance.${field}.value`),
+      value:
+        field === 'exclusiveNode'
+          ? booleanField(raw.value, `${fieldName}.fieldProvenance.${field}.value`)
+          : numberField(raw.value, `${fieldName}.fieldProvenance.${field}.value`),
     };
     // The legacy vm-size adapter records which adapter/version translated which
     // legacy size into this field. Dropping it erased the audit trail on a
@@ -524,9 +529,7 @@ function normalizeReservationFieldCompatibility(
   }
   const adapter = stringOrNull(value.adapter);
   if (!adapter) {
-    throw new ResourceRequirementsValidationError(
-      `${fieldName}.compatibility.adapter is invalid`
-    );
+    throw new ResourceRequirementsValidationError(`${fieldName}.compatibility.adapter is invalid`);
   }
   const legacyVmSize = parseLegacyVmSize(stringOrNull(value.legacyVmSize));
   if (!legacyVmSize) {
@@ -565,10 +568,7 @@ function layersFromReservationProvenance(
     } else if (field === 'maxCoTenants') {
       nextLayer.maxCoTenants = fieldProvenance.value as number;
     }
-    layers[layer] = normalizeResourceRequirementsInput(
-      nextLayer,
-      `${layer}.resourceRequirements`
-    );
+    layers[layer] = normalizeResourceRequirementsInput(nextLayer, `${layer}.resourceRequirements`);
   }
 
   return layers;
@@ -577,9 +577,10 @@ function layersFromReservationProvenance(
 function intentFromLayers(
   layers: ResourceResolutionInput
 ): Record<StoredResourceLayerName, ResourceRequirements | null> {
-  const intent = Object.fromEntries(
-    RESOURCE_LAYER_ORDER.map((layer) => [layer, null])
-  ) as Record<StoredResourceLayerName, ResourceRequirements | null>;
+  const intent = Object.fromEntries(RESOURCE_LAYER_ORDER.map((layer) => [layer, null])) as Record<
+    StoredResourceLayerName,
+    ResourceRequirements | null
+  >;
   for (const layer of RESOURCE_LAYER_ORDER) {
     const requirements = layers[layer];
     if (requirements !== undefined) {
@@ -595,9 +596,10 @@ function intentFromLayers(
 function intentFromUnknown(
   value: Record<string, unknown>
 ): Record<StoredResourceLayerName, ResourceRequirements | null> {
-  const intent = Object.fromEntries(
-    RESOURCE_LAYER_ORDER.map((layer) => [layer, null])
-  ) as Record<StoredResourceLayerName, ResourceRequirements | null>;
+  const intent = Object.fromEntries(RESOURCE_LAYER_ORDER.map((layer) => [layer, null])) as Record<
+    StoredResourceLayerName,
+    ResourceRequirements | null
+  >;
   for (const layer of RESOURCE_LAYER_ORDER) {
     const requirements = value[layer];
     if (requirements === undefined || requirements === null) continue;

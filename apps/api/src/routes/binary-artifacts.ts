@@ -51,10 +51,7 @@ export function registerBinaryArtifactRoutes(
     }
 
     if (!c.env.R2) {
-      return c.json(
-        { error: 'NOT_CONFIGURED', message: options.notConfiguredMessage },
-        503
-      );
+      return c.json({ error: 'NOT_CONFIGURED', message: options.notConfiguredMessage }, 503);
     }
 
     const object = await c.env.R2.get(artifactKey(options.storagePrefix, binaryName));

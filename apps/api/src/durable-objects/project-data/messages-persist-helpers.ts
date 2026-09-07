@@ -80,9 +80,7 @@ export function resolveDuplicateMessage(
     id,
     now: createdAt,
     sequence,
-    workspaceId: wsRow
-      ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
-      : null,
+    workspaceId: wsRow ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace') : null,
     inserted: false,
     toolMetadata: typeof existing.tool_metadata === 'string' ? existing.tool_metadata : null,
   };

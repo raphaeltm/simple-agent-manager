@@ -111,7 +111,10 @@ function assertAllLiveResourcesAddressed(input: {
   currentResources: CurrentResource[];
 }): void {
   const unresolved = input.currentResources
-    .filter((resource) => !input.selectionsByKey.has(resourceKey(resource.resourceKind, resource.resourceId)))
+    .filter(
+      (resource) =>
+        !input.selectionsByKey.has(resourceKey(resource.resourceKind, resource.resourceId))
+    )
     .map((resource) => resourceKey(resource.resourceKind, resource.resourceId));
   if (unresolved.length > 0) {
     throw conflict(
@@ -514,7 +517,8 @@ async function applyDeploymentEnvironmentAction(input: {
     action: input.action,
     status: 'applied',
     blocksRemoval: true,
-    message: 'Deployment node teardown is blocked because departing member credentials are unavailable',
+    message:
+      'Deployment node teardown is blocked because departing member credentials are unavailable',
   });
 }
 
@@ -662,7 +666,9 @@ export async function applyProjectMemberOffboarding(input: {
       detailsJson: schema.projectMemberOffboardingResourceActions.detailsJson,
     })
     .from(schema.projectMemberOffboardingResourceActions)
-    .where(eq(schema.projectMemberOffboardingResourceActions.planId, input.planId))) as StoredAction[];
+    .where(
+      eq(schema.projectMemberOffboardingResourceActions.planId, input.planId)
+    )) as StoredAction[];
 
   const currentResources = (await enumerateOffboardingResources({
     db: input.db,

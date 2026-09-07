@@ -73,7 +73,11 @@ export function getPeriodLabel(period: GatewayPeriod): string {
   if (period === 'current-month') {
     return new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   }
-  const map: Record<string, string> = { '7d': 'Last 7 days', '30d': 'Last 30 days', '90d': 'Last 90 days' };
+  const map: Record<string, string> = {
+    '7d': 'Last 7 days',
+    '30d': 'Last 30 days',
+    '90d': 'Last 90 days',
+  };
   return map[period] ?? period;
 }
 
@@ -121,7 +125,9 @@ const gatewayLogsResponseSchema = v.object({
 type RawGatewayLogsResponse = v.InferOutput<typeof gatewayLogsResponseSchema>;
 type RawGatewayLogEntry = RawGatewayLogsResponse['result'][number];
 
-function normalizeGatewayMetadata(metadata: RawGatewayLogEntry['metadata']): Record<string, string> | null {
+function normalizeGatewayMetadata(
+  metadata: RawGatewayLogEntry['metadata']
+): Record<string, string> | null {
   if (!metadata) return null;
 
   const normalized: Record<string, string> = {};
@@ -142,8 +148,8 @@ function normalizeGatewayLogEntry(entry: RawGatewayLogEntry): AIGatewayLogEntry 
 
 function normalizeGatewayLogsResponse(resp: RawGatewayLogsResponse): AIGatewayLogsResponse {
   const perPage = Math.max(1, resp.result_info.per_page);
-  const totalPages = resp.result_info.total_pages
-    ?? Math.ceil(resp.result_info.total_count / perPage);
+  const totalPages =
+    resp.result_info.total_pages ?? Math.ceil(resp.result_info.total_count / perPage);
 
   return {
     ...resp,
@@ -165,13 +171,13 @@ export interface GatewayPaginationOptions {
 /** Resolve pageSize/maxPages from env with defaults and hard cap. */
 export function resolveGatewayPagination(
   env: Env,
-  options: GatewayPaginationOptions = {},
+  options: GatewayPaginationOptions = {}
 ): { pageSize: number; maxPages: number } {
   const pageSize = readBoundedPositiveInteger(
     env.AI_USAGE_PAGE_SIZE,
     DEFAULT_PAGE_SIZE,
     MIN_PAGE_SIZE,
-    MAX_PAGE_SIZE,
+    MAX_PAGE_SIZE
   );
   const defaultMaxPages = options.defaultMaxPages ?? DEFAULT_MAX_PAGES;
   const maxPagesHardCap = options.maxPagesHardCap ?? MAX_PAGES_HARD_CAP;
@@ -179,7 +185,7 @@ export function resolveGatewayPagination(
     options.maxPagesEnvValue ?? env.AI_USAGE_MAX_PAGES,
     defaultMaxPages,
     MIN_MAX_PAGES,
-    maxPagesHardCap,
+    maxPagesHardCap
   );
   return { pageSize, maxPages };
 }
@@ -188,7 +194,7 @@ function readBoundedPositiveInteger(
   raw: string | undefined,
   fallback: number,
   min: number,
-  max: number,
+  max: number
 ): number {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < min) {
@@ -209,7 +215,7 @@ function clampInteger(value: number, min: number, max: number): number {
 export async function fetchGatewayLogs(
   env: Env,
   gatewayId: string,
-  params: URLSearchParams,
+  params: URLSearchParams
 ): Promise<AIGatewayLogsResponse> {
   const accountId = env.CF_ACCOUNT_ID;
   if (!accountId) throw errors.internal('CF_ACCOUNT_ID is not configured');
@@ -246,7 +252,7 @@ export async function iterateGatewayLogs(
   gatewayId: string,
   startDate: string,
   visitor: (entry: AIGatewayLogEntry) => void,
-  options: GatewayPaginationOptions = {},
+  options: GatewayPaginationOptions = {}
 ): Promise<void> {
   const { pageSize, maxPages } = resolveGatewayPagination(env, options);
 
@@ -350,7 +356,10 @@ export function aggregateByModel(map: Map<string, UsageByModel>, entry: AIGatewa
 }
 
 /** Accumulate a gateway log entry into a by-provider map. */
-export function aggregateByProvider(map: Map<string, UsageByProvider>, entry: AIGatewayLogEntry): void {
+export function aggregateByProvider(
+  map: Map<string, UsageByProvider>,
+  entry: AIGatewayLogEntry
+): void {
   const provider = providerAttributionFromEntry(entry);
   const key = `${provider.providerId}:${provider.dialect}`;
   const tokensIn = entry.tokens_in || 0;
@@ -424,9 +433,11 @@ function nonEmpty(value: unknown): string | null {
 }
 
 function labelFromProviderId(providerId: string): string {
-  return providerId
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ') || 'Unknown';
+  return (
+    providerId
+      .split(/[-_]/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ') || 'Unknown'
+  );
 }

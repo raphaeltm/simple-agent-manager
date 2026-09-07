@@ -14,8 +14,7 @@ import type { AnthropicToolDef, ToolContext } from '../types';
 
 export const resumeMissionDef: AnthropicToolDef = {
   name: 'resume_mission',
-  description:
-    'Resume a paused mission. The orchestrator will begin dispatching new tasks again.',
+  description: 'Resume a paused mission. The orchestrator will begin dispatching new tasks again.',
   input_schema: {
     type: 'object',
     properties: {
@@ -30,7 +29,7 @@ export const resumeMissionDef: AnthropicToolDef = {
 
 export async function resumeMission(
   input: { missionId: string },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
   if (!input.missionId?.trim()) {
     return { error: 'missionId is required.' };
@@ -50,12 +49,7 @@ export async function resumeMission(
     })
     .from(schema.missions)
     .innerJoin(schema.projects, eq(schema.missions.projectId, schema.projects.id))
-    .where(
-      and(
-        eq(schema.missions.id, missionId),
-        eq(schema.projects.userId, ctx.userId),
-      ),
-    )
+    .where(and(eq(schema.missions.id, missionId), eq(schema.projects.userId, ctx.userId)))
     .limit(1);
 
   const mission = rows[0];

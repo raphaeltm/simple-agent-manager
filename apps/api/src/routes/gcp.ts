@@ -62,12 +62,14 @@ async function getStoredGcpCredential(env: Env, userId: string): Promise<GcpCred
   const [row] = await db
     .select({ encryptedToken: schema.credentials.encryptedToken, iv: schema.credentials.iv })
     .from(schema.credentials)
-    .where(and(
-      eq(schema.credentials.userId, userId),
-      eq(schema.credentials.provider, 'gcp'),
-      eq(schema.credentials.credentialType, 'cloud-provider'),
-      isNull(schema.credentials.projectId),
-    ))
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.provider, 'gcp'),
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+        isNull(schema.credentials.projectId)
+      )
+    )
     .limit(1);
   if (!row) return null;
   const decrypted = await decrypt(row.encryptedToken, row.iv, getCredentialEncryptionKey(env));
@@ -77,7 +79,7 @@ async function getStoredGcpCredential(env: Env, userId: string): Promise<GcpCred
 async function clearCredentialCache(
   env: Env,
   userId: string,
-  credential: GcpCredential,
+  credential: GcpCredential
 ): Promise<void> {
   try {
     await clearGcpAccessTokenCache(env, userId, credential);
@@ -120,10 +122,7 @@ gcpRoutes.put(
 
     let credential: GcpCredential;
     try {
-      credential = await parseGcpServiceAccountJson(
-        body.serviceAccountJson,
-        body.defaultZone,
-      );
+      credential = await parseGcpServiceAccountJson(body.serviceAccountJson, body.defaultZone);
     } catch (err) {
       throw errors.badRequest(err instanceof Error ? err.message : 'Invalid service-account JSON');
     }
@@ -143,7 +142,7 @@ gcpRoutes.put(
         userId,
         'service-account-setup',
         credential,
-        c.env,
+        c.env
       );
       await verifyGcpServiceAccountAccess(credential, accessToken, c.env);
     } catch (err) {
@@ -164,7 +163,7 @@ gcpRoutes.put(
         gcp: toGcpCredentialMetadata(credential),
       },
     });
-  },
+  }
 );
 
 /** Run the existing keyless WIF setup and store its metadata atomically. */
@@ -179,12 +178,7 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
   const previous = await getStoredGcpCredential(c.env, userId).catch(() => null);
   let credential: Awaited<ReturnType<typeof runGcpSetup>>;
   try {
-    credential = await runGcpSetup(
-      oauthToken,
-      body.gcpProjectId,
-      body.defaultZone,
-      c.env,
-    );
+    credential = await runGcpSetup(oauthToken, body.gcpProjectId, body.defaultZone, c.env);
   } catch (err) {
     throw toSanitizedAppError(err, 'gcp-setup');
   }
@@ -209,7 +203,8 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
         serviceAccountEmail: credential.serviceAccountEmail,
         defaultZone: credential.defaultZone,
       },
-      warning: 'Setup completed but OIDC verification failed. This may resolve after a few minutes of propagation.',
+      warning:
+        'Setup completed but OIDC verification failed. This may resolve after a few minutes of propagation.',
     });
   }
 
@@ -235,12 +230,7 @@ gcpRoutes.post('/verify', async (c) => {
 
   try {
     if (gcpCredential.authType === 'service-account-key') {
-      const token = await getGcpAccessToken(
-        userId,
-        'verification',
-        gcpCredential,
-        c.env,
-      );
+      const token = await getGcpAccessToken(userId, 'verification', gcpCredential, c.env);
       await verifyGcpServiceAccountAccess(gcpCredential, token, c.env);
     } else {
       await verifyGcpOidcSetup(userId, 'verification', gcpCredential, c.env);

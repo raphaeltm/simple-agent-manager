@@ -5,7 +5,7 @@
  * setup-session code goes through here rather than touching the DO namespace
  * directly, so the pool key and cap resolution live in one place.
  */
-import type { LeaseResult,SetupSessionPool } from '../durable-objects/setup-session-pool';
+import type { LeaseResult, SetupSessionPool } from '../durable-objects/setup-session-pool';
 import type { Env } from '../env';
 import { getMaxConcurrentSetupSessions, getPoolLeaseMaxAgeMs } from './credential-setup-config';
 
@@ -27,7 +27,10 @@ export async function leaseSetupSlot(env: Env, sessionId: string): Promise<Lease
 }
 
 /** Release a previously leased slot. Safe to call with a null/undefined lease. */
-export async function releaseSetupSlot(env: Env, leaseId: string | null | undefined): Promise<void> {
+export async function releaseSetupSlot(
+  env: Env,
+  leaseId: string | null | undefined
+): Promise<void> {
   if (!leaseId) return;
   await getStub(env).release(leaseId);
 }

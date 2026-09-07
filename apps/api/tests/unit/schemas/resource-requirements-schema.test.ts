@@ -22,11 +22,11 @@ describe('resource requirements request schemas', () => {
 
   it('keeps null semantics on profile, skill, and trigger adapters but rejects task nulls', () => {
     expect(
-      v.safeParse(CreateAgentProfileSchema, { name: 'profile', resourceRequirements: null })
-        .success
+      v.safeParse(CreateAgentProfileSchema, { name: 'profile', resourceRequirements: null }).success
     ).toBe(true);
-    expect(v.safeParse(CreateSkillSchema, { name: 'skill', resourceRequirements: null }).success)
-      .toBe(true);
+    expect(
+      v.safeParse(CreateSkillSchema, { name: 'skill', resourceRequirements: null }).success
+    ).toBe(true);
     expect(
       v.safeParse(CreateTriggerSchema, {
         name: 'Nightly',
@@ -49,9 +49,9 @@ describe('resource requirements request schemas', () => {
       { maxCoTenants: 1.5 },
       [],
     ]) {
-      expect(
-        v.safeParse(SubmitTaskSchema, { message: 'ship', resourceRequirements }).success
-      ).toBe(false);
+      expect(v.safeParse(SubmitTaskSchema, { message: 'ship', resourceRequirements }).success).toBe(
+        false
+      );
     }
   });
 });

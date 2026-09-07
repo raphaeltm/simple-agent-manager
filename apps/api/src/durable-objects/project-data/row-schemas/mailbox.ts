@@ -15,7 +15,6 @@ import { parseRow, safeParseJson } from './core';
 // Agent Mailbox row schemas (extended from session_inbox via migration 017)
 // =============================================================================
 
-
 /** Full mailbox message row — includes all columns from migration 015 + 017 */
 const MailboxMessageRowSchema = v.object({
   id: v.string(),
@@ -66,7 +65,9 @@ export function parseMailboxMessageRow(row: unknown): AgentMailboxMessage {
     messageClass: r.message_class,
     deliveryState: r.delivery_state,
     content: r.content,
-    metadata: r.metadata ? expectJsonRecord(safeParseJson(r.metadata), 'mailbox_message.metadata') : null,
+    metadata: r.metadata
+      ? expectJsonRecord(safeParseJson(r.metadata), 'mailbox_message.metadata')
+      : null,
     ackRequired: r.ack_required === 1,
     ackTimeoutMs: r.ack_timeout_ms,
     deliveryAttempts: r.delivery_attempts,

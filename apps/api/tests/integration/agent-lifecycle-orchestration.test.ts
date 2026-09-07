@@ -71,7 +71,10 @@ function createSqlStorage(db: Database.Database): SqlStorage {
   return {
     exec(query: string, ...params: unknown[]) {
       const trimmed = query.trim().toUpperCase();
-      const isSelect = trimmed.startsWith('SELECT') || trimmed.startsWith('WITH') || trimmed.startsWith('PRAGMA TABLE_INFO');
+      const isSelect =
+        trimmed.startsWith('SELECT') ||
+        trimmed.startsWith('WITH') ||
+        trimmed.startsWith('PRAGMA TABLE_INFO');
 
       if (isSelect) {
         const rows = params.length > 0 ? db.prepare(query).all(...params) : db.prepare(query).all();

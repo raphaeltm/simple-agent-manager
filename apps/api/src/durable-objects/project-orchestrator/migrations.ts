@@ -60,7 +60,11 @@ export function runOrchestratorMigrations(sql: SqlStorage): void {
     const applied = sql.exec('SELECT 1 FROM _migrations WHERE name = ?', migration.name).toArray();
     if (applied.length === 0) {
       sql.exec(migration.sql);
-      sql.exec('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)', migration.name, Date.now());
+      sql.exec(
+        'INSERT INTO _migrations (name, applied_at) VALUES (?, ?)',
+        migration.name,
+        Date.now()
+      );
     }
   }
 }

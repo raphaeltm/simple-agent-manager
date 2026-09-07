@@ -131,6 +131,8 @@ async function recoverWorkspaceFromD1(
        capacity_pool_scope AS capacityPoolScope,
        capacity_pool_revision AS capacityPoolRevision,
        capacity_source_id AS capacitySourceId,
+       capacity_source_generation AS capacitySourceGeneration,
+       capacity_source_external_ref AS capacitySourceExternalRef,
        capacity_pool_candidate_id AS capacityPoolCandidateId,
        placement_credential_source AS placementCredentialSource,
        placement_credential_reference AS placementCredentialReference,
@@ -229,6 +231,9 @@ async function createAndProvisionWorkspace(
       workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
       devcontainerConfigName: state.config.devcontainerConfigName ?? null,
       agentProfileHint: state.config.agentProfileHint ?? null,
+      resourceRequirementsJson: state.config.resourceRequirements
+        ? JSON.stringify(state.config.resourceRequirements)
+        : null,
       capacityPlacementSnapshot: state.stepResults.capacityPlacementSnapshot ?? null,
       resolvedReservation,
       createdAt: now,

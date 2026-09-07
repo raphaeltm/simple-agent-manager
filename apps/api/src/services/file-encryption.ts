@@ -36,7 +36,11 @@ function base64ToBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-async function importKey(keyBase64: string, usages: string[], extractable = false): Promise<CryptoKey> {
+async function importKey(
+  keyBase64: string,
+  usages: string[],
+  extractable = false
+): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     'raw',
     base64ToBuffer(keyBase64),
@@ -86,21 +90,13 @@ export async function encryptFile(
 
   // 2. Encrypt file data with DEK
   const dataIv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: dataIv },
-    dek,
-    data
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: dataIv }, dek, data);
 
   // 3. Export DEK raw bytes, then wrap with KEK
   const dekRaw = (await crypto.subtle.exportKey('raw', dek)) as ArrayBuffer;
   const dekIv = crypto.getRandomValues(new Uint8Array(12));
   const kek = await importKek(kekBase64, ['encrypt']);
-  const wrappedDek = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: dekIv },
-    kek,
-    dekRaw
-  );
+  const wrappedDek = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: dekIv }, kek, dekRaw);
 
   return {
     ciphertext,
@@ -170,9 +166,7 @@ export function metadataToR2CustomMetadata(
 /**
  * Deserialize R2 custom metadata back to encryption metadata.
  */
-export function r2CustomMetadataToMetadata(
-  custom: Record<string, string>
-): FileEncryptionMetadata {
+export function r2CustomMetadataToMetadata(custom: Record<string, string>): FileEncryptionMetadata {
   const wrappedDek = custom['x-enc-wrapped-dek'];
   const dekIv = custom['x-enc-dek-iv'];
   const dataIv = custom['x-enc-data-iv'];

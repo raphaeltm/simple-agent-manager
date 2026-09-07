@@ -5,7 +5,7 @@ import { POLICY_CATEGORIES, POLICY_SCOPES, POLICY_SOURCES } from '@simple-agent-
 
 const SCOPE_DESCRIPTION =
   "How long this policy applies. 'always' (default) is a standing project policy injected into every future session. " +
-  "'task' is a one-shot policy captured for a specific piece of work (\"use profile X for the 2026-08-21 reliability wave\") " +
+  '\'task\' is a one-shot policy captured for a specific piece of work ("use profile X for the 2026-08-21 reliability wave") ' +
   'and REQUIRES expiresAt, so it cannot outlive the work it was captured for.';
 
 const EXPIRES_AT_DESCRIPTION =
@@ -26,17 +26,29 @@ export const POLICY_TOOLS = [
       properties: {
         category: {
           type: 'string',
-          description: 'Policy category: rule (must follow), constraint (technical limitation), delegation (agent autonomy), preference (soft guidance)',
+          description:
+            'Policy category: rule (must follow), constraint (technical limitation), delegation (agent autonomy), preference (soft guidance)',
           enum: [...POLICY_CATEGORIES],
         },
-        title: { type: 'string', description: 'Short title summarizing the policy (max 200 chars)' },
-        content: { type: 'string', description: 'Full policy content with details and rationale (max 2000 chars)' },
+        title: {
+          type: 'string',
+          description: 'Short title summarizing the policy (max 200 chars)',
+        },
+        content: {
+          type: 'string',
+          description: 'Full policy content with details and rationale (max 2000 chars)',
+        },
         source: {
           type: 'string',
-          description: 'How this policy was created: explicit (human stated it) or inferred (agent deduced from behavior)',
+          description:
+            'How this policy was created: explicit (human stated it) or inferred (agent deduced from behavior)',
           enum: [...POLICY_SOURCES],
         },
-        confidence: { type: 'number', description: 'Confidence level 0.0-1.0 (default: 0.8). Use 0.9+ for explicit human statements.' },
+        confidence: {
+          type: 'number',
+          description:
+            'Confidence level 0.0-1.0 (default: 0.8). Use 0.9+ for explicit human statements.',
+        },
         scope: { type: 'string', description: SCOPE_DESCRIPTION, enum: [...POLICY_SCOPES] },
         expiresAt: { type: 'number', description: EXPIRES_AT_DESCRIPTION },
       },
@@ -55,7 +67,10 @@ export const POLICY_TOOLS = [
           description: 'Optional filter by category: rule, constraint, delegation, preference',
           enum: [...POLICY_CATEGORIES],
         },
-        includeInactive: { type: 'boolean', description: 'Include deactivated policies (default: false)' },
+        includeInactive: {
+          type: 'boolean',
+          description: 'Include deactivated policies (default: false)',
+        },
         limit: { type: 'number', description: 'Max results to return (default: 50)' },
         offset: { type: 'number', description: 'Pagination offset (default: 0)' },
       },
@@ -104,7 +119,8 @@ export const POLICY_TOOLS = [
   },
   {
     name: 'remove_policy',
-    description: 'Deactivate a project policy (soft-delete). The policy remains in history but no longer applies to agents.',
+    description:
+      'Deactivate a project policy (soft-delete). The policy remains in history but no longer applies to agents.',
     inputSchema: {
       type: 'object' as const,
       properties: {

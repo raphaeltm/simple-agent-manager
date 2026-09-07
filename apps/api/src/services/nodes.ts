@@ -2,6 +2,7 @@ import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/
 import {
   isTransientCapacityError,
   type NativeVMConfig,
+  type Provider,
   ProviderError,
   type ProviderRequestContext,
   rethrowIfProviderRequestAborted,
@@ -9,6 +10,7 @@ import {
 } from '@simple-agent-manager/providers';
 import {
   type CapacityPlacementSnapshot,
+  type CapacityWorkloadRole,
   type CredentialProvider,
   type CredentialSource,
   DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH,
@@ -34,6 +36,10 @@ import {
 } from './node-provider-labels';
 import { persistError } from './observability';
 import {
+  buildPlacementAuthoritySqlPredicate,
+  PROVIDER_ALLOCATION_ACTIVE_STATUS_SQL,
+} from './placement-authority';
+import {
   createProviderForUser,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
@@ -49,28 +55,41 @@ import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-ca
 
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
 
+type ProvisionNodeRow = typeof schema.nodes.$inferSelect;
+
 type NodeAllocationPlanGuardRow = {
   id: string;
   user_id: string;
   status: string;
+  runtime: string | null;
+  node_class: string | null;
+  node_role: string | null;
+  workload_role: string | null;
+  cloud_provider: string | null;
+  vm_location: string | null;
   capacity_pool_id: string | null;
   capacity_pool_scope: string | null;
   capacity_pool_revision: number | null;
   capacity_source_id: string | null;
+  capacity_source_generation: number | null;
+  capacity_source_external_ref: string | null;
   capacity_pool_candidate_id: string | null;
   capacity_pool_project_id: string | null;
+  placement_credential_source: string | null;
   placement_credential_reference: string | null;
   placement_credential_version: number | null;
   provider_instance_type: string | null;
-  pool_status: string | null;
-  pool_revision: number | null;
-  pool_configuration_state: string | null;
-  source_status: string | null;
-  source_credential_reference: string | null;
-  source_credential_version: number | null;
-  candidate_status: string | null;
-  candidate_catalog_availability: string | null;
-  candidate_provider_instance_type: string | null;
+  provider_instance_vcpu_count: number | null;
+  provider_instance_memory_mb: number | null;
+  provider_instance_disk_gb: number | null;
+  provider_instance_boot_disk_size_gb: number | null;
+  provider_instance_image: string | null;
+  provider_instance_architecture: string | null;
+  provider_instance_price_display: string | null;
+  provider_instance_price_currency: string | null;
+  provider_instance_price_monthly_cents: number | null;
+  provider_instance_price_hourly_micros: number | null;
+  placement_explanation_json: string | null;
 };
 
 function managedNodeStopDiagnostic(env: Env): string {
@@ -88,40 +107,62 @@ function managedNodeStopDiagnostic(env: Env): string {
   );
 }
 
+/**
+ * Role the caller intends to place. The node row cannot supply this: deriving the
+ * expected role from the same row being validated makes the check self-consistent,
+ * so a row whose `workload_role` drifted to another role would validate against
+ * itself instead of being rejected.
+ */
+export interface NodeAllocationPlanRole {
+  nodeRole: 'workspace' | 'deployment';
+  workloadRole: CapacityWorkloadRole;
+}
+
 export async function assertNodeAllocationPlanCurrent(
   env: Env,
   nodeId: string,
   userId: string,
-  projectId: string | null
+  projectId: string | null,
+  expectedRole: NodeAllocationPlanRole = { nodeRole: 'workspace', workloadRole: 'workspace' }
 ): Promise<void> {
-  if (typeof env.DATABASE.prepare !== 'function') return;
+  if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
+    throw new Error('Node allocation authority database is unavailable');
+  }
   const row = await env.DATABASE.prepare(
     `SELECT
        n.id,
        n.user_id,
        n.status,
+       n.runtime,
+       n.node_class,
+       n.node_role,
+       n.workload_role,
+       n.cloud_provider,
+       n.vm_location,
        n.capacity_pool_id,
        n.capacity_pool_scope,
        n.capacity_pool_revision,
        n.capacity_source_id,
+       n.capacity_source_generation,
+       n.capacity_source_external_ref,
        n.capacity_pool_candidate_id,
        n.capacity_pool_project_id,
+       n.placement_credential_source,
        n.placement_credential_reference,
        n.placement_credential_version,
        n.provider_instance_type,
-       p.status AS pool_status,
-       p.revision AS pool_revision,
-       p.configuration_state AS pool_configuration_state,
-       s.status AS source_status,
-       s.credential_reference AS source_credential_reference,
-       s.credential_version AS source_credential_version,
-       c.status AS candidate_status,
-       c.catalog_availability AS candidate_catalog_availability,
-       c.provider_instance_type AS candidate_provider_instance_type
+       n.provider_instance_vcpu_count,
+       n.provider_instance_memory_mb,
+       n.provider_instance_disk_gb,
+       n.provider_instance_boot_disk_size_gb,
+       n.provider_instance_image,
+       n.provider_instance_architecture,
+       n.provider_instance_price_display,
+       n.provider_instance_price_currency,
+       n.provider_instance_price_monthly_cents,
+       n.provider_instance_price_hourly_micros,
+       n.placement_explanation_json
      FROM nodes n
-     LEFT JOIN capacity_pools p ON p.id = n.capacity_pool_id
-     LEFT JOIN capacity_sources s ON s.id = n.capacity_source_id
-     LEFT JOIN capacity_pool_candidates c ON c.id = n.capacity_pool_candidate_id
      WHERE n.id = ?`
   )
     .bind(nodeId)
@@ -133,54 +174,63 @@ export async function assertNodeAllocationPlanCurrent(
   if (row.user_id !== userId) {
     throw new Error('Node allocation user changed before provider allocation');
   }
-  if (row.status === 'deleted' || row.status === 'stopped') {
-    throw new Error('Node allocation lifecycle is no longer active');
-  }
-  if (!row.capacity_pool_id) return;
-
-  if (!row.pool_status) {
-    throw new Error('Selected capacity pool no longer exists');
-  }
-  if (row.pool_status !== 'active' || row.pool_configuration_state !== 'configured-ready') {
-    throw new Error(
-      `Selected capacity pool is not currently usable (${row.pool_configuration_state ?? row.pool_status})`
-    );
-  }
-  if (row.capacity_pool_revision !== row.pool_revision) {
-    throw new Error('Selected capacity pool changed after placement was planned');
-  }
-  if (row.capacity_pool_scope === 'project' && row.capacity_pool_project_id !== projectId) {
-    throw new Error('Selected project capacity pool no longer matches this allocation');
-  }
-  if (!row.source_status || row.source_status !== 'active') {
-    throw new Error('Selected capacity source is not currently active');
-  }
-  if (!row.candidate_status || row.candidate_status !== 'active') {
-    throw new Error('Selected capacity candidate is not currently active');
-  }
-  if (row.candidate_catalog_availability === 'last-known-unavailable') {
-    throw new Error('Selected capacity candidate is no longer available in the provider catalog');
-  }
-  if (
-    row.provider_instance_type &&
-    row.candidate_provider_instance_type &&
-    row.provider_instance_type !== row.candidate_provider_instance_type
-  ) {
-    throw new Error('Selected capacity candidate no longer matches the planned native offering');
-  }
-  if (
-    row.placement_credential_reference &&
-    row.source_credential_reference &&
-    row.placement_credential_reference !== row.source_credential_reference
-  ) {
-    throw new Error('Selected capacity source credential reference changed after placement');
-  }
-  if (
-    row.placement_credential_version !== null &&
-    row.source_credential_version !== null &&
-    row.placement_credential_version !== row.source_credential_version
-  ) {
-    throw new Error('Selected capacity source credential generation changed after placement');
+  const { nodeRole, workloadRole } = expectedRole;
+  const predicate = buildPlacementAuthoritySqlPredicate({
+    userId,
+    projectId,
+    nodeRole,
+    workloadRole,
+    capacityPlacementSnapshot: {
+      capacityPoolId: row.capacity_pool_id,
+      capacityPoolScope:
+        row.capacity_pool_scope === 'installation' ||
+        row.capacity_pool_scope === 'user' ||
+        row.capacity_pool_scope === 'project'
+          ? row.capacity_pool_scope
+          : null,
+      capacityPoolRevision: row.capacity_pool_revision,
+      capacitySourceId: row.capacity_source_id,
+      capacitySourceGeneration: row.capacity_source_generation,
+      capacitySourceExternalRef: row.capacity_source_external_ref,
+      capacityPoolCandidateId: row.capacity_pool_candidate_id,
+      placementCredentialSource:
+        row.placement_credential_source === 'user' ||
+        row.placement_credential_source === 'project' ||
+        row.placement_credential_source === 'platform'
+          ? row.placement_credential_source
+          : null,
+      placementCredentialReference: row.placement_credential_reference,
+      placementCredentialVersion: row.placement_credential_version,
+      capacityPoolProjectId: row.capacity_pool_project_id,
+      workloadRole,
+      providerInstanceType: row.provider_instance_type,
+      providerInstanceVcpuCount: row.provider_instance_vcpu_count,
+      providerInstanceMemoryMb: row.provider_instance_memory_mb,
+      providerInstanceDiskGb: row.provider_instance_disk_gb,
+      providerInstanceBootDiskSizeGb: row.provider_instance_boot_disk_size_gb,
+      providerInstanceImage: row.provider_instance_image,
+      providerInstanceArchitecture: row.provider_instance_architecture,
+      providerInstancePriceDisplay: row.provider_instance_price_display,
+      providerInstancePriceCurrency: row.provider_instance_price_currency,
+      providerInstancePriceMonthlyCents: row.provider_instance_price_monthly_cents,
+      providerInstancePriceHourlyMicros: row.provider_instance_price_hourly_micros,
+      placementExplanationJson: row.placement_explanation_json,
+    },
+    requireProjectMembership: projectId !== null,
+  });
+  const current = await env.DATABASE.prepare(
+    `SELECT 1 AS ok
+     FROM nodes n
+     WHERE n.id = ?
+       AND n.user_id = ?
+       AND n.status IN (${PROVIDER_ALLOCATION_ACTIVE_STATUS_SQL})
+       ${predicate.sql}
+     LIMIT 1`
+  )
+    .bind(nodeId, userId, ...predicate.binds)
+    .first<{ ok: number }>();
+  if (!current) {
+    throw new Error('Node allocation plan is no longer current');
   }
 }
 
@@ -327,6 +377,7 @@ export interface ProvisionTaskContext {
 /** Deployment node context for cloud-init (sets role=deployment + environmentId). */
 export interface DeploymentProvisionContext {
   environmentId: string;
+  projectId?: string | null;
 }
 
 export interface ProvisionNodeOptions {
@@ -347,6 +398,114 @@ export interface ProvisionNodeOptions {
   signal?: AbortSignal;
   /** Fail-closed recovery-authority check at the provider allocation boundary. */
   assertExternalMutationAuthority?: () => Promise<void>;
+  /** Project context used for placement-authority checks when no taskContext exists. */
+  authorityProjectId?: string | null;
+}
+
+function provisionAuthorityProjectId(
+  taskContext: ProvisionTaskContext | undefined,
+  options: ProvisionNodeOptions | undefined,
+  deploymentContext: DeploymentProvisionContext | undefined
+): string | null {
+  return (
+    taskContext?.projectId ?? options?.authorityProjectId ?? deploymentContext?.projectId ?? null
+  );
+}
+
+function creatingProvisioningPredicate(
+  node: ProvisionNodeRow,
+  runtimeIncarnationId: string | null,
+  providerInstanceId: string | null = node.providerInstanceId
+) {
+  return and(
+    eq(schema.nodes.id, node.id),
+    eq(schema.nodes.userId, node.userId),
+    eq(schema.nodes.status, 'creating'),
+    eq(schema.nodes.runtime, 'vm'),
+    eq(schema.nodes.nodeClass, 'managed'),
+    sql`${schema.nodes.providerInstanceId} IS ${providerInstanceId}`,
+    sql`${schema.nodes.runtimeIncarnationId} IS ${runtimeIncarnationId}`
+  );
+}
+
+function providerIdentityRecordPredicate(
+  node: ProvisionNodeRow,
+  runtimeIncarnationId: string | null
+) {
+  return and(
+    eq(schema.nodes.id, node.id),
+    eq(schema.nodes.userId, node.userId),
+    eq(schema.nodes.runtime, 'vm'),
+    eq(schema.nodes.nodeClass, 'managed'),
+    sql`${schema.nodes.runtimeIncarnationId} IS ${runtimeIncarnationId}`,
+    sql`${schema.nodes.status} NOT IN ('deleted', 'stopped')`
+  );
+}
+
+function d1WriteChanged(result: { meta?: { changes?: number | null } } | undefined): boolean {
+  return (result?.meta?.changes ?? 0) === 1;
+}
+
+async function deleteCreatedProviderVmDirectly(input: {
+  provider: Pick<Provider, 'deleteVM'>;
+  providerInstanceId: string;
+  nodeId: string;
+}): Promise<void> {
+  try {
+    await input.provider.deleteVM(input.providerInstanceId);
+  } catch (err) {
+    log.error('node_provisioning.created_vm_direct_cleanup_failed', {
+      nodeId: input.nodeId,
+      providerInstanceId: input.providerInstanceId,
+      ...serializeError(err),
+    });
+  }
+}
+
+async function cleanupCreatedVmAfterProvisioningRace(input: {
+  node: ProvisionNodeRow;
+  env: Env;
+  provider: Pick<Provider, 'deleteVM'>;
+  providerInstanceId: string;
+  runtimeIncarnationId: string | null;
+  backendDnsRecordId?: string | null;
+}): Promise<void> {
+  if (input.backendDnsRecordId) {
+    try {
+      await deleteDNSRecord(input.backendDnsRecordId, input.env);
+    } catch (dnsErr) {
+      log.error('node_provisioning.created_vm_dns_cleanup_failed', {
+        nodeId: input.node.id,
+        backendDnsRecordId: input.backendDnsRecordId,
+        ...serializeError(dnsErr),
+      });
+    }
+  }
+
+  try {
+    await deleteNodeResourcesStrict(input.node.id, input.node.userId, input.env, {
+      cleanupDns: false,
+      expectedRuntime: {
+        userId: input.node.userId,
+        runtime: input.node.runtime,
+        providerInstanceId: input.providerInstanceId,
+        runtimeIncarnationId: input.runtimeIncarnationId,
+      },
+    });
+    return;
+  } catch (strictErr) {
+    log.error('node_provisioning.created_vm_strict_cleanup_failed', {
+      nodeId: input.node.id,
+      providerInstanceId: input.providerInstanceId,
+      ...serializeError(strictErr),
+    });
+  }
+
+  await deleteCreatedProviderVmDirectly({
+    provider: input.provider,
+    providerInstanceId: input.providerInstanceId,
+    nodeId: input.node.id,
+  });
 }
 
 export async function provisionNode(
@@ -371,19 +530,27 @@ export async function provisionNode(
 
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
   let attemptedProvider = targetProvider;
+  let provisioningRuntimeIncarnationId = node.runtimeIncarnationId;
   const attributionUserId = node.credentialAttributionUserId ?? node.userId;
   const attributionProjectId =
     node.credentialAttributionSource === 'project'
       ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
       : null;
   const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
+  const authorityProjectId = provisionAuthorityProjectId(taskContext, options, deploymentContext);
+  // Caller intent, not the node row: a deployment provision supplies a deployment
+  // context, everything else is placing a workspace node.
+  const authorityRole: NodeAllocationPlanRole = deploymentContext
+    ? { nodeRole: 'deployment', workloadRole: 'deployment' }
+    : { nodeRole: 'workspace', workloadRole: 'workspace' };
 
   try {
     await assertNodeAllocationPlanCurrent(
       env,
       node.id,
       node.userId,
-      taskContext?.projectId ?? null
+      authorityProjectId,
+      authorityRole
     );
     const providerResult = await createProviderForUser(
       db,
@@ -407,8 +574,8 @@ export async function provisionNode(
 
     // Persist the resolved provider identity before external provisioning so
     // cleanup never has to guess which third-party API owns the VM.
-    const runtimeIncarnationId = crypto.randomUUID();
-    await db
+    provisioningRuntimeIncarnationId = crypto.randomUUID();
+    const providerIdentityClaim = await db
       .update(schema.nodes)
       .set({
         cloudProvider: providerResult.providerName,
@@ -428,11 +595,15 @@ export async function provisionNode(
         placementCredentialFingerprint:
           providerResult.exactCredentialBinding?.credentialFingerprint ??
           node.placementCredentialFingerprint,
-        runtimeIncarnationId,
+        runtimeIncarnationId: provisioningRuntimeIncarnationId,
         runtimeTerminationConfirmedAt: null,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(schema.nodes.id, node.id));
+      .where(creatingProvisioningPredicate(node, node.runtimeIncarnationId))
+      .run();
+    if (!d1WriteChanged(providerIdentityClaim)) {
+      throw new Error('Node lifecycle changed before provider allocation could be claimed');
+    }
 
     const callbackToken = await signNodeCallbackToken(node.id, env);
 
@@ -518,7 +689,8 @@ export async function provisionNode(
       env,
       node.id,
       node.userId,
-      taskContext?.projectId ?? null
+      authorityProjectId,
+      authorityRole
     );
     await options?.assertExternalMutationAuthority?.();
     const vmConfig = applyNativePlanToVmConfig(
@@ -545,23 +717,34 @@ export async function provisionNode(
 
     // Persist the provider identity before the post-request authority check so
     // a revocation that races createVM can strictly destroy the paid resource.
-    await db
+    const providerIdentityRecord = await db
       .update(schema.nodes)
       .set({
         providerInstanceId: vm.id,
         ...observedHardwareDbValues(vm),
         ipAddress: vm.ip || null,
         runtimeTerminationConfirmedAt: null,
-        status: 'creating',
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(schema.nodes.id, node.id));
+      .where(providerIdentityRecordPredicate(node, provisioningRuntimeIncarnationId))
+      .run();
+    if (!d1WriteChanged(providerIdentityRecord)) {
+      await cleanupCreatedVmAfterProvisioningRace({
+        node,
+        env,
+        provider,
+        providerInstanceId: vm.id,
+        runtimeIncarnationId: provisioningRuntimeIncarnationId,
+      });
+      throw new Error('Node lifecycle changed before provider identity could be recorded');
+    }
     try {
       await assertNodeAllocationPlanCurrent(
         env,
         node.id,
         node.userId,
-        taskContext?.projectId ?? null
+        authorityProjectId,
+        authorityRole
       );
       await options?.assertExternalMutationAuthority?.();
     } catch (authorityErr) {
@@ -577,7 +760,7 @@ export async function provisionNode(
             userId: node.userId,
             runtime: node.runtime,
             providerInstanceId: vm.id,
-            runtimeIncarnationId,
+            runtimeIncarnationId: provisioningRuntimeIncarnationId,
           },
         });
       } catch (cleanupErr) {
@@ -585,6 +768,11 @@ export async function provisionNode(
           nodeId: node.id,
           providerInstanceId: vm.id,
           ...serializeError(cleanupErr),
+        });
+        await deleteCreatedProviderVmDirectly({
+          provider,
+          providerInstanceId: vm.id,
+          nodeId: node.id,
         });
       }
       throw authorityErr;
@@ -598,7 +786,7 @@ export async function provisionNode(
         nodeId: node.id,
         providerInstanceId: vm.id,
       });
-      await db
+      const awaitingIpUpdate = await db
         .update(schema.nodes)
         .set({
           cloudProvider: providerResult.providerName,
@@ -614,7 +802,18 @@ export async function provisionNode(
           errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
           updatedAt: new Date().toISOString(),
         })
-        .where(eq(schema.nodes.id, node.id));
+        .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId, vm.id))
+        .run();
+      if (!d1WriteChanged(awaitingIpUpdate)) {
+        await cleanupCreatedVmAfterProvisioningRace({
+          node,
+          env,
+          provider,
+          providerInstanceId: vm.id,
+          runtimeIncarnationId: provisioningRuntimeIncarnationId,
+        });
+        throw new Error('Node lifecycle changed before pending-IP state could be published');
+      }
       throwIfProviderRequestAborted(providerContext);
       return;
     }
@@ -633,7 +832,7 @@ export async function provisionNode(
     }
 
     throwIfProviderRequestAborted(providerContext);
-    await db
+    const finalUpdate = await db
       .update(schema.nodes)
       .set({
         cloudProvider: providerResult.providerName,
@@ -654,7 +853,19 @@ export async function provisionNode(
           : null,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(schema.nodes.id, node.id));
+      .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId, vm.id))
+      .run();
+    if (!d1WriteChanged(finalUpdate)) {
+      await cleanupCreatedVmAfterProvisioningRace({
+        node,
+        env,
+        provider,
+        providerInstanceId: vm.id,
+        runtimeIncarnationId: provisioningRuntimeIncarnationId,
+        backendDnsRecordId,
+      });
+      throw new Error('Node lifecycle changed before running state could be published');
+    }
     throwIfProviderRequestAborted(providerContext);
   } catch (err) {
     rethrowIfProviderRequestAborted(err, providerContext);
@@ -710,7 +921,10 @@ export async function provisionNode(
     // size attempts leave no orphaned `error` rows (decision #1).
     if (options?.rethrowProviderError) {
       if (isCapacityFailure) {
-        await db.delete(schema.nodes).where(eq(schema.nodes.id, node.id));
+        await db
+          .delete(schema.nodes)
+          .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
+          .run();
       } else {
         const truncatedError = truncateNodeErrorMessage(errorMessage);
         await db
@@ -721,7 +935,8 @@ export async function provisionNode(
             errorMessage: `[${providerName}] ${truncatedError}`,
             updatedAt: new Date().toISOString(),
           })
-          .where(eq(schema.nodes.id, node.id));
+          .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
+          .run();
       }
       throw err;
     }
@@ -736,7 +951,8 @@ export async function provisionNode(
         errorMessage: `[${providerName}] ${truncatedError}`,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(schema.nodes.id, node.id));
+      .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
+      .run();
   }
 }
 

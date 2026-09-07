@@ -4,7 +4,7 @@
  * Verifies that broadcastEvent filters messages to session-subscribed sockets
  * and project-wide (untagged) sockets correctly.
  */
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock drizzle-orm to provide sql template tag (needed by observability-schema.ts)
 vi.mock('drizzle-orm', () => ({
@@ -147,7 +147,9 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
         // Expected in Node.js — status 101 not supported
       }
 
-      expect(freshCtx.acceptWebSocket).toHaveBeenCalledWith(serverWs, ['session:a1b2c3d4-e5f6-7890-abcd-ef1234567890']);
+      expect(freshCtx.acceptWebSocket).toHaveBeenCalledWith(serverWs, [
+        'session:a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+      ]);
     });
 
     it('accepts WebSocket without tags when no sessionId param', async () => {
@@ -202,7 +204,9 @@ describe('ProjectData DO — session-scoped broadcasting', () => {
         if (query.includes('SELECT chat_session_id FROM acp_sessions')) {
           return {
             toArray: () => [{ chat_session_id: chatSessionId }],
-            columnNames: [], rowsRead: 1, rowsWritten: 0,
+            columnNames: [],
+            rowsRead: 1,
+            rowsWritten: 0,
           };
         }
         if (query.includes('INSERT INTO session_state')) {

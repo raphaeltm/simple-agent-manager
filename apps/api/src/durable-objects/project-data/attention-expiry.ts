@@ -4,10 +4,7 @@ import { transitionTaskToTerminal } from '../../services/task-terminal-transitio
 import type { NotificationService } from '../notification';
 import * as activity from './activity';
 import * as attention from './attention';
-import {
-  activeWorkHardStallMs,
-  reconciliationDeadlineMs,
-} from './reconciliation-thresholds';
+import { activeWorkHardStallMs, reconciliationDeadlineMs } from './reconciliation-thresholds';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.attention_expiry');

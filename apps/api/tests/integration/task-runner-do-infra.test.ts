@@ -9,18 +9,9 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const wranglerConfig = readFileSync(
-  resolve(process.cwd(), 'wrangler.toml'),
-  'utf8'
-);
-const indexSource = readFileSync(
-  resolve(process.cwd(), 'src/index.ts'),
-  'utf8'
-);
-const envSource = readFileSync(
-  resolve(process.cwd(), 'src/env.ts'),
-  'utf8'
-);
+const wranglerConfig = readFileSync(resolve(process.cwd(), 'wrangler.toml'), 'utf8');
+const indexSource = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+const envSource = readFileSync(resolve(process.cwd(), 'src/env.ts'), 'utf8');
 // TaskRunner DO is split across task-runner/ directory — read all module files
 const doDir = resolve(process.cwd(), 'src/durable-objects/task-runner');
 const doSource = [
@@ -155,11 +146,7 @@ describe('Constitution Principle XI compliance', () => {
 
   it('no hardcoded timeout values in step handlers', () => {
     // Step handlers should use rc.getXxx() not magic numbers
-    const stepHandlers = [
-      'handleNodeAgentReady',
-      'handleWorkspaceReady',
-      'handleNodeProvisioning',
-    ];
+    const stepHandlers = ['handleNodeAgentReady', 'handleWorkspaceReady', 'handleNodeProvisioning'];
     for (const handler of stepHandlers) {
       // Step handlers are now exported functions (not private class methods)
       const fnStart = doSource.indexOf(`export async function ${handler}(`);

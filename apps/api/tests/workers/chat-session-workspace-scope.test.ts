@@ -49,8 +49,14 @@ describe('resolveLiveWorkspaceForSession — query-layer tenant scoping', () => 
   beforeAll(async () => {
     await seedUser(USER_A, { githubId: `gh-${USER_A}` });
     await seedUser(USER_B, { githubId: `gh-${USER_B}` });
-    await seedInstallation(INSTALL_A, USER_A, { installationIdValue: `inst-${USER_A}`, accountName: USER_A });
-    await seedInstallation(INSTALL_B, USER_B, { installationIdValue: `inst-${USER_B}`, accountName: USER_B });
+    await seedInstallation(INSTALL_A, USER_A, {
+      installationIdValue: `inst-${USER_A}`,
+      accountName: USER_A,
+    });
+    await seedInstallation(INSTALL_B, USER_B, {
+      installationIdValue: `inst-${USER_B}`,
+      accountName: USER_B,
+    });
     await seedProject(PROJECT_A, USER_A, INSTALL_A, { name: `proj ${PROJECT_A}` });
     await seedProject(PROJECT_B, USER_B, INSTALL_B, { name: `proj ${PROJECT_B}` });
     await seedNode(NODE_A, USER_A, { status: 'running' });

@@ -65,9 +65,7 @@ export function extractMentions(text: string): MentionMatch[] {
  */
 function buildMentionContext(resolved: ResolvedMention[]): string {
   const lines = resolved.map(({ profile }) => {
-    const desc = profile.systemPromptAppend
-      ? ` — "${profile.systemPromptAppend}"`
-      : '';
+    const desc = profile.systemPromptAppend ? ` — "${profile.systemPromptAppend}"` : '';
     return `- @${profile.profileName}: ${profile.agentType}${desc} (profileId: ${profile.profileId})`;
   });
 
@@ -90,7 +88,7 @@ export async function enrichMessageWithMentions(
   db: Db,
   projectId: string,
   userId: string,
-  env: ProfileEnv,
+  env: ProfileEnv
 ): Promise<EnrichmentResult> {
   const mentions = extractMentions(message);
 

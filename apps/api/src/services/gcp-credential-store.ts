@@ -17,10 +17,7 @@ export interface StoredGcpCredentialResult {
  * may both begin before either batch runs, so a pre-batch snapshot can miss the
  * credential inserted by the competing request.
  */
-function cleanupManagedCredentialStatements(
-  env: Env,
-  userId: string,
-): D1PreparedStatement[] {
+function cleanupManagedCredentialStatements(env: Env, userId: string): D1PreparedStatement[] {
   return [
     env.DATABASE.prepare(
       `DELETE FROM cc_attachments
@@ -35,7 +32,7 @@ function cleanupManagedCredentialStatements(
              AND consumer_kind = 'compute'
              AND consumer_target = 'gcp'
              AND json_extract(settings_json, '$.managedBy') = 'legacy-gcp-credential'
-         )`,
+         )`
     ).bind(userId, userId),
     env.DATABASE.prepare(
       `DELETE FROM cc_credentials
@@ -66,7 +63,7 @@ function cleanupManagedCredentialStatements(
                  WHERE other_attachment.configuration_id = other_configuration.id
                )
              )
-         )`,
+         )`
     ).bind(userId, userId, userId),
     env.DATABASE.prepare(
       `DELETE FROM cc_configurations
@@ -77,7 +74,7 @@ function cleanupManagedCredentialStatements(
          AND NOT EXISTS (
            SELECT 1 FROM cc_attachments
            WHERE configuration_id = cc_configurations.id
-         )`,
+         )`
     ).bind(userId),
   ];
 }
@@ -86,7 +83,7 @@ function cleanupManagedCredentialStatements(
 export async function replaceUserGcpCredential(
   env: Env,
   userId: string,
-  credential: GcpCredential,
+  credential: GcpCredential
 ): Promise<StoredGcpCredentialResult> {
   if (typeof env.DATABASE.batch !== 'function') {
     throw new Error('Atomic credential replacement is unavailable');
@@ -98,7 +95,7 @@ export async function replaceUserGcpCredential(
   const ccAttachmentId = `cc-att-${ulid()}`;
   const encrypted = await encrypt(
     serializeGcpCredential(credential),
-    getCredentialEncryptionKey(env),
+    getCredentialEncryptionKey(env)
   );
 
   const statements: D1PreparedStatement[] = [
@@ -107,38 +104,38 @@ export async function replaceUserGcpCredential(
        WHERE user_id = ?
          AND project_id IS NULL
          AND provider = 'gcp'
-         AND credential_type = 'cloud-provider'`,
+         AND credential_type = 'cloud-provider'`
     ).bind(userId),
     ...cleanupManagedCredentialStatements(env, userId),
     env.DATABASE.prepare(
       `INSERT INTO credentials (
          id, user_id, project_id, provider, credential_type, agent_type,
          credential_kind, is_active, encrypted_token, iv, created_at, updated_at
-       ) VALUES (?, ?, NULL, 'gcp', 'cloud-provider', NULL, 'api-key', 1, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, NULL, 'gcp', 'cloud-provider', NULL, 'api-key', 1, ?, ?, ?, ?)`
     ).bind(legacyId, userId, encrypted.ciphertext, encrypted.iv, now, now),
     env.DATABASE.prepare(
       `INSERT INTO cc_credentials (
          id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at
-       ) VALUES (?, ?, 'GCP cloud credential', 'cloud-provider', ?, ?, 1, ?, ?)`,
+       ) VALUES (?, ?, 'GCP cloud credential', 'cloud-provider', ?, ?, 1, ?, ?)`
     ).bind(ccCredentialId, userId, encrypted.ciphertext, encrypted.iv, now, now),
     env.DATABASE.prepare(
       `INSERT INTO cc_configurations (
          id, owner_id, name, consumer_kind, consumer_target, credential_id,
          settings_json, is_active, created_at, updated_at
-       ) VALUES (?, ?, 'GCP default', 'compute', 'gcp', ?, ?, 1, ?, ?)`,
+       ) VALUES (?, ?, 'GCP default', 'compute', 'gcp', ?, ?, 1, ?, ?)`
     ).bind(
       ccConfigurationId,
       userId,
       ccCredentialId,
       JSON.stringify({ managedBy: 'legacy-gcp-credential' }),
       now,
-      now,
+      now
     ),
     env.DATABASE.prepare(
       `INSERT INTO cc_attachments (
          id, configuration_id, consumer_kind, consumer_target, user_id, project_id,
          is_active, created_at, updated_at
-       ) VALUES (?, ?, 'compute', 'gcp', ?, NULL, 1, ?, ?)`,
+       ) VALUES (?, ?, 'compute', 'gcp', ?, NULL, 1, ?, ?)`
     ).bind(ccAttachmentId, ccConfigurationId, userId, now, now),
   ];
 
@@ -157,7 +154,7 @@ export async function deleteUserGcpCredential(env: Env, userId: string): Promise
        WHERE user_id = ?
          AND project_id IS NULL
          AND provider = 'gcp'
-         AND credential_type = 'cloud-provider'`,
+         AND credential_type = 'cloud-provider'`
     ).bind(userId),
     ...cleanupManagedCredentialStatements(env, userId),
   ];

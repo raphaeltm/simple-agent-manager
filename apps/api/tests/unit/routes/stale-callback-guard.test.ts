@@ -35,12 +35,16 @@ describe('callbackTokenIssuedAtMs', () => {
 
 describe('getInstantStaleCallbackMarginMs', () => {
   it('defaults when unset', () => {
-    expect(getInstantStaleCallbackMarginMs({} as Env)).toBe(DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS);
+    expect(getInstantStaleCallbackMarginMs({} as Env)).toBe(
+      DEFAULT_INSTANT_STALE_CALLBACK_MARGIN_MS
+    );
   });
 
   it('honours a valid override', () => {
     expect(
-      getInstantStaleCallbackMarginMs({ INSTANT_STALE_CALLBACK_MARGIN_MS: '30000' } as unknown as Env)
+      getInstantStaleCallbackMarginMs({
+        INSTANT_STALE_CALLBACK_MARGIN_MS: '30000',
+      } as unknown as Env)
     ).toBe(30_000);
   });
 

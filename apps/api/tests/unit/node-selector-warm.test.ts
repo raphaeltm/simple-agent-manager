@@ -10,7 +10,10 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('warm node selection source contract', () => {
-  const selectorFile = readFileSync(resolve(process.cwd(), 'src/services/node-selector.ts'), 'utf8');
+  const selectorFile = readFileSync(
+    resolve(process.cwd(), 'src/services/node-selector.ts'),
+    'utf8'
+  );
 
   describe('warm node query', () => {
     it('queries D1 for nodes with non-null warm_since', () => {
@@ -18,7 +21,7 @@ describe('warm node selection source contract', () => {
     });
 
     it('only targets running nodes owned by user', () => {
-      expect(selectorFile).toContain("eq(schema.nodes.userId, userId)");
+      expect(selectorFile).toContain('eq(schema.nodes.userId, userId)');
       expect(selectorFile).toContain("eq(schema.nodes.status, 'running')");
     });
 
@@ -61,7 +64,6 @@ describe('warm node selection source contract', () => {
     it('warm node selection only runs when taskId is provided', () => {
       expect(selectorFile).toContain('if (taskId && env.NODE_LIFECYCLE)');
     });
-
   });
 
   describe('NodeSelectorEnv includes NODE_LIFECYCLE', () => {

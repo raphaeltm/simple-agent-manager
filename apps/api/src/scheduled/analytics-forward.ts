@@ -5,7 +5,7 @@
  * Analytics Engine to external platforms (Segment, GA4).
  */
 import type { Env } from '../env';
-import { type ForwardResult,runAnalyticsForward } from '../services/analytics-forward';
+import { type ForwardResult, runAnalyticsForward } from '../services/analytics-forward';
 
 export async function runAnalyticsForwardJob(env: Env): Promise<ForwardResult> {
   return runAnalyticsForward(env);

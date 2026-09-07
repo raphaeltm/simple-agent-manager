@@ -8,6 +8,8 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { startSamAwareAgentSession } from './agent-session-bootstrap';
+import { explicitRuntimeAdapterSnapshot } from './canonical-vm-allocation';
+import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
 import { signCallbackToken, signNodeCallbackToken } from './jwt';
 import {
   type AgentSessionOverrides,
@@ -260,6 +262,11 @@ export async function acceptInstantSession(
   await ensureInstantCheckoutBranch(env, input, branch, defaultBranch);
 
   const gitSource = await resolveWorkspaceGitSource(db, input.project);
+  const capacityPlacementSnapshot = explicitRuntimeAdapterSnapshot({
+    runtime: 'cf-container',
+    workloadRole: 'workspace',
+    providerInstanceType: 'cf-container',
+  });
 
   const node = await createNodeRecord(env, {
     userId: input.userId,
@@ -274,23 +281,7 @@ export async function acceptInstantSession(
       ? Number.parseInt(env.NODE_HEARTBEAT_STALE_SECONDS, 10)
       : 180,
     runtime: 'cf-container',
-    capacityPlacementSnapshot: {
-      capacityPoolId: null,
-      capacityPoolScope: null,
-      capacityPoolRevision: null,
-      capacitySourceId: null,
-      capacityPoolCandidateId: null,
-      placementCredentialSource: null,
-      placementCredentialReference: null,
-      placementCredentialVersion: null,
-      capacityPoolProjectId: null,
-      workloadRole: 'workspace',
-      providerInstanceType: 'cf-container',
-      placementExplanationJson: JSON.stringify({
-        kind: 'explicit_runtime_adapter',
-        runtime: 'cf-container',
-      }),
-    },
+    capacityPlacementSnapshot,
   });
 
   const nodeId = node.id;
@@ -310,7 +301,7 @@ export async function acceptInstantSession(
     status: 'creating',
     vmSize: 'standard-1',
     vmLocation: 'cf-container',
-    providerInstanceType: 'cf-container',
+    ...capacityPlacementSnapshotDbValues(capacityPlacementSnapshot),
     workspaceProfile: 'lightweight',
     agentProfileHint: input.agentProfileId ?? null,
     createdAt: now,

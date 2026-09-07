@@ -294,7 +294,12 @@ export async function tryAcquireVmProvisioningLease(
   await ensureVmTaskAdmission(env, input);
   const config = getVmAdmissionConfig(env);
   if (config.mode === 'off' || config.mode === 'shadow') {
-    await markProvisioningGranted(env, input, 0, config.mode === 'shadow' ? 'admission_shadow' : 'admission_created');
+    await markProvisioningGranted(
+      env,
+      input,
+      0,
+      config.mode === 'shadow' ? 'admission_shadow' : 'admission_created'
+    );
     return { kind: 'granted', scopeKey: input.scopeKey, fencingToken: 0 };
   }
 
@@ -666,6 +671,9 @@ export async function cancelVmTaskAdmission(
     );
   }
   if (admission?.scope_key) {
-    await wakeVmAdmissionWaiters(env, { scopeKey: admission.scope_key, reason: 'admission_cancelled' });
+    await wakeVmAdmissionWaiters(env, {
+      scopeKey: admission.scope_key,
+      reason: 'admission_cancelled',
+    });
   }
 }

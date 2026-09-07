@@ -1,3 +1,18 @@
+/**
+ * Capacity-exhaustion behaviour of the real `node_provisioning` step.
+ *
+ * Renamed from task-runner-size-fallback.test.ts. The legacy VM-size descent
+ * this file used to assert (large -> medium -> small on transient capacity) is
+ * GONE: it silently provisioned smaller hardware than the caller's resolved
+ * requirements asked for whenever the size happened to be default-derived.
+ * The tests that asserted the descent were removed rather than relaxed; the
+ * invariants worth keeping ("an explicit size never downgrades", "a non-capacity
+ * provider error fails fast") were kept and are now stronger, because NOTHING
+ * downgrades a size any more.
+ *
+ * What replaces the descent is the effective pool's own `exhaustionPolicy`,
+ * exercised below through `handleNodeProvisioning` itself.
+ */
 import { ProviderError } from '@simple-agent-manager/providers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -234,6 +249,7 @@ function capacityPoolSelection(): NonNullable<TaskRunnerState['config']['capacit
     scope: 'user',
     revision: 2,
     strategy: 'pack',
+    exhaustionPolicy: 'fail',
     capacityPoolProjectId: null,
     workloadRole: 'workspace',
     poolSnapshot: { ...snapshot, capacitySourceId: null, capacityPoolCandidateId: null },
@@ -277,7 +293,7 @@ beforeEach(() => {
   }));
 });
 
-describe('TaskRunner size-fallback descent', () => {
+describe('TaskRunner capacity exhaustion', () => {
   it('does not provision through legacy fallback when the selected pool has no candidates', async () => {
     const { DATABASE } = createDbMock({});
     const rc = createContext(DATABASE);
@@ -289,7 +305,8 @@ describe('TaskRunner size-fallback descent', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: 'No active compute pool offerings in the selected user pool satisfy the requested resources.',
+      message:
+        'No active compute pool offerings in the selected user pool satisfy the requested resources.',
       permanent: true,
     });
 
@@ -335,35 +352,6 @@ describe('TaskRunner size-fallback descent', () => {
       autoProvisioned: true,
     });
   });
-
-  it.each([
-    { start: 'large', exhausted: 'node-large', expected: 'medium' },
-    { start: 'medium', exhausted: 'node-medium', expected: 'small' },
-  ])(
-    'descends from a project-default $start to $expected on transient capacity and records the downgrade',
-    async ({ start, exhausted, expected }) => {
-      provisionNode.mockImplementation(async (id: string) => {
-        if (id === exhausted) throw capacityError(start);
-        // next-smaller size succeeds
-      });
-      const { DATABASE, runCalls } = createDbMock({});
-      const rc = createContext(DATABASE);
-      const state = createState({ vmSize: start, vmSizeSource: 'project' });
-
-      await handleNodeProvisioning(state, rc);
-
-      // A fresh node row is created per size attempt (create-then-try per iteration).
-      expect(createNodeRecord).toHaveBeenCalledTimes(2);
-      expect(provisionNode).toHaveBeenCalledTimes(2);
-      expect(state.stepResults.nodeId).toBe(`node-${expected}`);
-      expect(state.stepResults.autoProvisioned).toBe(true);
-      expect(state.stepResults.provisionedVmSize).toBe(expected);
-      expect(state.config.vmSize).toBe(expected);
-      // provisioned_vm_size persisted to the task for UI surfacing
-      expect(findDowngradeWrite(runCalls)?.args[0]).toBe(expected);
-      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
-    }
-  );
 
   it('does NOT record a downgrade when the first (requested) size succeeds', async () => {
     provisionNode.mockResolvedValue(undefined);
@@ -436,7 +424,7 @@ describe('TaskRunner size-fallback descent', () => {
     const state = createState({ vmSize: 'large', vmSizeSource: 'task' });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: 'There were no large machines available.',
+      message: 'No capacity available for large.',
       permanent: true,
     });
     // Only the requested size attempted — no descent.
@@ -456,43 +444,11 @@ describe('TaskRunner size-fallback descent', () => {
       const state = createState({ vmSize: 'large', vmSizeSource: source });
 
       await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-        message: 'There were no large machines available.',
+        message: 'No capacity available for large.',
         permanent: true,
       });
       expect(provisionNode).toHaveBeenCalledTimes(1);
       expect(findDowngradeWrite(runCalls)).toBeUndefined();
-      expect(rc.advanceToStep).not.toHaveBeenCalled();
-    }
-  );
-
-  it.each([
-    {
-      start: 'medium',
-      source: 'project',
-      message: 'No capacity for any available VM size (tried medium, small).',
-      attempts: 2,
-    },
-    {
-      start: 'large',
-      source: 'platform',
-      message: 'No capacity for any available VM size (tried large, medium, small).',
-      attempts: 3,
-    },
-  ])(
-    'fails terminally with the full chain when every size from $start is capacity-exhausted',
-    async ({ start, source, message, attempts }) => {
-      provisionNode.mockImplementation(async () => {
-        throw capacityError('any');
-      });
-      const { DATABASE } = createDbMock({});
-      const rc = createContext(DATABASE);
-      const state = createState({ vmSize: start, vmSizeSource: source });
-
-      await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-        message,
-        permanent: true,
-      });
-      expect(provisionNode).toHaveBeenCalledTimes(attempts);
       expect(rc.advanceToStep).not.toHaveBeenCalled();
     }
   );
@@ -532,20 +488,33 @@ describe('TaskRunner size-fallback descent', () => {
     expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 
-  it('does not descend when the kill switch disables fallback', async () => {
-    provisionNode.mockImplementation(async () => {
-      throw capacityError('large');
-    });
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE, { CAPACITY_SIZE_FALLBACK_ENABLED: 'false' });
-    const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
+  it.each(['project', 'platform'])(
+    'no longer descends a %s-default-derived size on transient capacity',
+    async (source) => {
+      // This is the removed legacy behaviour, asserted from the other side: a
+      // default-derived size used to descend the large->medium->small ladder.
+      // It now makes exactly one attempt, like every other size source.
+      provisionNode.mockImplementation(async () => {
+        throw capacityError('large');
+      });
+      const { DATABASE, runCalls } = createDbMock({});
+      const rc = createContext(DATABASE);
+      const state = createState({ vmSize: 'large', vmSizeSource: source });
 
-    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: 'There were no large machines available.',
-      permanent: true,
-    });
-    expect(provisionNode).toHaveBeenCalledTimes(1);
-  });
+      await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+        message: 'No capacity available for large.',
+        permanent: true,
+      });
+      expect(provisionNode).toHaveBeenCalledTimes(1);
+      expect(createNodeRecord).toHaveBeenCalledTimes(1);
+      // Nothing smaller than the request was ever created.
+      expect(createNodeRecord).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ vmSize: 'medium' })
+      );
+      expect(findDowngradeWrite(runCalls)).toBeUndefined();
+    }
+  );
 
   it('recovers an already-provisioned node after a crash instead of creating a duplicate', async () => {
     // Simulate a prior attempt that provisioned node-medium (a downgrade from
@@ -638,5 +607,223 @@ describe('TaskRunner size-fallback descent', () => {
     });
     expect(createNodeRecord).not.toHaveBeenCalled();
     expect(provisionNode).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Exhaustion policy: the behaviour that replaced the legacy VM-size descent.
+// ---------------------------------------------------------------------------
+
+type PoolSelection = NonNullable<TaskRunnerState['config']['capacityPoolSelection']>;
+type PoolCandidate = PoolSelection['candidates'][number];
+
+/** A sibling offering in the SAME pool and the SAME capacity source. */
+function siblingCandidate(overrides: Partial<PoolCandidate> & { id: string }): PoolCandidate {
+  const base = capacityPoolSelection().candidates[0] as PoolCandidate;
+  const merged = { ...base, ...overrides } as PoolCandidate;
+  return {
+    ...merged,
+    snapshot: {
+      ...(base.snapshot as NonNullable<PoolCandidate['snapshot']>),
+      capacityPoolCandidateId: merged.id,
+      capacitySourceId: merged.capacitySourceId,
+      providerInstanceType: merged.providerInstanceType,
+    },
+  } as PoolCandidate;
+}
+
+function poolWith(
+  exhaustionPolicy: 'fail' | 'queue' | 'fallback-chain',
+  candidates: PoolCandidate[]
+): PoolSelection {
+  return { ...capacityPoolSelection(), exhaustionPolicy, candidates } as PoolSelection;
+}
+
+const PRIMARY = 'vc2-6c-16gb';
+const ALTERNATE = 'vc2-8c-32gb';
+
+/**
+ * A second offering identical to the primary on every ranking signal (capacity,
+ * price, priority) and differing only in `candidateOrder` and instance type.
+ * That keeps this suite about the EXHAUSTION POLICY: whichever strategy the pool
+ * carries, the primary ranks first, so a second provider call can only mean a
+ * fallback actually happened.
+ */
+function alternateCandidate(): PoolCandidate {
+  return siblingCandidate({
+    id: 'candidate-user-alternate',
+    providerInstanceType: ALTERNATE,
+    candidateOrder: 1,
+  });
+}
+
+/** Provider instance types actually handed to createNodeRecord, in order. */
+function attemptedInstanceTypes(): Array<string | null | undefined> {
+  return createNodeRecord.mock.calls.map(
+    (call) => (call[1] as { providerInstanceType?: string | null }).providerInstanceType
+  );
+}
+
+describe('TaskRunner capacity exhaustion policy', () => {
+  beforeEach(() => {
+    // `vi.clearAllMocks()` clears CALLS but not implementations, so a
+    // `resolveCredentialSource` stub set by an earlier test in this file leaks
+    // in and diverts these cases down the admission-lease path instead of the
+    // provisioning loop. Pin it explicitly: no credential source means no
+    // admission scope, which isolates exhaustion policy from lease behaviour
+    // (the queue policy, which REQUIRES an admission scope, is covered in
+    // task-runner-exhaustion-queue.test.ts).
+    resolveCredentialSource.mockReset();
+    provisionNode.mockReset();
+    provisionNode.mockImplementation(async () => {
+      throw capacityError('primary');
+    });
+  });
+
+  it('fail: stops after the first offering even when the pool has alternatives', async () => {
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: poolWith('fail', [
+        capacityPoolSelection().candidates[0] as PoolCandidate,
+        alternateCandidate(),
+      ]),
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: `No capacity available for ${PRIMARY}.`,
+      permanent: true,
+    });
+    expect(provisionNode).toHaveBeenCalledTimes(1);
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY]);
+    expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
+  });
+
+  it("fallback-chain: tries the pool's other permitted offering before failing", async () => {
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: poolWith('fallback-chain', [
+        capacityPoolSelection().candidates[0] as PoolCandidate,
+        alternateCandidate(),
+      ]),
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}).`,
+      permanent: true,
+    });
+    expect(provisionNode).toHaveBeenCalledTimes(2);
+    // Each attempt provisions its OWN offering, not a repeat of the first.
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY, ALTERNATE]);
+  });
+
+  it('fallback-chain: succeeds on the alternative and advances', async () => {
+    provisionNode.mockImplementationOnce(async () => {
+      throw capacityError('primary');
+    });
+    provisionNode.mockImplementationOnce(async () => undefined);
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: poolWith('fallback-chain', [
+        capacityPoolSelection().candidates[0] as PoolCandidate,
+        alternateCandidate(),
+      ]),
+    });
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY, ALTERNATE]);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    // The run's recorded placement follows the offering actually provisioned.
+    expect(state.config.providerInstanceType).toBe(ALTERNATE);
+    expect(state.stepResults.capacityPlacementSnapshot?.capacityPoolCandidateId).toBe(
+      'candidate-user-alternate'
+    );
+  });
+
+  it('fallback-chain: refuses an alternative from a different capacity source credential', async () => {
+    // Cross-credential-domain borrowing would run outside the admission lease
+    // this task holds and would bill a source the caller was not authorized for.
+    const foreign = siblingCandidate({
+      id: 'candidate-foreign-source',
+      capacitySourceId: 'source-other',
+      providerInstanceType: ALTERNATE,
+      candidateOrder: 1,
+    });
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: poolWith('fallback-chain', [
+        capacityPoolSelection().candidates[0] as PoolCandidate,
+        foreign,
+      ]),
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: `No capacity available for ${PRIMARY}.`,
+      permanent: true,
+    });
+    expect(provisionNode).toHaveBeenCalledTimes(1);
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY]);
+  });
+
+  it('fallback-chain: refuses an alternative from a different pool', async () => {
+    const otherPool = siblingCandidate({
+      id: 'candidate-other-pool',
+      poolId: 'pool-other',
+      providerInstanceType: ALTERNATE,
+      candidateOrder: 1,
+    });
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: poolWith('fallback-chain', [
+        capacityPoolSelection().candidates[0] as PoolCandidate,
+        otherPool,
+      ]),
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: `No capacity available for ${PRIMARY}.`,
+      permanent: true,
+    });
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY]);
+  });
+
+  it('fallback-chain: refuses an alternative billed to a different credential attribution', async () => {
+    const otherAttribution = siblingCandidate({
+      id: 'candidate-other-attribution',
+      credentialAttributionSource: 'project',
+      providerInstanceType: ALTERNATE,
+      candidateOrder: 1,
+    });
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: poolWith('fallback-chain', [
+        capacityPoolSelection().candidates[0] as PoolCandidate,
+        otherAttribution,
+      ]),
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: `No capacity available for ${PRIMARY}.`,
+      permanent: true,
+    });
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY]);
+  });
+
+  it('an unpooled legacy run makes exactly one attempt and never substitutes', async () => {
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: 'No capacity available for large.',
+      permanent: true,
+    });
+    expect(provisionNode).toHaveBeenCalledTimes(1);
   });
 });

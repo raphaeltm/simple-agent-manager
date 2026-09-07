@@ -26,9 +26,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => currentUserId,
 }));
 
-const { projectMcpConnectionRoutes, userMcpConnectionRoutes } = await import(
-  '../../../src/routes/mcp-connections'
-);
+const { projectMcpConnectionRoutes, userMcpConnectionRoutes } =
+  await import('../../../src/routes/mcp-connections');
 const { handleAppError } = await import('../../../src/middleware/app-error-handler');
 
 const ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
@@ -44,10 +43,7 @@ function makeApp() {
 }
 
 function env() {
-  return { DATABASE: createSqliteD1(sqlite), ENCRYPTION_KEY } as unknown as Record<
-    string,
-    unknown
-  >;
+  return { DATABASE: createSqliteD1(sqlite), ENCRYPTION_KEY } as unknown as Record<string, unknown>;
 }
 
 function seedProject(projectId: string, ownerId: string) {
@@ -59,9 +55,7 @@ function seedProject(projectId: string, ownerId: string) {
 function seedMember(projectId: string, userId: string, role: string, status = 'active') {
   // Composite (project_id, user_id) primary key — no surrogate id column.
   sqlite
-    .prepare(
-      'INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, ?, ?)'
-    )
+    .prepare('INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, ?, ?)')
     .run(projectId, userId, role, status);
 }
 

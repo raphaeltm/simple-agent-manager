@@ -17,6 +17,11 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { nodeHasCapacity, scoreNodeLoad } from '../../src/services/node-selector';
+import {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+  evaluateWorkspaceReservationCapacity,
+  resolveWorkspaceAdmissionPolicy,
+} from '../../src/services/workspace-resource-capacity';
 
 // =============================================================================
 // Behavioral tests — nodeHasCapacity()
@@ -406,35 +411,77 @@ describe('workspace count limit (MAX_WORKSPACES_PER_NODE)', () => {
 });
 
 // =============================================================================
-// TaskRunner workspace count limit consistency
+// Workspace count limit consistency
 // =============================================================================
 
-const taskRunnerSource = [
-  'index.ts',
-  'types.ts',
-  'node-steps.ts',
-  'node-selection.ts',
-  'workspace-steps.ts',
-  'agent-session-step.ts',
-  'state-machine.ts',
-  'helpers.ts',
-]
-  .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
-  .join('\n');
+// The per-node workspace cap used to live inside TaskRunner's findNodeWithCapacity
+// and was pinned here by grepping that file's source. It now lives in the shared
+// admission policy so advisory selection and the final admission SQL cannot
+// disagree, so these assertions exercise the real functions instead of the source
+// text (a source-contract test proves code is present, not that it enforces).
 
-describe('TaskRunner findNodeWithCapacity workspace count limit', () => {
-  it('imports DEFAULT_MAX_WORKSPACES_PER_NODE', () => {
-    expect(taskRunnerSource).toContain('DEFAULT_MAX_WORKSPACES_PER_NODE');
+describe('workspace count limit consistency', () => {
+  it('defaults the per-node cap to the shared constant', () => {
+    expect(resolveWorkspaceAdmissionPolicy({} as never).maxWorkspaces).toBe(
+      DEFAULT_MAX_WORKSPACES_PER_NODE
+    );
   });
 
-  it('reads MAX_WORKSPACES_PER_NODE from env', () => {
-    const section = taskRunnerSource.slice(taskRunnerSource.indexOf('findNodeWithCapacity'));
-    expect(section).toContain('MAX_WORKSPACES_PER_NODE');
+  it('reads MAX_WORKSPACES_PER_NODE from env and lets project scaling override it', () => {
+    expect(
+      resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '7' } as never).maxWorkspaces
+    ).toBe(7);
+    expect(
+      resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '7' } as never, {
+        maxWorkspacesPerNode: 2,
+      }).maxWorkspaces
+    ).toBe(2);
   });
 
-  it('queries workspace count per node and rejects at capacity', () => {
-    const section = taskRunnerSource.slice(taskRunnerSource.indexOf('findNodeWithCapacity'));
-    expect(section).toContain("status IN ('running', 'creating', 'recovery')");
-    expect(section).toContain('>= maxWorkspaces');
+  it('rejects a node once its active workspace count reaches the cap', () => {
+    const policy = resolveWorkspaceAdmissionPolicy({ MAX_WORKSPACES_PER_NODE: '2' } as never);
+    const node = {
+      id: 'node-1',
+      nodeClass: 'managed',
+      providerInstanceId: 'server-1',
+      observedProviderInstanceVcpuCount: 8,
+      observedProviderInstanceMemoryMb: 16_384,
+      observedProviderInstanceDiskGb: 160,
+      observedHardwareSource: 'observed',
+      // A node that already hosts work must also report fresh, unpressured
+      // metrics, so the cap is the only thing this case varies.
+      lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
+      lastHeartbeatAt: new Date().toISOString(),
+    };
+    const reservation = {
+      cpuMillis: 1000,
+      memoryMb: 1024,
+      diskMb: 1024,
+      exclusiveNode: false,
+      maxCoTenants: 4,
+      source: 'platform' as const,
+      sourceId: 'platform',
+      version: 1,
+    };
+    const usage = (activeCount: number) => ({
+      activeCount,
+      invalidCount: 0,
+      exclusiveCount: 0,
+      minMaxCoTenants: null,
+      cpuMillis: 0,
+      memoryMb: 0,
+      diskMb: 0,
+    });
+
+    expect(evaluateWorkspaceReservationCapacity(node, usage(1), reservation, policy).admitted).toBe(
+      true
+    );
+    const atCap = evaluateWorkspaceReservationCapacity(node, usage(2), reservation, policy);
+    expect(atCap.admitted).toBe(false);
+    expect(atCap.reasons.join(' ')).toContain('workspace');
+  });
+
+  it('counts only running/creating/recovery workspaces toward the cap', () => {
+    expect(ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL).toBe("'running', 'creating', 'recovery'");
   });
 });

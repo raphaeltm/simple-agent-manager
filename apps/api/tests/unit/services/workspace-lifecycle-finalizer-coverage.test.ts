@@ -64,6 +64,8 @@ const ALLOWLIST: Record<string, string> = {
     'Destroys expired cf-container snapshot runtime state after the ProjectData session is stopped; it does not mark workspace/node rows deleted, and the container DO routes D1 runtime termination through persistRuntimeEnded().',
   'services/deployment-provisioning.ts':
     'Abandons a fresh deployment node record after environment-link race loss before any workspace can reference the node.',
+  'services/provisioning-authority.ts':
+    'Post-allocation compensation for a node this request just created. It refuses any node that already has an attached workspace or deployment environment, so no lifecycle a finalizer owns can exist yet: the DELETE only removes a placeholder row that never reached the provider, and the strict-deletion call is the same external teardown primitive strict-node-deletion.ts is allowlisted for.',
   'services/strict-node-deletion.ts':
     'Strict external teardown deliberately does not mutate workspace/node rows; callers update D1 rows and invoke the shared finalizer only after external deletion succeeds.',
   'services/vm-agent-container.ts':

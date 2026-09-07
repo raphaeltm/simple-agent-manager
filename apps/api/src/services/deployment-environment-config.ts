@@ -59,7 +59,10 @@ export async function buildDeploymentEnvironmentConfigResponse(
   };
 }
 
-export async function touchDeploymentConfigUpdatedAt(db: Db, environmentId: string): Promise<string> {
+export async function touchDeploymentConfigUpdatedAt(
+  db: Db,
+  environmentId: string
+): Promise<string> {
   const now = new Date().toISOString();
   await db
     .update(schema.deploymentEnvironments)

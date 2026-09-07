@@ -132,7 +132,8 @@ describe('GitLab metadata propagation to VM workspace dispatch', () => {
         callbackToken: 'workspace-callback-token',
         gitUserName: 'User One',
         gitUserEmail: 'user-1@example.com',
-      })
+      }),
+      expect.objectContaining({ beforeExternalMutation: expect.any(Function) })
     );
   });
 

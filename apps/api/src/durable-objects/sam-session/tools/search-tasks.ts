@@ -17,7 +17,7 @@ const TASK_STATUSES = [
   'cancelled',
 ] as const;
 
-type TaskStatus = typeof TASK_STATUSES[number];
+type TaskStatus = (typeof TASK_STATUSES)[number];
 
 function isTaskStatus(value: string): value is TaskStatus {
   return (TASK_STATUSES as readonly string[]).includes(value);
@@ -65,13 +65,14 @@ export const searchTasksDef: AnthropicToolDef = {
 
 export async function searchTasks(
   input: { status?: string; projectId?: string; query?: string; keyword?: string; limit?: number },
-  ctx: ToolContext,
+  ctx: ToolContext
 ): Promise<unknown> {
-  const query = typeof input.query === 'string'
-    ? input.query.trim()
-    : typeof input.keyword === 'string'
-      ? input.keyword.trim()
-      : '';
+  const query =
+    typeof input.query === 'string'
+      ? input.query.trim()
+      : typeof input.keyword === 'string'
+        ? input.keyword.trim()
+        : '';
   if (!query) {
     return { error: 'query is required and must be a non-empty string.' };
   }
@@ -85,9 +86,8 @@ export async function searchTasks(
   }
 
   const limits = getMcpLimits(ctx.env as unknown as Env);
-  const requestedLimit = typeof input.limit === 'number' && Number.isFinite(input.limit)
-    ? input.limit
-    : 10;
+  const requestedLimit =
+    typeof input.limit === 'number' && Number.isFinite(input.limit) ? input.limit : 10;
   const searchLimit = Math.min(Math.max(1, Math.round(requestedLimit)), limits.taskSearchMax);
 
   const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
@@ -97,7 +97,7 @@ export async function searchTasks(
   const conditions: SQL[] = [eq(schema.projects.userId, ctx.userId)];
   const titleOrDescriptionMatch = or(
     like(schema.tasks.title, searchPattern),
-    like(schema.tasks.description, searchPattern),
+    like(schema.tasks.description, searchPattern)
   );
   if (titleOrDescriptionMatch) {
     conditions.push(titleOrDescriptionMatch);

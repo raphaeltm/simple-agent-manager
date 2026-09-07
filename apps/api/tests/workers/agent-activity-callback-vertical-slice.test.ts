@@ -68,9 +68,8 @@ type SeededCallbackSession = {
 };
 
 async function createTestApp(): Promise<Hono<{ Bindings: Env }>> {
-  const { agentActivityCallbackRoute } = await import(
-    '../../src/routes/projects/agent-activity-callback'
-  );
+  const { agentActivityCallbackRoute } =
+    await import('../../src/routes/projects/agent-activity-callback');
   const app = new Hono<{ Bindings: Env }>();
   app.route('/api/projects', agentActivityCallbackRoute);
   app.onError((err, c) => {
@@ -167,9 +166,8 @@ async function postActivity(
 
 describe('ACP activity callback vertical slice', () => {
   beforeEach(async () => {
-    const { resetAcpActivityAdmissionForTests } = await import(
-      '../../src/services/acp-activity-admission'
-    );
+    const { resetAcpActivityAdmissionForTests } =
+      await import('../../src/services/acp-activity-admission');
     resetAcpActivityAdmissionForTests();
     vi.clearAllMocks();
 
@@ -185,9 +183,8 @@ describe('ACP activity callback vertical slice', () => {
   });
 
   afterEach(async () => {
-    const { resetAcpActivityAdmissionForTests } = await import(
-      '../../src/services/acp-activity-admission'
-    );
+    const { resetAcpActivityAdmissionForTests } =
+      await import('../../src/services/acp-activity-admission');
     resetAcpActivityAdmissionForTests();
     vi.clearAllTimers();
     vi.useRealTimers();
@@ -221,14 +218,15 @@ describe('ACP activity callback vertical slice', () => {
     });
     expect(first.status).toBe(204);
 
-    expect(await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId))
-      .toMatchObject({
-        activity: 'prompting',
-        activityAt: baseTime,
-        promptStartedAt: baseTime,
-        runtimeWorkState: 'active',
-        runtimeWorkCount: 1,
-      });
+    expect(
+      await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId)
+    ).toMatchObject({
+      activity: 'prompting',
+      activityAt: baseTime,
+      promptStartedAt: baseTime,
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+    });
 
     vi.setSystemTime(baseTime + 100);
     const redundant = await postActivity(app, session, {
@@ -244,13 +242,14 @@ describe('ACP activity callback vertical slice', () => {
     });
     expect(redundant.status).toBe(204);
 
-    expect(await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId))
-      .toMatchObject({
-        activity: 'prompting',
-        activityAt: baseTime,
-        promptStartedAt: baseTime,
-        runtimeWorkProgressAt: baseTime,
-      });
+    expect(
+      await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId)
+    ).toMatchObject({
+      activity: 'prompting',
+      activityAt: baseTime,
+      promptStartedAt: baseTime,
+      runtimeWorkProgressAt: baseTime,
+    });
 
     vi.setSystemTime(baseTime + 200);
     const terminal = await postActivity(app, session, {
@@ -265,13 +264,14 @@ describe('ACP activity callback vertical slice', () => {
     });
     expect(terminal.status).toBe(204);
 
-    expect(await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId))
-      .toMatchObject({
-        activity: 'idle',
-        activityAt: baseTime + 200,
-        runtimeWorkState: 'inactive',
-        runtimeWorkCount: 0,
-      });
+    expect(
+      await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId)
+    ).toMatchObject({
+      activity: 'idle',
+      activityAt: baseTime + 200,
+      runtimeWorkState: 'inactive',
+      runtimeWorkCount: 0,
+    });
   });
 
   it('does not let a stale callback resurrect activity after terminal idle state', async () => {
@@ -308,12 +308,13 @@ describe('ACP activity callback vertical slice', () => {
     });
     expect(stale.status).toBe(204);
 
-    expect(await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId))
-      .toMatchObject({
-        activity: 'idle',
-        activityAt: baseTime,
-        runtimeWorkState: 'inactive',
-        runtimeWorkCount: 0,
-      });
+    expect(
+      await projectDataService.getSessionState(testEnv, session.projectId, session.acpSessionId)
+    ).toMatchObject({
+      activity: 'idle',
+      activityAt: baseTime,
+      runtimeWorkState: 'inactive',
+      runtimeWorkCount: 0,
+    });
   });
 });

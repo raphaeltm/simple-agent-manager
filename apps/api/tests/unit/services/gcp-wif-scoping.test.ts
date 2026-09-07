@@ -1,4 +1,4 @@
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Security tests for WIF pool IAM binding scoping.
@@ -9,9 +9,8 @@ import { beforeEach,describe, expect, it, vi } from 'vitest';
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-const { createOidcProvider, updateOidcProvider, grantWifUserOnSa } = await import(
-  '../../../src/services/gcp-setup'
-);
+const { createOidcProvider, updateOidcProvider, grantWifUserOnSa } =
+  await import('../../../src/services/gcp-setup');
 
 function mockGcpResponse(body: unknown, status = 200) {
   return {
@@ -38,13 +37,13 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
         'sam-oidc',
         'https://api.example.com',
         5000,
-        'proj-abc-123',
+        'proj-abc-123'
       );
 
       const call = mockFetch.mock.calls[0];
       const body = JSON.parse(call![1]!.body as string);
       expect(body.attributeCondition).toBe(
-        "assertion.iss == 'https://api.example.com' && assertion.project_id == 'proj-abc-123'",
+        "assertion.iss == 'https://api.example.com' && assertion.project_id == 'proj-abc-123'"
       );
     });
 
@@ -57,7 +56,7 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
         'sam-pool',
         'sam-oidc',
         'https://api.example.com',
-        5000,
+        5000
       );
 
       const call = mockFetch.mock.calls[0];
@@ -78,14 +77,14 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
         'sam-oidc',
         'https://api.example.com',
         5000,
-        'proj-abc-123',
+        'proj-abc-123'
       );
 
       // The update call (second fetch) should have project-scoped condition
       const updateCall = mockFetch.mock.calls[1];
       const updateBody = JSON.parse(updateCall![1]!.body as string);
       expect(updateBody.attributeCondition).toBe(
-        "assertion.iss == 'https://api.example.com' && assertion.project_id == 'proj-abc-123'",
+        "assertion.iss == 'https://api.example.com' && assertion.project_id == 'proj-abc-123'"
       );
     });
   });
@@ -101,13 +100,13 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
         'sam-oidc',
         'https://api.example.com',
         5000,
-        'proj-xyz-789',
+        'proj-xyz-789'
       );
 
       const call = mockFetch.mock.calls[0];
       const body = JSON.parse(call![1]!.body as string);
       expect(body.attributeCondition).toBe(
-        "assertion.iss == 'https://api.example.com' && assertion.project_id == 'proj-xyz-789'",
+        "assertion.iss == 'https://api.example.com' && assertion.project_id == 'proj-xyz-789'"
       );
     });
 
@@ -120,7 +119,7 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
         'sam-pool',
         'sam-oidc',
         'https://api.example.com',
-        5000,
+        5000
       );
 
       const call = mockFetch.mock.calls[0];
@@ -143,18 +142,18 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
         'sa@my-gcp-project.iam.gserviceaccount.com',
         'sam-pool',
         5000,
-        'proj-abc-123',
+        'proj-abc-123'
       );
 
       const setCall = mockFetch.mock.calls[1];
       const setBody = JSON.parse(setCall![1]!.body as string);
       const binding = setBody.policy.bindings.find(
-        (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser',
+        (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser'
       );
 
       // Must be subject-scoped principal, NOT pool-wide wildcard
       expect(binding.members[0]).toBe(
-        'principal://iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/sam-pool/subject/project:proj-abc-123',
+        'principal://iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/sam-pool/subject/project:proj-abc-123'
       );
       expect(binding.members[0]).not.toContain('/*');
     });
@@ -171,17 +170,17 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
         '123456',
         'sa@my-gcp-project.iam.gserviceaccount.com',
         'sam-pool',
-        5000,
+        5000
       );
 
       const setCall = mockFetch.mock.calls[1];
       const setBody = JSON.parse(setCall![1]!.body as string);
       const binding = setBody.policy.bindings.find(
-        (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser',
+        (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser'
       );
 
       expect(binding.members[0]).toBe(
-        'principalSet://iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/sam-pool/*',
+        'principalSet://iam.googleapis.com/projects/123456/locations/global/workloadIdentityPools/sam-pool/*'
       );
     });
 
@@ -201,13 +200,13 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
           'sa@my-gcp-project.iam.gserviceaccount.com',
           'sam-pool',
           5000,
-          projectId,
+          projectId
         );
 
         const setCall = mockFetch.mock.calls.at(-1);
         const setBody = JSON.parse(setCall![1]!.body as string);
         const binding = setBody.policy.bindings.find(
-          (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser',
+          (b: { role: string }) => b.role === 'roles/iam.workloadIdentityUser'
         );
         members.push(binding.members[0]);
       }
@@ -234,8 +233,8 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
           'sam-oidc',
           'https://api.example.com',
           5000,
-          "x' || true || 'y",
-        ),
+          "x' || true || 'y"
+        )
       ).rejects.toThrow('unsafe for CEL interpolation');
     });
 
@@ -248,8 +247,8 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
           'sa@x.com',
           'sam-pool',
           5000,
-          'project with spaces',
-        ),
+          'project with spaces'
+        )
       ).rejects.toThrow('unsafe for CEL interpolation');
     });
 
@@ -265,8 +264,8 @@ describe('WIF pool scoping (cross-project impersonation prevention)', () => {
           'sam-oidc',
           'https://api.example.com',
           5000,
-          '01KHRJGANBBWGDY1NZ0KVF0D4J',
-        ),
+          '01KHRJGANBBWGDY1NZ0KVF0D4J'
+        )
       ).resolves.toBeUndefined();
     });
   });

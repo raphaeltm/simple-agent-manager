@@ -74,11 +74,7 @@ export async function resolveMcpServersForSession(
     // is not atomic, and lowering MAX_MCP_CONNECTIONS_PER_SCOPE does not retroactively delete
     // rows — so the write-side cap is not a guarantee the read side can rely on. Two scopes
     // are visible at once, hence twice the cap.
-    const rows: unknown = await db
-      .select()
-      .from(schema.mcpConnections)
-      .where(where)
-      .limit(maxRows);
+    const rows: unknown = await db.select().from(schema.mcpConnections).where(where).limit(maxRows);
     // The result shape is validated rather than assumed. This function runs on the
     // agent-session start path, so anything that throws here takes session start down for
     // the whole tenant — including a driver or binding that returns a non-array.

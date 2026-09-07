@@ -74,9 +74,8 @@ adminAiUsageRoutes.get('/', async (c) => {
   }
 
   // 24h is admin-only — resolve start date manually; 7d/30d/90d use shared helper
-  const startDate = period === '24h'
-    ? periodToStartDate(period)
-    : getGatewayPeriodBounds(period).startDate;
+  const startDate =
+    period === '24h' ? periodToStartDate(period) : getGatewayPeriodBounds(period).startDate;
 
   const modelMap = new Map<string, UsageByModel>();
   const dayMap = new Map<string, UsageByDay>();

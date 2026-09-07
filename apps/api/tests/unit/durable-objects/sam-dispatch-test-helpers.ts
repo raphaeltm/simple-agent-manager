@@ -126,9 +126,7 @@ export function buildDispatchPlacementResolution(input: DispatchPlacementResolut
     effectiveProvider: 'hetzner',
     credentialAttributionUserId: inherited.userId ?? input.userId,
     credentialAttributionProjectId:
-      credentialAttributionSource === 'project'
-        ? (inherited.projectId ?? input.projectId)
-        : null,
+      credentialAttributionSource === 'project' ? (inherited.projectId ?? input.projectId) : null,
     credentialAttributionSource,
   };
 }

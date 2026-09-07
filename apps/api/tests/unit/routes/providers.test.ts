@@ -296,7 +296,11 @@ describe('GET /api/providers/catalog', () => {
     ]);
     mockCreateProvider.mockReturnValue(makeMockProvider({ name: 'hetzner' }));
 
-    const res = await app.request('/api/providers/catalog?scope=user', { method: 'GET' }, makeEnv());
+    const res = await app.request(
+      '/api/providers/catalog?scope=user',
+      { method: 'GET' },
+      makeEnv()
+    );
     const body = (await res.json()) as ProviderCatalogResponse;
 
     expect(res.status).toBe(200);

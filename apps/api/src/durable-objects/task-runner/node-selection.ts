@@ -5,8 +5,8 @@
  * policy remain independently reviewable. See rule 18.
  */
 import {
-  canSatisfyVmSize,
   type CapacityPlacementSnapshot,
+  type CapacityPoolStrategy,
   type ResolvedResourceReservation,
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
@@ -18,6 +18,11 @@ import {
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
 import {
+  comparePlacementHostsByStrategy,
+  normalizePlacementHostSignals,
+  type PlacementHostSignals,
+} from '../../services/placement-strategy';
+import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
@@ -27,8 +32,10 @@ import {
   isResolvedResourceReservation,
   loadActiveWorkspaceReservationUsage,
   parseWorkspaceAdmissionMetrics,
+  resolveTrustedWorkspaceNodeCapacity,
   resolveWorkspaceAdmissionPolicy,
-  scoreWorkspaceAdmissionMetrics,
+  type TrustedWorkspaceNodeCapacityRow,
+  trustedWorkspaceNodeCapacityColumnsSql,
 } from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -67,7 +74,7 @@ export type NodePlacementFields = {
   placementExplanationJson?: string | null;
   lastMetrics?: string | null;
   lastHeartbeatAt?: string | null;
-};
+} & Partial<TrustedWorkspaceNodeCapacityRow>;
 
 function recoverySourceTaskGuard(
   state: TaskRunnerState
@@ -199,6 +206,7 @@ export async function tryClaimWarmNode(
        n.placement_credential_version AS placementCredentialVersion,
        n.capacity_pool_project_id AS capacityPoolProjectId,
        n.workload_role AS workloadRole,
+       ${trustedWorkspaceNodeCapacityColumnsSql('n')},
        n.provider_instance_type AS providerInstanceType,
        n.provider_instance_vcpu_count AS providerInstanceVcpuCount,
        n.provider_instance_memory_mb AS providerInstanceMemoryMb,
@@ -257,6 +265,7 @@ export async function tryClaimWarmNode(
        placement_credential_version AS placementCredentialVersion,
        capacity_pool_project_id AS capacityPoolProjectId,
        workload_role AS workloadRole,
+       ${trustedWorkspaceNodeCapacityColumnsSql()},
        provider_instance_type AS providerInstanceType,
        provider_instance_vcpu_count AS providerInstanceVcpuCount,
        provider_instance_memory_mb AS providerInstanceMemoryMb,
@@ -281,7 +290,17 @@ export async function tryClaimWarmNode(
 
   if (!warmNodes.results.length) return null;
 
-  // Sort nodes that can satisfy the requested size, preferring exact size/location.
+  // Warm hosts are ranked by the SAME strategy comparator as occupied reuse, so
+  // an operator's pool strategy is observable on the warm path too. It used to
+  // rank on `vmSize` equality, which made every strategy pick the same host.
+  const warmPolicy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
+  const warmReservation = getTaskReservation(state);
+  const warmUsage = await loadActiveWorkspaceReservationUsage(
+    rc.env.DATABASE,
+    warmNodes.results.map((node) => node.id)
+  );
+  const warmStrategy = taskPlacementStrategy(state);
+  const warmSelectionSettings = state.config.capacityPoolSelection?.selectionSettings;
   const sorted = warmNodes.results
     .filter((node) =>
       isNodeAgentVersionCompatible(node.agentVersion, rc.env.VM_AGENT_REQUIRED_VERSION)
@@ -289,15 +308,25 @@ export async function tryClaimWarmNode(
     .filter((node) => nodeSatisfiesTaskResources(node, state))
     .flatMap((node) => {
       const selection = resolveReusableNodeSelection(state, node);
-      return selection ? [{ ...node, selection }] : [];
+      if (!selection) return [];
+      const signals = normalizePlacementHostSignals({
+        node,
+        usage: warmUsage.get(node.id),
+        request: warmReservation,
+        policy: warmPolicy,
+      });
+      return [{ ...node, selection, signals }];
     })
     .sort((a, b) => {
-      const aSizeMatch = a.vmSize === state.config.vmSize ? 1 : 0;
-      const bSizeMatch = b.vmSize === state.config.vmSize ? 1 : 0;
-      if (aSizeMatch !== bSizeMatch) return bSizeMatch - aSizeMatch;
       const aLocMatch = a.vmLocation === state.config.vmLocation ? 1 : 0;
       const bLocMatch = b.vmLocation === state.config.vmLocation ? 1 : 0;
-      return bLocMatch - aLocMatch;
+      if (aLocMatch !== bLocMatch) return bLocMatch - aLocMatch;
+      return comparePlacementHostsByStrategy(
+        a.signals,
+        b.signals,
+        warmStrategy,
+        warmSelectionSettings
+      );
     });
 
   for (const warmNode of sorted) {
@@ -321,6 +350,7 @@ export async function tryClaimWarmNode(
            placement_credential_version AS placementCredentialVersion,
            capacity_pool_project_id AS capacityPoolProjectId,
            workload_role AS workloadRole,
+           ${trustedWorkspaceNodeCapacityColumnsSql()},
            provider_instance_type AS providerInstanceType,
            provider_instance_vcpu_count AS providerInstanceVcpuCount,
            provider_instance_memory_mb AS providerInstanceMemoryMb,
@@ -408,6 +438,7 @@ export async function findNodeWithCapacity(
        placement_credential_version AS placementCredentialVersion,
        capacity_pool_project_id AS capacityPoolProjectId,
        workload_role AS workloadRole,
+       ${trustedWorkspaceNodeCapacityColumnsSql()},
        provider_instance_type AS providerInstanceType,
        provider_instance_vcpu_count AS providerInstanceVcpuCount,
        provider_instance_memory_mb AS providerInstanceMemoryMb,
@@ -444,6 +475,13 @@ export async function findNodeWithCapacity(
       placementCredentialVersion: number | null;
       capacityPoolProjectId: string | null;
       workloadRole: string | null;
+      nodeClass: string | null;
+      providerInstanceId: string | null;
+      observedProviderInstanceType: string | null;
+      observedProviderInstanceVcpuCount: number | null;
+      observedProviderInstanceMemoryMb: number | null;
+      observedProviderInstanceDiskGb: number | null;
+      observedHardwareSource: string | null;
       providerInstanceType: string | null;
       providerInstanceVcpuCount: number | null;
       providerInstanceMemoryMb: number | null;
@@ -467,15 +505,14 @@ export async function findNodeWithCapacity(
   const nodeIds = nodes.results.map((n) => n.id);
   const usageByNode = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, nodeIds);
 
-  type ScoredNode = {
+  type RankedNode = {
     id: string;
-    vmSize: string;
     vmLocation: string;
     capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
-    score: number | null;
+    signals: PlacementHostSignals;
   };
 
-  const candidates: ScoredNode[] = [];
+  const candidates: RankedNode[] = [];
   const rejectionDiagnostics: Array<{ nodeId: string; reasons: string[] }> = [];
 
   for (const node of nodes.results) {
@@ -500,10 +537,15 @@ export async function findNodeWithCapacity(
     }
     candidates.push({
       id: node.id,
-      vmSize: node.vmSize,
       vmLocation: node.vmLocation,
       capacityPlacementSnapshot: selection.capacityPlacementSnapshot,
-      score: scoreWorkspaceAdmissionMetrics(metrics, policy),
+      signals: normalizePlacementHostSignals({
+        node,
+        usage: usageByNode.get(node.id),
+        request: requestedReservation,
+        policy,
+        metrics,
+      }),
     });
   }
 
@@ -517,18 +559,17 @@ export async function findNodeWithCapacity(
     return null;
   }
 
-  // Sort: prefer matching location/size, then lowest load
+  // Requested location stays a hard preference (an explicit locality constraint
+  // the caller made), then the pool's configured strategy decides. The former
+  // `vmSize === config.vmSize` tier is gone: a size label never outranked
+  // concrete capacity, it only made every strategy behave like `balanced`.
+  const strategy = taskPlacementStrategy(state);
+  const selectionSettings = state.config.capacityPoolSelection?.selectionSettings;
   candidates.sort((a, b) => {
     const aLoc = a.vmLocation === state.config.vmLocation ? 1 : 0;
     const bLoc = b.vmLocation === state.config.vmLocation ? 1 : 0;
     if (aLoc !== bLoc) return bLoc - aLoc;
-    const aSize = a.vmSize === state.config.vmSize ? 1 : 0;
-    const bSize = b.vmSize === state.config.vmSize ? 1 : 0;
-    if (aSize !== bSize) return bSize - aSize;
-    if (a.score === null && b.score === null) return 0;
-    if (a.score === null) return 1;
-    if (b.score === null) return -1;
-    return a.score - b.score;
+    return comparePlacementHostsByStrategy(a.signals, b.signals, strategy, selectionSettings);
   });
 
   const best = candidates[0];
@@ -573,28 +614,54 @@ function resolveReusableNodeSelection(
   };
 }
 
+/**
+ * Whether a host's hardware can satisfy the canonical reservation.
+ *
+ * Ranks concrete capacity only. The legacy `canSatisfyVmSize(node.vmSize, ...)`
+ * fallback this replaced let a stale `vm_size` label — a transport/compatibility
+ * field, not an authority — admit a host whose real hardware was never verified.
+ * Trusted OBSERVED capacity is preferred; the planned provider-native offering is
+ * accepted only as a pre-heartbeat estimate for a node that carries a native
+ * instance identity. A host with neither fails closed: `vm_size` alone can no
+ * longer admit anything. `evaluateWorkspaceReservationCapacity` independently
+ * re-rejects such a host, so this is defence in depth, not the only gate.
+ */
 export function nodeSatisfiesTaskResources(
   node: NodePlacementFields,
   state: TaskRunnerState
 ): boolean {
   const reservation = getTaskReservation(state);
-  if (
-    reservation &&
-    node.providerInstanceType &&
-    positiveInteger(node.providerInstanceVcpuCount) !== null &&
-    positiveInteger(node.providerInstanceMemoryMb) !== null
-  ) {
+  if (!reservation) return false;
+
+  const trusted = resolveTrustedWorkspaceNodeCapacity(node);
+  if (trusted.source !== null) {
     return offeringSatisfiesReservation(
       {
-        vcpuCount: positiveInteger(node.providerInstanceVcpuCount) ?? 0,
-        memoryMb: positiveInteger(node.providerInstanceMemoryMb) ?? 0,
+        vcpuCount: trusted.vcpuCount ?? 0,
+        memoryMb: trusted.memoryMb ?? 0,
+        diskGb: trusted.diskGb,
+      },
+      reservation
+    );
+  }
+
+  // Pre-heartbeat compatibility estimate: a node that carries a provider-native
+  // instance identity may be ranked on its PLANNED offering until observed
+  // hardware arrives. Marked as an estimate in placement diagnostics.
+  const plannedVcpu = positiveInteger(node.providerInstanceVcpuCount);
+  const plannedMemoryMb = positiveInteger(node.providerInstanceMemoryMb);
+  if (node.providerInstanceType && plannedVcpu !== null && plannedMemoryMb !== null) {
+    return offeringSatisfiesReservation(
+      {
+        vcpuCount: plannedVcpu,
+        memoryMb: plannedMemoryMb,
         diskGb: optionalPositiveInteger(node.providerInstanceDiskGb),
       },
       reservation
     );
   }
 
-  return canSatisfyVmSize(node.vmSize, state.config.vmSize);
+  return false;
 }
 
 function offeringSatisfiesReservation(
@@ -605,6 +672,16 @@ function offeringSatisfiesReservation(
   if (offering.memoryMb < reservation.memoryMb) return false;
   if (offering.diskGb !== null && offering.diskGb * 1024 < reservation.diskMb) return false;
   return true;
+}
+
+/**
+ * The effective pool's configured packing strategy for this run.
+ *
+ * A run with no capacity-pool selection is a legacy/unpooled placement: it keeps
+ * the historical least-loaded ordering, which `balanced` reproduces exactly.
+ */
+export function taskPlacementStrategy(state: TaskRunnerState): CapacityPoolStrategy {
+  return state.config.capacityPoolSelection?.strategy ?? 'balanced';
 }
 
 export function getTaskReservation(state: TaskRunnerState): ResolvedResourceReservation {

@@ -159,7 +159,12 @@ describe('MCP ProjectData event subscription tools', () => {
       { state: 'any', limit: 5 }
     );
 
-    await handleGetProjectEventSubscription(1, { subscriptionId: 'subscription-1', required: false }, token, env);
+    await handleGetProjectEventSubscription(
+      1,
+      { subscriptionId: 'subscription-1', required: false },
+      token,
+      env
+    );
     expect(serviceMocks.getProjectEventSubscriptionForCaller).toHaveBeenCalledWith(
       env,
       expect.objectContaining({ kind: 'agent', projectId: 'project-1', taskId: 'task-1' }),

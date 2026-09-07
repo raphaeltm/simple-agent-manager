@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
 
-import { type Workspace,workspaces } from '../db/schema';
+import { type Workspace, workspaces } from '../db/schema';
 import type { Env } from '../env';
 import { getUserId } from './auth';
 
@@ -22,11 +22,7 @@ export async function requireWorkspaceOwnership(
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE);
 
-  const result = await db
-    .select()
-    .from(workspaces)
-    .where(eq(workspaces.id, workspaceId))
-    .limit(1);
+  const result = await db.select().from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1);
 
   const workspace = result[0];
 

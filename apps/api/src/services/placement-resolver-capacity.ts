@@ -18,17 +18,23 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
+import { timestampVersion } from './default-capacity-pool-helpers';
 import type { CapacityPoolSummary } from './default-capacity-pools';
 import {
   legacyReusableNodeMatches,
   normalizeLegacyPoolSize,
 } from './legacy-node-pool-compatibility';
+import { capacityCandidateWorkloadRoleEligible } from './placement-authority';
 import type {
   CapacityAwareNodePlacementRow,
   TaskStartCapacityCandidate,
   TaskStartCapacityPoolSelection,
   TaskStartPlacement,
 } from './placement-resolver-types';
+import {
+  comparePlacementLocationsByStrategy,
+  type PlacementLocationInventory,
+} from './placement-strategy';
 
 const CAPACITY_PLACEMENT_PLAN_VERSION = 1;
 const MAX_SCORE_WEIGHT = 1_000_000_000;
@@ -53,6 +59,8 @@ export function capacityPoolSnapshotForPool(
     capacityPoolScope: selection.scope,
     capacityPoolRevision: selection.revision,
     capacitySourceId: null,
+    capacitySourceGeneration: null,
+    capacitySourceExternalRef: null,
     capacityPoolCandidateId: null,
     placementCredentialSource: null,
     placementCredentialReference: null,
@@ -160,6 +168,8 @@ export function capacityPlacementSnapshotForCandidate(
       capacityPoolScope: selection.scope,
       capacityPoolRevision: selection.revision,
       capacitySourceId: candidate.capacitySourceId,
+      capacitySourceGeneration: candidate.capacitySourceGeneration,
+      capacitySourceExternalRef: candidate.capacitySourceExternalRef,
       capacityPoolCandidateId: candidate.id,
       placementCredentialSource: candidate.placementCredentialSource,
       placementCredentialReference: candidate.placementCredentialReference,
@@ -245,7 +255,7 @@ function normalizeCapacityCandidate(
   effectiveState: TaskStartCapacityPoolSelection['effectiveState']
 ): TaskStartCapacityCandidate | null {
   if (!isActiveCapacityPlacementOption(pool, source, candidate)) return null;
-  if (candidate.workloadRole !== workloadRole) return null;
+  if (!capacityCandidateWorkloadRoleEligible(candidate.workloadRole, workloadRole)) return null;
   if (candidate.runtime && candidate.runtime !== placement.runtime.executionRuntime) return null;
   if (source.sourceKind !== 'cloud-provider-credential') return null;
   if (!candidate.provider || !isValidProvider(candidate.provider)) return null;
@@ -287,13 +297,16 @@ function normalizeCapacityCandidate(
 
   const capacityPoolProjectId =
     pool.scope === 'project' ? (pool.ownerProjectId ?? placement.projectId) : null;
+  const capacitySourceGeneration = timestampVersion(source.updatedAt ?? source.createdAt);
   const normalized: Omit<TaskStartCapacityCandidate, 'snapshot'> = {
     id: candidate.id,
     poolId: candidate.poolId,
     capacitySourceId: candidate.capacitySourceId,
+    capacitySourceGeneration,
+    capacitySourceExternalRef: source.externalSourceRef,
     provider: candidate.provider,
     location: candidate.location as VMLocation,
-    workloadRole: candidate.workloadRole,
+    workloadRole,
     runtime: candidate.runtime,
     machineClass: candidate.machineClass,
     machineSize: normalizeLegacyPoolSize(candidate.machineSize),
@@ -301,6 +314,11 @@ function normalizeCapacityCandidate(
     providerInstanceVcpuCount,
     providerInstanceMemoryMb,
     providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: optionalPositiveInteger(
+      candidate.providerInstanceBootDiskSizeGb
+    ),
+    providerInstanceImage: candidate.providerInstanceImage,
+    providerInstanceArchitecture: candidate.providerInstanceArchitecture,
     providerInstancePriceDisplay: candidate.providerInstancePriceDisplay,
     providerInstancePriceCurrency: nonEmptyString(candidate.providerInstancePriceCurrency),
     providerInstancePriceMonthlyCents: nonNegativeInteger(
@@ -328,16 +346,23 @@ function normalizeCapacityCandidate(
       capacityPoolScope: pool.scope,
       capacityPoolRevision: pool.revision,
       capacitySourceId: source.id,
+      capacitySourceGeneration,
+      capacitySourceExternalRef: source.externalSourceRef,
       capacityPoolCandidateId: candidate.id,
       placementCredentialSource: source.credentialSource,
       placementCredentialReference: source.credentialReference,
       placementCredentialVersion: source.credentialVersion,
       capacityPoolProjectId,
-      workloadRole: candidate.workloadRole,
+      workloadRole,
       providerInstanceType,
       providerInstanceVcpuCount,
       providerInstanceMemoryMb,
       providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: optionalPositiveInteger(
+        candidate.providerInstanceBootDiskSizeGb
+      ),
+      providerInstanceImage: candidate.providerInstanceImage,
+      providerInstanceArchitecture: candidate.providerInstanceArchitecture,
       providerInstancePriceDisplay: candidate.providerInstancePriceDisplay,
       providerInstancePriceCurrency: nonEmptyString(candidate.providerInstancePriceCurrency),
       providerInstancePriceMonthlyCents: nonNegativeInteger(
@@ -449,6 +474,46 @@ function capacityCandidateMatchesNode(
     nodeVmSize: node.vmSize,
     requestedVmSize,
     candidateMachineSize: null,
+  });
+}
+
+export interface RankCapacityCandidatesInput {
+  strategy: CapacityPoolStrategy;
+  reservation: ResolvedResourceReservation;
+  settings?: CapacityPoolPlacementSettings;
+  /**
+   * Live host distribution for the caller. Only `pack` and `spread` consult it,
+   * and only at provisioning time — resolve-time ordering has no host inventory
+   * and must stay byte-identical, so an absent inventory is a strict no-op.
+   */
+  locationInventory?: PlacementLocationInventory;
+}
+
+/**
+ * Re-rank an already-resolved candidate list at provisioning time.
+ *
+ * `pack` and `spread` are meaningless for a brand-new offering considered in
+ * isolation: neither utilization nor co-tenancy exists yet. They become
+ * observable only against the caller's live host distribution, which the
+ * resolver does not have. This applies that distribution as the leading key for
+ * those two strategies and otherwise preserves the resolver's exact ordering.
+ *
+ * Returns a new array; the input is not mutated.
+ */
+export function rankCapacityCandidatesForRuntime(
+  candidates: readonly TaskStartCapacityCandidate[],
+  input: RankCapacityCandidatesInput
+): TaskStartCapacityCandidate[] {
+  const settings = input.settings ?? defaultPlacementSettings();
+  return [...candidates].sort((a, b) => {
+    const byLocation = comparePlacementLocationsByStrategy(
+      { provider: a.provider, location: a.location },
+      { provider: b.provider, location: b.location },
+      input.strategy,
+      input.locationInventory
+    );
+    if (byLocation !== 0) return byLocation;
+    return compareCapacityCandidates(a, b, input.strategy, input.reservation, settings);
   });
 }
 

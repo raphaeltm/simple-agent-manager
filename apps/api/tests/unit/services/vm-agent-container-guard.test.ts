@@ -28,9 +28,9 @@ describe('fetchVmAgentContainer source-task guard', () => {
       chatSessionId: 'chat-1',
     };
 
-    await expect(fetchVmAgentContainer(env, 'node-1', request, 8080, guard)).resolves.toBeInstanceOf(
-      Response
-    );
+    await expect(
+      fetchVmAgentContainer(env, 'node-1', request, 8080, guard)
+    ).resolves.toBeInstanceOf(Response);
 
     expect(stub.proxyHttpGuarded).toHaveBeenCalledWith(request, 8080, guard);
     expect(stub.proxyHttp).not.toHaveBeenCalled();

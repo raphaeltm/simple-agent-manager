@@ -45,9 +45,7 @@ vi.mock('../../../src/db/schema', () => ({
   },
 }));
 
-const { runTrialWaitlistCleanup } = await import(
-  '../../../src/scheduled/trial-waitlist-cleanup'
-);
+const { runTrialWaitlistCleanup } = await import('../../../src/scheduled/trial-waitlist-cleanup');
 
 function makeEnv(overrides: Partial<Env> = {}): Env {
   return { DATABASE: {}, ...overrides } as unknown as Env;
@@ -91,10 +89,7 @@ describe('runTrialWaitlistCleanup', () => {
     // The `lt` helper was called with the threshold — verify it was derived
     // from the env override (60 days) not the default (30 days).
     const expectedThreshold60 = now - 60 * 24 * 60 * 60 * 1000;
-    expect(mockLt).toHaveBeenCalledWith(
-      expect.anything(),
-      expectedThreshold60
-    );
+    expect(mockLt).toHaveBeenCalledWith(expect.anything(), expectedThreshold60);
   });
 
   it('falls back to default 30 days when env is missing', async () => {
@@ -104,9 +99,6 @@ describe('runTrialWaitlistCleanup', () => {
     await runTrialWaitlistCleanup(env, now);
 
     const expectedThreshold30 = now - 30 * 24 * 60 * 60 * 1000;
-    expect(mockLt).toHaveBeenCalledWith(
-      expect.anything(),
-      expectedThreshold30
-    );
+    expect(mockLt).toHaveBeenCalledWith(expect.anything(), expectedThreshold30);
   });
 });

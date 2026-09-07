@@ -29,14 +29,16 @@ async function projectDataSessionAlreadyClosedForSleep(
   projectId: string,
   chatSessionId: string
 ): Promise<boolean> {
-  const session = await projectDataService.getSession(env, projectId, chatSessionId).catch((error) => {
-    log.warn('session_sleep_lifecycle_repair.project_data_status_failed', {
-      projectId,
-      chatSessionId,
-      error: error instanceof Error ? error.message : String(error),
+  const session = await projectDataService
+    .getSession(env, projectId, chatSessionId)
+    .catch((error) => {
+      log.warn('session_sleep_lifecycle_repair.project_data_status_failed', {
+        projectId,
+        chatSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
     });
-    return null;
-  });
   const status = typeof session?.status === 'string' ? session.status : null;
   return status === 'sleeping' || status === 'stopped';
 }

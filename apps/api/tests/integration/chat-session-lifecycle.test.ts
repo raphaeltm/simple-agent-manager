@@ -11,7 +11,7 @@
  *
  * Uses the same InMemorySqlStorage approach as project-data.test.ts.
  */
-import { beforeEach,describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { runMigrations } from '../../src/durable-objects/migrations';
 
@@ -36,9 +36,7 @@ class InMemorySqlStorage {
     if (upper.startsWith('CREATE INDEX') || upper.startsWith('ALTER TABLE')) {
       // ALTER TABLE ADD COLUMN — add null column to existing rows
       if (upper.startsWith('ALTER TABLE')) {
-        const alterMatch = normalized.match(
-          /ALTER TABLE (\w+) ADD COLUMN (\w+)/i
-        );
+        const alterMatch = normalized.match(/ALTER TABLE (\w+) ADD COLUMN (\w+)/i);
         if (alterMatch) {
           const tableName = alterMatch[1];
           const colName = alterMatch[2];
@@ -502,7 +500,15 @@ function createMockProjectDataDO(projectId: string) {
     sql.exec(
       `INSERT INTO activity_events (id, event_type, actor_type, actor_id, workspace_id, session_id, task_id, payload, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, eventType, actorType, actorId, workspaceId, sessionId, taskId, payload, now
+      id,
+      eventType,
+      actorType,
+      actorId,
+      workspaceId,
+      sessionId,
+      taskId,
+      payload,
+      now
     );
     return id;
   }
@@ -518,9 +524,7 @@ function createMockProjectDataDO(projectId: string) {
       taskId: string | null = null
     ): Promise<string> {
       const maxSessions = 1000;
-      const countRow = sql
-        .exec('SELECT COUNT(*) as cnt FROM chat_sessions')
-        .toArray()[0];
+      const countRow = sql.exec('SELECT COUNT(*) as cnt FROM chat_sessions').toArray()[0];
       if ((countRow?.cnt as number) >= maxSessions) {
         throw new Error(`Maximum ${maxSessions} sessions per project exceeded`);
       }
@@ -529,17 +533,20 @@ function createMockProjectDataDO(projectId: string) {
       sql.exec(
         `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
-        id, workspaceId, taskId, topic, now, now, now
+        id,
+        workspaceId,
+        taskId,
+        topic,
+        now,
+        now,
+        now
       );
       recordActivityEventInternal('session.started', 'system', null, workspaceId, id, taskId, null);
       broadcastEvent('session.created', { id, workspaceId, taskId, topic, status: 'active' });
       return id;
     },
 
-    async linkSessionToWorkspace(
-      sessionId: string,
-      workspaceId: string
-    ): Promise<void> {
+    async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
       const session = sql
         .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
         .toArray()[0];
@@ -549,7 +556,9 @@ function createMockProjectDataDO(projectId: string) {
       const now = Date.now();
       sql.exec(
         'UPDATE chat_sessions SET workspace_id = ?, updated_at = ? WHERE id = ?',
-        workspaceId, now, sessionId
+        workspaceId,
+        now,
+        sessionId
       );
       broadcastEvent('session.updated', { sessionId, workspaceId });
     },
@@ -558,7 +567,9 @@ function createMockProjectDataDO(projectId: string) {
       const now = Date.now();
       sql.exec(
         `UPDATE chat_sessions SET status = 'stopped', ended_at = ?, updated_at = ? WHERE id = ? AND status = 'active'`,
-        now, now, sessionId
+        now,
+        now,
+        sessionId
       );
     },
 
@@ -579,11 +590,17 @@ function createMockProjectDataDO(projectId: string) {
       sql.exec(
         `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        id, sessionId, role, content, toolMetadata, now
+        id,
+        sessionId,
+        role,
+        content,
+        toolMetadata,
+        now
       );
       sql.exec(
         `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
-        now, sessionId
+        now,
+        sessionId
       );
       broadcastEvent('message.new', { sessionId, messageId: id, role });
       return id;
@@ -622,7 +639,12 @@ function createMockProjectDataDO(projectId: string) {
         sql.exec(
           `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at)
            VALUES (?, ?, ?, ?, ?, ?)`,
-          msg.messageId, sessionId, msg.role, msg.content, msg.toolMetadata, createdAt
+          msg.messageId,
+          sessionId,
+          msg.role,
+          msg.content,
+          msg.toolMetadata,
+          createdAt
         );
         persisted++;
       }
@@ -630,7 +652,9 @@ function createMockProjectDataDO(projectId: string) {
       if (persisted > 0) {
         sql.exec(
           `UPDATE chat_sessions SET message_count = message_count + ?, updated_at = ? WHERE id = ?`,
-          persisted, now, sessionId
+          persisted,
+          now,
+          sessionId
         );
       }
 
@@ -639,14 +663,20 @@ function createMockProjectDataDO(projectId: string) {
 
     getSession(sessionId: string): Record<string, unknown> | null {
       const rows = sql
-        .exec('SELECT id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at FROM chat_sessions WHERE id = ?', sessionId)
+        .exec(
+          'SELECT id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at FROM chat_sessions WHERE id = ?',
+          sessionId
+        )
         .toArray();
       return rows[0] || null;
     },
 
     getSessionsByTaskId(taskId: string): Record<string, unknown>[] {
       return sql
-        .exec('SELECT id, workspace_id, task_id, topic, status, message_count FROM chat_sessions WHERE task_id = ?', taskId)
+        .exec(
+          'SELECT id, workspace_id, task_id, topic, status, message_count FROM chat_sessions WHERE task_id = ?',
+          taskId
+        )
         .toArray();
     },
 
@@ -783,9 +813,9 @@ describe('TDF-6: Chat session lifecycle', () => {
     });
 
     it('throws when persisting to nonexistent session', async () => {
-      await expect(
-        projectDO.persistMessage('nonexistent', 'user', 'Hello', null)
-      ).rejects.toThrow(/not found/i);
+      await expect(projectDO.persistMessage('nonexistent', 'user', 'Hello', null)).rejects.toThrow(
+        /not found/i
+      );
     });
 
     it('broadcasts message.new event for each message', async () => {
@@ -807,8 +837,20 @@ describe('TDF-6: Chat session lifecycle', () => {
       const sessionId = await projectDO.createSession(null, 'Test task', 'task-001');
 
       const batch1 = [
-        { messageId: 'msg-1', role: 'assistant', content: 'Response 1', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: 'msg-2', role: 'assistant', content: 'Response 2', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: 'msg-1',
+          role: 'assistant',
+          content: 'Response 1',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: 'msg-2',
+          role: 'assistant',
+          content: 'Response 2',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ];
 
       const result1 = await projectDO.persistMessageBatch(sessionId, batch1);
@@ -829,13 +871,31 @@ describe('TDF-6: Chat session lifecycle', () => {
       const sessionId = await projectDO.createSession(null, 'Test task', 'task-001');
 
       await projectDO.persistMessageBatch(sessionId, [
-        { messageId: 'msg-1', role: 'assistant', content: 'R1', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: 'msg-1',
+          role: 'assistant',
+          content: 'R1',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // Second batch with one existing and one new
       const result = await projectDO.persistMessageBatch(sessionId, [
-        { messageId: 'msg-1', role: 'assistant', content: 'R1', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: 'msg-2', role: 'assistant', content: 'R2', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: 'msg-1',
+          role: 'assistant',
+          content: 'R1',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: 'msg-2',
+          role: 'assistant',
+          content: 'R2',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(1);
@@ -848,7 +908,13 @@ describe('TDF-6: Chat session lifecycle', () => {
     it('throws when batch targets nonexistent session', async () => {
       await expect(
         projectDO.persistMessageBatch('nonexistent', [
-          { messageId: 'msg-1', role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
+          {
+            messageId: 'msg-1',
+            role: 'user',
+            content: 'Hello',
+            toolMetadata: null,
+            timestamp: new Date().toISOString(),
+          },
         ])
       ).rejects.toThrow(/not found/i);
     });
@@ -875,8 +941,20 @@ describe('TDF-6: Chat session lifecycle', () => {
 
       // 4. Agent sends messages (via VM agent → message batch endpoint)
       await projectDO.persistMessageBatch(sessionId, [
-        { messageId: 'agent-msg-1', role: 'assistant', content: 'I found the issue', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: 'agent-msg-2', role: 'assistant', content: 'Fixed!', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: 'agent-msg-1',
+          role: 'assistant',
+          content: 'I found the issue',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: 'agent-msg-2',
+          role: 'assistant',
+          content: 'Fixed!',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // 5. Verify all messages are in one session
@@ -903,7 +981,13 @@ describe('TDF-6: Chat session lifecycle', () => {
       // Messages should work even without workspace link
       await projectDO.persistMessage(sessionId, 'user', 'Initial message', null);
       await projectDO.persistMessageBatch(sessionId, [
-        { messageId: 'batch-1', role: 'assistant', content: 'Working on it', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: 'batch-1',
+          role: 'assistant',
+          content: 'Working on it',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const messages = projectDO.getMessages(sessionId);

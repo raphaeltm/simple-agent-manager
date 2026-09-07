@@ -97,7 +97,12 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
   const gatewayId = c.env.AI_GATEWAY_ID;
   if (!gatewayId) {
     const providerMap = new Map<string, UsageByProvider>();
-    const localProviderUsage = await getProviderUsage(c.env.KV, userId, new Date(periodBounds.startDate), c.env);
+    const localProviderUsage = await getProviderUsage(
+      c.env.KV,
+      userId,
+      new Date(periodBounds.startDate),
+      c.env
+    );
     let totalRequests = 0;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
@@ -178,7 +183,12 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
     } satisfies UserAiUsageResponse);
   }
 
-  const localProviderUsage = await getProviderUsage(c.env.KV, userId, new Date(periodBounds.startDate), c.env);
+  const localProviderUsage = await getProviderUsage(
+    c.env.KV,
+    userId,
+    new Date(periodBounds.startDate),
+    c.env
+  );
   for (const entry of localProviderUsage) {
     mergeLocalProviderUsage(providerMap, entry);
     totalRequests += entry.requests;
@@ -195,7 +205,9 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
     cachedRequests,
     errorRequests,
     byModel: Array.from(modelMap.values()).sort((a, b) => b.costUsd - a.costUsd),
-    byProvider: Array.from(providerMap.values()).sort((a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens),
+    byProvider: Array.from(providerMap.values()).sort(
+      (a, b) => b.costUsd - a.costUsd || b.totalTokens - a.totalTokens
+    ),
     byDay: Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
     period,
     periodLabel: getPeriodLabel(period),
@@ -206,7 +218,7 @@ usageRoutes.get('/ai', requireAuth(), requireApproved(), async (c) => {
 
 function mergeLocalProviderUsage(
   map: Map<string, UsageByProvider>,
-  entry: Awaited<ReturnType<typeof getProviderUsage>>[number],
+  entry: Awaited<ReturnType<typeof getProviderUsage>>[number]
 ): void {
   const key = `${entry.providerId}:${entry.dialect}`;
   const existing = map.get(key);
@@ -277,18 +289,23 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     alertThresholdPercent: DEFAULT_AI_USAGE_ALERT_THRESHOLD_PERCENT,
   };
 
-  const dailyInputPercent = effectiveLimits.dailyInputTokenLimit > 0
-    ? Math.min(100, (dailyUsage.inputTokens / effectiveLimits.dailyInputTokenLimit) * 100)
-    : 0;
-  const dailyOutputPercent = effectiveLimits.dailyOutputTokenLimit > 0
-    ? Math.min(100, (dailyUsage.outputTokens / effectiveLimits.dailyOutputTokenLimit) * 100)
-    : 0;
-  const monthlyCostPercent = settings.monthlyCostCapUsd !== null && settings.monthlyCostCapUsd > 0
-    ? Math.min(100, (monthCostUsd / settings.monthlyCostCapUsd) * 100)
-    : null;
+  const dailyInputPercent =
+    effectiveLimits.dailyInputTokenLimit > 0
+      ? Math.min(100, (dailyUsage.inputTokens / effectiveLimits.dailyInputTokenLimit) * 100)
+      : 0;
+  const dailyOutputPercent =
+    effectiveLimits.dailyOutputTokenLimit > 0
+      ? Math.min(100, (dailyUsage.outputTokens / effectiveLimits.dailyOutputTokenLimit) * 100)
+      : 0;
+  const monthlyCostPercent =
+    settings.monthlyCostCapUsd !== null && settings.monthlyCostCapUsd > 0
+      ? Math.min(100, (monthCostUsd / settings.monthlyCostCapUsd) * 100)
+      : null;
 
-  const exceeded = dailyInputPercent >= 100 || dailyOutputPercent >= 100
-    || (monthlyCostPercent !== null && monthlyCostPercent >= 100);
+  const exceeded =
+    dailyInputPercent >= 100 ||
+    dailyOutputPercent >= 100 ||
+    (monthlyCostPercent !== null && monthlyCostPercent >= 100);
 
   const response: UserAiBudgetResponse = {
     settings,
@@ -302,7 +319,8 @@ usageRoutes.get('/ai/budget', requireAuth(), requireApproved(), async (c) => {
     utilization: {
       dailyInputPercent: Math.round(dailyInputPercent * 10) / 10,
       dailyOutputPercent: Math.round(dailyOutputPercent * 10) / 10,
-      monthlyCostPercent: monthlyCostPercent !== null ? Math.round(monthlyCostPercent * 10) / 10 : null,
+      monthlyCostPercent:
+        monthlyCostPercent !== null ? Math.round(monthlyCostPercent * 10) / 10 : null,
     },
     exceeded,
   };
@@ -330,7 +348,10 @@ usageRoutes.put('/ai/budget', requireAuth(), requireApproved(), async (c) => {
   try {
     settings = validateBudgetUpdate(body, c.env, adminAllowance);
   } catch (err) {
-    return c.json({ error: 'VALIDATION_ERROR', message: err instanceof Error ? err.message : String(err) }, 400);
+    return c.json(
+      { error: 'VALIDATION_ERROR', message: err instanceof Error ? err.message : String(err) },
+      400
+    );
   }
 
   await saveUserBudgetSettings(c.env.KV, userId, settings);

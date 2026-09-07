@@ -330,7 +330,9 @@ describe('session recovery handoff', () => {
         superseded_by_task_id: thirdWake.taskId,
       });
       expect(
-        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = ?`).get(thirdWake.taskId)
+        sqlite
+          .prepare(`SELECT status, chat_session_id FROM tasks WHERE id = ?`)
+          .get(thirdWake.taskId)
       ).toMatchObject({ status: 'queued', chat_session_id: 'chat-1' });
 
       markWorkspaceDeleted(sqlite);

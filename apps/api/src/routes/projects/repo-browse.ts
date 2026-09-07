@@ -20,7 +20,13 @@ const VALID_REF = /^[A-Za-z0-9._\-/]+$/;
  * to octet-stream + attachment so a committed .svg/.html cannot run as stored XSS
  * on the api origin. Mirrors apps/api/src/routes/library.ts.
  */
-const DANGEROUS_MIMES = ['text/html', 'application/javascript', 'application/xhtml+xml', 'image/svg+xml', 'text/xml'];
+const DANGEROUS_MIMES = [
+  'text/html',
+  'application/javascript',
+  'application/xhtml+xml',
+  'image/svg+xml',
+  'text/xml',
+];
 
 /** Validate a git ref: non-empty, no `..`, only ref-safe characters. */
 function validateRef(ref: string, label = 'ref'): string {

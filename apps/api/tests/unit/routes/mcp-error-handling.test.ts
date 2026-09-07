@@ -104,19 +104,19 @@ function jsonRpcRequest(method: string, params?: Record<string, unknown>) {
   };
 }
 
-async function mcpPost(
-  app: Hono,
-  body: unknown,
-  token: string = 'valid-token',
-) {
-  return app.request('/mcp', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+async function mcpPost(app: Hono, body: unknown, token: string = 'valid-token') {
+  return app.request(
+    '/mcp',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  }, mockEnv);
+    mockEnv
+  );
 }
 
 describe('MCP tools/call error handling', () => {
@@ -138,13 +138,16 @@ describe('MCP tools/call error handling', () => {
   it('returns JSON-RPC error (not HTTP 500) when search_knowledge handler throws', async () => {
     // Make the DO stub throw to simulate a transient DO communication failure
     mockDoStub.searchKnowledgeObservations.mockRejectedValue(
-      new Error('Durable Object unavailable'),
+      new Error('Durable Object unavailable')
     );
 
-    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
-      name: 'search_knowledge',
-      arguments: { query: 'test' },
-    }));
+    const res = await mcpPost(
+      app,
+      jsonRpcRequest('tools/call', {
+        name: 'search_knowledge',
+        arguments: { query: 'test' },
+      })
+    );
 
     // Should return 200 with JSON-RPC error, NOT HTTP 500
     expect(res.status).toBe(200);
@@ -157,14 +160,15 @@ describe('MCP tools/call error handling', () => {
   });
 
   it('returns JSON-RPC error when get_project_knowledge handler throws', async () => {
-    mockDoStub.listKnowledgeEntities.mockRejectedValue(
-      new Error('Durable Object unavailable'),
-    );
+    mockDoStub.listKnowledgeEntities.mockRejectedValue(new Error('Durable Object unavailable'));
 
-    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
-      name: 'get_project_knowledge',
-      arguments: {},
-    }));
+    const res = await mcpPost(
+      app,
+      jsonRpcRequest('tools/call', {
+        name: 'get_project_knowledge',
+        arguments: {},
+      })
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -175,13 +179,16 @@ describe('MCP tools/call error handling', () => {
 
   it('returns JSON-RPC error when confirm_knowledge handler throws', async () => {
     mockDoStub.confirmKnowledgeObservation.mockRejectedValue(
-      new Error('Durable Object unavailable'),
+      new Error('Durable Object unavailable')
     );
 
-    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
-      name: 'confirm_knowledge',
-      arguments: { observationId: 'obs-123' },
-    }));
+    const res = await mcpPost(
+      app,
+      jsonRpcRequest('tools/call', {
+        name: 'confirm_knowledge',
+        arguments: { observationId: 'obs-123' },
+      })
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -191,14 +198,15 @@ describe('MCP tools/call error handling', () => {
   });
 
   it('preserves requestId in error response for client correlation', async () => {
-    mockDoStub.searchKnowledgeObservations.mockRejectedValue(
-      new Error('DO failure'),
-    );
+    mockDoStub.searchKnowledgeObservations.mockRejectedValue(new Error('DO failure'));
 
-    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
-      name: 'search_knowledge',
-      arguments: { query: 'test' },
-    }));
+    const res = await mcpPost(
+      app,
+      jsonRpcRequest('tools/call', {
+        name: 'search_knowledge',
+        arguments: { query: 'test' },
+      })
+    );
 
     const body = await res.json();
     expect(body.id).toBe(1); // Must match the request id
@@ -207,14 +215,15 @@ describe('MCP tools/call error handling', () => {
 
   it('catches errors from any tool handler via the outer try/catch', async () => {
     // Simulate a failure in get_relevant_knowledge by making the DO throw
-    mockDoStub.getRelevantKnowledge.mockRejectedValue(
-      new Error('Network error'),
-    );
+    mockDoStub.getRelevantKnowledge.mockRejectedValue(new Error('Network error'));
 
-    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
-      name: 'get_relevant_knowledge',
-      arguments: { context: 'some context' },
-    }));
+    const res = await mcpPost(
+      app,
+      jsonRpcRequest('tools/call', {
+        name: 'get_relevant_knowledge',
+        arguments: { context: 'some context' },
+      })
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -224,14 +233,15 @@ describe('MCP tools/call error handling', () => {
   });
 
   it('returns JSON-RPC error when add_knowledge handler throws', async () => {
-    mockDoStub.getKnowledgeEntityByName.mockRejectedValue(
-      new Error('DO storage full'),
-    );
+    mockDoStub.getKnowledgeEntityByName.mockRejectedValue(new Error('DO storage full'));
 
-    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
-      name: 'add_knowledge',
-      arguments: { entityName: 'test-entity', observation: 'some observation' },
-    }));
+    const res = await mcpPost(
+      app,
+      jsonRpcRequest('tools/call', {
+        name: 'add_knowledge',
+        arguments: { entityName: 'test-entity', observation: 'some observation' },
+      })
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -241,14 +251,15 @@ describe('MCP tools/call error handling', () => {
   });
 
   it('returns JSON-RPC error when get_knowledge handler throws', async () => {
-    mockDoStub.getKnowledgeEntity.mockRejectedValue(
-      new Error('DO unavailable'),
-    );
+    mockDoStub.getKnowledgeEntity.mockRejectedValue(new Error('DO unavailable'));
 
-    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
-      name: 'get_knowledge',
-      arguments: { entityId: 'entity-123' },
-    }));
+    const res = await mcpPost(
+      app,
+      jsonRpcRequest('tools/call', {
+        name: 'get_knowledge',
+        arguments: { entityId: 'entity-123' },
+      })
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -258,14 +269,15 @@ describe('MCP tools/call error handling', () => {
   });
 
   it('returns JSON-RPC error when get_related handler throws', async () => {
-    mockDoStub.getKnowledgeEntityByName.mockRejectedValue(
-      new Error('DO connection reset'),
-    );
+    mockDoStub.getKnowledgeEntityByName.mockRejectedValue(new Error('DO connection reset'));
 
-    const res = await mcpPost(app, jsonRpcRequest('tools/call', {
-      name: 'get_related',
-      arguments: { entityName: 'test-entity' },
-    }));
+    const res = await mcpPost(
+      app,
+      jsonRpcRequest('tools/call', {
+        name: 'get_related',
+        arguments: { entityName: 'test-entity' },
+      })
+    );
 
     expect(res.status).toBe(200);
     const body = await res.json();

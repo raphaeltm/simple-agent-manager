@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { recomputeMissionSchedulerStates } from '../../../src/services/scheduler-state-sync';
 
-function makeMockD1(tasks: Array<{ id: string; status: string; mission_id: string | null }>, deps: Array<{ task_id: string; depends_on_task_id: string }> = []) {
+function makeMockD1(
+  tasks: Array<{ id: string; status: string; mission_id: string | null }>,
+  deps: Array<{ task_id: string; depends_on_task_id: string }> = []
+) {
   const mockRun = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
   let callCount = 0;
   const mockPrepare = vi.fn().mockImplementation(() => ({
@@ -20,7 +23,9 @@ function makeMockD1(tasks: Array<{ id: string; status: string; mission_id: strin
       return { run: mockRun };
     }),
   }));
-  return { prepare: mockPrepare, _run: mockRun } as unknown as D1Database & { _run: ReturnType<typeof vi.fn> };
+  return { prepare: mockPrepare, _run: mockRun } as unknown as D1Database & {
+    _run: ReturnType<typeof vi.fn>;
+  };
 }
 
 describe('recomputeMissionSchedulerStates', () => {
@@ -43,7 +48,7 @@ describe('recomputeMissionSchedulerStates', () => {
         { id: 'task-1', status: 'queued', mission_id: 'mission-1' },
         { id: 'task-2', status: 'queued', mission_id: 'mission-1' },
       ],
-      [{ task_id: 'task-2', depends_on_task_id: 'task-1' }],
+      [{ task_id: 'task-2', depends_on_task_id: 'task-1' }]
     );
 
     await recomputeMissionSchedulerStates(db, 'mission-1');
@@ -51,9 +56,7 @@ describe('recomputeMissionSchedulerStates', () => {
   });
 
   it('sets completed for completed tasks', async () => {
-    const db = makeMockD1([
-      { id: 'task-1', status: 'completed', mission_id: 'mission-1' },
-    ]);
+    const db = makeMockD1([{ id: 'task-1', status: 'completed', mission_id: 'mission-1' }]);
 
     await recomputeMissionSchedulerStates(db, 'mission-1');
     expect(db._run).toHaveBeenCalled();

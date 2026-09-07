@@ -18,9 +18,7 @@ import { describe, expect, it, vi } from 'vitest';
 const SRC_DIR = path.resolve(__dirname, '../../src');
 
 import * as schema from '../../src/db/schema';
-import {
-  selectNodeForTaskRun,
-} from '../../src/services/node-selector';
+import { selectNodeForTaskRun } from '../../src/services/node-selector';
 
 vi.mock('../../src/services/node-lifecycle', () => ({
   tryClaim: vi.fn(),
@@ -83,7 +81,9 @@ function createMockDb({
                 if (selection && 'warmSince' in selection && 'status' in selection) {
                   return {
                     limit() {
-                      return Promise.resolve([{ status: 'running', warmSince: new Date().toISOString() }]);
+                      return Promise.resolve([
+                        { status: 'running', warmSince: new Date().toISOString() },
+                      ]);
                     },
                   };
                 }
@@ -132,11 +132,7 @@ describe('selectNodeForTaskRun — node_role filtering', () => {
     // Only a deployment node is available
     const db = createMockDb({ allNodes: [deploymentNode] });
 
-    const result = await selectNodeForTaskRun(
-      db as any,
-      'user-1',
-      env
-    );
+    const result = await selectNodeForTaskRun(db as any, 'user-1', env);
 
     // Should return null — deployment node is not eligible
     expect(result).toBeNull();
@@ -155,11 +151,7 @@ describe('selectNodeForTaskRun — node_role filtering', () => {
 
     const db = createMockDb({ allNodes: [deploymentNode, workspaceNode] });
 
-    const result = await selectNodeForTaskRun(
-      db as any,
-      'user-1',
-      env
-    );
+    const result = await selectNodeForTaskRun(db as any, 'user-1', env);
 
     expect(result).not.toBeNull();
     expect(result!.id).toBe('node-ws-1');
@@ -173,11 +165,7 @@ describe('selectNodeForTaskRun — node_role filtering', () => {
 
     const db = createMockDb({ allNodes: nodes });
 
-    const result = await selectNodeForTaskRun(
-      db as any,
-      'user-1',
-      env
-    );
+    const result = await selectNodeForTaskRun(db as any, 'user-1', env);
 
     expect(result).toBeNull();
   });
@@ -287,10 +275,7 @@ describe('task-runner node-steps — node_role filtering', () => {
 describe('workspace creation node quota — node_role filtering', () => {
   it('workspace CRUD node count excludes deployment nodes', async () => {
     const fs = await import('fs');
-    const source = fs.readFileSync(
-      path.join(SRC_DIR, 'routes/workspaces/crud.ts'),
-      'utf-8'
-    );
+    const source = fs.readFileSync(path.join(SRC_DIR, 'routes/workspaces/crud.ts'), 'utf-8');
 
     // The node count for workspace creation quota must filter by nodeRole
     const countSection = source.slice(

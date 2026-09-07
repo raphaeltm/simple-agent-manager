@@ -41,10 +41,7 @@ const FORWARDED_RESPONSE_HEADERS = [
 ];
 
 /** Additional headers forwarded for raw binary file responses (security headers set by VM agent). */
-const RAW_FILE_EXTRA_HEADERS = [
-  'Content-Security-Policy',
-  'X-Content-Type-Options',
-];
+const RAW_FILE_EXTRA_HEADERS = ['Content-Security-Policy', 'X-Content-Type-Options'];
 
 /**
  * Resolve workspace from a chat session and build the VM agent URL + token.
@@ -130,9 +127,7 @@ async function resolveSessionWorkspace(
   });
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
-    throw errors.badRequest(
-      `Workspace is not accessible (status: ${workspace.status})`
-    );
+    throw errors.badRequest(`Workspace is not accessible (status: ${workspace.status})`);
   }
 
   if (!workspace.nodeId) {
@@ -164,7 +159,9 @@ async function proxyToVmAgent(
   queryParams: URLSearchParams
 ): Promise<Response> {
   const timeoutMs = parseInt(env.FILE_PROXY_TIMEOUT_MS ?? String(DEFAULT_FILE_PROXY_TIMEOUT_MS));
-  const maxBytes = parseInt(env.FILE_PROXY_MAX_RESPONSE_BYTES ?? String(DEFAULT_FILE_PROXY_MAX_RESPONSE_BYTES));
+  const maxBytes = parseInt(
+    env.FILE_PROXY_MAX_RESPONSE_BYTES ?? String(DEFAULT_FILE_PROXY_MAX_RESPONSE_BYTES)
+  );
 
   queryParams.set('token', token);
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/${vmPath}?${queryParams.toString()}`;
@@ -273,7 +270,15 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/find', async (c) => {
     userId
   );
 
-  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'files/find', new URLSearchParams());
+  return proxyToVmAgent(
+    c.env,
+    nodeId,
+    workspaceUrl,
+    workspaceId,
+    token,
+    'files/find',
+    new URLSearchParams()
+  );
 });
 
 /** GET /:id/sessions/:sessionId/files/list — Proxy directory listing */
@@ -329,7 +334,15 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/git/status', async (c) => {
     userId
   );
 
-  return proxyToVmAgent(c.env, nodeId, workspaceUrl, workspaceId, token, 'git/status', new URLSearchParams());
+  return proxyToVmAgent(
+    c.env,
+    nodeId,
+    workspaceUrl,
+    workspaceId,
+    token,
+    'git/status',
+    new URLSearchParams()
+  );
 });
 
 /** GET /:id/sessions/:sessionId/git/diff — Proxy git diff for a file */
@@ -455,7 +468,9 @@ fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
     userId
   );
 
-  const timeoutMs = parseInt(c.env.FILE_UPLOAD_TIMEOUT_MS ?? String(DEFAULT_FILE_UPLOAD_TIMEOUT_MS));
+  const timeoutMs = parseInt(
+    c.env.FILE_UPLOAD_TIMEOUT_MS ?? String(DEFAULT_FILE_UPLOAD_TIMEOUT_MS)
+  );
   const maxBatchBytes = parseInt(
     c.env.FILE_UPLOAD_BATCH_MAX_BYTES ?? String(DEFAULT_FILE_UPLOAD_BATCH_MAX_BYTES)
   );
@@ -468,17 +483,23 @@ fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
 
   const url = `${workspaceUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload?token=${encodeURIComponent(token)}`;
 
-  const res = await fetchNodeAgent(nodeId, c.env, url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': c.req.header('Content-Type') ?? 'multipart/form-data',
+  const res = await fetchNodeAgent(
+    nodeId,
+    c.env,
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': c.req.header('Content-Type') ?? 'multipart/form-data',
+      },
+      body: c.req.raw.body
+        ? createSizeLimitedStream(c.req.raw.body, maxBatchBytes + 1024 * 1024)
+        : undefined,
+      // @ts-expect-error duplex is required for streaming request bodies in fetch
+      duplex: 'half',
     },
-    body: c.req.raw.body
-      ? createSizeLimitedStream(c.req.raw.body, maxBatchBytes + 1024 * 1024)
-      : undefined,
-    // @ts-expect-error duplex is required for streaming request bodies in fetch
-    duplex: 'half',
-  }, timeoutMs);
+    timeoutMs
+  );
 
   if (!res.ok) {
     const text = await res.text();
@@ -487,12 +508,9 @@ fileProxyRoutes.post('/:id/sessions/:sessionId/files/upload', async (c) => {
       status: res.status,
       body: text,
     });
-    const clientStatus =
-      res.status === 413 ? 413 : res.status >= 500 ? 502 : 400;
+    const clientStatus = res.status === 413 ? 413 : res.status >= 500 ? 502 : 400;
     if (clientStatus === 502) throw errors.internal('Workspace agent unavailable');
-    throw errors.badRequest(
-      clientStatus === 413 ? 'File too large' : 'Upload failed'
-    );
+    throw errors.badRequest(clientStatus === 413 ? 'File too large' : 'Upload failed');
   }
 
   const headers = new Headers();
@@ -517,7 +535,9 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {
   if (!filePath) throw errors.badRequest('path query parameter is required');
   const safePath = normalizeFileProxyPath(filePath);
 
-  const timeoutMs = parseInt(c.env.FILE_DOWNLOAD_TIMEOUT_MS ?? String(DEFAULT_FILE_DOWNLOAD_TIMEOUT_MS));
+  const timeoutMs = parseInt(
+    c.env.FILE_DOWNLOAD_TIMEOUT_MS ?? String(DEFAULT_FILE_DOWNLOAD_TIMEOUT_MS)
+  );
   const maxBytes = parseInt(
     c.env.FILE_DOWNLOAD_MAX_BYTES ?? String(DEFAULT_FILE_DOWNLOAD_MAX_BYTES)
   );
@@ -556,10 +576,10 @@ fileProxyRoutes.get('/:id/sessions/:sessionId/files/download', async (c) => {
     headers.set('Content-Type', 'application/octet-stream');
   }
 
-  return new Response(
-    res.body ? createSizeLimitedStream(res.body, maxBytes) : null,
-    { status: res.status, headers }
-  );
+  return new Response(res.body ? createSizeLimitedStream(res.body, maxBytes) : null, {
+    status: res.status,
+    headers,
+  });
 });
 
 export { fileProxyRoutes };

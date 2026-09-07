@@ -1,4 +1,8 @@
-import type { AgentProfileRuntime, CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
+import type {
+  AgentProfileRuntime,
+  CredentialProvider,
+  CredentialSource,
+} from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
@@ -26,7 +30,9 @@ export interface WorkspaceRuntimeDecision {
     | 'zero-config';
 }
 
-export function decideWorkspaceRuntime(input: WorkspaceRuntimeDecisionInput): WorkspaceRuntimeDecision {
+export function decideWorkspaceRuntime(
+  input: WorkspaceRuntimeDecisionInput
+): WorkspaceRuntimeDecision {
   if (!input.containerEnabled) {
     return { runtime: 'vm', reason: 'sandbox-disabled' };
   }
@@ -59,7 +65,10 @@ export async function resolveWorkspaceRuntime(
   }
 ): Promise<WorkspaceRuntimeDecision> {
   if ((env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) !== 'true') {
-    return decideWorkspaceRuntime({ containerEnabled: false, explicitRuntime: input.explicitRuntime });
+    return decideWorkspaceRuntime({
+      containerEnabled: false,
+      explicitRuntime: input.explicitRuntime,
+    });
   }
 
   const credential = await resolveCredentialSource(

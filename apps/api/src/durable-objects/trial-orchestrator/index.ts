@@ -233,7 +233,7 @@ export class TrialOrchestrator extends DurableObject<Env> {
         const backoff = computeBackoffMs(
           state.retryCount,
           this.getRetryBaseDelayMs(),
-          this.getRetryMaxDelayMs(),
+          this.getRetryMaxDelayMs()
         );
         await this.ctx.storage.setAlarm(Date.now() + backoff);
         log.info('trial_orchestrator_do.step_retry_scheduled', {
@@ -255,7 +255,7 @@ export class TrialOrchestrator extends DurableObject<Env> {
   private async failTrial(
     state: TrialOrchestratorState,
     reason: string,
-    errorCode: string,
+    errorCode: string
   ): Promise<void> {
     // Revoke MCP token BEFORE marking state as failed so a leaked token from a
     // botched/timed-out trial cannot continue hitting MCP endpoints for the
@@ -343,63 +343,63 @@ export class TrialOrchestrator extends DurableObject<Env> {
   private getOverallTimeoutMs(): number {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS,
-      DEFAULT_TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS,
+      DEFAULT_TRIAL_ORCHESTRATOR_OVERALL_TIMEOUT_MS
     );
   }
 
   private getRetryBaseDelayMs(): number {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS,
-      DEFAULT_TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS,
+      DEFAULT_TRIAL_ORCHESTRATOR_RETRY_BASE_DELAY_MS
     );
   }
 
   private getRetryMaxDelayMs(): number {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS,
-      DEFAULT_TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS,
+      DEFAULT_TRIAL_ORCHESTRATOR_RETRY_MAX_DELAY_MS
     );
   }
 
   private getMaxRetries(): number {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES,
-      DEFAULT_TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES,
+      DEFAULT_TRIAL_ORCHESTRATOR_STEP_MAX_RETRIES
     );
   }
 
   private getWorkspaceReadyTimeoutMs(): number {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS,
-      DEFAULT_TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS,
+      DEFAULT_TRIAL_ORCHESTRATOR_WORKSPACE_READY_TIMEOUT_MS
     );
   }
 
   private getWorkspaceReadyPollIntervalMs(): number {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS,
-      DEFAULT_TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS,
+      DEFAULT_TRIAL_ORCHESTRATOR_WORKSPACE_READY_POLL_INTERVAL_MS
     );
   }
 
   private getNodeReadyTimeoutMs(): number {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS,
-      DEFAULT_TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS,
+      DEFAULT_TRIAL_ORCHESTRATOR_NODE_READY_TIMEOUT_MS
     );
   }
 
   private getAgentReadyTimeoutMs(): number {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS,
-      DEFAULT_TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS,
+      DEFAULT_TRIAL_ORCHESTRATOR_AGENT_READY_TIMEOUT_MS
     );
   }
 
   private getHeartbeatSkewMs(): number {
     return parseEnvInt(
       this.env.TRIAL_ORCHESTRATOR_HEARTBEAT_SKEW_MS,
-      DEFAULT_TRIAL_ORCHESTRATOR_HEARTBEAT_SKEW_MS,
+      DEFAULT_TRIAL_ORCHESTRATOR_HEARTBEAT_SKEW_MS
     );
   }
 }

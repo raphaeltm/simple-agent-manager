@@ -45,11 +45,7 @@ export async function encrypt(
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plaintext);
 
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    encoded
-  );
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
 
   return {
     ciphertext: bufferToBase64(ciphertext),
@@ -62,11 +58,7 @@ export async function encrypt(
  * Returns the original plaintext.
  * Logs decryption failures for security monitoring.
  */
-export async function decrypt(
-  ciphertext: string,
-  iv: string,
-  keyBase64: string
-): Promise<string> {
+export async function decrypt(ciphertext: string, iv: string, keyBase64: string): Promise<string> {
   try {
     const key = await crypto.subtle.importKey(
       'raw',

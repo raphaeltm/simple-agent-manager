@@ -20,7 +20,9 @@ function makeEnv() {
     DATABASE: { prepare },
     KV: {
       get: vi.fn(async (key: string) => values.get(key) ?? null),
-      put: vi.fn(async (key: string, value: string) => { values.set(key, value); }),
+      put: vi.fn(async (key: string, value: string) => {
+        values.set(key, value);
+      }),
     },
     NOTIFICATION: {},
     TRIAL_ANONYMOUS_USER_ID: 'system-sentinel',

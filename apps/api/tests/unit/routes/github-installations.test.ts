@@ -53,23 +53,32 @@ vi.mock('../../../src/auth', () => ({
   }),
 }));
 vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => vi.fn((c: any, next: any) => {
-    c.set('auth', {
-      user: { id: 'user-1', role: 'user', status: 'active', email: 'u@example.com', name: 'User', avatarUrl: null },
-      session: { id: 'sess-1', expiresAt: new Date() },
-    });
-    return next();
-  }),
-  requireApproved: () => vi.fn((c: any, next: any) => next()),
-  optionalAuth: () => vi.fn((c: any, next: any) => {
-    if (mocks.optionalAuthUser) {
+  requireAuth: () =>
+    vi.fn((c: any, next: any) => {
       c.set('auth', {
-        user: mocks.optionalAuthUser,
+        user: {
+          id: 'user-1',
+          role: 'user',
+          status: 'active',
+          email: 'u@example.com',
+          name: 'User',
+          avatarUrl: null,
+        },
         session: { id: 'sess-1', expiresAt: new Date() },
       });
-    }
-    return next();
-  }),
+      return next();
+    }),
+  requireApproved: () => vi.fn((c: any, next: any) => next()),
+  optionalAuth: () =>
+    vi.fn((c: any, next: any) => {
+      if (mocks.optionalAuthUser) {
+        c.set('auth', {
+          user: mocks.optionalAuthUser,
+          session: { id: 'sess-1', expiresAt: new Date() },
+        });
+      }
+      return next();
+    }),
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/services/github-app', async () => {
@@ -114,7 +123,14 @@ describe('GitHub App installation sharing', () => {
     insertedRows = [];
     deleteResponses = [];
     deletedTables = [];
-    mocks.optionalAuthUser = { id: 'user-1', role: 'user', status: 'active', email: 'u@example.com', name: 'User', avatarUrl: null };
+    mocks.optionalAuthUser = {
+      id: 'user-1',
+      role: 'user',
+      status: 'active',
+      email: 'u@example.com',
+      name: 'User',
+      avatarUrl: null,
+    };
     mocks.insertError = null;
     mocks.insertErrorTable = 'all';
     mocks.getAccessToken.mockResolvedValue({ accessToken: 'github-user-token' });
@@ -243,9 +259,7 @@ describe('GitHub App installation sharing', () => {
 
   const expectOnlyExistingInstallation = async (res: Response) => {
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual([
-      expect.objectContaining({ installationId: '111' }),
-    ]);
+    await expect(res.json()).resolves.toEqual([expect.objectContaining({ installationId: '111' })]);
   };
 
   const callbackInsertFailure = async (error: Error) => {
@@ -263,25 +277,31 @@ describe('GitHub App installation sharing', () => {
   };
 
   const insertedPerUserRows = () =>
-    insertedRows.filter((row): row is Record<string, unknown> =>
-      typeof row === 'object' && row !== null && 'userId' in row
+    insertedRows.filter(
+      (row): row is Record<string, unknown> =>
+        typeof row === 'object' && row !== null && 'userId' in row
     );
 
   const insertedCanonicalRows = () =>
-    insertedRows.filter((row): row is Record<string, unknown> =>
-      typeof row === 'object' && row !== null && 'accountNameNormalized' in row
+    insertedRows.filter(
+      (row): row is Record<string, unknown> =>
+        typeof row === 'object' && row !== null && 'accountNameNormalized' in row
     );
 
   const postInstallationWebhook = (payload: string) =>
-    app.request('/api/github/webhook', {
-      method: 'POST',
-      headers: {
-        'x-hub-signature-256': 'sha256=test',
-        'x-github-event': 'installation',
-        'content-type': 'application/json',
+    app.request(
+      '/api/github/webhook',
+      {
+        method: 'POST',
+        headers: {
+          'x-hub-signature-256': 'sha256=test',
+          'x-github-event': 'installation',
+          'content-type': 'application/json',
+        },
+        body: payload,
       },
-      body: payload,
-    }, mockEnv);
+      mockEnv
+    );
 
   it('stores callback installation only when the GitHub user can access it', async () => {
     limitResponses.push([]);
@@ -290,7 +310,9 @@ describe('GitHub App installation sharing', () => {
     const res = await app.request('/api/github/callback?installation_id=123', {}, mockEnv);
 
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('https://app.example.com/settings?github_app=installed');
+    expect(res.headers.get('location')).toBe(
+      'https://app.example.com/settings?github_app=installed'
+    );
     expect(insertedCanonicalRows()).toEqual([
       expect.objectContaining({
         installationId: '123',
@@ -323,12 +345,17 @@ describe('GitHub App installation sharing', () => {
       installationId: '123',
       tokenPresent: true,
     });
-    expect(mocks.log.info).toHaveBeenCalledWith('github.installation_callback.accessible_installations', {
-      userId: 'user-1',
-      installationId: '123',
-      installationCount: 1,
-      installations: [{ installationId: '123', accountName: 'acme', accountType: 'Organization' }],
-    });
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'github.installation_callback.accessible_installations',
+      {
+        userId: 'user-1',
+        installationId: '123',
+        installationCount: 1,
+        installations: [
+          { installationId: '123', accountName: 'acme', accountType: 'Organization' },
+        ],
+      }
+    );
     expect(mocks.log.info).toHaveBeenCalledWith('github.installation_callback.installation_match', {
       userId: 'user-1',
       installationId: '123',
@@ -392,16 +419,18 @@ describe('GitHub App installation sharing', () => {
   });
 
   it('rejects and deletes an existing callback personal row owned by a different GitHub user', async () => {
-    limitResponses.push([{
-      id: 'bad-row-1',
-      userId: 'user-1',
-      installationId: 'user-1:108667778',
-      externalInstallationId: '108667778',
-      accountType: 'personal',
-      accountName: 'raphaeltm',
-      createdAt: '2026-06-06T16:41:10.502Z',
-      updatedAt: '2026-06-06T16:41:10.502Z',
-    }]);
+    limitResponses.push([
+      {
+        id: 'bad-row-1',
+        userId: 'user-1',
+        installationId: 'user-1:108667778',
+        externalInstallationId: '108667778',
+        accountType: 'personal',
+        accountName: 'raphaeltm',
+        createdAt: '2026-06-06T16:41:10.502Z',
+        updatedAt: '2026-06-06T16:41:10.502Z',
+      },
+    ]);
     mocks.getAuthenticatedGitHubUser.mockResolvedValue({ id: 591860, login: 'lionello' });
     mocks.getUserAccessibleInstallations.mockResolvedValue([
       { id: 108667778, account: { id: 910895, login: 'raphaeltm', type: 'User' } },
@@ -443,7 +472,9 @@ describe('GitHub App installation sharing', () => {
     const res = await app.request('/api/github/callback?installation_id=113789898', {}, mockEnv);
 
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('https://app.example.com/settings?github_app=installed');
+    expect(res.headers.get('location')).toBe(
+      'https://app.example.com/settings?github_app=installed'
+    );
     expect(insertedPerUserRows()).toHaveLength(1);
     expect(insertedPerUserRows()[0]).toMatchObject({
       userId: 'user-1',
@@ -464,7 +495,9 @@ describe('GitHub App installation sharing', () => {
     const res = await app.request('/api/github/callback?installation_id=113789898', {}, mockEnv);
 
     expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toBe('https://app.example.com/settings?github_app=installed');
+    expect(res.headers.get('location')).toBe(
+      'https://app.example.com/settings?github_app=installed'
+    );
     expect(insertedPerUserRows()).toHaveLength(1);
     expect(insertedPerUserRows()[0]).toMatchObject({
       userId: 'user-1',
@@ -630,20 +663,19 @@ describe('GitHub App installation sharing', () => {
       }),
     ]);
     expect(insertedPerUserRows()).toHaveLength(0);
-    expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.deferred_org_installations', {
-      userId: 'user-1',
-      deferredInstallationCount: 2,
-      reason: 'shared_org_discovery_required',
-    });
-    await expect(res.json()).resolves.toEqual([
-      expect.objectContaining({ installationId: '111' }),
-    ]);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'github.installations_sync.deferred_org_installations',
+      {
+        userId: 'user-1',
+        deferredInstallationCount: 2,
+        reason: 'shared_org_discovery_required',
+      }
+    );
+    await expect(res.json()).resolves.toEqual([expect.objectContaining({ installationId: '111' })]);
   });
 
   it('does not direct-sync another user personal installation returned by GitHub user-context access', async () => {
-    whereResponses.push(
-      [existingInstallationRow()]
-    );
+    whereResponses.push([existingInstallationRow()]);
     mocks.getAuthenticatedGitHubUser.mockResolvedValue({ id: 591860, login: 'lionello' });
     mocks.getUserAccessibleInstallations.mockResolvedValue([
       { id: 108667778, account: { id: 910895, login: 'raphaeltm', type: 'User' } },
@@ -653,14 +685,15 @@ describe('GitHub App installation sharing', () => {
 
     expect(res.status).toBe(200);
     expect(insertedRows).toHaveLength(0);
-    expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.skipped_direct_installations', {
-      userId: 'user-1',
-      skippedInstallationCount: 1,
-      reason: 'not_authenticated_user_personal_installation',
-    });
-    await expect(res.json()).resolves.toEqual([
-      expect.objectContaining({ installationId: '111' }),
-    ]);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'github.installations_sync.skipped_direct_installations',
+      {
+        userId: 'user-1',
+        skippedInstallationCount: 1,
+        reason: 'not_authenticated_user_personal_installation',
+      }
+    );
+    await expect(res.json()).resolves.toEqual([expect.objectContaining({ installationId: '111' })]);
   });
 
   it('does not direct-sync another user personal installation when GitHub omits account id', async () => {
@@ -674,11 +707,14 @@ describe('GitHub App installation sharing', () => {
 
     expect(res.status).toBe(200);
     expect(insertedRows).toHaveLength(0);
-    expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.skipped_direct_installations', {
-      userId: 'user-1',
-      skippedInstallationCount: 1,
-      reason: 'not_authenticated_user_personal_installation',
-    });
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'github.installations_sync.skipped_direct_installations',
+      {
+        userId: 'user-1',
+        skippedInstallationCount: 1,
+        reason: 'not_authenticated_user_personal_installation',
+      }
+    );
   });
 
   it('removes a legacy mismatched personal installation row before returning installations', async () => {
@@ -757,17 +793,22 @@ describe('GitHub App installation sharing', () => {
       userId: 'user-1',
       tokenPresent: true,
     });
-    expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.accessible_installations', {
-      userId: 'user-1',
-      installationCount: 1,
-      installations: [
-        { installationId: '113789898', accountName: 'lionello', accountType: 'User' },
-      ],
-    });
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'github.installations_sync.accessible_installations',
+      {
+        userId: 'user-1',
+        installationCount: 1,
+        installations: [
+          { installationId: '113789898', accountName: 'lionello', accountType: 'User' },
+        ],
+      }
+    );
     expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.missing_installations', {
       userId: 'user-1',
       missingInstallationCount: 1,
-      installations: [{ installationId: '113789898', accountName: 'lionello', accountType: 'User' }],
+      installations: [
+        { installationId: '113789898', accountName: 'lionello', accountType: 'User' },
+      ],
     });
     expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.insert_result', {
       userId: 'user-1',
@@ -861,9 +902,7 @@ describe('GitHub App installation sharing', () => {
     expect(res.status).toBe(200);
     expect(verifyUserInstallationAccess).not.toHaveBeenCalled();
     expect(insertedRows).toHaveLength(0);
-    await expect(res.json()).resolves.toEqual([
-      expect.objectContaining({ installationId: '111' }),
-    ]);
+    await expect(res.json()).resolves.toEqual([expect.objectContaining({ installationId: '111' })]);
   });
 
   it('skips shared org candidates when installation-specific user verification denies access', async () => {
@@ -875,20 +914,23 @@ describe('GitHub App installation sharing', () => {
 
     expect(res.status).toBe(200);
     expect(insertedRows).toHaveLength(0);
-    expect(mocks.log.warn).toHaveBeenCalledWith('github.shared_org_installations.verification_skipped', {
-      userId: 'user-1',
-      installationId: '120081765',
-      accountName: 'effprop',
-      reason: 'not_accessible_to_user',
-    });
-    await expect(res.json()).resolves.toEqual([
-      expect.objectContaining({ installationId: '111' }),
-    ]);
+    expect(mocks.log.warn).toHaveBeenCalledWith(
+      'github.shared_org_installations.verification_skipped',
+      {
+        userId: 'user-1',
+        installationId: '120081765',
+        accountName: 'effprop',
+        reason: 'not_accessible_to_user',
+      }
+    );
+    await expect(res.json()).resolves.toEqual([expect.objectContaining({ installationId: '111' })]);
   });
 
   it('does not let shared org discovery errors erase or block current installations', async () => {
     whereResponses.push([existingInstallationRow()]);
-    mocks.getAuthenticatedUserOrganizations.mockRejectedValue(new Error('GitHub org lookup timeout'));
+    mocks.getAuthenticatedUserOrganizations.mockRejectedValue(
+      new Error('GitHub org lookup timeout')
+    );
 
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
@@ -898,23 +940,27 @@ describe('GitHub App installation sharing', () => {
       userId: 'user-1',
       error: 'GitHub org lookup timeout',
     });
-    await expect(res.json()).resolves.toEqual([
-      expect.objectContaining({ installationId: '111' }),
-    ]);
+    await expect(res.json()).resolves.toEqual([expect.objectContaining({ installationId: '111' })]);
   });
 
   it('lists repositories through GitHub user-context installation access', async () => {
-    whereResponses.push([{
-      ...existingInstallationRow(),
-      id: 'inst-row-111',
-      externalInstallationId: '111',
-      accountName: 'acme',
-    }]);
+    whereResponses.push([
+      {
+        ...existingInstallationRow(),
+        id: 'inst-row-111',
+        externalInstallationId: '111',
+        accountName: 'acme',
+      },
+    ]);
     mocks.getUserInstallationRepositories.mockResolvedValue([
       { id: 42, fullName: 'acme/allowed-private', private: true, defaultBranch: 'main' },
     ]);
 
-    const res = await app.request('/api/github/repositories?installation_id=inst-row-111', {}, mockEnv);
+    const res = await app.request(
+      '/api/github/repositories?installation_id=inst-row-111',
+      {},
+      mockEnv
+    );
 
     expect(res.status).toBe(200);
     expect(getUserInstallationRepositories).toHaveBeenCalledWith('github-user-token', '111', {
@@ -923,28 +969,32 @@ describe('GitHub App installation sharing', () => {
       installationId: 'inst-row-111',
     });
     await expect(res.json()).resolves.toEqual({
-      repositories: [{
-        id: 42,
-        fullName: 'acme/allowed-private',
-        name: 'allowed-private',
-        private: true,
-        defaultBranch: 'main',
-        installationId: 'inst-row-111',
-      }],
+      repositories: [
+        {
+          id: 42,
+          fullName: 'acme/allowed-private',
+          name: 'allowed-private',
+          private: true,
+          defaultBranch: 'main',
+          installationId: 'inst-row-111',
+        },
+      ],
     });
   });
 
   it('does not expose repos from a bad stored RaphaelTM personal installation row', async () => {
-    whereResponses.push([{
-      id: '01KTEWYMY2QASTZRD78XD3B673',
-      userId: 'user-1',
-      installationId: 'user-1:108667778',
-      externalInstallationId: '108667778',
-      accountType: 'personal',
-      accountName: 'raphaeltm',
-      createdAt: '2026-06-06T16:41:10.502Z',
-      updatedAt: '2026-06-06T16:41:10.502Z',
-    }]);
+    whereResponses.push([
+      {
+        id: '01KTEWYMY2QASTZRD78XD3B673',
+        userId: 'user-1',
+        installationId: 'user-1:108667778',
+        externalInstallationId: '108667778',
+        accountType: 'personal',
+        accountName: 'raphaeltm',
+        createdAt: '2026-06-06T16:41:10.502Z',
+        updatedAt: '2026-06-06T16:41:10.502Z',
+      },
+    ]);
     mocks.getUserInstallationRepositories.mockRejectedValue(new Error('Resource not accessible'));
 
     const res = await app.request(
@@ -967,12 +1017,14 @@ describe('GitHub App installation sharing', () => {
   });
 
   it('requires user-context repository access before listing branches with an app token', async () => {
-    whereResponses.push([{
-      ...existingInstallationRow(),
-      id: 'inst-row-111',
-      externalInstallationId: '111',
-      accountName: 'acme',
-    }]);
+    whereResponses.push([
+      {
+        ...existingInstallationRow(),
+        id: 'inst-row-111',
+        externalInstallationId: '111',
+        accountName: 'acme',
+      },
+    ]);
     mocks.getUserInstallationRepositories.mockResolvedValue([
       { id: 42, fullName: 'acme/allowed-private', private: true, defaultBranch: 'main' },
     ]);
@@ -991,17 +1043,25 @@ describe('GitHub App installation sharing', () => {
       installationId: 'inst-row-111',
       repository: 'acme/allowed-private',
     });
-    expect(getRepositoryBranches).toHaveBeenCalledWith('111', 'acme', 'allowed-private', mockEnv, undefined);
+    expect(getRepositoryBranches).toHaveBeenCalledWith(
+      '111',
+      'acme',
+      'allowed-private',
+      mockEnv,
+      undefined
+    );
     await expect(res.json()).resolves.toEqual([{ name: 'main' }]);
   });
 
   it('does not list branches for repos outside the authenticated GitHub user context', async () => {
-    whereResponses.push([{
-      ...existingInstallationRow(),
-      id: 'inst-row-111',
-      externalInstallationId: '111',
-      accountName: 'acme',
-    }]);
+    whereResponses.push([
+      {
+        ...existingInstallationRow(),
+        id: 'inst-row-111',
+        externalInstallationId: '111',
+        accountName: 'acme',
+      },
+    ]);
     mocks.getUserInstallationRepositories.mockResolvedValue([
       { id: 42, fullName: 'acme/allowed-private', private: true, defaultBranch: 'main' },
     ]);
@@ -1019,9 +1079,13 @@ describe('GitHub App installation sharing', () => {
   it('unlinks only the current user per-user installation row', async () => {
     deleteResponses.push([], [{ id: 'inst-row-effprop-user-1' }]);
 
-    const res = await app.request('/api/github/installations/inst-row-effprop-user-1', {
-      method: 'DELETE',
-    }, mockEnv);
+    const res = await app.request(
+      '/api/github/installations/inst-row-effprop-user-1',
+      {
+        method: 'DELETE',
+      },
+      mockEnv
+    );
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ success: true });
