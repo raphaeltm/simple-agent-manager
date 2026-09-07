@@ -8,11 +8,11 @@ import { transitionTaskToTerminal } from '../../../src/services/task-terminal-tr
 import { cancelVmTaskAdmission } from '../../../src/services/vm-admission-control';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-const recordTaskLifecycleEventBestEffort = vi.hoisted(() => vi.fn(async () => undefined));
+const recordTaskLifecycleEventViaSourceOutbox = vi.hoisted(() => vi.fn(async () => undefined));
 
 vi.mock('../../../src/services/project-data', () => ({ reconcileTaskWaits: vi.fn() }));
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
-  recordTaskLifecycleEventBestEffort,
+  recordTaskLifecycleEventViaSourceOutbox,
 }));
 vi.mock('../../../src/services/vm-admission-control', () => ({
   cancelVmTaskAdmission: vi.fn().mockResolvedValue(undefined),
@@ -35,6 +35,7 @@ describe('transitionTaskToTerminal', () => {
       schema.taskStatusEvents,
       schema.workspaces,
       schema.triggerExecutions,
+      schema.projectEventSourceOutbox,
     ]);
     env = { DATABASE: createSqliteD1(sqlite) } as unknown as Env;
     seedWorkspace('workspace-1');
@@ -192,8 +193,8 @@ describe('transitionTaskToTerminal', () => {
     expect(cancelVmTaskAdmission).toHaveBeenCalledWith(env, 'task-1', 'task_failed');
     expect(reconcileTaskWaits).toHaveBeenCalledTimes(1);
     expect(reconcileTaskWaits).toHaveBeenCalledWith(env, PROJECT_ID, 'task-1');
-    expect(recordTaskLifecycleEventBestEffort).toHaveBeenCalledTimes(1);
-    expect(recordTaskLifecycleEventBestEffort).toHaveBeenCalledWith(
+    expect(recordTaskLifecycleEventViaSourceOutbox).toHaveBeenCalledTimes(1);
+    expect(recordTaskLifecycleEventViaSourceOutbox).toHaveBeenCalledWith(
       env,
       expect.objectContaining({
         projectId: PROJECT_ID,
@@ -205,6 +206,24 @@ describe('transitionTaskToTerminal', () => {
         occurredAt: NOW.toISOString(),
       })
     );
+    expect(
+      sqlite
+        .prepare(
+          `SELECT project_id, source, event_type, subject_type, subject_id, delivery_key, state
+             FROM project_event_source_outbox`
+        )
+        .all()
+    ).toEqual([
+      {
+        project_id: PROJECT_ID,
+        source: 'sam.lifecycle',
+        event_type: 'task.failed',
+        subject_type: 'task',
+        subject_id: 'task-1',
+        delivery_key: 'task:task-1:status:failed',
+        state: 'pending',
+      },
+    ]);
   });
 
   it('rejects stale terminal evidence after workspace node ownership changes', async () => {
@@ -234,7 +253,7 @@ describe('transitionTaskToTerminal', () => {
     ).toBe('running');
     expect(cancelVmTaskAdmission).not.toHaveBeenCalled();
     expect(reconcileTaskWaits).not.toHaveBeenCalled();
-    expect(recordTaskLifecycleEventBestEffort).not.toHaveBeenCalled();
+    expect(recordTaskLifecycleEventViaSourceOutbox).not.toHaveBeenCalled();
   });
 
   it('terminalizes queued rows for scheduled timeout recovery', async () => {

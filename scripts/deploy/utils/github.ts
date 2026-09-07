@@ -35,6 +35,8 @@ export interface GitHubAppManifest {
     metadata: string;
     email_addresses: string;
     pull_requests: string;
+    checks: string;
+    actions: string;
   };
 }
 
@@ -59,8 +61,20 @@ export function generateAppManifest(appName: string, baseDomain: string): GitHub
     setup_on_update: true,
     description: 'Simple Agent Manager - AI Coding Agent Environment Manager',
     public: false,
-    default_events: ['push', 'pull_request'],
+    default_events: [
+      'check_run',
+      'check_suite',
+      'issue_comment',
+      'pull_request',
+      'pull_request_review',
+      'pull_request_review_comment',
+      'push',
+      'repository',
+      'workflow_run',
+    ],
     default_permissions: {
+      actions: 'read',
+      checks: 'read',
       contents: 'write',
       metadata: 'read',
       email_addresses: 'read',
@@ -88,6 +102,15 @@ export function generateAppCreationUrl(baseDomain: string, appName: string = 'SA
   params.set('metadata', 'read');
   params.set('email_addresses', 'read');
   params.set('pull_requests', 'read');
+  params.set('checks', 'read');
+  params.set('actions', 'read');
+  params.append('events[]', 'check_run');
+  params.append('events[]', 'check_suite');
+  params.append('events[]', 'issue_comment');
+  params.append('events[]', 'pull_request_review');
+  params.append('events[]', 'pull_request_review_comment');
+  params.append('events[]', 'repository');
+  params.append('events[]', 'workflow_run');
   params.append('events[]', 'push');
   params.append('events[]', 'pull_request');
 

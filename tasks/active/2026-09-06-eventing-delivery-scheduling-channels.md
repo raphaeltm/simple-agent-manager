@@ -55,10 +55,10 @@ A owns append-only DO migration IDs in wave one. B reserves D1 migration 0144 if
 
 ### B. Source reliability and CI/review/webhook events
 
-- [ ] Persist wake-critical lifecycle emission intent alongside the authoritative transition or implement bounded authoritative reconciliation; retry failed admission with stable delivery identity. Verify a failed first admission eventually yields one event. Do not claim blanket source-capture guarantees.
-- [ ] Add `check_run`, `check_suite`, `workflow_run`, `pull_request_review`, and `pull_request_review_comment` adapters with repository/PR/commit/run correlation and deterministic delivery keys. Older commit results must be distinguishable from the current push.
-- [ ] Update GitHub App event subscription/permission setup and upgrade guidance, plus schemas/filters/tool contracts where relevant. Preserve existing trigger behavior and blank source labels.
-- [ ] Forward authenticated generic webhook facts into canonical project event admission with deduplication, bounded payloads, provenance and truthful failure/filtered outcomes.
+- [x] Persist wake-critical lifecycle emission intent alongside the authoritative transition or implement bounded authoritative reconciliation; retry failed admission with stable delivery identity. Verify a failed first admission eventually yields one event. Do not claim blanket source-capture guarantees.
+- [x] Add `check_run`, `check_suite`, `workflow_run`, `pull_request_review`, and `pull_request_review_comment` adapters with repository/PR/commit/run correlation and deterministic delivery keys. Older commit results must be distinguishable from the current push.
+- [x] Update GitHub App event subscription/permission setup and upgrade guidance, plus schemas/filters/tool contracts where relevant. Preserve existing trigger behavior and blank source labels.
+- [x] Forward authenticated generic webhook facts into canonical project event admission with deduplication, bounded payloads, provenance and truthful failure/filtered outcomes.
 
 ### C. Credential-limit awareness
 
@@ -108,6 +108,14 @@ The source report deferred broad email integration, arbitrary workflow DAG editi
 ## Validation record
 
 Pending implementation. Baseline at `a82e1adbb`: frozen-lockfile install passed; `pnpm lint` passed all 13 packages with existing warnings; `pnpm exec turbo run typecheck --concurrency=1` passed all 19 tasks. An initial concurrent typecheck/build process exited 137; serialized execution passed. No feature verification claimed.
+
+Section B child validation on `sam/implement-cireview-authenticated-webhook-2b57t8`:
+
+- Implemented GitHub `check_run`, `check_suite`, `workflow_run`, `pull_request_review`, and `pull_request_review_comment` project-event producers with source `github`, delivery key `delivery:<GitHub delivery id>`, commit subject for CI events when a head SHA exists, pull-request subject for review events, and repository/PR/head/run/check/review/comment identity in bounded metadata.
+- Implemented authenticated generic webhook project-event admission with source `webhook`, event types `webhook.accepted`, `webhook.filtered`, `webhook.still_running`, `webhook.concurrent_limit`, `webhook.inactive`, and `webhook.internal_error`; subject is the webhook trigger id. Trigger submission behavior and blank `sourceLabel` prompt semantics are unchanged.
+- Added D1 migration `0144_project_event_source_outbox.sql` for producer-side source admission intents. The established task-terminal transition helper inserts `sam.lifecycle` terminal task source intents in the same D1 batch as the authoritative task/status/event transition, and trigger cleanup reconciles due intents with bounded rows, retry backoff, max attempts, expiry, stale processing leases, and final state visibility. Other lifecycle hook callers remain hook-bound best-effort source capture and are not claimed as blanket authoritative capture.
+- Updated GitHub App manifest/setup generation and docs for Checks read, Actions read, Pull requests read, and subscriptions to `check_run`, `check_suite`, `workflow_run`, `pull_request_review`, and `pull_request_review_comment`.
+- Local validation passed: `pnpm --filter @simple-agent-manager/shared build`; `pnpm --filter @simple-agent-manager/api typecheck`; `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/github-project-event-producer.test.ts tests/unit/services/project-event-source-outbox.test.ts tests/unit/services/task-terminal-transition.test.ts tests/unit/services/task-terminal-transition-hooks.test.ts tests/integration/webhook-trigger-ingress.test.ts tests/unit/services/trigger-execution-cleanup.test.ts` (76 tests); `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/github-project-events.test.ts` (8 tests); `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/trigger-execution-cleanup.test.ts` (17 tests); `pnpm --filter @simple-agent-manager/api lint`.
 
 ## References
 
