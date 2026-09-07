@@ -1,4 +1,3 @@
-import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 /**
  * Response mappers — convert database schema types to API response DTOs.
  *
@@ -8,7 +7,6 @@ import { publicPlacementExplanationJson } from '../services/public-placement-exp
  * - toProjectResponse, toProjectSummaryResponse (was in projects.ts)
  * - toTaskResponse, toDependencyResponse (was in tasks.ts)
  */
-
 import type {
   AgentSession,
   Project,
@@ -28,6 +26,8 @@ import {
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
+
+import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 
 // Mirrors ProjectAgentDefaults (packages/shared/src/types/project.ts) and the
 // write-time AgentDefaultEntrySchema (apps/api/src/schemas/projects.ts,

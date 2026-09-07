@@ -1,6 +1,7 @@
 /** Shipped migrations and external HTTP/JWT boundaries joined to the shared upgrade slice. */
-import { readFileSync, readdirSync } from 'node:fs';
+import { readdirSync,readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
@@ -14,12 +15,12 @@ import { encrypt } from '../../../src/services/encryption';
 import { signNodeCallbackToken } from '../../../src/services/jwt';
 import { provisionNode } from '../../../src/services/nodes';
 import {
+  assertReserved,
+  type Fixture,
   fixture,
   reserve,
   seedHost,
   select,
-  assertReserved,
-  type Fixture,
 } from './node-pool-upgrade-test-helpers';
 
 const migrationDirectory = join(process.cwd(), 'src/db/migrations');

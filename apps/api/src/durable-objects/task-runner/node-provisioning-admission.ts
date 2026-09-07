@@ -1,4 +1,3 @@
-import { persistPlacementDiagnostics } from './placement-diagnostics';
 import { log } from '../../lib/logger';
 import {
   resolveVmAdmissionScope,
@@ -6,6 +5,7 @@ import {
   type VmProvisioningLeaseResult,
   type VmTaskAdmissionIdentity,
 } from '../../services/vm-admission-control';
+import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export async function scheduleAdmissionWait(

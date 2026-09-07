@@ -10,7 +10,121 @@ configuration and active/sleeping workloads must survive the transition.
 
 Deliver all fixes together in one PR. Implementation branches are integration
 inputs only: no separate child PRs, staging deployments or merges. The parent
-coordinates the final local review, staging sweep, CI and CodeRabbit review.
+coordinates final local review, local verification, CI and CodeRabbit review.
+The current continuation interprets “keep everything local” as excluding staging
+work; the unverified staging gap is recorded below.
+
+## Current continuation status — 2026-09-07
+
+This section supersedes gate/ownership statements in the historical checkpoints
+below. Recovered head: `8ccc610d6`; integrated corrections: `27a7a1abe`,
+`4196ad57f`, `fabce54a7`, and `9524491af`. The deliverable remains **one green OPEN PR**.
+No PR merge or SAM-agent dispatch is authorized. The current interpretation of
+“keep everything local” excludes staging deployment; this is an interpretation
+of scope, not an explicit user waiver of the original staging criterion.
+Implementation, delegation, and runtime verification stay in the local session.
+
+**Current gate: implementation and local specialist corrections are integrated;
+final release verification and PR/CI/CodeRabbit remain incomplete.** Checked
+implementation boxes mean the code and relevant regression coverage exist;
+they do not substitute for the still-open final validation items in section E.
+The task stays active and must not be archived on this checkpoint.
+
+### Current verification evidence
+
+| Check                                                                              | Current result                                       | Evidence / remaining action                                                                                                                                                                                                                                                                                       |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full repository build                                                              | PASS                                                 | Initial full build: 9 tasks, 451 seconds. Latest full rebuild passed in 149 seconds; `pnpm exec turbo run build --concurrency=1`.                                                                                                                                                                                 |
+| Full lint                                                                          | Rerun running                                        | First full run failed six web lint errors; corrections are integrated. Do not describe the failed/aborted runs as green.                                                                                                                                                                                          |
+| Full typecheck                                                                     | Rerun pending                                        | Isolated API typecheck passed. Full run found display-only `NodeUsageRecord.cloudProvider` versus `Hardware` typing; corrected locally, final rerun pending.                                                                                                                                                      |
+| Joined upgrade/admission matrix                                                    | PASS, 12/12                                          | `node-pool-upgrade-admission.test.ts` and `node-pool-upgrade-boundaries.test.ts`; real task/wake routes and DO serialization through SQL admission, real migration chain with enforced FKs, old JWT heartbeat, real provisioning with provider/DNS HTTP mocked. Log `/tmp/node-pool-upgrade-boundaries-test.log`. |
+| Allocation/cleanup neighbors                                                       | PASS, 100 tests across 9 files on final focused runs | Shared current-authority reuse gate, occupied-node cleanup barrier, warm/preferred selection, and runtime/role regressions; final affected rerun 37/37.                                                                                                                                                           |
+| Native Hetzner region contract                                                     | PASS, 63/63                                          | Native allocation cannot leave selected region; regression failed before fix even when another region would succeed.                                                                                                                                                                                              |
+| Direct-workspace inheritance                                                       | PASS, 3/3 API scenarios                              | Real registered route/SQLite: blank and partial fields inherit project resources; explicit old size still translates deterministically.                                                                                                                                                                           |
+| Focused web components                                                             | PASS, 51/51                                          | `project-chat` and `create-workspace` files; `/tmp/node-pools-web-focus.log`. This is not the full web suite.                                                                                                                                                                                                     |
+| Wizard Chromium regression                                                         | PASS, 2/2                                            | Actual profile wizard rejects invalid resources and permits correction at 375x667 and 1280x800. Screenshots visually reviewed by coordinator; `/tmp/node-pools-wizard-browser.log`.                                                                                                                               |
+| Native hardware Chromium suite                                                     | PASS, 104 passed / 40 skipped                        | 6.5 minutes; `/tmp/node-pools-native-browser.log`. Coordinator reviewed 16 normal screenshots (8 surfaces × 2 viewports), with no visible issues. Desktop Usage needs a focused below-fold Active Nodes capture, rerun pending. Skipped cases are not passes; full state/artifact accounting remains open.        |
+| Boundary scanner                                                                   | Rerun pending                                        | Initial current-session invocation was killed with exit 137 under memory pressure; `/tmp/node-pools-boundary.log`. Historical 60/76 counts below are not current scanner results.                                                                                                                                 |
+| Broad API/web/provider/shared/cloud-init tests; Workers/D1 races; Go race/coverage | Pending final coordinated runs                       | Focused passes above do not replace the integrated full checks. Go 1.26.6 is installed for the Go checks.                                                                                                                                                                                                         |
+| Final PR, CI, CodeRabbit                                                           | Pending final integration/checks                     | Reuse PR #2030, now targeting main; preserve one PR through ancestry integration. Attach actual local evidence and unverified staging scope, obtain green CI/review, leave open.                                                                                                                                  |
+| Staging                                                                            | NOT PERFORMED — unverified gap                       | Current user says “Keep everything local”; the continuation interprets this as excluding staging deployment. This is not an explicit user waiver. No real-cloud smoke test is claimed; local provider tests mock external HTTP.                                                                                   |
+
+The 4 GB shared host exhausted memory when heavy checks ran concurrently. Those
+killed runs are not test results. Heavy verification is now serialized with
+bounded workers; exact commands/results are recorded in
+`.codex/tmp/node-pools/results.jsonl` and `.do-state.md`.
+
+### Specialist findings and disposition
+
+Local allocation/security/Cloudflare/constitution review found and fixed two
+additional races: advisory selection could repeatedly choose nodes rejected by
+final authority, and fresh-node cleanup could delete compute after a workspace
+attached. Reuse now applies the shared current-authority SQL before ranking;
+cleanup atomically claims an unoccupied runtime before strict deletion. Positive,
+negative, and mutation/barrier regressions are green.
+
+Local provider/client/Go review fixed native Hetzner cross-region fallback and
+fabricated `medium` authority in blank direct-workspace requests. The coordinator
+fixed invalid-resource handling in the profile wizard and verified both viewport
+regressions with Chromium. Reviewed CLI/VM-agent/configuration paths have no
+remaining concrete correctness finding; broad Go execution remains pending.
+
+All seven later A4 findings are resolved with direct publication-interleaving
+regressions: orphan-anchor deletion race, mirror membership resurrection,
+content/source-bound publication cursor, first NULL selection digest, secret
+scrub starvation, concurrent native configuration edits, and same-millisecond
+pool edit result ambiguity. The earlier six-finding A4 checkpoint is historical,
+not evidence of an unresolved issue. Successful empty API inventory also stays
+authoritative through a later static fallback/outage. Fractional backfill batch
+sizes are clamped again at `9524491af`; the focused real-SQLite regression passed
+(1 passed, 90 skipped by the test-name filter), with the full suite still pending.
+
+Completion validation joined the previously separate upgrade and allocation
+proofs. The 12 passing cases cover pre-pool and abstract-candidate upgrades with
+actual SQL migrations and enforced foreign keys; installation-only, personal,
+and multi-member project credentials; modern precedence; stale queued removal;
+sleeping wake after defaults change; old-agent heartbeat preserving native
+metadata; paid provisioning payload/observed hardware; and revocation before a
+paid request. Existing CLI/browser/MCP input-contract tests converge on the same
+resolver and TaskRunner bridge exercised by these joined tests; no claim is made
+that every client adapter was repeated against a provider HTTP fixture.
+
+Supporting local reports: `/tmp/node-pools-allocation-review.md`,
+`/tmp/node-pools-client-provider-review.md`, and
+`/tmp/node-pools-completion-review.md`. Their key outcomes are retained here so
+loss of temporary files cannot turn the old checkpoints back into current state.
+
+### Constraint scope and remaining acceptance gaps
+
+Provider/location overrides are hard placement constraints; supported native
+image/architecture/disk fields reach exact candidate matching and provider
+validation. There was no public per-workload network/VPC/subnet input in the
+baseline node/workspace/VM request contracts, and none is introduced here.
+Existing provider network configuration is retained: Infomaniak's
+`INFOMANIAK_NETWORK_NAME` flows through `provider-credential-codecs.ts` and the
+provider factory to the resolved network UUID; GCP retains its existing default
+network. Deployment's internal Docker network is a separate compose concern.
+The checklist's network wording means preserving those supported paths, not
+promising a new network-selection product or silently dropping an existing input.
+Deployment provider/location/native identity and persistent-volume affinity keep
+their explicit role/authorization adapters.
+
+The upgrade operations documentation is now in public
+`reference/configuration.md` under “Upgrading existing compute pools”: additive
+migration, pending/empty/disabled/catalog state diagnosis, D1 completion/cursors,
+grandfathered nodes, compatible clients, and ranking-only rollback.
+
+No additional concrete runtime implementation omission was established by these
+local reviews. The stale VM-size chooser in `guides/idea-execution.md` is corrected
+to workload requirements and inheritance, with modern MCP field names and links
+to actual upgrade/rollback guidance. This was checked against `TaskSubmitForm`
+and MCP parameter normalization; no new API behavior is claimed. Outstanding
+acceptance work is the final integrated quality and visual evidence, final
+task-completion review against that candidate, and open-PR CI/CodeRabbit completion. The full screenshot matrix still needs its final
+pass/skip and reviewed-artifact accounting; the two wizard screenshots alone do
+not satisfy every changed surface/state. Staging remains an unverified acceptance gap under the current interpretation
+of local-only scope. It must be disclosed in the PR and must not be represented
+as an explicit user waiver or a validation pass.
 
 ## Preflight and source evidence
 
@@ -80,138 +194,151 @@ Changing a deprecated size hint cannot change a native payload or accounting.
 
 ### A. Canonical requirements, pool state and migration (F1, F2, F3, F6, F7, F9, F11)
 
-- [ ] Implement one shared versioned legacy-to-workload adapter, validation,
-  per-field precedence and provenance. Cover task/profile/skill/project/platform
-  values, defaults, queued plans, retry and recovery. Reject nonfinite/negative
-  resources and malformed compatibility constraints consistently.
-- [ ] Persist configurable defaults/mapping and strategy weights with validated
-  environment fallbacks; expose their effective nonsecret values to clients.
-- [ ] Separate pool configuration state from current eligibility. Preserve a
-  configured pool when all selections are removed or a source is disabled.
-- [ ] Add bounded, resumable, idempotent migration/ensure independent of visiting
-  settings; integrate credential create/attach/rotate/disable/delete/re-enable
-  lifecycle. Backfill missing modern values with CAS and preserve concurrent
-  edits, removals, original values and migration provenance.
-- [ ] Separate selected membership from catalog availability/staleness/retirement.
-  Cache credential-scoped snapshots with bounded refresh; provider failure or
-  incomplete pagination cannot replace a valid catalog with a narrow fallback.
-  Returning inventory becomes available without reselecting removed inventory.
-- [ ] Make policy edits atomic and revisioned, including effective reconciliation
-  changes. Carry exhaustion policy and ranking settings in versioned plans.
-  Define queue/fail/intra-pool fallback behavior; do not expose unsupported
-  cross-pool semantics or claim settings execute when they do not.
-- [ ] Normalize comparable prices to one time unit and same currency; explicitly
-  rank unknown/noncomparable prices and preserve owner-defined priority order.
-- [ ] Distinguish explicit provider/location/architecture/image/network constraints
-  from inherited preferences. Return actionable incompatibility reasons.
-  Slice A exports the plan/snapshot/settings fields and provider/location hard
-  checks used by pool selection; full architecture/image/network writer wiring
-  remains in downstream allocation/runtime slices.
+- [x] Implement one shared versioned legacy-to-workload adapter, validation,
+      per-field precedence and provenance. Cover task/profile/skill/project/platform
+      values, defaults, queued plans, retry and recovery. Reject nonfinite/negative
+      resources and malformed compatibility constraints consistently.
+- [x] Persist configurable defaults/mapping and strategy weights with validated
+      environment fallbacks; expose their effective nonsecret values to clients.
+- [x] Separate pool configuration state from current eligibility. Preserve a
+      configured pool when all selections are removed or a source is disabled.
+- [x] Add bounded, resumable, idempotent migration/ensure independent of visiting
+      settings; integrate credential create/attach/rotate/disable/delete/re-enable
+      lifecycle. Backfill missing modern values with CAS and preserve concurrent
+      edits, removals, original values and migration provenance.
+- [x] Separate selected membership from catalog availability/staleness/retirement.
+      Cache credential-scoped snapshots with bounded refresh; provider failure or
+      incomplete pagination cannot replace a valid catalog with a narrow fallback.
+      Returning inventory becomes available without reselecting removed inventory.
+- [x] Make policy edits atomic and revisioned, including effective reconciliation
+      changes. Carry exhaustion policy and ranking settings in versioned plans.
+      Define queue/fail/intra-pool fallback behavior; do not expose unsupported
+      cross-pool semantics or claim settings execute when they do not.
+- [x] Normalize comparable prices to one time unit and same currency; explicitly
+      rank unknown/noncomparable prices and preserve owner-defined priority order.
+- [x] Distinguish explicit provider/location/architecture/image/network constraints
+      from inherited preferences. Return actionable incompatibility reasons.
+      The supported native image/architecture/disk fields are wired through direct
+      allocation and provider validation. Network scope is the preserved provider
+      setup described in the current-status section; no new workload network selector
+      is claimed.
 
 ### B. Provider-native contracts and actual hardware (F8)
 
-- [ ] Make legacy size optional for exact-SKU provisioning via a well-defined
-  native contract; centralize legacy provider mapping outside native core.
-- [ ] Every supported provider uses concrete instance identity and requested or
-  included storage/image semantics. Fix UpCloud disk dependence and GCP disk
-  mismatch; validate provider limits before paid calls. Test all provider payloads.
-- [ ] Persist observed returned provider type/resources when available and label
-  unknown observations truthfully. Metering never treats a compatibility tier as
-  authoritative hardware metadata.
-- [ ] Test arbitrary native SKUs, absent/contradictory legacy hints, storage above
-  defaults, image/architecture compatibility, malformed responses and fallback
-  legacy requests. Keep provider API contract citations with validation evidence.
+- [x] Make legacy size optional for exact-SKU provisioning via a well-defined
+      native contract; centralize legacy provider mapping outside native core.
+- [x] Every supported provider uses concrete instance identity and requested or
+      included storage/image semantics. Fix UpCloud disk dependence and GCP disk
+      mismatch; validate provider limits before paid calls. Test all provider payloads.
+- [x] Persist observed returned provider type/resources when available and label
+      unknown observations truthfully. Metering never treats a compatibility tier as
+      authoritative hardware metadata.
+- [x] Test arbitrary native SKUs, absent/contradictory legacy hints, storage above
+      defaults, image/architecture compatibility, malformed responses and fallback
+      legacy requests. Keep provider API contract citations with validation evidence.
 
 ### C. All allocation writers and final admission (F4, F5, F6, F10, F11)
 
-- [ ] Incorporate and adapt #2021 aggregate reservation implementation. One shared
-  policy accounts for active reservations at advisory selection AND final atomic
-  D1 insertion. Enforce finite memory/headroom, CPU-share budgets, storage and
-  exclusivity. Preserve old count caps only as compatibility safety settings;
-  do not introduce a co-tenant-count product model.
-- [ ] Wire canonical requirements through submit/run/MCP/chat/trigger/dispatch,
-  retry/recovery and direct workspace/node APIs. Enumerate every node/workspace
-  insert/provision writer and route it through shared scope/admission contracts.
-- [ ] Direct node IDs validate user/project/pool/source/role/capacity atomically;
-  deployment nodes cannot become task hosts accidentally. Deployment provisioning
-  uses an explicit canonical role adapter and preserves provider/location/volume
-  affinity for existing stateful services; incompatible moves fail visibly.
-- [ ] Safely classify/adopt legacy unpooled nodes from verified provider/account
-  metadata or mark them grandfathered/draining without interrupting active work.
-  Unknown provider/source/type must not masquerade as the chosen pool candidate.
-- [ ] Apply pack/smallest-fit/balanced/spread semantics to reuse and provisioning;
-  test each supported strategy's distinct behavior. Normalize CPU/load units and
-  memory signals; use disk pressure as a veto and configurable host headroom.
-- [ ] Preserve shared admission/backpressure across sizes/offerings. Distinguish
-  source/account capacity cooldown from SKU/region scarcity. Queue age, reuse,
-  resource headroom, compatibility translation and rejection reasons are observable.
-- [ ] Recheck pool revision, candidate membership, source credential generation,
-  deletion/lifecycle state and aggregate capacity before paid allocation/final
-  placement. Race tests cover last capacity, concurrent edits, source revocation,
-  credential rotation and simultaneous different-size requests.
-- [ ] Keep Cloudflare Containers an explicit runtime or configured last resort;
-  never silently change runtime or project credential authority on exhaustion.
-- [ ] Delete uncalled size-based selector code and obsolete tests after inventory.
+- [x] Incorporate and adapt #2021 aggregate reservation implementation. One shared
+      policy accounts for active reservations at advisory selection AND final atomic
+      D1 insertion. Enforce finite memory/headroom, CPU-share budgets, storage and
+      exclusivity. Preserve old count caps only as compatibility safety settings;
+      do not introduce a co-tenant-count product model.
+- [x] Wire canonical requirements through submit/run/MCP/chat/trigger/dispatch,
+      retry/recovery and direct workspace/node APIs. Enumerate every node/workspace
+      insert/provision writer and route it through shared scope/admission contracts.
+- [x] Direct node IDs validate user/project/pool/source/role/capacity atomically;
+      deployment nodes cannot become task hosts accidentally. Deployment provisioning
+      uses an explicit canonical role adapter and preserves provider/location/volume
+      affinity for existing stateful services; incompatible moves fail visibly.
+- [x] Safely classify/adopt legacy unpooled nodes from verified provider/account
+      metadata or mark them grandfathered/draining without interrupting active work.
+      Unknown provider/source/type must not masquerade as the chosen pool candidate.
+- [x] Apply pack/smallest-fit/balanced/spread semantics to reuse and provisioning;
+      test each supported strategy's distinct behavior. Normalize CPU/load units and
+      memory signals; use disk pressure as a veto and configurable host headroom.
+- [x] Preserve shared admission/backpressure across sizes/offerings. Distinguish
+      source/account capacity cooldown from SKU/region scarcity. Queue age, reuse,
+      resource headroom, compatibility translation and rejection reasons are observable.
+- [x] Recheck pool revision, candidate membership, source credential generation,
+      deletion/lifecycle state and aggregate capacity before paid allocation/final
+      placement. Race tests cover last capacity, concurrent edits, source revocation,
+      credential rotation and simultaneous different-size requests.
+- [x] Keep Cloudflare Containers an explicit runtime or configured last resort;
+      never silently change runtime or project credential authority on exhaustion.
+- [x] Delete uncalled size-based selector code and obsolete tests after inventory.
 
 ### D. All supported writers/displays and upgrade documentation (F12)
 
-- [ ] Replace legacy-only controls in ChatInput profile setup, ProfileFormDialog,
-  SkillFormDialog, ProjectSettings, TaskSubmitForm, TriggerAdvancedOptions,
-  CreateWorkspace and Nodes with workload requirements/inheritance and appropriate
-  native offerings. Old values remain understandable and editable safely.
-- [ ] Session infrastructure, workspace sidebar, deployment detail, node/usage
-  pages show actual provider/type/resources; unknown historical identity is marked
-  as a compatibility estimate. Never put a SKU in a vmSize field.
-- [ ] Add a concise safe effective-pool summary, including installation-funded
-  capacity, and why-this-node information from the canonical plan without exposing
-  administrator credentials. Show queue, empty/unavailable pool and migration states.
-- [ ] Update MCP dispatch/profile/trigger schemas and handlers together, plus CLI
-  modern resource inputs and native output. Retain deprecated --vm-size and old
-  API fields with deterministic translation and appropriate deprecation guidance.
-- [ ] Update public workspace/idea-execution/configuration/provider docs, API/env
-  references and provider AGENTS guidance. Add user-facing upgrade/rollback and
-  compatibility-window instructions tied to actual code and migration diagnostics.
+- [x] Replace legacy-only controls in ChatInput profile setup, ProfileFormDialog,
+      SkillFormDialog, ProjectSettings, TaskSubmitForm, TriggerAdvancedOptions,
+      CreateWorkspace and Nodes with workload requirements/inheritance and appropriate
+      native offerings. Old values remain understandable and editable safely.
+- [x] Session infrastructure, workspace sidebar, deployment detail, node/usage
+      pages show actual provider/type/resources; unknown historical identity is marked
+      as a compatibility estimate. Never put a SKU in a vmSize field.
+- [x] Add a concise safe effective-pool summary, including installation-funded
+      capacity, and why-this-node information from the canonical plan without exposing
+      administrator credentials. Show queue, empty/unavailable pool and migration states.
+- [x] Update MCP dispatch/profile/trigger schemas and handlers together, plus CLI
+      modern resource inputs and native output. Retain deprecated --vm-size and old
+      API fields with deterministic translation and appropriate deprecation guidance.
+- [x] Update public workspace/idea-execution/configuration/provider docs, API/env
+      references and provider AGENTS guidance. Add user-facing upgrade/rollback and
+      compatibility-window instructions tied to actual code and migration diagnostics.
+      Upgrade/configuration/provider references and the stale run-dialog VM-size
+      row in `guides/idea-execution.md` are updated and source-checked.
 - [ ] Capture/review Playwright screenshots of every changed surface at 375x667
-  and 1280x800 with normal, long, empty, many-item and error states; assert no
-  horizontal overflow. Post evidence to the single final PR.
+      and 1280x800 with normal, long, empty, many-item and error states; assert no
+      horizontal overflow. Post evidence to the single final PR.
 
 ### E. No-leakage gates and release validation
 
-- [ ] Add a tested boundary/architecture gate banning legacy-size authority in
-  canonical placement/provider/metering code outside named compatibility modules.
-  Inventory allocation writers in a checked contract. Allow historical migrations,
-  adapter fixtures, labeled historical displays and unrelated responsive CSS.
-- [ ] Add upgrade fixtures for pre-pool, abstract-candidate, native-with-removals,
-  and queued/current-plan states. Test clean installation-only, personal and
-  multi-member project credentials. Assert row/FK preservation and resumable CAS.
-- [ ] Add shadow comparison/rollout diagnostics with structured difference reasons
-  and configurable cohort/behavior rollout; authorization fences stay unconditional.
-  Retain additive data and compatible plan readers through rollback.
-- [ ] Cover old browser/API/CLI/MCP payloads, old agents, sleeping-session wake,
-  queued retry, credential/provider change and explicit modern precedence in
-  capability tests through the actual entry point to provider/atomic reservation.
+- [x] Add a tested boundary/architecture gate banning legacy-size authority in
+      canonical placement/provider/metering code outside named compatibility modules.
+      Inventory allocation writers in a checked contract. Allow historical migrations,
+      adapter fixtures, labeled historical displays and unrelated responsive CSS.
+- [x] Add upgrade fixtures for pre-pool, abstract-candidate, native-with-removals,
+      and queued/current-plan states. Test clean installation-only, personal and
+      multi-member project credentials. Assert row/FK preservation and resumable CAS.
+- [x] Add shadow comparison/rollout diagnostics with structured difference reasons
+      and configurable cohort/behavior rollout; authorization fences stay unconditional.
+      Retain additive data and compatible plan readers through rollback.
+- [x] Cover old browser/API/CLI/MCP payloads, old agents, sleeping-session wake,
+      queued retry, credential/provider change and explicit modern precedence in
+      capability tests through the actual entry point to provider/atomic reservation.
 - [ ] Run lint, typecheck, test, build and real Workers/D1 race/migration suites,
-  provider payload tests, CLI Go scenario tests/coverage and visual checks.
+      provider payload tests, CLI Go scenario tests/coverage and visual checks.
 - [ ] Complete all local /do specialist reviews, fix every correctness finding,
-  and run task-completion validation before archive.
+      and run task-completion validation before archive.
 - [ ] Coordinate shared staging; deploy one pinned integrated candidate. Exercise
-  fresh/legacy requests, default credentials, native catalog edits, empty-pool
-  failure, reuse/burst admission, direct workspace and safe recovery on real VMs.
-  Verify heartbeat, requested resources, persisted plan and observed hardware;
-  clean staging to zero VMs immediately afterward.
+      fresh/legacy requests, default credentials, native catalog edits, empty-pool
+      failure, reuse/burst admission, direct workspace and safe recovery on real VMs.
+      Verify heartbeat, requested resources, persisted plan and observed hardware;
+      clean staging to zero VMs immediately afterward.
+      **Current scope interpretation:** this original step is not performed because
+      the continuation interprets the current local-only instruction as excluding
+      staging deployment. Record the unverified gap in the PR; this is not an
+      explicit user waiver or a staging validation pass.
 - [ ] Open the single PR, attach concrete validation/review/screenshot evidence,
-  obtain green checks, trigger CodeRabbit with coderabbit-review label and resolve
-  all feedback. Leave open for user review; no merge requested in this task.
+      obtain green checks, trigger CodeRabbit with coderabbit-review label and resolve
+      all feedback. Leave open for user review; no merge requested in this task.
 
 ## Acceptance
 
-Every checklist item above is required. Each implementation slice returns commit
+Every checklist item above records the original acceptance criteria. Staging is
+not performed under the current interpretation of local-only scope and remains
+an unverified gap to disclose, not an explicitly user-waived or verified item.
+Local verification, CI, and review remain required. Each implementation slice returns commit
 SHAs, exact commands/results, tests linked to its criteria and remaining integration
 requirements. Completion requires evidence on the integrated final candidate,
 not only the child branch or an earlier PR. No criterion may be silently deferred
 to another PR or replaced by documentation claiming unimplemented behavior.
 
-## Integration review status
+## Historical integration review status
+
+This pre-recovery checkpoint is retained for provenance; see Current continuation
+status for corrected implementation and outstanding release gates.
 
 The canonical policy contracts are integrated for dependent implementation, but
 section A is not accepted yet. Independent review found precedence, resumable
@@ -260,26 +387,30 @@ assignment owns those scanner defects. Its initial count of 76 findings is not a
 verified count of forbidden authority paths. Runtime, display, rollout, and final
 validation requirements remain unchanged.
 
-### Active recovery ownership
+### Historical recovery ownership
+
+These remote task assignments belong to earlier sessions. They are not active
+work instructions for this local-only continuation.
 
 The three original backend continuations terminated on provider usage limits.
 Their published checkpoints are preserved; unpublished filesystem recovery has
 not been verified. Replacement assignments use those checkpoints and reconstruct
 only missing changes, with independent review still required.
 
-| Scope | Current SAM task | Checkpoint or dependency |
-| --- | --- | --- |
-| Allocation authority and direct adapters | `01M1XFH3SHTKP79YDJ0DMC4CQ2` | Starts from `4e1d67565`; current-default and relay compensation findings remain required |
-| Pool reconciliation and settings | `01M1XFJSHZV180T9WTWDQZJGQC` | Merge `18054bfc3` reviewed; reserves additive migration `0153` |
-| Request persistence and execution authority | `01M1XH4423TCTD979QVXH4G4WH` | Starts from root `fba14b605`; four independent review findings remain required |
-| Actual resource-form browser proof | `01M1XDFEQT2VD51Z5XC5CTHH0C` | Completing real component interactions and screenshots |
-| Boundary scanner and allocation inventory | `01M1XG087A28G664J0YWDVT4A6` | WIP `830f8132d`; scanner review corrections remain required |
+| Scope                                       | Current SAM task             | Checkpoint or dependency                                                                 |
+| ------------------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------- |
+| Allocation authority and direct adapters    | `01M1XFH3SHTKP79YDJ0DMC4CQ2` | Starts from `4e1d67565`; current-default and relay compensation findings remain required |
+| Pool reconciliation and settings            | `01M1XFJSHZV180T9WTWDQZJGQC` | Merge `18054bfc3` reviewed; reserves additive migration `0153`                           |
+| Request persistence and execution authority | `01M1XH4423TCTD979QVXH4G4WH` | Starts from root `fba14b605`; four independent review findings remain required           |
+| Actual resource-form browser proof          | `01M1XDFEQT2VD51Z5XC5CTHH0C` | Completing real component interactions and screenshots                                   |
+| Boundary scanner and allocation inventory   | `01M1XG087A28G664J0YWDVT4A6` | WIP `830f8132d`; scanner review corrections remain required                              |
 
 The pool-reconciliation child's initial baseline typecheck claim was withdrawn:
 its command wrapper masked a nonzero exit status. It must rerun after installing
 dependencies. This correction does not invalidate the independently executed
 root checks on `eb89a8370` described above. No replacement checkpoint is accepted
 merely because it is pushed or its task is marked complete.
+
 ## A4 resume checkpoint — 2026-09-07 (branch `sam/resume-failed-pool-reconciliation-qzjgqc`)
 
 Replacement for the terminal A4 task `01M1X7ZB3XMVY1C037FGH1FJZ9` (Codex
@@ -290,14 +421,14 @@ rather than recovered. Root `eb89a8370` is merged into this branch (`18054bfc3`)
 
 ### Disposition of the six independent findings against `4a21532a5`
 
-| # | Finding | Disposition | Implementation | Discriminating proof |
-|---|---------|-------------|----------------|----------------------|
-| 1 | P1 non-atomic membership/policy/revision edit | Fixed | `default-capacity-pool-updates.ts` `publishPoolEditAtomically`: one D1 batch, every statement fenced on the same pre-read `revision`, grouped by target status and chunked under the bind ceiling; read-back on `(revision, updatedAt)` closes the ABA window; losing editors return `conflict` → HTTP 409 | Mid-batch failure rolls back; stale concurrent edit cannot overwrite the winner; both proven red when the fence or the batch is removed |
-| 2 | P2 empty successful API catalog misclassified | Fixed | `Provider.instanceOfferingApiBacked` (Hetzner declares it); `refreshStatusForOfferings` carries transport provenance instead of inferring from members. Empty static lists stay incomplete (fail-safe) | Real `HetznerProvider` + mocked `/server_types` returning `[]`; plus a full credential-backed reconciliation proving prior offerings become `last-known-unavailable` while membership survives |
-| 3 | P2 price-only ranking change kept plan authority | Fixed | Price currency/monthly/hourly added to `capacityCandidateAuthorityGeneration` (`:v2`); new `capacity_pools.selection_digest` (migration **0153**, additive) drives a revision bump from `reconcileDefaultPoolStatus` only when selection-affecting state changed | Identical refresh keeps the revision stable; two comparable offerings swapping cheapest position bumps it |
-| 4 | P2 refresh cleared persisted native config | Fixed | Effective boot disk/image/architecture read from the persisted row and re-published, plus `COALESCE(excluded.…, current)` in both upsert paths | Same-inventory refresh preserves all three fields AND the authority generation |
-| 5 | No-credential-copy invariant | Fixed | `materializeCapacitySourceCredential` removed. The source binds by exact reference (`credential_source` + `cc_credentials:<id>` + `cc_attachments:<id>` + version). A **secret-free** anchor row remains only because migration 0125's shipped `capacity_sources` CHECK requires a non-null `credential_id` and the table is an FK CASCADE parent (rule 31 forbids the rebuild). `scrubCapacitySourceCredentialSecrets` erases previously copied ciphertext and prunes only unreferenced anchors | Canary ciphertext never reaches `credentials`; upgraded copies are scrubbed; the referenced anchor is never deleted and no capacity source is cascaded away |
-| 6 | Bounded/resumable catalog publication | Fixed | Durable per-(pool, source) publication cursor in `platform_settings`, keyed by a digest of the ordered candidate set; missing-offering cleanup requires BOTH a complete catalog and a complete publication. Per-isolate credential-scoped catalog cache (`CAPACITY_POOL_CATALOG_CACHE_TTL_MS`), successful+complete refreshes only | Multi-pass publication with a NEW db handle per pass proves durable resumption; partial passes never mark missing; a failed refresh never marks missing; one provider request per credential per TTL, with a cleared-cache control |
+| #   | Finding                                          | Disposition | Implementation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Discriminating proof                                                                                                                                                                                                               |
+| --- | ------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | P1 non-atomic membership/policy/revision edit    | Fixed       | `default-capacity-pool-updates.ts` `publishPoolEditAtomically`: one D1 batch, every statement fenced on the same pre-read `revision`, grouped by target status and chunked under the bind ceiling; read-back on `(revision, updatedAt)` closes the ABA window; losing editors return `conflict` → HTTP 409                                                                                                                                                                                       | Mid-batch failure rolls back; stale concurrent edit cannot overwrite the winner; both proven red when the fence or the batch is removed                                                                                            |
+| 2   | P2 empty successful API catalog misclassified    | Fixed       | `Provider.instanceOfferingApiBacked` (Hetzner declares it); `refreshStatusForOfferings` carries transport provenance instead of inferring from members. Empty static lists stay incomplete (fail-safe)                                                                                                                                                                                                                                                                                           | Real `HetznerProvider` + mocked `/server_types` returning `[]`; plus a full credential-backed reconciliation proving prior offerings become `last-known-unavailable` while membership survives                                     |
+| 3   | P2 price-only ranking change kept plan authority | Fixed       | Price currency/monthly/hourly added to `capacityCandidateAuthorityGeneration` (`:v2`); new `capacity_pools.selection_digest` (migration **0153**, additive) drives a revision bump from `reconcileDefaultPoolStatus` only when selection-affecting state changed                                                                                                                                                                                                                                 | Identical refresh keeps the revision stable; two comparable offerings swapping cheapest position bumps it                                                                                                                          |
+| 4   | P2 refresh cleared persisted native config       | Fixed       | Effective boot disk/image/architecture read from the persisted row and re-published, plus `COALESCE(excluded.…, current)` in both upsert paths                                                                                                                                                                                                                                                                                                                                                   | Same-inventory refresh preserves all three fields AND the authority generation                                                                                                                                                     |
+| 5   | No-credential-copy invariant                     | Fixed       | `materializeCapacitySourceCredential` removed. The source binds by exact reference (`credential_source` + `cc_credentials:<id>` + `cc_attachments:<id>` + version). A **secret-free** anchor row remains only because migration 0125's shipped `capacity_sources` CHECK requires a non-null `credential_id` and the table is an FK CASCADE parent (rule 31 forbids the rebuild). `scrubCapacitySourceCredentialSecrets` erases previously copied ciphertext and prunes only unreferenced anchors | Canary ciphertext never reaches `credentials`; upgraded copies are scrubbed; the referenced anchor is never deleted and no capacity source is cascaded away                                                                        |
+| 6   | Bounded/resumable catalog publication            | Fixed       | Durable per-(pool, source) publication cursor in `platform_settings`, keyed by a digest of the ordered candidate set; missing-offering cleanup requires BOTH a complete catalog and a complete publication. Per-isolate credential-scoped catalog cache (`CAPACITY_POOL_CATALOG_CACHE_TTL_MS`), successful+complete refreshes only                                                                                                                                                               | Multi-pass publication with a NEW db handle per pass proves durable resumption; partial passes never mark missing; a failed refresh never marks missing; one provider request per credential per TTL, with a cleared-cache control |
 
 ### Deployment workload-role regression (message `01M1XA6V7V35Y51P6R8GJK71QX`)
 
@@ -430,7 +561,8 @@ honest classification of what each call site does today, not an approval:
 | `createNodeRecord`          | `services/session-snapshot-upload-relay.ts` `ensureSessionSnapshotUploadRelay` | service / recovery-relay | **unreviewed-bypass** |
 | `provisionNode`             | `services/session-snapshot-upload-relay.ts` `ensureSessionSnapshotUploadRelay` | service / recovery-relay | **unreviewed-bypass** |
 
-Remaining upgrade / capability test matrix:
+Historical remaining upgrade / capability test matrix (superseded by the current
+12-case joined matrix above):
 
 | Scenario                       | Existing tests found                                                                                                                                                                                                                            | Missing before section E can be accepted                                                                                                        |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -478,7 +610,11 @@ structured difference diagnostics, public/operator documentation, final local
 specialist review evidence, full quality suite, and one coordinated staging
 sweep on the integrated candidate.
 
-### Current gate state
+### Historical E1 gate state
+
+The scanner counts below describe the E1 checkpoint only. The current-session
+scanner invocation was killed and requires a new successful run; use the current
+verification table rather than interpreting these historical counts as current.
 
 `pnpm quality:node-pool-boundary` exits 1 with **60 violations**; the scanner's
 own regression suite is 50/50 green. These are reported separately on purpose.

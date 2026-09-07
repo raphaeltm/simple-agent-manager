@@ -20,7 +20,6 @@ import {
   normalizeCapacityAuthorityGeneration,
 } from './capacity-pool-authority';
 import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
-import { resolvePlacementRollout } from './placement-rollout';
 import { timestampVersion } from './default-capacity-pool-helpers';
 import type { CapacityPoolSummary } from './default-capacity-pools';
 import {
@@ -41,6 +40,7 @@ import type {
   TaskStartCapacityPoolSelection,
   TaskStartPlacement,
 } from './placement-resolver-types';
+import { resolvePlacementRollout } from './placement-rollout';
 
 export {
   rankCapacityCandidatesForRuntime,

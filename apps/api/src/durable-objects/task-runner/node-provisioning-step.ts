@@ -14,7 +14,6 @@ import type {
   VMSize,
 } from '@simple-agent-manager/shared';
 
-import { persistPlacementDiagnostics } from './placement-diagnostics';
 import { log } from '../../lib/logger';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
@@ -68,6 +67,7 @@ import {
   tryClaimWarmNode,
   verifyNodeAgentHealthy,
 } from './node-selection';
+import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 async function trySelectReusableNodeForProvisioning(
@@ -462,7 +462,8 @@ export async function handleNodeProvisioning(
   await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts, queue: {} });
 
   for (const [i, attempt] of exhaustionPlan.attempts.entries()) {
-    const diagnosticAttempt = diagnosticAttempts[i]!;
+    const diagnosticAttempt = diagnosticAttempts[i];
+    if (!diagnosticAttempt) throw new Error('Missing provisioning attempt diagnostic');
     diagnosticAttempt.outcome = 'pending';
     await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts });
     const isLastAttempt = i === exhaustionPlan.attempts.length - 1;

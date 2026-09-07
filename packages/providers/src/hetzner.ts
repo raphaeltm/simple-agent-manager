@@ -14,14 +14,13 @@ import {
   HETZNER_LOCATIONS,
   HETZNER_SIZE_CONFIGS,
   HETZNER_VOLUME_CAPABILITIES,
-  HETZNER_VOLUME_MAX_SIZE_GB,
-  HETZNER_VOLUME_MIN_SIZE_GB,
   type HetznerProviderRuntimeOptions,
   isAlreadyDetachedVolumeError,
   isTransientCapacityError,
   mapHetznerProviderError,
   mapHetznerServerToVMInstance,
   mapHetznerVolumeToInstance,
+  validateHetznerVolumeSize,
 } from './hetzner-metadata';
 import { fetchPaginatedHetznerList } from './hetzner-pagination';
 import { getProviderCatalogOfferings } from './instance-offerings';
@@ -508,7 +507,7 @@ export class HetznerProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<VolumeInstance> {
     throwIfProviderRequestAborted(context);
-    this.validateRequestedVolumeSize(config.sizeGb);
+    validateHetznerVolumeSize(config.sizeGb);
 
     let response: Response;
     try {
@@ -632,7 +631,7 @@ export class HetznerProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<VolumeInstance> {
     throwIfProviderRequestAborted(context);
-    this.validateRequestedVolumeSize(config.sizeGb);
+    validateHetznerVolumeSize(config.sizeGb);
     const currentSizeGb =
       config.currentSizeGb ?? (await this.getCurrentVolumeSize(config, context));
     if (config.sizeGb < currentSizeGb) {
@@ -767,25 +766,6 @@ export class HetznerProvider implements Provider {
   private toHetznerLabelSelectorParts(labels?: Record<string, string>): string[] {
     if (!labels) return [];
     return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
-  }
-
-  private validateRequestedVolumeSize(sizeGb: number): void {
-    if (!Number.isInteger(sizeGb) || sizeGb < HETZNER_VOLUME_MIN_SIZE_GB) {
-      throw new ProviderError(
-        this.name,
-        undefined,
-        `Hetzner volume size must be an integer >= ${HETZNER_VOLUME_MIN_SIZE_GB}GB`,
-        { category: 'invalid_config' }
-      );
-    }
-    if (sizeGb > HETZNER_VOLUME_MAX_SIZE_GB) {
-      throw new ProviderError(
-        this.name,
-        undefined,
-        `Hetzner volume size must be <= ${HETZNER_VOLUME_MAX_SIZE_GB}GB`,
-        { category: 'invalid_config' }
-      );
-    }
   }
 
   private async getCurrentVolumeSize(

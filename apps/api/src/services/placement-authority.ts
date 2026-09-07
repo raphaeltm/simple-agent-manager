@@ -8,11 +8,11 @@ import {
   type ProjectCapability,
   projectMemberRolesWithCapability,
 } from '../middleware/project-auth';
-import { capacityCandidateSatisfiesWorkloadRole } from './capacity-pool-workload-roles';
 import {
   buildAnyDefaultCapacityPoolExclusionSql,
   buildHigherPrecedenceDefaultCapacityPoolExclusionSql,
 } from './capacity-pool-precedence';
+import { capacityCandidateSatisfiesWorkloadRole } from './capacity-pool-workload-roles';
 
 export type PlacementSqlBind = string | number | null;
 export type PlacementAuthorityNodeClass = 'managed' | 'user-owned';

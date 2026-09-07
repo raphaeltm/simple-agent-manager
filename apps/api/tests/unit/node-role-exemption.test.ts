@@ -17,8 +17,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 const SRC_DIR = path.resolve(__dirname, '../../src');
 
-import * as schema from '../../src/db/schema';
-
 vi.mock('../../src/services/node-lifecycle', () => ({
   tryClaim: vi.fn(),
 }));
@@ -51,61 +49,6 @@ function makeNode(overrides: Partial<MockNode> = {}): MockNode {
     lastMetrics: JSON.stringify({ cpuLoadAvg1: 5, memoryPercent: 10 }),
     warmSince: null,
     ...overrides,
-  };
-}
-
-/**
- * Build a mock DB that filters by nodeRole in its where() clause,
- * mirroring how the real Drizzle queries filter.
- */
-function createMockDb({
-  allNodes,
-  workspaceCount = 0,
-}: {
-  allNodes: MockNode[];
-  workspaceCount?: number;
-}) {
-  return {
-    select(selection?: Record<string, unknown>) {
-      return {
-        from(table: unknown) {
-          return {
-            where(..._args: unknown[]) {
-              if (table === schema.workspaces) {
-                return Promise.resolve([{ count: workspaceCount }]);
-              }
-
-              if (table === schema.nodes) {
-                // For warm-node freshness re-checks (select by ID with limit)
-                if (selection && 'warmSince' in selection && 'status' in selection) {
-                  return {
-                    limit() {
-                      return Promise.resolve([
-                        { status: 'running', warmSince: new Date().toISOString() },
-                      ]);
-                    },
-                  };
-                }
-
-                // The real Drizzle queries include eq(schema.nodes.nodeRole, 'workspace').
-                // Filter the mock data the same way the DB would.
-                const filtered = allNodes.filter((n) => n.nodeRole === 'workspace');
-
-                // For warm nodes query (has warmSince in selection)
-                if (selection && 'warmSince' in selection) {
-                  return Promise.resolve(filtered.filter((n) => n.warmSince));
-                }
-
-                // For main node query
-                return Promise.resolve(filtered.filter((n) => n.status === 'running'));
-              }
-
-              return Promise.resolve([]);
-            },
-          };
-        },
-      };
-    },
   };
 }
 

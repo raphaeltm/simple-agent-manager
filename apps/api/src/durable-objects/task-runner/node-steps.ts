@@ -5,17 +5,16 @@
  * `node_agent_ready` in `./node-agent-ready-step`; both are re-exported here so
  * the DO's step table keeps one import site. See rule 18.
  */
-import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-resource-capacity';
-import { persistPlacementDiagnostics } from './placement-diagnostics';
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
-import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
   type CapacityAwareNodePlacementRow,
   capacityPoolNoCandidatesError,
   hasNoCapacityPoolCandidates,
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
+import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
+import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-resource-capacity';
 import {
   findNodeWithCapacity,
   getTaskReservation,
@@ -25,6 +24,7 @@ import {
   tryClaimWarmNode,
   verifyNodeAgentHealthy,
 } from './node-selection';
+import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export { handleNodeAgentReady } from './node-agent-ready-step';

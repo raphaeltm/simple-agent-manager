@@ -89,6 +89,25 @@ export const HETZNER_VOLUME_CAPABILITIES: VolumeCapabilities = {
   },
 };
 
+export function validateHetznerVolumeSize(sizeGb: number): void {
+  if (!Number.isInteger(sizeGb) || sizeGb < HETZNER_VOLUME_MIN_SIZE_GB) {
+    throw new ProviderError(
+      'hetzner',
+      undefined,
+      `Hetzner volume size must be an integer >= ${HETZNER_VOLUME_MIN_SIZE_GB}GB`,
+      { category: 'invalid_config' }
+    );
+  }
+  if (sizeGb > HETZNER_VOLUME_MAX_SIZE_GB) {
+    throw new ProviderError(
+      'hetzner',
+      undefined,
+      `Hetzner volume size must be <= ${HETZNER_VOLUME_MAX_SIZE_GB}GB`,
+      { category: 'invalid_config' }
+    );
+  }
+}
+
 export interface HetznerProviderRuntimeOptions {
   capacityRetryMaxAttempts?: number;
   capacityRetryBudgetMs?: number;

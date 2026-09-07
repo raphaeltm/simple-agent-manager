@@ -19,8 +19,8 @@ import {
   comparePlacementHostsByStrategy,
   comparePlacementLocationsByStrategy,
   normalizePlacementHostSignals,
-  placementLocationKey,
   type PlacementHostSignals,
+  placementLocationKey,
 } from '../../../src/services/placement-strategy';
 import {
   type ActiveWorkspaceReservationUsage,

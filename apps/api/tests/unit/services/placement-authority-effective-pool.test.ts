@@ -19,7 +19,6 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import type { Env } from '../../../src/env';
 import {
   findNodeWithCapacity,
   tryClaimWarmNode,
@@ -29,9 +28,10 @@ import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
+import type { Env } from '../../../src/env';
+import { assertNodeAllocationPlanCurrent } from '../../../src/services/nodes';
 import type { TaskStartCapacityPoolSelection } from '../../../src/services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../../src/services/reusable-node-authority';
-import { assertNodeAllocationPlanCurrent } from '../../../src/services/nodes';
 import type { WorkspacePlacementInput } from '../../../src/services/workspace-placement';
 import { reserveWorkspacePlacement } from '../../../src/services/workspace-placement';
 import {

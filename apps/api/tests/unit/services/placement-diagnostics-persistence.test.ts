@@ -1,14 +1,14 @@
-import { publicPlacementExplanationJson } from '../../../src/services/public-placement-explanation';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { persistPlacementDiagnostics } from '../../../src/durable-objects/task-runner/placement-diagnostics';
 import { scheduleAdmissionWait } from '../../../src/durable-objects/task-runner/node-provisioning-admission';
+import { persistPlacementDiagnostics } from '../../../src/durable-objects/task-runner/placement-diagnostics';
 import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
 import { buildPlacementDecisionDiagnostics } from '../../../src/services/placement-diagnostics';
+import { publicPlacementExplanationJson } from '../../../src/services/public-placement-explanation';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const dbs: Database.Database[] = [];

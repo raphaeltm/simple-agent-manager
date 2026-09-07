@@ -9,7 +9,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
-import * as schema from '../db/schema';
+import type * as schema from '../db/schema';
 import type { Env } from '../env';
 import { type DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
 

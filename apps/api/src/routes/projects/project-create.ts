@@ -2,7 +2,7 @@ import type { RepoProvider } from '@simple-agent-manager/shared';
 import { ARTIFACTS_DEFAULTS } from '@simple-agent-manager/shared';
 import { and, count, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';

@@ -1,5 +1,5 @@
 /**
- * Reusable-node health, warm-pool claim, and capacity-selection helpers.
+ * Reusable-node warm-pool claim and capacity-selection helpers.
  *
  * Kept separate from the node step handlers so provisioning and placement
  * policy remain independently reviewable. See rule 18.
@@ -11,25 +11,24 @@ import {
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 
-import {
-  resolvePlacementRollout,
-  comparePlacementRolloutHosts,
-  PLACEMENT_ROLLOUT_BASELINE_STRATEGY,
-} from '../../services/placement-rollout';
-import type { PlacementHostDiagnosticInput } from '../../services/placement-diagnostics';
-import { updatePlacementDiagnostics } from './placement-diagnostics';
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
-import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
+import type { PlacementHostDiagnosticInput } from '../../services/placement-diagnostics';
 import {
   type CapacityAwareNodePlacementRow,
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
 import {
+  comparePlacementRolloutHosts,
+  PLACEMENT_ROLLOUT_BASELINE_STRATEGY,
+  resolvePlacementRollout,
+} from '../../services/placement-rollout';
+import {
   comparePlacementHostsByStrategy,
   normalizePlacementHostSignals,
   type PlacementHostSignals,
 } from '../../services/placement-strategy';
+import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
@@ -46,7 +45,10 @@ import {
   type TrustedWorkspaceNodeCapacityRow,
 } from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
+import { updatePlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+
+export { verifyNodeAgentHealthy } from './node-agent-health';
 
 export interface ReusableNodeSelection {
   nodeId: string;
@@ -152,47 +154,6 @@ async function claimWarmNodeCandidate(
     throw error;
   }
   return true;
-}
-
-/**
- * Verify that the VM agent on a node is actually healthy by checking D1
- * heartbeat records. We cannot fetch the VM directly because Cloudflare
- * same-zone routing intercepts Worker subrequests to vm-* hostnames,
- * routing them back to this API Worker instead of the VM agent.
- */
-export async function verifyNodeAgentHealthy(
-  nodeId: string,
-  rc: TaskRunnerContext
-): Promise<boolean> {
-  try {
-    const node = await rc.env.DATABASE.prepare(
-      `SELECT health_status, last_heartbeat_at, agent_ready_at, agent_version FROM nodes WHERE id = ?`
-    )
-      .bind(nodeId)
-      .first<{
-        health_status: string | null;
-        last_heartbeat_at: string | null;
-        agent_ready_at: string | null;
-        agent_version: string | null;
-      }>();
-
-    if (
-      !node ||
-      node.health_status !== 'healthy' ||
-      !node.last_heartbeat_at ||
-      !node.agent_ready_at ||
-      !isNodeAgentVersionCompatible(node.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)
-    ) {
-      return false;
-    }
-
-    // Consider node healthy if heartbeat is within the stale threshold
-    const staleSeconds = parseInt(rc.env.NODE_HEARTBEAT_STALE_SECONDS || '180', 10);
-    const heartbeatAge = (Date.now() - new Date(node.last_heartbeat_at).getTime()) / 1000;
-    return heartbeatAge < staleSeconds;
-  } catch {
-    return false;
-  }
 }
 
 export async function tryClaimWarmNode(

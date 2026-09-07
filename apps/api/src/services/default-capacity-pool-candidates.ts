@@ -369,10 +369,16 @@ function parsePublicationCursor(raw: string | null): PublicationCursor | null {
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return null;
-    const record = parsed as Record<string, unknown>;
-    const digest = record.digest;
-    const published = record.published;
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      !('digest' in parsed) ||
+      !('published' in parsed)
+    )
+      return null;
+    const digest = parsed.digest;
+    const published = parsed.published;
     if (typeof digest !== 'string' || digest.length === 0) return null;
     if (typeof published !== 'number' || !Number.isSafeInteger(published) || published < 0) {
       return null;

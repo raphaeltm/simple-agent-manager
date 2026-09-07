@@ -60,6 +60,7 @@ import {
 } from './resource-requirements-input';
 import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
+export type { RankCapacityCandidatesInput } from './placement-resolver-capacity';
 export {
   capacityPlacementSnapshotForCandidate,
   capacityPlacementSnapshotForTaskStart,
@@ -70,7 +71,6 @@ export {
   rankCapacityCandidatesForRuntime,
   resolveReusableNodeCapacitySnapshot,
 } from './placement-resolver-capacity';
-export type { RankCapacityCandidatesInput } from './placement-resolver-capacity';
 export type {
   CapacityAwareNodePlacementRow,
   PlacementCredentialAttribution,

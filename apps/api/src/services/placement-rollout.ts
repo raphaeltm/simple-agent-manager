@@ -1,4 +1,3 @@
-import { comparePlacementHostsByStrategy, type PlacementHostSignals } from './placement-strategy';
 import type {
   CapacityPoolPlacementSettings,
   CapacityPoolStrategy,
@@ -6,6 +5,7 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import { DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS } from './capacity-pool-placement-settings';
+import { comparePlacementHostsByStrategy, type PlacementHostSignals } from './placement-strategy';
 
 // FNV-1a provides a stable cohort across isolates, retries and version rollbacks.
 const FNV_OFFSET = 0x811c9dc5;

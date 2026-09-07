@@ -36,9 +36,9 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import {
+  type ActiveWorkspaceReservationUsage,
   cpuBudgetMillis,
   emptyUsage,
-  type ActiveWorkspaceReservationUsage,
   parseWorkspaceAdmissionMetrics,
   resolveTrustedWorkspaceNodeCapacity,
   scoreWorkspaceAdmissionMetrics,

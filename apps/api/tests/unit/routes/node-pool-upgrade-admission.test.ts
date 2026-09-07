@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
+
 import { ensureSessionRecovery } from '../../../src/services/session-recovery';
 import { seedCloudCredential } from './capacity-pool-test-seeds';
 import {
+  assertReserved,
   fixture,
+  reserve,
+  type Scope,
   seedHost,
   select,
-  reserve,
-  assertReserved,
-  type Scope,
 } from './node-pool-upgrade-test-helpers';
 
 describe('old node-pool requests through TaskRunner admission', () => {

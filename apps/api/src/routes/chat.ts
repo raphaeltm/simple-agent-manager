@@ -1,4 +1,3 @@
-import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 /**
  * Chat session routes — CRUD for project chat sessions and messages.
  *
@@ -38,6 +37,7 @@ import {
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
+import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';
 import { attachWakeState } from './chat/wake-state';
 import { resolveChatAgentState } from './chat-agent-state';

@@ -59,10 +59,7 @@ function getDownloadDir(env: Env): string {
 /** Timeout for VM agent file transfer calls. Override via LIBRARY_MCP_TRANSFER_TIMEOUT_MS. */
 const DEFAULT_LIBRARY_MCP_TRANSFER_TIMEOUT_MS = 60_000;
 function getTransferTimeout(env: Env): number {
-  return parsePositiveInt(
-    env.LIBRARY_MCP_TRANSFER_TIMEOUT_MS,
-    DEFAULT_LIBRARY_MCP_TRANSFER_TIMEOUT_MS
-  );
+  return parsePositiveInt(env.LIBRARY_MCP_TRANSFER_TIMEOUT_MS, DEFAULT_LIBRARY_MCP_TRANSFER_TIMEOUT_MS);
 }
 
 /** Max caption length for display_from_library cards. Override via LIBRARY_MCP_CAPTION_MAX_LENGTH. */
@@ -72,7 +69,7 @@ const MIN_LIBRARY_MCP_CAPTION_MAX = 20;
 function getCaptionMax(env: Env): number {
   return Math.max(
     parsePositiveInt(env.LIBRARY_MCP_CAPTION_MAX_LENGTH, DEFAULT_LIBRARY_MCP_CAPTION_MAX),
-    MIN_LIBRARY_MCP_CAPTION_MAX
+    MIN_LIBRARY_MCP_CAPTION_MAX,
   );
 }
 
@@ -106,14 +103,10 @@ function validateRelativePath(path: string): string | null {
 
 function requireWorkspaceId(
   requestId: string | number | null,
-  tokenData: McpTokenData
+  tokenData: McpTokenData,
 ): JsonRpcResponse | null {
   if (!tokenData.workspaceId) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'No active workspace — this tool requires a workspace context'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'No active workspace — this tool requires a workspace context');
   }
   return null;
 }
@@ -126,7 +119,7 @@ async function resolveWorkspaceVmUrl(
   db: AppDb,
   env: Env,
   workspaceId: string,
-  projectId: string
+  projectId: string,
 ): Promise<{ vmBaseUrl: string; nodeId: string } | { error: string }> {
   const [workspace] = await db
     .select({
@@ -135,7 +128,12 @@ async function resolveWorkspaceVmUrl(
       nodeId: schema.workspaces.nodeId,
     })
     .from(schema.workspaces)
-    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.projectId, projectId)))
+    .where(
+      and(
+        eq(schema.workspaces.id, workspaceId),
+        eq(schema.workspaces.projectId, projectId),
+      ),
+    )
     .limit(1);
 
   if (!workspace) {
@@ -172,17 +170,11 @@ async function uploadToWorkspace(input: WorkspaceUploadInput): Promise<void> {
   formData.append('files', new Blob([data]), filename);
 
   // Use Authorization header for server-to-server calls (not query param)
-  const res = await fetchNodeAgent(
-    nodeId,
-    env,
-    url,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    },
-    getTransferTimeout(env)
-  );
+  const res = await fetchNodeAgent(nodeId, env, url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  }, getTransferTimeout(env));
 
   if (!res.ok) {
     const text = await res.text().catch(() => 'unknown');
@@ -200,22 +192,16 @@ async function downloadFromWorkspace(
   nodeId: string,
   workspaceId: string,
   userId: string,
-  filePath: string
+  filePath: string,
 ): Promise<{ data: ArrayBuffer; contentType: string }> {
   const { token } = await signTerminalToken(userId, workspaceId, env);
   const params = new URLSearchParams({ path: filePath });
   const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`;
 
   // Use Authorization header for server-to-server calls (not query param)
-  const res = await fetchNodeAgent(
-    nodeId,
-    env,
-    url,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-    getTransferTimeout(env)
-  );
+  const res = await fetchNodeAgent(nodeId, env, url, {
+    headers: { Authorization: `Bearer ${token}` },
+  }, getTransferTimeout(env));
 
   if (!res.ok) {
     const text = await res.text().catch(() => 'unknown');
@@ -247,7 +233,7 @@ export async function handleListLibraryFiles(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   try {
     const db = drizzle(env.DATABASE, { schema });
@@ -258,19 +244,15 @@ export async function handleListLibraryFiles(
       ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, maxTags)
       : undefined;
     const fileType = typeof params.fileType === 'string' ? params.fileType : undefined;
-    const source =
-      params.source === 'user' || params.source === 'agent' ? params.source : undefined;
+    const source = params.source === 'user' || params.source === 'agent' ? params.source : undefined;
     const VALID_SORT_FIELDS = ['createdAt', 'filename', 'sizeBytes'] as const;
-    const sortBy =
-      typeof params.sortBy === 'string' &&
-      (VALID_SORT_FIELDS as readonly string[]).includes(params.sortBy)
-        ? (params.sortBy as (typeof VALID_SORT_FIELDS)[number])
-        : undefined;
+    const sortBy = typeof params.sortBy === 'string' && (VALID_SORT_FIELDS as readonly string[]).includes(params.sortBy)
+      ? (params.sortBy as typeof VALID_SORT_FIELDS[number])
+      : undefined;
     const maxPageSize = getListMaxPageSize(env);
-    const limit =
-      typeof params.limit === 'number' && params.limit > 0
-        ? Math.min(Math.floor(params.limit), maxPageSize)
-        : undefined;
+    const limit = typeof params.limit === 'number' && params.limit > 0
+      ? Math.min(Math.floor(params.limit), maxPageSize)
+      : undefined;
     const rawDirectory = typeof params.directory === 'string' ? params.directory : undefined;
     let directory: string | undefined;
     if (rawDirectory) {
@@ -306,15 +288,10 @@ export async function handleListLibraryFiles(
     }));
 
     return jsonRpcSuccess(requestId, {
-      content: [
-        { type: 'text', text: JSON.stringify({ files, totalCount: result.total }, null, 2) },
-      ],
+      content: [{ type: 'text', text: JSON.stringify({ files, totalCount: result.total }, null, 2) }],
     });
   } catch (err) {
-    log.error('mcp.list_library_files.error', {
-      projectId: tokenData.projectId,
-      error: String(err),
-    });
+    log.error('mcp.list_library_files.error', { projectId: tokenData.projectId, error: String(err) });
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to list library files');
   }
 }
@@ -326,7 +303,7 @@ export async function handleDownloadLibraryFile(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   // Require workspace
   const wsErr = requireWorkspaceId(requestId, tokenData);
@@ -334,11 +311,7 @@ export async function handleDownloadLibraryFile(
 
   const fileId = params.fileId;
   if (typeof fileId !== 'string' || !fileId.trim()) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'fileId is required and must be a non-empty string'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'fileId is required and must be a non-empty string');
   }
 
   try {
@@ -346,30 +319,18 @@ export async function handleDownloadLibraryFile(
     const encryptionKey = getEncryptionKey(env);
 
     // Check workspace is reachable first (cheap D1 query) before expensive R2 decrypt
-    const vmResult = await resolveWorkspaceVmUrl(
-      db,
-      env,
-      tokenData.workspaceId,
-      tokenData.projectId
-    );
+    const vmResult = await resolveWorkspaceVmUrl(db, env, tokenData.workspaceId, tokenData.projectId);
     if ('error' in vmResult) {
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }
 
     // Download and decrypt from R2
-    const { data, file } = await downloadFile(
-      db,
-      env.R2,
-      encryptionKey,
-      tokenData.projectId,
-      fileId
-    );
+    const { data, file } = await downloadFile(db, env.R2, encryptionKey, tokenData.projectId, fileId);
 
     // Determine and validate target path
-    const targetDir =
-      typeof params.targetPath === 'string' && params.targetPath.trim()
-        ? params.targetPath.trim()
-        : getDownloadDir(env);
+    const targetDir = typeof params.targetPath === 'string' && params.targetPath.trim()
+      ? params.targetPath.trim()
+      : getDownloadDir(env);
 
     const pathErr = validateRelativePath(targetDir);
     if (pathErr) {
@@ -391,20 +352,11 @@ export async function handleDownloadLibraryFile(
     const downloadedTo = `${targetDir}/${file.filename}`;
 
     return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              downloadedTo,
-              filename: file.filename,
-              sizeBytes: file.sizeBytes,
-            },
-            null,
-            2
-          ),
-        },
-      ],
+      content: [{ type: 'text', text: JSON.stringify({
+        downloadedTo,
+        filename: file.filename,
+        sizeBytes: file.sizeBytes,
+      }, null, 2) }],
     });
   } catch (err) {
     log.error('mcp.download_library_file.error', {
@@ -428,7 +380,7 @@ export async function handleUploadToLibrary(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   // Require workspace
   const wsErr = requireWorkspaceId(requestId, tokenData);
@@ -436,17 +388,11 @@ export async function handleUploadToLibrary(
 
   const filePath = params.filePath;
   if (typeof filePath !== 'string' || !filePath.trim()) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'filePath is required and must be a non-empty string'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'filePath is required and must be a non-empty string');
   }
 
   const description = typeof params.description === 'string' ? params.description : undefined;
-  const tags = Array.isArray(params.tags)
-    ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, getMaxTagsPerFile(env))
-    : undefined;
+  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, getMaxTagsPerFile(env)) : undefined;
   const directory = typeof params.directory === 'string' ? params.directory : undefined;
 
   try {
@@ -454,12 +400,7 @@ export async function handleUploadToLibrary(
     const encryptionKey = getEncryptionKey(env);
 
     // Resolve workspace VM URL
-    const vmResult = await resolveWorkspaceVmUrl(
-      db,
-      env,
-      tokenData.workspaceId,
-      tokenData.projectId
-    );
+    const vmResult = await resolveWorkspaceVmUrl(db, env, tokenData.workspaceId, tokenData.projectId);
     if ('error' in vmResult) {
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }
@@ -471,7 +412,7 @@ export async function handleUploadToLibrary(
       vmResult.nodeId,
       tokenData.workspaceId,
       tokenData.userId,
-      filePath.trim()
+      filePath.trim(),
     );
 
     // Extract filename from path
@@ -480,43 +421,23 @@ export async function handleUploadToLibrary(
     const mimeType = contentType;
 
     // Upload to library (will throw 409 on duplicate filename in same directory)
-    const result = await uploadFile(
-      db,
-      env.R2,
-      encryptionKey,
-      env,
-      tokenData.projectId,
-      tokenData.userId,
-      filename,
-      mimeType,
-      data,
-      {
-        description,
-        tags,
-        uploadSource: 'agent',
-        uploadSessionId: tokenData.taskId, // task context doubles as session context for agents
-        uploadTaskId: tokenData.taskId,
-        tagSource: 'agent',
-        directory,
-      }
-    );
+    const result = await uploadFile(db, env.R2, encryptionKey, env, tokenData.projectId, tokenData.userId, filename, mimeType, data, {
+      description,
+      tags,
+      uploadSource: 'agent',
+      uploadSessionId: tokenData.taskId, // task context doubles as session context for agents
+      uploadTaskId: tokenData.taskId,
+      tagSource: 'agent',
+      directory,
+    });
 
     return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              fileId: result.id,
-              filename: result.filename,
-              mimeType: result.mimeType,
-              sizeBytes: result.sizeBytes,
-            },
-            null,
-            2
-          ),
-        },
-      ],
+      content: [{ type: 'text', text: JSON.stringify({
+        fileId: result.id,
+        filename: result.filename,
+        mimeType: result.mimeType,
+        sizeBytes: result.sizeBytes,
+      }, null, 2) }],
     });
   } catch (err) {
     const message = (err as Error).message;
@@ -536,34 +457,25 @@ export async function handleUploadToLibrary(
             and(
               eq(schema.projectFiles.projectId, tokenData.projectId),
               eq(schema.projectFiles.directory, lookupDir),
-              eq(schema.projectFiles.filename, filename)
-            )
+              eq(schema.projectFiles.filename, filename),
+            ),
           )
           .limit(1);
 
         if (existing) {
           return jsonRpcSuccess(requestId, {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(
-                  {
-                    error: 'FILE_EXISTS',
-                    existingFile: {
-                      id: existing.id,
-                      filename: existing.filename,
-                      mimeType: existing.mimeType,
-                      sizeBytes: existing.sizeBytes,
-                      uploadSource: existing.uploadSource,
-                      uploadedBy: existing.uploadedBy,
-                      createdAt: existing.createdAt,
-                    },
-                  },
-                  null,
-                  2
-                ),
+            content: [{ type: 'text', text: JSON.stringify({
+              error: 'FILE_EXISTS',
+              existingFile: {
+                id: existing.id,
+                filename: existing.filename,
+                mimeType: existing.mimeType,
+                sizeBytes: existing.sizeBytes,
+                uploadSource: existing.uploadSource,
+                uploadedBy: existing.uploadedBy,
+                createdAt: existing.createdAt,
               },
-            ],
+            }, null, 2) }],
           });
         }
       } catch (lookupErr) {
@@ -587,11 +499,7 @@ export async function handleUploadToLibrary(
       return jsonRpcError(requestId, INVALID_PARAMS, 'File not found in workspace');
     }
     // Pass through validation errors (file limit, size limit, bad filename, etc.)
-    if (
-      err instanceof Error &&
-      'statusCode' in err &&
-      (err as { statusCode: number }).statusCode === 400
-    ) {
+    if (err instanceof Error && 'statusCode' in err && (err as { statusCode: number }).statusCode === 400) {
       return jsonRpcError(requestId, INVALID_PARAMS, message);
     }
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to upload to library');
@@ -606,7 +514,7 @@ export async function handleReplaceLibraryFile(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   // Require workspace
   const wsErr = requireWorkspaceId(requestId, tokenData);
@@ -614,26 +522,16 @@ export async function handleReplaceLibraryFile(
 
   const fileId = params.fileId;
   if (typeof fileId !== 'string' || !fileId.trim()) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'fileId is required and must be a non-empty string'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'fileId is required and must be a non-empty string');
   }
 
   const filePath = params.filePath;
   if (typeof filePath !== 'string' || !filePath.trim()) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'filePath is required and must be a non-empty string'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'filePath is required and must be a non-empty string');
   }
 
   const description = typeof params.description === 'string' ? params.description : undefined;
-  const tags = Array.isArray(params.tags)
-    ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, getMaxTagsPerFile(env))
-    : undefined;
+  const tags = Array.isArray(params.tags) ? params.tags.filter((t): t is string => typeof t === 'string').slice(0, getMaxTagsPerFile(env)) : undefined;
 
   try {
     const db = drizzle(env.DATABASE, { schema });
@@ -652,12 +550,7 @@ export async function handleReplaceLibraryFile(
     const previousSizeBytes = existingFile.file.sizeBytes;
 
     // Resolve workspace VM URL
-    const vmResult = await resolveWorkspaceVmUrl(
-      db,
-      env,
-      tokenData.workspaceId,
-      tokenData.projectId
-    );
+    const vmResult = await resolveWorkspaceVmUrl(db, env, tokenData.workspaceId, tokenData.projectId);
     if ('error' in vmResult) {
       return jsonRpcError(requestId, INTERNAL_ERROR, vmResult.error);
     }
@@ -669,7 +562,7 @@ export async function handleReplaceLibraryFile(
       vmResult.nodeId,
       tokenData.workspaceId,
       tokenData.userId,
-      filePath.trim()
+      filePath.trim(),
     );
 
     // Extract filename from path
@@ -688,7 +581,7 @@ export async function handleReplaceLibraryFile(
       filename,
       mimeType,
       data,
-      { description }
+      { description },
     );
 
     // Merge new tags with existing (additive)
@@ -697,22 +590,13 @@ export async function handleReplaceLibraryFile(
     }
 
     return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              fileId: updated.id,
-              filename: updated.filename,
-              mimeType: updated.mimeType,
-              sizeBytes: updated.sizeBytes,
-              previousSizeBytes,
-            },
-            null,
-            2
-          ),
-        },
-      ],
+      content: [{ type: 'text', text: JSON.stringify({
+        fileId: updated.id,
+        filename: updated.filename,
+        mimeType: updated.mimeType,
+        sizeBytes: updated.sizeBytes,
+        previousSizeBytes,
+      }, null, 2) }],
     });
   } catch (err) {
     log.error('mcp.replace_library_file.error', {
@@ -737,24 +621,19 @@ export async function handleDisplayFromLibrary(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env
+  env: Env,
 ): Promise<JsonRpcResponse> {
   const fileId = params.fileId;
   if (typeof fileId !== 'string' || !fileId.trim()) {
-    return jsonRpcError(
-      requestId,
-      INVALID_PARAMS,
-      'fileId is required and must be a non-empty string'
-    );
+    return jsonRpcError(requestId, INVALID_PARAMS, 'fileId is required and must be a non-empty string');
   }
 
   // Optional caption — bound length to keep tool metadata lean and avoid an
   // unbounded string rendering in the card.
   const captionMax = getCaptionMax(env);
-  const caption =
-    typeof params.caption === 'string' && params.caption.trim()
-      ? params.caption.trim().slice(0, captionMax)
-      : undefined;
+  const caption = typeof params.caption === 'string' && params.caption.trim()
+    ? params.caption.trim().slice(0, captionMax)
+    : undefined;
 
   try {
     const db = drizzle(env.DATABASE, { schema });
@@ -772,22 +651,13 @@ export async function handleDisplayFromLibrary(
     }
 
     return jsonRpcSuccess(requestId, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(
-            {
-              fileId: existing.file.id,
-              filename: existing.file.filename,
-              mimeType: existing.file.mimeType,
-              sizeBytes: existing.file.sizeBytes,
-              ...(caption ? { caption } : {}),
-            },
-            null,
-            2
-          ),
-        },
-      ],
+      content: [{ type: 'text', text: JSON.stringify({
+        fileId: existing.file.id,
+        filename: existing.file.filename,
+        mimeType: existing.file.mimeType,
+        sizeBytes: existing.file.sizeBytes,
+        ...(caption ? { caption } : {}),
+      }, null, 2) }],
     });
   } catch (err) {
     log.error('mcp.display_from_library.error', {

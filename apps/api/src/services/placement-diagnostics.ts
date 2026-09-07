@@ -20,14 +20,14 @@ import {
   type PlacementDecisionDiagnostics,
   type PlacementHostDiagnostic,
   type PlacementQueueDiagnostic,
-  type PlacementRolloutDiagnostic,
   type PlacementResourceEvidence,
   type PlacementResourceFacts,
+  type PlacementRolloutDiagnostic,
   type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
 
-import { PLACEMENT_STRATEGY_HOST_ORDERING, type PlacementHostSignals } from './placement-strategy';
 import type { TaskStartCapacityPoolSelection } from './placement-resolver-types';
+import { PLACEMENT_STRATEGY_HOST_ORDERING, type PlacementHostSignals } from './placement-strategy';
 
 /** A host that was considered, with the capacity gate's verdict on it. */
 export interface PlacementHostDiagnosticInput {
