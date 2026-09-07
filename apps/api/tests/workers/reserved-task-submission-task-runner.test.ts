@@ -7,6 +7,7 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
+import { fetchNodeAgent } from '../../src/services/node-agent';
 import * as projectDataService from '../../src/services/project-data';
 import {
   reservedIdentitiesForTriggerExecution,
@@ -17,13 +18,12 @@ import type {
   ReservedTaskSubmissionInput,
 } from '../../src/services/reserved-task-submission-contracts';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from '../../src/services/task-runner-do';
-import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
-import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
-import { fetchNodeAgent } from '../../src/services/node-agent';
 import {
   assertTaskRunnerStartGuard,
   type TaskRunnerReservedSubmissionGuard,
 } from '../../src/services/task-runner-start-guard';
+import { reserveWorkspacePlacement } from '../../src/services/workspace-placement';
+import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 const testEnv = env as unknown as Env;
 type TaskRunnerStartBoundaryInput = Parameters<typeof startTaskRunnerDO>[1];
