@@ -90,7 +90,8 @@ export function createMatchesForEvent(
   sql: SqlStorage,
   event: ProjectEventRecord,
   now: number,
-  limits: ProjectEventLimits
+  limits: ProjectEventLimits,
+  requireCompleteFanout = false
 ): ProjectEventMatchRecord[] {
   const eventKeys = projectEventKeys(event);
   const placeholders = eventKeys.map(() => '?').join(', ');
@@ -108,10 +109,13 @@ export function createMatchesForEvent(
       event.projectId,
       now,
       ...eventKeys,
-      limits.maxActiveSubscriptionsPerProject
+      limits.maxActiveSubscriptionsPerProject + (requireCompleteFanout ? 1 : 0)
     )
     .toArray();
 
+  if (requireCompleteFanout && rows.length > limits.maxActiveSubscriptionsPerProject) {
+    throw new ProjectEventLimitExceededError('Channel subscription candidate capacity exceeded');
+  }
   const matches: ProjectEventMatchRecord[] = [];
   for (const row of rows) {
     let subscription: ProjectEventSubscriptionRecord;
@@ -122,9 +126,13 @@ export function createMatchesForEvent(
       continue;
     }
     if (!filterMatchesProjectEvent(subscription.filter, event)) continue;
+    if (requireCompleteFanout && matches.length >= limits.maxMatchesPerEvent) {
+      // The enclosing channel transaction rolls back all earlier match writes.
+      throw new ProjectEventLimitExceededError('Channel event fanout capacity exceeded');
+    }
     const match = insertMatchIfAbsent(sql, event, subscription, now);
     matches.push(match);
-    if (matches.length >= limits.maxMatchesPerEvent) break;
+    if (!requireCompleteFanout && matches.length >= limits.maxMatchesPerEvent) break;
   }
   return matches;
 }
@@ -634,7 +642,7 @@ export function chunkIdsForBindBudget(ids: readonly string[], reservedBinds: num
   return chunks;
 }
 
-function insertMatchIfAbsent(
+export function insertMatchIfAbsent(
   sql: SqlStorage,
   event: ProjectEventRecord,
   subscription: ProjectEventSubscriptionRecord,

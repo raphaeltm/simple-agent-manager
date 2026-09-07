@@ -809,3 +809,4 @@ export {
   MCP_CONNECTION_NAME_RULE,
   SAM_MCP_SERVER_NAME,
 } from './mcp-connection';
+export * from './project-event-channels';

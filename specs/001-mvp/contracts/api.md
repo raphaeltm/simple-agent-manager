@@ -519,3 +519,17 @@ curl -X DELETE https://api.example.com/vms/ws-abc123 \
 Full OpenAPI 3.0 spec will be generated from route handlers and available at:
 - `/openapi.json` - JSON format
 - `/docs` - Swagger UI (optional, development only)
+
+## Project event member controls
+
+Active project members with `task:read` can `GET /api/projects/:projectId/event-subscriptions`
+with `state`, `limit`, and `sessionId`, inspect `GET /:subscriptionId`, browse
+`GET /api/projects/:projectId/event-channels`, and read `GET /event-channels/:channel/history`.
+Subscription session filtering precedes the bounded SQL limit. Channel reads accept
+`cursor` and `limit`; history discloses `watermark`, `hasMore`, and `retentionGap`.
+
+`POST /api/projects/:projectId/event-subscriptions/:subscriptionId/cancel` requires
+`task:write`, accepts only optional `reason`, and derives cancellation attribution
+from the authenticated human. Human/agent-owned subscriptions can be cancelled;
+policy/system/standing-watch ownership uses its separate control path. Cancellation
+is idempotent and revokes pending canonical deliveries.

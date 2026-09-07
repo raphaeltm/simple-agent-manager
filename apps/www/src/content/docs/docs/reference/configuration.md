@@ -1068,6 +1068,13 @@ Safe operator sequence for ProjectData storage relief:
 | `PROJECT_EVENT_MAX_MATCHES_PER_EVENT`                   | `100`             | Maximum durable subscription matches written for one admitted normalized event                                                                                                   |
 | `PROJECT_EVENT_DELIVERY_BATCH_MAX_EVENTS`               | `50`              | Maximum event matches in one durable delivery batch                                                                                                                              |
 | `PROJECT_EVENT_DELIVERY_ATTEMPT_MAX_PER_BATCH`          | `10`              | Maximum recorded delivery attempts for one event delivery batch                                                                                                                  |
+| `PROJECT_EVENT_CHANNEL_MAX_CHANNELS` | `128` | Maximum catalog generations per project |
+| `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` | `4096` | Maximum channel message UTF-8 bytes, also subject to canonical metadata limits |
+| `PROJECT_EVENT_CHANNEL_NAME_MAX_BYTES` | `64` | Maximum channel name bytes |
+| `PROJECT_EVENT_CHANNEL_PUBLISH_WINDOW_MS` | `60000` | Per-project fixed publish window in milliseconds |
+| `PROJECT_EVENT_CHANNEL_PUBLISH_MAX_PER_WINDOW` | `120` | Maximum newly committed channel publishes per project window; retained replays do not consume quota |
+| `PROJECT_EVENT_CHANNEL_CURSOR_TTL_MS` | `3600000` | History cursor and unfinished catch-up lifetime in milliseconds; continuation never extends it |
+| `PROJECT_EVENT_CHANNEL_CATALOG_IDLE_TTL_MS` | `2592000000` | Minimum idle time before reclaiming an empty catalog generation without live catch-up |
 | `PROJECT_EVENT_LIST_LIMIT`                              | `50`              | Default ProjectData event-subscription list/status page size                                                                                                                     |
 | `PROJECT_EVENT_LIST_MAX`                                | `200`             | Maximum ProjectData event-subscription list/status page size                                                                                                                     |
 | `PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH`    | `512`             | Maximum opaque `list_subscription_events` cursor length accepted by ProjectData pull delivery                                                                                    |

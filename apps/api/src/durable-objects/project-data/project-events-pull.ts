@@ -256,7 +256,7 @@ export function ackProjectEventDelivery(
   };
 }
 
-function readVisibleSubscription(
+export function readVisibleSubscription(
   sql: SqlStorage,
   projectId: string,
   subscriptionId: string,

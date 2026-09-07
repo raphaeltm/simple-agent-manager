@@ -281,3 +281,11 @@ All API errors follow this format:
   message: "Human-readable description"
 }
 ```
+
+## Agent event channels
+
+`GET /api/projects/:projectId/event-channels` lists bounded lifetime catalog summaries (`cursor`, `limit`; response `channels`, `nextCursor`). `GET /api/projects/:projectId/event-channels/:channel/history` returns a bounded snapshot (`events`, `cursor`, `watermark`, `hasMore`, `retentionGap`). Both use active project `task:read` membership. Catalog counts are lifetime counts within a generation, never retained-event counts.
+
+MCP names: `publish_channel_event(channel,message,idempotencyKey)`, `list_event_channels(cursor?,limit?)`, `get_channel_history(channel,cursor?,limit?)`, `follow_event_channel(channel,idempotencyKey,cursor?,requestedDelivery?,reason?,expiresAt?)`, `catch_up_event_channel(subscriptionId,limit?)`. Source/type/actor/project/target identity are verified/server-derived; publishing/follow/catch-up require task:write and active agent authority. Channel source is sam.agent_channel, type agent.channel.published, subject type agent_channel with stable channel name. Read text is untrusted evidence. Canonical list/read/ack performs delivery after catch-up.
+
+Follow captures the current canonical sequence watermark and live subscription atomically. Catch-up pages insert unique canonical matches and advance only a contiguous page; capacity or retention gaps roll back without skipping events. Cursor generation/scope/expiry are validated; follow replay preserves immutable start and deadline. Catalog reclamation never changes name-based live routing. Retained event key replays bypass admission quota; changed message conflicts; idempotency ends with canonical retention. Rate limiting is a shared fixed project window, so boundary bursts can consume two windows. Configuration is documented in the public configuration reference.

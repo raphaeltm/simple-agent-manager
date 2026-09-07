@@ -49,6 +49,7 @@ import * as missionState from './missions';
 import * as policies from './policies';
 import * as projectCommentInbox from './project-comment-inbox';
 import * as projectEvents from './project-events';
+import * as eventChannels from './project-event-channels';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
@@ -1024,6 +1025,42 @@ export class ProjectData extends DurableObject<Env> {
         error: err instanceof Error ? err.message : String(err),
       })
     );
+    return result;
+  }
+
+  async publishProjectEventChannel(input: eventChannels.PublishProjectEventChannelInput): Promise<eventChannels.PublishProjectEventChannelResult> {
+    this.ensureProjectId(input.projectId);
+    const prepared = await eventChannels.prepareChannelPublish(this.env, input);
+    const result = this.ctx.storage.transactionSync(() =>
+      eventChannels.publishChannel(this.sql, this.env, this.getProjectId(), prepared));
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  listProjectEventChannels(input: eventChannels.ListProjectEventChannelsInput): eventChannels.ProjectEventChannelList {
+    this.ensureProjectId(input.projectId);
+    return eventChannels.listChannels(this.sql, this.env, this.getProjectId(), input);
+  }
+
+  getProjectEventChannelHistory(input: eventChannels.ProjectEventChannelHistoryInput): eventChannels.ProjectEventChannelHistory {
+    this.ensureProjectId(input.projectId);
+    return this.ctx.storage.transactionSync(() =>
+      eventChannels.channelHistory(this.sql, this.env, this.getProjectId(), input));
+  }
+
+  async followProjectEventChannel(input: eventChannels.FollowProjectEventChannelInput): Promise<eventChannels.FollowProjectEventChannelResult> {
+    this.ensureProjectId(input.projectId);
+    const result = this.ctx.storage.transactionSync(() =>
+      eventChannels.followChannel(this.sql, this.env, this.getProjectId(), input));
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async catchUpProjectEventChannel(input: eventChannels.CatchUpProjectEventChannelInput): Promise<eventChannels.FollowProjectEventChannelResult> {
+    this.ensureProjectId(input.projectId);
+    const result = this.ctx.storage.transactionSync(() =>
+      eventChannels.catchUpChannel(this.sql, this.env, this.getProjectId(), input));
+    await this.recalculateAlarm();
     return result;
   }
 

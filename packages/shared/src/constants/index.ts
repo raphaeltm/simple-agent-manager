@@ -662,3 +662,4 @@ export {
   RESOURCE_RESERVATION_VERSION,
   selectVmSizeForRequirements,
 } from './resource-defaults';
+export * from './project-event-channels';

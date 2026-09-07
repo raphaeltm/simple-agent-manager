@@ -143,7 +143,8 @@ export function admitProjectEvent(
   sql: SqlStorage,
   env: Env,
   storedProjectId: string | null,
-  input: AdmitProjectEventInput
+  input: AdmitProjectEventInput,
+  requireCompleteFanout = false
 ): ProjectEventAdmissionResult {
   const limits = resolveProjectEventLimits(env);
   const eventInput = normalizeProjectEventInput(input, limits);
@@ -230,7 +231,7 @@ export function admitProjectEvent(
   );
 
   const event = readEventById(sql, eventInput.projectId, eventId);
-  const matches = createMatchesForEvent(sql, event, eventInput.receivedAt, limits);
+  const matches = createMatchesForEvent(sql, event, eventInput.receivedAt, limits, requireCompleteFanout);
   ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
   return { outcome: 'created', event, matches };
 }

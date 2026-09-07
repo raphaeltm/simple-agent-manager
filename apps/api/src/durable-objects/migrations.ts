@@ -2021,6 +2021,33 @@ export const MIGRATIONS: Migration[] = [
   {
     name: '048-project-event-channel-member-surfaces',
     run: (sql) => {
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_event_channels (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        lifetime_count INTEGER NOT NULL DEFAULT 0,
+        last_published_at INTEGER NOT NULL,
+        UNIQUE(project_id, name)
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_channels_empty
+        ON project_event_channels(project_id, last_published_at, id)`);
+      sql.exec(`ALTER TABLE project_events ADD COLUMN channel_id TEXT`);
+      sql.exec(`ALTER TABLE project_events ADD COLUMN channel_sequence INTEGER`);
+      sql.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_events_channel_sequence
+        ON project_events(channel_id, channel_sequence) WHERE channel_id IS NOT NULL`);
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_event_channel_publish_rate (
+        project_id TEXT PRIMARY KEY,
+        window_started_at INTEGER NOT NULL,
+        publish_count INTEGER NOT NULL
+      )`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_id TEXT`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_after_sequence INTEGER`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_watermark INTEGER`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_catchup_expires_at INTEGER`);
+      sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN channel_start_fingerprint TEXT`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_channel_catchup_live
+        ON project_event_subscriptions(channel_id, channel_catchup_expires_at)
+        WHERE lifecycle_state = 'active' AND channel_after_sequence < channel_watermark`);
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_session_state
         ON project_event_subscriptions(project_id, target_session_id, lifecycle_state, updated_at DESC, id)`);
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_member_session

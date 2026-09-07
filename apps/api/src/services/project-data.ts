@@ -8,6 +8,11 @@
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
 import type {
+  PublishProjectEventChannelInput, PublishProjectEventChannelResult,
+  ListProjectEventChannelsInput, ProjectEventChannelList,
+  ProjectEventChannelHistoryInput, ProjectEventChannelHistory,
+  FollowProjectEventChannelInput, FollowProjectEventChannelResult,
+  CatchUpProjectEventChannelInput,
   AckProjectEventDeliveryInput,
   AdmitProjectEventInput,
   AgentMailboxMessage,
@@ -454,6 +459,11 @@ function withProjectId<T extends { projectId: string }>(
 }
 
 type ProjectDataEventRpc = {
+  publishProjectEventChannel(input: PublishProjectEventChannelInput): Promise<PublishProjectEventChannelResult>;
+  listProjectEventChannels(input: ListProjectEventChannelsInput): Promise<ProjectEventChannelList>;
+  getProjectEventChannelHistory(input: ProjectEventChannelHistoryInput): Promise<ProjectEventChannelHistory>;
+  followProjectEventChannel(input: FollowProjectEventChannelInput): Promise<FollowProjectEventChannelResult>;
+  catchUpProjectEventChannel(input: CatchUpProjectEventChannelInput): Promise<FollowProjectEventChannelResult>;
   admitProjectEvent(input: AdmitProjectEventInput): Promise<ProjectEventAdmissionResult>;
   createProjectEventSubscription(
     input: CreateProjectEventSubscriptionInput
@@ -1247,6 +1257,26 @@ export async function listProjectCommentInbox(
 // =========================================================================
 // ProjectData Event Subscription Core
 // =========================================================================
+
+export function publishProjectEventChannel(env: Env, projectId: string, input: ProjectDataEventInput<PublishProjectEventChannelInput>) {
+  return callProjectDataEvent(env, projectId, 'publishProjectEventChannel', input);
+}
+
+export function listProjectEventChannels(env: Env, projectId: string, input: ProjectDataEventInput<ListProjectEventChannelsInput> = {}) {
+  return callProjectDataEvent(env, projectId, 'listProjectEventChannels', input);
+}
+
+export function getProjectEventChannelHistory(env: Env, projectId: string, input: ProjectDataEventInput<ProjectEventChannelHistoryInput>) {
+  return callProjectDataEvent(env, projectId, 'getProjectEventChannelHistory', input);
+}
+
+export function followProjectEventChannel(env: Env, projectId: string, input: ProjectDataEventInput<FollowProjectEventChannelInput>) {
+  return callProjectDataEvent(env, projectId, 'followProjectEventChannel', input);
+}
+
+export function catchUpProjectEventChannel(env: Env, projectId: string, input: ProjectDataEventInput<CatchUpProjectEventChannelInput>) {
+  return callProjectDataEvent(env, projectId, 'catchUpProjectEventChannel', input);
+}
 
 export async function admitProjectEvent(
   env: Env,
