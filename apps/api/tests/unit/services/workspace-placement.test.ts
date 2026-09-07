@@ -58,6 +58,9 @@ function seedNode(overrides: Record<string, unknown> = {}): void {
     capacity_pool_candidate_id: 'candidate-cx42',
     capacity_pool_project_id: 'project-1',
     provider_instance_type: 'cx42',
+    provider_instance_vcpu_count: 8,
+    provider_instance_memory_mb: 16 * 1024,
+    provider_instance_disk_gb: 240,
     ...overrides,
   };
   const columns = Object.keys(row);
@@ -86,6 +89,16 @@ function reserveInput(snapshot: CapacityPlacementSnapshot) {
     workspaceProfile: 'full' as const,
     devcontainerConfigName: null,
     agentProfileHint: null,
+    resolvedReservation: {
+      cpuMillis: 2_000,
+      memoryMb: 4_096,
+      diskMb: 40_960,
+      exclusiveNode: false,
+      maxCoTenants: 4,
+      source: 'platform' as const,
+      sourceId: 'platform',
+      version: 1,
+    },
     capacityPlacementSnapshot: snapshot,
     createdAt: '2026-08-28T00:00:00.000Z',
   };
@@ -143,5 +156,37 @@ describe('reserveWorkspacePlacement', () => {
     expect(
       sqlite?.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE id = 'workspace-1'").get()
     ).toEqual({ count: 0 });
+  });
+
+  it('rejects a request that exceeds known capacity on an empty node', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot({
+      capacityPoolCandidateId: 'candidate-cx23',
+      providerInstanceType: 'cx23',
+      providerInstanceVcpuCount: 2,
+      providerInstanceMemoryMb: 4_096,
+      providerInstanceDiskGb: 40,
+    });
+    seedNode({
+      capacity_pool_candidate_id: 'candidate-cx23',
+      provider_instance_type: 'cx23',
+      provider_instance_vcpu_count: 2,
+      provider_instance_memory_mb: 4_096,
+      provider_instance_disk_gb: 40,
+    });
+
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(snapshot),
+          resolvedReservation: {
+            ...reserveInput(snapshot).resolvedReservation,
+            cpuMillis: 3_000,
+          },
+        },
+        5
+      )
+    ).resolves.toBe(false);
   });
 });

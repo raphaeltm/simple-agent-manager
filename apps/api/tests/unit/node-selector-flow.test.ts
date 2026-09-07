@@ -431,10 +431,4 @@ describe('TaskRunner findNodeWithCapacity workspace count limit', () => {
     const section = taskRunnerSource.slice(taskRunnerSource.indexOf('findNodeWithCapacity'));
     expect(section).toContain('MAX_WORKSPACES_PER_NODE');
   });
-
-  it('queries workspace count per node and rejects at capacity', () => {
-    const section = taskRunnerSource.slice(taskRunnerSource.indexOf('findNodeWithCapacity'));
-    expect(section).toContain("status IN ('running', 'creating', 'recovery')");
-    expect(section).toContain('>= maxWorkspaces');
-  });
 });

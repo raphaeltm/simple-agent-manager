@@ -105,9 +105,9 @@ export interface TaskRunConfig {
     nodeMemoryThresholdPercent?: number | null;
     warmNodeTimeoutMs?: number | null;
   } | null;
-  /** Resolved resource requirements (audit-only, Phase 0). */
+  /** Raw resolved inputs retained for audit and provenance. */
   resourceRequirements?: ResourceRequirements | null;
-  /** Resolved reservation in scheduler units (audit-only, Phase 0). */
+  /** Immutable scheduler reservation used for node selection and final workspace placement. */
   resolvedReservation?: ResolvedResourceReservation | null;
   /** Effective one-pool placement selection for VM tasks. Null preserves legacy placement. */
   capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
