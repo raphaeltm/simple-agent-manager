@@ -23,9 +23,14 @@ export const CAPACITY_POOL_SELECTION_SETTINGS_SETTING_KEY = 'capacityPools.selec
 
 export const DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS: Pick<
   CapacityPoolPlacementSettings,
-  'version' | 'legacyWorkloadAdapterVersion' | 'selectionWeights' | 'rolloutCohortPercent'
+  | 'version'
+  | 'sourceGeneration'
+  | 'legacyWorkloadAdapterVersion'
+  | 'selectionWeights'
+  | 'rolloutCohortPercent'
 > = {
   version: 1,
+  sourceGeneration: 1,
   legacyWorkloadAdapterVersion: LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
   selectionWeights: {
     priority: 100_000_000,
@@ -52,7 +57,11 @@ export async function resolveCapacityPoolPlacementSettings(
   >
 ): Promise<ResolvedCapacityPoolPlacementSettings> {
   const rows = await db
-    .select({ key: schema.platformSettings.key, value: schema.platformSettings.value })
+    .select({
+      key: schema.platformSettings.key,
+      value: schema.platformSettings.value,
+      updatedAt: schema.platformSettings.updatedAt,
+    })
     .from(schema.platformSettings)
     .where(
       eq(
@@ -61,33 +70,46 @@ export async function resolveCapacityPoolPlacementSettings(
       )
     );
   const selectionRows = await db
-    .select({ key: schema.platformSettings.key, value: schema.platformSettings.value })
+    .select({
+      key: schema.platformSettings.key,
+      value: schema.platformSettings.value,
+      updatedAt: schema.platformSettings.updatedAt,
+    })
     .from(schema.platformSettings)
     .where(eq(schema.platformSettings.key, CAPACITY_POOL_SELECTION_SETTINGS_SETTING_KEY));
 
   const diagnostics: string[] = [];
-  const persistedMapping = rows[0]?.value ?? null;
+  const persistedMapping = rows[0] ?? null;
   const envMapping = env?.CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON ?? null;
-  const legacyMapping = parseLegacyWorkloadMapping(
-    persistedMapping,
-    'persisted',
-    diagnostics
-  ) ??
+  const legacyMappingResult =
+    parseLegacyWorkloadMapping(persistedMapping?.value, 'persisted', diagnostics) ??
     parseLegacyWorkloadMapping(envMapping, 'environment', diagnostics) ??
-    DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS;
+    defaultLegacyWorkloadMappingResult();
 
-  const persistedSelection = selectionRows[0]?.value ?? null;
+  const persistedSelection = selectionRows[0] ?? null;
   const envSelection = env?.CAPACITY_POOL_SELECTION_SETTINGS_JSON ?? null;
   const selectionResult =
-    parseSelectionSettings(persistedSelection, 'persisted', diagnostics) ??
+    parseSelectionSettings(persistedSelection?.value, 'persisted', diagnostics) ??
     parseSelectionSettings(envSelection, 'environment', diagnostics);
+  const selectionSource = selectionResult?.source ?? 'default';
+  const selectionRaw =
+    selectionSource === 'persisted'
+      ? persistedSelection?.value
+      : selectionSource === 'environment'
+        ? envSelection
+        : stableStringify(DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS);
 
   return {
     resourceDefaults: {
-      legacyWorkloadMapping: legacyMapping,
+      legacyWorkloadMapping: legacyMappingResult.mapping,
     },
     placementSettings: {
       version: DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.version,
+      sourceGeneration: sourceGenerationForSelectedSettings({
+        source: selectionSource,
+        raw: selectionRaw,
+        updatedAt: selectionSource === 'persisted' ? persistedSelection?.updatedAt : null,
+      }),
       legacyWorkloadAdapterVersion:
         DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.legacyWorkloadAdapterVersion,
       selectionWeights:
@@ -97,12 +119,8 @@ export async function resolveCapacityPoolPlacementSettings(
         selectionResult?.rolloutCohortPercent ??
         DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.rolloutCohortPercent,
       source: {
-        legacyWorkloadMapping: persistedMapping
-          ? 'persisted'
-          : envMapping
-            ? 'environment'
-            : 'default',
-        selection: persistedSelection ? 'persisted' : envSelection ? 'environment' : 'default',
+        legacyWorkloadMapping: legacyMappingResult.source,
+        selection: selectionSource,
       },
       diagnostics,
     },
@@ -113,7 +131,7 @@ function parseLegacyWorkloadMapping(
   raw: string | null | undefined,
   source: 'persisted' | 'environment',
   diagnostics: string[]
-): Record<VMSize, Required<ResourceRequirements>> | null {
+): { source: 'persisted' | 'environment'; mapping: Record<VMSize, Required<ResourceRequirements>> } | null {
   const parsed = parseJsonRecord(raw, `${source}:legacyWorkloadMapping`, diagnostics);
   if (!parsed) return null;
 
@@ -132,14 +150,23 @@ function parseLegacyWorkloadMapping(
     mapping[size] = requirements;
   }
 
-  return mapping as Record<VMSize, Required<ResourceRequirements>>;
+  return { source, mapping: mapping as Record<VMSize, Required<ResourceRequirements>> };
+}
+
+function defaultLegacyWorkloadMappingResult(): {
+  source: 'default';
+  mapping: Record<VMSize, Required<ResourceRequirements>>;
+} {
+  return { source: 'default', mapping: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS };
 }
 
 function parseSelectionSettings(
   raw: string | null | undefined,
   source: 'persisted' | 'environment',
   diagnostics: string[]
-): Pick<CapacityPoolPlacementSettings, 'selectionWeights' | 'rolloutCohortPercent'> | null {
+): Pick<CapacityPoolPlacementSettings, 'selectionWeights' | 'rolloutCohortPercent'> & {
+  source: 'persisted' | 'environment';
+} | null {
   const parsed = parseJsonRecord(raw, `${source}:selectionSettings`, diagnostics);
   if (!parsed) return null;
 
@@ -156,9 +183,13 @@ function parseSelectionSettings(
     parsed.rolloutCohortPercent >= 0 &&
     parsed.rolloutCohortPercent <= 100
       ? parsed.rolloutCohortPercent
-      : DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.rolloutCohortPercent;
+      : null;
+  if (rolloutCohortPercent === null) {
+    diagnostics.push(`${source}:selectionSettings.rolloutCohortPercent:invalid`);
+    return null;
+  }
 
-  return { selectionWeights: weights, rolloutCohortPercent };
+  return { source, selectionWeights: weights, rolloutCohortPercent };
 }
 
 function parseJsonRecord(
@@ -216,6 +247,38 @@ function normalizeSelectionWeights(
     return null;
   }
   return { priority, price, fit, capacity, candidateOrder };
+}
+
+function sourceGenerationForSelectedSettings(input: {
+  source: 'persisted' | 'environment' | 'default';
+  raw: string | null | undefined;
+  updatedAt: string | null | undefined;
+}): number {
+  if (input.source === 'persisted') {
+    const timestamp = Date.parse(input.updatedAt ?? '');
+    if (Number.isFinite(timestamp) && timestamp > 0) return timestamp;
+  }
+  return stablePositiveHash(`${input.source}:${input.raw ?? ''}`);
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function stablePositiveHash(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) || DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS.sourceGeneration;
 }
 
 function positiveFiniteNumber(value: unknown): number | null {

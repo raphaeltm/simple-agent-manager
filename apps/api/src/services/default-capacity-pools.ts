@@ -9,7 +9,7 @@ import type {
   DefaultCapacityPoolSummary,
   ProviderInstanceOffering,
 } from '@simple-agent-manager/shared';
-import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -48,6 +48,8 @@ const DEFAULT_POOL_STRATEGY = 'balanced';
 const DEFAULT_EXHAUSTION_POLICY = 'queue';
 const DEFAULT_BACKFILL_SCOPE_BATCH_SIZE = 25;
 const MAX_BACKFILL_SCOPE_BATCH_SIZE = 200;
+const BACKFILL_USER_CURSOR_KEY = 'capacityPools.backfill.userCursor.v1';
+const BACKFILL_PROJECT_CURSOR_KEY = 'capacityPools.backfill.projectCursor.v1';
 const SOURCE_KIND_CLOUD_PROVIDER = 'cloud-provider-credential';
 const CREDENTIAL_TYPE_CLOUD_PROVIDER = 'cloud-provider';
 const ACTIVE_STATUS = 'active';
@@ -142,21 +144,23 @@ export async function backfillDefaultCapacityPoolsForExistingCredentials(
   const scopeBatchSize = resolveBackfillScopeBatchSize(options);
   const userIds = options.userId
     ? [options.userId]
-    : (await listCredentialUserIds(db)).slice(0, scopeBatchSize);
+    : await listCredentialUserIdsForBackfill(db, scopeBatchSize);
   const projectIds = options.projectId
     ? [options.projectId]
-    : (await listCredentialProjectIds(db)).slice(0, scopeBatchSize);
+    : await listCredentialProjectIdsForBackfill(db, scopeBatchSize);
 
   let usersEnsured = 0;
   for (const userId of userIds) {
     await ensureUserDefaultPool(db, userId, options);
     usersEnsured += 1;
+    if (!options.userId) await writeBackfillCursor(db, BACKFILL_USER_CURSOR_KEY, userId);
   }
 
   let projectsEnsured = 0;
   for (const projectId of projectIds) {
     await ensureProjectDefaultPool(db, projectId, options);
     projectsEnsured += 1;
+    if (!options.projectId) await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, projectId);
   }
 
   return { installation, usersEnsured, projectsEnsured };
@@ -265,52 +269,124 @@ export async function readDefaultCapacityPoolSummaries(
   return { installation, user, project };
 }
 
-async function listCredentialUserIds(db: Db): Promise<string[]> {
+async function listCredentialUserIdsForBackfill(db: Db, limit: number): Promise<string[]> {
+  const cursor = await readBackfillCursor(db, BACKFILL_USER_CURSOR_KEY);
+  let ids = await listCredentialUserIdsPage(db, cursor, limit);
+  if (ids.length === 0 && cursor) {
+    await writeBackfillCursor(db, BACKFILL_USER_CURSOR_KEY, null);
+    ids = await listCredentialUserIdsPage(db, null, limit);
+  }
+  return ids;
+}
+
+async function listCredentialUserIdsPage(
+  db: Db,
+  cursor: string | null,
+  limit: number
+): Promise<string[]> {
   const legacyRows = await db
     .select({ userId: schema.credentials.userId })
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.credentialType, CREDENTIAL_TYPE_CLOUD_PROVIDER),
-        isNull(schema.credentials.projectId)
+        isNull(schema.credentials.projectId),
+        cursor ? gt(schema.credentials.userId, cursor) : undefined
       )
-    );
+    )
+    .orderBy(asc(schema.credentials.userId))
+    .limit(limit);
   const ccRows = await db
     .select({ userId: schema.ccAttachments.userId })
     .from(schema.ccAttachments)
     .where(
       and(
         eq(schema.ccAttachments.consumerKind, 'compute'),
-        isNull(schema.ccAttachments.projectId)
+        isNull(schema.ccAttachments.projectId),
+        cursor ? gt(schema.ccAttachments.userId, cursor) : undefined
       )
-    );
-  return [...new Set([...legacyRows.map((row) => row.userId), ...ccRows.map((row) => row.userId)])];
+    )
+    .orderBy(asc(schema.ccAttachments.userId))
+    .limit(limit);
+
+  return [
+    ...new Set([...legacyRows.map((row) => row.userId), ...ccRows.map((row) => row.userId)].sort()),
+  ].slice(0, limit);
 }
 
-async function listCredentialProjectIds(db: Db): Promise<string[]> {
+async function listCredentialProjectIdsForBackfill(db: Db, limit: number): Promise<string[]> {
+  const cursor = await readBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY);
+  let ids = await listCredentialProjectIdsPage(db, cursor, limit);
+  if (ids.length === 0 && cursor) {
+    await writeBackfillCursor(db, BACKFILL_PROJECT_CURSOR_KEY, null);
+    ids = await listCredentialProjectIdsPage(db, null, limit);
+  }
+  return ids;
+}
+
+async function listCredentialProjectIdsPage(
+  db: Db,
+  cursor: string | null,
+  limit: number
+): Promise<string[]> {
   const legacyRows = await db
     .select({ projectId: schema.credentials.projectId })
     .from(schema.credentials)
     .where(
       and(
         eq(schema.credentials.credentialType, CREDENTIAL_TYPE_CLOUD_PROVIDER),
-        isNotNull(schema.credentials.projectId)
+        isNotNull(schema.credentials.projectId),
+        cursor ? gt(schema.credentials.projectId, cursor) : undefined
       )
-    );
+    )
+    .orderBy(asc(schema.credentials.projectId))
+    .limit(limit);
   const ccRows = await db
     .select({ projectId: schema.ccAttachments.projectId })
     .from(schema.ccAttachments)
     .where(
       and(
         eq(schema.ccAttachments.consumerKind, 'compute'),
-        isNotNull(schema.ccAttachments.projectId)
+        isNotNull(schema.ccAttachments.projectId),
+        cursor ? gt(schema.ccAttachments.projectId, cursor) : undefined
       )
-    );
+    )
+    .orderBy(asc(schema.ccAttachments.projectId))
+    .limit(limit);
+
   return [
     ...new Set(
-      [...legacyRows, ...ccRows].flatMap((row) => (row.projectId ? [row.projectId] : []))
+      [...legacyRows, ...ccRows].flatMap((row) => (row.projectId ? [row.projectId] : [])).sort()
     ),
-  ];
+  ].slice(0, limit);
+}
+
+async function readBackfillCursor(db: Db, key: string): Promise<string | null> {
+  const [row] = await db
+    .select({ value: schema.platformSettings.value })
+    .from(schema.platformSettings)
+    .where(eq(schema.platformSettings.key, key))
+    .limit(1);
+  return row?.value || null;
+}
+
+async function writeBackfillCursor(db: Db, key: string, cursor: string | null): Promise<void> {
+  const now = new Date().toISOString();
+  if (cursor === null) {
+    await db.delete(schema.platformSettings).where(eq(schema.platformSettings.key, key));
+    return;
+  }
+  await db
+    .insert(schema.platformSettings)
+    .values({ key, value: cursor, updatedAt: now, updatedBy: null })
+    .onConflictDoUpdate({
+      target: schema.platformSettings.key,
+      set: {
+        value: cursor,
+        updatedAt: now,
+        updatedBy: sql`NULL`,
+      },
+    });
 }
 
 async function ensureInstallationDefaultPool(
@@ -417,8 +493,18 @@ async function ensureDefaultPoolForCredentialSeeds(
       ? await updateCapacitySourceForSeed(db, existingSource.id, materializedSeed)
       : await insertCapacitySourceForSeed(db, materializedSeed);
 
-    const offerings = await resolveOfferingsForSeed(materializedSeed, options);
-    await ensureCandidatesForSource(db, pool.id, source.id, materializedSeed.provider, offerings);
+    const refreshStartedAt = new Date().toISOString();
+    const resolvedOfferings = await resolveOfferingsForSeed(materializedSeed, options);
+    if (resolvedOfferings.refreshSucceeded) {
+      await ensureCandidatesForSource(
+        db,
+        pool.id,
+        source.id,
+        materializedSeed.provider,
+        resolvedOfferings.offerings,
+        { refreshStartedAt }
+      );
+    }
   }
 
   await disableCapacitySourcesMissingFromSeeds(

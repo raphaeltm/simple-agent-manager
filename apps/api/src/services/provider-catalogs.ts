@@ -72,7 +72,7 @@ export async function listProviderCatalogOfferings(
       provider: providerName,
       ...serializeError(error),
     });
-    return provider.listInstanceOfferings({ preferApi: false });
+    throw error;
   }
 }
 

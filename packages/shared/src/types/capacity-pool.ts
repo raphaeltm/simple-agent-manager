@@ -174,6 +174,8 @@ export interface CapacityPoolSelectionWeights {
 
 export interface CapacityPoolPlacementSettings {
   version: number;
+  /** Monotonic/fingerprinted generation of the effective settings source. */
+  sourceGeneration: number;
   legacyWorkloadAdapterVersion: number;
   selectionWeights: CapacityPoolSelectionWeights;
   rolloutCohortPercent: number;

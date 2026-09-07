@@ -1,3 +1,4 @@
+import type { ProviderInstanceOffering } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -63,9 +64,9 @@ export async function materializeCapacitySourceCredential(
 export async function resolveOfferingsForSeed(
   seed: CredentialCapacitySeed,
   options: DefaultCapacityPoolsBackfillOptions
-) {
+): Promise<{ offerings: ProviderInstanceOffering[]; refreshSucceeded: boolean }> {
   if (options.offeringResolver) {
-    return options.offeringResolver(seed);
+    return { offerings: await options.offeringResolver(seed), refreshSucceeded: true };
   }
 
   if (options.env) {
@@ -88,7 +89,7 @@ export async function resolveOfferingsForSeed(
           createdBy: seed.createdBy,
         },
       });
-      return catalog.offerings ?? [];
+      return { offerings: catalog.offerings ?? [], refreshSucceeded: true };
     } catch (error) {
       log.warn('default_capacity_pools.catalog_build_failed', {
         provider: seed.provider,
@@ -96,8 +97,9 @@ export async function resolveOfferingsForSeed(
         credentialSource: seed.credentialSource,
         ...serializeError(error),
       });
+      return { offerings: [], refreshSucceeded: false };
     }
   }
 
-  return getStaticProviderCatalogOfferings(seed.provider);
+  return { offerings: getStaticProviderCatalogOfferings(seed.provider), refreshSucceeded: true };
 }

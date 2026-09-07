@@ -31,6 +31,7 @@ import type {
 } from './placement-resolver-types';
 
 const CAPACITY_PLACEMENT_PLAN_VERSION = 1;
+const MAX_SCORE_WEIGHT = 1_000_000_000;
 
 export function capacityPoolSnapshotForPool(
   selection: Pick<
@@ -60,8 +61,8 @@ export function capacityPoolSnapshotForPool(
     workloadRole: selection.workloadRole,
     exhaustionPolicy: selection.exhaustionPolicy,
     effectivePoolState: selection.effectiveState,
-    selectionSettingsVersion: selection.selectionSettings.version,
-    sourceGeneration: selection.revision,
+    selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
+    sourceGeneration: selectionSourceGeneration(selection),
     placementExplanationJson: buildCapacityPlacementExplanation(selection),
   };
 }
@@ -175,8 +176,8 @@ export function capacityPlacementSnapshotForCandidate(
       providerInstancePriceHourlyMicros: candidate.providerInstancePriceHourlyMicros,
       exhaustionPolicy: selection.exhaustionPolicy,
       effectivePoolState: selection.effectiveState,
-      selectionSettingsVersion: selection.selectionSettings.version,
-      sourceGeneration: selection.revision,
+      selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
+      sourceGeneration: selectionSourceGeneration(selection, candidate),
       placementExplanationJson: buildCapacityPlacementExplanation(selection, candidate),
     }
   );
@@ -204,7 +205,11 @@ export function buildCapacityPoolSelection(
   };
   const poolSnapshot = capacityPoolSnapshotForPool(baseSelection);
 
-  const candidates = summary.candidates
+  const effectiveState = summary.effectiveState ?? 'configured-ready';
+  const candidates =
+    effectiveState === 'configured-ready'
+      ? classifyCandidatePriceComparability(
+          summary.candidates
     .flatMap((candidate) => {
       const source = sourceById.get(candidate.capacitySourceId);
       if (!source) return [];
@@ -215,13 +220,15 @@ export function buildCapacityPoolSelection(
         placement,
         workloadRole,
         settings,
-        summary.effectiveState ?? 'configured-ready'
+        effectiveState
       );
       return normalized ? [normalized] : [];
     })
+        )
     .sort((a, b) =>
       compareCapacityCandidates(a, b, pool.strategy, placement.resolvedReservation, settings)
-    );
+    )
+      : [];
 
   return {
     ...baseSelection,
@@ -304,7 +311,7 @@ function normalizeCapacityCandidate(
     providerInstancePriceHourlyMicros: nonNegativeInteger(
       candidate.providerInstancePriceHourlyMicros
     ),
-    priceComparability: comparablePriceMicros(candidate) ? 'known' : 'unknown',
+    priceComparability: 'unknown',
     catalogAvailability,
     priority: candidate.priority,
     candidateOrder: candidate.candidateOrder,
@@ -343,8 +350,14 @@ function normalizeCapacityCandidate(
       ),
       exhaustionPolicy: pool.exhaustionPolicy,
       effectivePoolState: effectiveState,
-      selectionSettingsVersion: settings.version,
-      sourceGeneration: pool.revision,
+      selectionSettingsVersion: settings.sourceGeneration,
+      sourceGeneration: selectionSourceGeneration(
+        {
+          revision: pool.revision,
+          selectionSettings: settings,
+        },
+        normalized
+      ),
       placementExplanationJson: buildCapacityPlacementExplanation(
         {
           poolId: pool.id,
@@ -450,6 +463,7 @@ function compareCapacityCandidates(
 ): number {
   const capacityDiff = compareOfferingCapacity(a, b);
   if (strategy === 'pack' && capacityDiff !== 0) return -capacityDiff;
+  if (a.priority !== b.priority) return a.priority - b.priority;
   if (strategy === 'smallest-fit') {
     const fitDiff = compareOfferingFitSurplus(a, b, reservation);
     if (fitDiff !== 0) return fitDiff;
@@ -461,7 +475,6 @@ function compareCapacityCandidates(
     weightedCandidateScore(a, strategy, reservation, settings) -
     weightedCandidateScore(b, strategy, reservation, settings);
   if (weighted !== 0) return weighted;
-  if (a.priority !== b.priority) return a.priority - b.priority;
   const priceDiff = compareOfferingPrice(a, b);
   if (priceDiff !== 0) return priceDiff;
   if (strategy !== 'pack' && capacityDiff !== 0) return capacityDiff;
@@ -476,8 +489,8 @@ function weightedCandidateScore(
   settings: CapacityPoolPlacementSettings
 ): number {
   const weights = settings.selectionWeights;
-  const price = comparablePriceMicros(candidate)?.value ?? Number.MAX_SAFE_INTEGER;
-  const fit = offeringFitSurplus(candidate, reservation);
+  const price = normalizedPriceScore(candidate);
+  const fit = boundedScoreTerm(offeringFitSurplus(candidate, reservation));
   const capacity = compareOfferingCapacity(
     candidate,
     {
@@ -487,13 +500,12 @@ function weightedCandidateScore(
     }
   );
   const capacityTerm = strategy === 'pack' ? -capacity : capacity;
-  return (
-    candidate.priority * weights.priority +
-    price * weights.price +
-    fit * weights.fit +
-    capacityTerm * weights.capacity +
-    candidate.candidateOrder * weights.candidateOrder
-  );
+  const score =
+    price * boundedWeight(weights.price) +
+    fit * boundedWeight(weights.fit) +
+    boundedScoreTerm(capacityTerm) * boundedWeight(weights.capacity) +
+    boundedScoreTerm(candidate.candidateOrder) * boundedWeight(weights.candidateOrder);
+  return Number.isFinite(score) ? score : Number.MAX_SAFE_INTEGER;
 }
 
 function capacityCandidateSatisfiesReservation(
@@ -608,6 +620,11 @@ function compareOfferingPrice(
     | 'providerInstancePriceHourlyMicros'
   >
 ): number {
+  const aComparability = priceComparability(a);
+  const bComparability = priceComparability(b);
+  if (aComparability !== 'known' && bComparability !== 'known') return 0;
+  if (aComparability !== 'known') return 1;
+  if (bComparability !== 'known') return -1;
   const aPrice = comparablePriceMicros(a);
   const bPrice = comparablePriceMicros(b);
   if (aPrice === null && bPrice === null) return 0;
@@ -615,6 +632,71 @@ function compareOfferingPrice(
   if (bPrice === null) return -1;
   if (aPrice.currency !== bPrice.currency) return 0;
   return aPrice.value - bPrice.value;
+}
+
+function classifyCandidatePriceComparability(
+  candidates: TaskStartCapacityCandidate[]
+): TaskStartCapacityCandidate[] {
+  const pricedCurrencies = new Set(
+    candidates.flatMap((candidate) => {
+      const price = comparablePriceMicros(candidate);
+      return price ? [price.currency] : [];
+    })
+  );
+  const hasCurrencyMismatch = pricedCurrencies.size > 1;
+  return candidates.map((candidate) => {
+    const price = comparablePriceMicros(candidate);
+    return {
+      ...candidate,
+      priceComparability: price ? (hasCurrencyMismatch ? 'currency-mismatch' : 'known') : 'unknown',
+    };
+  });
+}
+
+function priceComparability(
+  candidate: Pick<
+    TaskStartCapacityCandidate,
+    | 'providerInstancePriceCurrency'
+    | 'providerInstancePriceMonthlyCents'
+    | 'providerInstancePriceHourlyMicros'
+  >
+): TaskStartCapacityCandidate['priceComparability'] {
+  return 'priceComparability' in candidate &&
+    (candidate.priceComparability === 'known' ||
+      candidate.priceComparability === 'unknown' ||
+      candidate.priceComparability === 'currency-mismatch')
+    ? candidate.priceComparability
+    : comparablePriceMicros(candidate)
+      ? 'known'
+      : 'unknown';
+}
+
+function normalizedPriceScore(candidate: TaskStartCapacityCandidate): number {
+  if (candidate.priceComparability !== 'known') return 1_000_000;
+  const price = comparablePriceMicros(candidate);
+  if (!price) return 1_000_000;
+  return Math.min(1_000_000, price.value / 1_000);
+}
+
+function boundedScoreTerm(value: number): number {
+  if (!Number.isFinite(value)) return Number.MAX_SAFE_INTEGER / MAX_SCORE_WEIGHT;
+  return Math.max(-1_000_000_000, Math.min(1_000_000_000, value));
+}
+
+function boundedWeight(value: number): number {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.min(value, MAX_SCORE_WEIGHT);
+}
+
+function selectionSourceGeneration(
+  selection: Pick<TaskStartCapacityPoolSelection, 'revision' | 'selectionSettings'>,
+  candidate?: Pick<TaskStartCapacityCandidate, 'placementCredentialVersion'> | null
+): number {
+  return Math.max(
+    selection.revision,
+    selection.selectionSettings.sourceGeneration ?? selection.selectionSettings.version,
+    candidate?.placementCredentialVersion ?? 0
+  );
 }
 
 function comparablePriceMicros(
@@ -730,8 +812,8 @@ function buildCapacityPlacementExplanation(
     providerInstancePriceHourlyMicros: candidate?.providerInstancePriceHourlyMicros ?? null,
     exhaustionPolicy: selection.exhaustionPolicy,
     effectivePoolState: selection.effectiveState,
-    selectionSettingsVersion: selection.selectionSettings.version,
-    sourceGeneration: selection.revision,
+    selectionSettingsVersion: selection.selectionSettings.sourceGeneration,
+    sourceGeneration: selectionSourceGeneration(selection, candidate),
     decidedAt: new Date().toISOString(),
   });
 }

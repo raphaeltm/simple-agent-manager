@@ -46,6 +46,7 @@ import {
   disconnectComputeCredentialFromCC,
   syncComputeCredentialToCC,
 } from '../../services/composable-credentials/compute-sync';
+import { reconcileCapacityPoolsForCredentialMutation } from '../../services/capacity-pool-credential-lifecycle';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getTimeoutMs } from '../../services/fetch-timeout';
 import { serializeCredentialToken } from '../../services/provider-credentials';
@@ -325,6 +326,11 @@ projectCredentialsRoutes.put(
         encryptedToken: ciphertext,
         iv,
       });
+      await reconcileCapacityPoolsForCredentialMutation(c.env, {
+        scope: 'project',
+        userId,
+        projectId,
+      });
 
       const response: CredentialResponse = {
         id: existingCred.id,
@@ -356,6 +362,11 @@ projectCredentialsRoutes.put(
       provider: providerName,
       encryptedToken: ciphertext,
       iv,
+    });
+    await reconcileCapacityPoolsForCredentialMutation(c.env, {
+      scope: 'project',
+      userId,
+      projectId,
     });
 
     const response: CredentialResponse = {
@@ -405,6 +416,7 @@ projectCredentialsRoutes.delete('/:id/cloud-credentials/:provider', async (c) =>
     projectId,
     provider: providerName,
   });
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'project', userId, projectId });
 
   return c.json({ success: true });
 });
