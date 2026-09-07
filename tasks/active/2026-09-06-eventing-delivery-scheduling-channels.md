@@ -55,10 +55,12 @@ A owns append-only DO migration IDs in wave one. B reserves D1 migration 0144 if
 
 ### B. Source reliability and CI/review/webhook events
 
-- [x] Persist wake-critical lifecycle emission intent alongside the authoritative transition or implement bounded authoritative reconciliation; retry failed admission with stable delivery identity. Verify a failed first admission eventually yields one event. Do not claim blanket source-capture guarantees.
-- [x] Add `check_run`, `check_suite`, `workflow_run`, `pull_request_review`, and `pull_request_review_comment` adapters with repository/PR/commit/run correlation and deterministic delivery keys. Older commit results must be distinguishable from the current push.
-- [x] Update GitHub App event subscription/permission setup and upgrade guidance, plus schemas/filters/tool contracts where relevant. Preserve existing trigger behavior and blank source labels.
-- [x] Forward authenticated generic webhook facts into canonical project event admission with deduplication, bounded payloads, provenance and truthful failure/filtered outcomes.
+- [ ] Persist wake-critical lifecycle emission intent alongside the authoritative transition or implement bounded authoritative reconciliation; retry failed admission with stable delivery identity. Verify a failed first admission eventually yields one event. Do not claim blanket source-capture guarantees.
+- [ ] Add `check_run`, `check_suite`, `workflow_run`, `pull_request_review`, and `pull_request_review_comment` adapters with repository/PR/commit/run correlation and deterministic delivery keys. Older commit results must be distinguishable from the current push.
+- [ ] Update GitHub App event subscription/permission setup and upgrade guidance, plus schemas/filters/tool contracts where relevant. Preserve existing trigger behavior and blank source labels.
+- [ ] Forward authenticated generic webhook facts into canonical project event admission with deduplication, bounded payloads, provenance and truthful failure/filtered outcomes.
+
+Section B was reopened after independent review. Parent verification passes the existing 76 focused and 25 Workers tests, but review reproduced losing-transition emissions, unfenced retry claims, false conflict success, unbounded expired history and unsafe or unadmittable webhook metadata. Required fixes and runtime evidence are tracked in `2026-09-07-event-source-review-fixes.md`.
 
 ### C. Credential-limit awareness
 
