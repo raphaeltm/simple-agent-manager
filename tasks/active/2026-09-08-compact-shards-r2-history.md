@@ -99,3 +99,12 @@ PR [2034](https://github.com/raphaeltm/simple-agent-manager/pull/2034) is open. 
 ## Final Sonar cleanup
 
 PR Sonar rejected3.7% new duplication against the3% gate and reported archive helper complexity. Shared real-Workers archive fixtures now remove duplicated setup; guard, query, formatting and budget helpers were extracted while preserving public RPC contracts and validation order. All three independent reviewers rechecked PASS. Focused units68, combined legacy/compact Workers14, API typecheck and changed-file lint passed. Changed functions meet the local Sonar complexity threshold. Final-head CI/Sonar and another deployment/canary/copy-back/normal-settings staging cycle remain required before CodeRabbit and merge.
+
+
+## Final runtime staging and concurrency check (0fe6e2c54)
+
+Full CI34215059313, Sonar and E2E smoke passed. Staging34215274019 passed. The same fixture migrated to compact generation4 throughdee53370-0730-4e9c-ae5a-2c95707b7543, with D1 confirming publishedr2-gzip-v1 and the same aggregate hash. Target commit/seal writes remained9+18+31+6; source deletion38, reclaiming12KiB.
+
+The first simultaneous API/UI check encountered two10-second R2 deadline errors. Tail RPC durations10.4–13.45s with0–1ms CPU support an I/O stall, but do not identify a provider outage or the precise R2 phase. Sequential exact-baseline retry and the identical concurrent API/UI repeat both passed on the unchanged runtime. The expanded tool screenshot was inspected. A real Workers Promise.all regression now verifies full history, role-filtered history, inline tool and legacy archived tool reads against the same owner after source deletion; all6 compact Workers tests passed. Safety and completion reviewers rechecked PASS. The transient failures remain recorded rather than ignored.
+
+Final copy-back and normal-settings restoration are in progress. Both temporary GitHub staging overrides are removed. Test-only concurrency coverage requires fresh final-head CI before CodeRabbit. Separately observed repeated no-op storage alarms are recorded in tasks/backlog/2026-09-08-staging-repeated-noop-storage-alarms.md; no causal link to the R2 errors is established. Production remains unchanged.

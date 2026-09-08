@@ -255,6 +255,54 @@ describe('compact R2 archive rollout', () => {
         if (!location?.migration_id) throw new Error('Migration missing');
         expect(await countTargetMessages(location.owner_name, sessionId)).toBe(0);
         expect(await source.getMessageCount(sessionId)).toBe(0);
+        // Real RPCs share one archive owner and R2 objects while maintaining
+        // independent cursors, streams and deadlines for concurrent readers.
+        const [full, users, inlineTool, archivedTool] = await Promise.all([
+          projectDataService.getMessages(
+            testEnv,
+            projectId,
+            sessionId,
+            300,
+            null,
+            null,
+            undefined,
+            false,
+            'asc'
+          ),
+          projectDataService.getMessages(
+            testEnv,
+            projectId,
+            sessionId,
+            300,
+            null,
+            null,
+            ['user'],
+            false,
+            'asc'
+          ),
+          projectDataService.getMessageToolContent(
+            testEnv,
+            projectId,
+            sessionId,
+            seedMessages(201)[199].messageId
+          ),
+          projectDataService.getMessageToolContent(
+            testEnv,
+            projectId,
+            sessionId,
+            archivedMessage.messageId
+          ),
+        ]);
+        expect(full).toEqual(original);
+        expect(users).toEqual({
+          messages: original.messages.filter((message) => message.role === 'user'),
+          hasMore: false,
+        });
+        expect(inlineTool).toMatchObject({
+          source: 'inline',
+          content: [{ type: 'text', text: 'inline tool result' }],
+        });
+        expect(archivedTool).toMatchObject({ source: 'archive', content: toolMetadata.content });
         await verifyToolsAndSearch();
         expect(
           await projectDataService.getMessages(
