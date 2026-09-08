@@ -318,7 +318,8 @@ export async function cleanupFreshProvisioningNode(
   const row = await database
     .prepare(
       `SELECT n.id, n.status, n.provider_instance_id AS providerInstanceId,
-              n.runtime_incarnation_id AS runtimeIncarnationId
+              n.runtime_incarnation_id AS runtimeIncarnationId,
+              n.runtime_termination_confirmed_at AS runtimeTerminationConfirmedAt
          FROM nodes n
         WHERE n.id = ?
           AND n.user_id = ?
@@ -343,11 +344,15 @@ export async function cleanupFreshProvisioningNode(
       status: string;
       providerInstanceId: string | null;
       runtimeIncarnationId: string | null;
+      runtimeTerminationConfirmedAt: string | null;
     }>();
 
   if (!row) return 'skipped';
 
   if (!row.providerInstanceId) {
+    // A NULL provider ID can also mean createVM is still in flight. Only an
+    // explicit absence proof for this incarnation permits placeholder removal.
+    if (!row.runtimeTerminationConfirmedAt) return 'skipped';
     const deleted = await database
       .prepare(
         `DELETE FROM nodes
@@ -358,6 +363,7 @@ export async function cleanupFreshProvisioningNode(
             AND node_role = ?
             AND provider_instance_id IS NULL
             AND runtime_incarnation_id IS ?
+            AND runtime_termination_confirmed_at = ?
             AND status IN ('creating', 'error')
             AND NOT EXISTS (
               SELECT 1 FROM workspaces w
@@ -369,7 +375,13 @@ export async function cleanupFreshProvisioningNode(
                WHERE de.node_id = nodes.id
             )`
       )
-      .bind(input.nodeId, input.userId, input.nodeRole, row.runtimeIncarnationId ?? null)
+      .bind(
+        input.nodeId,
+        input.userId,
+        input.nodeRole,
+        row.runtimeIncarnationId ?? null,
+        row.runtimeTerminationConfirmedAt
+      )
       .run();
     return (deleted.meta?.changes ?? 0) > 0 ? 'placeholder-deleted' : 'skipped';
   }

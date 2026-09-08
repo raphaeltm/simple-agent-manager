@@ -339,7 +339,12 @@ async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promi
 }
 
 async function claimManagedNodeDeletion(db: NodeDb, node: NodeRow): Promise<NodeRow> {
-  if (node.runtimeTerminationConfirmedAt || node.status === 'destroying') {
+  // Absence proof must also fence lifecycle changes: claim teardown before
+  // consuming proof on any node that has not already entered terminal cleanup.
+  if (
+    (node.runtimeTerminationConfirmedAt && node.status === 'deleted') ||
+    node.status === 'destroying'
+  ) {
     return await requireSameNodeIncarnation(db, node, 'managed deletion claim');
   }
 

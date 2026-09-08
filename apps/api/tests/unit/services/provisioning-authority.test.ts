@@ -229,7 +229,13 @@ describe('provisioning authority helpers', () => {
 
   it('deletes an unattached placeholder node without reaching the provider', async () => {
     const { env, statements } = makeEnv((_sql, _binds, method) => {
-      if (method === 'first') return { id: 'node-1', status: 'error', providerInstanceId: null };
+      if (method === 'first')
+        return {
+          id: 'node-1',
+          status: 'error',
+          providerInstanceId: null,
+          runtimeTerminationConfirmedAt: '2026-09-08T12:00:00.000Z',
+        };
       return { meta: { changes: 1 } };
     });
 

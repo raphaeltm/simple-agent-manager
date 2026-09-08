@@ -100,6 +100,10 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     nodeMode: input.nodeMode ?? 'shared',
     runtime: input.runtime ?? 'vm',
     runtimeIncarnationId: crypto.randomUUID(),
+    // This newly inserted VM placeholder has never reached a provider. The
+    // provisioner's incarnation claim clears this proof before external create.
+    // Container allocation follows a separate path without that claim.
+    runtimeTerminationConfirmedAt: (input.runtime ?? 'vm') === 'vm' ? now : null,
     ...capacitySnapshotValues,
     providerInstanceType: input.providerInstanceType ?? capacitySnapshotValues.providerInstanceType,
     providerInstanceBootDiskSizeGb:

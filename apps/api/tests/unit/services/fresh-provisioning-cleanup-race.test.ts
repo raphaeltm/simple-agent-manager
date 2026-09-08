@@ -62,6 +62,21 @@ function afterEligibilityRead(write: () => void): Env {
 }
 
 describe('fresh paid-node cleanup claim', () => {
+  it('preserves a placeholder when the provider claims it after cleanup reads its absence proof', async () => {
+    sqlite.exec(`UPDATE nodes SET status = 'creating', provider_instance_id = NULL,
+      runtime_termination_confirmed_at = '2026-09-08T12:00:00.000Z'`);
+    const env = afterEligibilityRead(() => {
+      sqlite.exec(`UPDATE nodes SET runtime_incarnation_id = 'provider-claim',
+        runtime_termination_confirmed_at = NULL`);
+    });
+    expect(await cleanupFreshProvisioningNode(env, input)).toBe('skipped');
+    expect(sqlite.prepare('SELECT status, runtime_incarnation_id FROM nodes').get()).toEqual({
+      status: 'creating',
+      runtime_incarnation_id: 'provider-claim',
+    });
+    expect(mocks.deleteNodeResourcesStrict).not.toHaveBeenCalled();
+  });
+
   it('preserves a node when another workspace attaches after the eligibility read', async () => {
     const env = afterEligibilityRead(() => {
       sqlite.exec(`INSERT INTO workspaces (id, node_id, user_id, status)
