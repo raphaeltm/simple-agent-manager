@@ -109,6 +109,6 @@ Shared project collaboration:
 
 - VS Code Remote integration.
 - Collaborative editing.
-- Workspace snapshots and restore.
+- Longer-lived workspace snapshots and restore controls.
 - GPU instances for AI workloads.
 - Kubernetes-based workspaces.
