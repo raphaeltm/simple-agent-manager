@@ -1,4 +1,5 @@
 import type { VmPromptDeliveryCapabilities } from '@simple-agent-manager/shared';
+
 import type { PromptDeliveryResult } from '../durable-objects/project-data/prompt-delivery';
 
 /** Only preparation belongs here: the callback must never submit a prompt. */
