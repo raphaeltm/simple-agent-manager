@@ -6,7 +6,7 @@ import {
   DEFAULT_WORKSPACE_PROFILE,
   type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
-import { and, count, eq, inArray, isNull } from 'drizzle-orm';
+import { and, count, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Hono } from 'hono';
 
@@ -26,34 +26,26 @@ import {
 } from '../../services/canonical-vm-allocation';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
 import { toCapacityPlacementSnapshot } from '../../services/capacity-pools';
-import { stopComputeTracking } from '../../services/compute-usage';
+import { scheduleDirectProvisioning } from '../../services/direct-provisioning';
 import { getRuntimeLimits } from '../../services/limits';
-import { waitForNodeAgentReady } from '../../services/node-agent';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
   assertNodeAllocationPlanCurrent,
   createNodeRecord,
-  provisionNode,
 } from '../../services/nodes';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,
 } from '../../services/placement-resolver';
 import * as projectDataService from '../../services/project-data';
-import {
-  assertDirectWorkspaceProvisioningAuthority,
-  cleanupFreshProvisioningNode,
-  type FreshProvisioningNodeCleanupResult,
-} from '../../services/provisioning-authority';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
 import {
-  attachPrecreatedWorkspacePlacement,
   reserveWorkspacePlacement,
 } from '../../services/workspace-placement';
 import { resolveWorkspaceAdmissionPolicy } from '../../services/workspace-resource-capacity';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
-import { getOwnedNode, getOwnedWorkspace, scheduleWorkspaceCreateOnNode } from './_helpers';
+import { getOwnedNode, getOwnedWorkspace } from './_helpers';
 import {
   normalizeCredentialSource,
   optionalPositiveInteger,
@@ -484,28 +476,6 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
         });
       }
 
-      const assertDirectWorkspacePlaceholderAuthority = async () => {
-        await assertDirectWorkspaceProvisioningAuthority(c.env, {
-          workspaceId,
-          taskId: chatTaskId,
-          userId,
-          projectId: linkedProject.id,
-          expectedNodeId: null,
-          chatSessionId,
-        });
-      };
-
-      const assertDirectWorkspaceDispatchAuthority = async () => {
-        await assertDirectWorkspaceProvisioningAuthority(c.env, {
-          workspaceId,
-          taskId: chatTaskId,
-          userId,
-          projectId: linkedProject.id,
-          expectedNodeId: targetNodeId,
-          chatSessionId,
-        });
-      };
-
       const nodeCountForUser = userNodeCountVal + (mustProvisionNode ? 1 : 0);
       const reusedExistingNode = !mustProvisionNode;
       const workspaceCountOnNodeBefore = nodeWorkspaceCountVal;
@@ -547,205 +517,23 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
         });
       }
 
-      c.executionCtx.waitUntil(
-        (async () => {
-          const innerDb = drizzle(c.env.DATABASE, { schema });
-          const markDirectWorkspaceProvisioningFailed = async (
-            message: string,
-            cleanup: FreshProvisioningNodeCleanupResult
-          ) => {
-            const failedAt = new Date().toISOString();
-            // Preserve authoritative absence before the unattached node identity is
-            // lost. A skipped or failed cleanup cannot establish deletion proof.
-            const proof = {
-              'placeholder-deleted': 'workspace_never_started',
-              'strict-deleted': 'node_runtime_terminated',
-              skipped: null,
-              failed: null,
-            }[cleanup];
-            const workspaceFailed = await c.env.DATABASE.prepare(
-              `UPDATE workspaces
-                SET status = 'error',
-                    error_message = ?,
-                    runtime_deletion_confirmed_at = ?,
-                    runtime_deletion_proof = ?,
-                    updated_at = ?
-              WHERE id = ?
-                AND user_id = ?
-                AND project_id = ?
-                AND node_id IS NULL
-                AND chat_session_id IS ?
-                AND status = 'creating'
-                AND runtime_deletion_confirmed_at IS NULL`
-            )
-              .bind(
-                message, proof ? failedAt : null, proof, failedAt,
-                workspaceId, userId, linkedProject.id, chatSessionId
-              )
-              .run();
-            if ((workspaceFailed.meta?.changes ?? 0) !== 1) return;
-            await c.env.DATABASE.prepare(
-              `UPDATE tasks
-                SET status = 'failed',
-                    execution_step = 'workspace_creation',
-                    error_message = ?,
-                    completed_at = ?,
-                    updated_at = ?
-              WHERE id = ?
-                AND workspace_id = ?
-                AND user_id = ?
-                AND project_id = ?
-                AND status IN ('queued', 'in_progress')
-                AND task_mode = 'conversation'
-                AND triggered_by = 'user'`
-            )
-              .bind(message, failedAt, failedAt, chatTaskId, workspaceId, userId, linkedProject.id)
-              .run();
-          };
-          if (mustProvisionNode) {
-            await provisionNode(
-              targetNodeId,
-              c.env,
-              chatSessionId
-                ? {
-                    projectId: linkedProject.id,
-                    chatSessionId,
-                    taskId: chatTaskId,
-                    taskMode: 'conversation',
-                  }
-                : undefined,
-              {
-                authorityProjectId: linkedProject.id,
-                assertExternalMutationAuthority: assertDirectWorkspacePlaceholderAuthority,
-              }
-            );
-
-            const nodeRows = await innerDb
-              .select({
-                status: schema.nodes.status,
-                errorMessage: schema.nodes.errorMessage,
-              })
-              .from(schema.nodes)
-              .where(eq(schema.nodes.id, targetNodeId))
-              .limit(1);
-
-            const provisionedNode = nodeRows[0];
-            if (!provisionedNode || provisionedNode.status !== 'running') {
-              const cleanup = await cleanupFreshProvisioningNode(c.env, {
-                nodeId: targetNodeId,
-                userId,
-                nodeRole: 'workspace',
-                reason: 'direct_workspace_node_not_running',
-              });
-              await markDirectWorkspaceProvisioningFailed(
-                provisionedNode?.errorMessage || 'Node provisioning failed',
-                cleanup
-              );
-              return;
-            }
-
-            const placementAttached = await attachPrecreatedWorkspacePlacement(
-              c.env.DATABASE,
-              {
-                id: workspaceId,
-                nodeId: targetNodeId,
-                projectId: linkedProject.id,
-                userId,
-                installationId: resolvedInstallationId,
-                name: workspaceName,
-                displayName: uniqueName.displayName,
-                normalizedDisplayName: uniqueName.normalizedDisplayName,
-                repository: resolvedRepository,
-                branch,
-                vmSize: workspaceVmSize,
-                vmLocation: workspaceVmLocation,
-                workspaceProfile: DEFAULT_WORKSPACE_PROFILE,
-                devcontainerConfigName: null,
-                agentProfileHint: null,
-                resourceRequirementsJson,
-                capacityPlacementSnapshot,
-                authorityNodeClass,
-                resolvedReservation,
-                createdAt: now,
-              },
-              admissionPolicy
-            );
-            if (!placementAttached) {
-              const cleanup = await cleanupFreshProvisioningNode(c.env, {
-                nodeId: targetNodeId,
-                userId,
-                nodeRole: 'workspace',
-                reason: 'direct_workspace_final_admission_failed',
-              });
-              await markDirectWorkspaceProvisioningFailed(
-                'Node lost capacity or placement authority before workspace creation',
-                cleanup
-              );
-              return;
-            }
-
-            // Provisioning has persisted native hardware and final admission has
-            // attached the workspace. Meter now: readiness can outlive waitUntil,
-            // while cloud-init independently brings the workspace online.
-            await startComputeTrackingForNode(innerDb, {
-              userId,
-              workspaceId,
-              nodeId: targetNodeId,
-              vmSize: workspaceVmSize,
-            });
-
-            try {
-              await waitForNodeAgentReady(targetNodeId, c.env);
-            } catch (err) {
-              const failedWorkspaces = await innerDb
-                .update(schema.workspaces)
-                .set({
-                  status: 'error',
-                  errorMessage:
-                    err instanceof Error
-                      ? err.message
-                      : 'Node agent not reachable after provisioning',
-                  updatedAt: new Date().toISOString(),
-                })
-                .where(
-                  and(
-                    eq(schema.workspaces.id, workspaceId),
-                    eq(schema.workspaces.nodeId, targetNodeId),
-                    eq(schema.workspaces.userId, userId),
-                    eq(schema.workspaces.projectId, linkedProject.id),
-                    eq(schema.workspaces.status, 'creating'),
-                    isNull(schema.workspaces.runtimeDeletionConfirmedAt)
-                  )
-                )
-                .returning({ id: schema.workspaces.id });
-              // A callback or deletion may have won while readiness was pending.
-              // Only the owner of the creating -> error transition closes usage.
-              if (failedWorkspaces.length > 0) {
-                await stopComputeTracking(innerDb, workspaceId).catch((e) => {
-                  log.warn('workspace.compute_tracking_stop_failed', {
-                    workspaceId,
-                    error: String(e),
-                  });
-                });
-              }
-              return;
-            }
-          }
-
-          await scheduleWorkspaceCreateOnNode(
-            c.env,
-            workspaceId,
-            targetNodeId,
-            userId,
-            resolvedRepository,
-            branch,
-            linkedProject,
-            auth.user.name,
-            auth.user.email,
-            { beforeExternalMutation: assertDirectWorkspaceDispatchAuthority }
-          );
-        })()
-      );
+      await scheduleDirectProvisioning(c.env, {
+        nodeId: targetNodeId,
+        userId,
+        workspace: {
+          placement: {
+            id: workspaceId, nodeId: targetNodeId, projectId: linkedProject.id, userId,
+            installationId: resolvedInstallationId, name: workspaceName,
+            displayName: uniqueName.displayName, normalizedDisplayName: uniqueName.normalizedDisplayName,
+            repository: resolvedRepository, branch, vmSize: workspaceVmSize, vmLocation: workspaceVmLocation,
+            workspaceProfile: DEFAULT_WORKSPACE_PROFILE, devcontainerConfigName: null, agentProfileHint: null,
+            resourceRequirementsJson, capacityPlacementSnapshot, authorityNodeClass, resolvedReservation, createdAt: now,
+          },
+          linkedProject: { id: linkedProject.id, repoProvider: linkedProject.repoProvider },
+          taskId: chatTaskId, chatSessionId, mustProvisionNode,
+          gitUserName: auth.user.name ?? null, gitUserEmail: auth.user.email ?? null,
+        },
+      });
 
       const created = await getOwnedWorkspace(db, workspaceId, userId);
 

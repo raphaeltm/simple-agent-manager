@@ -19,6 +19,9 @@ export const SAM_NODE_LABEL_KEY = 'node';
 /** Label carrying the node role (`workspace` | `deployment`). */
 export const SAM_ROLE_LABEL_KEY = 'role';
 
+/** Exact persisted incarnation of the provider create attempt. */
+export const SAM_RUNTIME_INCARNATION_LABEL_KEY = 'incarnation';
+
 /**
  * Label carrying the owning deployment environment (e.g. `production`, `staging`).
  *
@@ -90,6 +93,7 @@ export function buildNodeProviderLabels(params: {
   isDeploymentNode: boolean;
   environmentLabel: string | null;
   installationId: string | null;
+  runtimeIncarnationId?: string;
 }): Record<string, string> {
   const labels: Record<string, string> = {
     [SAM_NODE_LABEL_KEY]: params.nodeId.toLowerCase(),
@@ -104,5 +108,8 @@ export function buildNodeProviderLabels(params: {
     labels[SAM_INSTALLATION_LABEL_KEY] = params.installationId;
   }
 
+  if (params.runtimeIncarnationId) {
+    labels[SAM_RUNTIME_INCARNATION_LABEL_KEY] = params.runtimeIncarnationId;
+  }
   return labels;
 }

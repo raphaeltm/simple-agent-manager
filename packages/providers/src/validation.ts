@@ -17,6 +17,7 @@ import {
 } from './validation-core';
 
 export interface HetznerServerPayload {
+  location?: { name: string };
   id: number;
   name: string;
   status: string;
@@ -368,6 +369,7 @@ function readHetznerNextPage(root: JsonObject, context: string): { nextPage?: nu
 
 function validateHetznerServer(payload: unknown, context: string): HetznerServerPayload {
   const server = expectObject(payload, 'hetzner', context);
+  const location = optionalObject(server, 'location', 'hetzner', context);
   const publicNet = requireObject(server, 'public_net', 'hetzner', context);
   const ipv4 = requireObject(publicNet, 'ipv4', 'hetzner', `${context}.public_net`);
   const serverType = requireObject(server, 'server_type', 'hetzner', context);
@@ -376,6 +378,7 @@ function validateHetznerServer(payload: unknown, context: string): HetznerServer
   const disk = optionalNonNegativeInteger(serverType, 'disk', 'hetzner', `${context}.server_type`);
 
   return {
+    ...(location ? { location: { name: requireString(location, 'name', 'hetzner', `${context}.location`) } } : {}),
     id: requireNumber(server, 'id', 'hetzner', context),
     name: requireString(server, 'name', 'hetzner', context),
     status: requireString(server, 'status', 'hetzner', context),

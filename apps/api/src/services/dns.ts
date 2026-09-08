@@ -164,7 +164,7 @@ export async function deleteDNSRecord(
         Authorization: `Bearer ${env.CF_API_TOKEN}`,
       },
     },
-    timeoutMs
+    timeoutMs, signal
   );
 
   // The background caller's deadline must also cover a stalled error body after
@@ -208,6 +208,8 @@ export async function updateDNSRecord(
 async function findDNSRecordByName(
   recordName: string,
   env: Env,
+  signal?: AbortSignal,
+  requireUnique = false,
 ): Promise<{ id: string; name: string; type: string; content?: string; proxied?: boolean } | null> {
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const searchUrl = `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records?type=A&name=${encodeURIComponent(recordName)}`;
@@ -215,13 +217,15 @@ async function findDNSRecordByName(
     headers: {
       Authorization: `Bearer ${env.CF_API_TOKEN}`,
     },
-  }, timeoutMs);
+  }, timeoutMs, signal);
+  const readable = signal ? await completeAbortableResponse(response, signal) : response;
 
-  if (!response.ok) {
-    throw new Error(await readCloudflareError(response, `Failed to find DNS record: ${response.status}`));
+  if (!readable.ok) {
+    throw new Error(await readCloudflareError(readable, `Failed to find DNS record: ${response.status}`));
   }
 
-  const data = await readResponseJson(response, dnsRecordListResponseSchema, 'cloudflare.dns.find_record_by_name');
+  const data = await readResponseJson(readable, dnsRecordListResponseSchema, 'cloudflare.dns.find_record_by_name');
+  if (requireUnique && data.result.length > 1) throw new Error('Multiple DNS records match the node backend hostname');
   return data.result[0] ?? null;
 }
 
@@ -400,8 +404,21 @@ export async function createBackendDNSRecord(
 export async function createNodeBackendDNSRecord(
   nodeId: string,
   ip: string,
-  env: Env
+  env: Env,
+  signal?: AbortSignal,
+  recoverExisting = false
 ): Promise<string> {
+  if (signal?.aborted) throw signal.reason;
+  if (recoverExisting) {
+    const hostname = getNodeBackendHostname(nodeId, env.BASE_DOMAIN);
+    const existing = await findDNSRecordByName(hostname, env, signal, true);
+    if (existing) {
+      if (existing.name !== hostname || existing.type !== 'A' || existing.content !== ip || existing.proxied !== true) {
+        throw new Error('Existing backend DNS identity differs from the recovered allocation');
+      }
+      return existing.id;
+    }
+  }
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records`,
@@ -419,14 +436,15 @@ export async function createNodeBackendDNSRecord(
         proxied: true, // Orange-clouded — CF edge terminates TLS, re-encrypts to Origin CA
       }),
     },
-    timeoutMs
+    timeoutMs, signal
   );
 
-  if (!response.ok) {
-    throw new Error(await readCloudflareError(response, `Failed to create backend DNS record: ${response.status}`));
+  const readable = signal ? await completeAbortableResponse(response, signal) : response;
+  if (!readable.ok) {
+    throw new Error(await readCloudflareError(readable, `Failed to create backend DNS record: ${response.status}`));
   }
 
-  const data = await readResponseJson(response, dnsRecordIdResponseSchema, 'cloudflare.dns.create_backend_record');
+  const data = await readResponseJson(readable, dnsRecordIdResponseSchema, 'cloudflare.dns.create_backend_record');
   return data.result.id;
 }
 

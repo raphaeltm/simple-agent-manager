@@ -18,6 +18,8 @@ import { legacyNodeVcpuEstimate } from './legacy-node-pool-compatibility';
 // =============================================================================
 
 export interface StartComputeTrackingInput {
+  /** Stable record identity for a replayable creation continuation. */
+  idempotencyKey?: string;
   userId: string;
   workspaceId: string;
   nodeId: string;
@@ -117,14 +119,14 @@ export async function startComputeTracking(
   db: DrizzleD1Database<typeof schema>,
   input: StartComputeTrackingInput
 ): Promise<string> {
-  const id = ulid();
+  const id = input.idempotencyKey ?? ulid();
   const { vcpuCount } = resolveComputeVcpuCount(input);
   if (vcpuCount === null) {
     throw new Error('Compute tracking requires observed or configured native vCPU hardware');
   }
   const now = new Date().toISOString();
 
-  await db.insert(schema.computeUsage).values({
+  const insert = db.insert(schema.computeUsage).values({
     id,
     userId: input.userId,
     workspaceId: input.workspaceId,
@@ -152,6 +154,9 @@ export async function startComputeTracking(
     startedAt: now,
     createdAt: now,
   });
+
+  if (input.idempotencyKey) await insert.onConflictDoNothing({ target: schema.computeUsage.id });
+  else await insert;
 
   log.info('compute-usage: started tracking', {
     id,

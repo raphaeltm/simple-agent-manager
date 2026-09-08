@@ -507,6 +507,19 @@ unauthenticated `/api/config/*` endpoints are marked `public`. Endpoints returni
 | `PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS` | `0`     | `max-age` for project agent-profile and skill lists (0 = always revalidate) |
 | `PROJECT_REFERENCE_CACHE_SWR_SECONDS`     | `30`    | `stale-while-revalidate` for project agent-profile and skill lists          |
 
+## Durable Direct Provisioning
+
+Direct node allocation and workspace creation use isolated NodeLifecycle Durable Object instances. These optional Worker runtime overrides accept positive integers; invalid or unset values use the defaults.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` | `5000` (5 s) | Allocation/reconciliation request budget, also used for background readiness and workspace dispatch. |
+| `NODE_PROVISIONING_RETRY_INTERVAL_MS` | `30000` (30 s) | Delay between durable provisioning attempts. |
+| `NODE_PROVISIONING_MAX_AGE_MS` | `900000` (15 min) | Maximum provisioning intent age before retries stop. |
+| `NODE_PROVISIONING_MAX_ATTEMPTS` | `30` | Maximum provisioning attempts before retries stop. |
+
+Reaching either the age or attempt limit stops allocation retries. Diagnostic publication then uses a separate retry budget with the same interval and attempt limit; the age limit applies only to allocation and reconciliation. The unresolved intent is retained for inspection. Empty provider inventory does not authorize another provider create request or establish cleanup proof.
+
 ## Warm Node Pooling
 
 | Variable                               | Default            | Description                                                                                                                      |
@@ -818,7 +831,7 @@ Durable prompt delivery is enabled by default so a follow-up can remain queued w
 | `PROMPT_DELIVERY_RETRY_MAX_MS`               | `300000`          | Maximum exponential retry delay.                                                                                |
 | `PROMPT_DELIVERY_TTL_MS`                     | `3600000`         | Maximum unresolved delivery lifetime.                                                                           |
 | `PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS`         | `30000`           | Age at which an unconfirmed claim enters receipt reconciliation.                                                |
-| `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`      | `5000`            | Timeout for background VM delivery and receipt calls.                                                           |
+| `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`      | `5000`            | Deadline for pre-send target/recovery preparation; also bounds background VM submit and receipt calls. Preparation timeouts remain retryable without sending a prompt. |
 | `PROMPT_DELIVERY_MIN_ALARM_DELAY_MS`         | `1000`            | Minimum delay before the next delivery alarm.                                                                   |
 | `ACP_LONG_TURN_SUPERVISOR_ENABLED`           | `false`           | Reserved long-turn candidate/preemption engine switch; this release leaves it inert.                            |
 | `ACP_LONG_TURN_CHECKPOINT_MS`                | `18000000` (5 hr) | Reserved checkpoint eligibility threshold.                                                                      |

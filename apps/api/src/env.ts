@@ -366,6 +366,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT?: string;
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   // Warm node pooling configuration
+  NODE_PROVISIONING_REQUEST_TIMEOUT_MS?: string;
+  NODE_PROVISIONING_RETRY_INTERVAL_MS?: string;
+  NODE_PROVISIONING_MAX_AGE_MS?: string;
+  NODE_PROVISIONING_MAX_ATTEMPTS?: string;
   NODE_WARM_TIMEOUT_MS?: string;
   NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS?: string; // Destroying-state alarm backstop (default: 86400000)
   MAX_AUTO_NODE_LIFETIME_MS?: string;

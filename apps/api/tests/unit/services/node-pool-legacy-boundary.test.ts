@@ -1147,6 +1147,54 @@ describe('node-pool source discovery', () => {
 });
 
 describe('node-pool inventories', () => {
+  it('requires incarnation and workspace authority evidence in the durable allocation owner', () => {
+    const filePath = 'apps/api/src/durable-objects/node-lifecycle-provisioning.ts';
+    const entry = ALLOCATION_ENTRYPOINT_INVENTORY.find(
+      (candidate) => candidate.filePath === filePath && candidate.owner === 'run'
+    );
+    expect(entry).toBeDefined();
+    if (!entry) throw new Error('Missing durable allocation contract');
+    const source = `
+      import { provisionNode } from '../services/node-provisioning';
+      class Controller {
+        async run() {
+          await provisionNode(nodeId, env, undefined, {
+            durableAllocation: { initialIncarnationId, incarnationId },
+            signal,
+            assertExternalMutationAuthority: () => assertDirectCreationAuthority(env, workspace, false),
+          });
+          await continueDirectWorkspaceCreation(env, workspace, incarnationId);
+        }
+      }`;
+    const validate = (text: string) =>
+      validateAllocationEntrypointInventory([file(filePath, text)], [entry]);
+    expect(validate(source)).toEqual([]);
+    expect(validate(source.replace('durableAllocation:', 'unfencedAllocation:'))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: expect.stringContaining('property durableAllocation') }),
+      ])
+    );
+    expect(
+      validate(source.replace('initialIncarnationId, incarnationId', 'initialIncarnationId'))
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: expect.stringContaining('property incarnationId') }),
+      ])
+    );
+    expect(
+      validate(
+        source.replace('assertDirectCreationAuthority(env, workspace, false)', 'true') +
+          '\nfunction sibling() { assertDirectCreationAuthority(env, workspace, false); }'
+      )
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: expect.stringContaining('call to assertDirectCreationAuthority()'),
+        }),
+      ])
+    );
+  });
+
   it('records every allocation writer with an owning function and a role', () => {
     for (const entry of ALLOCATION_WRITER_INVENTORY) {
       expect(entry.owner.length).toBeGreaterThan(0);

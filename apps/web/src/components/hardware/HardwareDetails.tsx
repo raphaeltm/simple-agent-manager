@@ -122,8 +122,10 @@ export function requestedResources(
   };
   values.forEach((value, index) => {
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      const converted = value / (resolved ? (index === 0 ? 1000 : 1024) : 1);
+      const formatted = index === 0 ? converted : Number(converted.toFixed(1));
       parts.push(
-        `${Number((value / (resolved ? (index === 0 ? 1000 : 1024) : 1)).toFixed(1))} ${units[index]}${translated(index) ? ' (compatibility estimate)' : ''}`
+        `${formatted} ${units[index]}${translated(index) ? ' (compatibility estimate)' : ''}`
       );
     }
   });

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { registerWorkspaceCreateRoute } from '../../../src/routes/workspaces/workspace-create';
+import { directProvisioningHarness } from '../../helpers/direct-provisioning';
 import { fixture } from './node-pool-upgrade-test-helpers';
 
 vi.mock('../../../src/middleware/auth', () => ({
@@ -57,6 +58,7 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
     '$label requirements preserve field precedence',
     async ({ body, cpu, memory, disk, source }) => {
       const f = fixture();
+      directProvisioningHarness(f.env);
       f.sqlite.prepare('UPDATE projects SET resource_requirements_json = ?').run(
         JSON.stringify({
           minVcpu: 1,
@@ -73,8 +75,8 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
           : c.json({ error: error.message }, 500)
       );
       registerWorkspaceCreateRoute(app);
-      // No external provider or VM call is allowed; the failed asynchronous
-      // provisioning path still retains the reservation created by the HTTP route.
+      // Allocation is durably scheduled without draining its alarm here; the
+      // accepted route has already persisted canonical reservation inheritance.
       vi.stubGlobal(
         'fetch',
         vi.fn(async () => {

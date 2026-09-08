@@ -49,6 +49,18 @@ describe('hardware provenance at the public display boundary', () => {
       })
     ).toBe('2.5 vCPU · 5 GB RAM · 0 GB disk');
   });
+  it.each([
+    [250, '0.25'],
+    [1, '0.001'],
+    [2505, '2.505'],
+  ])('preserves milliCPU precision for a %i milliCPU request', (cpuMillis, label) => {
+    expect(requestedResources({
+      resolvedReservationJson: JSON.stringify({ cpuMillis, memoryMb: 1024 }),
+    })).toBe(`${label} vCPU · 1 GB RAM`);
+    expect(requestedResources({
+      resourceRequirementsJson: JSON.stringify({ minVcpu: cpuMillis / 1000 }),
+    })).toBe(`${label} vCPU`);
+  });
   it('marks only translated fields as compatibility estimates', () => {
     expect(
       requestedResources({

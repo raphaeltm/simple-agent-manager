@@ -730,3 +730,69 @@ by other release tasks and must be handed off before deployment. This file
 records the implementation and dated checkpoints; the final release results,
 current checks, cleanup evidence and production deployment outcome are maintained
 in [PR #2030](https://github.com/raphaeltm/simple-agent-manager/pull/2030).
+
+## September 8 continued live verification — allocation lifetime finding
+
+The current integrated code passed CI and Sonar after merging archive PR #2034.
+Live verification then exposed two additional product gaps: the Nodes creator still
+submitted only legacy sizes, and a successful D1 node DELETE returned 409 when
+foreign-key SET NULL updates made `meta.changes` greater than one. Native selection
+(including installation-funded users without personal credentials) and the exact
+positive-change deletion check are being validated with actual-page request tests
+and real Workers/D1 foreign keys respectively.
+
+A slow direct CX23 creation exposed a separate allocation-lifetime gap. Node
+`01M20KQDHX8M3YP89Q6QTQP6S1` claimed its provider credential at 13:36:11 UTC,
+but the matching Hetzner server was created at 13:37:19. The VM booted and sent
+heartbeats while D1 still lacked its provider ID and workspace attachment.
+The authenticated heartbeat supplied IPv6, which could not satisfy the existing
+IPv4 DNS write. An isolated read-only provider inventory verified the exact server,
+staging installation/environment/node labels and public addresses; no absence was
+inferred. Direct Nodes and workspace creation currently run provisioning under
+request `waitUntil`, unlike the durable task runner. The clone/streaming-response
+hypothesis was independently rejected by real workerd HTTP and DO probes.
+
+- [x] Move direct allocation and its attachment/metering continuation to durable
+      per-intent execution, retaining exact pool/credential/incarnation authority.
+- [x] Correlate uncertain external creation with its persisted incarnation and
+      reconcile an exact provider match before any subsequent paid side effect.
+      Empty or ambiguous inventory must not imply absence or authorize duplicate creation.
+- [x] Verify slow response, restart after provider acceptance, concurrent deletion,
+      authority revocation and ambiguous inventory through joined DO/provider/D1 tests.
+- [ ] Repair only the exact live test runtime's missing metadata after reviewed
+      provider evidence, then finish same-snapshot restoration, terminal and pricing
+      checks and remove every owned runtime, artifact, DNS record and test project.
+
+These are release gates. The task remains active; maintenance operations and earlier
+passing checks do not constitute a successful final recovery or release.
+
+
+### September 8 verification checkpoint at 15:00 UTC
+
+The exact live CX23 metadata repair passed its identity-fenced preview and changed
+one node record (workflow 34238659733); the normal heartbeat then repaired DNS.
+The fresh recovery workspace retained its saved 1024 MB reservation after the
+project default changed to 2048 MB. Snapshot restoration preserved the original
+repository and home marker contents, and the resumed agent reported both through
+the original conversation with `RESTORED-READ-OK-1788878933077`. Its native CX23
+usage record retained the known hourly price of 8800 micros. Desktop and mobile
+terminal commands returned their expected output through one connection with four
+resize events and no errors or disconnects during the measured window.
+
+The first recovery prompt also exposed a pre-send delivery preparation overrun:
+target recovery could outlive the delivery lease and be treated as an uncertain
+send while the runtime was still creating. Preparation now has its own deadline
+and safe retry result, separate from prompt submission. Late preparation cannot
+send a prompt. The existing uncertain-send and receipt safeguards remain intact;
+52 focused tests passed, including delayed recovery and delayed capability checks.
+The successful live file read used one fresh prompt after runtime readiness; the
+new deadline fix still requires verification in the final deployed build.
+
+Durable allocation review found and resolved interruption checkpoints around
+post-provider authority, dispatch acknowledgement, metering idempotency and
+terminal diagnostic publication. Normal providers with delayed IP assignment
+retain their successful allocation checkpoint and wait for heartbeat. Four joined
+Workers/D1 cases and 36 actual-route/SQL cases passed; counts overlap neighboring
+coverage. Independent Cloudflare/security review passed. File-size and type-boundary
+checks passed, and the current-tree secret scan found 52 reviewed findings and no
+new findings. Final combined CI/Sonar, staging, cleanup and merge remain pending.

@@ -19,6 +19,7 @@ import { requireNodeOwnership } from '../middleware/node-auth';
 import { CreateNodeSchema, jsonValidator } from '../schemas';
 import { resolveCanonicalVmAllocationPlan } from '../services/canonical-vm-allocation';
 import { collectEnvironmentRouteHostnames } from '../services/deployment-routing';
+import { scheduleDirectProvisioning } from '../services/direct-provisioning';
 import { cleanupAppRouteDNSRecords } from '../services/dns';
 import { signNodeManagementToken } from '../services/jwt';
 import { getRuntimeLimits } from '../services/limits';
@@ -39,7 +40,6 @@ import type { DeleteNodeResourcesResult } from '../services/node-resource-deleti
 import {
   createNodeRecord,
   deleteNodeResources,
-  provisionNode,
   retireDeletedDeploymentNodeRecord,
   stopNodeResources,
 } from '../services/nodes';
@@ -331,7 +331,7 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     c.env
   );
 
-  c.executionCtx.waitUntil(provisionNode(created.id, c.env));
+  await scheduleDirectProvisioning(c.env, { nodeId: created.id, userId });
   return c.json(created, 201);
 });
 

@@ -65,6 +65,8 @@ export type VMStatus = 'initializing' | 'running' | 'off' | 'starting' | 'stoppi
  * VM instance as returned by provider
  */
 export interface VMInstance {
+  /** Provider-reported location; never inferred from the requested target. */
+  location?: string;
   /** Provider-specific server ID */
   id: string;
 

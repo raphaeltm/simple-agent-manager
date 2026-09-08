@@ -257,6 +257,7 @@ export function mapHetznerServerToVMInstance(server: HetznerServerPayload): VMIn
   return {
     id: String(server.id),
     name: server.name,
+    ...(server.location ? { location: server.location.name } : {}),
     ip: server.public_net.ipv4.ip,
     status: mapHetznerStatus(server.status),
     serverType: server.server_type.name,

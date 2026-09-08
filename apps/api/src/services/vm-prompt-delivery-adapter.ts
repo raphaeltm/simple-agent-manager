@@ -18,6 +18,7 @@ import { NodeAgentHttpError, nodeAgentRequest, sendPromptToAgentOnNode } from '.
 import * as projectDataService from './project-data';
 import { ensureSessionRecovery } from './session-recovery';
 import { markSessionSnapshotAwakeInPlace } from './session-snapshots';
+import { prepareVmPromptDelivery } from './vm-prompt-delivery-preparation';
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
 
@@ -138,7 +139,9 @@ function legacyCapabilities(runtimeIdentity: string): VmPromptDeliveryCapabiliti
 export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   constructor(private readonly env: Env) {}
 
-  async submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
+  private async prepareSubmit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult | {
+    kind: 'prepared'; target: VmPromptDeliveryTarget; capabilities: VmPromptDeliveryCapabilities;
+  }> {
     const resolution: TargetResolution = input.resolvedTarget
       ? { kind: 'ready', target: input.resolvedTarget }
       : await this.resolveTarget(input.projectId, input.claim.message.targetSessionId, input);
@@ -195,9 +198,15 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
 
+    const guarded = await this.runSideEffectGuard(input);
+    return guarded ?? { kind: 'prepared', target, capabilities };
+  }
+
+  async submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
+    const prepared = await prepareVmPromptDelivery(input.requestTimeoutMs, () => this.prepareSubmit(input));
+    if (prepared.kind !== 'prepared') return prepared;
+    const { target, capabilities } = prepared;
     try {
-      const guarded = await this.runSideEffectGuard(input);
-      if (guarded) return guarded;
       const raw = await sendPromptToAgentOnNode(
         target.nodeId,
         target.workspaceId,

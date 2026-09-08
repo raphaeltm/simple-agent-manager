@@ -37,6 +37,8 @@ export async function startComputeTrackingForNode(
     workspaceId: string;
     nodeId: string;
     vmSize: string;
+    idempotencyKey?: string;
+    propagateFailure?: boolean;
   }
 ): Promise<void> {
   try {
@@ -67,6 +69,7 @@ export async function startComputeTrackingForNode(
       .limit(1);
 
     await startComputeTracking(db, {
+      idempotencyKey: input.idempotencyKey,
       userId: input.userId,
       workspaceId: input.workspaceId,
       nodeId: input.nodeId,
@@ -92,6 +95,7 @@ export async function startComputeTrackingForNode(
       credentialSource: (nodeRow?.credentialSource as CredentialSource) ?? 'user',
     });
   } catch (err) {
+    if (input.propagateFailure) throw err;
     log.error('workspace.compute_tracking_start_failed', {
       workspaceId: input.workspaceId,
       error: err instanceof Error ? err.message : String(err),

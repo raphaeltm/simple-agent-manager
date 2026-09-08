@@ -365,7 +365,7 @@ export async function scheduleWorkspaceCreateOnNode(
   project: WorkspaceGitSourceProject,
   gitUserName?: string | null,
   gitUserEmail?: string | null,
-  options: { beforeExternalMutation?: () => Promise<void> } = {}
+  options: { beforeExternalMutation?: () => Promise<void>; durableRetry?: boolean } = {}
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
@@ -393,7 +393,7 @@ export async function scheduleWorkspaceCreateOnNode(
 
     const callbackToken = await signCallbackToken(workspaceId, env);
     const gitSource = await resolveWorkspaceGitSource(db, project);
-    await createWorkspaceOnNode(
+    const acknowledgement = await createWorkspaceOnNode(
       nodeId,
       env,
       userId,
@@ -408,6 +408,10 @@ export async function scheduleWorkspaceCreateOnNode(
       },
       { beforeExternalMutation: assertCurrent }
     );
+    if (options.durableRetry && (!acknowledgement || typeof acknowledgement !== 'object'
+      || !('workspaceId' in acknowledgement) || acknowledgement.workspaceId !== workspaceId)) {
+      throw new Error('Node agent did not acknowledge the expected workspace identity');
+    }
     await assertCurrent();
     await env.DATABASE.prepare(
       `UPDATE workspaces
@@ -422,6 +426,8 @@ export async function scheduleWorkspaceCreateOnNode(
       .bind(new Date().toISOString(), new Date().toISOString(), workspaceId, userId, nodeId)
       .run();
   } catch (err) {
+    // A durable caller replays the same idempotent VM-agent workspace ID after a lost response.
+    if (options.durableRetry) throw err;
     await env.DATABASE.prepare(
       `UPDATE workspaces
           SET status = 'error', error_message = ?, updated_at = ?

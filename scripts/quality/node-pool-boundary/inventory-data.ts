@@ -82,11 +82,12 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     filePath: 'apps/api/src/routes/workspaces/workspace-create.ts',
     table: 'tasks',
     owner: 'post /',
-    role: 'legacy direct workspace conversation task adapter',
-    canonicalService: 'explicit legacy workspace route adapter',
+    role: 'direct workspace conversation task adapter',
+    canonicalService: 'canonical placement -> durable node lifecycle provisioning',
     requiredEvidence: [
       { kind: 'call', name: 'createNodeRecord' },
-      { kind: 'call', name: 'provisionNode' },
+      { kind: 'call', name: 'scheduleDirectProvisioning' },
+      { kind: 'call', name: 'reserveWorkspacePlacement' },
     ],
   },
   {
@@ -305,18 +306,10 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     admission:
       'canonical VM allocation plan selects current pool/source/credential authority; node creation persists its snapshot for paid-boundary revalidation',
     status: 'role-adapter',
-    requiredEvidence: [{ kind: 'call', name: 'resolveCanonicalVmAllocationPlan' }],
-  },
-  {
-    filePath: 'apps/api/src/routes/nodes.ts',
-    owner: 'post /',
-    entrypoint: 'provisionNode',
-    scope: 'route',
-    role: 'workspace',
-    admission:
-      'provisionNode revalidates the persisted canonical allocation plan at the paid provider boundary; the route does not hold a provisioning lease',
-    status: 'role-adapter',
-    requiredEvidence: [{ kind: 'call', name: 'resolveCanonicalVmAllocationPlan' }],
+    requiredEvidence: [
+      { kind: 'call', name: 'resolveCanonicalVmAllocationPlan' },
+      { kind: 'call', name: 'scheduleDirectProvisioning' },
+    ],
   },
   {
     filePath: 'apps/api/src/routes/workspaces/workspace-create.ts',
@@ -330,18 +323,26 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     requiredEvidence: [
       { kind: 'call', name: 'resolveCanonicalVmAllocationPlan' },
       { kind: 'call', name: 'reserveWorkspacePlacement' },
+      { kind: 'call', name: 'scheduleDirectProvisioning' },
     ],
   },
   {
-    filePath: 'apps/api/src/routes/workspaces/workspace-create.ts',
-    owner: 'post /',
+    filePath: 'apps/api/src/durable-objects/node-lifecycle-provisioning.ts',
+    owner: 'run',
     entrypoint: 'provisionNode',
-    scope: 'route',
+    scope: 'node-lifecycle',
     role: 'workspace',
     admission:
-      'provisionNode revalidates the persisted canonical allocation plan for the node whose workspace was atomically reserved',
+      'persisted intent and exact incarnation fence provider allocation/reconciliation; provisionNode revalidates canonical pool/source/credential authority, and direct workspace authority plus final atomic attachment guard the continuation',
     status: 'role-adapter',
-    requiredEvidence: [{ kind: 'call', name: 'reserveWorkspacePlacement', scope: 'module' }],
+    requiredEvidence: [
+      { kind: 'property', name: 'durableAllocation' },
+      { kind: 'property', name: 'initialIncarnationId' },
+      { kind: 'property', name: 'incarnationId' },
+      { kind: 'property', name: 'signal' },
+      { kind: 'call', name: 'assertDirectCreationAuthority' },
+      { kind: 'call', name: 'continueDirectWorkspaceCreation' },
+    ],
   },
   {
     filePath: 'apps/api/src/routes/workspaces/workspace-create-helpers.ts',
