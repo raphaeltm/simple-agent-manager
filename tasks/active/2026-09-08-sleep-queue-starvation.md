@@ -38,3 +38,5 @@ A full batch of permanently invalid candidates cannot block subsequent valid wor
 - Regression suite exercises completion → working callback → both ledger sweeps → successful final-message persistence, missing intent/state/timestamp, stale expiry, live prompt/background-work leases, explicit wake and stopping-claim safety.
 - D1 summary repair adds at most one keyed DO read per otherwise eligible candidate (default25/max200); no VM/provider probe. Protection defers candidates under the existing configured retry interval.
 - Remaining mode-selection mismatch and legacy credential-fingerprint recovery remain tracked separately.
+
+- Adjacent long-prompt cutoff prevented: both automatic eligibility and point-of-teardown classifiers now receive the completed timestamp, using the later activity/completion clock before treating a still-prompting terminal task as stale. Confirmed idle still releases immediately. Two policy regressions plus real sweep/teardown integration pass (53 focusedtests); localreviewPASS.

@@ -139,6 +139,7 @@ export function getFreshHarnessWorkLeaseExpiry(
  */
 export function classifySessionIdleness(input: {
   taskStatus: string | null;
+  taskCompletedAt?: string | null;
   state: SessionIdlenessActivityState | null;
   now: Date;
   idleAfterMs: number;
@@ -181,7 +182,11 @@ export function classifySessionIdleness(input: {
   // that state as idle only after the normal idle interval has elapsed, so a
   // final response is preserved but old terminal sessions cannot strand compute.
   if (input.taskStatus === 'completed' && activity !== 'idle') {
-    if (!activityAt) {
+    // complete_task runs inside the prompt: an hours-old prompting transition
+    // does not mean the response following that tool has already drained.
+    const completedAt = Date.parse(input.taskCompletedAt ?? '');
+    const drainAnchor = Math.max(activityAt ?? 0, Number.isFinite(completedAt) ? completedAt : 0);
+    if (!drainAnchor) {
       return {
         idle: false,
         conclusive: false,
@@ -189,7 +194,7 @@ export function classifySessionIdleness(input: {
         activity,
       };
     }
-    const eligibleAt = activityAt + input.idleAfterMs;
+    const eligibleAt = drainAnchor + input.idleAfterMs;
     if (eligibleAt > input.now.getTime()) {
       return {
         idle: false,

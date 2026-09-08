@@ -38,6 +38,7 @@ export function isCompletingSessionProtected(
     if (!state) continue;
     const idleness = classifySessionIdleness({
       taskStatus: task.status,
+      taskCompletedAt: task.completed_at ?? task.updated_at,
       state,
       now,
       idleAfterMs,

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
+import { sleepWorkspaceSession } from '../../src/services/session-sleep';
 import { cleanupTerminalTaskResources } from '../../src/services/task-terminal-cleanup';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
@@ -219,6 +220,31 @@ describe('terminal session sleep lifecycle integration', () => {
   afterEach(() => {
     sqlite.close();
     vi.useRealTimers();
+  });
+
+  it('protects a long prompt immediately after completion in both sweep and teardown gates', async () => {
+    sqlite
+      .prepare('UPDATE tasks SET completed_at = ? WHERE id = ?')
+      .run(START.toISOString(), 'task-1');
+    activity = { activity: 'prompting', activityAt: START.getTime() - 60 * 60 * 1000 };
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    expect(await runSessionSleepSweep(env, START)).toMatchObject({
+      deferred: 1,
+      claimed: 0,
+      slept: 0,
+    });
+    expect(
+      sqlite.prepare('SELECT sleep_after FROM session_snapshots WHERE id = ?').get('snapshot-1')
+    ).toEqual({ sleep_after: RETRY_AT.toISOString() });
+    await expect(
+      sleepWorkspaceSession(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'explicit test sleep',
+      })
+    ).rejects.toThrow('Workspace agent is not idle (prompting)');
+    expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
   });
 
   it('terminalizes a stopped capture in the service catch before the sweep handles it again', async () => {
