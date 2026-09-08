@@ -27,7 +27,9 @@ function memoryR2() {
   return {
     objects,
     bucket: {
-      head: vi.fn(async (key: string) => objects.has(key) ? { size: objects.get(key)?.byteLength } : null),
+      head: vi.fn(async (key: string) =>
+        objects.has(key) ? { size: objects.get(key)?.byteLength } : null
+      ),
       put: vi.fn(async (key: string, value: Uint8Array, options?: R2PutOptions) => {
         if (options?.onlyIf && objects.has(key)) return null;
         objects.set(key, new Uint8Array(value));
@@ -138,7 +140,10 @@ describe('compact raw transcript chunks', () => {
 });
 
 describe('compact archive migration compatibility', () => {
-  it.each([{ count: 40, metadataBytes: 0 }, { count: 100, metadataBytes: 200 * 1024 }])(
+  it.each([
+    { count: 40, metadataBytes: 0 },
+    { count: 100, metadataBytes: 200 * 1024 },
+  ])(
     'preserves exact paging, tools, search and default-size recovery for $count rows ($metadataBytes byte metadata)',
     { timeout: 30_000 },
     async ({ count, metadataBytes }) => {
@@ -154,7 +159,9 @@ describe('compact archive migration compatibility', () => {
         source.exec = ((query: string, ...params: unknown[]) => {
           const cursor = execute(query, ...params);
           if (query.startsWith('SELECT id, session_id, role, content')) {
-            cursor.toArray = () => { throw new Error('Archive raw history must stream its SQL cursor'); };
+            cursor.toArray = () => {
+              throw new Error('Archive raw history must stream its SQL cursor');
+            };
           }
           return cursor;
         }) as typeof source.exec;
@@ -165,11 +172,16 @@ describe('compact archive migration compatibility', () => {
       try {
         runMigrations(source);
         runMigrations(target);
-        source.exec(`INSERT INTO chat_sessions (id, status, message_count, started_at, ended_at,
+        source.exec(
+          `INSERT INTO chat_sessions (id, status, message_count, started_at, ended_at,
         created_at, updated_at, agent_completed_at, materialized_at)
-        VALUES ('session', 'stopped', ?, 1000, 1500, 1000, 1500, 1500, 1500)`, count);
+        VALUES ('session', 'stopped', ?, 1000, 1500, 1000, 1500, 1500, 1500)`,
+          count
+        );
         const original = await fixture(count);
-      if (metadataBytes) for (const row of original.rows) row.tool_metadata = JSON.stringify({ payload: 'x'.repeat(metadataBytes) });
+        if (metadataBytes)
+          for (const row of original.rows)
+            row.tool_metadata = JSON.stringify({ payload: 'x'.repeat(metadataBytes) });
         original.rows[10]!.role = 'tool';
         original.rows[10]!.tool_metadata = JSON.stringify({
           content: [{ type: 'text', text: 'complete tool payload' }],
@@ -273,9 +285,18 @@ describe('compact archive migration compatibility', () => {
           let clock = Date.now();
           const date = vi.spyOn(Date, 'now').mockImplementation(() => clock);
           const deadlineEnv = { ...env, PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS: '10' };
-          bucket.get = ((key: string) => { clock += 4; return originalGet.call(bucket, key); }) as typeof bucket.get;
-          try { await expect(archive.sealArchiveTarget(target, sealInput, deadlineEnv)).rejects.toThrow('deadline'); }
-          finally { bucket.get = originalGet; date.mockRestore(); }
+          bucket.get = ((key: string) => {
+            clock += 4;
+            return originalGet.call(bucket, key);
+          }) as typeof bucket.get;
+          try {
+            await expect(archive.sealArchiveTarget(target, sealInput, deadlineEnv)).rejects.toThrow(
+              'deadline'
+            );
+          } finally {
+            bucket.get = originalGet;
+            date.mockRestore();
+          }
         }
         const sealed = await archive.sealArchiveTarget(target, sealInput, env);
         expect(sealed.messageCount).toBe(count);
@@ -301,7 +322,18 @@ describe('compact archive migration compatibility', () => {
                   compact,
                   order
                 )
-              ).toEqual(getMessages(source, 'session', 9, 1035, 1002, roles, compact, order));
+              ).toEqual(
+                getMessages(
+                  createSqlStorage(sourceDb),
+                  'session',
+                  9,
+                  1035,
+                  1002,
+                  roles,
+                  compact,
+                  order
+                )
+              );
             }
           }
         expect(
@@ -347,7 +379,7 @@ describe('compact archive migration compatibility', () => {
           )
         ).rejects.toThrow();
         objects.clear();
-      await expect(archive.sealArchiveTarget(target, sealInput, env)).rejects.toThrow();
+        await expect(archive.sealArchiveTarget(target, sealInput, env)).rejects.toThrow();
         await expect(
           archive.archiveTargetReadMessages(
             target,
@@ -402,8 +434,12 @@ describe('compact object corruption after transport validation', () => {
     const { bucket, objects } = memoryR2();
     const chunk = await fixture();
     const ref = await writeCompactChunk(bucket, 'corruption', chunk);
-    await expect(readCompactChunk(bucket, { ...ref, bodySha256: '0'.repeat(64) }, chunk)).rejects.toThrow('hash');
-    await expect(readCompactChunk(bucket, { ...ref, bodyBytes: ref.bodyBytes - 1 }, chunk)).rejects.toThrow('byte limit');
+    await expect(
+      readCompactChunk(bucket, { ...ref, bodySha256: '0'.repeat(64) }, chunk)
+    ).rejects.toThrow('hash');
+    await expect(
+      readCompactChunk(bucket, { ...ref, bodyBytes: ref.bodyBytes - 1 }, chunk)
+    ).rejects.toThrow('byte limit');
     const bytes = objects.get(ref.key);
     if (!bytes) throw new Error('Fixture missing');
     const corrupt = new Uint8Array(bytes);
@@ -417,7 +453,10 @@ describe('compact object corruption after transport validation', () => {
     const chunk = await fixture();
     const ref = await writeCompactChunk(bucket, 'stalled', chunk);
     const cancel = vi.fn();
-    vi.mocked(bucket.get).mockResolvedValue({ size: ref.bytes, body: new ReadableStream({ cancel }) } as R2ObjectBody);
+    vi.mocked(bucket.get).mockResolvedValue({
+      size: ref.bytes,
+      body: new ReadableStream({ cancel }),
+    } as R2ObjectBody);
     await expect(readCompactChunk(bucket, ref, chunk, 5)).rejects.toThrow('deadline');
     expect(cancel).toHaveBeenCalledTimes(1);
   });

@@ -3126,7 +3126,7 @@ async function processArchiveMigrationBatch(input: {
   };
   const releaseUnused = async (reservation?: ArchiveWriteReservation) => {
     if (!reservation?.reservationId) return;
-    try { await releaseUnusedArchiveReservation(input.env.DATABASE, reservation.reservationId, reservation.estimatedWrites, input.now); }
+    try { await releaseUnusedArchiveReservation(input.env.DATABASE, reservation.reservationId, reservation.estimatedWrites, input.now, input.env); }
     catch (error) { log.warn('project_data_archive_unused_reservation_release_failed', { ...serializeError(error) }); }
   };
   const processOne = async (migration: MigrationRow, writeReservation?: ArchiveWriteReservation): Promise<void> => {

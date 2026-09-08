@@ -621,7 +621,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_ARCHIVE_COMPACT_ENABLED?: string;
   PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET?: string;
   PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR?: string;
-  PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS?: string; // Per-object compressed R2 I/O deadline (default: 10000)
+  PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS?: string; // Shared compact operation / chunk-write R2 I/O deadline (default: 10000)
+  PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS?: string;
+  PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT?: string;
   PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED?: string; // Separate kill switch for unscoped scheduled archive-sharding sweep (default: disabled)
   PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS?: string; // Persisted cadence between unscoped archive-sharding sweeps (default: 86400000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED?: string; // Enable one exact project-scoped, read-only resumable relief preflight (default: false)

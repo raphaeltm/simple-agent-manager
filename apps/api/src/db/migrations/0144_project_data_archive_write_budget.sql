@@ -1,4 +1,4 @@
--- Account-wide admission pool for compact archive attempts. No history scan or per-tick reset.
+-- Installation-wide admission pool for compact archive attempts. No history scan or per-tick reset.
 CREATE TABLE project_data_archive_write_budget (
   id TEXT PRIMARY KEY CHECK (id = 'global'),
   window_started_at INTEGER NOT NULL,

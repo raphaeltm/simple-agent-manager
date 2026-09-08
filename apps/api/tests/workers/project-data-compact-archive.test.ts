@@ -2,7 +2,10 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
-import { copyBackProjectDataArchiveMigration, runScopedProjectDataArchiveCanary } from '../../src/scheduled/project-data-archive-sharding';
+import {
+  copyBackProjectDataArchiveMigration,
+  runScopedProjectDataArchiveCanary,
+} from '../../src/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
@@ -65,11 +68,22 @@ async function seedTerminalSessionWithMessages(
   const source = projectDataStub(projectId);
   await source.ensureProjectId(projectId);
   const sessionId = await source.createSession(null, 'Bind limit transcript');
-  await source.persistMessageBatch(sessionId, seedMessages(count).map((message, index) => {
-    if (tools && index >= count - 2) return { ...message, role: 'tool', toolMetadata: JSON.stringify(index === count - 2
-      ? { content: [{ type: 'text', text: 'inline tool result' }] } : { title: 'Archived tool' }) };
-    return streaming ? { ...message, role: index === 0 ? 'user' : 'assistant' } : message;
-  }));
+  await source.persistMessageBatch(
+    sessionId,
+    seedMessages(count).map((message, index) => {
+      if (tools && index >= count - 2)
+        return {
+          ...message,
+          role: 'tool',
+          toolMetadata: JSON.stringify(
+            index === count - 2
+              ? { content: [{ type: 'text', text: 'inline tool result' }] }
+              : { title: 'Archived tool' }
+          ),
+        };
+      return streaming ? { ...message, role: index === 0 ? 'user' : 'assistant' } : message;
+    })
+  );
   await source.stopSession(sessionId);
   await source.runSummarySyncForTest();
   return { source, sessionId };
@@ -105,71 +119,209 @@ async function readLocation(projectId: string, sessionId: string) {
 describe('compact R2 archive rollout', () => {
   it('defers without fencing, then migrates, reads and copies back through real R2 and SQLite', async () => {
     const projectId = `compact-archive-${crypto.randomUUID()}`;
-    const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 201, false, true);
+    const { source, sessionId } = await seedTerminalSessionWithMessages(
+      projectId,
+      201,
+      false,
+      true
+    );
     const archivedMessage = seedMessages(201)[200];
     const archivedAt = Date.now();
     const key = `legacy-tool/${projectId}`;
     const toolMetadata = { content: [{ type: 'text', text: 'legacy archived tool result' }] };
-    await env.PROJECT_DATA_ARCHIVE_R2.put(key, JSON.stringify({ version: 1, projectId, sessionId,
-      messageId: archivedMessage.messageId, messageCreatedAt: 1_200_000, messageSequence: 201, toolMetadata }));
-    await runInDurableObject(source, async (_instance, state) => state.storage.sql.exec(`INSERT INTO tool_payload_archives
+    await env.PROJECT_DATA_ARCHIVE_R2.put(
+      key,
+      JSON.stringify({
+        version: 1,
+        projectId,
+        sessionId,
+        messageId: archivedMessage.messageId,
+        messageCreatedAt: 1_200_000,
+        messageSequence: 201,
+        toolMetadata,
+      })
+    );
+    await runInDurableObject(source, async (_instance, state) =>
+      state.storage.sql
+        .exec(
+          `INSERT INTO tool_payload_archives
       (message_id, session_id, r2_key, content_bytes, tool_metadata_bytes, archived_at, message_created_at, message_sequence, archive_version)
-      VALUES (?, ?, ?, 100, ?, ?, 1200000, 201, 1)`, archivedMessage.messageId, sessionId, key, JSON.stringify(toolMetadata).length, archivedAt).toArray());
+      VALUES (?, ?, ?, 100, ?, ?, 1200000, 201, 1)`,
+          archivedMessage.messageId,
+          sessionId,
+          key,
+          JSON.stringify(toolMetadata).length,
+          archivedAt
+        )
+        .toArray()
+    );
     const verifyToolsAndSearch = async () => {
-      expect(await projectDataService.getMessageCount(testEnv, projectId, sessionId, ['tool'])).toBe(2);
-      expect(await projectDataService.getMessageToolContent(testEnv, projectId, sessionId, seedMessages(201)[199].messageId))
-        .toMatchObject({ source: 'inline', content: [{ type: 'text', text: 'inline tool result' }] });
-      expect(await projectDataService.getMessageToolContent(testEnv, projectId, sessionId, archivedMessage.messageId))
-        .toMatchObject({ source: 'archive', content: toolMetadata.content });
-      const payloads = await projectDataService.getArchivedToolPayloads(testEnv, projectId, { sessionId, limit: 10 });
-      expect(payloads.payloads).toEqual([expect.objectContaining({ messageId: archivedMessage.messageId, available: true, content: toolMetadata.content })]);
-      expect((await projectDataService.searchMessages(testEnv, projectId, 'payload', sessionId)).length).toBeGreaterThan(0);
-      expect((await projectDataService.searchMessages(testEnv, projectId, 'payload')).some(row => row.sessionId === sessionId)).toBe(true);
+      expect(
+        await projectDataService.getMessageCount(testEnv, projectId, sessionId, ['tool'])
+      ).toBe(2);
+      expect(
+        await projectDataService.getMessageToolContent(
+          testEnv,
+          projectId,
+          sessionId,
+          seedMessages(201)[199].messageId
+        )
+      ).toMatchObject({
+        source: 'inline',
+        content: [{ type: 'text', text: 'inline tool result' }],
+      });
+      expect(
+        await projectDataService.getMessageToolContent(
+          testEnv,
+          projectId,
+          sessionId,
+          archivedMessage.messageId
+        )
+      ).toMatchObject({ source: 'archive', content: toolMetadata.content });
+      const payloads = await projectDataService.getArchivedToolPayloads(testEnv, projectId, {
+        sessionId,
+        limit: 10,
+      });
+      expect(payloads.payloads).toEqual([
+        expect.objectContaining({
+          messageId: archivedMessage.messageId,
+          available: true,
+          content: toolMetadata.content,
+        }),
+      ]);
+      expect(
+        (await projectDataService.searchMessages(testEnv, projectId, 'payload', sessionId)).length
+      ).toBeGreaterThan(0);
+      expect(
+        (await projectDataService.searchMessages(testEnv, projectId, 'payload')).some(
+          (row) => row.sessionId === sessionId
+        )
+      ).toBe(true);
     };
     await verifyToolsAndSearch();
-    const original = await projectDataService.getMessages(testEnv, projectId, sessionId, 300, null, null, undefined, false, 'asc');
-    await withArchiveEnv({ PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true', PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
-      PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1', PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '0' }, async () => {
-      const result = await runScopedProjectDataArchiveCanary(testEnv, { projectId, sessionId, dryRun: false,
-        reason: 'compact budget refusal test', nowDate: new Date(Date.now() + 60_000) });
-      expect(result.stats).toMatchObject({ migrated: 0, failed: 0, budgetDeferred: 1 });
-      expect(await readLocation(projectId, sessionId)).toBeNull();
-      expect(await source.getMessageCount(sessionId)).toBe(201);
-    });
-    await withArchiveEnv({ PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true', PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
-      PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1', PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '1000000' }, async () => {
-      const result = await runScopedProjectDataArchiveCanary(testEnv, { projectId, sessionId, dryRun: false,
-        reason: 'compact full roundtrip test', nowDate: new Date(Date.now() + 60_000) });
-      expect(result.stats).toMatchObject({ migrated: 1, failed: 0 });
-      const location = await readLocation(projectId, sessionId);
-      expect(location?.location_state).toBe('archive_shard');
-      if (!location?.migration_id) throw new Error('Migration missing');
-      expect(await countTargetMessages(location.owner_name, sessionId)).toBe(0);
-      expect(await source.getMessageCount(sessionId)).toBe(0);
-      await verifyToolsAndSearch();
-      expect(await projectDataService.getMessages(testEnv, projectId, sessionId, 300, null, null, undefined, false, 'asc')).toEqual(original);
-      await withArchiveEnv({ PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false' }, async () => {
-        expect(await projectDataService.getMessages(testEnv, projectId, sessionId, 300, null, null, undefined, false, 'asc')).toEqual(original);
-        const result = await copyBackProjectDataArchiveMigration(testEnv, { projectId, migrationId: location.migration_id as string,
-          reason: 'verify lossless compact recovery' });
-        expect(result.restoredToRoot).toBe(true);
+    const original = await projectDataService.getMessages(
+      testEnv,
+      projectId,
+      sessionId,
+      300,
+      null,
+      null,
+      undefined,
+      false,
+      'asc'
+    );
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '0',
+      },
+      async () => {
+        const result = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'compact budget refusal test',
+          nowDate: new Date(Date.now() + 60_000),
+        });
+        expect(result.stats).toMatchObject({ migrated: 0, failed: 0, budgetDeferred: 1 });
+        expect(await readLocation(projectId, sessionId)).toBeNull();
+        expect(await source.getMessageCount(sessionId)).toBe(201);
+      }
+    );
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '1000000',
+      },
+      async () => {
+        const result = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'compact full roundtrip test',
+          nowDate: new Date(Date.now() + 60_000),
+        });
+        expect(result.stats).toMatchObject({ migrated: 1, failed: 0 });
+        const location = await readLocation(projectId, sessionId);
+        expect(location?.location_state).toBe('archive_shard');
+        if (!location?.migration_id) throw new Error('Migration missing');
+        expect(await countTargetMessages(location.owner_name, sessionId)).toBe(0);
+        expect(await source.getMessageCount(sessionId)).toBe(0);
         await verifyToolsAndSearch();
-        expect(await projectDataService.getMessages(testEnv, projectId, sessionId, 300, null, null, undefined, false, 'asc')).toEqual(original);
-      });
-    });
+        expect(
+          await projectDataService.getMessages(
+            testEnv,
+            projectId,
+            sessionId,
+            300,
+            null,
+            null,
+            undefined,
+            false,
+            'asc'
+          )
+        ).toEqual(original);
+        await withArchiveEnv({ PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false' }, async () => {
+          expect(
+            await projectDataService.getMessages(
+              testEnv,
+              projectId,
+              sessionId,
+              300,
+              null,
+              null,
+              undefined,
+              false,
+              'asc'
+            )
+          ).toEqual(original);
+          const result = await copyBackProjectDataArchiveMigration(testEnv, {
+            projectId,
+            migrationId: location.migration_id as string,
+            reason: 'verify lossless compact recovery',
+          });
+          expect(result.restoredToRoot).toBe(true);
+          await verifyToolsAndSearch();
+          expect(
+            await projectDataService.getMessages(
+              testEnv,
+              projectId,
+              sessionId,
+              300,
+              null,
+              null,
+              undefined,
+              false,
+              'asc'
+            )
+          ).toEqual(original);
+        });
+      }
+    );
   });
 
   it('shares an atomic durable allowance across concurrent attempts, retries and UTC windows', async () => {
-    const { reserveArchiveWrites, ARCHIVE_BUDGET_WINDOW_MS } = await import('../../src/project-data-archive/write-budget');
+    const { reserveArchiveWrites, ARCHIVE_BUDGET_WINDOW_MS } =
+      await import('../../src/project-data-archive/write-budget');
     await env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget').run();
     const now = Date.now();
-    const results = await Promise.all(Array.from({ length: 10 }, () => reserveArchiveWrites(env.DATABASE, 3000, 10_000, now)));
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () => reserveArchiveWrites(env.DATABASE, 3000, 10_000, now))
+    );
     expect(results.filter(Boolean)).toHaveLength(3);
     expect(await reserveArchiveWrites(env.DATABASE, 1001, 10_000, now)).toBe(false);
     expect(await reserveArchiveWrites(env.DATABASE, 1000, 10_000, now)).toBe(true);
     expect(await reserveArchiveWrites(env.DATABASE, 1, 10_000, now)).toBe(false);
-    expect(await reserveArchiveWrites(env.DATABASE, 10001, 10_000, now + ARCHIVE_BUDGET_WINDOW_MS)).toBe(false);
-    expect(await reserveArchiveWrites(env.DATABASE, 10_000, 10_000, now + ARCHIVE_BUDGET_WINDOW_MS)).toBe(true);
+    expect(
+      await reserveArchiveWrites(env.DATABASE, 10001, 10_000, now + ARCHIVE_BUDGET_WINDOW_MS)
+    ).toBe(false);
+    expect(
+      await reserveArchiveWrites(env.DATABASE, 10_000, 10_000, now + ARCHIVE_BUDGET_WINDOW_MS)
+    ).toBe(true);
     expect(await reserveArchiveWrites(env.DATABASE, 1, 10_000, now)).toBe(false);
   });
 });
@@ -184,8 +336,17 @@ describe('compact archive SQL cost measurement', () => {
       const projectId = `compact-cost-${crypto.randomUUID()}`;
       const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 1001, true);
       const targetOwnerName = `${projectId}:archive:g1:s0`;
-      const base = { projectId, sessionId, migrationId: crypto.randomUUID(), sourceOwnerName: projectId,
-        targetOwnerName, targetGeneration: 1, sourceIntentToken: crypto.randomUUID(), now: Date.now() + 60_000, minTerminalAgeMs: 0 };
+      const base = {
+        projectId,
+        sessionId,
+        migrationId: crypto.randomUUID(),
+        sourceOwnerName: projectId,
+        targetOwnerName,
+        targetGeneration: 1,
+        sourceIntentToken: crypto.randomUUID(),
+        now: Date.now() + 60_000,
+        minTerminalAgeMs: 0,
+      };
       const prepared = await source.archiveSourcePrepareIntent(base);
       if ('refused' in prepared) throw new Error('Cost fixture refused');
       const target = projectDataStub(targetOwnerName);
@@ -195,7 +356,14 @@ describe('compact archive SQL cost measurement', () => {
         let cursor: string | null = null;
         let ordinal = 0;
         do {
-          const chunk = await source.archiveSourceExportChunk({ ...base, tableName, cursor, ordinal, maxRows: 500, maxBytes: 1024 * 1024 });
+          const chunk = await source.archiveSourceExportChunk({
+            ...base,
+            tableName,
+            cursor,
+            ordinal,
+            maxRows: 500,
+            maxBytes: 1024 * 1024,
+          });
           chunks.push(chunk);
           cursor = chunk.hasMore ? chunk.cursor : null;
           ordinal++;
@@ -203,29 +371,52 @@ describe('compact archive SQL cost measurement', () => {
       }
       const result = await runInDurableObject(target, async (_instance, state) => {
         let writes = 0;
-        const sql = new Proxy(state.storage.sql, { get(object, property) {
-          if (property === 'exec') return (query: string, ...params: unknown[]) => {
-            const result = object.exec(query, ...params);
-            writes += result.rowsWritten;
-            return result;
-          };
-          return Reflect.get(object, property, object);
-        } });
-        archive.prepareArchiveTarget(sql, { ...base, storageFormat, terminalVersionSha256: prepared.terminalVersionSha256,
-          expectedMessageCount: prepared.messageCount, sessionRow: prepared.sessionRow });
+        const sql = new Proxy(state.storage.sql, {
+          get(object, property) {
+            if (property === 'exec')
+              return (query: string, ...params: unknown[]) => {
+                const result = object.exec(query, ...params);
+                writes += result.rowsWritten;
+                return result;
+              };
+            return Reflect.get(object, property, object);
+          },
+        });
+        archive.prepareArchiveTarget(sql, {
+          ...base,
+          storageFormat,
+          terminalVersionSha256: prepared.terminalVersionSha256,
+          expectedMessageCount: prepared.messageCount,
+          sessionRow: prepared.sessionRow,
+        });
         for (const chunk of chunks) {
-          const rawChunkRef = storageFormat === 'r2-gzip-v1' && chunk.tableName === 'chat_messages'
-            ? await writeCompactChunk(env.PROJECT_DATA_ARCHIVE_R2, 'cost-test', chunk) : undefined;
-          await archive.commitArchiveTargetChunk(sql, { ...chunk, rawChunkRef, now: base.now }, testEnv);
+          const rawChunkRef =
+            storageFormat === 'r2-gzip-v1' && chunk.tableName === 'chat_messages'
+              ? await writeCompactChunk(env.PROJECT_DATA_ARCHIVE_R2, 'cost-test', chunk)
+              : undefined;
+          await archive.commitArchiveTargetChunk(
+            sql,
+            { ...chunk, rawChunkRef, now: base.now },
+            testEnv
+          );
         }
-        await archive.sealArchiveTarget(sql, { ...base, terminalVersionSha256: prepared.terminalVersionSha256,
-          expectedChunkHashes: chunks.map(chunk => chunk.sha256) }, testEnv);
+        await archive.sealArchiveTarget(
+          sql,
+          {
+            ...base,
+            terminalVersionSha256: prepared.terminalVersionSha256,
+            expectedChunkHashes: chunks.map((chunk) => chunk.sha256),
+          },
+          testEnv
+        );
         return { writes, bytes: sql.databaseSize };
       });
       measurements.push(result.writes);
       console.info('compact archive cost fixture', storageFormat, JSON.stringify(result));
     }
-    expect(measurements).toMatchSnapshot('legacy and compact SQL writes for 1001 streaming fragments');
+    expect(measurements).toMatchSnapshot(
+      'legacy and compact SQL writes for 1001 streaming fragments'
+    );
     expect(measurements[0]).toBeGreaterThan(1000);
     expect(measurements[1]).toBeLessThan(measurements[0] * 0.2);
   });
@@ -236,25 +427,53 @@ describe('compact archive concurrent mutation fencing', () => {
     const { writeCompactChunk } = await import('../../src/project-data-archive/compact-r2');
     const projectId = `compact-concurrency-${crypto.randomUUID()}`;
     const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 10, true);
-    const base = { projectId, sessionId, migrationId: crypto.randomUUID(), sourceOwnerName: projectId,
-      targetOwnerName: `${projectId}:archive:g1:s0`, targetGeneration: 1, sourceIntentToken: crypto.randomUUID(),
-      now: Date.now() + 60_000, minTerminalAgeMs: 0 };
+    const base = {
+      projectId,
+      sessionId,
+      migrationId: crypto.randomUUID(),
+      sourceOwnerName: projectId,
+      targetOwnerName: `${projectId}:archive:g1:s0`,
+      targetGeneration: 1,
+      sourceIntentToken: crypto.randomUUID(),
+      now: Date.now() + 60_000,
+      minTerminalAgeMs: 0,
+    };
     const prepared = await source.archiveSourcePrepareIntent(base);
     if ('refused' in prepared) throw new Error('Concurrency fixture refused');
     const target = projectDataStub(base.targetOwnerName);
     await target.ensureProjectId(projectId);
-    await target.archiveTargetPrepare({ ...base, storageFormat: 'r2-gzip-v1',
-      terminalVersionSha256: prepared.terminalVersionSha256, expectedMessageCount: prepared.messageCount, sessionRow: prepared.sessionRow });
-    const chunk = await source.archiveSourceExportChunk({ ...base, tableName: 'chat_messages', ordinal: 0, maxRows: 500 });
+    await target.archiveTargetPrepare({
+      ...base,
+      storageFormat: 'r2-gzip-v1',
+      terminalVersionSha256: prepared.terminalVersionSha256,
+      expectedMessageCount: prepared.messageCount,
+      sessionRow: prepared.sessionRow,
+    });
+    const chunk = await source.archiveSourceExportChunk({
+      ...base,
+      tableName: 'chat_messages',
+      ordinal: 0,
+      maxRows: 500,
+    });
     const rawChunkRef = await writeCompactChunk(env.PROJECT_DATA_ARCHIVE_R2, 'concurrency', chunk);
     const results = await Promise.all([
       target.archiveTargetCommitChunk({ ...chunk, rawChunkRef, now: base.now }),
       target.archiveTargetCommitChunk({ ...chunk, rawChunkRef, now: base.now }),
     ]);
-    expect(results.map(result => result.idempotent).sort()).toEqual([false, true]);
+    expect(results.map((result) => result.idempotent).sort()).toEqual([false, true]);
     await target.archiveTargetAbandonSession({ ...base, sourceIntactVerified: true });
-    expect(await runInDurableObject(target, async (_instance, state) => state.storage.sql.exec(
-      'SELECT COUNT(*) AS n FROM project_data_archive_raw_chunks WHERE session_id = ?', sessionId).toArray()[0]?.n)).toBe(0);
+    expect(
+      await runInDurableObject(
+        target,
+        async (_instance, state) =>
+          state.storage.sql
+            .exec(
+              'SELECT COUNT(*) AS n FROM project_data_archive_raw_chunks WHERE session_id = ?',
+              sessionId
+            )
+            .toArray()[0]?.n
+      )
+    ).toBe(0);
     expect(await source.getMessageCount(sessionId)).toBe(10);
   });
 });
@@ -266,56 +485,136 @@ describe('compact coordinator restart and contention', () => {
     const { sessionId } = await seedTerminalSessionWithMessages(projectId, 10, true);
     const owners = new Map<string, string>();
     const interruptedNamespace = {
-      idFromName(name: string) { const id = env.PROJECT_DATA.idFromName(name); owners.set(id.toString(), name); return id; },
+      idFromName(name: string) {
+        const id = env.PROJECT_DATA.idFromName(name);
+        owners.set(id.toString(), name);
+        return id;
+      },
       get(id: DurableObjectId) {
         const stub = env.PROJECT_DATA.get(id);
         if (!owners.get(id.toString())?.includes(':archive:')) return stub;
-        return { ensureProjectId: (project: string) => stub.ensureProjectId(project),
-          archiveTargetPrepare: async () => { throw new Error('injected coordinator interruption before target creation'); } };
+        return {
+          ensureProjectId: (project: string) => stub.ensureProjectId(project),
+          archiveTargetPrepare: async () => {
+            throw new Error('injected coordinator interruption before target creation');
+          },
+        };
       },
     } as unknown as WorkerEnv['PROJECT_DATA'];
-    const base = { ...testEnv, PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true', PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
-      PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1', PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '100000' };
-    const args = { projectId, sessionId, dryRun: false, reason: 'resume format proof', nowDate: new Date(Date.now() + 60_000) };
-    const failed = await runScopedProjectDataArchiveCanary({ ...base, PROJECT_DATA: interruptedNamespace }, args);
+    const base = {
+      ...testEnv,
+      PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+      PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+      PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+      PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '100000',
+    };
+    const args = {
+      projectId,
+      sessionId,
+      dryRun: false,
+      reason: 'resume format proof',
+      nowDate: new Date(Date.now() + 60_000),
+    };
+    const failed = await runScopedProjectDataArchiveCanary(
+      { ...base, PROJECT_DATA: interruptedNamespace },
+      args
+    );
     expect(failed.stats).toMatchObject({ failed: 1, migrated: 0 });
-    const journal = await env.DATABASE.prepare('SELECT storage_format, state FROM project_data_archive_migrations WHERE project_id = ?')
-      .bind(projectId).first();
+    const journal = await env.DATABASE.prepare(
+      'SELECT storage_format, state FROM project_data_archive_migrations WHERE project_id = ?'
+    )
+      .bind(projectId)
+      .first();
     expect(journal).toMatchObject({ storage_format: 'r2-gzip-v1', state: 'failed' });
-    const paused = await runScopedProjectDataArchiveCanary({ ...base, PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false',
-      PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '0' }, args);
+    const paused = await runScopedProjectDataArchiveCanary(
+      {
+        ...base,
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '0',
+      },
+      args
+    );
     expect(paused.stats).toMatchObject({ migrated: 0, failed: 0, budgetDeferred: 1 });
-    const resumed = await runScopedProjectDataArchiveCanary({ ...base, PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false' }, args);
+    const resumed = await runScopedProjectDataArchiveCanary(
+      { ...base, PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false' },
+      args
+    );
     expect(resumed.stats).toMatchObject({ migrated: 1, failed: 0 });
     const location = await readLocation(projectId, sessionId);
     if (!location) throw new Error('Missing location');
     expect(await countTargetMessages(location.owner_name, sessionId)).toBe(0);
-    const target = await projectDataStub(location.owner_name).archiveTargetInspectSession({ projectId, sessionId,
-      migrationId: location.migration_id, targetOwnerName: location.owner_name, targetGeneration: location.generation });
+    const target = await projectDataStub(location.owner_name).archiveTargetInspectSession({
+      projectId,
+      sessionId,
+      migrationId: location.migration_id,
+      targetOwnerName: location.owner_name,
+      targetGeneration: location.generation,
+    });
     expect(target.storageFormat).toBe('r2-gzip-v1');
   });
 
   it('releases only unused same-session contender reservations, exactly once and never across days', async () => {
-    const { releaseUnusedArchiveReservation, reserveArchiveWrites, ARCHIVE_BUDGET_WINDOW_MS } = await import('../../src/project-data-archive/write-budget');
+    const { releaseUnusedArchiveReservation, reserveArchiveWrites, ARCHIVE_BUDGET_WINDOW_MS } =
+      await import('../../src/project-data-archive/write-budget');
     const projectId = `compact-contention-${crypto.randomUUID()}`;
     const { source, sessionId } = await seedTerminalSessionWithMessages(projectId, 10, true);
     await env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget').run();
     const estimate = await source.archiveSourceEstimateWrites(sessionId, 32, 5000);
     const nowDate = new Date(Date.now() + 60_000);
-    const configured = { ...testEnv, PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true', PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
-      PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1', PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '100000' };
-    const results = await Promise.all(Array.from({ length: 3 }, () => runScopedProjectDataArchiveCanary(configured,
-      { projectId, sessionId, dryRun: false, reason: 'same session concurrent canaries', nowDate })));
+    const configured = {
+      ...testEnv,
+      PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+      PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+      PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+      PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: '100000',
+    };
+    const results = await Promise.all(
+      Array.from({ length: 3 }, () =>
+        runScopedProjectDataArchiveCanary(configured, {
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'same session concurrent canaries',
+          nowDate,
+        })
+      )
+    );
     expect(results.reduce((n, result) => n + result.stats.migrated, 0)).toBe(1);
-    const budget = await env.DATABASE.prepare('SELECT reserved_writes FROM project_data_archive_write_budget').first();
+    const budget = await env.DATABASE.prepare(
+      'SELECT reserved_writes FROM project_data_archive_write_budget'
+    ).first();
     expect(budget?.reserved_writes).toBe(estimate);
     const receipt = crypto.randomUUID();
     expect(await reserveArchiveWrites(env.DATABASE, 1000, 100000, nowDate.getTime())).toBe(true);
     await releaseUnusedArchiveReservation(env.DATABASE, receipt, 1000, nowDate.getTime());
     await releaseUnusedArchiveReservation(env.DATABASE, receipt, 1000, nowDate.getTime());
-    expect((await env.DATABASE.prepare('SELECT reserved_writes FROM project_data_archive_write_budget').first())?.reserved_writes).toBe(estimate);
-    expect(await reserveArchiveWrites(env.DATABASE, 1000, 100000, nowDate.getTime() + ARCHIVE_BUDGET_WINDOW_MS)).toBe(true);
-    await releaseUnusedArchiveReservation(env.DATABASE, crypto.randomUUID(), estimate, nowDate.getTime());
-    expect((await env.DATABASE.prepare('SELECT reserved_writes FROM project_data_archive_write_budget').first())?.reserved_writes).toBe(1000);
+    expect(
+      (
+        await env.DATABASE.prepare(
+          'SELECT reserved_writes FROM project_data_archive_write_budget'
+        ).first()
+      )?.reserved_writes
+    ).toBe(estimate);
+    expect(
+      await reserveArchiveWrites(
+        env.DATABASE,
+        1000,
+        100000,
+        nowDate.getTime() + ARCHIVE_BUDGET_WINDOW_MS
+      )
+    ).toBe(true);
+    await releaseUnusedArchiveReservation(
+      env.DATABASE,
+      crypto.randomUUID(),
+      estimate,
+      nowDate.getTime()
+    );
+    expect(
+      (
+        await env.DATABASE.prepare(
+          'SELECT reserved_writes FROM project_data_archive_write_budget'
+        ).first()
+      )?.reserved_writes
+    ).toBe(1000);
   });
 });

@@ -22,14 +22,14 @@ Incident lessons: Aug 26 unseekable scans amplified read bills; Sept 5 whole-ses
 
 ## Implementation checklist
 
-- [ ] Add additive compact-session/chunk-reference schema and versioned types; test fresh and upgrade migration paths.
-- [ ] Add bounded gzip R2 chunk codec with read-back verification, identity/hash validation, corruption/size failure and immutable retry behavior.
-- [ ] Commit raw chunks as SQL references; retain grouped/search records and tool archive ledgers. Pin representation across retries and flag changes.
-- [ ] Recompute source-compatible hashes/counts from streamed compact chunks before sealing; preserve manifest/source-delete invariants and concurrent-operation safety.
-- [ ] Route exact transcript pagination, role counts, lazy tool content and export/copy-back to compact storage; preserve legacy behavior and fail closed on unavailable/corrupt archives.
-- [ ] Enforce durable migration write-budget admission/defer semantics, measure actual SQL writes and bytes freed, prevent oversized-session budget bypass, reserve normal-traffic headroom; document hard versus estimated boundaries.
-- [ ] Add realistic unit and Workers integration tests for complete migration/read/search/tool/copy-back, retries, corrupt R2, wrong ownership, budget exhaustion/refresh and demonstrably fewer target SQL writes.
-- [ ] Update deployment env mapping, both env skills, examples, architecture/configuration docs and CLAUDE recent changes.
+- [x] Add additive compact-session/chunk-reference schema and versioned types; test fresh and upgrade migration paths.
+- [x] Add bounded gzip R2 chunk codec with read-back verification, identity/hash validation, corruption/size failure and immutable retry behavior.
+- [x] Commit raw chunks as SQL references; retain grouped/search records and tool archive ledgers. Pin representation across retries and flag changes.
+- [x] Recompute source-compatible hashes/counts from streamed compact chunks before sealing; preserve manifest/source-delete invariants and concurrent-operation safety.
+- [x] Route exact transcript pagination, role counts, lazy tool content and export/copy-back to compact storage; preserve legacy behavior and fail closed on unavailable/corrupt archives.
+- [x] Enforce durable migration write-budget admission/defer semantics, measure actual SQL writes and bytes freed, prevent oversized-session budget bypass, reserve normal-traffic headroom; document hard versus estimated boundaries.
+- [x] Add realistic unit and Workers integration tests for complete migration/read/search/tool/copy-back, retries, corrupt R2, wrong ownership, budget exhaustion/refresh and demonstrably fewer target SQL writes.
+- [x] Update deployment env mapping, both env skills, examples, architecture/configuration docs and CLAUDE recent changes.
 - [ ] Run local full quality gates and task completion/specialist review; fix findings.
 - [ ] Coordinate staging, deploy final candidate, prove full retrieval/search/tool behavior through API/MCP and UI; record cost/storage evidence and clean up test resources.
 - [ ] Create PR, get CI/CodeRabbit green, prepare exact production rollout plan under the existing approval policy; merge/deploy when authorized and gates satisfied.
@@ -62,3 +62,5 @@ The daily budget is explicitly an estimate (default 250k/day with factor32 and F
 - Real Workers SQL cost fixture: 1,001 streaming fragments, same consolidation: **3,058 legacy target writes vs63 compact target writes** (~97.94% reduction for target writes only). Snapshot records the runtime counters. Source deletion remains billable.
 
 Full lint13 packages passed, config mapping33 tests passed, D1 ordering passed. Full root test run failed on a now-fixed import error during an intermediate build; it is not counted as passing and must be rerun. Staging, CI and CodeRabbit still pending.
+
+Final independent rechecks: Cloudflare/security PASS; budget/constitution/env/docs PASS after exposing receipt retention and cleanup settings; test-engineer/coverage findings PASS. Focused unit suite95 PASS. Full repository validation and final combined Workers suite in progress; staging and PR gates remain outstanding.

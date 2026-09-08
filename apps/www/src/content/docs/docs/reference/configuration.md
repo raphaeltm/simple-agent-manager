@@ -1324,6 +1324,8 @@ External analytics forwarding is off by default. When enabled, SAM forwards only
 | `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` | `250000` | Installation-wide daily estimated SQL write allowance for compact migration attempts; 0 pauses admission. |
 | `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` | `32` | Conservative SQL write estimate per row/512 bytes of grouped FTS text; includes source deletion. |
 | `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS` | `10000` | R2 I/O deadline shared across each compact read/export/seal operation, or one chunk write, in milliseconds. |
+| `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS` | `604800000` | Unused reservation receipt retention (7 days); clamped to at least one UTC budget day. |
+| `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT` | `100` | Maximum expired receipts removed per unused release; zero disables cleanup. |
 
 Compact archives keep session metadata, complete consolidated conversation text, grouped FTS and existing tool-archive pointers in SQLite. Original message rows (IDs, timestamps, order, origins and full tool metadata) live in immutable gzip R2 chunks in the private `PROJECT_DATA_ARCHIVE_R2` binding. SQL chunk references contain sizes, SHA-256, role counts, time bounds and message IDs. Exact history and tool expansion fetch and verify those chunks. Missing/corrupt objects fail the request; they do not silently produce a truncated history. The original terminal hash must match before publication and source deletion. Version 2 recovery manifests include the compressed-object references; legacy version 1 manifests remain unchanged.
 
