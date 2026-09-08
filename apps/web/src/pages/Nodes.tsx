@@ -1,5 +1,5 @@
 import type { CredentialProvider, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, PROVIDER_LABELS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
 import {
   Alert,
   Button,
@@ -14,6 +14,7 @@ import { Server } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import { nodeCreationCatalogs } from '../components/node/node-creation-catalogs';
 import { NodeCard } from '../components/node/NodeCard';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { createNode, deleteNode, stopNode } from '../lib/api';
@@ -24,6 +25,7 @@ import {
   providerCatalogQueryOptions,
   workspaceListQueryOptions,
 } from '../lib/query-options';
+import { userDefaultCapacityPoolsQueryOptions } from '../lib/query-options/capacity-pools';
 
 export function Nodes() {
   const navigate = useNavigate();
@@ -32,8 +34,10 @@ export function Nodes() {
 
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newNodeLocation, setNewNodeLocation] = useState(DEFAULT_VM_LOCATION);
+  const [newNodeLocation, setNewNodeLocation] = useState('');
   const [newNodeVmSize, setNewNodeVmSize] = useState<VMSize>('medium');
+  const [nativeInstanceType, setNativeInstanceType] = useState('');
+  const [useLegacyPreset, setUseLegacyPreset] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -62,11 +66,33 @@ export function Nodes() {
     enabled: Boolean(queryScope),
   });
 
-  const catalogs = catalogData ?? [];
+  const { data: poolResponse, isPending: poolLoading, isError: poolError } = useQuery({
+    ...userDefaultCapacityPoolsQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  const poolSummary = poolResponse?.effectiveSummary;
+  const catalogs = nodeCreationCatalogs(catalogData ?? [], poolSummary);
 
   // Auto-select first provider once catalog loads, if nothing selected yet
   const effectiveProvider = selectedProvider || catalogs[0]?.provider || '';
   const activeCatalog = catalogs.find((c) => c.provider === effectiveProvider);
+  const legacySizes = activeCatalog?.sizes;
+  const nodeLocation = newNodeLocation || activeCatalog?.defaultLocation || '';
+  const nativeOfferings = (activeCatalog?.offerings ?? []).filter(
+    (offering) =>
+      offering.provider === effectiveProvider && offering.location === nodeLocation
+      && offering.available !== false && !offering.stale
+  );
+  const selectedOffering = nativeOfferings.find(
+    (offering) => offering.providerInstanceType === nativeInstanceType
+  );
+  // An absent field identifies an older catalog contract. A modern empty catalog
+  // must never silently fall back to a legacy preset.
+  const legacyCatalog = activeCatalog?.sizes !== undefined && activeCatalog.offerings === undefined;
+  const validLocation = activeCatalog?.locations.some((location) => location.id === nodeLocation);
+  const canCreateNode = Boolean(validLocation && (
+    selectedOffering || (legacyCatalog && useLegacyPreset && activeCatalog?.sizes?.[newNodeVmSize])
+  ));
 
   // --- Derived state ---
 
@@ -93,6 +119,7 @@ export function Nodes() {
   // --- Mutation handlers ---
 
   const handleCreateNode = async () => {
+    if (!canCreateNode) return;
     try {
       setCreating(true);
       setError(null);
@@ -100,8 +127,10 @@ export function Nodes() {
       const provider = effectiveProvider;
       const created = await createNode({
         name: `node-${timestamp}`,
-        vmSize: newNodeVmSize,
-        vmLocation: newNodeLocation,
+        ...(selectedOffering
+          ? { providerInstanceType: selectedOffering.providerInstanceType }
+          : { vmSize: newNodeVmSize }),
+        vmLocation: nodeLocation,
         ...(provider ? { provider: provider as CredentialProvider } : {}),
       });
       setShowCreateForm(false);
@@ -156,14 +185,26 @@ export function Nodes() {
           </p>
           {isRefreshing && <Spinner size="sm" />}
         </div>
-        <Button onClick={() => setShowCreateForm((v) => !v)} disabled={creating}>
+        <Button onClick={() => setShowCreateForm((v) => !v)} disabled={creating} variant={showCreateForm ? 'secondary' : 'primary'}>
           {showCreateForm ? 'Cancel' : 'Create Node'}
         </Button>
       </div>
 
       {showCreateForm && (
-        <div className="mb-4 glass-surface rounded-md p-4 grid gap-4">
-          {catalogs.length > 1 && (
+        <div className="mb-4 glass-surface rounded-md p-4 grid gap-4 min-w-0">
+          {poolSummary?.scope === 'installation' && (
+            <p className="sam-type-secondary text-fg-muted m-0">Installation-funded compute</p>
+          )}
+          {(poolLoading || poolError || catalogs.length === 0) && (
+            <p className="sam-type-secondary text-fg-muted m-0" role="status">
+              {poolLoading ? 'Loading available compute…' : poolError
+                ? 'Unable to load available compute. Please retry.'
+                : poolSummary?.state === 'migration-pending'
+                  ? 'Compute pool migration is in progress. Please retry shortly.'
+                  : 'No available native offerings in the current compute pool.'}
+            </p>
+          )}
+          {catalogs.length > 0 && (
             <div>
               <label
                 htmlFor="node-provider"
@@ -174,14 +215,17 @@ export function Nodes() {
               </label>
               <Select
                 id="node-provider"
-                value={effectiveProvider}
+                value={activeCatalog ? effectiveProvider : ''}
                 onChange={(e) => {
                   const p = e.target.value;
                   setSelectedProvider(p);
+                  setNativeInstanceType('');
+                  setUseLegacyPreset(false);
                   const cat = catalogs.find((c) => c.provider === p);
                   if (cat) setNewNodeLocation(cat.defaultLocation);
                 }}
               >
+                {!activeCatalog && <option value="" disabled>Choose a provider</option>}
                 {catalogs.map((cat) => (
                   <option key={cat.provider} value={cat.provider}>
                     {PROVIDER_LABELS[cat.provider] ?? cat.provider}
@@ -191,21 +235,108 @@ export function Nodes() {
             </div>
           )}
           {activeCatalog && (
+            <div className="min-w-0">
+              <label
+                htmlFor="node-location"
+                className="block text-fg-muted font-medium mb-1"
+                style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+              >
+                Location
+              </label>
+              <Select
+                id="node-location"
+                value={nodeLocation}
+                onChange={(e) => {
+                  setNewNodeLocation(e.target.value);
+                  setNativeInstanceType('');
+                }}
+              >
+                {activeCatalog.locations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.name}, {loc.country}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+          {activeCatalog && !legacyCatalog && (
+            <div className="min-w-0">
+              <label
+                htmlFor="node-offering"
+                className="block text-fg-muted font-medium mb-1"
+                style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+              >
+                Native offering
+              </label>
+              <Select
+                id="node-offering"
+                className="min-w-0 max-w-full"
+                value={selectedOffering?.providerInstanceType ?? ''}
+                onChange={(e) => {
+                  setSelectedProvider(effectiveProvider);
+                  setNewNodeLocation(nodeLocation);
+                  setNativeInstanceType(e.target.value);
+                }}
+                disabled={nativeOfferings.length === 0}
+                aria-describedby="node-offering-help"
+              >
+                <option value="">Choose an offering</option>
+                {nativeOfferings.map((offering) => (
+                  <option key={offering.providerInstanceType} value={offering.providerInstanceType}>
+                    {offering.providerInstanceType}
+                    {offering.displayName && offering.displayName.toLowerCase() !== offering.providerInstanceType.toLowerCase()
+                      ? ` (${offering.displayName})` : ''} — {offering.vcpu ?? '?'} vCPU,
+                    {' '}{offering.memoryMb == null ? '?' : offering.memoryMb / 1024} GB
+                    {offering.price ? ` · ${offering.price}` : ''}
+                  </option>
+                ))}
+              </Select>
+              {selectedOffering && (
+                <p className="sam-type-secondary text-fg-muted mt-2 mb-0 [overflow-wrap:anywhere]" aria-label="Selected offering resources">
+                  {selectedOffering.vcpu ?? '?'} vCPU · {selectedOffering.memoryMb == null ? '?' : selectedOffering.memoryMb / 1024} GB memory
+                  {selectedOffering.diskGb == null ? '' : ` · ${selectedOffering.diskGb} GB disk`}
+                  {selectedOffering.price ? ` · ${selectedOffering.price}` : ''}
+                </p>
+              )}
+              <p id="node-offering-help" className="sam-type-secondary text-fg-muted mt-2 mb-0 break-words">
+                {nativeOfferings.length === 0
+                  ? 'No available native offerings in this location.'
+                  : 'Choose the provider instance to create. Your compute pool must allow this offering.'}
+              </p>
+            </div>
+          )}
+          {legacyCatalog && (
+            <div>
+              <p className="sam-type-secondary text-fg-muted mt-0 mb-2">
+                This older catalog does not list native offerings. A compatibility preset is a request estimate;
+                your compute pool determines the actual instance.
+              </p>
+              <label className="flex items-center gap-2 sam-type-secondary">
+                <input
+                  type="checkbox"
+                  checked={useLegacyPreset}
+                  onChange={(e) => setUseLegacyPreset(e.target.checked)}
+                />
+                Use a legacy compatibility preset
+              </label>
+            </div>
+          )}
+          {legacyCatalog && useLegacyPreset && legacySizes && (
             <div>
               <label
                 htmlFor="node-size"
                 className="block text-fg-muted font-medium mb-1"
                 style={{ fontSize: 'var(--sam-type-secondary-size)' }}
               >
-                Size
+                Compatibility preset
               </label>
               <Select
                 id="node-size"
                 value={newNodeVmSize}
                 onChange={(e) => setNewNodeVmSize(e.target.value as VMSize)}
               >
-                {(Object.keys(activeCatalog.sizes) as VMSize[]).map((size) => {
-                  const info = activeCatalog.sizes[size];
+                {(Object.keys(legacySizes) as VMSize[]).map((size) => {
+                  const info = legacySizes[size];
                   const label = VM_SIZE_LABELS[size];
                   return (
                     <option key={size} value={size}>
@@ -217,30 +348,8 @@ export function Nodes() {
               </Select>
             </div>
           )}
-          {activeCatalog && (
-            <div>
-              <label
-                htmlFor="node-location"
-                className="block text-fg-muted font-medium mb-1"
-                style={{ fontSize: 'var(--sam-type-secondary-size)' }}
-              >
-                Location
-              </label>
-              <Select
-                id="node-location"
-                value={newNodeLocation}
-                onChange={(e) => setNewNodeLocation(e.target.value)}
-              >
-                {activeCatalog.locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}, {loc.country}
-                  </option>
-                ))}
-              </Select>
-            </div>
-          )}
           <div className="flex justify-end">
-            <Button onClick={handleCreateNode} disabled={creating} loading={creating}>
+            <Button onClick={handleCreateNode} disabled={creating || !canCreateNode} loading={creating}>
               Create Node
             </Button>
           </div>
@@ -269,7 +378,7 @@ export function Nodes() {
           {(nodesQueryError instanceof Error && nodesQueryError.message) || 'Failed to load nodes'}
         </Alert>
       ) : sortedNodes.length === 0 ? (
-        <EmptyState
+        !showCreateForm && <EmptyState
           icon={<Server size={48} />}
           heading="No nodes yet"
           description="Create your first node to start hosting workspaces."
@@ -285,7 +394,7 @@ export function Nodes() {
               onStop={handleStopNode}
               onDelete={handleDeleteNode}
               onCreateWorkspace={handleCreateWorkspace}
-              catalogs={catalogs}
+              catalogs={catalogData ?? []}
             />
           ))}
         </div>

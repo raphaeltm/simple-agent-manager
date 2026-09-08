@@ -604,6 +604,7 @@ describe('project capacity pool routes', () => {
       strategy: 'balanced',
       exhaustionPolicy: 'queue',
       availableCandidateCount: 0,
+      nativeOfferings: [],
       reason: 'configured-default-pool-has-no-active-candidates',
     });
   });

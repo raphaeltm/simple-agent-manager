@@ -427,6 +427,27 @@ describe('default capacity pool routes', () => {
       ]),
     });
     expect(body.effectiveSummary.availableCandidateCount).toBeGreaterThan(0);
+    expect(body.effectiveSummary.nativeOfferings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: 'hetzner', providerInstanceType: expect.any(String), location: expect.any(String) }),
+    ]));
+    for (const offering of body.effectiveSummary.nativeOfferings) {
+      expect(Object.keys(offering).sort()).toEqual([
+        'diskGb', 'displayName', 'location', 'memoryMb', 'price', 'provider', 'providerInstanceType', 'vcpu',
+      ]);
+    }
+    const removed = sqlite.prepare(`SELECT id, provider, location, provider_instance_type
+      FROM capacity_pool_candidates WHERE workload_role='workspace' AND status='active'
+        AND provider_instance_type IS NOT NULL LIMIT 1`).get() as {
+      id: string; provider: string; location: string; provider_instance_type: string;
+    };
+    sqlite.prepare('UPDATE capacity_pool_candidates SET status=? WHERE id=?').run('disabled', removed.id);
+    const updated = await createApp().request('/api/capacity-pools/defaults', {}, env);
+    const afterRemoval = await updated.json() as {
+      effectiveSummary: { nativeOfferings: Array<{ provider: string; location: string; providerInstanceType: string }> };
+    };
+    expect(afterRemoval.effectiveSummary.nativeOfferings).not.toContainEqual(expect.objectContaining({
+      provider: removed.provider, location: removed.location, providerInstanceType: removed.provider_instance_type,
+    }));
   });
 
   it('does not reconcile installation defaults for ordinary user reads or reconcile calls', async () => {

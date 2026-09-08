@@ -243,6 +243,17 @@ export interface SafeEffectiveCapacityPoolSummary {
   strategy: CapacityPoolStrategy | null;
   exhaustionPolicy: CapacityExhaustionPolicy | null;
   availableCandidateCount: number;
+  /** Eligible VM choices without pool, source, credential or owner identifiers. */
+  nativeOfferings?: Array<{
+    provider: CredentialProvider;
+    location: string;
+    providerInstanceType: string;
+    displayName: string;
+    vcpu: number | null;
+    memoryMb: number | null;
+    diskGb: number | null;
+    price: string | null;
+  }>;
   reason?: SafeEffectiveCapacityPoolReason;
 }
 

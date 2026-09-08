@@ -282,26 +282,26 @@
   {
     "slug": "node-create",
     "surface": "Nodes creation form",
-    "mock_state_coverage": "Real Nodes page; mocked provider catalogs, provider switch resets location, explicit compatibility size POST, and API rejection. Selected pair shows GCP catalog inputs.",
-    "reviewer": "root",
-    "capture": "viewport",
+    "mock_state_coverage": "Real Nodes page; installation-funded native CX43 selection without a personal credential catalog. Exact native SKU POST, provider/location reset, empty/stale/unavailable offerings, configured-empty/migrating/disabled effective pools, explicit old-catalog compatibility, API error, 35 long/special-character options and 320px overflow cases are exercised.",
+    "reviewer": "merge_review",
+    "capture": "full page at stated viewport",
     "files": {
       "mobile": {
         "path": "node-create-mobile.png",
-        "source": ".codex/tmp/node-pools/screenshots/compute-create-node-catalog-375x667.png",
+        "source": ".codex/tmp/playwright-screenshots/compute-create-node-installation-375x667.png",
         "viewport_css_px": [
           375,
           667
         ],
         "png_px": [
           750,
-          1644
+          1392
         ],
-        "sha256": "54e3dced8347906479c673bc4a1c713fe158506a821efc6ea84a871097d187b3"
+        "sha256": "da18bfdcfed5c189bcbaf8a1fe6e89c9a9f1455b29a146af0beed727344d0db3"
       },
       "desktop": {
         "path": "node-create-desktop.png",
-        "source": ".codex/tmp/node-pools/screenshots/compute-create-node-catalog-1280x800.png",
+        "source": ".codex/tmp/playwright-screenshots/compute-create-node-installation-1280x800.png",
         "viewport_css_px": [
           1280,
           800
@@ -310,7 +310,7 @@
           2560,
           1600
         ],
-        "sha256": "648c10ae500af7d005336252acf787c51152bd123501681faffc61aab076ac74"
+        "sha256": "154aade400f51356e6d49a0f2906cd15df24ac0b59215d67e36b3cd34035711c"
       }
     }
   },

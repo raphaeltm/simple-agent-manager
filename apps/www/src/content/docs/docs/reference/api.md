@@ -215,6 +215,13 @@ so clients do not infer unsupported cross-scope fallback. Ordinary users may rec
 installation-funded `effectiveSummary` from existing installation metadata, but this endpoint never
 reconciles installation credentials.
 
+When the effective pool is ready, `effectiveSummary.nativeOfferings` lists its eligible VM
+provider, location, native instance type, display name, resources and displayed price. These
+choices omit pool, source, credential and owner identifiers. The Nodes creation form uses them
+even when the user has no personal cloud credential. Empty, disabled or migrating effective
+pools return no choices; they do not fall back to a personal credential catalog. Final node
+creation still revalidates the selected offering against current pool authority.
+
 ### `POST /api/capacity-pools/defaults/reconcile`
 
 Explicitly reconcile the authenticated user's default pool from active personal compute

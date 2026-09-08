@@ -152,7 +152,9 @@ async function removeManagedNodeRecords(
       )
     )
     .run();
-  if ((deletedNode.meta.changes ?? 0) !== 1) {
+  // The predicate targets one primary key, but D1 also counts FK SET NULL
+  // writes (for example tasks.auto_provisioned_node_id) in meta.changes.
+  if ((deletedNode.meta.changes ?? 0) < 1) {
     throw errors.conflict('Managed node incarnation changed after deletion proof');
   }
 }

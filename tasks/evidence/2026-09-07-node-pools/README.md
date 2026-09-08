@@ -31,7 +31,7 @@ Browser mocks assert visible state and API payloads. Actual current-authority/ad
 | Deployment environment node hardware | [Image](deployment-mobile.png) | [Image](deployment-desktop.png) | viewport | root |
 | Personal compute usage active nodes | [Image](usage-mobile.png) | [Image](usage-desktop.png) | viewport | root |
 | Admin compute usage node hardware | [Image](admin-usage-mobile.png) | [Image](admin-usage-desktop.png) | viewport | root |
-| Nodes creation form | [Image](node-create-mobile.png) | [Image](node-create-desktop.png) | viewport | root |
+| Nodes creation form | [Image](node-create-mobile.png) | [Image](node-create-desktop.png) | full page at stated viewport | merge_review |
 | Create Workspace workload resources | [Image](workspace-create-mobile.png) | [Image](workspace-create-desktop.png) | viewport | root |
 | Agent profile resource form | [Image](profile-resources-mobile.png) | [Image](profile-resources-desktop.png) | focused dialog | root |
 | Skill resource form | [Image](skill-resources-mobile.png) | [Image](skill-resources-desktop.png) | viewport | root |
@@ -82,7 +82,7 @@ Real component harness; native/requested/observed disagreement, legacy fallback,
 
 ### Nodes creation form
 
-Real Nodes page; mocked provider catalogs, provider switch resets location, explicit compatibility size POST, and API rejection. Selected pair shows GCP catalog inputs.
+Real Nodes page; selected pair now shows installation-funded native CX43 selection for a user with no personal credential catalog. Provider/location changes clear the native choice; the POST carries the exact SKU without vmSize. Empty/stale/unavailable offerings and empty/migrating/disabled effective pools block creation. Legacy compatibility presets require explicit opt-in on an old, unconfigured catalog. Native GCP, API rejection, 35 offerings, long/special-character labels and 320px overflow are also covered.
 
 ### Create Workspace workload resources
 
@@ -135,3 +135,29 @@ Real shared pool editor; provider/region/CPU/RAM/price and available/unavailable
 ### Pool offering selection card
 
 Real shared offering card under each scope; long native SKU, 48 vCPU/192 GB/960 GB, high mocked price, Not selected with visible Add. This exact-element pair proves long content wraps without hiding the action.
+
+## September 8 native Nodes correction
+
+The Nodes creator previously still posted legacy tiers. Its native UI regression
+failed on both required viewports before the correction. The updated actual-page
+matrix covers 11 scenarios at both 375×667 and 1280×800, with additional 320px
+overflow checks inside the long-label case. The ordinary-user API/SQLite test
+proves installation-funded native choices remain available with no personal
+credential catalog, returns only explicitly permitted resource/identity fields,
+excludes credential canaries, and removes disabled offerings. The two scope route
+suites passed 34 tests. These remain local mock/API boundary checks, not a live
+provider provisioning claim.
+
+Interaction variants considered: compact provider/location/native selects; a
+full offering-card grid; and a request-first form. The compact native selectors
+reuse the existing node creation layout and match its exact-instance API. A
+wrapped resource/price line keeps selected capacity readable on narrow screens.
+The duplicate empty-state Create action is hidden while the form is open; Cancel
+uses secondary styling. Native select controls may truncate exceptionally long
+human labels, while the leading SKU and separately wrapped resources stay visible.
+
+Review rubric: visual hierarchy 4/5; interaction clarity 5/5; mobile usability
+4/5; accessibility 4/5 (labels, native keyboard controls, focus styling and
+non-color-only errors; no full screen-reader audit claimed); system consistency
+5/5. Nodes has no useEffect hooks; provider/location handlers explicitly clear
+stale selection, and current query results determine whether creation is enabled.

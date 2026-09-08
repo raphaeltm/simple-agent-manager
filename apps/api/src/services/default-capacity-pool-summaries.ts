@@ -7,6 +7,7 @@ import type {
   SafeEffectiveCapacityPoolReason,
   SafeEffectiveCapacityPoolSummary,
 } from '@simple-agent-manager/shared';
+import { isValidProvider } from '@simple-agent-manager/shared';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
@@ -45,17 +46,46 @@ export function toSafeEffectiveCapacityPoolSummary(
       strategy: null,
       exhaustionPolicy: null,
       availableCandidateCount: 0,
+      nativeOfferings: [],
       reason: 'no-capacity-pool-configured',
     };
   }
 
   const state = summary.effectiveState ?? 'configured-ready';
+  const activeSources = new Set(summary.sources.filter((source) =>
+    source.status === ACTIVE_STATUS && source.sourceKind === SOURCE_KIND_CLOUD_PROVIDER
+  ).map((source) => source.id));
+  const nativeOfferings: NonNullable<SafeEffectiveCapacityPoolSummary['nativeOfferings']> = [];
+  const seen = new Set<string>();
+  if (state === 'configured-ready') {
+    for (const candidate of summary.candidates) {
+      if (candidate.status !== ACTIVE_STATUS || !activeSources.has(candidate.capacitySourceId)
+        || candidate.workloadRole !== PRIMARY_CAPACITY_WORKLOAD_ROLE || candidate.runtime !== 'vm'
+        || candidate.catalogAvailability !== 'available' || !candidate.providerInstanceCatalogSource
+        || !candidate.provider || !isValidProvider(candidate.provider)
+        || !candidate.location || !candidate.providerInstanceType) continue;
+      const key = JSON.stringify([candidate.provider, candidate.location, candidate.providerInstanceType]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      nativeOfferings.push({
+        provider: candidate.provider,
+        location: candidate.location,
+        providerInstanceType: candidate.providerInstanceType,
+        displayName: candidate.providerInstanceDisplayName ?? candidate.providerInstanceType,
+        vcpu: candidate.providerInstanceVcpuCount,
+        memoryMb: candidate.providerInstanceMemoryMb,
+        diskGb: candidate.providerInstanceDiskGb,
+        price: candidate.providerInstancePriceDisplay,
+      });
+    }
+  }
   return {
     scope: summary.pool.scope,
     state,
     strategy: summary.pool.strategy,
     exhaustionPolicy: summary.pool.exhaustionPolicy,
     availableCandidateCount: summary.availableCandidateCount ?? 0,
+    nativeOfferings,
     reason: safeEffectiveReasonForState(state),
   };
 }
