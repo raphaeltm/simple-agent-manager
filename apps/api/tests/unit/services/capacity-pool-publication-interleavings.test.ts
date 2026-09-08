@@ -179,7 +179,7 @@ describe('pool publication real SQL interleavings', () => {
     ).toEqual({ status: 'deleted' });
   });
 
-  it('restarts a partial catalog when unchanged IDs acquire new prices', async () => {
+  it('restarts changed prices but retains completed publication across unchanged refreshes', async () => {
     const { sqlite, db } = fixture();
     const store = cursorStore();
     const options = { publishBatchSize: 2, cursorStore: store };
@@ -196,10 +196,50 @@ describe('pool publication real SQL interleavings', () => {
         )
         .all()
     ).toEqual([{ price: 9900 }]);
+    const changedCatalog = [offering('cx23', 99), offering('cx33', 20)];
+    const completed = await publish(db, changedCatalog, options);
+    expect(completed.publicationComplete).toBe(true);
+    expect(store.values.size).toBe(1);
+    const completedCursor = JSON.parse([...store.values.values()][0]!);
+    expect(completedCursor).toEqual({
+      digest: expect.any(String),
+      published: 4,
+      complete: true,
+    });
+    await reconcileDefaultPoolStatus(db, 'pool', undefined, completed);
+    const readyPool = sqlite
+      .prepare("SELECT revision, migration_state FROM capacity_pools WHERE id='pool'")
+      .get();
+    expect(readyPool).toMatchObject({ migration_state: 'complete' });
+
+    // The bounded refresh rotates through both pages without hiding a ready catalog.
+    for (const published of [2, 4]) {
+      const refreshed = await publish(db, changedCatalog, options);
+      expect(refreshed).toMatchObject({ publishedCandidates: 2, publicationComplete: true });
+      expect(JSON.parse([...store.values.values()][0]!)).toEqual({
+        ...completedCursor,
+        published,
+      });
+      await reconcileDefaultPoolStatus(db, 'pool', undefined, refreshed);
+      expect(
+        sqlite.prepare("SELECT revision, migration_state FROM capacity_pools WHERE id='pool'").get()
+      ).toEqual(readyPool);
+    }
+
+    // A price change also invalidates an already-completed semantic catalog.
+    const repriced = await publish(db, [offering('cx23', 101), offering('cx33', 20)], options);
+    expect(repriced.publicationComplete).toBe(false);
+    const repricedCursor = JSON.parse([...store.values.values()][0]!);
+    expect(repricedCursor).toEqual({
+      digest: expect.any(String),
+      published: 2,
+      complete: false,
+    });
+    expect(repricedCursor.digest).not.toBe(completedCursor.digest);
+    await reconcileDefaultPoolStatus(db, 'pool', undefined, repriced);
     expect(
-      (await publish(db, [offering('cx23', 99), offering('cx33', 20)], options)).publicationComplete
-    ).toBe(true);
-    expect(store.values.size).toBe(0);
+      sqlite.prepare("SELECT migration_state FROM capacity_pools WHERE id='pool'").get()
+    ).toEqual({ migration_state: 'pending' });
   });
 
   it('does not count generation-rejected writes as published progress', async () => {
