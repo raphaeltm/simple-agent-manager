@@ -17,7 +17,8 @@ Ten orphan snapshot sleep intents occupy every scheduler batch indefinitely. Val
 - [x] Diagnose cutoff/mode mismatch and document evidence or tracked follow-up.
 - [x] Confirm existing safe legacy-node remediation coverage or track required gap.
 - [x] Run appropriate unit/integration, lint, typecheck, build and local specialist review.
-- [ ] Stage final candidate, create PR, pass CI/CodeRabbit, merge and verify production queue progress.
+- [x] Stage final candidate and verify orphan retirement, preservation and continued candidate progress.
+- [ ] Create PR, pass CI/CodeRabbit, merge and verify production queue progress.
 
 ## Acceptance criteria
 A full batch of permanently invalid candidates cannot block subsequent valid work across repeated ticks. Null/deleted sources leave retry eligibility without losing artifacts. Concurrent renewal cannot be overwritten by stale terminalization. Active prompts remain protected by the existing idleness predicate. Final report accurately separates demonstrated causes from unknowns.
@@ -45,3 +46,10 @@ A full batch of permanently invalid candidates cannot block subsequent valid wor
 - Final implementation commit `c42e972b7`; CI [34207458403](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34207458403) passed every applicable job. Clean local `pnpm exec turbo run lint typecheck test build --concurrency=1` passed47/47checks, including9043APItests across667files. Local specialist review PASS.
 - No PR or own staging deployment yet: shared environment is reserved by archive canary task `01M1ZW0ZCXCZDVY6D01404NWHC` and waiting node-pool task `01M1ZWC98V6FVJC4WC4Q8R64Z3`. Do not overwrite their verification. Archive canary must be copied back and settings made compatible before an older reader replaces its code.
 - Resume from `.do-state.md` and `.workflow-state.md`. Register a bounded SAM durable wait; do not call complete_task or archive this task until staging, PR/review, merge and production verification finish. Staging baseline has10failed+8scheduledintents,15missingworkspaces; retire originalorphans while comparing artifact/capture/recovery fields.
+
+## Staging verification (2026-09-08 10:27 UTC)
+- Deployment [34213975013](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34213975013) on `8a0e574a4` (source `c42e972b7`) passed with smoke tests.
+- Fresh10:10baseline still showed the same10orphan failures rewritten each tick. First new-code tick10:20:38 retired10; nexttick10:25:37 retired the remaining5originalorphans. All15preserved snapshot status, artifact keys, capture generation, recovery attempts, expiry and sleeping timestamp.
+- Three workspace-backed entries previously starved sinceSeptember1–4 were reached and safely deferred with future deadlines because idleness was unknown. No widening of batch10 was needed.
+- Authenticated dashboard/projects Playwright passed10:26:48 with no browser exceptions; both screenshots inspected. No new testVMs/resources/settings. Staging released to waiting node-pool owner.
+- Local completion review PASS covers all implementation criteria; PR/CI/CodeRabbit and production release remain explicit unchecked gates. Mode-selection mismatch and legacy missing-fingerprint node recovery remain separate SAM Ideas, not claimed fixed.
