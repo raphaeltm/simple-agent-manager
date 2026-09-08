@@ -141,14 +141,14 @@ INTO`, `REPLACE INTO`, `"quoted"` / `` `backticked` `` / `[bracketed]` and
 A second inventory covers the calls that allocate or pay for capacity without
 writing a row themselves: `createNodeRecord`, `provisionNode`,
 `reserveWorkspacePlacement`, `createWorkspaceOnNode`, `startComputeTracking`.
-Each of the 21 current call sites carries an explicit `scope`, `role`,
-`admission` string and `status`. A caller that is not inventoried is reported,
+Each of the 21 call sites at the scanner checkpoint carried an explicit `scope`,
+`role`, `admission` string and `status`. A caller that is not inventoried is reported,
 so the shared `createNodeRecord` cannot conceal a bypass — a
 `services/new-fleet-warmer.ts` negative fixture proves it.
 
-`status: 'unreviewed-bypass'` is an honest classification of current WIP code,
+`status: 'unreviewed-bypass'` classifies an unreviewed caller,
 not an approval: it is reported as a violation on every run. Six such findings
-exist today (routes/nodes.ts, routes/workspaces/crud.ts,
+existed at this checkpoint (routes/nodes.ts, routes/workspaces/crud.ts,
 services/session-snapshot-upload-relay.ts).
 
 ### 8. Native-offering-removal matrix row
@@ -157,12 +157,13 @@ Corrected in the shared task file. The old row asserted that an old native plan
 must "survive" a catalog removal, which is the wrong contract. The corrected row
 is recorded there and reproduced in the Findings section below.
 
-## Current honest gate state
+## Historical scanner checkpoint
 
-`pnpm quality:node-pool-boundary` exits **1** with **60 violations**. This is a
-real failure of the application migration, reported separately from the scanner
-regression suite, which is **50/50 green**. The count is not zero and must not be
-made zero by weakening the gate.
+At the September 7 scanner correction checkpoint, `pnpm quality:node-pool-boundary`
+exited **1** with **60 violations**. This was a real application migration
+failure, reported separately from the **50/50 green** scanner regression suite.
+These historical counts do not describe the integrated PR #2030 tree. The gate
+was not weakened to remove the findings.
 
 | Class                                            | Count | Files                                                                                                             |
 | ------------------------------------------------ | ----: | ----------------------------------------------------------------------------------------------------------------- |
@@ -176,20 +177,31 @@ Triaged out as legitimate (each with a paired test): type positions, persisted
 legacy columns, audit/diagnostic metadata, legacy→legacy propagation, deprecated
 request-field presence checks, and the five reviewed deprecated-field validators.
 
-## Quality integration
+## Historical quality integration
 
 `pnpm quality:node-pool-boundary` fails on any violation.
 `pnpm quality:node-pool-boundary:report` prints the same list and exits 0 for the
 migration owners.
 
-The gate is deliberately **not** added as a blocking CI step while the count is
-above zero: repository policy (progressive quality-tool rollout) requires
-existing debt to be ratcheted rather than to fail unrelated pull requests. The
-ratchet that does run in CI is
-`apps/api/tests/unit/services/node-pool-legacy-boundary.test.ts`, which asserts
-the count never exceeds the recorded 60 and that the known leak classes are still
-reported. Wiring the command into `code-quality` is the correct final step once
-the application slices bring the count to zero.
+At that checkpoint, the gate was deliberately **not** a blocking CI step while
+the count was above zero: repository policy (progressive quality-tool rollout)
+required existing debt to be ratcheted rather than fail unrelated pull requests.
+The CI ratchet in `apps/api/tests/unit/services/node-pool-legacy-boundary.test.ts`
+then asserted that the count never exceeded 60 and known leak classes remained
+reported. Blocking integration was deferred until the application slices reached
+zero.
+
+## September 8 integrated checkpoint
+
+The integrated PR #2030 tree now asserts zero legacy authority leaks and zero
+uninventoried allocation entrypoints in
+`apps/api/tests/unit/services/node-pool-legacy-boundary.test.ts`. The
+`code-quality` job in `.github/workflows/ci.yml` runs
+`pnpm quality:node-pool-boundary` as a blocking step. The historical 60-violation
+ratchet and deferred CI wiring above have therefore been superseded. This source
+check does not claim a new current-head CI result; final checks, live lifecycle
+acceptance, cleanup and release remain recorded in the parent compatibility task
+and PR #2030.
 
 ## Validation
 
@@ -199,16 +211,17 @@ fixture went red.
 
 ## Not in scope
 
-Fixing the 60 application violations. They belong to the current-authority /
-direct-allocation slices (A5 `01M1XFJSHZV180T9WTWDQZJGQC`, C3a
-`01M1XFH3SHTKP79YDJ0DMC4CQ2`) and to the future C3b2 runtime-leak work. Section E
+Fixing the 60 application violations was outside this scanner slice. They belonged
+to the current-authority / direct-allocation slices (A5 `01M1XFJSHZV180T9WTWDQZJGQC`, C3a
+`01M1XFH3SHTKP79YDJ0DMC4CQ2`) and the subsequent C3b2 runtime-leak work. Their
+integration is reflected in the zero-violation gate above; Section E release
 acceptance remains parent-owned.
 
-## Discrimination evidence
+## Historical discrimination evidence
 
 Each guard was deleted in turn and the fixture suite re-run. Every mutation
-turned exactly the intended fixtures red; the suite is 50/50 green with the guard
-restored.
+turned exactly the intended fixtures red; the checkpoint suite was 50/50 green
+with the guard restored.
 
 | Guard removed                                            |                Result |
 | -------------------------------------------------------- | --------------------: |
@@ -235,20 +248,20 @@ deleting the lookahead changed nothing. The boundary property is instead proven
 by the lazy-quantifier mutation in the last row above, which is the natural wrong
 implementation this class of bug takes.
 
-## Test-count reconciliation
+## Historical test-count reconciliation
 
-`apps/api` unit suite on this branch: **652 files, 8747 tests, 8674 passed, 73
-failed, 0 files failed to collect** (JSON reporter, `success: false` read from
+`apps/api` unit suite at the scanner correction checkpoint: **652 files, 8747 tests,
+8674 passed, 73 failed, 0 files failed to collect** (JSON reporter, `success: false` read from
 the report rather than from a piped exit code).
 
-The 73 failures are pre-existing WIP application failures owned by other slices,
+The 73 failures were pre-existing WIP application failures owned by other slices,
 across 18 files (`deployment-provisioning`, `node-selector-flow`,
 `placement-resolver`, `capacity-pools-defaults`, `task-run-capacity-pools`,
 `session-snapshot-upload-relay`, `trigger-submit`, and others). Verified by
 running exactly those 18 files against the base commit `93bfa4246` with this
 branch stashed: **18 failed files / 73 failed / 272 passed**, identical.
 
-Baseline reconciliation: the only files this branch changes are the scanner
-modules, `package.json`, this branch's task docs and the boundary test file. The
+Baseline reconciliation: the only files the scanner correction branch changed
+were the scanner modules, `package.json`, this branch's task docs and the boundary test file. The
 boundary test file went from 7 tests to 50, so the expected total is
 `8704 + 43 = 8747`, which matches. No test file lost its collection.

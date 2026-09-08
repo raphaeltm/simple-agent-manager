@@ -1,7 +1,8 @@
 # PR #2030 final continuation evidence
 
 The inherited 44-image mock gallery remains in `../2026-09-07-node-pools/`.
-These additional captures cover the final corrections and live runtime checks.
+These additional captures cover continuation corrections and live runtime checks.
+Historical and superseded captures below do not establish final-build acceptance.
 
 ## Reviewed captures
 
@@ -24,35 +25,48 @@ reviewed for clipping, readability, responsive controls and overflow. The termin
 screenshots show actual execution, not a mock connection. Full screen-reader or
 24-hour observability coverage is not claimed.
 
-## Live lifecycle checkpoint
+## Historical live lifecycle checkpoint: `99a620928`
 
 Session `bb03e84d-7778-412d-baf2-aec372da2364` created and read back
 `PR2030-FINAL-1788889363195` in both `/workspaces/bullboard/.pr2030-final-check`
 and `/home/node/.pr2030-final-check`. UI sleep returned 200 at 17:46 UTC.
-Snapshot `01M211XXWT1ME9VGR2YVN77XE6` is available with degradation none and
-home/WIP hashes; R2 lists home.tar (71,680 bytes), wip.bundle (21,259 bytes), and manifest.json (602 bytes).
-The saved reservation is 1 GB and 0.25 vCPU. The profile default was then changed to 2 GB.
-The empty VM was deleted through SAM, preserving the snapshot with zero live VMs.
-Final wake/readback and cleanup remain pending and must be appended before merge.
+Snapshot `01M211XXWT1ME9VGR2YVN77XE6` became available with degradation none and
+home/WIP hashes; R2 listed home.tar (71,680 bytes), wip.bundle (21,259 bytes), and manifest.json (602 bytes).
+The saved reservation was 1 GB and 0.25 vCPU. The profile default was then changed to 2 GB.
+The empty VM was deleted through SAM, preserving snapshot artifacts with zero live
+VMs at that checkpoint. The subsequent wake failed: node deletion had removed the
+required workspace row and nulled `snapshot.workspace_id`. Artifact presence and
+the Sleeping display did not establish recoverability. A fresh supported capture,
+node deletion and wake with both marker readbacks and the saved reservation on
+`c6d1a987f`, followed by cleanup, remain pending and must be recorded before merge.
 
 An earlier Codex startup inherited the staging user's rejected `gpt-5.4-mini`
 model. It executed no marker prompt; its workspace was deleted. The isolated
 profile selects the configured Claude agent without changing the user's defaults.
 
 
-`sleep-status-desktop.png` / `sleep-status-mobile.png` use the real header with
-mock canonical Sleeping data and the observed old-task runtime-loss error. The
-healthy snapshot case has no failure card; canonical failed recovery and active
-runtime failure retain their cards. Both viewport captures were reviewed with no
-overflow, clipping, or unreadable controls. These are local mocks; final staging
-captures will verify the same state after deployment.
-
-
 ## Superseded sleep-header experiment
 
-The `sleep-status-*` local captures document an experiment that was reverted.
+`sleep-status-desktop.png` / `sleep-status-mobile.png` used the real header with
+mock canonical Sleeping data and the observed old-task runtime-loss error. The
+proposed display suppressed the runtime-loss card for the Sleeping fixture while
+retaining canonical failed-recovery and active-runtime failure cards. Both local
+mock captures were reviewed with no overflow, clipping or unreadable controls.
+They document the `722997457` experiment, which was reverted in `c6d1a987f`.
 Subsequent live wake proved the snapshot's required workspace row had been
 removed by node deletion. Canonical Sleeping alone did not prove recoverability;
 hiding its runtime error was unsafe. These images are retained as investigation
 evidence and are not final UI acceptance evidence. The node deletion fix and a
 new supported lifecycle test replace this experiment.
+
+## Final candidate checkpoint: `c6d1a987f`
+
+[Deployment and smoke run 34262971288](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34262971288) passed; all PR checks including SonarCloud passed on this runtime SHA. Fresh session `fb2b4d63-bbad-4419-809e-6bb5d2d22dbc` created and read `PR2030-FINAL-1788892522814` in both original marker paths on the exact c6 VM binary. Its saved reservation is 250 CPU milliseconds, 1024 MB RAM and 40960 MB disk.
+
+`final-markers-before-sleep-desktop.png` shows the agent readback. `final-terminal-desktop.png` and `final-terminal-mobile.png` show actual WebSocket command outputs on this runtime, with mobile overflow false. Both terminal captures were opened and reviewed.
+
+Sleep returned 200 with available, non-degraded snapshot `01M215AEPJBTRVVPQCFT7SFVT8`. After the profile default changed to 2 GB, node deletion first returned 409 while strict provider termination remained unconfirmed; a reconciled request returned 200. The node disappeared, while workspace `01M2154KB0JNB384PGVDM50Z7K` and the snapshot's workspace reference remained. Both node references became null. `final-sleep-after-node-delete-desktop.png` / `final-sleep-after-node-delete-mobile.png` show the actual Sleeping state without a runtime error; both were opened and reviewed. The mobile capture is scrolled to the prior readback and composer.
+
+One wake prompt was accepted with delivery `01M215KKYAARTRYB7FM9JS4B4P`; recovery claimed the snapshot and created replacement node `01M215M9Z05Q8B72NB2SA082VQ`. Final restored marker readback and saved-reservation verification remain pending at this checkpoint.
+
+The earlier orphaned snapshot was separately removed by [guarded maintenance run 34264932643](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34264932643), after a mutation-free preview. Exactly its three hash-verified objects and one unchanged snapshot row were deleted; independent R2 listing and D1 checks confirmed absence. No recovery metadata was rearmed.

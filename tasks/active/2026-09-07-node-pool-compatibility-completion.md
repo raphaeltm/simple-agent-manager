@@ -341,8 +341,12 @@ Changing a deprecated size hint cannot change a native payload or accounting.
       capability tests through the actual entry point to provider/atomic reservation.
 - [ ] Run lint, typecheck, test, build and real Workers/D1 race/migration suites,
       provider payload tests, CLI Go scenario tests/coverage and visual checks.
-- [ ] Complete all local /do specialist reviews, fix every correctness finding,
-      and run task-completion validation before archive.
+- [x] Complete local /do specialist reviews and correct identified implementation
+      findings through `c6d1a987f`, including independent review of snapshot
+      context retention on node deletion. Completion and documentation audits
+      identified the remaining live validation and release gates below.
+- [ ] Reconcile final validation evidence and run task-completion validation
+      before archive.
 - [ ] Coordinate shared staging; deploy one pinned integrated candidate. Exercise
       fresh/legacy requests, default credentials, native catalog edits, empty-pool
       failure, reuse/burst admission, direct workspace and safe recovery on real VMs.
@@ -759,9 +763,12 @@ hypothesis was independently rejected by real workerd HTTP and DO probes.
       Empty or ambiguous inventory must not imply absence or authorize duplicate creation.
 - [x] Verify slow response, restart after provider acceptance, concurrent deletion,
       authority revocation and ambiguous inventory through joined DO/provider/D1 tests.
-- [ ] Repair only the exact live test runtime's missing metadata after reviewed
-      provider evidence, then finish same-snapshot restoration, terminal and pricing
-      checks and remove every owned runtime, artifact, DNS record and test project.
+- [x] Repair only the exact live test runtime's missing metadata after reviewed
+      provider evidence, then verify the original snapshot's restoration, terminal
+      and pricing. The September 8 15:00 UTC checkpoint records this parent-session
+      result; it is not a restoration on the final continuation build.
+- [ ] Remove every owned runtime, artifact, DNS record and test project after
+      the final candidate's supported lifecycle verification.
 
 These are release gates. The task remains active; maintenance operations and earlier
 passing checks do not constitute a successful final recovery or release.
@@ -829,7 +836,9 @@ internal validation error (10021); no final combined deployment success is claim
 - [ ] Update PR evidence, pass final CI/staging, merge, and verify production deployment.
 
 
-Final-candidate staging deployment `34255654245` and its smoke tests passed.
+### Historical continuation checkpoint: `99a620928`
+
+Staging deployment `34255654245` and its smoke tests passed at this checkpoint.
 All PR checks including SonarCloud passed at `49987bf97`; its only difference
 from staged `99a620928` is import whitespace. The fresh VM reported that exact
 staged binary. First-choice native allocation selected `cx23` at 8,800 hourly
@@ -845,35 +854,40 @@ screenshots passed. The first agent startup rejected the smoke user's inherited
 Codex model `gpt-5.4-mini` before executing the marker prompt. Its workspace was
 removed via the supported API; the bounded profile now selects the already
 configured Claude agent without changing user defaults. Live lifecycle testing
-continues on the same owned VM. This configuration failure is not a sleep/wake
+continued on the same owned VM. This configuration failure is not a sleep/wake
 pass, and no duplicate active test workspace is retained.
 
 
 The fresh Claude conversation created and read both `PR2030-FINAL-1788889363195`
 markers. UI sleep returned 200, snapshot `01M211XXWT1ME9VGR2YVN77XE6` became
 available with no degradation and home/WIP hashes. The empty VM was deleted via
-SAM, preserving the snapshot. The profile default is now 2 GB for the pending
-wake test of the saved 1 GB reservation. All 13 owned session R2 prefixes were
-checked: only this fresh snapshot has objects. The original snapshot prefix is
+SAM, preserving the snapshot artifacts but, as the subsequent failed wake proved,
+destroying required workspace context. The profile default was changed to 2 GB
+for the wake test of the saved 1 GB reservation. All 13 owned session R2 prefixes
+were checked: only this fresh snapshot had objects. The original snapshot prefix was
 empty, and the unused primary-user test project was deleted via SAM.
 
-A refreshed sleeping screen showed an old task's Runtime lost card despite its
-canonical Sleeping state and zero recovery attempts. The final UI correction
-suppresses only that historical runtime-loss error; canonical recovery failure,
-local resume errors, active failures and other snapshot errors remain visible.
-Seven actual-header regressions and reviewed desktop/mobile screenshots cover
-these cases. Latest main's dependency updates and subsequent blog update were
-merged; no additional runtime implementation changes were introduced.
+### Superseded sleep-header experiment: `722997457`
 
+A refreshed sleeping screen showed an old task's Runtime lost card despite its
+canonical Sleeping state and zero recovery attempts. An experimental UI change
+suppressed that historical runtime-loss error. Seven actual-header regressions
+and reviewed desktop/mobile mock screenshots covered the proposed display rule,
+but did not establish live recoverability. The change was subsequently reverted;
+its captures are investigation evidence, not final UI acceptance. Latest main's
+dependency updates and subsequent blog update were also merged.
+
+### Node deletion correction: `c6d1a987f`
 
 The wake attempt exposed the actual deletion defect: `removeManagedNodeRecords`
 physically removed the sleeping workspace after preserving the snapshot, and D1
 nulled `snapshot.workspace_id`. `loadRecoveryContext` requires that row, so the
 snapshot was no longer recoverable. The UI-only suppression in `722997457` was
-therefore reverted: Sleeping alone is not proof of recoverability. The final fix
-preserves exact restorable/in-flight snapshot workspace context when deleting a
-node, while explicit workspace deletion remains destructive. A new supported
-capture/delete/wake cycle is required; the orphaned test snapshot is not repaired
+therefore reverted: Sleeping alone is not proof of recoverability. The fix in
+`c6d1a987f` preserves same-owner snapshot-referenced workspace context when deleting
+a node, including pending, failed and in-flight snapshots; retention does not
+assert recovery eligibility. Explicit workspace deletion remains destructive.
+A new supported capture/delete/wake cycle is required; the orphaned test snapshot is not repaired
 by manually recreating metadata and does not count as a successful recovery.
 
 

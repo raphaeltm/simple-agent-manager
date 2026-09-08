@@ -241,9 +241,13 @@ Intentional non-sleep destroyers:
       inventory coverage.
 - [x] Update docs and PR evidence for lifecycle semantics, provider-native node
       identity, metering behavior, and deployment-node pool scope.
-- [ ] Run local quality suite, local specialist reviews, UI screenshots if UI
-      files change, staging on a final pinned candidate with zero staging VMs at
-      rest, PR, CI, CodeRabbit label loop (waived for #2030), merge, and production deploy
+- [x] Record inherited local quality checks, local specialist reviews and UI
+      screenshots in PR #2030 and the compatibility completion task; independently
+      review and run focused validation for the continuation fixes through
+      `c6d1a987f`. CodeRabbit is waived for #2030 because of its file limit.
+- [ ] Complete final current-head quality/CI checks and screenshot evidence,
+      staging on a pinned candidate, confirmed owned-resource cleanup with zero
+      staging VMs at rest, final completion review, merge and production deployment
       monitoring.
 
 ## Acceptance Criteria
@@ -283,3 +287,20 @@ are recorded in the compatibility completion task and PR. The first test VM,
 workspace and DNS records are confirmed deleted. Final release acceptance still
 requires the corrected candidate's full live pass and cleanup; PR #2030 is the
 release record for current-head checks, staging results and deployment outcome.
+
+The continuation's capture/delete/wake test exposed another destroyer: node
+deletion preserved snapshot artifacts but physically deleted the sleeping
+workspace, causing D1 to null `snapshot.workspace_id`. The attempted wake failed
+because recovery requires that source workspace context. The Sleeping-only UI
+error suppression was reverted; this orphan is not a successful recovery and is
+not repaired by manually recreating metadata.
+
+`c6d1a987f` retains same-owner snapshot-referenced workspaces with an atomic
+deletion predicate in both managed and BYO node deletion paths. Node foreign keys
+detach while snapshot workspace references survive. Retention covers pending,
+failed and in-flight snapshots without claiming they are eligible to wake;
+explicit workspace deletion still removes snapshot/R2 state. Ten real Workers/D1
+tests passed, including the reproduced failure, cleared chat pointers during
+handoff, waking at the attempt limit and explicit deletion. Independent review,
+API typecheck and scoped ESLint passed. A fresh supported capture, node deletion
+and wake on the corrected staging build, final cleanup and release remain pending.
