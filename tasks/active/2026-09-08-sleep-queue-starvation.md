@@ -16,7 +16,7 @@ Ten orphan snapshot sleep intents occupy every scheduler batch indefinitely. Val
 - [x] Check budget exhaustion and repairable degraded candidate convergence.
 - [x] Diagnose cutoff/mode mismatch and document evidence or tracked follow-up.
 - [x] Confirm existing safe legacy-node remediation coverage or track required gap.
-- [ ] Run appropriate unit/integration, lint, typecheck, build and local specialist review.
+- [x] Run appropriate unit/integration, lint, typecheck, build and local specialist review.
 - [ ] Stage final candidate, create PR, pass CI/CodeRabbit, merge and verify production queue progress.
 
 ## Acceptance criteria
@@ -40,3 +40,8 @@ A full batch of permanently invalid candidates cannot block subsequent valid wor
 - Remaining mode-selection mismatch and legacy credential-fingerprint recovery remain tracked separately.
 
 - Adjacent long-prompt cutoff prevented: both automatic eligibility and point-of-teardown classifiers now receive the completed timestamp, using the later activity/completion clock before treating a still-prompting terminal task as stale. Confirmed idle still releases immediately. Two policy regressions plus real sweep/teardown integration pass (53 focusedtests); localreviewPASS.
+
+## Release state before durable staging wait (2026-09-08 09:32 UTC)
+- Final implementation commit `c42e972b7`; CI [34207458403](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34207458403) passed every applicable job. Clean local `pnpm exec turbo run lint typecheck test build --concurrency=1` passed47/47checks, including9043APItests across667files. Local specialist review PASS.
+- No PR or own staging deployment yet: shared environment is reserved by archive canary task `01M1ZW0ZCXCZDVY6D01404NWHC` and waiting node-pool task `01M1ZWC98V6FVJC4WC4Q8R64Z3`. Do not overwrite their verification. Archive canary must be copied back and settings made compatible before an older reader replaces its code.
+- Resume from `.do-state.md` and `.workflow-state.md`. Register a bounded SAM durable wait; do not call complete_task or archive this task until staging, PR/review, merge and production verification finish. Staging baseline has10failed+8scheduledintents,15missingworkspaces; retire originalorphans while comparing artifact/capture/recovery fields.
