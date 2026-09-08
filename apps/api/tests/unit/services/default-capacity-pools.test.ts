@@ -5139,6 +5139,172 @@ describe('capacity pool review findings', () => {
       ).toBe(2);
     });
 
+    it('keeps a 270-row catalog ready after completion and identical later refreshes', async () => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      const offerings = manyLiveOfferings(135);
+      offerings[0] = liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+      });
+      let stableRevision: number | undefined;
+
+      for (let pass = 0; pass < 4; pass += 1) {
+        const refreshedAt = new Date(Date.UTC(2026, 8, 8, 0, pass)).toISOString();
+        const result = await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+          userId: 'user-1',
+          includeInstallation: false,
+          candidatePublishBatchSize: 200,
+          offeringResolver: async () =>
+            offerings.map((offering) => ({
+              ...offering,
+              catalogLastSeenAt: refreshedAt,
+            })),
+        });
+        expect(result.user?.pool.migrationState).toBe(pass === 0 ? 'pending' : 'complete');
+        expect(result.user?.effectiveState).toBe(
+          pass === 0 ? 'migration-pending' : 'configured-ready'
+        );
+        expect(getCount('capacity_pool_candidates')).toBe(pass === 0 ? 200 : 270);
+        // Keep doing bounded, generation-fenced timestamp refreshes after completion.
+        expect(
+          getCount(
+            'capacity_pool_candidates',
+            'catalog_generation = (SELECT source_generation FROM capacity_sources LIMIT 1)'
+          )
+        ).toBe(pass % 2 === 0 ? 200 : 70);
+        expect(
+          getCount(
+            'capacity_pool_candidates',
+            `provider_instance_catalog_last_seen_at = '${refreshedAt}'`
+          )
+        ).toBe(pass % 2 === 0 ? 200 : 70);
+        if (pass === 1) stableRevision = result.user?.pool.revision;
+        if (pass > 1) expect(result.user?.pool.revision).toBe(stableRevision);
+      }
+    });
+
+    it.each([
+      'hardware',
+      'price',
+      'operator-settings',
+      'disabled',
+      'removed',
+      'credential',
+    ] as const)('invalidates completed publication when %s changes', async (change) => {
+      createDb();
+      seedUserCredential({ id: 'user-hetzner' });
+      let offerings = manyLiveOfferings(4);
+      offerings[0] = liveHetznerOffering({
+        location: 'fsn1',
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+      });
+      const refresh = () =>
+        ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+          userId: 'user-1',
+          includeInstallation: false,
+          candidatePublishBatchSize: 4,
+          offeringResolver: async () => offerings,
+        });
+      await refresh();
+      expect((await refresh()).user?.pool.migrationState).toBe('complete');
+      const previousAuthority = getRows<{ authority_generation: number }>(
+        'SELECT authority_generation FROM capacity_sources'
+      )[0]?.authority_generation;
+
+      if (change === 'hardware') offerings[0] = { ...offerings[0]!, vcpu: 8 };
+      if (change === 'price') offerings[0] = { ...offerings[0]!, priceMonthly: 99 };
+      if (change === 'operator-settings')
+        sqlite?.exec(
+          "UPDATE capacity_pool_candidates SET provider_instance_boot_disk_size_gb = 96 WHERE provider_instance_type = 'cx23'"
+        );
+      if (change === 'disabled')
+        sqlite?.exec(
+          "UPDATE capacity_pool_candidates SET status = 'disabled' WHERE provider_instance_type = 'cx23' AND workload_role = 'workspace'"
+        );
+      if (change === 'removed') offerings = offerings.slice(0, -1);
+      if (change === 'credential')
+        sqlite?.exec(
+          "UPDATE credentials SET encrypted_token = 'rotated-token-with-unchanged-timestamp' WHERE id = 'user-hetzner'"
+        );
+
+      expect((await refresh()).user?.pool.migrationState).toBe('pending');
+      if (change === 'removed')
+        expect(
+          getCount(
+            'capacity_pool_candidates',
+            "provider_instance_type = 'provider-native-3' AND catalog_availability = 'last-known-unavailable'"
+          )
+        ).toBe(0);
+      expect((await refresh()).user?.pool.migrationState).toBe('complete');
+      expect((await refresh()).user?.pool.migrationState).toBe('complete');
+      if (change === 'hardware')
+        expect(getCatalogCandidateRow('cx23')?.provider_instance_vcpu_count).toBe(8);
+      if (change === 'price')
+        expect(getCatalogCandidateRow('cx23')?.provider_instance_price_monthly_cents).toBe(9900);
+      if (change === 'operator-settings')
+        expect(
+          getCount(
+            'capacity_pool_candidates',
+            "provider_instance_type = 'cx23' AND provider_instance_boot_disk_size_gb = 96"
+          )
+        ).toBe(2);
+      if (change === 'disabled')
+        expect(
+          getCount(
+            'capacity_pool_candidates',
+            "provider_instance_type = 'cx23' AND status = 'disabled'"
+          )
+        ).toBe(2);
+      if (change === 'removed')
+        expect(
+          getCount(
+            'capacity_pool_candidates',
+            "provider_instance_type = 'provider-native-3' AND catalog_availability = 'last-known-unavailable'"
+          )
+        ).toBe(2);
+      if (change === 'credential')
+        expect(
+          getRows<{ authority_generation: number }>(
+            'SELECT authority_generation FROM capacity_sources'
+          )[0]?.authority_generation
+        ).not.toBe(previousAuthority);
+    });
+
+    it.each(['legacy', 'malformed'] as const)(
+      'resumes safely from a %s publication cursor',
+      async (kind) => {
+        createDb();
+        seedUserCredential({ id: 'user-hetzner' });
+        const offerings = manyLiveOfferings(4);
+        const refresh = () =>
+          ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+            userId: 'user-1',
+            includeInstallation: false,
+            candidatePublishBatchSize: 4,
+            offeringResolver: async () => offerings,
+          });
+        await refresh();
+        const row = getRows<{ key: string; value: string }>(
+          "SELECT key, value FROM platform_settings WHERE key LIKE 'capacityPools.candidatePublication.v1:%'"
+        )[0]!;
+        const cursor: { digest: string; published: number; complete?: unknown } = JSON.parse(
+          row.value
+        );
+        if (kind === 'legacy') delete cursor.complete;
+        else cursor.complete = 'true';
+        sqlite
+          ?.prepare('UPDATE platform_settings SET value = ? WHERE key = ?')
+          .run(JSON.stringify(cursor), row.key);
+        const result = await refresh();
+        expect(result.user?.pool.migrationState).toBe(kind === 'legacy' ? 'complete' : 'pending');
+        expect(getCount('capacity_pool_candidates')).toBe(kind === 'legacy' ? 8 : 4);
+        expect((await refresh()).user?.pool.migrationState).toBe('complete');
+      }
+    );
+
     it('never marks missing when the refresh itself failed mid-publication', async () => {
       createDb();
       seedUserCredential({ id: 'user-hetzner' });

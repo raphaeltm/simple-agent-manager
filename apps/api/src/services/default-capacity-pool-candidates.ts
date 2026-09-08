@@ -91,6 +91,8 @@ interface PublicationCursor {
   digest: string;
   /** Number of rows already published for that exact catalog. */
   published: number;
+  /** This exact semantic catalog has completed at least one fenced publication. */
+  complete?: boolean;
 }
 
 export async function ensureCandidatesForSource(
@@ -171,22 +173,27 @@ export async function ensureCandidatesForSource(
     1,
     options.publishBatchSize ?? DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE
   );
-  const publishFrom = Math.min(alreadyPublished, candidateValues.length);
+  // A completed catalog keeps its readiness proof while later bounded passes refresh
+  // timestamps and write generations. Changed semantic content resets that proof.
+  const publishFrom = alreadyPublished >= candidateValues.length ? 0 : alreadyPublished;
   const publishTo = Math.min(publishFrom + batchSize, candidateValues.length);
   const pending = candidateValues.slice(publishFrom, publishTo);
 
   const published = await publishCandidateValues(db, pending, options);
 
   const publishedTotal = publishFrom + published;
-  const publicationComplete = publishedTotal >= candidateValues.length;
-  // The common case is a small catalog that completes in one pass with no cursor to clear.
-  // Writing (then deleting) a cursor row for every source on every reconciliation pass would
-  // add two platform_settings writes per source per pass for no benefit.
-  if (!publicationComplete || progress.cursorPresent) {
+  const publicationComplete =
+    publishedTotal >= candidateValues.length || (progress.complete && published === pending.length);
+  // Retain completion for multi-pass catalogs: clearing the cursor would make every
+  // following identical refresh mark a ready pool migration-pending again. Small catalogs
+  // still complete in one pass without a progress row.
+  if (!publicationComplete || progress.cursorPresent || candidateValues.length > batchSize) {
     await writePublicationProgress(
       options.cursorStore,
       cursorKey,
-      publicationComplete ? null : { digest, published: publishedTotal }
+      candidateValues.length <= batchSize && publicationComplete
+        ? null
+        : { digest, published: publishedTotal, complete: publicationComplete }
     );
   }
 
@@ -346,14 +353,16 @@ async function readPublicationProgress(
   store: CapacityCandidatePublicationCursorStore | undefined,
   key: string,
   digest: string
-): Promise<{ published: number; cursorPresent: boolean }> {
-  if (!store) return { published: 0, cursorPresent: false };
+): Promise<{ published: number; complete: boolean; cursorPresent: boolean }> {
+  if (!store) return { published: 0, complete: false, cursorPresent: false };
   const raw = await store.read(key);
   const cursor = parsePublicationCursor(raw);
   // A cursor for a DIFFERENT catalog is still present and must be cleared/overwritten, but it
   // contributes no progress: publication restarts from the beginning.
-  if (!cursor || cursor.digest !== digest) return { published: 0, cursorPresent: raw !== null };
-  return { published: cursor.published, cursorPresent: true };
+  if (!cursor || cursor.digest !== digest) {
+    return { published: 0, complete: false, cursorPresent: raw !== null };
+  }
+  return { published: cursor.published, complete: cursor.complete === true, cursorPresent: true };
 }
 
 async function writePublicationProgress(
@@ -383,7 +392,8 @@ function parsePublicationCursor(raw: string | null): PublicationCursor | null {
     if (typeof published !== 'number' || !Number.isSafeInteger(published) || published < 0) {
       return null;
     }
-    return { digest, published };
+    if ('complete' in parsed && typeof parsed.complete !== 'boolean') return null;
+    return { digest, published, complete: 'complete' in parsed && parsed.complete === true };
   } catch {
     return null;
   }
