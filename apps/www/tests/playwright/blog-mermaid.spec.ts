@@ -13,8 +13,8 @@ const mermaidPosts = [
   },
   {
     name: 'the current daily journal',
-    path: '/blog/sams-journal-the-start-had-to-be-true/',
-    screenshotName: 'daily-start',
+    path: '/blog/sams-journal-old-chats-got-a-lighter-home/',
+    screenshotName: 'daily-r2-history',
   },
 ];
 
