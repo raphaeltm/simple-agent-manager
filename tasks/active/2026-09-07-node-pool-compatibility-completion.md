@@ -9,12 +9,12 @@ intent, and saved policies are not consistently enforced. Existing clients,
 configuration and active/sleeping workloads must survive the transition.
 
 Deliver all fixes together in one PR. Implementation branches are integration
-inputs only: no separate child PRs, staging deployments or merges. The parent
-coordinates final local review, local verification, CI and CodeRabbit review.
-The current continuation interprets “keep everything local” as excluding staging
-work; the unverified staging gap is recorded below.
+inputs only; final release work stays in this parent session. On September 8,
+the user authorized staging verification, cleanup, iteration, and merge after
+successful validation, followed by production deployment monitoring.
+No SAM task dispatches. CodeRabbit is waived for this PR under its file limit.
 
-## Continuation checkpoint — 2026-09-08
+## Historical local-only reconciliation checkpoint — 2026-09-08
 
 Resumed PR #2030 from `7ba09bb9d` under a three-hour local-work window. The
 previous repair CI run `34136000309` completed successfully with every executed
@@ -41,28 +41,28 @@ test-fixture paths already covered by the canonical test-only policy. Production
 SQL remains analyzed and its duplicate admission CTE/eligibility predicates are
 shared without changing either atomic mutation's query or ordered bindings.
 
-**Deliverable remains one green OPEN PR, no merge and no SAM dispatch.**
-CodeRabbit is unavailable under its 100-file cap, explicitly accepted by the
-user. Staging remains an unverified release gap under the prior local-only
-instruction. The historical checkpoints below do not override this scope.
+**The later September 8 release instruction supersedes the local-only scope.**
+The user authorizes staging, cleanup and merge after successful verification.
+[PR #2030](https://github.com/raphaeltm/simple-agent-manager/pull/2030) records the
+current release candidate, live evidence, checks and deployment outcome.
 
 ## Previous continuation status — 2026-09-07
 
-This section supersedes gate/ownership statements in the historical checkpoints
-below. Recovered head: `8ccc610d6`; integrated corrections: `27a7a1abe`,
-`4196ad57f`, `fabce54a7`, and `9524491af`. The deliverable remains **one green OPEN PR**.
-No PR merge or SAM-agent dispatch is authorized. The current interpretation of
-“keep everything local” excludes staging deployment; this is an interpretation
-of scope, not an explicit user waiver of the original staging criterion.
-Implementation, delegation, and runtime verification stay in the local session.
+This section records the September 7 checkpoint and its then-current scope.
+Recovered head: `8ccc610d6`; integrated corrections: `27a7a1abe`,
+`4196ad57f`, `fabce54a7`, and `9524491af`. The deliverable then was a green OPEN PR.
+Merge and SAM-agent dispatch were not authorized at that checkpoint. The earlier
+local-only instruction was interpreted as excluding staging, without a waiver
+of the original staging criterion. The September 8 instruction above now governs.
+Implementation and verification continue in this parent session.
 
-**Current gate: implementation and local specialist corrections are integrated;
+**Gate at that checkpoint: implementation and local specialist corrections were integrated;
 final release verification and PR/CI/CodeRabbit remain incomplete.** Checked
 implementation boxes mean the code and relevant regression coverage exist;
 they do not substitute for the still-open final validation items in section E.
 The task stays active and must not be archived on this checkpoint.
 
-### Current verification evidence
+### Verification evidence recorded at the September 7 checkpoint
 
 | Check                                                                              | Current result                                       | Evidence / remaining action                                                                                                                                                                                                                                                                                       |
 | ---------------------------------------------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -348,19 +348,19 @@ Changing a deprecated size hint cannot change a native payload or accounting.
       failure, reuse/burst admission, direct workspace and safe recovery on real VMs.
       Verify heartbeat, requested resources, persisted plan and observed hardware;
       clean staging to zero VMs immediately afterward.
-      **Current scope interpretation:** this original step is not performed because
-      the continuation interprets the current local-only instruction as excluding
-      staging deployment. Record the unverified gap in the PR; this is not an
-      explicit user waiver or a staging validation pass.
-- [ ] Open the single PR, attach concrete validation/review/screenshot evidence,
-      obtain green checks, trigger CodeRabbit with coderabbit-review label and resolve
-      all feedback. Leave open for user review; no merge requested in this task.
+      The September 8 user instruction explicitly authorizes this live gate.
+      Record the pinned deployment, actual runtime behavior and confirmed cleanup
+      in PR #2030. Earlier local or partially successful staging iterations do
+      not substitute for the corrected candidate's complete live verification.
+- [ ] Complete the single PR with concrete validation/review/screenshot evidence,
+      obtain green current-head checks, then merge and monitor production deployment.
+      CodeRabbit is explicitly waived for PR #2030 because of its 100-file limit.
 
 ## Acceptance
 
-Every checklist item above records the original acceptance criteria. Staging is
-not performed under the current interpretation of local-only scope and remains
-an unverified gap to disclose, not an explicitly user-waived or verified item.
+Every checklist item above records the acceptance criteria. Staging and merge
+are authorized by the September 8 continuation; successful live validation and
+confirmed cleanup are required before merge. No staging waiver is claimed.
 Local verification, CI, and review remain required. Each implementation slice returns commit
 SHAs, exact commands/results, tests linked to its criteria and remaining integration
 requirements. Completion requires evidence on the integrated final candidate,
@@ -679,7 +679,7 @@ Affected application files, for the owning slices:
 `services/placement-resolver-capacity.ts` (2), `routes/workspaces/crud.ts` (2),
 `routes/nodes.ts` (2).
 
-## Final local repair checkpoint
+## Historical final local repair checkpoint — 2026-09-07
 
 PR #2030 remains OPEN against main; no merge, SAM dispatch, or staging deployment. All eight API shards completed and exposed 27 files requiring fixture/source-contract repairs. The combined repair run passed 790 cases, with two callback import timeouts. Moving the two callback-route imports into collection produced 10/10 passing callback tests (606 ms behavior, 14.72 seconds module imports). The five-second test deadline is unchanged. Four affected web unit suites passed 143/143; trigger/MCP 57/57; full MCP 241/241; affected Workers 28/28; deployment/resolver 120/120. The source scanner passed across 1,331 files.
 
@@ -696,3 +696,37 @@ CI run 34132885635 at `40ee92602` completed with two failing jobs. Web passed al
 The other failure was the devcontainer Docker Compose download checksum, before mount checks. The same job passed previously and the upstream checksum subsequently downloaded in valid format; the next CI run will retry it. Full lint, typecheck and build passed on the previous integrated head, as did Workers, Go, visual, security and quality CI jobs.
 
 Raphaël explicitly confirmed CodeRabbit cannot run on this PR because of its 100-file limit. CodeRabbit is therefore a task-specific unavailable review, not a pending action or a claimed pass. He authorized only 20 more minutes, ending approximately 15:12 UTC; pause then if final CI is not green. The PR remains open, no merge is authorized, and live staging verification remains unperformed.
+
+## September 8 staging corrections and release record
+
+The first two staging deployments passed their deployment and smoke jobs. A real
+native CX33 in fsn1 ran through an installation credential for a user with no
+personal cloud credential. Its healthy VM agent reported four CPUs and actual
+physical memory. Resource-default edits persisted through desktop/mobile UI
+reloads. The workspace and VM were deleted through confirmed API cleanup, and
+Cloudflare showed no remaining DNS records for either resource.
+
+That iteration exposed release blockers: concurrent refresh could overwrite a
+completed pool publication, the expanded workspace/node join exceeded D1's
+result-column limit, and direct-workspace usage began too late in a long
+background readiness wait. The corrections at `08fc90df2` fence publication and
+readiness writes with their source generations, select only consumed joined
+fields, and start native usage after successful attachment with guarded failure
+cleanup. Independent reviews and red-before/green-after regressions pass. Full
+CI at that head passed 9,436 API, 3,746 web and 936 Workers tests, plus Sonar.
+The screenshot upload job passed on retry after a GitHub upload stalled.
+
+The follow-up at `be8fa2f3d` removes an integer-only duplicate workspace resource
+validator. A real route test now preserves fractional workload reservations
+using the same canonical schema as other request writers; invalid co-tenant
+counts fail before allocation. Its 20 focused route/schema/metering tests,
+API typecheck, lint, current-tree and PR-range secret scans pass. Full CI and
+Sonar subsequently passed on that code head, including the API test job,
+3,746 web tests and 936 Workers tests. All executed GitHub checks were green.
+
+The corrected candidate still requires the final live provisioning, reuse,
+admission, empty-pool, sleep/recovery and cleanup pass. Shared staging is used
+by other release tasks and must be handed off before deployment. This file
+records the implementation and dated checkpoints; the final release results,
+current checks, cleanup evidence and production deployment outcome are maintained
+in [PR #2030](https://github.com/raphaeltm/simple-agent-manager/pull/2030).

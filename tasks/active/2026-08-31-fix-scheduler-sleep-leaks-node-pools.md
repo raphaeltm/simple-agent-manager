@@ -243,7 +243,7 @@ Intentional non-sleep destroyers:
       identity, metering behavior, and deployment-node pool scope.
 - [ ] Run local quality suite, local specialist reviews, UI screenshots if UI
       files change, staging on a final pinned candidate with zero staging VMs at
-      rest, PR, CI, CodeRabbit label loop, merge, and production deploy
+      rest, PR, CI, CodeRabbit label loop (waived for #2030), merge, and production deploy
       monitoring.
 
 ## Acceptance Criteria
@@ -267,3 +267,19 @@ Intentional non-sleep destroyers:
 - Tests cover the production race, three guard sites, bounded convergence,
   recovery placement, metering, and writer inventory.
 - D1 migrations are additive and pass migration safety checks.
+
+## September 8 continuation and release record
+
+Implementation is consolidated in [PR #2030](https://github.com/raphaeltm/simple-agent-manager/pull/2030).
+The user now explicitly authorizes live staging verification, cleanup, iteration,
+merge after successful validation, and production deployment monitoring. The
+prior local-only/no-merge checkpoint no longer applies. No SAM task dispatches;
+CodeRabbit is waived for this PR because of its file limit.
+
+Initial live provisioning succeeded through the installation credential and
+confirmed native hardware. That iteration found pool-publication, D1 query-width
+and usage-start ordering bugs; their reviewed corrections and regression evidence
+are recorded in the compatibility completion task and PR. The first test VM,
+workspace and DNS records are confirmed deleted. Final release acceptance still
+requires the corrected candidate's full live pass and cleanup; PR #2030 is the
+release record for current-head checks, staging results and deployment outcome.
