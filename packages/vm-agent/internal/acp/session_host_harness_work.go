@@ -455,7 +455,7 @@ func (h *SessionHost) startHarnessWorkRereportLocked() {
 	if h.harnessActivityCancel != nil || h.config.ActivityRereportInterval <= 0 {
 		return
 	}
-	ctx, cancel := context.WithCancel(h.ctx)
+	ctx, cancel := context.WithCancel(h.lifecycleContext())
 	h.harnessActivityCancel = cancel
 	interval := h.config.ActivityRereportInterval
 	go func() {
@@ -502,7 +502,7 @@ func (h *SessionHost) stopHarnessWorkRereportLocked() {
 // prompting after markPromptDone's authoritative idle report.
 func (h *SessionHost) nudgeHarnessActivityReport() {
 	select {
-	case <-h.ctx.Done():
+	case <-h.lifecycleContext().Done():
 		return
 	default:
 	}

@@ -570,7 +570,7 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	// Register the viewer BEFORE starting the write pump goroutine to
 	// close the TOCTOU window between the status check above and the
 	// goroutine launch. If the session transitions to stopped after our
-	// check, the goroutine will exit via h.ctx.Done().
+	// check, the goroutine will exit via lifecycleContext().Done().
 	h.viewerMu.Lock()
 	h.viewers[id] = viewer
 	if h.suspendTimer != nil {

@@ -42,7 +42,22 @@ func (h *SessionHost) startAgentWithSessionMode(ctx context.Context, agentType s
 	h.process = process
 	h.attachACPConnection(process, agentType)
 	go h.monitorStderr(process)
-	go h.monitorProcessExit(ctx, process, agentType, cred, startup.settings)
+	// The monitor OUTLIVES this call. It restarts the agent after a crash or an
+	// intentional prompt-cancel process stop — minutes or hours later. `ctx`
+	// belongs to whatever drove THIS startup: an HTTP snapshot-restore request
+	// (server.handleRestoreAgentSession -> RestoreAgent) or a viewer WebSocket
+	// connection (Gateway.handleMessage -> SelectAgent). Both are cancelled as
+	// soon as that request/connection ends, so capturing `ctx` here means every
+	// later restart runs its container exec, auth-file write and ACP handshake
+	// under an already-cancelled context and fails with "context canceled",
+	// leaving the host in HostError with no usable agent. Hand the monitor the
+	// host's own lifecycle context, which only Stop() cancels — and it takes no
+	// context parameter at all, so there is no way to hand it this one.
+	//
+	// Startup I/O below deliberately KEEPS `ctx`: the initial attempt should
+	// still abort when its own request is abandoned. Host lifetime and
+	// startup-attempt lifetime are separate on purpose.
+	go h.monitorProcessExit(process, agentType, cred, startup.settings)
 
 	return h.establishACPSession(ctx, agentType, startup.settings, previousAcpSessionID, requireLoadSession)
 }
@@ -570,6 +585,6 @@ func (h *SessionHost) attachACPConnection(process agentProcess, agentType string
 	if serializeTimeout <= 0 {
 		serializeTimeout = DefaultNotifSerializeTimeout
 	}
-	orderedStdout := newOrderedPipe(process.Stdout(), processedCh, h.ctx.Done(), serializeTimeout)
+	orderedStdout := newOrderedPipe(process.Stdout(), processedCh, h.lifecycleContext().Done(), serializeTimeout)
 	h.acpConn = acpsdk.NewClientSideConnection(client, process.Stdin(), orderedStdout)
 }

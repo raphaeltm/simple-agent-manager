@@ -165,6 +165,7 @@ func Load() (*Config, error) {
 		ACPTerminalActivityReportAttempts: getEnvInt("ACTIVITY_TERMINAL_REPORT_ATTEMPTS", DefaultACPTerminalActivityReportAttempts),
 		ACPTerminalActivityReportBackoff:  getEnvDuration("ACTIVITY_TERMINAL_REPORT_BACKOFF", DefaultACPTerminalActivityReportBackoff),
 		ACPCredentialSyncTimeout:          getEnvDuration("ACP_CREDENTIAL_SYNC_TIMEOUT", DefaultACPCredentialSyncTimeout),
+		ACPRestartAttemptTimeout:          getEnvDuration("ACP_RESTART_ATTEMPT_TIMEOUT", DefaultACPRestartAttemptTimeout),
 		ACPActivityReportTimeout:          getEnvDuration("ACP_ACTIVITY_REPORT_TIMEOUT", DefaultACPActivityReportTimeout),
 		ACPCheckpointPreemptGrace:         getEnvDuration("ACP_CHECKPOINT_PREEMPT_GRACE", DefaultACPCheckpointPreemptGrace),
 		ACPCheckpointPreemptMaxGrace:      getEnvDuration("ACP_CHECKPOINT_PREEMPT_MAX_GRACE", DefaultACPCheckpointPreemptMaxGrace),

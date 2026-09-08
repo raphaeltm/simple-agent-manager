@@ -530,7 +530,7 @@ func (h *SessionHost) startPromptActivityRereport() {
 	if interval <= 0 {
 		return
 	}
-	ctx, cancel := context.WithCancel(h.ctx)
+	ctx, cancel := context.WithCancel(h.lifecycleContext())
 	h.promptCancelMu.Lock()
 	if h.promptActivityCancel != nil {
 		h.promptActivityCancel()

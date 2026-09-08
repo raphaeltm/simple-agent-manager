@@ -434,6 +434,7 @@ func New(cfg *config.Config) (*Server, error) {
 		TerminalActivityReportBackoff:    cfg.ACPTerminalActivityReportBackoff,
 		ActivityReportTimeout:            cfg.ACPActivityReportTimeout,
 		CredentialSyncTimeout:            cfg.ACPCredentialSyncTimeout,
+		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
 		SAMEnvFallback:                   cfg.BuildSAMEnvFallback(),

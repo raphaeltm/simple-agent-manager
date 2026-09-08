@@ -9,7 +9,16 @@ import (
 )
 
 // monitorProcessExit detects agent crashes and attempts restart.
-func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload) {
+//
+// It deliberately takes NO context parameter. This goroutine outlives whatever
+// started the agent — an HTTP snapshot-restore request or a viewer WebSocket
+// connection — and a context captured from either is already cancelled by the
+// time a restart runs, which failed every restart with "context canceled" and
+// wedged two production sessions on 2026-09-08. The restart context is derived
+// from the host lifecycle at the point of use instead, so there is no parameter
+// through which a request-scoped context can be reintroduced.
+// See .claude/rules/71-request-context-must-not-outlive-its-request.md.
+func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload) {
 	err := process.Wait()
 
 	time.Sleep(100 * time.Millisecond)
@@ -224,7 +233,16 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		h.reportActivity("idle")
 		return
 	}
-	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery, recoveryNotify) {
+	// Bound this attempt. h.mu is held for its whole duration and
+	// execInContainer has no timeout of its own, so an unbounded attempt against
+	// a wedged container runtime would also block Stop(). Derived DOWNWARD from
+	// the lifecycle context and cancelled as soon as the attempt resolves: the
+	// replacement process's own monitor takes the lifecycle context, never this
+	// bounded one (rule 71, requirement 4).
+	attemptCtx, cancelAttempt := context.WithTimeout(h.lifecycleContext(), h.restartAttemptTimeout())
+	defer cancelAttempt()
+	restarted := h.restartAgentLocked(attemptCtx, agentType, cred, settings, loadSessionID, crashRecovery, recoveryNotify)
+	if !restarted {
 		return
 	}
 	if !crashRecovery.inProgress {
@@ -343,6 +361,17 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 		h.completeActivePromptFailure(err.Error())
 		h.broadcastAgentStatus(StatusError, agentType, err.Error())
 		h.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
+		// The detach path published "recovering" before this restart attempt.
+		// Without a closing transition the control-plane activity mirror stays
+		// "recovering" forever, and all three of its consumers wedge together
+		// (rule 57): the composer/stop button keeps showing work in flight, the
+		// durable-message gate keeps refusing delivery, and the idle scheduler
+		// never arms a sleep timer for a host that has no usable agent at all.
+		// Every sibling terminal branch in monitorProcessExit already reports
+		// this; the restart failure was the only one that did not.
+		// reportActivity attaches the redacted statusErr set above, so the
+		// restart diagnostic survives into the control plane.
+		h.reportActivity("error")
 		return false
 	}
 	h.setStatusLocked(HostReady)

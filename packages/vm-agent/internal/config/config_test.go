@@ -378,6 +378,7 @@ func legacyOperationalTimeoutChecks(cfg *Config) []struct {
 		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 30 * time.Second},
 		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 10 * time.Second},
 		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 10 * time.Second},
+		{"ACPRestartAttemptTimeout", cfg.ACPRestartAttemptTimeout, 5 * time.Minute},
 		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 10 * time.Second},
 		{"ACPHarnessActivityReportDebounce", cfg.ACPHarnessActivityReportDebounce, 750 * time.Millisecond},
 		{"DevcontainerCachePushTimeout", cfg.DevcontainerCachePushTimeout, 10 * time.Minute},
@@ -451,6 +452,7 @@ func TestOperationalTimeoutOverrides(t *testing.T) {
 	t.Setenv("MCP_BUILD_PREPARE_TIMEOUT", "40s")
 	t.Setenv("JWKS_FETCH_TIMEOUT", "14s")
 	t.Setenv("ACP_CREDENTIAL_SYNC_TIMEOUT", "16s")
+	t.Setenv("ACP_RESTART_ATTEMPT_TIMEOUT", "4m")
 	t.Setenv("ACP_ACTIVITY_REPORT_TIMEOUT", "17s")
 	t.Setenv("ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE", "875ms")
 	t.Setenv("WORKSPACE_READY_CALLBACK_TIMEOUT", "33s")
@@ -477,6 +479,7 @@ func TestOperationalTimeoutOverrides(t *testing.T) {
 		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 40 * time.Second},
 		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 14 * time.Second},
 		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 16 * time.Second},
+		{"ACPRestartAttemptTimeout", cfg.ACPRestartAttemptTimeout, 4 * time.Minute},
 		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 17 * time.Second},
 		{"ACPHarnessActivityReportDebounce", cfg.ACPHarnessActivityReportDebounce, 875 * time.Millisecond},
 		{"WorkspaceReadyCallbackTimeout", cfg.WorkspaceReadyCallbackTimeout, 33 * time.Second},
@@ -499,6 +502,7 @@ func TestInvalidOperationalTimeoutParseFallsBackAndRedactsValue(t *testing.T) {
 		"GRACEFUL_SHUTDOWN_TIMEOUT", "SYSTEM_PROVISIONING_TIMEOUT", "CF_IP_FETCH_TIMEOUT",
 		"BOOT_LOG_HTTP_TIMEOUT", "MCP_SHORT_COMMAND_TIMEOUT", "MCP_DIFF_COMMAND_TIMEOUT",
 		"MCP_BUILD_PREPARE_TIMEOUT", "JWKS_FETCH_TIMEOUT", "ACP_CREDENTIAL_SYNC_TIMEOUT",
+		"ACP_RESTART_ATTEMPT_TIMEOUT",
 		"ACP_ACTIVITY_REPORT_TIMEOUT", "ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE",
 		"DEVCONTAINER_CACHE_PUSH_TIMEOUT",
 		"DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", "LOG_STREAM_PING_WRITE_TIMEOUT",
@@ -945,6 +949,7 @@ func validConfig() *Config {
 		MCPBuildPrepareTimeout:                  DefaultMCPBuildPrepareTimeout,
 		JWKSFetchTimeout:                        DefaultJWKSFetchTimeout,
 		ACPCredentialSyncTimeout:                DefaultACPCredentialSyncTimeout,
+		ACPRestartAttemptTimeout:                DefaultACPRestartAttemptTimeout,
 		ACPActivityReportTimeout:                DefaultACPActivityReportTimeout,
 		ACPHarnessActivityReportDebounce:        DefaultACPHarnessActivityReportDebounce,
 		WorkspaceReadyCallbackTimeout:           DefaultWorkspaceReadyCallbackTimeout,
@@ -989,6 +994,7 @@ func TestValidateOperationalTimeouts(t *testing.T) {
 		{"mcp build prepare", func(cfg *Config) { cfg.MCPBuildPrepareTimeout = 0 }, "MCP_BUILD_PREPARE_TIMEOUT"},
 		{"jwks fetch", func(cfg *Config) { cfg.JWKSFetchTimeout = 0 }, "JWKS_FETCH_TIMEOUT"},
 		{"credential sync", func(cfg *Config) { cfg.ACPCredentialSyncTimeout = 0 }, "ACP_CREDENTIAL_SYNC_TIMEOUT"},
+		{"restart attempt", func(cfg *Config) { cfg.ACPRestartAttemptTimeout = 0 }, "ACP_RESTART_ATTEMPT_TIMEOUT"},
 		{"activity report", func(cfg *Config) { cfg.ACPActivityReportTimeout = 0 }, "ACP_ACTIVITY_REPORT_TIMEOUT"},
 		{"harness activity debounce", func(cfg *Config) { cfg.ACPHarnessActivityReportDebounce = 0 }, "ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE"},
 		{"cache push", func(cfg *Config) { cfg.DevcontainerCachePushTimeout = 0 }, "DEVCONTAINER_CACHE_PUSH_TIMEOUT"},
