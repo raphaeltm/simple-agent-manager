@@ -101,9 +101,11 @@ def transfer_proof(api, domain, apply=False):
     require(all(re.fullmatch(r'[a-z_]+', key) for key in keys), 'Unexpected workspace column name')
     # Every mutable guard is repeated in the atomic write. The complete workspace
     # snapshot additionally rejects attachment, owner, status and metadata races.
+    # D1 limits expression depth to 100. A row-value IS comparison preserves
+    # every NULL-safe column match without adding 57 nested AND expressions.
+    snapshot = '(' + ','.join('w.' + key for key in keys) + ') IS (' + ','.join('?' for _ in keys) + ')'
     update = """UPDATE workspaces AS w SET runtime_deletion_proof=?,
-      runtime_deletion_confirmed_at=? WHERE """ + GUARDS + ' AND ' + ' AND '.join(
-        'w.' + key + ' IS ?' for key in keys) + """
+      runtime_deletion_confirmed_at=? WHERE """ + GUARDS + ' AND ' + snapshot + """
       AND EXISTS(SELECT 1 FROM nodes exact WHERE exact.id=?
         AND exact.runtime_termination_confirmed_at=?)"""
     params = [PROOF, timestamp] + PARAMS + [before[key] for key in keys] + [NODE, timestamp]

@@ -100,6 +100,25 @@ class HelperProofScenarios(unittest.TestCase):
         self.assertEqual(self.run_transfer()['outcome'], 'already_proven')
         self.assertEqual(self.api.updates, 1)
 
+    def test_real_workspace_width_fits_d1_expression_depth_and_retains_full_snapshot_cas(self):
+        def actual_width():
+            api = Database()
+            # Live D1 has 57 workspace columns. Preserve the full-row guard, including NULLs,
+            # under D1's expression-depth budget rather than relaxing authority checks.
+            for index in range(43):
+                name = 'guard_' + chr(97 + index // 26) + chr(97 + index % 26)
+                api.db.execute('ALTER TABLE workspaces ADD COLUMN ' + name + ' TEXT')
+            api.db.setlimit(sqlite3.SQLITE_LIMIT_EXPR_DEPTH, 100)
+            return api
+        self.api = actual_width()
+        self.assertEqual(self.run_transfer()['changes'], 1)
+        self.api = actual_width()
+        self.api.before_update = lambda db: db.execute("UPDATE workspaces SET guard_bq='changed'")
+        with self.assertRaisesRegex(Refused, 'CAS'):
+            self.run_transfer()
+        self.assertEqual(self.api.db.execute('SELECT COUNT(*) FROM workspaces '
+                                            'WHERE runtime_deletion_proof IS NOT NULL').fetchone()[0], 0)
+
     def test_live_node_always_refuses_even_if_stale_proof_exists(self):
         for status, marker in [('running', None), ('running', self.api.at),
                                ('destroying', self.api.at), ('deleted', None)]:

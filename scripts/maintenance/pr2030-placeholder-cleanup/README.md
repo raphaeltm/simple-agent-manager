@@ -309,6 +309,10 @@ and strict node proof. Original workspace usage or snapshots, including snapshot
 for its session, refuse; another active workspace on the node also refuses.
 The whole workspace snapshot fences concurrent metadata, ownership, attachment
 or status changes; the exact source proof timestamp is compared again in SQL.
+The 57-column snapshot uses a NULL-safe row-value `IS` comparison, keeping the
+same 77 bindings while respecting D1's expression-depth limit of 100. The original
+AND-chain attempt was rejected before mutation by Cloudflare error 7500;
+read-only `EXPLAIN` and a SQLite depth-limit regression reproduce that constraint.
 
 Only `runtime_deletion_proof='node_runtime_terminated'` and
 `runtime_deletion_confirmed_at` change, copying the actual strict node timestamp.
