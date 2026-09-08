@@ -989,6 +989,9 @@ export function inspectArchiveSourceIntent(
   validateRootSourceOwner(input);
   const intent = readSourceIntent(sql, input.sessionId);
   if (!intent) return { exists: false, databaseSizeBytes: databaseSize(sql) };
+  if (isCompletedCopyBackPredecessor(sql, intent, input)) {
+    return { exists: false, databaseSizeBytes: databaseSize(sql) };
+  }
   const state = assertSameSourceIntentMigration(intent, input);
   return {
     exists: true,
@@ -1012,6 +1015,37 @@ export function inspectArchiveSourceIntent(
   };
 }
 
+/** A verified copy-back releases the root for a strictly newer migration. Old RPCs
+ * still have to match the current intent, so they cannot mutate the successor. */
+function isCompletedCopyBackPredecessor(
+  sql: SqlStorage,
+  intent: Record<string, unknown> | null,
+  input: ArchiveSourceInspectIntentInput
+): boolean {
+  if (!intent || intent.state !== 'rehome_exported' ||
+    intent.session_id !== input.sessionId ||
+    intent.project_id !== input.projectId ||
+    intent.source_owner_name !== input.sourceOwnerName ||
+    intent.migration_id === input.migrationId ||
+    typeof intent.target_generation !== 'number' ||
+    !Number.isSafeInteger(input.targetGeneration) ||
+    !Number.isSafeInteger(intent.target_generation) ||
+    intent.target_generation >= input.targetGeneration) return false;
+  const anchor = sql.exec<{
+    archive_state: string | null;
+    archive_migration_id: string | null;
+    archive_generation: number | null;
+    archive_owner_name: string | null;
+  }>(
+    `SELECT archive_state, archive_migration_id, archive_generation, archive_owner_name
+     FROM chat_sessions WHERE id = ?`, input.sessionId
+  ).toArray()[0];
+  return anchor?.archive_state === 'copy_back_restored' &&
+    anchor.archive_migration_id === intent.migration_id &&
+    anchor.archive_generation === intent.target_generation &&
+    anchor.archive_owner_name === intent.target_owner_name;
+}
+
 /**
  * Prepare the source intent, or return a typed refusal when a pre-copy eligibility invariant
  * rejects the session before any write. This is the `archiveSourcePrepareIntent` RPC body.
@@ -1019,7 +1053,8 @@ export function inspectArchiveSourceIntent(
  * The D1 candidate query cannot see the DO-local eligibility guards (`session_state`, ACP
  * rows, comments, attention markers, ...), so the coordinator fences a session `migrating` and
  * only then learns here that it cannot move. A refusal is returned ONLY while no source intent
- * row exists for the session — every later invariant (including the same eligibility check on a
+ * row exists for the session, or only a verified completed copy-back predecessor remains.
+ * Every later invariant (including the same eligibility check on a
  * re-prepare with an intent present, and at finalize) still throws, because by then the
  * transcript is fenced on this object and the coordinator must keep the journal on its
  * fail-closed retry path. Returning instead of throwing is what lets the refusal cross the RPC
@@ -1031,7 +1066,8 @@ export async function prepareArchiveSourceIntentOrRefuse(
 ): Promise<ArchiveSourcePrepareOutcome> {
   validateRootSourceOwner(input);
   const minTerminalAgeMs = input.minTerminalAgeMs ?? PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS;
-  const existing = readSourceIntent(sql, input.sessionId);
+  let existing = readSourceIntent(sql, input.sessionId);
+  const completedPredecessor = isCompletedCopyBackPredecessor(sql, existing, input);
   try {
     assertEligibleTerminalSource(sql, input.sessionId, input.now, minTerminalAgeMs);
     if (input.writeReservation && estimateArchiveWrites(sql, input.sessionId,
@@ -1039,7 +1075,7 @@ export async function prepareArchiveSourceIntentOrRefuse(
       throw new ProjectDataArchiveInvariantError('write_budget_inventory_changed', 'Archive inventory exceeds its reserved write estimate');
     }
   } catch (error) {
-    if (!existing && error instanceof ProjectDataArchiveInvariantError) {
+    if ((!existing || completedPredecessor) && error instanceof ProjectDataArchiveInvariantError) {
       return {
         refused: true,
         reason: error.reason,
@@ -1048,6 +1084,16 @@ export async function prepareArchiveSourceIntentOrRefuse(
       };
     }
     throw error;
+  }
+  if (completedPredecessor && existing) {
+    // No await between replacement and the fresh fence below; the RPC holds the
+    // source mutation lock. This removes only the completed intent, never history.
+    sql.exec(
+      `DELETE FROM project_data_archive_source_intents
+       WHERE session_id = ? AND migration_id = ? AND state = 'rehome_exported'`,
+      input.sessionId, existing.migration_id as string
+    );
+    existing = null;
   }
   if (!existing) {
     sql.exec(

@@ -30,7 +30,7 @@ Incident lessons: Aug 26 unseekable scans amplified read bills; Sept 5 whole-ses
 - [x] Enforce durable migration write-budget admission/defer semantics, measure actual SQL writes and bytes freed, prevent oversized-session budget bypass, reserve normal-traffic headroom; document hard versus estimated boundaries.
 - [x] Add realistic unit and Workers integration tests for complete migration/read/search/tool/copy-back, retries, corrupt R2, wrong ownership, budget exhaustion/refresh and demonstrably fewer target SQL writes.
 - [x] Update deployment env mapping, both env skills, examples, architecture/configuration docs and CLAUDE recent changes.
-- [ ] Run local full quality gates and task completion/specialist review; fix findings.
+- [x] Run local full quality gates and task completion/specialist review; fix findings.
 - [ ] Coordinate staging, deploy final candidate, prove full retrieval/search/tool behavior through API/MCP and UI; record cost/storage evidence and clean up test resources.
 - [ ] Create PR, get CI/CodeRabbit green, prepare exact production rollout plan under the existing approval policy; merge/deploy when authorized and gates satisfied.
 
@@ -64,3 +64,13 @@ The daily budget is explicitly an estimate (default 250k/day with factor32 and F
 Full lint13 packages passed, config mapping33 tests passed, D1 ordering passed. Full root test run failed on a now-fixed import error during an intermediate build; it is not counted as passing and must be rerun. Staging, CI and CodeRabbit still pending.
 
 Final independent rechecks: Cloudflare/security PASS; budget/constitution/env/docs PASS after exposing receipt retention and cleanup settings; test-engineer/coverage findings PASS. Focused unit suite95 PASS. Full repository validation and final combined Workers suite in progress; staging and PR gates remain outstanding.
+
+## Final local validation and CI checkpoint
+
+Full local typecheck (19 tasks), build (9 tasks), and lint (13 tasks) passed. Full root API collection had 9,039 passing tests and one stale migration index-count assertion; that assertion was corrected and all 18 migration tests passed. Web covered all 303 files across the initial run and the 10 remaining files run separately. The clean full CI run [34204747422](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34204747422) passed. Final compact Workers coverage also passed after adding actual authenticated `/mcp` HTTP entrypoint checks for exact history and session/project search before migration, while archived, with writers disabled, and after copy-back (six tests). Live staging MCP credentials could not be issued with the available KV token; live API/UI verification and Workers-runtime MCP verification are recorded separately.
+
+All three independent specialist reviewers returned PASS after the final relevant changes. Staging deployment and live canary/recovery verification are in progress; final PR CI and CodeRabbit remain pending. D1 migration was renamed to 0154 before its first deployment to avoid numbers already applied by another staging branch; SQL was unchanged, ordering and fresh Workers migration tests passed.
+
+## Staging-discovered recovery transition
+
+The first green staging deployment preserved baseline history and tools. A legacy archived fixture copied back exactly, but a new compact migration was blocked before copying because the completed old source intent rejected a successor identity. Fixed successor admission to require a verified copy-back anchor matching the old migration, generation and owner, plus a strictly higher safe-integer generation. Eligibility and budget checks precede replacement; active/deleted sources and stale RPCs fail closed. Eight guard cases and a real Workers second-migration/recovery round-trip pass. Safety reviewer rechecked PASS; staging rerun is required for this fix.

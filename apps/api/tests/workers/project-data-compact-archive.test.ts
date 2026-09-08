@@ -362,6 +362,26 @@ describe('compact R2 archive rollout', () => {
             )
           ).toEqual(original);
         });
+        // A completed recovery must permit a new generation, while old recovery
+        // RPCs remain fenced from the successor's transcript.
+        const remigrated = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId, sessionId, dryRun: false, reason: 'remigrate verified copy-back',
+          nowDate: new Date(Date.now() + 120_000),
+        });
+        expect(remigrated.stats).toMatchObject({ migrated: 1, failed: 0 });
+        const successor = await readLocation(projectId, sessionId);
+        expect(successor?.migration_id).not.toBe(location.migration_id);
+        expect(successor?.location_state).toBe('archive_shard');
+        await expect(copyBackProjectDataArchiveMigration(testEnv, {
+          projectId, migrationId: location.migration_id,
+          reason: 'stale recovery must not modify successor',
+        })).rejects.toThrow(/identity mismatch/);
+        await verifyToolsAndSearch();
+        const recovered = await copyBackProjectDataArchiveMigration(testEnv, {
+          projectId, migrationId: successor!.migration_id!, reason: 'recover successor',
+        });
+        expect(recovered.restoredToRoot).toBe(true);
+        await verifyMcpReads();
       }
     );
   });
