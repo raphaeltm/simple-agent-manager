@@ -823,3 +823,23 @@ internal validation error (10021); no final combined deployment success is claim
 - [ ] Remove owned helper/test resources, preserve pre-existing sleeping sessions,
       and verify pool settings remain at the baseline.
 - [ ] Update PR evidence, pass final CI/staging, merge, and verify production deployment.
+
+
+Final-candidate staging deployment `34255654245` and its smoke tests passed.
+All PR checks including SonarCloud passed at `49987bf97`; its only difference
+from staged `99a620928` is import whitespace. The fresh VM reported that exact
+staged binary. First-choice native allocation selected `cx23` at 8,800 hourly
+micros; observed hardware is 2 vCPU / 4 GB / 40 GB, while the saved reservation
+is 0.25 vCPU / 1 GB with profile provenance. Cold host setup and devcontainer
+startup passed. Actual terminal WebSocket output `PR2030-PTY-RETURNED` passed.
+
+Live verification exposed a false shortage banner caused solely by differing
+legacy size aliases despite a first-choice native allocation. Removed that
+obsolete inference; real provisioning errors and native hardware/placement
+surfaces remain. 18 focused tests, ESLint, and reviewed desktop/mobile mock
+screenshots passed. The first agent startup rejected the smoke user's inherited
+Codex model `gpt-5.4-mini` before executing the marker prompt. Its workspace was
+removed via the supported API; the bounded profile now selects the already
+configured Claude agent without changing user defaults. Live lifecycle testing
+continues on the same owned VM. This configuration failure is not a sleep/wake
+pass, and no duplicate active test workspace is retained.
