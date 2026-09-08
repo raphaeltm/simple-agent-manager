@@ -665,27 +665,45 @@ describe('node resource deletion services', () => {
 
   // --- Placement-binding disjuncts -------------------------------------------------------------
   // Migration 0142 added `placement_credential_fingerprint` and left every pre-existing node
-  // NULL, with no backfill path. Three distinct binding states reach the strict teardown gate
-  // and each needs its own case; the original suite tested only the first and asserted the
-  // merged behaviour as correct, which is how the version-only state shipped undeletable.
-
-  it('fails closed when a node carries no placement credential binding at all', async () => {
-    nodeRows.push(
-      managedPoolNode({
-        id: 'legacy-node',
-        status: 'destroying',
+  // NULL, with no backfill path. Several distinct binding states reach the strict teardown gate
+  // and each needs its own case (rule 69). The original suite tested only the first row below and
+  // asserted the merged behaviour as correct, which is how the version-only state — the one 0142
+  // actually creates — shipped undeletable with a green suite.
+  it.each([
+    [
+      'no placement credential binding at all',
+      {
         capacityPoolId: null,
         placementCredentialSource: null,
         placementCredentialReference: null,
         placementCredentialVersion: null,
         placementCredentialFingerprint: null,
-      })
+      },
+      'placementCredentialSource+placementCredentialReference',
+    ],
+    [
+      'a reference but no generation proof of either kind',
+      { placementCredentialVersion: null, placementCredentialFingerprint: null },
+      'placementCredentialFingerprint and placementCredentialVersion',
+    ],
+    [
+      'full proof but no cloud provider',
+      { cloudProvider: null },
+      'cloudProvider',
+    ],
+  ])('fails closed for a node with %s', async (_label, overrides, expectedMissing) => {
+    nodeRows.push(managedPoolNode({ id: 'gated-node', status: 'destroying', ...overrides }));
+
+    const error = await deleteNodeResourcesStrict('gated-node', 'user-1', ENV).catch(
+      (err: unknown) => err as Error
     );
 
-    await expect(deleteNodeResourcesStrict('legacy-node', 'user-1', ENV)).rejects.toThrow(
-      /exact provider credential binding is missing/
-    );
-
+    expect(error.message).toContain('exact provider credential binding is missing');
+    // The diagnostic names exactly which prerequisites are absent (rule 49)...
+    expect(error.message).toContain(expectedMissing);
+    // ...without echoing the reference. It is an ID rather than a secret, but strict teardown
+    // deliberately keeps it out of logs and error strings.
+    expect(error.message).not.toContain('credentials:project-cloud-1');
     expect(createProviderForUser).not.toHaveBeenCalled();
     expect(providerGetVM).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
@@ -693,62 +711,6 @@ describe('node resource deletion services', () => {
     expect(updateCalls).toEqual([]);
   });
 
-  it('fails closed when a binding has a reference but no generation proof of either kind', async () => {
-    nodeRows.push(
-      managedPoolNode({
-        id: 'proofless-node',
-        status: 'destroying',
-        placementCredentialVersion: null,
-        placementCredentialFingerprint: null,
-      })
-    );
-
-    await expect(deleteNodeResourcesStrict('proofless-node', 'user-1', ENV)).rejects.toThrow(
-      /exact provider credential binding is missing/
-    );
-
-    expect(createProviderForUser).not.toHaveBeenCalled();
-    expect(providerDeleteVM).not.toHaveBeenCalled();
-    expect(updateCalls).toEqual([]);
-  });
-
-  it('fails closed when a managed node has no cloud provider, even with full proof', async () => {
-    nodeRows.push(
-      managedPoolNode({ id: 'providerless-node', status: 'destroying', cloudProvider: null })
-    );
-
-    const error = await deleteNodeResourcesStrict('providerless-node', 'user-1', ENV).catch(
-      (err: unknown) => err as Error
-    );
-
-    expect(error.message).toContain('exact provider credential binding is missing');
-    expect(error.message).toContain('cloudProvider');
-    expect(createProviderForUser).not.toHaveBeenCalled();
-    expect(providerDeleteVM).not.toHaveBeenCalled();
-    expect(updateCalls).toEqual([]);
-  });
-
-  it('names the absent prerequisites without echoing the credential reference', async () => {
-    nodeRows.push(
-      managedPoolNode({
-        id: 'proofless-diagnostic',
-        status: 'destroying',
-        placementCredentialVersion: null,
-        placementCredentialFingerprint: null,
-      })
-    );
-
-    const error = await deleteNodeResourcesStrict('proofless-diagnostic', 'user-1', ENV).catch(
-      (err: unknown) => err as Error
-    );
-
-    expect(error.message).toContain(
-      'placementCredentialFingerprint and placementCredentialVersion'
-    );
-    // The reference is an ID rather than a secret, but strict teardown deliberately keeps it
-    // out of logs and error strings.
-    expect(error.message).not.toContain('credentials:project-cloud-1');
-  });
 
   // THE PRODUCTION INCIDENT (node 01M1RKXS5YT0AEAD84872MNN2E). A node provisioned before
   // migration 0142 carries source + reference + version but never a fingerprint. Requiring a

@@ -115,7 +115,8 @@ No other call site of `exactProviderCredentialBindingFromPlacementSnapshot` chan
 
 ## Test evidence
 
-Baselines reconciled (rule 02): `nodes-delete` 35 → 40, `provider-credentials-edge-cases` 32 → 45.
+Baselines reconciled (rule 02): `nodes-delete` 35 → 39, `provider-credentials-edge-cases` 32 → 45 (the fail-closed disjuncts
+are one `it.each` table, so the case count exceeds the test count).
 Full `apps/api` suite reconciled separately: 9075 tests, 0 collection failures.
 
 Discrimination checks, each run once and reverted. **The mutation must be stated precisely** — an
