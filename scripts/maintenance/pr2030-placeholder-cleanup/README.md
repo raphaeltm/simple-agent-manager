@@ -164,3 +164,75 @@ all-three atomic proof writes, partial proofs, stale incarnation/provider claims
 changed generation/manifest/ownership, expired snapshots, new recovery claims,
 new usage/workspaces, unchanged timestamps/artifacts, and repeat execution. Both
 final mutations stay below D1's 100-bind limit, and node projections are explicit.
+
+## Second exact rearm: `retry-provider-recovery`
+
+The earlier operations and their audits remain unchanged. After deploying
+`db06843dd72812ed4f6b7e12a882363901ba1a9d`, the native plan passed allocation
+authority, but Hetzner returned `412: error during placement` three times between
+13:28 and 13:30 UTC. `provider-recovery-evidence.json` records those exact three
+failed recovery tasks and their CX43/nbg1 node incarnations. Unlike the previous
+pre-claim incident, each node already has its **original positive authoritative
+runtime termination confirmation**, persisted by the corrected failure path.
+This operation does not create or repair any proof.
+
+`retry_provider_recovery.py` changes only the same snapshot's `recovery_attempts`
+from 3 to 0. It preserves the original manifest digest, home/WIP hashes, snapshot
+generation, source workspace/session, sleep/expiry timestamps, failed status,
+last failed recovery task, and every other snapshot field. Normal manual prompts
+do not reset an exhausted counter; this is a reviewed, one-snapshot incident
+repair before returning to normal same-chat recovery, not a new retry policy.
+
+Both SELECT and atomic UPDATE require all three exact failed task/node links,
+incarnations, creation timestamps and positive proof timestamps, the exact 412
+errors, null provider/IP/DNS/heartbeat fields, and no node workspace/usage/snapshot
+or competing task links. Node status may be `destroying` or `deleted`, but the
+proof and error evidence must remain unchanged. Another active recovery, new
+snapshot generation, modified manifest, or renewed claim refuses execution.
+A matching already-zero counter is a read-only no-op. A partial counter refuses.
+
+### Ready compute is a mandatory prerequisite
+
+The `helper` field is intentionally **null** in the prepared evidence. Both the
+previous CX33 helper and the subsequent retry were not yet proven healthy when
+this operation was prepared. Preview and apply both refuse until root captures
+and reviews an exact helper record with these nonsecret fields:
+
+```json
+{
+  "workspace_id": "<exact approved helper workspace>",
+  "id": "<its node ID>",
+  "runtime_incarnation_id": "<its current incarnation>",
+  "provider_instance_id": "<its provider instance ID>",
+  "provider_instance_type": "<its native offering>"
+}
+```
+
+The SQL requires that exact helper workspace to be running under the incident's
+user/project, attached to a healthy managed workspace VM in the installation
+pool at Hetzner `nbg1`. It requires the reviewed deployed agent version, a
+heartbeat within 90 seconds, observed matching native identity, at least 2 vCPU
+and 4 GiB memory, no termination proof, and the helper's expected 250-millicpu /
+512-MiB reservation with three co-tenant slots. No second active workspace may
+occupy it. This leaves capacity for the preserved 1000-millicpu / 1024-MiB run;
+normal admission still checks current policy and metrics. The helper's node,
+incarnation, provider ID and type are pinned again in the atomic update.
+
+Root must wait for a successful helper rather than rearming repeatedly against
+provider placement failure. Keep the helper running through restoration so the
+30-second warm timeout cannot remove it. If the Worker deployment changes,
+review and update only this operation's `REQUIRED_VERSION`, then capture a helper
+running that exact agent. Do not relax any other operation's historical guards.
+
+After root review, preview this explicit workflow operation with `apply=false`.
+Apply only after inspecting its exact helper, proofs and unchanged snapshot audit;
+require changes 1 and the `provider_recovery_rearmed` postcheck. Then send one
+normal same-chat prompt and verify fresh-node reuse, saved 1-GiB reservation,
+restored markers and final cleanup. No operation dispatches a task or provider
+request automatically. Do not merge this maintenance branch into main.
+
+Offline validation now comprises 36 scenarios. The added cases cover whole-table
+unchanged-state assertions, exact proof/incarnation/provider guards, helper
+identity/health/capacity/freshness, absent workspace/usage, concurrent recovery,
+new snapshot generation/manifest, atomic race rejection, idempotent zero-counter
+no-op, and the D1 binding limit.
