@@ -1,21 +1,18 @@
-name: Deploy Staging
+# Isolated maintenance branch only. Never merge this workflow into main.
+name: Staging Placeholder Cleanup
 
 on:
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: 'Preview changes without applying'
-        required: false
+      apply:
+        description: 'Persist the audited proof for the single PR 2030 failed placeholder'
+        required: true
         type: boolean
         default: false
 
-# Only one staging deployment at a time; queue (don't cancel) concurrent requests
 concurrency:
   group: deploy-staging
   cancel-in-progress: false
-
-env:
-  PLAYWRIGHT_VERSION: 1.59.1
 
 permissions:
   contents: read
@@ -23,49 +20,20 @@ permissions:
   id-token: none
 
 jobs:
-  deploy:
-    uses: ./.github/workflows/deploy-reusable.yml
-    with:
-      environment: staging
-      skip_agent: false # Required: staging VMs need the agent binary in R2
-      dry_run: ${{ inputs.dry_run || false }}
-    secrets: inherit
-
-  # Smoke tests run after successful staging deployment.
-  # Requires SMOKE_TEST_TOKEN secret in the staging environment.
-  # Skipped if the token is not configured (new deployments before token setup).
-  smoke-tests:
-    needs: deploy
-    if: ${{ !inputs.dry_run }}
+  repair-placeholder:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     environment: staging
-    env:
-      SMOKE_TEST_TOKEN: ${{ secrets.SMOKE_TEST_TOKEN }}
-      SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
-      SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22'
-
-      - name: Install Playwright
-        run: |
-          mkdir -p /tmp/pw && cd /tmp/pw
-          npm init -y > /dev/null 2>&1
-          npm install --ignore-scripts "@playwright/test@${PLAYWRIGHT_VERSION}"
-          npx playwright install chromium
-          mkdir -p $GITHUB_WORKSPACE/node_modules/.bin
-          ln -sf /tmp/pw/node_modules/@playwright $GITHUB_WORKSPACE/node_modules/@playwright
-          ln -sf /tmp/pw/node_modules/playwright $GITHUB_WORKSPACE/node_modules/playwright
-          ln -sf /tmp/pw/node_modules/playwright-core $GITHUB_WORKSPACE/node_modules/playwright-core
-          ln -sf /tmp/pw/node_modules/.bin/playwright $GITHUB_WORKSPACE/node_modules/.bin/playwright
-
-      - name: Run smoke tests
-        if: ${{ env.SMOKE_TEST_TOKEN != '' }}
-        run: npx playwright test --config=tests/smoke/playwright.config.ts
-
-      - name: Skip notice (no token configured)
-        if: ${{ env.SMOKE_TEST_TOKEN == '' }}
-        run: echo "⚠ Smoke tests skipped — SMOKE_TEST_TOKEN not configured in staging environment secrets"
+          persist-credentials: false
+      - name: Verify offline guard regressions
+        run: python3 -m unittest discover -s scripts/maintenance/pr2030-placeholder-cleanup -p 'test_*.py'
+      - name: Preview or persist the exact missing proof
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          APPLY_REPAIR: ${{ inputs.apply }}
+        run: python3 scripts/maintenance/pr2030-placeholder-cleanup/repair.py

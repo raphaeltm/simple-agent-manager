@@ -1,0 +1,24 @@
+{
+  "source_file": "final-fsn1-placement-failure.json",
+  "source_sha256": "92283e5c9c6860a0faa369a9b0810776348a21f4c2e17a2c07b96629fa72517f",
+  "observed_at": "2026-09-08T11:21:00.349222+00:00",
+  "workspace": {
+    "id": "01M20BZ3SP1ME6HDS6R4WTA6SB",
+    "status": "error",
+    "node_id": null,
+    "chat_session_id": "9fa25a37-69e6-4efa-97e4-55b770d7d5c4",
+    "error_message": "[hetzner] hetzner API error (412): error during placement",
+    "runtime_deletion_confirmed_at": null
+  },
+  "task": {
+    "id": "01M20BZ3YM6VA2B6NH82P65B21",
+    "workspace_id": "01M20BZ3SP1ME6HDS6R4WTA6SB",
+    "chat_session_id": "9fa25a37-69e6-4efa-97e4-55b770d7d5c4",
+    "status": "failed",
+    "execution_step": "workspace_creation",
+    "auto_provisioned_node_id": null,
+    "error_message": "[hetzner] hetzner API error (412): error during placement"
+  },
+  "nodes": [],
+  "snapshots": []
+}
