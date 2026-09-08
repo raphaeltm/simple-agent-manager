@@ -864,3 +864,23 @@ local resume errors, active failures and other snapshot errors remain visible.
 Seven actual-header regressions and reviewed desktop/mobile screenshots cover
 these cases. Latest main's dependency updates and subsequent blog update were
 merged; no additional runtime implementation changes were introduced.
+
+
+The wake attempt exposed the actual deletion defect: `removeManagedNodeRecords`
+physically removed the sleeping workspace after preserving the snapshot, and D1
+nulled `snapshot.workspace_id`. `loadRecoveryContext` requires that row, so the
+snapshot was no longer recoverable. The UI-only suppression in `722997457` was
+therefore reverted: Sleeping alone is not proof of recoverability. The final fix
+preserves exact restorable/in-flight snapshot workspace context when deleting a
+node, while explicit workspace deletion remains destructive. A new supported
+capture/delete/wake cycle is required; the orphaned test snapshot is not repaired
+by manually recreating metadata and does not count as a successful recovery.
+
+
+The node cleanup fix now retains same-owner snapshot-referenced workspaces
+atomically in both managed and BYO deletion paths. It does not weaken runtime
+termination or incarnation proof. Ten real Workers/D1 tests passed, including
+available/degraded snapshots, pending capture, waking at the attempt limit,
+cleared chat pointer during recovery handoff, BYO, and explicit workspace
+snapshot/R2 deletion. The original failure was reproduced before the fix;
+independent review, API typecheck and scoped ESLint passed.

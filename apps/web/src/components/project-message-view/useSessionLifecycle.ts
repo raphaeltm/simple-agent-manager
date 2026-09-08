@@ -729,8 +729,6 @@ export function useSessionLifecycle(
     completionDockWorking,
     /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
     isWaking: wake.isWaking,
-    /** Canonical recovery failure proof; distinct from a historical task error. */
-    wakeRecoveryStatus: sessionQuery.data?.state?.recoveryStatus ?? null,
     /** Current wake phase, or null before the replacement runner reports a step. */
     wakePhase: wake.wakePhase,
     staleNotice,

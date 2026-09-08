@@ -77,6 +77,17 @@ nodesRoutes.use('/*', async (c, next) => {
 
 type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
 
+function workspaceHasNoSnapshotContext() {
+  // Removing a host must not erase the workspace metadata the snapshot resumer
+  // needs. Retain in-flight/failed snapshots too: their context remains useful
+  // for recovery and diagnostics. Explicit workspace deletion discards artifacts.
+  return sql`NOT EXISTS (
+    SELECT 1 FROM session_snapshots AS snapshot
+    WHERE snapshot.workspace_id = ${schema.workspaces.id}
+      AND snapshot.user_id = ${schema.workspaces.userId}
+  )`;
+}
+
 function optionalPositiveInteger(value: number | undefined, field: string): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isInteger(value) || value <= 0) {
@@ -138,7 +149,8 @@ async function removeManagedNodeRecords(
       and(
         eq(schema.workspaces.nodeId, nodeId),
         eq(schema.workspaces.userId, userId),
-        eq(schema.workspaces.runtimeDeletionConfirmedAt, cleanup.runtimeTerminationConfirmedAt)
+        eq(schema.workspaces.runtimeDeletionConfirmedAt, cleanup.runtimeTerminationConfirmedAt),
+        workspaceHasNoSnapshotContext()
       )
     );
   const deletedNode = await db
@@ -182,7 +194,11 @@ async function removeDeletedNodeRecords(input: {
     await input.db
       .delete(schema.workspaces)
       .where(
-        and(eq(schema.workspaces.nodeId, input.nodeId), eq(schema.workspaces.userId, input.userId))
+        and(
+          eq(schema.workspaces.nodeId, input.nodeId),
+          eq(schema.workspaces.userId, input.userId),
+          workspaceHasNoSnapshotContext()
+        )
       );
     await input.db
       .delete(schema.nodes)

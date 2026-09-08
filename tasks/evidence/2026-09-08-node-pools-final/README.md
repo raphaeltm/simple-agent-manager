@@ -46,3 +46,13 @@ healthy snapshot case has no failure card; canonical failed recovery and active
 runtime failure retain their cards. Both viewport captures were reviewed with no
 overflow, clipping, or unreadable controls. These are local mocks; final staging
 captures will verify the same state after deployment.
+
+
+## Superseded sleep-header experiment
+
+The `sleep-status-*` local captures document an experiment that was reverted.
+Subsequent live wake proved the snapshot's required workspace row had been
+removed by node deletion. Canonical Sleeping alone did not prove recoverability;
+hiding its runtime error was unsafe. These images are retained as investigation
+evidence and are not final UI acceptance evidence. The node deletion fix and a
+new supported lifecycle test replace this experiment.

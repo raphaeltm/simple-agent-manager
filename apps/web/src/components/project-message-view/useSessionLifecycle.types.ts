@@ -46,8 +46,6 @@ export interface UseSessionLifecycleResult {
   completionDockWorking: boolean;
   /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
   isWaking: boolean;
-  /** Canonical recovery status, distinct from a historical task failure. */
-  wakeRecoveryStatus: Exclude<SessionStateSnapshot['recoveryStatus'], undefined>;
   /** Current wake phase, or null before the replacement runner reports a step. */
   wakePhase: TaskExecutionStep | null;
   staleNotice: boolean;
