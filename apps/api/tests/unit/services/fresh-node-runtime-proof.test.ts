@@ -1,3 +1,4 @@
+import { ProviderError } from '@simple-agent-manager/providers';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -92,6 +93,62 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe('fresh VM absence proof through real provisioning and cleanup SQL', () => {
+  it.each([
+    [
+      'placement rejection',
+      new ProviderError('hetzner', 412, 'Placement unavailable', {
+        providerCode: 'placement_error',
+      }),
+      true,
+    ],
+    [
+      'capacity rejection',
+      new ProviderError('hetzner', 422, 'Capacity exhausted', { category: 'transient_capacity' }),
+      true,
+    ],
+    [
+      'ambiguous transport failure',
+      new ProviderError('hetzner', undefined, 'Network timeout'),
+      false,
+    ],
+  ] as const)(
+    'records absence after %s only when createVM definitively rejected allocation',
+    async (_name, error, absent) => {
+      const node = await freshNode();
+      mocks.createVM.mockRejectedValueOnce(error);
+      await provisionNode(node.id, env);
+      expect(mocks.createVM).toHaveBeenCalledOnce();
+      expect(readNode(node.id)).toMatchObject({
+        status: 'error',
+        providerId: null,
+        proof: absent ? expect.any(String) : null,
+      });
+      expect(await cleanup(node.id)).toBe(absent ? 'placeholder-deleted' : 'skipped');
+    }
+  );
+
+  it('does not attach rejection proof to a concurrently replaced provider incarnation', async () => {
+    const node = await freshNode();
+    mocks.createVM.mockImplementationOnce(async () => {
+      sqlite
+        .prepare(
+          `UPDATE nodes SET runtime_incarnation_id = 'replacement',
+        runtime_termination_confirmed_at = NULL WHERE id = ?`
+        )
+        .run(node.id);
+      throw new ProviderError('hetzner', 412, 'Placement unavailable', {
+        providerCode: 'placement_error',
+      });
+    });
+    await provisionNode(node.id, env);
+    expect(readNode(node.id)).toMatchObject({
+      status: 'creating',
+      incarnation: 'replacement',
+      proof: null,
+    });
+    expect(await cleanup(node.id)).toBe('skipped');
+  });
+
   it('lets ordinary cleanup confirm a recovery allocation rejected before provider resolution', async () => {
     const node = await freshNode();
     mocks.assertPlan.mockRejectedValueOnce(new Error('Node allocation plan is no longer current'));

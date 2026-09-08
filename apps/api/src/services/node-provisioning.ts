@@ -230,6 +230,7 @@ export async function provisionNode(
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
   let attemptedProvider = targetProvider;
   let provisioningRuntimeIncarnationId = node.runtimeIncarnationId;
+  let providerAllocationRejected = false;
   const attributionUserId = node.credentialAttributionUserId ?? node.userId;
   const attributionProjectId =
     node.credentialAttributionSource === 'project'
@@ -409,9 +410,21 @@ export async function provisionNode(
       },
       node
     );
-    const vm = providerContext
-      ? await provider.createVM(vmConfig, providerContext)
-      : await provider.createVM(vmConfig);
+    const vm = await (providerContext
+      ? provider.createVM(vmConfig, providerContext)
+      : provider.createVM(vmConfig)).catch((err: unknown) => {
+      // Hetzner's placement/capacity retries only repeat rejected creates. A
+      // transport failure has no HTTP status and cannot prove absence. Keep
+      // this at the create boundary: later failures and multi-step providers
+      // can occur after allocation even when no VM identity reached the caller.
+      providerAllocationRejected =
+        providerResult.providerName === 'hetzner' &&
+        err instanceof ProviderError &&
+        err.providerName === 'hetzner' &&
+        err.statusCode !== undefined &&
+        (err.statusCode === 412 || isTransientCapacityError(err));
+      throw err;
+    });
     throwIfProviderRequestAborted(providerContext);
 
     // Persist the provider identity before the post-request authority check so
@@ -632,6 +645,9 @@ export async function provisionNode(
             status: 'error',
             healthStatus: 'unhealthy',
             errorMessage: `[${providerName}] ${truncatedError}`,
+            ...(providerAllocationRejected
+              ? { runtimeTerminationConfirmedAt: new Date().toISOString() }
+              : {}),
             updatedAt: new Date().toISOString(),
           })
           .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
@@ -648,6 +664,9 @@ export async function provisionNode(
         status: 'error',
         healthStatus: 'unhealthy',
         errorMessage: `[${providerName}] ${truncatedError}`,
+        ...(providerAllocationRejected
+          ? { runtimeTerminationConfirmedAt: new Date().toISOString() }
+          : {}),
         updatedAt: new Date().toISOString(),
       })
       .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
