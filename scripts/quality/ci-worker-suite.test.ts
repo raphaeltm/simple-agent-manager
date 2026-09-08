@@ -40,7 +40,14 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
     "needs.changes.outputs.api == 'true'"
   );
   expect(job).toContain('needs: [changes]');
-  expect(job).toContain('timeout-minutes: 15');
+  // The job must carry a bound — an unbounded required check can hang for the
+  // 6h GitHub ceiling. The exact value is tuning, not contract, so assert the
+  // bound exists and stays sane rather than pinning a magic number (#2016).
+  const timeoutMatch = job.match(/timeout-minutes: (\d+)/);
+  expect(timeoutMatch).not.toBeNull();
+  const timeoutMinutes = Number(timeoutMatch![1]);
+  expect(timeoutMinutes).toBeGreaterThan(0);
+  expect(timeoutMinutes).toBeLessThanOrEqual(30);
   expect(step).toContain('run: pnpm --filter @simple-agent-manager/api test:workers');
   expect(step).not.toContain('continue-on-error');
 }
