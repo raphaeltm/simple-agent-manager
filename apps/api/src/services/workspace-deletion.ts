@@ -451,7 +451,7 @@ async function finalizeConfirmedDeletion(
     };
   }
   const currentProof = confirmedDeletionProof(current);
-  if (currentProof) {
+  if (currentProof && current.status === 'deleted') {
     await beforeFinalize?.();
     const lifecycle = await finalizeWorkspaceLifecycleClosure(env, {
       workspaceIds: [expected.workspaceId],

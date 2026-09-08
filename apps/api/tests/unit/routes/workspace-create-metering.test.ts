@@ -4,6 +4,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { crudRoutes } from '../../../src/routes/workspaces/crud';
 import { lifecycleRoutes } from '../../../src/routes/workspaces/lifecycle';
 import { registerWorkspaceCreateRoute } from '../../../src/routes/workspaces/workspace-create';
 import { clearCapacityCatalogCache } from '../../../src/services/default-capacity-source-credentials';
@@ -12,6 +13,7 @@ import { signCallbackToken } from '../../../src/services/jwt';
 import { type Fixture, fixture } from './node-pool-upgrade-test-helpers';
 
 vi.mock('../../../src/middleware/auth', () => ({
+  getUserId: () => 'user-1',
   requireAuth: () => async (_c: unknown, next: () => Promise<void>) => next(),
   requireApproved: () => async (_c: unknown, next: () => Promise<void>) => next(),
   getAuth: () => ({
@@ -44,7 +46,11 @@ afterEach(() => {
   clearCapacityCatalogCache();
 });
 
-async function createMeteringFixture() {
+async function createMeteringFixture(options: {
+  rejectProvider?: boolean;
+  cleanupClaimed?: boolean;
+  reassignWorkspace?: boolean;
+} = {}) {
   const f = fixture();
   const projectStub = f.env.PROJECT_DATA.get(f.env.PROJECT_DATA.idFromName('project-1'));
   Object.assign(projectStub, { recordActivityEvent: vi.fn(async () => 'activity-1') });
@@ -60,6 +66,11 @@ async function createMeteringFixture() {
   f.sqlite
     .prepare('UPDATE credentials SET encrypted_token = ?, iv = ? WHERE id = ?')
     .run(secret.ciphertext, secret.iv, 'cloud');
+  if (options.cleanupClaimed) {
+    f.sqlite.exec(`CREATE TRIGGER claim_failed_node_cleanup AFTER UPDATE OF status ON nodes
+      WHEN NEW.status = 'error'
+      BEGIN UPDATE nodes SET status = 'destroying' WHERE id = NEW.id; END`);
+  }
   const serverType = {
     id: 1,
     name: 'cx23',
@@ -100,6 +111,12 @@ async function createMeteringFixture() {
       if (url.endsWith('/servers') && init?.method === 'POST') {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         providerCreates.push(body);
+        if (options.rejectProvider) {
+          if (options.reassignWorkspace) {
+            f.sqlite.prepare("UPDATE workspaces SET user_id = 'owner' WHERE user_id = 'user-1'").run();
+          }
+          return Response.json({ error: { code: 'placement_error', message: 'No capacity in selected location' } }, { status: 412 });
+        }
         return Response.json({
           server: {
             id: 321,
@@ -131,6 +148,7 @@ async function createMeteringFixture() {
   );
   registerWorkspaceCreateRoute(app);
   app.route('/', lifecycleRoutes);
+  app.route('/cleanup', crudRoutes);
   const pending: Promise<unknown>[] = [];
   const executionContext = {
     waitUntil: (promise: Promise<unknown>) => {
@@ -154,7 +172,8 @@ async function createMeteringFixture() {
   );
   const result = (await response.json()) as { id: string };
   expect(response.status, JSON.stringify(result)).toBe(201);
-  await Promise.race([
+  if (options.rejectProvider) await Promise.all(pending);
+  else await Promise.race([
     healthRequested,
     Promise.all(pending).then(() => {
       throw new Error('Provisioning finished without reaching readiness');
@@ -182,6 +201,48 @@ function usage(f: Fixture, workspaceId: string) {
 }
 
 describe('fresh workspace metering through registered HTTP and real SQL', () => {
+  it('retains authoritative pre-attach failure proof so DELETE completes without a node', async () => {
+    const { f, app, workspaceId, providerCreates } = await createMeteringFixture({ rejectProvider: true });
+    expect(providerCreates).toHaveLength(2);
+    expect(providerCreates.every((request) => request.location === 'fsn1')).toBe(true);
+    expect(f.sqlite.prepare('SELECT COUNT(*) AS count FROM nodes').get()).toEqual({ count: 0 });
+    expect(usage(f, workspaceId)).toEqual([]);
+    expect(f.sqlite.prepare(`SELECT status, node_id, runtime_deletion_proof, runtime_deletion_confirmed_at
+      FROM workspaces WHERE id = ?`).get(workspaceId)).toEqual({
+      status: 'error', node_id: null, runtime_deletion_proof: 'workspace_never_started',
+      runtime_deletion_confirmed_at: expect.any(String),
+    });
+    expect(f.sqlite.prepare('SELECT status FROM tasks WHERE workspace_id = ?').get(workspaceId))
+      .toEqual({ status: 'failed' });
+    const response = await app.request(`/cleanup/${workspaceId}`, { method: 'DELETE' }, f.env);
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(await response.json()).toEqual({ success: true, deletionStatus: 'confirmed' });
+    expect(f.sqlite.prepare('SELECT id FROM workspaces WHERE id = ?').get(workspaceId)).toBeUndefined();
+  }, 15_000);
+
+  it('does not invent absence proof when another cleanup owns the failed node', async () => {
+    const { f, app, workspaceId } = await createMeteringFixture({ rejectProvider: true, cleanupClaimed: true });
+    expect(f.sqlite.prepare('SELECT status FROM nodes').get()).toEqual({ status: 'destroying' });
+    expect(f.sqlite.prepare(`SELECT status, runtime_deletion_proof, runtime_deletion_confirmed_at
+      FROM workspaces WHERE id = ?`).get(workspaceId)).toEqual({
+      status: 'error', runtime_deletion_proof: null, runtime_deletion_confirmed_at: null,
+    });
+    const response = await app.request(`/cleanup/${workspaceId}`, { method: 'DELETE' }, f.env);
+    expect(response.status).toBe(202);
+    expect(f.sqlite.prepare('SELECT status FROM workspaces WHERE id = ?').get(workspaceId))
+      .toEqual({ status: 'stopping' });
+  }, 15_000);
+
+  it('does not mark a reassigned placeholder failed or attach old cleanup proof to its new owner', async () => {
+    const { f, workspaceId } = await createMeteringFixture({ rejectProvider: true, reassignWorkspace: true });
+    expect(f.sqlite.prepare(`SELECT status, user_id, runtime_deletion_proof, runtime_deletion_confirmed_at
+      FROM workspaces WHERE id = ?`).get(workspaceId)).toEqual({
+      status: 'creating', user_id: 'owner', runtime_deletion_proof: null, runtime_deletion_confirmed_at: null,
+    });
+    expect(f.sqlite.prepare('SELECT status FROM tasks WHERE workspace_id = ?').get(workspaceId))
+      .toEqual({ status: 'in_progress' });
+  }, 15_000);
+
   it('persists native usage before readiness completes and closes it on readiness failure', async () => {
     const control = await createMeteringFixture();
     try {

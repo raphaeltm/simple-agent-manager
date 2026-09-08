@@ -43,6 +43,7 @@ import * as projectDataService from '../../services/project-data';
 import {
   assertDirectWorkspaceProvisioningAuthority,
   cleanupFreshProvisioningNode,
+  type FreshProvisioningNodeCleanupResult,
 } from '../../services/provisioning-authority';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
@@ -549,12 +550,25 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
       c.executionCtx.waitUntil(
         (async () => {
           const innerDb = drizzle(c.env.DATABASE, { schema });
-          const markDirectWorkspaceProvisioningFailed = async (message: string) => {
+          const markDirectWorkspaceProvisioningFailed = async (
+            message: string,
+            cleanup: FreshProvisioningNodeCleanupResult
+          ) => {
             const failedAt = new Date().toISOString();
+            // Preserve authoritative absence before the unattached node identity is
+            // lost. A skipped or failed cleanup cannot establish deletion proof.
+            const proof = {
+              'placeholder-deleted': 'workspace_never_started',
+              'strict-deleted': 'node_runtime_terminated',
+              skipped: null,
+              failed: null,
+            }[cleanup];
             const workspaceFailed = await c.env.DATABASE.prepare(
               `UPDATE workspaces
                 SET status = 'error',
                     error_message = ?,
+                    runtime_deletion_confirmed_at = ?,
+                    runtime_deletion_proof = ?,
                     updated_at = ?
               WHERE id = ?
                 AND user_id = ?
@@ -564,7 +578,10 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
                 AND status = 'creating'
                 AND runtime_deletion_confirmed_at IS NULL`
             )
-              .bind(message, failedAt, workspaceId, userId, linkedProject.id, chatSessionId)
+              .bind(
+                message, proof ? failedAt : null, proof, failedAt,
+                workspaceId, userId, linkedProject.id, chatSessionId
+              )
               .run();
             if ((workspaceFailed.meta?.changes ?? 0) !== 1) return;
             await c.env.DATABASE.prepare(
@@ -614,14 +631,15 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
 
             const provisionedNode = nodeRows[0];
             if (!provisionedNode || provisionedNode.status !== 'running') {
-              await cleanupFreshProvisioningNode(c.env, {
+              const cleanup = await cleanupFreshProvisioningNode(c.env, {
                 nodeId: targetNodeId,
                 userId,
                 nodeRole: 'workspace',
                 reason: 'direct_workspace_node_not_running',
               });
               await markDirectWorkspaceProvisioningFailed(
-                provisionedNode?.errorMessage || 'Node provisioning failed'
+                provisionedNode?.errorMessage || 'Node provisioning failed',
+                cleanup
               );
               return;
             }
@@ -653,14 +671,15 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
               admissionPolicy
             );
             if (!placementAttached) {
-              await cleanupFreshProvisioningNode(c.env, {
+              const cleanup = await cleanupFreshProvisioningNode(c.env, {
                 nodeId: targetNodeId,
                 userId,
                 nodeRole: 'workspace',
                 reason: 'direct_workspace_final_admission_failed',
               });
               await markDirectWorkspaceProvisioningFailed(
-                'Node lost capacity or placement authority before workspace creation'
+                'Node lost capacity or placement authority before workspace creation',
+                cleanup
               );
               return;
             }
