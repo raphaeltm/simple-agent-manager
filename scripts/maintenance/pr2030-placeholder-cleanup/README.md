@@ -97,7 +97,7 @@ unchanged. The workflow now has an explicit `operation` choice; `apply` still
 defaults to false. Neither new operation runs as a side effect of the other.
 
 The new application fixes are pinned to Worker
-`fe31a27319935a0b20c300c4067010e725ab8d86`. Both new operations independently reject
+`db06843dd72812ed4f6b7e12a882363901ba1a9d`. Both new operations independently reject
 Worker `708e4f179...` and every other Worker version. Do not commit, push, or run
 these additions before root review; execution additionally waits for the corrected
 application deployment and its staging workflow to finish successfully.
