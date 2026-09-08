@@ -172,3 +172,5 @@ Before merging a PR that touches an alarm, cron, sweep, or reconcile loop:
 - `.claude/rules/45-durable-object-concurrency-mutex.md` — DO `await`
   interleaving hazards
 - `.claude/rules/35-vertical-slice-testing.md` — realistic cross-boundary tests
+
+When cleanup reacts to a terminal task, test the real order in which a tool marks the task complete before the assistant finishes its response. Run both canonical-session and summary-index cleanup between completion and final-message persistence. Assert the remaining response is accepted, and separately prove stale completion protection expires. Task completion alone is not proof that the prompt stream has drained.

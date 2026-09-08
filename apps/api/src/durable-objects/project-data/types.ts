@@ -13,6 +13,8 @@ export type Env = {
   VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
   TASK_LIVENESS_MAX_ACP_SESSIONS?: string;
+  /** Existing automatic idle interval also bounds completion-response draining. */
+  SESSION_SLEEP_AFTER_MS?: string;
   TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string;
   TASK_LIVENESS_PROBE_TIMEOUT_MS?: string;
   IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP?: string;

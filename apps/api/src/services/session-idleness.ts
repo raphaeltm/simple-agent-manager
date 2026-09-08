@@ -132,7 +132,7 @@ export function getFreshHarnessWorkLeaseExpiry(
  * ProjectData parent-wake delivery path when its children finish, so keeping it
  * awake merely to hold a place in the lineage burns compute for no benefit.
  *
- * Only the sleep reader calls this today. Converting the remaining shutdown
+ * Sleep and completed-task ledger cleanup use this predicate. Converting the remaining shutdown
  * timers (ProjectData idle cleanup, workspace idle timeout) onto it is tracked
  * as a follow-up in idea `01M08VJDHK3MNYMZCQF5AJC17P`; they still use
  * schedule/workspace-activity candidate selection plus `classifyTaskRuntimeLiveness()`.

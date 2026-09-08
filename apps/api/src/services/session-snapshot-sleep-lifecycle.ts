@@ -462,26 +462,4 @@ export async function scheduleSessionSnapshotSleep(
     );
 }
 
-export async function cancelScheduledSessionSleep(db: Db, chatSessionId: string): Promise<void> {
-  await db
-    .update(schema.sessionSnapshots)
-    .set({
-      sleepStatus: null,
-      sleepAfter: null,
-      sleepError: null,
-      sleepClaimId: null,
-      sleepClaimedAt: null,
-      sleepStoppingSince: null,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(
-      and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        isNull(schema.sessionSnapshots.sleepingAt),
-        or(
-          isNull(schema.sessionSnapshots.sleepStatus),
-          inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed', 'preparing'])
-        )
-      )
-    );
-}
+export { cancelScheduledSessionSleep } from './session-snapshot-sleep-cancel';
