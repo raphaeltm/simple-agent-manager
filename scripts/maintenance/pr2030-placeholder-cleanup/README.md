@@ -149,7 +149,7 @@ already-zero counter is a read-only no-op; counts 1, 2, or greater than 3 refuse
 ### Required order
 
 1. Root reviews the scripts, evidence, and offline test results.
-2. Wait for the corrected `fe31a273...` application and staging workflow.
+2. Wait for the corrected `db06843dd...` application and staging workflow.
 3. Preview and apply `recovery-node-proofs`; require exact changes 3.
 4. Preview and apply `rearm-recovery`; require exact changes 1.
 5. Root uses supported normal node DELETE APIs, then tests normal recovery of this
