@@ -20,7 +20,7 @@ catalog:
 
   # === Vitest Ecosystem ===
   '@vitest/coverage-v8': 4.1.7
-  '@vitejs/plugin-react': 5.2.0
+  '@vitejs/plugin-react': 6.1.1
 
   # === TypeScript ESLint ===
   # Released in lockstep from one monorepo — keep aligned so the parser and plugin
