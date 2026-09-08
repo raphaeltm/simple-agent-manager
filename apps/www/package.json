@@ -19,7 +19,7 @@
     "check:links": "python3 scripts/check-doc-links.py"
   },
   "dependencies": {
-    "@astrojs/sitemap": "3.7.3",
+    "@astrojs/sitemap": "3.7.4",
     "@astrojs/starlight": "0.40.0",
     "astro": "6.4.8",
     "mermaid": "11.14.0"
