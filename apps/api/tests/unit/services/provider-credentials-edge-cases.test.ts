@@ -15,6 +15,7 @@ import { decrypt } from '../../../src/services/encryption';
 import {
   createProviderForExactCredential,
   fingerprintEncryptedProviderCredential,
+  hasExactProviderCredentialGenerationProof,
 } from '../../../src/services/provider-credential-exact';
 import {
   buildProviderConfig,
@@ -520,6 +521,200 @@ describe('createProviderForUser exact credential binding', () => {
     } finally {
       sqlite.close();
     }
+  });
+});
+
+/**
+ * Version-only generation proof — the binding shape every node provisioned before migration
+ * 0142 carries (source + reference + version, fingerprint NULL). Strict teardown accepts it,
+ * so these cases pin what the resolver still refuses on that path. Driven through real SQLite
+ * so `updated_at` genuinely round-trips into `timestampVersion` rather than being handed in.
+ */
+describe('exact credential binding — version-only generation proof', () => {
+  const PLACED_AT = '2026-02-08T09:59:13.719Z';
+  const PLACED_VERSION = Date.parse(PLACED_AT);
+
+  function seedCredential(sqlite: Database.Database, updatedAt: string) {
+    createSchemaTables(sqlite, [schema.credentials]);
+    sqlite
+      .prepare(
+        `INSERT INTO credentials (
+           id, user_id, project_id, provider, credential_type, credential_kind,
+           is_active, encrypted_token, iv, created_at, updated_at
+         )
+         VALUES ('user-cloud-1', 'user-1', NULL, 'hetzner', 'cloud-provider', 'api-key',
+           1, 'ciphertext', 'iv', ?, ?)`
+      )
+      .run(PLACED_AT, updatedAt);
+    return drizzle(sqlite, { schema });
+  }
+
+  it('resolves a pre-0142 binding whose version still matches the credential row', async () => {
+    mockDecrypt.mockClear();
+    mockDecrypt.mockResolvedValueOnce('hetzner-api-token');
+    const sqlite = new Database(':memory:');
+    try {
+      const db = seedCredential(sqlite, PLACED_AT);
+      const providerFactory = vi.fn(async () => ({
+        provider: {} as never,
+        providerName: 'hetzner' as const,
+        credentialSource: 'user' as const,
+      }));
+
+      const result = await createProviderForExactCredential(
+        db as never,
+        'user-1',
+        'enc-key',
+        {} as never,
+        'hetzner',
+        null,
+        {
+          credentialSource: 'user',
+          credentialReference: 'credentials:user-cloud-1',
+          credentialVersion: PLACED_VERSION,
+          credentialFingerprint: null,
+        },
+        providerFactory
+      );
+
+      expect(result).toMatchObject({ providerName: 'hetzner', credentialSource: 'user' });
+      // Teardown gets the real content fingerprint back even though it went in version-only.
+      expect(result?.exactCredentialBinding?.credentialFingerprint).toBe(
+        await fingerprintEncryptedProviderCredential('ciphertext', 'iv')
+      );
+      expect(providerFactory).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('refuses a pre-0142 binding after the credential row rotates', async () => {
+    mockDecrypt.mockClear();
+    const sqlite = new Database(':memory:');
+    try {
+      // Every ciphertext write to `credentials` sets `updatedAt`, so rotation moves the version.
+      const db = seedCredential(sqlite, '2026-09-08T12:00:00.000Z');
+      const providerFactory = vi.fn(() => {
+        throw new Error('rotated account must not be constructed');
+      });
+
+      const result = await createProviderForExactCredential(
+        db as never,
+        'user-1',
+        'enc-key',
+        {} as never,
+        'hetzner',
+        null,
+        {
+          credentialSource: 'user',
+          credentialReference: 'credentials:user-cloud-1',
+          credentialVersion: PLACED_VERSION,
+          credentialFingerprint: null,
+        },
+        providerFactory
+      );
+
+      expect(result).toBeNull();
+      expect(providerFactory).not.toHaveBeenCalled();
+      expect(mockDecrypt).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('refuses a binding with neither fingerprint nor version even when the row is unchanged', async () => {
+    mockDecrypt.mockClear();
+    const sqlite = new Database(':memory:');
+    try {
+      const db = seedCredential(sqlite, PLACED_AT);
+      const providerFactory = vi.fn(() => {
+        throw new Error('proofless binding must not be constructed');
+      });
+
+      const result = await createProviderForExactCredential(
+        db as never,
+        'user-1',
+        'enc-key',
+        {} as never,
+        'hetzner',
+        null,
+        {
+          credentialSource: 'user',
+          credentialReference: 'credentials:user-cloud-1',
+          credentialVersion: null,
+          credentialFingerprint: null,
+        },
+        providerFactory
+      );
+
+      expect(result).toBeNull();
+      expect(providerFactory).not.toHaveBeenCalled();
+      expect(mockDecrypt).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('a matching version cannot rescue a binding whose fingerprint no longer matches', async () => {
+    mockDecrypt.mockClear();
+    const sqlite = new Database(':memory:');
+    try {
+      const db = seedCredential(sqlite, PLACED_AT);
+      const providerFactory = vi.fn(() => {
+        throw new Error('fingerprint mismatch must not be overridden by the version fallback');
+      });
+
+      const result = await createProviderForExactCredential(
+        db as never,
+        'user-1',
+        'enc-key',
+        {} as never,
+        'hetzner',
+        null,
+        {
+          credentialSource: 'user',
+          credentialReference: 'credentials:user-cloud-1',
+          credentialVersion: PLACED_VERSION,
+          credentialFingerprint: 'sha256:some-other-generation',
+        },
+        providerFactory
+      );
+
+      expect(result).toBeNull();
+      expect(providerFactory).not.toHaveBeenCalled();
+      expect(mockDecrypt).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
+describe('hasExactProviderCredentialGenerationProof', () => {
+  it.each([
+    ['fingerprint only', { credentialFingerprint: 'sha256:a', credentialVersion: null }, true],
+    ['version only', { credentialFingerprint: null, credentialVersion: 1700000000000 }, true],
+    ['both', { credentialFingerprint: 'sha256:a', credentialVersion: 1700000000000 }, true],
+    ['neither', { credentialFingerprint: null, credentialVersion: null }, false],
+  ])('%s -> %s', (_label, proof, expected) => {
+    expect(
+      hasExactProviderCredentialGenerationProof({
+        credentialSource: 'user',
+        credentialReference: 'credentials:user-cloud-1',
+        ...proof,
+      })
+    ).toBe(expected);
+  });
+
+  it('refuses a binding with no reference regardless of its generation proof', () => {
+    expect(hasExactProviderCredentialGenerationProof(null)).toBe(false);
+    expect(
+      hasExactProviderCredentialGenerationProof({
+        credentialSource: 'user',
+        credentialReference: null,
+        credentialVersion: 1700000000000,
+        credentialFingerprint: 'sha256:a',
+      })
+    ).toBe(false);
   });
 });
 

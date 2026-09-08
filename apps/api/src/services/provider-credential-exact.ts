@@ -22,7 +22,7 @@ export interface ExactProviderCredentialBinding {
   credentialReference: string | null | undefined;
   /** Updated-at snapshot used to fence placement before a runtime exists. */
   credentialVersion?: number | null;
-  /** Immutable content fingerprint required when deleting an existing runtime. */
+  /** Immutable content fingerprint: the preferred proof when deleting an existing runtime. */
   credentialFingerprint?: string | null;
 }
 
@@ -113,6 +113,35 @@ function withCredentialFingerprint(
   credentialFingerprint: string
 ): ExactProviderCredentialBinding {
   return { ...exactCredential, credentialFingerprint };
+}
+
+/**
+ * Does this binding carry a generation proof strong enough to authorize destroying an
+ * existing runtime?
+ *
+ * `credentialFingerprint` is the preferred proof: an immutable identity for one stored
+ * ciphertext generation, introduced by migration 0142. `credentialVersion` is the WEAKER
+ * legacy proof — the credential row's `updated_at` snapshot taken at placement time.
+ * Every ciphertext-mutating write to `credentials` sets `updatedAt` (routes/credentials.ts,
+ * routes/projects/credentials.ts), so a rotated row still moves the version and
+ * `exactCredentialGenerationMatches` still refuses. Rotation therefore remains detectable
+ * on the version-only path; it is simply detected by a mutable column rather than by
+ * content identity.
+ *
+ * Requiring a fingerprint here instead would strand every node provisioned before 0142:
+ * that column is backfill-proof by construction, so those rows can never satisfy it and
+ * become permanently undeletable, retrying teardown forever with no operator override.
+ * Accepting version-only proof is exactly as strong as the binding that provisioned them.
+ *
+ * This is NOT a relaxation for fingerprinted rows: when a fingerprint is present,
+ * `exactCredentialGenerationMatches` still requires it to match exactly, so a matching
+ * version can never rescue a binding whose fingerprint has moved.
+ */
+export function hasExactProviderCredentialGenerationProof(
+  binding: ExactProviderCredentialBinding | null | undefined
+): boolean {
+  if (!binding?.credentialReference) return false;
+  return binding.credentialFingerprint != null || binding.credentialVersion != null;
 }
 
 export function exactProviderCredentialBindingFromPlacementSnapshot(

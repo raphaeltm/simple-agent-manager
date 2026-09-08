@@ -11,6 +11,10 @@ import { deleteDNSRecord } from './dns';
 import { getTimeoutMs } from './fetch-timeout';
 import { persistError } from './observability';
 import {
+  type ExactProviderCredentialBinding,
+  hasExactProviderCredentialGenerationProof,
+} from './provider-credential-exact';
+import {
   createProviderForUser,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
@@ -123,6 +127,25 @@ function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
   return { targetProvider, attributionUserId, attributionProjectId, exactCredential };
 }
 
+/**
+ * Name the absent prerequisites without echoing their values. Credential references are
+ * IDs rather than secrets, but strict teardown deliberately keeps them out of logs and
+ * error strings, so this reports which fields are missing and never what they contain.
+ */
+function describeMissingExactBinding(
+  targetProvider: CredentialProvider | undefined,
+  exactCredential: ExactProviderCredentialBinding | null
+): string {
+  const missing: string[] = [];
+  if (!targetProvider) missing.push('cloudProvider');
+  if (!exactCredential) missing.push('placementCredentialSource+placementCredentialReference');
+  else if (!exactCredential.credentialReference) missing.push('placementCredentialReference');
+  else if (!hasExactProviderCredentialGenerationProof(exactCredential)) {
+    missing.push('placementCredentialFingerprint and placementCredentialVersion');
+  }
+  return missing.join(', ');
+}
+
 async function requireStrictNodeProvider(
   db: NodeDb,
   node: NodeRow,
@@ -131,9 +154,15 @@ async function requireStrictNodeProvider(
 ): Promise<ProviderForUserResult> {
   const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
     getStrictNodeCredentialContext(node, userId);
-  if (!targetProvider || !exactCredential?.credentialFingerprint) {
+  // A fingerprint is the preferred generation proof, but requiring it outright strands every
+  // node provisioned before migration 0142 — that column is backfill-proof, so those rows can
+  // never satisfy it. `hasExactProviderCredentialGenerationProof` also accepts the weaker
+  // version snapshot those nodes were placed with; `exactCredentialGenerationMatches` still
+  // refuses a rotated credential on either path, so this stays fail-closed.
+  if (!targetProvider || !hasExactProviderCredentialGenerationProof(exactCredential)) {
     throw new Error(
-      `Cannot strictly delete node ${node.id}: exact provider credential binding is missing`
+      `Cannot strictly delete node ${node.id}: exact provider credential binding is missing ` +
+        `(${describeMissingExactBinding(targetProvider, exactCredential)})`
     );
   }
   const providerResult = await createProviderForUser(
