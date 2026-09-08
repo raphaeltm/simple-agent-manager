@@ -114,6 +114,14 @@ until the budget refreshes and must not silently drop the candidate.
 For every new or changed sweep/reconcile candidate class, include a zombie
 prevention regression test:
 
+- Saturate the configured batch with permanently failing candidates, including
+  NULL-deadline and repair-exemption variants, and place valid work behind them.
+  Assert bounded repeated ticks reach that work. A failure that remains repairable
+  beyond the ordinary attempt budget must persist a future retry deadline, and
+  the selector and claim predicate must both honor that deadline.
+- When a service and its sweep both catch an error, test their real composition.
+  Terminal classification must happen in the first ownership-fenced failure write;
+  a later catch must not overwrite a renewed intent after the claim was released.
 - Run the sweep twice against a permanently failing candidate.
 - Assert the candidate is not re-selected on the second run, or that retries are
   explicitly bounded by a persisted/expiring marker.
