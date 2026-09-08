@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs';
-import * as v from 'valibot';
+import { resolvePullRequestEvidenceState } from './pr-evidence-source';
 
 const PREFLIGHT_START = '<!-- AGENT_PREFLIGHT_START -->';
 const PREFLIGHT_END = '<!-- AGENT_PREFLIGHT_END -->';
@@ -31,29 +30,6 @@ const QC_RESULT_PATTERN =
 function fail(message: string): never {
   console.error(`\nPreflight evidence check failed:\n- ${message}\n`);
   process.exit(1);
-}
-
-const pullRequestPayloadSchema = v.object({
-  pull_request: v.object({
-    body: v.optional(v.nullable(v.string())),
-    html_url: v.optional(v.string()),
-  }),
-});
-
-function parsePullRequestPayload(raw: string): { body: string; htmlUrl?: string } {
-  const payload: unknown = JSON.parse(raw);
-  const result = v.safeParse(pullRequestPayloadSchema, payload);
-  if (!result.success) {
-    fail(
-      'GitHub event payload must include pull_request with a string body/html_url when present.'
-    );
-  }
-
-  const pullRequest = result.output.pull_request;
-  return {
-    body: pullRequest.body ?? '',
-    ...(pullRequest.html_url ? { htmlUrl: pullRequest.html_url } : {}),
-  };
 }
 
 function escapeRegExp(value: string): string {
@@ -159,19 +135,20 @@ function validateSection(name: string, content: string | null, failures: string[
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const eventName = process.env.GITHUB_EVENT_NAME;
   if (eventName !== 'pull_request' && eventName !== 'pull_request_target') {
     console.log('Skipping preflight evidence check: not a pull request event.');
     return;
   }
 
-  const eventPath = process.env.GITHUB_EVENT_PATH;
-  if (!eventPath) {
-    fail('GITHUB_EVENT_PATH is missing.');
+  let payload;
+  try {
+    payload = await resolvePullRequestEvidenceState();
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
   }
-
-  const payload = parsePullRequestPayload(readFileSync(eventPath, 'utf8'));
+  console.log(`Validating preflight evidence from: ${payload.source}`);
 
   const body = payload.body;
   if (!body.trim()) {
@@ -320,4 +297,11 @@ function main(): void {
   }
 }
 
-main();
+// main() is async: an unhandled rejection must not exit 0 and silently pass the
+// gate. Fail closed on any unexpected error.
+main().catch((error: unknown) => {
+  console.error(
+    `\nPreflight evidence check errored:\n- ${error instanceof Error ? error.message : String(error)}\n`
+  );
+  process.exit(1);
+});
