@@ -48,16 +48,14 @@ export function estimateArchiveWrites(
   factor: number,
   maxMessages: number
 ): number {
-  const count = (table: string) =>
-    Number(
-      sql
-        .exec(
-          `SELECT COUNT(*) AS n FROM (SELECT 1 FROM ${table} WHERE session_id = ? LIMIT ?)`,
-          sessionId,
-          maxMessages + 1
-        )
-        .toArray()[0]?.n ?? 0
-    );
+  const countQueries = {
+    chat_messages:
+      'SELECT COUNT(*) AS n FROM (SELECT 1 FROM chat_messages WHERE session_id = ? LIMIT ?)',
+    tool_payload_archives:
+      'SELECT COUNT(*) AS n FROM (SELECT 1 FROM tool_payload_archives WHERE session_id = ? LIMIT ?)',
+  } as const;
+  const count = (table: keyof typeof countQueries) =>
+    Number(sql.exec(countQueries[table], sessionId, maxMessages + 1).toArray()[0]?.n ?? 0);
   const raw = count('chat_messages');
   const tools = count('tool_payload_archives');
   const grouped = sql
