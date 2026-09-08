@@ -150,6 +150,10 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	hostKey := workspaceID + ":" + requestedSessionID
 	requestedWorktree := strings.TrimSpace(r.URL.Query().Get("worktree"))
 	host := s.getOrCreateSessionHost(hostKey, workspaceID, requestedSessionID, session, runtime, requestedWorktree)
+	if host == nil {
+		writeSessionError(w, http.StatusConflict, "session_initializing", "Workspace session bootstrap is in progress")
+		return
+	}
 
 	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -215,8 +219,16 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 // getOrCreateSessionHost returns an existing SessionHost or creates a new one.
 func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string) *acp.SessionHost {
+	return s.getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionID, session, runtime, requestedWorktree, false)
+}
+
+func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string, restoreOwner bool) *acp.SessionHost {
 	// Fast path: check if host already exists.
 	s.sessionHostMu.Lock()
+	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+		s.sessionHostMu.Unlock()
+		return nil
+	}
 	if host, ok := s.sessionHosts[hostKey]; ok {
 		s.sessionHostMu.Unlock()
 		return host
@@ -240,6 +252,9 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 
 	s.sessionHostMu.Lock()
 	defer s.sessionHostMu.Unlock()
+	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+		return nil
+	}
 
 	// Re-check after re-acquiring lock (double-checked locking).
 	if host, ok := s.sessionHosts[hostKey]; ok {

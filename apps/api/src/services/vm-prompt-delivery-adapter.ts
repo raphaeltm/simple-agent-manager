@@ -18,7 +18,10 @@ import { NodeAgentHttpError, nodeAgentRequest, sendPromptToAgentOnNode } from '.
 import * as projectDataService from './project-data';
 import { ensureSessionRecovery } from './session-recovery';
 import { markSessionSnapshotAwakeInPlace } from './session-snapshots';
-import { prepareVmPromptDelivery } from './vm-prompt-delivery-preparation';
+import {
+  checkpointVmPromptSubmission,
+  prepareVmPromptDelivery,
+} from './vm-prompt-delivery-preparation';
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
 
@@ -215,26 +218,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     );
     if (prepared.kind !== 'prepared') return prepared;
     const { target, capabilities } = prepared;
-    try {
-      if (input.beforeSubmit && !input.beforeSubmit(capabilities)) {
-        return {
-          kind: 'retry',
-          reason: 'not_ready',
-          error: 'Prompt delivery attempt changed during preparation',
-          runtimeIdentity: null,
-          capabilities: null,
-        };
-      }
-    } catch (error) {
-      // This failure is before sendPromptToAgentOnNode: no prompt was submitted.
-      return {
-        kind: 'retry',
-        reason: 'not_ready',
-        error: `Prompt submission checkpoint failed: ${errorMessage(error)}`,
-        runtimeIdentity: null,
-        capabilities: null,
-      };
-    }
+    const checkpointFailure = checkpointVmPromptSubmission(input.beforeSubmit, capabilities);
+    if (checkpointFailure) return checkpointFailure;
     try {
       const raw = await sendPromptToAgentOnNode(
         target.nodeId,

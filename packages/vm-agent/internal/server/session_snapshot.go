@@ -88,17 +88,18 @@ type snapshotArtifact struct {
 }
 
 type sessionSnapshotHandlerInput struct {
-	workspaceID   string
-	sessionID     string
-	chatSessionID string
-	runtimeName   string
-	runtime       *WorkspaceRuntime
-	callbackToken string
-	agentType     string
-	background    bool
+	workspaceID            string
+	sessionID              string
+	chatSessionID          string
+	runtimeName            string
+	runtime                *WorkspaceRuntime
+	callbackToken          string
+	agentType              string
+	background             bool
+	workspaceCallbackToken string
 }
 
-func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request) (*sessionSnapshotHandlerInput, bool) {
+func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request, restoring bool) (*sessionSnapshotHandlerInput, bool) {
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")
 	if workspaceID == "" || sessionID == "" {
@@ -124,12 +125,23 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "chatSessionId is required")
 		return nil, false
 	}
+	// Validate routing before accepting callback credentials or touching files.
+	if restoring {
+		if err := s.initializeStandaloneRestoreSession(workspaceID, sessionID, body.ChatSessionID, body.Runtime); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return nil, false
+		}
+		if err := s.validateSessionRestoreIdentity(workspaceID, sessionID, body.ChatSessionID, strings.TrimSpace(body.AgentType)); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return nil, false
+		}
+	}
 	// A freshly-woken container never ran create-workspace, so its
 	// runtime.CallbackToken (the workspace-scoped token used by the message
 	// reporter and the snapshot callbacks) is unset. Persist the token the
 	// control plane provides on the restore request so chat replies and
 	// snapshot callbacks can authenticate after a wake.
-	if wsToken := strings.TrimSpace(body.WorkspaceCallbackToken); wsToken != "" {
+	if wsToken := strings.TrimSpace(body.WorkspaceCallbackToken); wsToken != "" && !restoring {
 		s.upsertWorkspaceRuntime(workspaceID, "", "", "", wsToken)
 	}
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
@@ -138,24 +150,28 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		return nil, false
 	}
 	callbackToken := s.callbackTokenForWorkspace(workspaceID)
+	if restoring && strings.TrimSpace(body.WorkspaceCallbackToken) != "" {
+		callbackToken = strings.TrimSpace(body.WorkspaceCallbackToken)
+	}
 	if callbackToken == "" {
 		writeError(w, http.StatusConflict, "workspace callback token unavailable")
 		return nil, false
 	}
 	return &sessionSnapshotHandlerInput{
-		workspaceID:   workspaceID,
-		sessionID:     sessionID,
-		chatSessionID: body.ChatSessionID,
-		runtimeName:   body.Runtime,
-		runtime:       runtime,
-		callbackToken: callbackToken,
-		agentType:     strings.TrimSpace(body.AgentType),
-		background:    body.Background,
+		workspaceID:            workspaceID,
+		sessionID:              sessionID,
+		chatSessionID:          body.ChatSessionID,
+		runtimeName:            body.Runtime,
+		runtime:                runtime,
+		callbackToken:          callbackToken,
+		agentType:              strings.TrimSpace(body.AgentType),
+		background:             body.Background,
+		workspaceCallbackToken: strings.TrimSpace(body.WorkspaceCallbackToken),
 	}, true
 }
 
 func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Request) {
-	input, ok := s.sessionSnapshotHandlerInput(w, r)
+	input, ok := s.sessionSnapshotHandlerInput(w, r, false)
 	if !ok {
 		return
 	}
@@ -176,18 +192,21 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Request) {
-	input, ok := s.sessionSnapshotHandlerInput(w, r)
+	input, ok := s.sessionSnapshotHandlerInput(w, r, true)
 	if !ok {
 		return
 	}
-	result, err := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.agentType, input.callbackToken)
+	result, err := s.runSessionRestore(r.Context(), input, func() map[string]interface{} {
+		result, restoreErr := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.agentType, input.callbackToken)
+		if restoreErr != nil {
+			_ = s.reportSnapshotRestoreResult(context.Background(), input.workspaceID, input.chatSessionID, "degraded", restoreErr.Error(), input.callbackToken)
+			s.prepareFreshSessionAfterDegradedRestore(input.workspaceID, input.sessionID, restoreErr)
+			return map[string]interface{}{"status": "degraded", "message": "The saved workspace was restored, but the agent context could not be resumed."}
+		}
+		return result
+	})
 	if err != nil {
-		_ = s.reportSnapshotRestoreResult(context.Background(), input.workspaceID, input.chatSessionID, "degraded", err.Error(), input.callbackToken)
-		s.prepareFreshSessionAfterDegradedRestore(input.workspaceID, input.sessionID, err)
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":  "degraded",
-			"message": "The saved workspace was restored, but the agent context could not be resumed.",
-		})
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
@@ -431,7 +450,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		return nil, fmt.Errorf("restored agent session is unavailable")
 	}
 	hostKey := runtime.ID + ":" + sessionID
-	host := s.getOrCreateSessionHost(hostKey, runtime.ID, sessionID, session, runtime, "")
+	host := s.getOrCreateSessionHostForRestore(hostKey, runtime.ID, sessionID, session, runtime, "", true)
 	if restoreErr := host.RestoreAgent(ctx, savedAgentType); restoreErr != nil {
 		return nil, fmt.Errorf("resume saved agent context: %w", restoreErr)
 	}
