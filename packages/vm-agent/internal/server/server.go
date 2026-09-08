@@ -71,6 +71,7 @@ var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 
 // Server is the HTTP server for the VM Agent.
 type Server struct {
+	systemProvisioning    *systemProvisioningBarrier
 	config                *config.Config
 	httpServer            *http.Server
 	jwtValidator          *auth.JWTValidator

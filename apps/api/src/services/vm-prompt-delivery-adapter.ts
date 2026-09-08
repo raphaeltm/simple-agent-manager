@@ -92,6 +92,8 @@ export interface VmPromptDeliveryAdapterInput {
   resolvedTarget?: VmPromptDeliveryTarget;
   /** Revalidates a parent wake immediately before recovery/container/VM mutations. */
   beforeSideEffect?: () => Promise<PromptDeliveryResult | null>;
+  /** Synchronous durable claim fence after preparation, immediately before possible prompt submission. */
+  beforeSubmit?: (capabilities: VmPromptDeliveryCapabilities) => boolean;
   /** Makes snapshot recovery's D1 claim conditional on the source parent. */
   sourceTaskGuard?: VmPromptDeliverySourceTaskGuard;
 }
@@ -139,9 +141,14 @@ function legacyCapabilities(runtimeIdentity: string): VmPromptDeliveryCapabiliti
 export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   constructor(private readonly env: Env) {}
 
-  private async prepareSubmit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult | {
-    kind: 'prepared'; target: VmPromptDeliveryTarget; capabilities: VmPromptDeliveryCapabilities;
-  }> {
+  private async prepareSubmit(input: VmPromptDeliveryAdapterInput): Promise<
+    | PromptDeliveryResult
+    | {
+        kind: 'prepared';
+        target: VmPromptDeliveryTarget;
+        capabilities: VmPromptDeliveryCapabilities;
+      }
+  > {
     const resolution: TargetResolution = input.resolvedTarget
       ? { kind: 'ready', target: input.resolvedTarget }
       : await this.resolveTarget(input.projectId, input.claim.message.targetSessionId, input);
@@ -203,9 +210,31 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   }
 
   async submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
-    const prepared = await prepareVmPromptDelivery(input.requestTimeoutMs, () => this.prepareSubmit(input));
+    const prepared = await prepareVmPromptDelivery(input.requestTimeoutMs, () =>
+      this.prepareSubmit(input)
+    );
     if (prepared.kind !== 'prepared') return prepared;
     const { target, capabilities } = prepared;
+    try {
+      if (input.beforeSubmit && !input.beforeSubmit(capabilities)) {
+        return {
+          kind: 'retry',
+          reason: 'not_ready',
+          error: 'Prompt delivery attempt changed during preparation',
+          runtimeIdentity: null,
+          capabilities: null,
+        };
+      }
+    } catch (error) {
+      // This failure is before sendPromptToAgentOnNode: no prompt was submitted.
+      return {
+        kind: 'retry',
+        reason: 'not_ready',
+        error: `Prompt submission checkpoint failed: ${errorMessage(error)}`,
+        runtimeIdentity: null,
+        capabilities: null,
+      };
+    }
     try {
       const raw = await sendPromptToAgentOnNode(
         target.nodeId,

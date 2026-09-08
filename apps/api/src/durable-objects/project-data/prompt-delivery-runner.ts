@@ -1,6 +1,7 @@
 import {
   MAX_ORCHESTRATOR_WAIT_CHILDREN,
   TASK_TERMINAL_STATUSES,
+  type VmPromptDeliveryCapabilities,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
@@ -10,6 +11,7 @@ import * as activity from './activity';
 import type { DurableExecutionConfig } from './durable-execution-config';
 import {
   applyPromptDeliveryResult,
+  markPromptDeliverySubmitting,
   type PromptDeliveryClaim,
   type PromptDeliveryResult,
 } from './prompt-delivery';
@@ -119,8 +121,7 @@ async function invalidParentWakeTargetResult(
     ? (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status)
     : false;
   const parentIsWakeable =
-    parent &&
-    (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
+    parent && (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
   if (
     !parent ||
     !parentIsWakeable ||
@@ -210,6 +211,8 @@ export async function runPromptDeliveryClaim(
       allowLegacyVm: config.legacyVmCompatEnabled,
       requestTimeoutMs: config.backgroundTimeoutMs,
       beforeSideEffect: validateParentWakeTarget,
+      beforeSubmit: (capabilities: VmPromptDeliveryCapabilities) =>
+        markPromptDeliverySubmitting(sql, claim, capabilities),
       sourceTaskGuard:
         claim.message.sourceKind === 'parent_wakeup' && claim.message.sourceTaskId
           ? {

@@ -796,3 +796,30 @@ Workers/D1 cases and 36 actual-route/SQL cases passed; counts overlap neighborin
 coverage. Independent Cloudflare/security review passed. File-size and type-boundary
 checks passed, and the current-tree secret scan found 52 reviewed findings and no
 new findings. Final combined CI/Sonar, staging, cleanup and merge remain pending.
+
+### September 8 continuation after parent runtime loss
+
+The parent session `ee16af66-6c80-4a98-a119-f5d0b5a88912` timed out at
+16:05 UTC. Its production workspace and node are deleted. The PR's pushed head
+`200978160` passed all executed CI and Sonar checks, but the final host-startup,
+durable prompt-preparation phase, and snapshot-restore retry corrections were
+not pushed. The transcript records local commits `70103f417` (host setup barrier)
+and `8893ab18a` (prompt preparation), followed by an uncommitted restore patch.
+The continuation is reconstructing these changes from the persisted SAM tool
+transcript and rerunning tests; it does not claim the missing workspace or its
+unpublished screenshots were recovered.
+
+At continuation baseline, staging has one owned running helper workspace
+`01M20V4KH101DA7M6CE42DGG7H` on node `01M20SKTFTHPNBS5APTRVNF5RM`, under test
+project `01M201HEKK895BY9Q7TYSJA4WY`. The installation pool is balanced/queue
+with nine active offerings. The original test snapshot remains available for
+session `ef07c74a-54c5-444a-a2ee-54d4ce21d939`. Pre-existing sleeping workspaces
+`01M1N2MGWMA0BYCRB250FT1907` and `01M1N3BWQJH10DQW564SV7BB65` are excluded
+from cleanup. The earlier combined deployment failed on a Cloudflare AI binding
+internal validation error (10021); no final combined deployment success is claimed.
+
+- [ ] Reconstruct the three unpublished corrections and obtain independent review.
+- [ ] Verify final candidate cold provisioning and original-snapshot recovery.
+- [ ] Remove owned helper/test resources, preserve pre-existing sleeping sessions,
+      and verify pool settings remain at the baseline.
+- [ ] Update PR evidence, pass final CI/staging, merge, and verify production deployment.
