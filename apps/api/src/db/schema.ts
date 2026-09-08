@@ -3021,6 +3021,19 @@ export const projectDataStorageReliefPreflights = sqliteTable(
 export type ProjectDataStorageReliefPreflightRow =
   typeof projectDataStorageReliefPreflights.$inferSelect;
 
+export const projectDataArchiveUnusedReservations = sqliteTable('project_data_archive_unused_reservations', {
+  reservationId: text('reservation_id').primaryKey(),
+  windowStartedAt: integer('window_started_at').notNull(),
+  estimatedWrites: integer('estimated_writes').notNull(),
+  released: integer('released').notNull().default(0),
+}, table => ({ windowIdx: index('idx_archive_unused_reservation_window').on(table.windowStartedAt) }));
+
+export const projectDataArchiveWriteBudget = sqliteTable('project_data_archive_write_budget', {
+  id: text('id').primaryKey(),
+  windowStartedAt: integer('window_started_at').notNull(),
+  reservedWrites: integer('reserved_writes').notNull(),
+});
+
 export const projectDataArchiveMigrations = sqliteTable(
   'project_data_archive_migrations',
   {
@@ -3029,6 +3042,7 @@ export const projectDataArchiveMigrations = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
     sessionId: text('session_id').notNull(),
+    storageFormat: text('storage_format', { enum: ['sqlite-v1', 'r2-gzip-v1'] }).notNull().default('sqlite-v1'),
     state: text('state', {
       enum: [
         'candidate',

@@ -1,7 +1,7 @@
 // FILE SIZE EXCEPTION: ProjectData terminal archive migration state machine — keeping source intent, target copy/seal, canonical hash, exact-read guards, and final source-delete invariants in one module avoids cross-file transaction coupling during Fable review. See .claude/rules/18-file-size-limits.md
 import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { type COMPACT_ARCHIVE_FORMAT, type CompactChunkRef,LEGACY_ARCHIVE_FORMAT } from '../../project-data-archive/compact-r2';
+import { COMPACT_ARCHIVE_FORMAT, compactArchiveTimeout, type CompactChunkRef,LEGACY_ARCHIVE_FORMAT } from '../../project-data-archive/compact-r2';
 import {
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
@@ -834,11 +834,14 @@ async function tableAggregateSha256(
     }
     query += ` ORDER BY ${spec.orderBy} LIMIT ?`;
     params.push(pageRows);
-    const page = sql.exec(query, ...params).toArray();
-    for (const raw of page) hasher.update(toArchiveRow(raw, spec.columns));
-    if (page.length < pageRows) break;
-    const tail = page[page.length - 1];
-    if (!tail) break;
+    let count = 0;
+    let tail: Record<string, unknown> | null = null;
+    for (const raw of sql.exec(query, ...params)) {
+      hasher.update(toArchiveRow(raw, spec.columns));
+      tail = raw;
+      count++;
+    }
+    if (count < pageRows || !tail) break;
     cursor = spec.cursorFromRow(tail);
   }
   return hasher.digestHex();
@@ -847,6 +850,7 @@ async function tableAggregateSha256(
 export type ComputeTerminalVersionOptions = {
   hashPageRows?: number;
   compactEnv?: Env;
+  compactDeadline?: number;
 };
 
 export async function computeTerminalVersion(
@@ -863,7 +867,7 @@ export async function computeTerminalVersion(
     );
   }
   const raw = options.compactEnv && compactArchive.isCompactArchive(sql, sessionId)
-    ? await compactArchive.compactRawDigest(sql, options.compactEnv, sessionId) : null;
+    ? await compactArchive.compactRawDigest(sql, options.compactEnv, sessionId, options.compactDeadline) : null;
   const messageCount = raw?.messageCount ?? countRows(
     sql,
     'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
@@ -1214,6 +1218,9 @@ export function prepareArchiveTarget(
   sql: SqlStorage,
   input: ArchiveTargetPrepareInput
 ): ArchiveTargetPrepareResult {
+  if (input.storageFormat !== undefined && input.storageFormat !== LEGACY_ARCHIVE_FORMAT && input.storageFormat !== COMPACT_ARCHIVE_FORMAT) {
+    throw new Error('Unsupported archive storage format');
+  }
   if (input.targetOwnerName === input.sourceOwnerName || input.targetGeneration <= 0) {
     throw new ProjectDataArchiveInvariantError(
       'target_owner_mismatch',
@@ -1460,6 +1467,7 @@ export async function sealArchiveTarget(
   input: ArchiveTargetSealInput,
   env?: Env
 ): Promise<ArchiveTargetSealResult> {
+  const compactDeadline = Date.now() + compactArchiveTimeout(env?.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
   const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -1470,6 +1478,14 @@ export async function sealArchiveTarget(
   if (compactArchive.isCompactArchive(sql, input.sessionId) && !env) throw new Error('Compact archive environment required');
   if (state === 'sealed' || state === 'published') {
     const row = readTargetSession(sql, input.sessionId);
+    // A resumed coordinator must not delete the root copy using a historical seal
+    // if an external R2 loss occurred while the migration was paused.
+    if (env && compactArchive.isCompactArchive(sql, input.sessionId)) {
+      const verified = await computeTerminalVersion(sql, input.sessionId, { compactEnv: env, compactDeadline, hashPageRows: input.hashPageRows });
+      if (verified.sha256 !== input.terminalVersionSha256 || verified.sha256 !== row?.terminal_version_sha256) {
+        throw new ProjectDataArchiveInvariantError('target_terminal_version_mismatch', 'Compact archive recovery proof no longer matches');
+      }
+    }
     return {
       aggregateSha256: strictString(row?.aggregate_sha256, 'target.aggregate_sha256'),
       messageCount: compactArchive.isCompactArchive(sql, input.sessionId)
@@ -1497,7 +1513,7 @@ export async function sealArchiveTarget(
     );
   }
   const hashPageRows = resolveHashPageRows(input.hashPageRows);
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows, compactEnv: env });
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows, compactEnv: env, compactDeadline });
   if (terminalVersion.sha256 !== input.terminalVersionSha256) {
     throw new ProjectDataArchiveInvariantError(
       'target_terminal_version_mismatch',
@@ -1531,7 +1547,7 @@ export async function sealArchiveTarget(
       `terminal:${input.terminalVersionSha256}`,
       `chunks:${committedChunkHashes.join(',')}`,
       `messages:${env && compactArchive.isCompactArchive(sql, input.sessionId)
-        ? (await compactArchive.compactRawDigest(sql, env, input.sessionId)).sha256
+        ? (await compactArchive.compactRawDigest(sql, env, input.sessionId, compactDeadline)).sha256
         : await tableAggregateSha256(sql, 'chat_messages', input.sessionId, hashPageRows)}`,
       `grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', input.sessionId, hashPageRows)}`,
       `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', input.sessionId, hashPageRows)}`,
@@ -1683,13 +1699,16 @@ async function exportArchiveRowsChunk(
   query += ` ORDER BY ${spec.orderBy} LIMIT ?`;
   params.push(maxRows + 1);
   const rawCursor = input.cursor && input.tableName === 'chat_messages' ? decodeCursor(input.cursor, 3) : null;
-  const candidates = compactEnv && input.tableName === 'chat_messages' && compactArchive.isCompactArchive(sql, input.sessionId)
+  const compactCandidates = compactEnv && input.tableName === 'chat_messages' && compactArchive.isCompactArchive(sql, input.sessionId)
     ? await compactArchive.compactExportCandidates(sql, compactEnv, input.sessionId, maxRows + 1,
       rawCursor ? { createdAt: Number(cursorPart(rawCursor, 0)), sequence: Number(cursorPart(rawCursor, 1)), id: cursorPart(rawCursor, 2) } : null)
-    : sql.exec(query, ...params).toArray();
+    : null;
+  const candidates: Iterable<Record<string, unknown>> = compactCandidates?.rows ?? sql.exec(query, ...params);
   const rows: ProjectDataArchiveRow[] = [];
   let byteCount = 0;
-  for (const candidate of candidates.slice(0, maxRows)) {
+  let hasMore = compactCandidates?.hasMore ?? false;
+  for (const candidate of candidates) {
+    if (rows.length === maxRows) { hasMore = true; break; }
     const row = toArchiveRow(candidate, spec.columns);
     const candidateBytes = byteLength(canonicalizeArchiveRow(spec.columns, row));
     if (candidateBytes > maxBytes) {
@@ -1698,11 +1717,10 @@ async function exportArchiveRowsChunk(
         'ProjectData archive row exceeds the configured chunk byte budget'
       );
     }
-    if (byteCount + candidateBytes > maxBytes) break;
+    if (byteCount + candidateBytes > maxBytes) { hasMore = true; break; }
     rows.push(row);
     byteCount += candidateBytes;
   }
-  const hasMore = rows.length < candidates.length;
   const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
   const cursor = lastRow ? spec.cursorFromRow(lastRow) : (input.cursor ?? null);
   const rowIds = rows.map((row) =>

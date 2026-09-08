@@ -863,7 +863,7 @@ function recordSelectRows(base: SqlStorage): {
       const rows = cursor.toArray();
       recorder.selects++;
       recorder.maxRowsPerSelect = Math.max(recorder.maxRowsPerSelect, rows.length);
-      return { toArray: () => rows, rowsWritten: 0 } as unknown as ReturnType<SqlStorage['exec']>;
+      return { toArray: () => rows, [Symbol.iterator]: () => rows[Symbol.iterator](), rowsWritten: 0 } as unknown as ReturnType<SqlStorage['exec']>;
     },
     get databaseSize() {
       return base.databaseSize;

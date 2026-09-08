@@ -262,9 +262,9 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS` — Delay before the next terminal event-log cleanup alarm batch when more candidates remain (default: `86400000`, daily)
 - `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED` — Production-disabled switch for exact archive read routing (default: disabled)
 - `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` — Write new archives as compact SQLite + compressed R2; existing formats remain readable. Default: `false`.
-- `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` — Account-wide daily estimated SQL write allowance for compact migration attempts; 0 pauses admission. Default: `250000`.
+- `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` — Installation-wide daily estimated SQL write allowance for compact migration attempts; 0 pauses admission. Default: `250000`.
 - `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` — Conservative SQL write estimate per row/512 bytes of grouped FTS text; includes source deletion. Default: `32`.
-- `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS` — Deadline for each compressed archive object write/read verification, in milliseconds. Default: `10000`.
+- `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS` — R2 I/O deadline shared across each compact read/export/seal operation, or one chunk write, in milliseconds. Default: `10000`.
 - `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` — Separate production-disabled switch for the unscoped scheduled archive-sharding sweep; enabling exact routing alone does not run global migration (default: disabled)
 - `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 1 hour after the 2026-09-08 billing firebreak (default: `86400000`, shipped: `3600000`)
 - `PROJECT_DATA_ARCHIVE_SHARD_COUNT` — Deterministic archive-shard fanout used when assigning terminal sessions to ProjectData archive Durable Objects (default: `128`)

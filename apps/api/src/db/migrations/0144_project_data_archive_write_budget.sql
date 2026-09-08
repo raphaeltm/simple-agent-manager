@@ -6,3 +6,12 @@ CREATE TABLE project_data_archive_write_budget (
 );
 
 ALTER TABLE project_data_archive_migrations ADD COLUMN storage_format TEXT NOT NULL DEFAULT 'sqlite-v1';
+
+-- Exactly-once release only for contenders that definitively never acquired work.
+CREATE TABLE project_data_archive_unused_reservations (
+  reservation_id TEXT PRIMARY KEY,
+  window_started_at INTEGER NOT NULL,
+  estimated_writes INTEGER NOT NULL,
+  released INTEGER NOT NULL DEFAULT 0 CHECK (released IN (0, 1))
+);
+CREATE INDEX idx_archive_unused_reservation_window ON project_data_archive_unused_reservations(window_started_at);

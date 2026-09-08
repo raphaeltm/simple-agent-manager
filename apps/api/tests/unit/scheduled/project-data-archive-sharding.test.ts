@@ -1636,6 +1636,21 @@ describe('archive-sharding candidate selection is size-ordered and budgeted', ()
     }
   });
 
+  it('excludes oversized compact sessions before the candidate limit while retaining smaller work', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createCoordinatorTables(sqlite);
+      seedSized(sqlite);
+      const result = await runScopedProjectDataArchiveCanary(makeEnv(sqlite, {
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true', PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '100',
+      }), { projectId: PROJECT_ID, dryRun: true, limit: 1, nowDate: new Date(NOW) });
+      expect(result.selected.map(candidate => candidate.sessionId)).toEqual(['session-small']);
+      expect(countMigrations(sqlite)).toBe(0);
+      expect(await dryRunSelection(sqlite, { PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '1' })).toEqual([]);
+    } finally { sqlite.close(); }
+  });
+
   it('still selects a single session larger than the whole budget so it cannot starve', async () => {
     const sqlite = new Database(':memory:');
     try {

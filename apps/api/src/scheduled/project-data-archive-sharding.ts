@@ -35,7 +35,7 @@ import {
   type ProjectDataArchiveSourcePrepareRefusal,
   type ProjectDataArchiveTableName,
 } from '../project-data-archive/contract';
-import { archiveWriteBudgetConfig, type ArchiveWriteReservation,reserveArchiveWrites } from '../project-data-archive/write-budget';
+import { archiveWriteBudgetConfig, type ArchiveWriteReservation, releaseUnusedArchiveReservation,reserveArchiveWrites } from '../project-data-archive/write-budget';
 import { getProjectDataArchiveRolloutWarningConfig } from '../services/project-data-archive-rollout-controls';
 import {
   archiveShardProjectDataOwner,
@@ -1061,8 +1061,8 @@ function precopyRefusalExclusionBinds(
 
 /**
  * Keep the largest-first candidate prefix whose cumulative `message_count` fits the
- * tick's message budget. The first candidate is always kept so a single session larger
- * than the budget still drains (in several passes) instead of starving forever. Sessions
+ * tick's message budget. Legacy admission retains its first oversized candidate; compact
+ * admission is strict and excludes oversized sessions before the SQL LIMIT. Sessions
  * are the unit of work, so `message_count` from `session_summaries` is the size proxy the
  * coordinator can see without touching a Durable Object.
  */
@@ -1071,7 +1071,10 @@ function applyMessageBudget(candidates: CandidateRow[], budget: number, strict =
   let used = 0;
   for (const candidate of candidates) {
     const size = Math.max(0, Number(candidate.message_count) || 0);
-    if (used + size > budget && (strict || kept.length > 0)) continue;
+    if (used + size > budget && (strict || kept.length > 0)) {
+      if (strict) continue;
+      break;
+    }
     kept.push(candidate);
     used += size;
   }
@@ -2058,7 +2061,7 @@ async function copySourceChunks(
         ordinal,
         cursor,
         maxRows: config.chunkRows,
-        maxBytes: targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT
+        maxBytes: targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages'
           ? Math.min(config.chunkBytes, COMPACT_ARCHIVE_CHUNK_BYTES) : config.chunkBytes,
       });
       if (targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages') {
@@ -2248,6 +2251,7 @@ async function migrateCandidate(
   now: number
 ): Promise<{
   migrated: boolean;
+  leaseNotAcquired?: boolean;
   /** True when the source object refused before any copy and the fence was unwound. */
   refused?: boolean;
   recoveredCrashGap: boolean;
@@ -2256,7 +2260,7 @@ async function migrateCandidate(
 }> {
   const claimedRow = await claimMigrationLease(env, selected, now, config.leaseMs);
   if (!claimedRow) {
-    return { migrated: false, recoveredCrashGap: false, chunksCopied: 0, rowsCopied: 0 };
+    return { migrated: false, leaseNotAcquired: true, recoveredCrashGap: false, chunksCopied: 0, rowsCopied: 0 };
   }
   try {
     return await migrateClaimedCandidate(env, config, r2, claimedRow, now);
@@ -2352,6 +2356,14 @@ async function migrateClaimedCandidate(
   }
 
   if (migration.state === 'recovery_manifest_persisted') {
+    if (migration.storage_format === COMPACT_ARCHIVE_FORMAT) {
+      const inspected = await target.archiveTargetInspectSession(targetInspectInput(migration));
+      await target.archiveTargetSeal({
+        ...sourcePrepareInput(migration, requireStringField(migration, 'source_intent_token'), now, config.sessionGraceMs),
+        terminalVersionSha256: prepared.terminalVersionSha256,
+        expectedChunkHashes: inspected.chunks.map(chunk => chunk.sha256),
+      });
+    }
     const finalized = await finalizeSourceAndPublish(env, config, source, migration, now);
     markPhase('finalize');
     migration = finalized.migration as ClaimedMigrationRow;
@@ -3110,7 +3122,12 @@ async function processArchiveMigrationBatch(input: {
       return null;
     }
     log.info('project_data_archive_write_budget_reserved', { projectId, sessionId, estimatedWrites, allowance });
-    return { estimatedWrites, factor, maxMessages: input.config.sweepMessageBudget };
+    return { reservationId: crypto.randomUUID(), estimatedWrites, factor, maxMessages: input.config.sweepMessageBudget };
+  };
+  const releaseUnused = async (reservation?: ArchiveWriteReservation) => {
+    if (!reservation?.reservationId) return;
+    try { await releaseUnusedArchiveReservation(input.env.DATABASE, reservation.reservationId, reservation.estimatedWrites, input.now); }
+    catch (error) { log.warn('project_data_archive_unused_reservation_release_failed', { ...serializeError(error) }); }
   };
   const processOne = async (migration: MigrationRow, writeReservation?: ArchiveWriteReservation): Promise<void> => {
     try {
@@ -3121,6 +3138,7 @@ async function processArchiveMigrationBatch(input: {
         migration,
         input.now
       );
+      if (result.leaseNotAcquired) await releaseUnused(writeReservation);
       if (result.migrated) input.stats.migrated++;
       if (result.refused) input.stats.refused++;
       if (result.recoveredCrashGap) input.stats.recoveredCrashGaps++;
@@ -3171,7 +3189,10 @@ async function processArchiveMigrationBatch(input: {
       ? await reserve(candidate.project_id, candidate.session_id) : undefined;
     if (reservation === null) continue;
     const migration = await createCandidateJournal(input.env, candidate, input.now);
-    if (!migration) continue;
+    if (!migration) {
+      await releaseUnused(reservation);
+      continue;
+    }
     input.onJournaled?.(candidate, migration);
     await processOne(migration, reservation);
   }

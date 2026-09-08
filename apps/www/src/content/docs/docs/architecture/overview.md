@@ -267,7 +267,7 @@ ProjectData stores the durable foundation for project event subscriptions in the
 
 Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles selected same-project task terminal state and enqueues one immutable caller wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
 
-Conversation and message text stays in ProjectData for long-term searchability. Large
+Complete consolidated conversation text stays in ProjectData for long-term searchability. Large
 tool-call JSON payloads older than the configured retention window are archived first
 to private, project-scoped R2 objects and only then stripped from the embedded SQLite
 row. Existing tool-content expanders read through the ProjectData service and fall
