@@ -118,7 +118,7 @@ async function listUserComputeAttachmentProjectIds(
     ...new Set(
       [...rows, ...poolRows, ...sourceRows]
         .flatMap((row) => (row.projectId ? [row.projectId] : []))
-        .sort()
+        .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
     ),
   ];
   return {

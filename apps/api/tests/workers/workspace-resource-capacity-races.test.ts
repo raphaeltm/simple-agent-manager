@@ -14,7 +14,10 @@ import {
   reserveWorkspacePlacement,
   type WorkspacePlacementInput,
 } from '../../src/services/workspace-placement';
-import type { WorkspaceAdmissionPolicy } from '../../src/services/workspace-resource-capacity';
+import {
+  aggregateWorkspaceReservationRows,
+  type WorkspaceAdmissionPolicy,
+} from '../../src/services/workspace-resource-capacity';
 import {
   seedInstallation,
   seedNode,
@@ -740,5 +743,241 @@ describe('workspace resource capacity advisory selection', () => {
     );
 
     expect(selected?.nodeId).toBe(largeAvailableNode);
+  });
+});
+
+// Preserve upstream mutation calibration against the canonical authority-bearing SQL.
+function interceptDatabase(
+  statements: string[],
+  options: {
+    transformSql?: (sql: string) => string;
+    transformBinds?: (values: unknown[]) => unknown[];
+  } = {}
+): D1Database {
+  return {
+    prepare(sql: string) {
+      statements.push(sql);
+      const statement = env.DATABASE.prepare(options.transformSql?.(sql) ?? sql);
+      return {
+        bind(...values: unknown[]) {
+          return statement.bind(...(options.transformBinds?.(values) ?? values));
+        },
+      } as D1PreparedStatement;
+    },
+  } as D1Database;
+}
+
+function removeAggregateResourcePredicates(sql: string): string {
+  const patterns = [
+    /\(\(active\.cpu_millis\s*\+\s*requested\.cpu_millis\)\s*<=\s*\(n\.trusted_provider_instance_vcpu_count\s*\*\s*1000\s*\*\s*policy\.cpu_share_budget_percent\)\s*\/\s*100\)/,
+    /\(\(active\.memory_mb\s*\+\s*requested\.memory_mb\)\s*<=\s*n\.trusted_provider_instance_memory_mb\s*-\s*policy\.host_memory_reserve_mb\)/,
+    /\(\(active\.disk_mb\s*\+\s*requested\.disk_mb\)\s*<=\s*n\.trusted_provider_instance_disk_gb\s*\*\s*1024\)/,
+  ];
+  let mutated = sql;
+  for (const pattern of patterns) {
+    if (!pattern.test(mutated)) throw new Error(`mutation target not found: ${pattern.source}`);
+    mutated = mutated.replace(pattern, '1 = 1');
+  }
+  return mutated;
+}
+
+function assertExactReservationSnapshot(
+  actual: string | null | undefined,
+  expected: ResolvedResourceReservation
+): void {
+  if (actual !== JSON.stringify(expected)) {
+    throw new Error('persisted reservation changed after placement resolution');
+  }
+}
+
+function assertUsageWithinSmallNode(rows: Array<{ resolvedReservationJson: string | null }>): void {
+  const usage = aggregateWorkspaceReservationRows(rows);
+  if (usage.cpuMillis > 2000) throw new Error('CPU overcommit detected');
+  if (usage.memoryMb > 4096) throw new Error('memory overcommit detected');
+  if (usage.diskMb > 40960) throw new Error('disk overcommit detected');
+}
+
+describe('native final reservation mutation calibration', () => {
+  it('uses one final D1 statement and persists exact authority and reservation snapshots', async () => {
+    const nodeId = 'node-wrc-exact-snapshot';
+    const workspaceId = 'workspace-wrc-exact-snapshot';
+    await makeReadyNode(nodeId, USER_ID, 'large');
+    const snapshot = await seedCurrentAuthorityForNode({
+      nodeId,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      label: 'exact',
+      size: 'large',
+    });
+    const exact = reservationV2({
+      cpuMillis: 3000,
+      memoryMb: 6144,
+      source: 'task',
+      sourceId: 'task-exact',
+    });
+    const statements: string[] = [];
+    await expect(
+      reserveWorkspacePlacement(
+        interceptDatabase(statements),
+        placement(workspaceId, nodeId, {
+          capacityPlacementSnapshot: snapshot,
+          resolvedReservation: exact,
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain('INSERT INTO workspaces');
+    const row = await env.DATABASE.prepare(
+      `SELECT capacity_pool_id, capacity_pool_revision,
+      capacity_source_id, placement_credential_reference, placement_credential_version,
+      placement_explanation_json, resolved_reservation_json FROM workspaces WHERE id = ?`
+    )
+      .bind(workspaceId)
+      .first<Record<string, string | number | null>>();
+    expect(row).toMatchObject({
+      capacity_pool_id: snapshot.capacityPoolId,
+      capacity_pool_revision: snapshot.capacityPoolRevision,
+      capacity_source_id: snapshot.capacitySourceId,
+      placement_credential_reference: snapshot.placementCredentialReference,
+      placement_credential_version: snapshot.placementCredentialVersion,
+      placement_explanation_json: snapshot.placementExplanationJson,
+    });
+    assertExactReservationSnapshot(row?.resolved_reservation_json as string | null, exact);
+  });
+
+  it('calibrates exact snapshot preservation against a final bind mutation', async () => {
+    const nodeId = 'node-wrc-mutated-snapshot';
+    const workspaceId = 'workspace-wrc-mutated-snapshot';
+    await makeReadyNode(nodeId);
+    const snapshot = await seedCurrentAuthorityForNode({
+      nodeId,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      label: 'mutated-snapshot',
+    });
+    const exact = reservation({ source: 'task', sourceId: 'task-exact-before-async-work' });
+    const expectedJson = JSON.stringify(exact);
+    const mutatedJson = JSON.stringify({ ...exact, sourceId: 're-resolved-too-late' });
+    await expect(
+      reserveWorkspacePlacement(
+        interceptDatabase([], {
+          transformBinds: (values) =>
+            values.map((value) => (value === expectedJson ? mutatedJson : value)),
+        }),
+        placement(workspaceId, nodeId, {
+          capacityPlacementSnapshot: snapshot,
+          resolvedReservation: exact,
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    const row = await env.DATABASE.prepare(
+      'SELECT resolved_reservation_json AS reservationJson FROM workspaces WHERE id = ?'
+    )
+      .bind(workspaceId)
+      .first<{ reservationJson: string | null }>();
+    expect(() => assertExactReservationSnapshot(row?.reservationJson, exact)).toThrow(
+      /changed after placement resolution/
+    );
+  });
+
+  it('calibrates the aggregate invariant against removal of the native resource CAS predicates', async () => {
+    const nodeId = 'node-wrc-mutated-resource-cas';
+    await makeReadyNode(nodeId, USER_ID, 'small');
+    const snapshot = await seedCurrentAuthorityForNode({
+      nodeId,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      label: 'mutated-cas',
+      size: 'small',
+    });
+    const request = reservation({ cpuMillis: 2000, memoryMb: 4096, diskMb: 40960 });
+    const input = { capacityPlacementSnapshot: snapshot, resolvedReservation: request };
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-wrc-mutated-existing', nodeId, input),
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-wrc-unmutated-overflow', nodeId, input),
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+    const statements: string[] = [];
+    await expect(
+      reserveWorkspacePlacement(
+        interceptDatabase(statements, { transformSql: removeAggregateResourcePredicates }),
+        placement('workspace-wrc-mutated-overflow', nodeId, input),
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
+    expect(statements).toHaveLength(1);
+    const rows = await env.DATABASE.prepare(
+      `SELECT resolved_reservation_json AS resolvedReservationJson
+      FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
+    )
+      .bind(nodeId)
+      .all<{ resolvedReservationJson: string | null }>();
+    expect(() => assertUsageWithinSmallNode(rows.results)).toThrow(/overcommit detected/);
+  });
+});
+
+describe('native exclusive reservation admission', () => {
+  it('rejects exclusive co-tenancy in final CAS while admitting an empty node', async () => {
+    const nodeId = 'node-wrc-exclusive';
+    await makeReadyNode(nodeId);
+    const snapshot = await seedCurrentAuthorityForNode({
+      nodeId,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      label: 'exclusive',
+    });
+    const workspaceId = 'workspace-wrc-exclusive-occupant';
+    await seedWorkspace(workspaceId, nodeId, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'running',
+      resolvedReservationJson: JSON.stringify(reservation()),
+    });
+    const exclusive = reservation({ exclusiveNode: true, maxCoTenants: 1 });
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-wrc-exclusive-denied', nodeId, {
+          capacityPlacementSnapshot: snapshot,
+          resolvedReservation: exclusive,
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+    await env.DATABASE.prepare('UPDATE workspaces SET resolved_reservation_json = ? WHERE id = ?')
+      .bind(JSON.stringify(exclusive), workspaceId)
+      .run();
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-wrc-after-exclusive-denied', nodeId, {
+          capacityPlacementSnapshot: snapshot,
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(false);
+    await env.DATABASE.prepare("UPDATE workspaces SET status = 'stopped' WHERE id = ?")
+      .bind(workspaceId)
+      .run();
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-wrc-exclusive-empty-allowed', nodeId, {
+          capacityPlacementSnapshot: snapshot,
+          resolvedReservation: exclusive,
+        }),
+        admissionPolicy()
+      )
+    ).resolves.toBe(true);
   });
 });

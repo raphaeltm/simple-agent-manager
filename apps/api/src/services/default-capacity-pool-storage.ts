@@ -96,7 +96,7 @@ async function listCredentialUserIdsPage(
     ...new Set(
       [...legacyRows, ...ccRows, ...poolRows, ...sourceRows]
         .flatMap((row) => (row.userId ? [row.userId] : []))
-        .sort()
+        .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
     ),
   ].slice(0, limit);
 }
@@ -173,7 +173,7 @@ async function listCredentialProjectIdsPage(
     ...new Set(
       [...legacyRows, ...ccRows, ...poolRows, ...sourceRows]
         .flatMap((row) => (row.projectId ? [row.projectId] : []))
-        .sort()
+        .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
     ),
   ].slice(0, limit);
 }

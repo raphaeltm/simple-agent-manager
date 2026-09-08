@@ -390,7 +390,7 @@ func (c *Collector) collectDocker() DockerInfo {
 	// Get Docker version
 	ctx, cancel := context.WithTimeout(context.Background(), c.config.DockerTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Version}}").Output()
+	out, err := exec.CommandContext(ctx, container.DockerCLIPath(), "version", "--format", "{{.Server.Version}}").Output()
 	if err == nil {
 		info.Version = strings.TrimSpace(string(out))
 	}
@@ -398,7 +398,7 @@ func (c *Collector) collectDocker() DockerInfo {
 	// Phase 1: Enumerate all containers with docker ps -a
 	ctx2, cancel2 := context.WithTimeout(context.Background(), c.config.DockerListTimeout)
 	defer cancel2()
-	out, err = exec.CommandContext(ctx2, "docker", "ps", "-a", "--format", "{{json .}}").Output()
+	out, err = exec.CommandContext(ctx2, container.DockerCLIPath(), "ps", "-a", "--format", "{{json .}}").Output()
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to list containers: %v", err)
 		slog.Warn("Docker container list failed", "error", err)
@@ -430,7 +430,7 @@ func (c *Collector) collectDocker() DockerInfo {
 		args := append([]string{"stats", "--no-stream", "--format",
 			`{"id":"{{.ID}}","cpuPercent":"{{.CPUPerc}}","memUsage":"{{.MemUsage}}","memPercent":"{{.MemPerc}}"}`},
 			runningIDs...)
-		out, err = exec.CommandContext(ctx3, "docker", args...).Output()
+		out, err = exec.CommandContext(ctx3, container.DockerCLIPath(), args...).Output()
 		if err != nil {
 			slog.Warn("Docker stats query failed (containers still listed)", "error", err)
 		} else {

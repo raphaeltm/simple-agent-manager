@@ -606,6 +606,44 @@ func TestParseDockerPSLabelEntries(t *testing.T) {
 	}
 }
 
+func TestCollectDockerUsesConfiguredCLIForAllQueries(t *testing.T) {
+	logPath := installFakeDockerCLI(t, "collector")
+	// The configured absolute executable must work without docker on PATH.
+	t.Setenv("PATH", t.TempDir())
+	collector := NewCollector(CollectorConfig{
+		DockerTimeout:      2 * time.Second,
+		DockerListTimeout:  2 * time.Second,
+		DockerStatsTimeout: 2 * time.Second,
+	})
+	info := collector.collectDocker()
+	if info.Error != nil {
+		t.Fatalf("collectDocker() error = %s", *info.Error)
+	}
+	if info.Version != "27.3.1" || info.Containers != 2 || len(info.ContainerList) != 2 {
+		t.Fatalf("collectDocker() = %+v, want configured version and both containers", info)
+	}
+	if got := info.ContainerList[0]; got.ID != "abc123" || got.CPUPercent != 1 || got.MemUsage != "10MiB / 1GiB" {
+		t.Errorf("running container = %+v, want populated Docker stats", got)
+	}
+	if got := info.ContainerList[1]; got.ID != "def456" || got.CPUPercent != 0 || got.MemUsage != "" {
+		t.Errorf("stopped container = %+v, want no resource stats", got)
+	}
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read Docker command log: %v", err)
+	}
+	commands := strings.Split(strings.TrimSpace(string(logged)), "\n")
+	if len(commands) != 3 {
+		t.Fatalf("commands = %q, want version, ps, stats", commands)
+	}
+	if commands[0] != "version --format {{.Server.Version}}" || commands[1] != "ps -a --format {{json .}}" {
+		t.Errorf("version/list commands = %q", commands[:2])
+	}
+	if !strings.HasPrefix(commands[2], "stats --no-stream --format ") || !strings.HasSuffix(commands[2], " abc123") || strings.Contains(commands[2], "def456") {
+		t.Errorf("stats command = %q, want only running container abc123", commands[2])
+	}
+}
+
 func TestCollectDockerContainerStatsForLabelsUsesDockerLabelFunctionFormatter(t *testing.T) {
 	logPath := installFakeDockerCLI(t, "json-labels")
 	labelValue := `/workspace/repo "quoted",comma\path`
@@ -907,6 +945,9 @@ func runFakeDockerCLI(args []string) int {
 	}
 	mode := os.Getenv("FAKE_DOCKER_MODE")
 	switch args[0] {
+	case "version":
+		fmt.Println("27.3.1")
+		return 0
 	case "ps":
 		return runFakeDockerPS(args, mode)
 	case "stats":
@@ -919,6 +960,10 @@ func runFakeDockerCLI(args []string) int {
 
 func runFakeDockerPS(args []string, mode string) int {
 	switch mode {
+	case "collector":
+		fmt.Println(`{"ID":"abc123","Names":"workspace-running","Image":"test:latest","Status":"Up 1 minute","State":"running","CreatedAt":"2026-09-08 00:00:00 +0000 UTC"}`)
+		fmt.Println(`{"ID":"def456","Names":"workspace-stopped","Image":"test:latest","Status":"Exited (0)","State":"exited","CreatedAt":"2026-09-08 00:00:00 +0000 UTC"}`)
+		return 0
 	case "both-streams":
 		fmt.Fprintln(os.Stderr, "safe diagnostic")
 		fmt.Fprintln(os.Stdout, "ok")

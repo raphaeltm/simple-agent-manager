@@ -40,7 +40,20 @@ describe('handleNodeSelection runtime guards', () => {
     const state = {
       taskId: 'task-1',
       userId: 'user-1',
-      config: { vmSize: 'small', vmLocation: 'fsn1' },
+      config: {
+        vmSize: 'small',
+        vmLocation: 'fsn1',
+        resolvedReservation: {
+          cpuMillis: 2_000,
+          memoryMb: 4_096,
+          diskMb: 40_960,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+          source: 'platform',
+          sourceId: 'platform',
+          version: 1,
+        },
+      },
       stepResults: {},
     } as unknown as TaskRunnerState;
 

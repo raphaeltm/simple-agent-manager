@@ -749,7 +749,8 @@ export async function stopAgentSessionOnNode(
   workspaceId: string,
   sessionId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<unknown> {
   try {
     return await nodeAgentRequest(
@@ -760,6 +761,7 @@ export async function stopAgentSessionOnNode(
         method: 'POST',
         userId,
         workspaceId,
+        requestTimeoutMs: options?.requestTimeoutMs,
       }
     );
   } finally {

@@ -38,6 +38,10 @@ type D1ResultMap = {
   >;
   workspaceCounts?: Array<{ node_id: string; c: number }>;
   warmWorkspaceCount?: number;
+  workspaceReservations?: Array<{
+    nodeId: string;
+    resolvedReservationJson: string | null;
+  }>;
   healthByNode?: Record<
     string,
     {
@@ -285,6 +289,14 @@ function createStatement(sql: string, results: D1ResultMap) {
       }
       if (sql.includes('SELECT node_id, COUNT(*) as c FROM workspaces')) {
         return Promise.resolve({ results: results.workspaceCounts ?? [] });
+      }
+      if (sql.includes('resolved_reservation_json AS reservationJson')) {
+        return Promise.resolve({
+          results: (results.workspaceReservations ?? []).map((row) => ({
+            nodeId: row.nodeId,
+            reservationJson: row.resolvedReservationJson,
+          })),
+        });
       }
       return Promise.resolve({ results: [] });
     },
@@ -757,6 +769,50 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 
+  it('rejects a preferred node whose active reservations consume its capacity', async () => {
+    const state = createState({
+      config: {
+        ...createState().config,
+        preferredNodeId: 'node-full',
+        vmSize: 'small',
+        resolvedReservation: {
+          cpuMillis: 2000,
+          memoryMb: 1024,
+          diskMb: 1024,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+          source: 'platform',
+          sourceId: 'platform',
+          version: 1,
+        },
+      },
+    });
+    const rc = createContext({
+      preferredNode: {
+        id: 'node-full',
+        status: 'running',
+        vm_size: 'small',
+        agent_version: 'current-sha',
+        provider_instance_type: 'cx23',
+        provider_instance_vcpu_count: 2,
+        provider_instance_memory_mb: 4_096,
+        provider_instance_disk_gb: 40,
+      },
+      workspaceReservations: [
+        {
+          nodeId: 'node-full',
+          resolvedReservationJson: JSON.stringify(state.config.resolvedReservation),
+        },
+      ],
+    });
+
+    await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({
+      message: 'Specified node lacks aggregate reservation capacity or fresh safe telemetry',
+      permanent: true,
+    });
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+
   it('does not claim undersized warm nodes and falls through to provisioning', async () => {
     const lifecycleGet = vi.fn();
     const state = createState();
@@ -842,6 +898,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           maxCoTenants: 1,
           source: 'task',
           sourceId: 'task-1',
+          version: 1,
         },
       },
     });

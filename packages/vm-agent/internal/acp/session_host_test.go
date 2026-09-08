@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -1911,6 +1912,60 @@ func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t
 	}
 	if !strings.Contains(statusErr, "container unavailable") {
 		t.Fatalf("statusErr = %q, expected restart attempt failure from container resolver", statusErr)
+	}
+}
+
+func TestSessionHost_MonitorIntentionalPromptCancelReportsIdleAfterSuccessfulRestart(t *testing.T) {
+	recorder := newActivityRecorder(t)
+
+	host := newRecoveryTestHost(t, time.Second)
+	defer host.Stop()
+	host.config.ProjectID = "project-1"
+	host.config.NodeID = "node-1"
+	host.config.ControlPlaneURL = recorder.server.URL
+	host.config.CallbackToken = "token"
+	host.config.HTTPClient = recorder.server.Client()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	host.config.ContainerResolver = func() (string, error) { return "", nil }
+	var starts atomic.Int32
+	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+		starts.Add(1)
+		proc, reader, writer := newFakeAgentProcess(time.Now(), true)
+		serveRecoveryACP(t, reader, writer)
+		return proc, nil
+	}
+
+	oldProc, _, _ := newFakeAgentProcess(time.Now().Add(-10*time.Second), false)
+	host.mu.Lock()
+	host.process = oldProc
+	host.setStatusLocked(HostReady)
+	host.agentType = "claude-code"
+	host.setSessionIDLocked("acp-session-1")
+	host.agentSupportsLoadSession = true
+	host.intentionalPromptCancelProcessStop = true
+	host.mu.Unlock()
+	close(oldProc.waitCh)
+
+	host.monitorProcessExit(
+		context.Background(),
+		oldProc,
+		"claude-code",
+		&agentCredential{credentialKind: "api-key"},
+		nil,
+	)
+
+	waitFor(t, 250*time.Millisecond, func() bool {
+		return countActivity(&recorder.mu, &recorder.activities, "idle") == 1
+	})
+	if starts.Load() != 1 {
+		t.Fatalf("restart count = %d, want 1", starts.Load())
+	}
+	if host.Status() != HostReady {
+		t.Fatalf("status = %s, want %s", host.Status(), HostReady)
+	}
+	if countActivity(&recorder.mu, &recorder.activities, "recovering") != 1 {
+		t.Fatalf("activities = %v, want one recovering report before idle", snapshotActivities(&recorder.mu, &recorder.activities))
 	}
 }
 

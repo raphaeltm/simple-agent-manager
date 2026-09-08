@@ -1457,7 +1457,7 @@ describe('VM admission control D1 races', () => {
     ).resolves.toBe(false);
   });
 
-  it('fails closed on malformed occupied reservations but preserves empty unknown-capacity placement', async () => {
+  it('fails closed on malformed reservations and unknown hardware until observed capacity arrives', async () => {
     const occupiedNode = 'node-vm-admission-invalid-reservation-occupied';
     const emptyUnknownNode = 'node-vm-admission-unknown-empty';
     await makeReadyNode(occupiedNode, USER_ID, 'medium');
@@ -1582,45 +1582,72 @@ describe('VM admission control D1 races', () => {
     }
   });
 
-  it('counts creating and recovery workspaces against final reservation capacity', async () => {
+  it('counts creating and recovery reservations but releases stopped and deleted capacity', async () => {
+    const fullReservation = reservation({ cpuMillis: 2000, memoryMb: 4096, diskMb: 40960 });
+    const policy = admissionPolicy({ maxWorkspaces: 3 });
     const creatingNode = 'node-vm-admission-capacity-creating';
     const recoveryNode = 'node-vm-admission-capacity-recovery';
     const stoppedNode = 'node-vm-admission-capacity-stopped';
-    await makeReadyNode(creatingNode, USER_ID, 'medium');
-    await makeReadyNode(recoveryNode, USER_ID, 'medium');
-    await makeReadyNode(stoppedNode, USER_ID, 'medium');
+    const deletedNode = 'node-vm-admission-capacity-deleted';
+    await makeReadyNode(creatingNode, USER_ID, 'small');
+    await makeReadyNode(recoveryNode, USER_ID, 'small');
+    await makeReadyNode(stoppedNode, USER_ID, 'small');
+    await makeReadyNode(deletedNode, USER_ID, 'small');
     await seedWorkspace('workspace-vm-admission-capacity-creating', creatingNode, USER_ID, {
       projectId: PROJECT_ID,
       status: 'creating',
+      resolvedReservationJson: JSON.stringify(fullReservation),
     });
     await seedWorkspace('workspace-vm-admission-capacity-recovery', recoveryNode, USER_ID, {
       projectId: PROJECT_ID,
       status: 'recovery',
+      resolvedReservationJson: JSON.stringify(fullReservation),
     });
     await seedWorkspace('workspace-vm-admission-capacity-stopped', stoppedNode, USER_ID, {
       projectId: PROJECT_ID,
       status: 'stopped',
+      resolvedReservationJson: JSON.stringify(fullReservation),
+    });
+    await seedWorkspace('workspace-vm-admission-capacity-deleted', deletedNode, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'deleted',
+      resolvedReservationJson: JSON.stringify(fullReservation),
     });
 
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
-        placement('workspace-vm-admission-capacity-creating-denied', creatingNode),
-        1
+        placement('workspace-vm-admission-capacity-creating-denied', creatingNode, {
+          resolvedReservation: fullReservation,
+        }),
+        policy
       )
     ).resolves.toBe(false);
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
-        placement('workspace-vm-admission-capacity-recovery-denied', recoveryNode),
-        1
+        placement('workspace-vm-admission-capacity-recovery-denied', recoveryNode, {
+          resolvedReservation: fullReservation,
+        }),
+        policy
       )
     ).resolves.toBe(false);
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
-        placement('workspace-vm-admission-capacity-stopped-allowed', stoppedNode),
-        1
+        placement('workspace-vm-admission-capacity-stopped-allowed', stoppedNode, {
+          resolvedReservation: fullReservation,
+        }),
+        policy
+      )
+    ).resolves.toBe(true);
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-capacity-deleted-allowed', deletedNode, {
+          resolvedReservation: fullReservation,
+        }),
+        policy
       )
     ).resolves.toBe(true);
   });

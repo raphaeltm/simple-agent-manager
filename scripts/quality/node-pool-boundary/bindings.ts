@@ -43,7 +43,7 @@ export function createBindings(source: ts.SourceFile) {
         ts.isVariableDeclaration(binding) &&
         binding.initializer &&
         ts.isVariableDeclarationList(binding.parent) &&
-        binding.parent.flags & ts.NodeFlags.Const
+        (binding.parent.flags & ts.NodeFlags.Const) !== 0
       ) {
         return stringValue(binding.initializer, seen);
       }

@@ -366,7 +366,7 @@ export function scoreWorkspaceAdmissionMetrics(
 
 export async function loadActiveWorkspaceReservationUsage(
   database: D1Database,
-  nodeIds: string[]
+  nodeIds: readonly string[]
 ): Promise<Map<string, ActiveWorkspaceReservationUsage>> {
   const usage = new Map<string, ActiveWorkspaceReservationUsage>();
   const uniqueNodeIds = Array.from(new Set(nodeIds)).filter((id) => id.length > 0);
@@ -388,24 +388,39 @@ export async function loadActiveWorkspaceReservationUsage(
     for (const row of rows.results ?? []) {
       const existing = usage.get(row.nodeId) ?? emptyUsage();
       existing.activeCount += 1;
-      const reservation = parseReservationJson(row.reservationJson);
-      if (!reservation) {
-        existing.invalidCount += 1;
-      } else {
-        existing.cpuMillis += reservation.cpuMillis;
-        existing.memoryMb += reservation.memoryMb;
-        existing.diskMb += reservation.diskMb;
-        if (reservation.exclusiveNode) existing.exclusiveCount += 1;
-        existing.minMaxCoTenants =
-          existing.minMaxCoTenants === null
-            ? reservation.maxCoTenants
-            : Math.min(existing.minMaxCoTenants, reservation.maxCoTenants);
-      }
+      addReservationUsage(existing, row.reservationJson);
       usage.set(row.nodeId, existing);
     }
   }
 
   return usage;
+}
+
+export function aggregateWorkspaceReservationRows(
+  rows: ReadonlyArray<{ resolvedReservationJson: string | null }>
+): ActiveWorkspaceReservationUsage {
+  const usage = emptyUsage();
+  for (const row of rows) {
+    usage.activeCount += 1;
+    addReservationUsage(usage, row.resolvedReservationJson);
+  }
+  return usage;
+}
+
+function addReservationUsage(usage: ActiveWorkspaceReservationUsage, value: string | null): void {
+  const reservation = parseResolvedResourceReservation(value);
+  if (!reservation) {
+    usage.invalidCount += 1;
+    return;
+  }
+  usage.cpuMillis += reservation.cpuMillis;
+  usage.memoryMb += reservation.memoryMb;
+  usage.diskMb += reservation.diskMb;
+  if (reservation.exclusiveNode) usage.exclusiveCount += 1;
+  usage.minMaxCoTenants = Math.min(
+    usage.minMaxCoTenants ?? reservation.maxCoTenants,
+    reservation.maxCoTenants
+  );
 }
 
 export function evaluateWorkspaceReservationCapacity(
@@ -532,10 +547,12 @@ function measuredAdmissionDiagnostic(
   return null;
 }
 
-function parseReservationJson(value: string | null): ResolvedResourceReservation | null {
+export function parseResolvedResourceReservation(
+  value: string | null | undefined
+): ResolvedResourceReservation | null {
   if (!value) return null;
   try {
-    const parsed = JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
     return isResolvedResourceReservation(parsed) ? parsed : null;
   } catch {
     return null;

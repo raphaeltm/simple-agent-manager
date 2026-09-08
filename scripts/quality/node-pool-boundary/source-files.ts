@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import ts from 'typescript';
@@ -40,9 +40,25 @@ export function findRepoRoot(start = process.cwd()): string {
   throw new Error(`Could not find repository root from ${start}`);
 }
 
+// Match the system Git boundary used by other quality scripts, while supporting
+// standard macOS installations too. Never search PATH: a repository-controlled
+// executable earlier in PATH must not become part of the scanner's trust base.
+function trustedGitExecutable(): string {
+  for (const candidate of ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git']) {
+    try {
+      if (!statSync(candidate).isFile()) continue;
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Try the next trusted installation location.
+    }
+  }
+  throw new Error('Git is not executable in a trusted system installation location');
+}
+
 export function listRepositorySourceFiles(repoRoot = findRepoRoot()): SourceFileInput[] {
   const tracked = execFileSync(
-    'git',
+    trustedGitExecutable(),
     ['ls-files', '--cached', '--others', '--exclude-standard', ...SCANNED_SOURCE_ROOTS],
     {
       cwd: repoRoot,

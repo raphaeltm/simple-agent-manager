@@ -207,7 +207,9 @@ export async function tryClaimWarmNode(
       ? resolveReusableNodeSelection(state, persistedClaim)
       : null;
     if (selection && (await claimWarmNodeCandidate(state, rc, selection))) {
-      return selection;
+      if (await hasReusableNodeReservationCapacity(rc, state, persistedClaim)) {
+        return selection;
+      }
     }
     // The persisted warm claim can no longer be used: either the referenced
     // node is no longer a reusable selection, or claiming it failed. Release

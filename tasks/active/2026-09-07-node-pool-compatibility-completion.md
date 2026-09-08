@@ -14,7 +14,39 @@ coordinates final local review, local verification, CI and CodeRabbit review.
 The current continuation interprets “keep everything local” as excluding staging
 work; the unverified staging gap is recorded below.
 
-## Current continuation status — 2026-09-07
+## Continuation checkpoint — 2026-09-08
+
+Resumed PR #2030 from `7ba09bb9d` under a three-hour local-work window. The
+previous repair CI run `34136000309` completed successfully with every executed
+job passing. The remaining GitHub blocker was the merge with current `main`.
+All 15 conflicts with `main` at `6895aacd5` are now reconciled locally. Native
+pool/credential authority, observed hardware, telemetry admission and D1 bind
+batching remain authoritative; upstream aggregate-capacity simulations and
+lifecycle/race assertions are adapted to those contracts. Persisted warm-node
+claims now repeat the capacity check before reuse.
+
+Initial reconciliation validation: API typecheck passes; 260 focused API tests
+across seven files pass; all 13 aggregate-capacity simulation cases pass. The
+first Workers run identified a ported lifecycle fixture whose positive controls
+omitted the explicit reservation/policy. The fixture is corrected and the final
+four-suite Workers run is pending. These results are local, with no live-cloud
+or staging claim.
+
+Sonar findings are being addressed with explicit binary-order string comparison,
+boolean bit-flag checks, trusted Git executable locations and the existing Docker
+executable resolver. Scanner trust regressions pass 4/4; Go sysinfo/container
+tests pass, including a regression that fails before honoring the configured
+Docker executable. Automatic-analysis CPD exclusions are aligned for 15 reviewed
+test-fixture paths already covered by the canonical test-only policy. Production
+SQL remains analyzed and its duplicate admission CTE/eligibility predicates are
+shared without changing either atomic mutation's query or ordered bindings.
+
+**Deliverable remains one green OPEN PR, no merge and no SAM dispatch.**
+CodeRabbit is unavailable under its 100-file cap, explicitly accepted by the
+user. Staging remains an unverified release gap under the prior local-only
+instruction. The historical checkpoints below do not override this scope.
+
+## Previous continuation status — 2026-09-07
 
 This section supersedes gate/ownership statements in the historical checkpoints
 below. Recovered head: `8ccc610d6`; integrated corrections: `27a7a1abe`,
