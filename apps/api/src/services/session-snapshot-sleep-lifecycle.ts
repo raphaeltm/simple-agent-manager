@@ -79,7 +79,7 @@ export async function claimSessionSnapshotSleep(
   );
   const repairableStrandedFailure = and(
     eq(schema.sessionSnapshots.sleepStatus, 'failed'),
-    isNull(schema.sessionSnapshots.sleepAfter),
+    or(isNull(schema.sessionSnapshots.sleepAfter), lte(schema.sessionSnapshots.sleepAfter, nowIso)),
     or(
       eq(schema.sessionSnapshots.status, 'degraded'),
       isNotNull(schema.sessionSnapshots.captureGeneration)
@@ -260,43 +260,7 @@ export async function deferSessionSnapshotStopping(
   return (result.meta.changes ?? 0) > 0;
 }
 
-export async function failSessionSnapshotSleepBeforeTeardown(
-  db: Db,
-  env: Env,
-  chatSessionId: string,
-  claimId: string,
-  error: string,
-  now = new Date()
-): Promise<boolean> {
-  const retryDelayMs = parsePositiveInt(
-    (env as SnapshotLeaseEnv).SESSION_SLEEP_RETRY_DELAY_MS,
-    DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS
-  );
-  const maxAttempts = parsePositiveInt(
-    (env as SnapshotLeaseEnv).SESSION_SLEEP_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
-  );
-  const retryAt = new Date(now.getTime() + retryDelayMs).toISOString();
-  const result = await db
-    .update(schema.sessionSnapshots)
-    .set({
-      sleepStatus: 'failed',
-      sleepAfter: sql`CASE WHEN ${schema.sessionSnapshots.sleepAttempts} >= ${maxAttempts} THEN NULL ELSE ${retryAt} END`,
-      sleepError: sessionLifecycleError(env, error),
-      sleepClaimId: null,
-      sleepClaimedAt: null,
-      sleepStoppingSince: null,
-      updatedAt: now.toISOString(),
-    })
-    .where(
-      and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        eq(schema.sessionSnapshots.sleepStatus, 'preparing'),
-        eq(schema.sessionSnapshots.sleepClaimId, claimId)
-      )
-    );
-  return (result.meta.changes ?? 0) > 0;
-}
+export { failSessionSnapshotSleepBeforeTeardown } from './session-snapshot-sleep-failure';
 
 /**
  * Defer an automatic sleep before a claim is consumed. Activity/idle

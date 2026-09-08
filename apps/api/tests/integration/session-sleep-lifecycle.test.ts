@@ -221,6 +221,66 @@ describe('terminal session sleep lifecycle integration', () => {
     vi.useRealTimers();
   });
 
+  it('terminalizes a stopped capture in the service catch before the sweep handles it again', async () => {
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    activity = { activity: 'idle', activityAt: START.getTime() };
+    mocks.hibernateAgentSessionOnNode.mockRejectedValue(
+      new Error(
+        'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)'
+      )
+    );
+
+    const first = await runSessionSleepSweep(env, START);
+    const second = await runSessionSleepSweep(env, RETRY_AT);
+
+    expect(first).toMatchObject({ claimed: 1, failed: 1 });
+    expect(second).toMatchObject({ selected: 0 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_claim_id FROM session_snapshots
+      WHERE id = 'snapshot-1'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'terminal_failed',
+      sleep_claim_id: null,
+    });
+    expect(mocks.hibernateAgentSessionOnNode).toHaveBeenCalledTimes(1);
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+  });
+
+  it('preserves a concurrent renewed intent when an old capture fails', async () => {
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    activity = { activity: 'idle', activityAt: START.getTime() };
+    mocks.hibernateAgentSessionOnNode.mockImplementation(async () => {
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET sleep_status = 'scheduled',
+        sleep_claim_id = NULL, sleep_after = '2026-08-15T05:00:00.000Z',
+        capture_generation = 'renewed' WHERE id = 'snapshot-1'`
+        )
+        .run();
+      throw new Error(
+        'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)'
+      );
+    });
+    await runSessionSleepSweep(env, START);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, capture_generation FROM session_snapshots
+      WHERE id = 'snapshot-1'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'scheduled',
+      sleep_after: '2026-08-15T05:00:00.000Z',
+      capture_generation: 'renewed',
+    });
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+  });
+
   it('persists terminal intent, defers prompting without an attempt, then sleeps on idle', async () => {
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
 

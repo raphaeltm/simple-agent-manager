@@ -20,10 +20,11 @@ import {
   failSessionSnapshotSleepBeforeTeardown,
   sessionLifecycleError,
 } from '../services/session-snapshots';
+import { terminalizeMissingSleepSource } from './session-sleep-terminal';
 
 export const DEFAULT_SESSION_SLEEP_SWEEP_BATCH_SIZE = 10;
 export const DEFAULT_SESSION_SLEEP_SWEEP_WALL_BUDGET_MS = 20_000;
-export const TERMINAL_SESSION_SLEEP_STATUS = 'terminal_failed';
+export { TERMINAL_SESSION_SLEEP_STATUS } from './session-sleep-terminal';
 export { DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS, DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS };
 
 export interface SessionSleepSweepStats {
@@ -40,14 +41,6 @@ export interface SessionSleepSweepStats {
 
 export interface SessionSleepSweepContext {
   waitUntil(promise: Promise<unknown>): void;
-}
-
-function isTerminalPostSleepCaptureError(error: string): boolean {
-  return (
-    error.includes(
-      'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)'
-    ) || error.includes('Workspace cannot sleep from status stopped')
-  );
 }
 
 async function reconcileUnscheduledSessionSleeps(
@@ -182,27 +175,6 @@ async function sleepClaimedSession(
         error: sessionLifecycleError(env, persistenceError),
       });
     });
-    if (isTerminalPostSleepCaptureError(lifecycleError)) {
-      await db
-        .update(schema.sessionSnapshots)
-        .set({
-          sleepStatus: TERMINAL_SESSION_SLEEP_STATUS,
-          sleepAfter: null,
-          sleepError: lifecycleError,
-          sleepClaimId: null,
-          sleepClaimedAt: null,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(schema.sessionSnapshots.id, candidate.snapshotId))
-        .catch((persistenceError) => {
-          log.error('session_sleep_sweep.terminal_failure_persistence_failed', {
-            snapshotId: candidate.snapshotId,
-            workspaceId: candidate.workspaceId,
-            chatSessionId: candidate.chatSessionId,
-            error: sessionLifecycleError(env, persistenceError),
-          });
-        });
-    }
     log.warn('session_sleep_sweep.failed', {
       snapshotId: candidate.snapshotId,
       workspaceId: candidate.workspaceId,
@@ -262,6 +234,8 @@ export async function runSessionSleepSweep(
       sleepStatus: schema.sessionSnapshots.sleepStatus,
       sleepAfter: schema.sessionSnapshots.sleepAfter,
       sleepClaimId: schema.sessionSnapshots.sleepClaimId,
+      sleepClaimedAt: schema.sessionSnapshots.sleepClaimedAt,
+      updatedAt: schema.sessionSnapshots.updatedAt,
       status: schema.sessionSnapshots.status,
       captureGeneration: schema.sessionSnapshots.captureGeneration,
     })
@@ -282,7 +256,10 @@ export async function runSessionSleepSweep(
           ),
           and(
             eq(schema.sessionSnapshots.sleepStatus, 'failed'),
-            isNull(schema.sessionSnapshots.sleepAfter),
+            or(
+              isNull(schema.sessionSnapshots.sleepAfter),
+              lte(schema.sessionSnapshots.sleepAfter, now.toISOString())
+            ),
             or(
               eq(schema.sessionSnapshots.status, 'degraded'),
               isNotNull(schema.sessionSnapshots.captureGeneration)
@@ -337,15 +314,18 @@ export async function runSessionSleepSweep(
     }
     let claimId: string;
     try {
+      if (!candidate.workspaceId) {
+        if (await terminalizeMissingSleepSource(db, candidate, now)) stats.exhausted++;
+        continue;
+      }
       if (
-        !candidate.workspaceId ||
-        (candidate.sleepStatus !== 'stopping' &&
-          candidate.sleepAttempts >= maxAttempts &&
-          !(
-            candidate.sleepStatus === 'failed' &&
-            candidate.sleepAfter === null &&
-            (candidate.status === 'degraded' || candidate.captureGeneration)
-          ))
+        candidate.sleepStatus !== 'stopping' &&
+        candidate.sleepAttempts >= maxAttempts &&
+        !(
+          candidate.sleepStatus === 'failed' &&
+          (candidate.sleepAfter === null || candidate.sleepAfter <= now.toISOString()) &&
+          (candidate.status === 'degraded' || candidate.captureGeneration)
+        )
       ) {
         await db
           .update(schema.sessionSnapshots)
@@ -371,16 +351,7 @@ export async function runSessionSleepSweep(
         });
         if (!eligibility.eligible) {
           if (eligibility.reason === 'workspace_metadata_missing') {
-            await db
-              .update(schema.sessionSnapshots)
-              .set({
-                sleepStatus: 'failed',
-                sleepAfter: null,
-                sleepError: 'Workspace metadata missing during automatic sleep',
-                updatedAt: now.toISOString(),
-              })
-              .where(eq(schema.sessionSnapshots.id, candidate.snapshotId));
-            stats.exhausted++;
+            if (await terminalizeMissingSleepSource(db, candidate, now)) stats.exhausted++;
           } else {
             stats.deferred++;
           }
