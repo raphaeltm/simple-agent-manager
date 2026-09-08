@@ -105,18 +105,49 @@ function reference(row: Record<string, unknown>): CompactChunkRef {
   };
 }
 
+type CompactRawFilter = {
+  before?: number | null;
+  after?: number | null;
+  roles?: string[];
+  messageId?: string;
+  order?: 'asc' | 'desc';
+  deadline?: number;
+};
+
+function compactChunkQuery(sessionId: string, cursor: number | null, filter: CompactRawFilter) {
+  const descending = filter.order === 'desc';
+  let query = 'SELECT * FROM project_data_archive_raw_chunks WHERE session_id = ?';
+  const params: Array<string | number> = [sessionId];
+  if (cursor !== null) {
+    query += descending ? ' AND ordinal < ?' : ' AND ordinal > ?';
+    params.push(cursor);
+  }
+  if (filter.before != null) {
+    query += ' AND first_created_at < ?';
+    params.push(filter.before);
+  }
+  if (filter.after != null) {
+    query += ' AND last_created_at > ?';
+    params.push(filter.after);
+  }
+  if (filter.roles?.length) {
+    query += ` AND EXISTS (SELECT 1 FROM json_each(role_counts_json) WHERE key IN (${filter.roles.map(() => '?').join(',')}))`;
+    params.push(...filter.roles);
+  }
+  if (filter.messageId) {
+    query += ' AND EXISTS (SELECT 1 FROM json_each(row_ids_json) WHERE value = ?)';
+    params.push(filter.messageId);
+  }
+  // One metadata row and one R2 body at a time; no session-sized object inventory.
+  query += descending ? ' ORDER BY ordinal DESC LIMIT 1' : ' ORDER BY ordinal ASC LIMIT 1';
+  return { query, params };
+}
+
 export async function* compactRawChunks(
   sql: SqlStorage,
   env: Env,
   sessionId: string,
-  filter: {
-    before?: number | null;
-    after?: number | null;
-    roles?: string[];
-    messageId?: string;
-    order?: 'asc' | 'desc';
-    deadline?: number;
-  } = {}
+  filter: CompactRawFilter = {}
 ): AsyncGenerator<ProjectDataArchiveChunk> {
   const target = sql
     .exec('SELECT * FROM project_data_archive_target_sessions WHERE session_id = ?', sessionId)
@@ -124,33 +155,9 @@ export async function* compactRawChunks(
   if (!target) throw new Error('Compact archive target missing');
   const deadline =
     filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
-  const descending = filter.order === 'desc';
   let cursor: number | null = null;
   for (;;) {
-    let query = 'SELECT * FROM project_data_archive_raw_chunks WHERE session_id = ?';
-    const params: Array<string | number> = [sessionId];
-    if (cursor !== null) {
-      query += descending ? ' AND ordinal < ?' : ' AND ordinal > ?';
-      params.push(cursor);
-    }
-    if (filter.before != null) {
-      query += ' AND first_created_at < ?';
-      params.push(filter.before);
-    }
-    if (filter.after != null) {
-      query += ' AND last_created_at > ?';
-      params.push(filter.after);
-    }
-    if (filter.roles?.length) {
-      query += ` AND EXISTS (SELECT 1 FROM json_each(role_counts_json) WHERE key IN (${filter.roles.map(() => '?').join(',')}))`;
-      params.push(...filter.roles);
-    }
-    if (filter.messageId) {
-      query += ' AND EXISTS (SELECT 1 FROM json_each(row_ids_json) WHERE value = ?)';
-      params.push(filter.messageId);
-    }
-    // One metadata row and one R2 body at a time; no session-sized object inventory.
-    query += descending ? ' ORDER BY ordinal DESC LIMIT 1' : ' ORDER BY ordinal ASC LIMIT 1';
+    const { query, params } = compactChunkQuery(sessionId, cursor, filter);
     const row = sql.exec(query, ...params).toArray()[0];
     if (!row) return;
     cursor = Number(row.ordinal);
@@ -197,16 +204,30 @@ export async function compactRawDigest(
   return { sha256: hasher.digestHex(), messageCount: hasher.rowCount, lastMessageAt };
 }
 
+export type CompactRawPageOptions = {
+  limit: number;
+  before: number | null;
+  after: number | null;
+  roles?: string[];
+  order: 'asc' | 'desc';
+};
+
+function matchesRawPage(row: ProjectDataArchiveRow, options: CompactRawPageOptions): boolean {
+  const timestamp = Number(row.created_at);
+  return !(
+    (options.before !== null && timestamp >= options.before) ||
+    (options.after !== null && timestamp <= options.after) ||
+    (options.roles?.length && !options.roles.includes(String(row.role)))
+  );
+}
+
 export async function compactRawPage(
   sql: SqlStorage,
   env: Env,
   sessionId: string,
-  limit: number,
-  before: number | null,
-  after: number | null,
-  roles: string[] | undefined,
-  order: 'asc' | 'desc'
+  options: CompactRawPageOptions
 ): Promise<ProjectDataArchiveRow[]> {
+  const { limit, before, after, roles, order } = options;
   const result: ProjectDataArchiveRow[] = [];
   let bytes = 0;
   for await (const chunk of compactRawChunks(sql, env, sessionId, {
@@ -217,13 +238,7 @@ export async function compactRawPage(
   })) {
     const rows = order === 'desc' ? [...chunk.rows].reverse() : chunk.rows;
     for (const row of rows) {
-      const timestamp = Number(row.created_at);
-      if (
-        (before !== null && timestamp >= before) ||
-        (after !== null && timestamp <= after) ||
-        (roles?.length && !roles.includes(String(row.role)))
-      )
-        continue;
+      if (!matchesRawPage(row, options)) continue;
       result.push(row);
       bytes += estimateRowBytes(row);
       if (bytes > RPC_SIZE_BUDGET_BYTES) return result;

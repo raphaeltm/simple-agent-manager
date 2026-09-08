@@ -871,12 +871,7 @@ export class ProjectData extends DurableObject<Env> {
       this.sql,
       this.env,
       input,
-      limit,
-      before,
-      after,
-      roles,
-      compact,
-      order
+      { limit, before, after, roles, compact, order }
     );
   }
 

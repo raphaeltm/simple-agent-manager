@@ -375,6 +375,23 @@ export function getMessages(
   return formatMessageRows(rows, sessionId, limit, compact, order, compactOptions);
 }
 
+function parseListedMessage(
+  row: Record<string, unknown>, sessionId: string, compact: boolean, compactOptions?: CompactMessageOptions
+): Record<string, unknown> | null {
+  try {
+    return compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row);
+  } catch (e) {
+    log.warn('messages.list_row_skipped', {
+      rowId: typeof row.id === 'string' ? row.id : null,
+      rowSessionId: typeof row.session_id === 'string' ? row.session_id : null,
+      requestedSessionId: sessionId,
+      compact,
+      error: String(e),
+    });
+  }
+  return null;
+}
+
 export function formatMessageRows(
   rows: Record<string, unknown>[], sessionId: string, limit: number,
   compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
@@ -407,25 +424,15 @@ export function formatMessageRows(
 
   const trimmedRows = candidateRows.slice(0, safeCount);
 
-  const orderedRows = order === 'desc' ? trimmedRows.reverse() : trimmedRows;
+  const orderedRows = trimmedRows;
+  if (order === 'desc') orderedRows.reverse();
   const messages: Record<string, unknown>[] = [];
   let skipped = 0;
 
   for (const row of orderedRows) {
-    try {
-      messages.push(
-        compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row)
-      );
-    } catch (e) {
-      skipped++;
-      log.warn('messages.list_row_skipped', {
-        rowId: typeof row.id === 'string' ? row.id : null,
-        rowSessionId: typeof row.session_id === 'string' ? row.session_id : null,
-        requestedSessionId: sessionId,
-        compact,
-        error: String(e),
-      });
-    }
+    const message = parseListedMessage(row, sessionId, compact, compactOptions);
+    if (message) messages.push(message);
+    else skipped++;
   }
 
   if (skipped > 0) {

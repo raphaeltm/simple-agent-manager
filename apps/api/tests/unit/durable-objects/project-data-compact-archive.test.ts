@@ -311,17 +311,14 @@ describe('compact archive migration compatibility', () => {
           for (const compact of [false, true]) {
             for (const roles of [undefined, ['assistant'], ['tool']]) {
               expect(
-                await archive.archiveTargetReadMessages(
-                  target,
-                  env,
-                  owner,
-                  9,
-                  1035,
-                  1002,
+                await archive.archiveTargetReadMessages(target, env, owner, {
+                  limit: 9,
+                  before: 1035,
+                  after: 1002,
                   roles,
                   compact,
-                  order
-                )
+                  order,
+                })
               ).toEqual(
                 getMessages(
                   createSqlStorage(sourceDb),
@@ -343,8 +340,8 @@ describe('compact archive migration compatibility', () => {
           })
         ).toEqual({ content: [{ type: 'text', text: 'complete tool payload' }], source: 'inline' });
         expect(
-          archive.archiveTargetSearchMessages(target, owner, 'consolidated', null, 10).length
-        ).toBe(1);
+          archive.archiveTargetSearchMessages(target, owner, 'consolidated', null, 10)
+        ).toHaveLength(1);
         const recovered: unknown[] = [];
         let cursor: string | null = null;
         let ordinal = 0;
@@ -370,28 +367,19 @@ describe('compact archive migration compatibility', () => {
             target,
             env,
             { ...owner, projectId: 'other' },
-            9,
-            null,
-            null,
-            undefined,
-            false,
-            'asc'
+            { limit: 9, before: null, after: null, compact: false, order: 'asc' }
           )
         ).rejects.toThrow();
         objects.clear();
         await expect(archive.sealArchiveTarget(target, sealInput, env)).rejects.toThrow();
         await expect(
-          archive.archiveTargetReadMessages(
-            target,
-            env,
-            owner,
-            9,
-            null,
-            null,
-            undefined,
-            false,
-            'asc'
-          )
+          archive.archiveTargetReadMessages(target, env, owner, {
+            limit: 9,
+            before: null,
+            after: null,
+            compact: false,
+            order: 'asc',
+          })
         ).rejects.toThrow();
         expect(source.exec('SELECT COUNT(*) AS count FROM chat_messages').toArray()[0]?.count).toBe(
           count

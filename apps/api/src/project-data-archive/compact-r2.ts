@@ -81,19 +81,21 @@ function assertChunk(value: unknown): asserts value is ProjectDataArchiveChunk {
     !Array.isArray(v.rowIds)
   )
     throw new Error('Invalid compact archive rows');
-  for (const row of v.rows) {
-    if (!row || typeof row !== 'object') throw new Error('Invalid compact archive row');
-    for (const key of ['id', 'session_id', 'role', 'content']) {
-      if (typeof row[key] !== 'string') throw new Error('Invalid compact archive row text');
-    }
-    if (
-      !Number.isSafeInteger(row.created_at) ||
-      !Number.isSafeInteger(row.sequence) ||
-      (row.tool_metadata !== null && typeof row.tool_metadata !== 'string') ||
-      (row.origin !== null && typeof row.origin !== 'string')
-    )
-      throw new Error('Invalid compact archive row fields');
+  for (const row of v.rows) assertRawRow(row);
+}
+function assertRawRow(value: unknown): void {
+  if (!value || typeof value !== 'object') throw new Error('Invalid compact archive row');
+  const row = value as Record<string, unknown>;
+  for (const key of ['id', 'session_id', 'role', 'content']) {
+    if (typeof row[key] !== 'string') throw new Error('Invalid compact archive row text');
   }
+  if (
+    !Number.isSafeInteger(row.created_at) ||
+    !Number.isSafeInteger(row.sequence) ||
+    (row.tool_metadata !== null && typeof row.tool_metadata !== 'string') ||
+    (row.origin !== null && typeof row.origin !== 'string')
+  )
+    throw new Error('Invalid compact archive row fields');
 }
 function responseBody(value: BodyInit): ReadableStream<Uint8Array> {
   const body = new Response(value).body;
@@ -148,8 +150,7 @@ export async function readCompactChunk(
     throw new Error('Invalid compact archive object size');
   }
   const object = await timed(r2.get(ref.key), deadline);
-  if (!object || object.size !== ref.bytes)
-    throw new Error('Compact archive missing or size mismatch');
+  if (object?.size !== ref.bytes) throw new Error('Compact archive missing or size mismatch');
   const compressed = await readBounded(object.body, ref.bytes, deadline);
   const body = await readBounded(
     responseBody(compressed).pipeThrough(new DecompressionStream('gzip')),

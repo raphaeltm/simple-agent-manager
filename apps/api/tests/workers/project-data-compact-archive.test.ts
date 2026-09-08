@@ -13,17 +13,18 @@ import {
   runScopedProjectDataArchiveCanary,
 } from '../../src/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
+import {
+  countTargetMessages,
+  projectDataStub,
+  readLocation,
+  seedMessages,
+  withArchiveEnv,
+} from './helpers/archive-fixtures';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import type { ProjectDataTestDouble } from './support/expected-error-doubles';
 const testEnv = env as unknown as WorkerEnv;
 const OWNER = 'compact-archive-owner';
 const INSTALLATION = 'compact-archive-installation';
-
-function projectDataStub(ownerName: string): DurableObjectStub<ProjectDataTestDouble> {
-  return env.PROJECT_DATA.get(
-    env.PROJECT_DATA.idFromName(ownerName)
-  ) as DurableObjectStub<ProjectDataTestDouble>;
-}
 
 async function seedProjectGraph(projectId: string): Promise<void> {
   await seedUser(OWNER);
@@ -31,37 +32,6 @@ async function seedProjectGraph(projectId: string): Promise<void> {
   await seedProject(projectId, OWNER, INSTALLATION, {
     name: `Archive Bridge ${projectId}`,
   });
-}
-
-async function withArchiveEnv<T>(
-  overrides: Partial<Record<keyof WorkerEnv, string>>,
-  fn: () => Promise<T>
-): Promise<T> {
-  const mutableEnv = testEnv as WorkerEnv & Record<string, string | undefined>;
-  const previous = new Map<string, string | undefined>();
-  for (const [key, value] of Object.entries(overrides)) {
-    previous.set(key, mutableEnv[key]);
-    mutableEnv[key] = value;
-  }
-  try {
-    return await fn();
-  } finally {
-    for (const [key, value] of previous) {
-      if (value === undefined) delete mutableEnv[key];
-      else mutableEnv[key] = value;
-    }
-  }
-}
-
-function seedMessages(count: number) {
-  return Array.from({ length: count }, (_, index) => ({
-    messageId: `bind-limit-message-${String(index).padStart(4, '0')}`,
-    role: index % 2 === 0 ? 'user' : 'assistant',
-    content: `bind limit payload ${index}`,
-    toolMetadata: null,
-    timestamp: new Date(1_000_000 + index * 1_000).toISOString(),
-    sequence: index + 1,
-  }));
 }
 
 async function seedTerminalSessionWithMessages(
@@ -93,33 +63,6 @@ async function seedTerminalSessionWithMessages(
   await source.stopSession(sessionId);
   await source.runSummarySyncForTest();
   return { source, sessionId };
-}
-
-async function countTargetMessages(ownerName: string, sessionId: string): Promise<number> {
-  const target = projectDataStub(ownerName);
-  return runInDurableObject(target, async (_instance, state) => {
-    const row = state.storage.sql
-      .exec('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', sessionId)
-      .toArray()[0] as { count: number };
-    return row.count;
-  });
-}
-
-async function readLocation(projectId: string, sessionId: string) {
-  return env.DATABASE.prepare(
-    `SELECT location_state, owner_kind, owner_name, generation, migration_id, target_aggregate_sha256
-     FROM project_data_session_locations
-     WHERE project_id = ? AND session_id = ?`
-  )
-    .bind(projectId, sessionId)
-    .first<{
-      location_state: string;
-      owner_kind: string;
-      owner_name: string;
-      generation: number;
-      migration_id: string | null;
-      target_aggregate_sha256: string | null;
-    }>();
 }
 
 describe('compact R2 archive rollout', () => {
@@ -365,20 +308,28 @@ describe('compact R2 archive rollout', () => {
         // A completed recovery must permit a new generation, while old recovery
         // RPCs remain fenced from the successor's transcript.
         const remigrated = await runScopedProjectDataArchiveCanary(testEnv, {
-          projectId, sessionId, dryRun: false, reason: 'remigrate verified copy-back',
+          projectId,
+          sessionId,
+          dryRun: false,
+          reason: 'remigrate verified copy-back',
           nowDate: new Date(Date.now() + 120_000),
         });
         expect(remigrated.stats).toMatchObject({ migrated: 1, failed: 0 });
         const successor = await readLocation(projectId, sessionId);
         expect(successor?.migration_id).not.toBe(location.migration_id);
         expect(successor?.location_state).toBe('archive_shard');
-        await expect(copyBackProjectDataArchiveMigration(testEnv, {
-          projectId, migrationId: location.migration_id,
-          reason: 'stale recovery must not modify successor',
-        })).rejects.toThrow(/identity mismatch/);
+        await expect(
+          copyBackProjectDataArchiveMigration(testEnv, {
+            projectId,
+            migrationId: location.migration_id,
+            reason: 'stale recovery must not modify successor',
+          })
+        ).rejects.toThrow(/identity mismatch/);
         await verifyToolsAndSearch();
         const recovered = await copyBackProjectDataArchiveMigration(testEnv, {
-          projectId, migrationId: successor!.migration_id!, reason: 'recover successor',
+          projectId,
+          migrationId: successor!.migration_id!,
+          reason: 'recover successor',
         });
         expect(recovered.restoredToRoot).toBe(true);
         await verifyMcpReads();

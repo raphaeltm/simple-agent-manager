@@ -3098,6 +3098,15 @@ function recordMigrationFailure(
   else stats.failed++;
 }
 
+async function reserveMigrationAttempt(
+  migration: MigrationRow,
+  reserve: (projectId: string, sessionId: string) => Promise<ArchiveWriteReservation | null>
+): Promise<ArchiveWriteReservation | null | undefined> {
+  if (migration.storage_format !== COMPACT_ARCHIVE_FORMAT ||
+    migration.state === 'source_deleted' || migration.state === 'published') return undefined;
+  return reserve(migration.project_id, migration.session_id);
+}
+
 async function processArchiveMigrationBatch(input: {
   env: Env;
   config: ArchiveCoordinatorConfig;
@@ -3174,9 +3183,7 @@ async function processArchiveMigrationBatch(input: {
 
   for (const migration of input.migrations) {
     if (outOfTime()) return;
-    const compact = migration.storage_format === COMPACT_ARCHIVE_FORMAT;
-    const reservation = compact && !['source_deleted', 'published'].includes(migration.state)
-      ? await reserve(migration.project_id, migration.session_id) : undefined;
+    const reservation = await reserveMigrationAttempt(migration, reserve);
     if (reservation === null) continue;
     await processOne(migration, reservation);
   }
