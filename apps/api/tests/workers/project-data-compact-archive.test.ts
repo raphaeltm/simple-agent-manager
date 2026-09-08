@@ -1,7 +1,13 @@
-import { env, runInDurableObject } from 'cloudflare:test';
+import {
+  createExecutionContext,
+  env,
+  runInDurableObject,
+  waitOnExecutionContext,
+} from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
+import worker from '../../src/index';
 import {
   copyBackProjectDataArchiveMigration,
   runScopedProjectDataArchiveCanary,
@@ -155,7 +161,62 @@ describe('compact R2 archive rollout', () => {
         )
         .toArray()
     );
+    const mcpToken = crypto.randomUUID();
+    await env.KV.put(
+      `mcp:${mcpToken}`,
+      JSON.stringify({
+        taskId: '',
+        contextType: 'conversation',
+        taskMode: 'conversation',
+        projectId,
+        userId: OWNER,
+        workspaceId: '',
+        chatSessionId: sessionId,
+        createdAt: new Date().toISOString(),
+      }),
+      { expirationTtl: 3600 }
+    );
+    const mcpRead = async (name: string, args: Record<string, unknown>) => {
+      const context = createExecutionContext();
+      const response = await worker.fetch(
+        new Request('https://api.test.example.com/mcp', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${mcpToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: { name, arguments: args },
+          }),
+        }),
+        testEnv,
+        context
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        error?: unknown;
+        result: { content: Array<{ text: string }> };
+      };
+      expect(body.error).toBeUndefined();
+      await waitOnExecutionContext(context);
+      return JSON.parse(body.result.content[0]!.text);
+    };
+    let originalMcp: unknown;
+    const verifyMcpReads = async () => {
+      const history = await mcpRead('get_session_messages', { projectId, sessionId, limit: 300 });
+      const scoped = await mcpRead('search_messages', { sessionId, query: 'payload', limit: 20 });
+      const project = await mcpRead('search_messages', { query: 'payload', limit: 20 });
+      expect(history.messages.length).toBeGreaterThan(0);
+      expect(scoped.count).toBeGreaterThan(0);
+      expect(
+        project.results.some((row: { sessionId: string }) => row.sessionId === sessionId)
+      ).toBe(true);
+      const result = { history, scoped: scoped.results, project: project.results };
+      if (originalMcp === undefined) originalMcp = result;
+      else expect(result).toEqual(originalMcp);
+    };
     const verifyToolsAndSearch = async () => {
+      await verifyMcpReads();
       expect(
         await projectDataService.getMessageCount(testEnv, projectId, sessionId, ['tool'])
       ).toBe(2);
@@ -266,6 +327,7 @@ describe('compact R2 archive rollout', () => {
           )
         ).toEqual(original);
         await withArchiveEnv({ PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'false' }, async () => {
+          await verifyMcpReads();
           expect(
             await projectDataService.getMessages(
               testEnv,
