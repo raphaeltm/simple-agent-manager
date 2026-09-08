@@ -242,6 +242,7 @@ const PROJECT_EVENT_TABLE_SCHEMAS: readonly MigrationTableSchema[] = [
     },
     constraints: ['PRIMARY KEY (project_id, category)'],
   },
+
 ];
 
 const PROJECT_EVENT_INDEX_SCHEMAS: readonly MigrationIndexSchema[] = [
@@ -1833,6 +1834,30 @@ export const MIGRATIONS: Migration[] = [
         FROM tool_payload_archives
         LIMIT 0
       `);
+    },
+  },
+  {
+    name: '045-project-data-compact-archive',
+    run: (sql) => {
+      const columns = sql.exec('PRAGMA table_info(project_data_archive_target_sessions)').toArray();
+      if (!columns.some(column => column.name === 'storage_format')) {
+        sql.exec("ALTER TABLE project_data_archive_target_sessions ADD COLUMN storage_format TEXT NOT NULL DEFAULT 'sqlite-v1'");
+      }
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_data_archive_raw_chunks (
+        session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        r2_key TEXT NOT NULL,
+        compressed_bytes INTEGER NOT NULL,
+        body_bytes INTEGER NOT NULL,
+        body_sha256 TEXT NOT NULL,
+        first_created_at INTEGER,
+        last_created_at INTEGER,
+        role_counts_json TEXT NOT NULL,
+        row_ids_json TEXT NOT NULL,
+        PRIMARY KEY (session_id, ordinal)
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_archive_raw_chunk_time
+        ON project_data_archive_raw_chunks(session_id, first_created_at, last_created_at)`);
     },
   },
 ];

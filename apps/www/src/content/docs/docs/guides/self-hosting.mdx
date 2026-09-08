@@ -486,3 +486,7 @@ Use the D1 database name from the deploy workflow's Pulumi stack output.
 Check Hetzner console for VM status. If the VM is running, SSH in and check `systemctl status vm-agent`.
 
 This page is the canonical troubleshooting reference for self-hosted deployments.
+
+### Compact conversation archives
+
+Compact SQLite/R2 archive writes are opt-in (`PROJECT_DATA_ARCHIVE_COMPACT_ENABLED=false`). Deployment supplies the existing private archive bucket; no new credentials are required. Before enabling, validate history, search and copy-back on staging and choose a migration allowance with room for normal account usage. Keep archived R2 objects for as long as their conversations exist. See the [format, cost controls and recovery limits](/docs/reference/configuration/#compact-archive-shards).

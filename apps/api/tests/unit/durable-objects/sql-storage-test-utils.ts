@@ -16,6 +16,7 @@ export function createSqlStorage(db: Database.Database): SqlStorage {
           toArray() {
             return rows;
           },
+          [Symbol.iterator]() { return rows[Symbol.iterator](); },
           rowsWritten: 0,
         };
       }

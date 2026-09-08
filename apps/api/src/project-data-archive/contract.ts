@@ -1,4 +1,7 @@
 export const PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION = 1;
+export const PROJECT_DATA_ARCHIVE_MESSAGE_COLUMNS = [
+  'id', 'session_id', 'role', 'content', 'tool_metadata', 'created_at', 'sequence', 'origin',
+] as const;
 
 export const PROJECT_DATA_ARCHIVE_LOCATION_STATES = [
   'root',
