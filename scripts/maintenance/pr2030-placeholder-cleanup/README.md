@@ -88,3 +88,79 @@ python3 -m unittest discover -s scripts/maintenance/pr2030-placeholder-cleanup -
 Ten scenario tests cover preview/apply/idempotency, original evidence, live binding
 mismatch, every identity/runtime/task guard, usage/snapshot rejection, unrelated
 rows, conflicting proofs, and ownership/snapshot changes between SELECT and UPDATE.
+
+## Additional operations: failed recovery verification
+
+The original placeholder operation succeeded in maintenance run `34227248440`
+(changes 1); the root subsequently completed its normal DELETE. Its script is
+unchanged. The workflow now has an explicit `operation` choice; `apply` still
+defaults to false. Neither new operation runs as a side effect of the other.
+
+The new application fixes are pinned to Worker
+`fe31a27319935a0b20c300c4067010e725ab8d86`. Both new operations independently reject
+Worker `708e4f179...` and every other Worker version. Do not commit, push, or run
+these additions before root review; execution additionally waits for the corrected
+application deployment and its staging workflow to finish successfully.
+
+### `recovery-node-proofs`
+
+`node_proof.py` and `node-proof-evidence.json` target exactly three task-owned
+CX43/nbg1 node placeholders created at 12:31:57, 12:32:43, and 12:33:12 UTC on
+2026-09-08. Each retained its original incarnation, insertion
+`credential_source='user'`, planned platform attribution and credential reference,
+NULL fingerprint, and NULL provider/IP/DNS/heartbeat/agent-ready fields.
+
+This retained pre-claim state is the evidence for absence. In
+`apps/api/src/services/node-provisioning.ts`, `provisionNode` atomically persists
+the resolved platform credential source and exact fingerprint and rotates the
+incarnation before any `createVM` call. The platform branch in
+`provider-credential-exact.ts` attaches the fingerprint; failure handling does not
+restore insertion defaults. The observed error alone would be insufficient
+because authority checks also occur after provider allocation. The parent and
+reconciliation agent independently reviewed this stronger invariant.
+
+The SQL fences exact node/task identities, incarnations, creation times,
+installation pool/candidate/revision, native type/location, credential references,
+all the pre-claim fields above, exact failed recovery task/error/source, and absence
+of any workspace, usage, snapshot, or other task link to each node. It materializes
+all three eligible null-proof IDs and changes all three or none in one UPDATE.
+Only `runtime_termination_confirmed_at` and `updated_at` change. Existing proofs on
+all three produce a read-only no-op; mixed proof state requires review.
+
+### `rearm-recovery`
+
+`rearm.py` and `recovery-evidence.json` target only snapshot
+`01M20CJ25DMR28FAJY2BC330TD`, session `ef07c74a-54c5-444a-a2ee-54d4ce21d939`.
+Three deterministic pre-provider stale-plan failures exhausted its recovery budget.
+The script changes only `recovery_attempts` from 3 to 0. The existing `failed`
+recovery status is accepted by normal `claimSessionSnapshotRecovery`; no lifecycle
+status, artifact, proof, task, timestamp, or global configuration changes.
+
+Every captured operational snapshot field is compared in SQL, including identity,
+original sleep timestamp, available/nondegraded status, generation, expiry, R2 keys,
+home/wip hashes, last failed recovery task, and lack of a current claim/restore.
+The original manifest JSON is omitted from committed evidence and audits; its
+SHA-256 is checked against the current value, which is also fenced verbatim in the
+atomic UPDATE. Current expiry, all three exact failed tasks/pre-claim node
+incarnations, absent node usage and active workspaces, and absence of another
+active recovery for this source task/session are required. A fully matching
+already-zero counter is a read-only no-op; counts 1, 2, or greater than 3 refuse.
+
+### Required order
+
+1. Root reviews the scripts, evidence, and offline test results.
+2. Wait for the corrected `fe31a273...` application and staging workflow.
+3. Preview and apply `recovery-node-proofs`; require exact changes 3.
+4. Preview and apply `rearm-recovery`; require exact changes 1.
+5. Root uses supported normal node DELETE APIs, then tests normal recovery of this
+   same preserved snapshot. Retain the audit and final artifact/hash evidence.
+
+Rearm requires the original three node rows to remain available until its guards
+run. Do not physically remove them before rearm. These operations do not restore
+the snapshot, start any task, delete any runtime, or consume provider credentials.
+
+Additional offline tests bring the suite to 27 scenarios, including real SQLite
+all-three atomic proof writes, partial proofs, stale incarnation/provider claims,
+changed generation/manifest/ownership, expired snapshots, new recovery claims,
+new usage/workspaces, unchanged timestamps/artifacts, and repeat execution. Both
+final mutations stay below D1's 100-bind limit, and node projections are explicit.

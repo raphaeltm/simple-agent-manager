@@ -4,8 +4,17 @@ name: Staging Placeholder Cleanup
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: 'Exact audited staging maintenance operation'
+        required: true
+        type: choice
+        options:
+          - placeholder-proof
+          - recovery-node-proofs
+          - rearm-recovery
+        default: placeholder-proof
       apply:
-        description: 'Persist the audited proof for the single PR 2030 failed placeholder'
+        description: 'Apply the selected exact repair after reviewing its preview'
         required: true
         type: boolean
         default: false
@@ -31,9 +40,26 @@ jobs:
       - name: Verify offline guard regressions
         run: python3 -m unittest discover -s scripts/maintenance/pr2030-placeholder-cleanup -p 'test_*.py'
       - name: Preview or persist the exact missing proof
+        if: ${{ inputs.operation == 'placeholder-proof' }}
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           APPLY_REPAIR: ${{ inputs.apply }}
         run: python3 scripts/maintenance/pr2030-placeholder-cleanup/repair.py
+      - name: Preview or rearm the exact preserved snapshot
+        if: ${{ inputs.operation == 'rearm-recovery' }}
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          APPLY_REPAIR: ${{ inputs.apply }}
+        run: python3 scripts/maintenance/pr2030-placeholder-cleanup/rearm.py
+      - name: Preview or prove the exact pre-claim recovery nodes absent
+        if: ${{ inputs.operation == 'recovery-node-proofs' }}
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          APPLY_REPAIR: ${{ inputs.apply }}
+        run: python3 scripts/maintenance/pr2030-placeholder-cleanup/node_proof.py
