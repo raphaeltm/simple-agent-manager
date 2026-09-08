@@ -15,7 +15,12 @@ import { estimateRowBytes, RPC_SIZE_BUDGET_BYTES } from './messages';
 import type { Env } from './types';
 
 export function isCompactArchive(sql: SqlStorage, sessionId: string): boolean {
-  const row = sql.exec('SELECT storage_format FROM project_data_archive_target_sessions WHERE session_id = ?', sessionId).toArray()[0];
+  const row = sql
+    .exec(
+      'SELECT storage_format FROM project_data_archive_target_sessions WHERE session_id = ?',
+      sessionId
+    )
+    .toArray()[0];
   if (!row) return false;
   if (row.storage_format === COMPACT_ARCHIVE_FORMAT) return true;
   if (row.storage_format === LEGACY_ARCHIVE_FORMAT) return false;
@@ -117,7 +122,8 @@ export async function* compactRawChunks(
     .exec('SELECT * FROM project_data_archive_target_sessions WHERE session_id = ?', sessionId)
     .toArray()[0];
   if (!target) throw new Error('Compact archive target missing');
-  const deadline = filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
+  const deadline =
+    filter.deadline ?? Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
   const descending = filter.order === 'desc';
   let cursor: number | null = null;
   for (;;) {
@@ -172,7 +178,12 @@ export async function* compactRawChunks(
   }
 }
 
-export async function compactRawDigest(sql: SqlStorage, env: Env, sessionId: string, deadline?: number) {
+export async function compactRawDigest(
+  sql: SqlStorage,
+  env: Env,
+  sessionId: string,
+  deadline?: number
+) {
   const hasher = createCanonicalRowsHasher(PROJECT_DATA_ARCHIVE_MESSAGE_COLUMNS);
   let lastMessageAt: number | null = null;
   let ordinal = 0;
