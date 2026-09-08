@@ -20,6 +20,7 @@ export const WorkspaceStatusSchema = z.enum([
   'running',
   'recovery',
   'stopped',
+  'evicted',
   'error',
 ]);
 

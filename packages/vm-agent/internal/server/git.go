@@ -388,6 +388,15 @@ func isValidRefChar(r rune) bool {
 // resolveContainerForWorkspace looks up the workspace runtime, validates its status,
 // and resolves the devcontainer's container ID, work directory, and user.
 func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, workDir, user string, err error) {
+	return s.resolveContainerForWorkspaceContext(context.Background(), workspaceID)
+}
+
+// resolveContainerForWorkspaceContext looks up the workspace runtime, validates
+// its status, and resolves the devcontainer using the caller's context.
+func (s *Server) resolveContainerForWorkspaceContext(ctx context.Context, workspaceID string) (containerID, workDir, user string, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		return "", "", "", errWorkspaceRuntimeNotFound
@@ -401,12 +410,12 @@ func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, 
 		return "", workDir, user, nil
 	}
 
-	resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue)
+	resolver := s.ptyManagerContainerResolverForLabelContext(runtime.ContainerLabelValue)
 	if resolver == nil {
 		return "", "", "", fmt.Errorf("container mode is not enabled")
 	}
 
-	containerID, err = resolver()
+	containerID, err = resolver(ctx)
 	if err != nil {
 		return "", "", "", fmt.Errorf("failed to resolve container: %w", err)
 	}

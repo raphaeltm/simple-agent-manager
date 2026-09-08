@@ -452,8 +452,8 @@ func TestParseDockerPS(t *testing.T) {
 			wantCount: 0,
 		},
 		{
-			name:  "invalid JSON lines skipped",
-			input: "not json\n{\"ID\":\"abc\",\"Names\":\"ok\",\"Image\":\"img\",\"Status\":\"Up\",\"State\":\"running\",\"CreatedAt\":\"now\"}\nmore garbage",
+			name:      "invalid JSON lines skipped",
+			input:     "not json\n{\"ID\":\"abc\",\"Names\":\"ok\",\"Image\":\"img\",\"Status\":\"Up\",\"State\":\"running\",\"CreatedAt\":\"now\"}\nmore garbage",
 			wantCount: 1,
 			wantFirst: ContainerInfo{
 				ID:        "abc",
@@ -519,6 +519,12 @@ func TestParseDockerStats(t *testing.T) {
 			wantIDs:   []string{"abc123", "def456"},
 		},
 		{
+			name:      "docker json template output",
+			input:     `{"BlockIO":"0B / 0B","CPUPerc":"12.50%","Container":"abc123","ID":"abc123","MemPerc":"25.00%","MemUsage":"512MiB / 2GiB","Name":"workspace-app","NetIO":"1kB / 2kB","PIDs":"42"}`,
+			wantCount: 1,
+			wantIDs:   []string{"abc123"},
+		},
+		{
 			name:      "empty output",
 			input:     "",
 			wantCount: 0,
@@ -548,7 +554,7 @@ func TestParseDockerStats(t *testing.T) {
 
 func TestParseDockerStatsMerge(t *testing.T) {
 	// Verify that parseDockerStats values can be correctly parsed by parsePercentString
-	input := `{"id":"abc123","cpuPercent":"52.30%","memUsage":"256MiB / 4GiB","memPercent":"6.25%"}`
+	input := `{"ID":"abc123","Name":"runner","CPUPerc":"52.30%","MemUsage":"256MiB / 4GiB","MemPerc":"6.25%","PIDs":"7"}`
 	result := parseDockerStats(input)
 
 	entry, ok := result["abc123"]
@@ -556,18 +562,47 @@ func TestParseDockerStatsMerge(t *testing.T) {
 		t.Fatal("missing entry for abc123")
 	}
 
-	cpuPct := parsePercentString(entry.CPUPercent)
-	if cpuPct != 52.3 {
-		t.Errorf("cpuPercent = %f, want 52.3", cpuPct)
+	if entry.CPUPercent != 52.3 {
+		t.Errorf("cpuPercent = %f, want 52.3", entry.CPUPercent)
 	}
-
-	memPct := parsePercentString(entry.MemPercent)
-	if memPct != 6.25 {
-		t.Errorf("memPercent = %f, want 6.25", memPct)
+	if entry.CPUPercentText != "52.30%" {
+		t.Errorf("cpuPercentText = %q, want 52.30%%", entry.CPUPercentText)
 	}
-
+	if entry.MemPercent != 6.25 {
+		t.Errorf("memPercent = %f, want 6.25", entry.MemPercent)
+	}
 	if entry.MemUsage != "256MiB / 4GiB" {
 		t.Errorf("memUsage = %q, want %q", entry.MemUsage, "256MiB / 4GiB")
+	}
+	if entry.MemUsageBytes != 256*1024*1024 {
+		t.Errorf("memUsageBytes = %d, want %d", entry.MemUsageBytes, uint64(256*1024*1024))
+	}
+	if entry.MemLimitBytes != 4*1024*1024*1024 {
+		t.Errorf("memLimitBytes = %d, want %d", entry.MemLimitBytes, uint64(4*1024*1024*1024))
+	}
+	if entry.PIDs != 7 {
+		t.Errorf("pids = %d, want 7", entry.PIDs)
+	}
+	if entry.Name != "runner" {
+		t.Errorf("name = %q, want runner", entry.Name)
+	}
+}
+
+func TestParseDockerMemoryUsage(t *testing.T) {
+	usage, limit := ParseDockerMemoryUsage("128MiB / 2GiB")
+	if usage != 128*1024*1024 {
+		t.Errorf("usage = %d, want %d", usage, uint64(128*1024*1024))
+	}
+	if limit != 2*1024*1024*1024 {
+		t.Errorf("limit = %d, want %d", limit, uint64(2*1024*1024*1024))
+	}
+
+	usage, limit = ParseDockerMemoryUsage("1.5GB / 4GB")
+	if usage != 1_500_000_000 {
+		t.Errorf("decimal usage = %d, want 1500000000", usage)
+	}
+	if limit != 4_000_000_000 {
+		t.Errorf("decimal limit = %d, want 4000000000", limit)
 	}
 }
 
@@ -658,9 +693,11 @@ func TestStatsOnlyForRunningContainers(t *testing.T) {
 	// Merge
 	for i := range containers {
 		if stats, ok := statsMap[containers[i].ID]; ok {
-			containers[i].CPUPercent = parsePercentString(stats.CPUPercent)
+			containers[i].CPUPercent = stats.CPUPercent
 			containers[i].MemUsage = stats.MemUsage
-			containers[i].MemPercent = parsePercentString(stats.MemPercent)
+			containers[i].MemUsageBytes = stats.MemUsageBytes
+			containers[i].MemLimitBytes = stats.MemLimitBytes
+			containers[i].MemPercent = stats.MemPercent
 		}
 	}
 
@@ -674,6 +711,12 @@ func TestStatsOnlyForRunningContainers(t *testing.T) {
 	}
 	if containers[0].MemUsage != "128MiB / 2GiB" {
 		t.Errorf("running container MemUsage = %q, want %q", containers[0].MemUsage, "128MiB / 2GiB")
+	}
+	if containers[0].MemUsageBytes != 128*1024*1024 {
+		t.Errorf("running container MemUsageBytes = %d, want %d", containers[0].MemUsageBytes, uint64(128*1024*1024))
+	}
+	if containers[0].MemLimitBytes != 2*1024*1024*1024 {
+		t.Errorf("running container MemLimitBytes = %d, want %d", containers[0].MemLimitBytes, uint64(2*1024*1024*1024))
 	}
 
 	// Exited container should have zero stats (no stats entry)

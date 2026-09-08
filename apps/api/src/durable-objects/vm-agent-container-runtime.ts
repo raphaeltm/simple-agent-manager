@@ -199,7 +199,7 @@ export async function persistRuntimeSleepingAfterRevokedWake(
     SELECT 1 FROM workspaces live_workspace
      WHERE live_workspace.id = ?
        AND live_workspace.node_id = ?
-       AND live_workspace.status NOT IN ('stopped', 'deleted', 'error')
+       AND live_workspace.status NOT IN ('stopped', 'evicted', 'deleted', 'error')
   )`;
   await env.DATABASE.batch([
     env.DATABASE.prepare(
@@ -214,7 +214,7 @@ export async function persistRuntimeSleepingAfterRevokedWake(
           SET status = 'sleeping', error_message = NULL, updated_at = ?
         WHERE id = ?
           AND node_id = ?
-          AND status NOT IN ('stopped', 'deleted', 'error')
+          AND status NOT IN ('stopped', 'evicted', 'deleted', 'error')
           AND ${liveNode}`
     ).bind(now, identity.workspaceId, identity.nodeId, identity.nodeId),
     env.DATABASE.prepare(

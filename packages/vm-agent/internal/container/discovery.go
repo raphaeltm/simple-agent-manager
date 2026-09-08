@@ -65,9 +65,7 @@ func FindContainerByLabel(ctx context.Context, labelKey, labelValue string) (str
 		return "", err
 	}
 
-	// The Docker-backed delegate currently uses exec.Command rather than
-	// exec.CommandContext, so cancellation is checked around the one-shot query.
-	candidates, err := listRunningContainersByLabel(labelKey, labelValue)
+	candidates, err := listRunningContainersByLabel(ctx, labelKey, labelValue)
 	if err != nil {
 		return "", fmt.Errorf("failed to query docker: %w", err)
 	}
@@ -119,30 +117,45 @@ func NewDiscovery(cfg Config) *Discovery {
 // GetContainerID returns the devcontainer's Docker container ID.
 // It caches the result and re-discovers if the cache is stale or the container is gone.
 func (d *Discovery) GetContainerID() (string, error) {
+	return d.GetContainerIDContext(context.Background())
+}
+
+// GetContainerIDContext returns the devcontainer's Docker container ID while
+// bounding Docker CLI probes with the caller's context.
+func (d *Discovery) GetContainerIDContext(ctx context.Context) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	d.mu.RLock()
 	if d.containerID != "" && time.Since(d.lastCheck) < d.cacheTTL {
 		id := d.containerID
 		d.mu.RUnlock()
-		if isContainerRunning(id) {
+		if isContainerRunning(ctx, id) {
 			return id, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
 		slog.Warn("Cached devcontainer no longer running, rediscovering", "containerID", id)
 		d.clearContainerIfCurrent(id)
-		return d.discover()
+		return d.discover(ctx)
 	}
 	d.mu.RUnlock()
 
-	return d.discover()
+	return d.discover(ctx)
 }
 
 // discover queries Docker for the devcontainer and caches the result.
-func (d *Discovery) discover() (string, error) {
+func (d *Discovery) discover(ctx context.Context) (string, error) {
 	d.mu.Lock()
 	if d.containerID != "" && time.Since(d.lastCheck) < d.cacheTTL {
 		id := d.containerID
 		d.mu.Unlock()
-		if isContainerRunning(id) {
+		if isContainerRunning(ctx, id) {
 			return id, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return "", err
 		}
 		slog.Warn("Cached devcontainer no longer running, rediscovering", "containerID", id)
 		d.clearContainerIfCurrent(id)
@@ -150,7 +163,7 @@ func (d *Discovery) discover() (string, error) {
 		d.mu.Unlock()
 	}
 
-	candidates, err := listRunningContainersByLabel(d.labelKey, d.labelValue)
+	candidates, err := listRunningContainersByLabel(ctx, d.labelKey, d.labelValue)
 	if err != nil {
 		return "", fmt.Errorf("failed to query docker: %w", err)
 	}
@@ -187,11 +200,17 @@ func sortCandidates(candidates []containerCandidate) {
 	})
 }
 
-func dockerListRunningContainersByLabel(labelKey, labelValue string) ([]containerCandidate, error) {
+func dockerListRunningContainersByLabel(ctx context.Context, labelKey, labelValue string) ([]containerCandidate, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	filter := fmt.Sprintf("label=%s=%s", labelKey, labelValue)
-	cmd := exec.Command(DockerCLIPath(), "ps", "--format", "{{.ID}}\t{{.CreatedAt}}", "--filter", filter)
+	cmd := exec.CommandContext(ctx, DockerCLIPath(), "ps", "--format", "{{.ID}}\t{{.CreatedAt}}", "--filter", filter)
 	output, err := cmd.Output()
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, err
 	}
 
@@ -217,11 +236,14 @@ func dockerListRunningContainersByLabel(labelKey, labelValue string) ([]containe
 	return candidates, nil
 }
 
-func dockerIsContainerRunning(containerID string) bool {
+func dockerIsContainerRunning(ctx context.Context, containerID string) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if strings.TrimSpace(containerID) == "" {
 		return false
 	}
-	cmd := exec.Command(DockerCLIPath(), "inspect", "-f", "{{.State.Running}}", containerID)
+	cmd := exec.CommandContext(ctx, DockerCLIPath(), "inspect", "-f", "{{.State.Running}}", containerID)
 	output, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(output)) == "true"
 }

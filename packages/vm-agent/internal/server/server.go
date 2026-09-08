@@ -86,6 +86,8 @@ type Server struct {
 	workspaceEvents       map[string][]EventRecord
 	eventStore            *eventstore.Store
 	resourceMonitor       *resourcemon.Monitor
+	resourceGuard         *resourcemon.ResourceGuard
+	resourceEviction      *resourcemon.EvictionController
 	agentSessions         *agentsessions.Manager
 	acpConfig             acp.GatewayConfig
 	sessionHostMu         sync.Mutex
@@ -121,7 +123,7 @@ type Server struct {
 	applyWatchdogMu       sync.Mutex
 	applyWatchdogs        map[string]chan struct{}
 	sessionSnapshotMu     sync.Mutex
-	sessionSnapshotLocks  map[string]*sync.Mutex
+	sessionSnapshotLocks  map[string]sessionSnapshotLock
 	sessionSnapshotRunner func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
 
 	// Deployment mode — one Engine per placed deployment environment.
@@ -169,6 +171,7 @@ type WorkspaceRuntime struct {
 	ContainerUser          string
 	CallbackToken          string
 	ProjectID              string
+	ChatSessionID          string
 	TaskID                 string
 	GitUserName            string
 	GitUserEmail           string
@@ -520,6 +523,22 @@ func New(cfg *config.Config) (*Server, error) {
 		slog.Error("Failed to start resource monitor", "error", err)
 	}
 
+	resourceGuard, err := resourcemon.NewResourceGuard(resourcemon.ResourceGuardConfig{
+		PSIPollInterval:        cfg.PSIPollInterval,
+		ContainerStatsInterval: cfg.ContainerStatsInterval,
+		DockerStatsTimeout:     cfg.SysInfoDockerTimeout,
+		PSIThresholds: resourcemon.PSIThresholds{
+			MemorySomeWarningThreshold:  cfg.PSIMemorySomeWarningThreshold,
+			MemorySomeCriticalThreshold: cfg.PSIMemorySomeCriticalThreshold,
+			MemoryFullWarningThreshold:  cfg.PSIMemoryFullWarningThreshold,
+			MemoryFullCriticalThreshold: cfg.PSIMemoryFullCriticalThreshold,
+		},
+		Logger: slog.Default(),
+	})
+	if err != nil {
+		slog.Error("Failed to configure resource guard", "error", err)
+	}
+
 	s := &Server{
 		config:              cfg,
 		jwtValidator:        jwtValidator,
@@ -532,6 +551,7 @@ func New(cfg *config.Config) (*Server, error) {
 		workspaceEvents:     make(map[string][]EventRecord),
 		eventStore:          evStore,
 		resourceMonitor:     resMon,
+		resourceGuard:       resourceGuard,
 		agentSessions:       agentsessions.NewManager(),
 		acpConfig:           acpGatewayConfig,
 		sessionHosts:        make(map[string]*acp.SessionHost),
@@ -555,6 +575,14 @@ func New(cfg *config.Config) (*Server, error) {
 		applyWatchdogs:      make(map[string]chan struct{}),
 		deployEngines:       make(map[string]*deploy.Engine),
 		deployRetiring:      make(map[string]bool),
+	}
+	if resourceGuard != nil {
+		evictionController, evictionErr := s.newResourceEvictionController()
+		if evictionErr != nil {
+			slog.Error("Failed to configure resource eviction controller", "error", evictionErr)
+		} else {
+			s.resourceEviction = evictionController
+		}
 	}
 
 	// GitTokenFetcher is intentionally left nil at the server level.
@@ -592,6 +620,7 @@ func New(cfg *config.Config) (*Server, error) {
 			ContainerUser:       strings.TrimSpace(cfg.ContainerUser),
 			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
 			ProjectID:           strings.TrimSpace(cfg.ProjectID),
+			ChatSessionID:       strings.TrimSpace(cfg.ChatSessionID),
 			TaskID:              strings.TrimSpace(cfg.TaskID),
 			Lightweight:         cfg.IsStandaloneMode(),
 			PTY:                 ptyManager,
@@ -968,6 +997,7 @@ func (s *Server) stopAllPortScanners() {
 func (s *Server) Start() error {
 	s.startNodeHealthReporter()
 	s.startAcpHeartbeatReporter()
+	s.startResourceGuard()
 
 	// Start error reporter background flush
 	s.errorReporter.Start()
@@ -979,6 +1009,60 @@ func (s *Server) Start() error {
 
 	slog.Info("Starting VM Agent", "addr", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
+}
+
+func (s *Server) startResourceGuard() {
+	if s.resourceGuard == nil {
+		return
+	}
+	if err := s.resourceGuard.Start(context.Background()); err != nil {
+		slog.Warn("Resource guard failed to start", "error", err)
+		return
+	}
+	if s.resourceEviction != nil {
+		if err := s.resourceEviction.Start(context.Background()); err != nil {
+			slog.Warn("Resource eviction controller failed to start", "error", err)
+		}
+		return
+	}
+	go func() {
+		for {
+			select {
+			case <-s.done:
+				return
+			case event, ok := <-s.resourceGuard.PressureEvents():
+				if !ok {
+					return
+				}
+				s.logResourcePressureEvent(event)
+			}
+		}
+	}()
+}
+
+func (s *Server) logResourcePressureEvent(event resourcemon.PressureEvent) {
+	attrs := []any{
+		"type", event.Type,
+		"level", event.Level,
+		"workspaceId", event.WorkspaceID,
+		"containerId", event.ContainerID,
+		"containerName", event.ContainerName,
+	}
+	if event.Memory != nil {
+		attrs = append(attrs,
+			"someAvg10", event.Memory.Some.Avg10,
+			"someAvg60", event.Memory.Some.Avg60,
+			"fullAvg10", event.Memory.Full.Avg10,
+			"fullAvg60", event.Memory.Full.Avg60,
+		)
+	}
+	if event.Level == resourcemon.PressureLevelCritical {
+		slog.Warn(event.Message, attrs...)
+		return
+	}
+	if event.Level == resourcemon.PressureLevelWarning {
+		slog.Info(event.Message, attrs...)
+	}
 }
 
 // StopAllWorkspacesAndSessions transitions all local workloads to stopped state.
@@ -1046,6 +1130,22 @@ func (s *Server) Stop(ctx context.Context) error {
 
 		// Flush and stop all per-workspace message reporters
 		s.shutdownAllReporters()
+
+		if s.resourceEviction != nil {
+			s.resourceEviction.Close()
+		}
+
+		if s.resourceGuard != nil {
+			if err := s.resourceGuard.Close(); err != nil {
+				slog.Warn("Failed to close resource guard", "error", err)
+			}
+		}
+
+		if s.resourceMonitor != nil {
+			if err := s.resourceMonitor.Close(); err != nil {
+				slog.Warn("Failed to close resource monitor", "error", err)
+			}
+		}
 
 		// Close persistence store
 		if s.store != nil {

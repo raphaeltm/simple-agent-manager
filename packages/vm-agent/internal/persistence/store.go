@@ -48,6 +48,7 @@ type WorkspaceMetadata struct {
 	CloneURL               string `json:"cloneUrl,omitempty"`
 	RepositoryHost         string `json:"repositoryHost,omitempty"`
 	RepositoryPath         string `json:"repositoryPath,omitempty"`
+	ChatSessionID          string `json:"chatSessionId,omitempty"`
 	Lightweight            bool   `json:"lightweight"`
 	DevcontainerConfigName string `json:"devcontainerConfigName,omitempty"`
 	UpdatedAt              string `json:"updatedAt"`
@@ -157,6 +158,7 @@ func (s *Store) migrate() error {
 		migrateV10,
 		migrateV11,
 		migrateV12,
+		migrateV13,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -228,6 +230,13 @@ func migrateV12(db *sql.DB) error {
 	return err
 }
 
+// migrateV13 adds the ProjectData chat session ID to workspace metadata so
+// VM-agent-local snapshot triggers can survive process restarts.
+func migrateV13(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE workspace_metadata ADD COLUMN chat_session_id TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 // migrateV1 creates the initial tabs table.
 func migrateV1(db *sql.DB) error {
 	_, err := db.Exec(`
@@ -293,11 +302,11 @@ func (s *Store) UpsertWorkspaceMetadata(meta WorkspaceMetadata) error {
 
 	_, err = s.db.Exec(
 		`INSERT OR REPLACE INTO workspace_metadata
-			(workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, lightweight, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, chat_session_id, lightweight, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		meta.WorkspaceID, meta.Repository, meta.Branch, meta.BaseBranch, meta.DefaultBranch, meta.ContainerWorkDir,
 		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, callbackToken,
-		meta.RepoProvider, meta.CloneURL, meta.RepositoryHost, meta.RepositoryPath,
+		meta.RepoProvider, meta.CloneURL, meta.RepositoryHost, meta.RepositoryPath, meta.ChatSessionID,
 		meta.Lightweight, meta.UpdatedAt,
 	)
 	if err != nil {
@@ -314,12 +323,12 @@ func (s *Store) GetWorkspaceMetadata(workspaceID string) (*WorkspaceMetadata, er
 
 	var m WorkspaceMetadata
 	err := s.db.QueryRow(
-		`SELECT workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, lightweight, updated_at
+		`SELECT workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, chat_session_id, lightweight, updated_at
 		FROM workspace_metadata WHERE workspace_id = ?`,
 		workspaceID,
 	).Scan(&m.WorkspaceID, &m.Repository, &m.Branch, &m.BaseBranch, &m.DefaultBranch, &m.ContainerWorkDir,
 		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.CallbackToken,
-		&m.RepoProvider, &m.CloneURL, &m.RepositoryHost, &m.RepositoryPath,
+		&m.RepoProvider, &m.CloneURL, &m.RepositoryHost, &m.RepositoryPath, &m.ChatSessionID,
 		&m.Lightweight, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil

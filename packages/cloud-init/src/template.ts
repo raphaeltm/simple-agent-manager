@@ -132,6 +132,19 @@ runcmd:
     fi
   - 'logger -t sam-boot "PHASE END: origin-ca-bootstrap"'
 
+  - 'logger -t sam-boot "PHASE START: resource-isolation"'
+  - /usr/local/sbin/sam-configure-docker-memory.sh
+  - |
+    set -eu
+    systemctl daemon-reload
+    if systemctl list-unit-files docker.service 2>/dev/null | grep -q '^docker.service'; then
+      logger -t sam-boot "Restarting Docker to apply resource limits"
+      systemctl restart docker
+    else
+      logger -t sam-boot "Docker service not installed yet; resource limits will apply on first Docker start"
+    fi
+  - 'logger -t sam-boot "PHASE END: resource-isolation"'
+
   - 'logger -t sam-boot "PHASE START: vm-agent-start"'
   - systemctl daemon-reload
   - systemctl enable vm-agent
@@ -163,6 +176,8 @@ write_files:
       [Service]
       Type=simple
       User=root
+      Slice=sam-infra.slice
+      OOMScoreAdjust=-900
       Environment=NODE_ID={{ node_id }}
       Environment=CONTROL_PLANE_URL={{ control_plane_url }}
       Environment=JWKS_ENDPOINT={{ jwks_url }}
@@ -217,6 +232,54 @@ write_files:
 
       [Install]
       WantedBy=multi-user.target
+
+  - path: /etc/systemd/system/sam-infra.slice
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=SAM infrastructure services
+
+      [Slice]
+      MemoryAccounting=yes
+      MemoryMin={{ sam_infra_slice_memory_min_mb }}M
+
+  - path: /usr/local/sbin/sam-configure-docker-memory.sh
+    permissions: '0755'
+    content: |
+      #!/bin/sh
+      set -eu
+
+      VM_AGENT_MEMORY_RESERVE_MB="{{ vm_agent_memory_reserve_mb }}"
+      MEMINFO_PATH="\${SAM_MEMINFO_PATH:-/proc/meminfo}"
+      DOCKER_SERVICE_DROPIN_DIR="\${SAM_DOCKER_SERVICE_DROPIN_DIR:-/etc/systemd/system/docker.service.d}"
+      DOCKER_RESOURCE_LIMITS_PATH="$DOCKER_SERVICE_DROPIN_DIR/resource-limits.conf"
+
+      if ! [ "$VM_AGENT_MEMORY_RESERVE_MB" -gt 0 ] 2>/dev/null; then
+        logger -t sam-boot "ERROR: VM_AGENT_MEMORY_RESERVE_MB must be a positive integer"
+        exit 1
+      fi
+
+      TOTAL_MEMORY_KB=$(awk '/^MemTotal:/ { print $2; exit }' "$MEMINFO_PATH")
+      if ! [ "\${TOTAL_MEMORY_KB:-0}" -gt 0 ] 2>/dev/null; then
+        logger -t sam-boot "ERROR: unable to read MemTotal from $MEMINFO_PATH"
+        exit 1
+      fi
+
+      TOTAL_MEMORY_MB=$(( (TOTAL_MEMORY_KB + 1023) / 1024 ))
+      DOCKER_MEMORY_MAX_MB=$(( TOTAL_MEMORY_MB - VM_AGENT_MEMORY_RESERVE_MB ))
+      if [ "$DOCKER_MEMORY_MAX_MB" -le 0 ]; then
+        logger -t sam-boot "ERROR: Docker MemoryMax would be non-positive (total=\${TOTAL_MEMORY_MB}M reserve=\${VM_AGENT_MEMORY_RESERVE_MB}M)"
+        exit 1
+      fi
+
+      mkdir -p "$DOCKER_SERVICE_DROPIN_DIR"
+      {
+        echo "[Service]"
+        echo "MemoryAccounting=yes"
+        echo "MemoryMax=\${DOCKER_MEMORY_MAX_MB}M"
+      } > "$DOCKER_RESOURCE_LIMITS_PATH"
+
+      logger -t sam-boot "Docker memory ceiling configured: MemoryMax=\${DOCKER_MEMORY_MAX_MB}M (total=\${TOTAL_MEMORY_MB}M reserve=\${VM_AGENT_MEMORY_RESERVE_MB}M)"
 
   - path: /etc/caddy/Caddyfile
     permissions: '0644'

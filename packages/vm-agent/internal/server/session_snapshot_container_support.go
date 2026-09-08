@@ -73,8 +73,8 @@ func (w *cappedFileWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func (s *Server) resolveContainerSnapshotTarget(runtime *WorkspaceRuntime) (*containerSnapshotTarget, error) {
-	containerID, workDir, user, err := s.resolveContainerForWorkspace(runtime.ID)
+func (s *Server) resolveContainerSnapshotTarget(ctx context.Context, runtime *WorkspaceRuntime) (*containerSnapshotTarget, error) {
+	containerID, workDir, user, err := s.resolveContainerForWorkspaceContext(ctx, runtime.ID)
 	if err != nil {
 		return nil, err
 	}

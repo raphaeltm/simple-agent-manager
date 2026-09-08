@@ -172,6 +172,37 @@ func TestFinalSessionSnapshotWaitsForBackgroundCaptureThenRunsFreshCapture(t *te
 	}
 }
 
+func TestCaptureSessionSnapshotRespectsContextWhileWaitingForSnapshotLock(t *testing.T) {
+	var calls atomic.Int32
+	s := &Server{
+		sessionSnapshotRunner: func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+			calls.Add(1)
+			return map[string]interface{}{"status": "available"}, nil
+		},
+	}
+	input := &sessionSnapshotHandlerInput{chatSessionID: "chat-locked"}
+	lock := s.sessionSnapshotLock(input.chatSessionID)
+	if err := lock.Lock(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := s.captureSessionSnapshot(ctx, input)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("captureSessionSnapshot error = %v, want context deadline exceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 200*time.Millisecond {
+		t.Fatalf("captureSessionSnapshot waited %s for lock, want context-bounded return", elapsed)
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("snapshot runner calls = %d, want 0 while lock is held", got)
+	}
+}
+
 func TestBackgroundSessionSnapshotReportsGenerationScopedFailure(t *testing.T) {
 	reported := make(chan map[string]string, 1)
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -10,7 +10,7 @@ interface HeartbeatTimeoutCandidate {
   nodeId: string | null;
 }
 
-const TERMINAL_WORKSPACE_STATUSES = new Set(['stopping', 'stopped', 'error', 'deleted']);
+const TERMINAL_WORKSPACE_STATUSES = new Set(['stopping', 'stopped', 'evicted', 'error', 'deleted']);
 
 export function checkRuntimeHeartbeatTimeouts(
   sql: SqlStorage,

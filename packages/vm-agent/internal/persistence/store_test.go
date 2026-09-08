@@ -584,6 +584,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		ContainerLabelVal: "/workspace/ws-1",
 		WorkspaceDir:      "/workspace/ws-1",
 		CallbackToken:     "workspace-callback-token",
+		ChatSessionID:     "chat-session-1",
 	})
 	if err != nil {
 		t.Fatalf("UpsertWorkspaceMetadata: %v", err)
@@ -618,6 +619,9 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	if meta.CallbackToken != "workspace-callback-token" {
 		t.Errorf("expected CallbackToken to round-trip, got %q", meta.CallbackToken)
 	}
+	if meta.ChatSessionID != "chat-session-1" {
+		t.Errorf("expected ChatSessionID to round-trip, got %q", meta.ChatSessionID)
+	}
 	var rawCallbackToken string
 	if err := store.db.QueryRow("SELECT callback_token FROM workspace_metadata WHERE workspace_id = ?", "ws-1").Scan(&rawCallbackToken); err != nil {
 		t.Fatalf("read raw callback token: %v", err)
@@ -639,6 +643,7 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 		ContainerLabelVal: "/workspace/ws-1",
 		WorkspaceDir:      "/workspace/ws-1",
 		CallbackToken:     "updated-callback-token",
+		ChatSessionID:     "chat-session-2",
 	})
 	if err != nil {
 		t.Fatalf("UpsertWorkspaceMetadata overwrite: %v", err)
@@ -656,6 +661,9 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	}
 	if meta.CallbackToken != "updated-callback-token" {
 		t.Errorf("expected updated CallbackToken after overwrite, got %q", meta.CallbackToken)
+	}
+	if meta.ChatSessionID != "chat-session-2" {
+		t.Errorf("expected updated ChatSessionID after overwrite, got %q", meta.ChatSessionID)
 	}
 }
 
@@ -701,6 +709,7 @@ func TestWorkspaceMetadataPersistedAcrossReopen(t *testing.T) {
 		Branch:           "develop",
 		ContainerWorkDir: "/workspaces/repo-name",
 		WorkspaceDir:     "/workspace/ws-persist",
+		ChatSessionID:    "chat-persist",
 	})
 	store1.Close()
 
@@ -722,6 +731,9 @@ func TestWorkspaceMetadataPersistedAcrossReopen(t *testing.T) {
 	}
 	if meta.ContainerWorkDir != "/workspaces/repo-name" {
 		t.Errorf("expected ContainerWorkDir '/workspaces/repo-name', got %q", meta.ContainerWorkDir)
+	}
+	if meta.ChatSessionID != "chat-persist" {
+		t.Errorf("expected ChatSessionID 'chat-persist', got %q", meta.ChatSessionID)
 	}
 }
 

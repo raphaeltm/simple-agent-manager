@@ -451,7 +451,7 @@ export async function closeOrphanedComputeUsage(
 ): Promise<number> {
   const now = new Date().toISOString();
 
-  // Find open compute_usage rows where workspace is stopped/deleted/missing
+  // Find open compute_usage rows where workspace is stopped/evicted/deleted/missing
   const orphans = await db
     .select({
       computeId: schema.computeUsage.id,
@@ -464,7 +464,7 @@ export async function closeOrphanedComputeUsage(
     .where(
       and(
         isNull(schema.computeUsage.endedAt),
-        sql`(${schema.workspaces.id} IS NULL OR ${schema.workspaces.status} IN ('stopped', 'deleted', 'error'))`
+        sql`(${schema.workspaces.id} IS NULL OR ${schema.workspaces.status} IN ('stopped', 'evicted', 'deleted', 'error'))`
       )
     );
 

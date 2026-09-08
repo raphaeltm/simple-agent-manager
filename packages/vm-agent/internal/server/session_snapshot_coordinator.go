@@ -4,21 +4,55 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
 )
 
-func (s *Server) sessionSnapshotLock(chatSessionID string) *sync.Mutex {
+type sessionSnapshotLock chan struct{}
+
+func newSessionSnapshotLock() sessionSnapshotLock {
+	return make(chan struct{}, 1)
+}
+
+func (l sessionSnapshotLock) Lock(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case l <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (l sessionSnapshotLock) TryLock() bool {
+	select {
+	case l <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l sessionSnapshotLock) Unlock() {
+	select {
+	case <-l:
+	default:
+		panic("unlock of unlocked session snapshot lock")
+	}
+}
+
+func (s *Server) sessionSnapshotLock(chatSessionID string) sessionSnapshotLock {
 	s.sessionSnapshotMu.Lock()
 	defer s.sessionSnapshotMu.Unlock()
 	if s.sessionSnapshotLocks == nil {
-		s.sessionSnapshotLocks = make(map[string]*sync.Mutex)
+		s.sessionSnapshotLocks = make(map[string]sessionSnapshotLock)
 	}
 	lock := s.sessionSnapshotLocks[chatSessionID]
 	if lock == nil {
-		lock = &sync.Mutex{}
+		lock = newSessionSnapshotLock()
 		s.sessionSnapshotLocks[chatSessionID] = lock
 	}
 	return lock
@@ -34,6 +68,7 @@ func (s *Server) runSessionSnapshot(ctx context.Context, input *sessionSnapshotH
 		input.sessionID,
 		input.chatSessionID,
 		input.runtimeName,
+		input.acpSessionID,
 		input.agentType,
 		input.callbackToken,
 	)
@@ -41,7 +76,9 @@ func (s *Server) runSessionSnapshot(ctx context.Context, input *sessionSnapshotH
 
 func (s *Server) captureSessionSnapshot(ctx context.Context, input *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
 	lock := s.sessionSnapshotLock(input.chatSessionID)
-	lock.Lock()
+	if err := lock.Lock(ctx); err != nil {
+		return nil, err
+	}
 	defer lock.Unlock()
 	return s.runSessionSnapshot(ctx, input)
 }

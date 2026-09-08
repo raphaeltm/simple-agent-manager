@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -44,6 +45,7 @@ type workspaceRuntimeOpts struct {
 	DevcontainerCache      DevcontainerCacheCredentials
 	DefaultBranch          string // project's actual default branch; used by the push guard
 	ProjectID              string
+	ChatSessionID          string
 	TaskID                 string
 }
 
@@ -263,6 +265,10 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		if opt.ProjectID != "" {
 			runtime.ProjectID = opt.ProjectID
 		}
+		if opt.ChatSessionID != "" {
+			runtime.ChatSessionID = opt.ChatSessionID
+			metadataChanged = true
+		}
 		if opt.TaskID != "" {
 			runtime.TaskID = opt.TaskID
 		}
@@ -280,6 +286,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	effectiveBranch := branch
 	var persistedWorkspaceDir, persistedContainerWorkDir, persistedContainerLabelValue, persistedContainerUser string
 	var persistedCallbackToken string
+	var persistedChatSessionID string
 	var persistedBaseBranch, persistedDefaultBranch string
 	var persistedRepoProvider, persistedCloneURL, persistedRepositoryHost, persistedRepositoryPath string
 	var persistedLightweight bool
@@ -310,6 +317,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			persistedCloneURL = meta.CloneURL
 			persistedRepositoryHost = meta.RepositoryHost
 			persistedRepositoryPath = meta.RepositoryPath
+			persistedChatSessionID = meta.ChatSessionID
 			persistedLightweight = meta.Lightweight
 			persistedDevcontainerConfigName = meta.DevcontainerConfigName
 		}
@@ -352,6 +360,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		ContainerUser:          containerUser,
 		CallbackToken:          firstNonEmpty(strings.TrimSpace(callbackToken), strings.TrimSpace(persistedCallbackToken)),
 		ProjectID:              opt.ProjectID,
+		ChatSessionID:          firstNonEmpty(opt.ChatSessionID, persistedChatSessionID),
 		TaskID:                 opt.TaskID,
 		GitUserName:            opt.GitUserName,
 		GitUserEmail:           opt.GitUserEmail,
@@ -531,6 +540,7 @@ func (s *Server) persistWorkspaceMetadata(runtime *WorkspaceRuntime) {
 		CloneURL:               runtime.CloneURL,
 		RepositoryHost:         runtime.RepositoryHost,
 		RepositoryPath:         runtime.RepositoryPath,
+		ChatSessionID:          runtime.ChatSessionID,
 		Lightweight:            runtime.Lightweight,
 		DevcontainerConfigName: runtime.DevcontainerConfigName,
 	}); err != nil {
@@ -677,6 +687,16 @@ func (s *Server) ptyManagerContainerResolverFromConfig() pty.ContainerResolver {
 }
 
 func (s *Server) ptyManagerContainerResolverForLabel(labelValue string) pty.ContainerResolver {
+	resolver := s.ptyManagerContainerResolverForLabelContext(labelValue)
+	if resolver == nil {
+		return nil
+	}
+	return func() (string, error) {
+		return resolver(context.Background())
+	}
+}
+
+func (s *Server) ptyManagerContainerResolverForLabelContext(labelValue string) func(context.Context) (string, error) {
 	if !s.config.ContainerMode {
 		return nil
 	}
@@ -707,12 +727,18 @@ func (s *Server) ptyManagerContainerResolverForLabel(labelValue string) pty.Cont
 		}))
 	}
 
-	return func() (string, error) {
+	return func(ctx context.Context) (string, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
 		var lastErr error
 		for _, discovery := range discoveries {
-			containerID, err := discovery.GetContainerID()
+			containerID, err := discovery.GetContainerIDContext(ctx)
 			if err == nil {
 				return containerID, nil
+			}
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", ctxErr
 			}
 			lastErr = err
 		}

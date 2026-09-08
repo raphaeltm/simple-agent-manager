@@ -31,6 +31,7 @@ The reference covers:
   - Error reporting (flush interval, batch size)
   - ACP settings (buffer sizes, ping/pong, prompt timeout, prompt retries, idle suspend)
   - Events (max retained)
+  - Active resource monitoring and eviction settings
   - System info (Docker timeout, cache TTL)
 
 Also see `apps/api/.env.example` for the full list.
