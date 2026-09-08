@@ -1,6 +1,7 @@
 // FILE SIZE EXCEPTION: ProjectData terminal archive migration state machine — keeping source intent, target copy/seal, canonical hash, exact-read guards, and final source-delete invariants in one module avoids cross-file transaction coupling during Fable review. See .claude/rules/18-file-size-limits.md
 import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import { type COMPACT_ARCHIVE_FORMAT, type CompactChunkRef,LEGACY_ARCHIVE_FORMAT } from '../../project-data-archive/compact-r2';
 import {
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
@@ -28,6 +29,8 @@ import {
   createCanonicalRowsHasher,
   sha256Hex,
 } from '../../project-data-archive/hashing';
+import { type ArchiveWriteReservation,estimateArchiveWrites } from '../../project-data-archive/write-budget';
+import * as compactArchive from './compact-archive';
 import * as messages from './messages';
 import type {
   ArchivedToolPayloadListResult,
@@ -167,6 +170,7 @@ const ARCHIVE_TABLE_SPECS: Record<ProjectDataArchiveTableName, ChunkTableSpec> =
 };
 
 export type ArchiveSourcePrepareInput = {
+  writeReservation?: ArchiveWriteReservation;
   projectId: string;
   sessionId: string;
   migrationId: string;
@@ -247,6 +251,7 @@ export type ArchiveSourceExportChunkInput = {
 };
 
 export type ArchiveTargetPrepareInput = {
+  storageFormat?: typeof COMPACT_ARCHIVE_FORMAT | typeof LEGACY_ARCHIVE_FORMAT;
   projectId: string;
   sessionId: string;
   migrationId: string;
@@ -267,6 +272,7 @@ export type ArchiveTargetPrepareResult = {
 
 export type ArchiveTargetCommitChunkInput = ProjectDataArchiveChunk & {
   now: number;
+  rawChunkRef?: CompactChunkRef;
 };
 
 export type ArchiveTargetCommitChunkResult = {
@@ -335,6 +341,7 @@ export type ArchiveTargetInspectInput = {
 };
 
 export type ArchiveTargetInspectResult = {
+  storageFormat: string;
   state: ProjectDataArchiveTargetState;
   terminalVersionSha256: string;
   aggregateSha256: string | null;
@@ -347,6 +354,8 @@ export type ArchiveTargetInspectResult = {
     sha256: string;
     rowCount: number;
     byteCount: number;
+    r2Key?: string;
+    rawChunkRef?: CompactChunkRef;
   }>;
   sessionRow: ProjectDataArchiveRow;
   databaseSizeBytes: number;
@@ -837,6 +846,7 @@ async function tableAggregateSha256(
 
 export type ComputeTerminalVersionOptions = {
   hashPageRows?: number;
+  compactEnv?: Env;
 };
 
 export async function computeTerminalVersion(
@@ -852,15 +862,17 @@ export async function computeTerminalVersion(
       'Cannot compute ProjectData archive terminal version for a missing session'
     );
   }
-  const messageCount = countRows(
+  const raw = options.compactEnv && compactArchive.isCompactArchive(sql, sessionId)
+    ? await compactArchive.compactRawDigest(sql, options.compactEnv, sessionId) : null;
+  const messageCount = raw?.messageCount ?? countRows(
     sql,
     'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
     sessionId
   );
-  const lastMessageAt = readLastMessageAt(sql, sessionId);
+  const lastMessageAt = raw ? raw.lastMessageAt : readLastMessageAt(sql, sessionId);
   const components = [
     `chat_session:${canonicalizeArchiveRow(CHAT_SESSION_ANCHOR_COLUMNS, sessionRow)}`,
-    `chat_messages:${await tableAggregateSha256(sql, 'chat_messages', sessionId, pageRows)}`,
+    `chat_messages:${raw?.sha256 ?? await tableAggregateSha256(sql, 'chat_messages', sessionId, pageRows)}`,
     `chat_messages_grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', sessionId, pageRows)}`,
     `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', sessionId, pageRows)}`,
     `comments:${countRows(sql, 'SELECT COUNT(*) AS count FROM comment_threads WHERE session_id = ?', sessionId)}:${countRows(
@@ -1018,6 +1030,10 @@ export async function prepareArchiveSourceIntentOrRefuse(
   const existing = readSourceIntent(sql, input.sessionId);
   try {
     assertEligibleTerminalSource(sql, input.sessionId, input.now, minTerminalAgeMs);
+    if (input.writeReservation && estimateArchiveWrites(sql, input.sessionId,
+      input.writeReservation.factor, input.writeReservation.maxMessages) > input.writeReservation.estimatedWrites) {
+      throw new ProjectDataArchiveInvariantError('write_budget_inventory_changed', 'Archive inventory exceeds its reserved write estimate');
+    }
   } catch (error) {
     if (!existing && error instanceof ProjectDataArchiveInvariantError) {
       return {
@@ -1231,9 +1247,9 @@ export function prepareArchiveTarget(
     `INSERT INTO project_data_archive_target_sessions (
        session_id, project_id, migration_id, owner_name, generation, source_owner_name,
        source_intent_token, state, terminal_version_sha256, expected_message_count,
-       received_message_count, created_at, updated_at
+       received_message_count, created_at, updated_at, storage_format
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, 0, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, 0, ?, ?, ?)`,
     input.sessionId,
     input.projectId,
     input.migrationId,
@@ -1244,7 +1260,8 @@ export function prepareArchiveTarget(
     input.terminalVersionSha256,
     input.expectedMessageCount,
     input.now,
-    input.now
+    input.now,
+    input.storageFormat ?? LEGACY_ARCHIVE_FORMAT
   );
   return { idempotent: false, state: 'prepared' };
 }
@@ -1333,8 +1350,16 @@ function readCommittedRowsForChunk(
 
 export async function commitArchiveTargetChunk(
   sql: SqlStorage,
-  input: ArchiveTargetCommitChunkInput
+  input: ArchiveTargetCommitChunkInput,
+  env?: Env
 ): Promise<ArchiveTargetCommitChunkResult> {
+  const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    migrationId: input.migrationId,
+    targetOwnerName: input.targetOwnerName,
+    targetGeneration: input.targetGeneration,
+  });
   const existingChunk = sql
     .exec(
       'SELECT sha256, row_count FROM project_data_archive_target_chunks WHERE chunk_id = ?',
@@ -1355,13 +1380,6 @@ export async function commitArchiveTargetChunk(
       sha256: input.sha256,
     };
   }
-  const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
-    projectId: input.projectId,
-    sessionId: input.sessionId,
-    migrationId: input.migrationId,
-    targetOwnerName: input.targetOwnerName,
-    targetGeneration: input.targetGeneration,
-  });
   if (!['prepared', 'copying'].includes(state)) {
     throw new ProjectDataArchiveInvariantError(
       'target_not_copyable',
@@ -1376,11 +1394,16 @@ export async function commitArchiveTargetChunk(
       'ProjectData archive source chunk hash did not match the supplied rows'
     );
   }
-  for (const row of input.rows) {
-    insertArchiveRow(sql, input.tableName, row);
+  const rawCompact = input.tableName === 'chat_messages' && compactArchive.isCompactArchive(sql, input.sessionId);
+  let committedHash: string;
+  if (rawCompact) {
+    if (!env || !input.rawChunkRef) throw new Error('Compact archive requires a verified R2 reference');
+    await compactArchive.commitCompactRawChunk(sql, env, input, input.rawChunkRef);
+    committedHash = input.sha256;
+  } else {
+    for (const row of input.rows) insertArchiveRow(sql, input.tableName, row);
+    committedHash = await canonicalRowsSha256(spec.columns, readCommittedRowsForChunk(sql, input.tableName, input.rowIds));
   }
-  const committedRows = readCommittedRowsForChunk(sql, input.tableName, input.rowIds);
-  const committedHash = await canonicalRowsSha256(spec.columns, committedRows);
   if (committedHash !== input.sha256) {
     throw new ProjectDataArchiveInvariantError(
       'target_recomputed_hash_mismatch',
@@ -1409,12 +1432,12 @@ export async function commitArchiveTargetChunk(
   sql.exec(
     `UPDATE project_data_archive_target_sessions
      SET state = 'copying',
-         received_message_count = (
-           SELECT COUNT(*) FROM chat_messages WHERE session_id = ?
-         ),
+         received_message_count = ?,
          updated_at = ?
      WHERE session_id = ?`,
-    input.sessionId,
+    compactArchive.isCompactArchive(sql, input.sessionId)
+      ? compactArchive.compactMessageCount(sql, input.sessionId)
+      : countRows(sql, 'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', input.sessionId),
     input.now,
     input.sessionId
   );
@@ -1434,7 +1457,8 @@ function chunkId(
 
 export async function sealArchiveTarget(
   sql: SqlStorage,
-  input: ArchiveTargetSealInput
+  input: ArchiveTargetSealInput,
+  env?: Env
 ): Promise<ArchiveTargetSealResult> {
   const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
     projectId: input.projectId,
@@ -1443,11 +1467,13 @@ export async function sealArchiveTarget(
     targetOwnerName: input.targetOwnerName,
     targetGeneration: input.targetGeneration,
   });
+  if (compactArchive.isCompactArchive(sql, input.sessionId) && !env) throw new Error('Compact archive environment required');
   if (state === 'sealed' || state === 'published') {
     const row = readTargetSession(sql, input.sessionId);
     return {
       aggregateSha256: strictString(row?.aggregate_sha256, 'target.aggregate_sha256'),
-      messageCount: countRows(
+      messageCount: compactArchive.isCompactArchive(sql, input.sessionId)
+        ? compactArchive.compactMessageCount(sql, input.sessionId) : countRows(
         sql,
         'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
         input.sessionId
@@ -1471,7 +1497,7 @@ export async function sealArchiveTarget(
     );
   }
   const hashPageRows = resolveHashPageRows(input.hashPageRows);
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows });
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows, compactEnv: env });
   if (terminalVersion.sha256 !== input.terminalVersionSha256) {
     throw new ProjectDataArchiveInvariantError(
       'target_terminal_version_mismatch',
@@ -1504,12 +1530,15 @@ export async function sealArchiveTarget(
     [
       `terminal:${input.terminalVersionSha256}`,
       `chunks:${committedChunkHashes.join(',')}`,
-      `messages:${await tableAggregateSha256(sql, 'chat_messages', input.sessionId, hashPageRows)}`,
+      `messages:${env && compactArchive.isCompactArchive(sql, input.sessionId)
+        ? (await compactArchive.compactRawDigest(sql, env, input.sessionId)).sha256
+        : await tableAggregateSha256(sql, 'chat_messages', input.sessionId, hashPageRows)}`,
       `grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', input.sessionId, hashPageRows)}`,
       `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', input.sessionId, hashPageRows)}`,
     ].join('\n')
   );
-  const messageCount = countRows(
+  const messageCount = compactArchive.isCompactArchive(sql, input.sessionId)
+    ? compactArchive.compactMessageCount(sql, input.sessionId) : countRows(
     sql,
     'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
     input.sessionId
@@ -1570,6 +1599,13 @@ function readTargetChunkInventory(
         sha256: strictString(row.sha256, 'target_chunk.sha256'),
         rowCount: strictInteger(row.row_count, 'target_chunk.row_count'),
         byteCount: strictInteger(row.byte_count, 'target_chunk.byte_count'),
+        ...(() => {
+          if (tableName !== 'chat_messages') return {};
+          const ref = sql.exec('SELECT * FROM project_data_archive_raw_chunks WHERE session_id = ? AND ordinal = ?',
+            sessionId, row.ordinal).toArray()[0];
+          return ref ? { r2Key: String(ref.r2_key), rawChunkRef: { key: String(ref.r2_key), bytes: Number(ref.compressed_bytes),
+            bodyBytes: Number(ref.body_bytes), bodySha256: String(ref.body_sha256) } } : {};
+        })(),
       };
     });
 }
@@ -1581,13 +1617,15 @@ export function inspectArchiveTargetSession(
   const target = readTargetSession(sql, input.sessionId);
   const state = validateTargetOwner(target, input);
   return {
+    storageFormat: String(target?.storage_format ?? LEGACY_ARCHIVE_FORMAT),
     state,
     terminalVersionSha256: strictString(
       target?.terminal_version_sha256,
       'target.terminal_version_sha256'
     ),
     aggregateSha256: optionalNonEmptyString(target?.aggregate_sha256),
-    messageCount: countRows(
+    messageCount: compactArchive.isCompactArchive(sql, input.sessionId)
+      ? compactArchive.compactMessageCount(sql, input.sessionId) : countRows(
       sql,
       'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
       input.sessionId
@@ -1622,7 +1660,8 @@ async function exportArchiveRowsChunk(
     cursor?: string | null;
     maxRows?: number;
     maxBytes?: number;
-  }
+  },
+  compactEnv?: Env
 ): Promise<ProjectDataArchiveChunk> {
   const spec = validateTableName(input.tableName);
   const maxBytes = normalizePositiveInteger(
@@ -1643,7 +1682,11 @@ async function exportArchiveRowsChunk(
   }
   query += ` ORDER BY ${spec.orderBy} LIMIT ?`;
   params.push(maxRows + 1);
-  const candidates = sql.exec(query, ...params).toArray();
+  const rawCursor = input.cursor && input.tableName === 'chat_messages' ? decodeCursor(input.cursor, 3) : null;
+  const candidates = compactEnv && input.tableName === 'chat_messages' && compactArchive.isCompactArchive(sql, input.sessionId)
+    ? await compactArchive.compactExportCandidates(sql, compactEnv, input.sessionId, maxRows + 1,
+      rawCursor ? { createdAt: Number(cursorPart(rawCursor, 0)), sequence: Number(cursorPart(rawCursor, 1)), id: cursorPart(rawCursor, 2) } : null)
+    : sql.exec(query, ...params).toArray();
   const rows: ProjectDataArchiveRow[] = [];
   let byteCount = 0;
   for (const candidate of candidates.slice(0, maxRows)) {
@@ -1686,7 +1729,8 @@ async function exportArchiveRowsChunk(
 
 export async function exportArchiveTargetChunk(
   sql: SqlStorage,
-  input: ArchiveTargetExportChunkInput
+  input: ArchiveTargetExportChunkInput,
+  env?: Env
 ): Promise<ProjectDataArchiveChunk> {
   const state = validateTargetOwner(readTargetSession(sql, input.sessionId), input);
   if (state !== 'sealed' && state !== 'published' && state !== 'rehome_exported') {
@@ -1707,7 +1751,7 @@ export async function exportArchiveTargetChunk(
     cursor: input.cursor,
     maxRows: input.maxRows,
     maxBytes: input.maxBytes,
-  });
+  }, env);
 }
 
 function rebuildTargetFts(sql: SqlStorage, sessionId: string, pageRows: number): void {
@@ -2407,7 +2451,7 @@ export function archiveSourceSearchMessages(
   return messages.searchMessages(sql, query, input.sessionId, roles, limit);
 }
 
-export function archiveTargetReadMessages(
+export async function archiveTargetReadMessages(
   sql: SqlStorage,
   env: Env,
   input: ProjectDataArchiveExactReadInput,
@@ -2417,7 +2461,7 @@ export function archiveTargetReadMessages(
   roles: string[] | undefined,
   compact: boolean,
   order: 'asc' | 'desc'
-): { messages: Record<string, unknown>[]; hasMore: boolean } {
+): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
   validateTargetOwner(readTargetSession(sql, input.sessionId), {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -2439,6 +2483,10 @@ export function archiveTargetReadMessages(
     );
   }
   const compactOptions = compact ? messages.resolveCompactMessageOptions(env) : undefined;
+  if (compactArchive.isCompactArchive(sql, input.sessionId)) {
+    const rows = await compactArchive.compactRawPage(sql, env, input.sessionId, limit + 1, before, after, roles, order);
+    return messages.formatMessageRows(rows, input.sessionId, limit, compact, order, compactOptions);
+  }
   return messages.getMessages(
     sql,
     input.sessionId,
@@ -2470,7 +2518,17 @@ export async function archiveTargetReadMessageToolContent(
       'ProjectData archive target tool-content read is not sealed'
     );
   }
-  const inlineContent = messages.getMessageToolContent(sql, input.sessionId, input.messageId);
+  let inlineContent: unknown[] | null;
+  if (compactArchive.isCompactArchive(sql, input.sessionId)) {
+    const raw = await compactArchive.compactRawMessage(sql, env, input.sessionId, input.messageId);
+    if (!raw || raw.role !== 'tool') return null;
+    try {
+      const metadata = typeof raw.tool_metadata === 'string' ? JSON.parse(raw.tool_metadata) : null;
+      inlineContent = Array.isArray(metadata?.content) ? metadata.content : [];
+    } catch { inlineContent = []; }
+  } else {
+    inlineContent = messages.getMessageToolContent(sql, input.sessionId, input.messageId);
+  }
   if (inlineContent === null) return null;
   if (inlineContent.length > 0) return { content: inlineContent, source: 'inline' };
   return (
@@ -2502,7 +2560,9 @@ export function archiveTargetReadMessageCount(
       'ProjectData archive target count read is not sealed'
     );
   }
-  return messages.getMessageCount(sql, input.sessionId, roles);
+  return compactArchive.isCompactArchive(sql, input.sessionId)
+    ? compactArchive.compactMessageCount(sql, input.sessionId, roles)
+    : messages.getMessageCount(sql, input.sessionId, roles);
 }
 
 export async function archiveTargetReadArchivedToolPayloads(

@@ -325,9 +325,9 @@ export function persistMessageBatch(
  * We leave a 2 MiB margin for the session envelope, pagination metadata,
  * and JSON structural overhead.
  */
-const RPC_SIZE_BUDGET_BYTES = 30 * 1024 * 1024; // 30 MiB
+export const RPC_SIZE_BUDGET_BYTES = 30 * 1024 * 1024; // 30 MiB
 
-function estimateRowBytes(row: Record<string, unknown>): number {
+export function estimateRowBytes(row: Record<string, unknown>): number {
   let size = 64; // object overhead + fixed fields (id, role, created_at, sequence)
   const content = row.content;
   if (typeof content === 'string') size += content.length * 2; // UTF-16 chars
@@ -372,6 +372,13 @@ export function getMessages(
   params.push(limit + 1);
 
   const rows = sql.exec(query, ...params).toArray();
+  return formatMessageRows(rows, sessionId, limit, compact, order, compactOptions);
+}
+
+export function formatMessageRows(
+  rows: Record<string, unknown>[], sessionId: string, limit: number,
+  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
+): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;
 

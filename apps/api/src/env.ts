@@ -617,7 +617,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO?: string;
   PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES?: string;
-  PROJECT_DATA_ARCHIVE_SHARDING_ENABLED?: string; // Exact archive read routing switch (default: disabled)
+  PROJECT_DATA_ARCHIVE_SHARDING_ENABLED?: string;
+  PROJECT_DATA_ARCHIVE_COMPACT_ENABLED?: string;
+  PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET?: string;
+  PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR?: string;
+  PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS?: string; // Exact archive read routing switch (default: disabled)
   PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED?: string; // Separate kill switch for unscoped scheduled archive-sharding sweep (default: disabled)
   PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS?: string; // Persisted cadence between unscoped archive-sharding sweeps (default: 86400000)
   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED?: string; // Enable one exact project-scoped, read-only resumable relief preflight (default: false)

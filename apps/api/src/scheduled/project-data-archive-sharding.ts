@@ -9,6 +9,7 @@ import type {
 } from '../durable-objects/project-data/archive-sharding';
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
+import { COMPACT_ARCHIVE_CHUNK_BYTES, COMPACT_ARCHIVE_FORMAT, compactArchiveTimeout, LEGACY_ARCHIVE_FORMAT, writeCompactChunk } from '../project-data-archive/compact-r2';
 import {
   isProjectDataArchiveSourcePrepareRefusal,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
@@ -34,6 +35,7 @@ import {
   type ProjectDataArchiveSourcePrepareRefusal,
   type ProjectDataArchiveTableName,
 } from '../project-data-archive/contract';
+import { archiveWriteBudgetConfig, type ArchiveWriteReservation,reserveArchiveWrites } from '../project-data-archive/write-budget';
 import { getProjectDataArchiveRolloutWarningConfig } from '../services/project-data-archive-rollout-controls';
 import {
   archiveShardProjectDataOwner,
@@ -100,6 +102,7 @@ const JOURNAL_PHASE_RANK: Record<ProjectDataArchiveJournalState, number> = {
 };
 
 type ArchiveCoordinatorConfig = {
+  writeReservation?: ArchiveWriteReservation;
   enabled: boolean;
   globalSweepIntervalMs: number;
   shardCount: number;
@@ -127,6 +130,7 @@ type ArchiveCoordinatorConfig = {
   wallTimeMs: number;
   poisonAfterAttempts: number;
   r2Prefix: string;
+  r2TimeoutMs: number;
 };
 
 type ArchiveCoordinatorScope = {
@@ -148,6 +152,7 @@ type CandidateRow = {
 };
 
 type MigrationRow = {
+  storage_format?: typeof COMPACT_ARCHIVE_FORMAT | typeof LEGACY_ARCHIVE_FORMAT;
   migration_id: string;
   project_id: string;
   session_id: string;
@@ -208,6 +213,7 @@ export type ProjectDataArchiveGlobalSweepCadenceState = {
 };
 
 export type ProjectDataArchiveShardingStats = {
+  budgetDeferred?: number;
   enabled: boolean;
   skipped: boolean;
   skipReason: string | null;
@@ -465,6 +471,7 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
       1,
       PROJECT_DATA_ARCHIVE_MAX_POISON_AFTER_ATTEMPTS
     ),
+    r2TimeoutMs: compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS),
     r2Prefix: env.PROJECT_DATA_ARCHIVE_R2_PREFIX || PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX,
   };
 }
@@ -904,7 +911,9 @@ function manifestForTarget(
   now: number
 ) {
   return {
-    version: PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
+    version: migration.storage_format === COMPACT_ARCHIVE_FORMAT ? 2 : PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
+    ...(migration.storage_format === COMPACT_ARCHIVE_FORMAT ? { storageFormat: COMPACT_ARCHIVE_FORMAT,
+      rawChunks: chunks.filter(chunk => chunk.rawChunkRef).map(chunk => ({ ordinal: chunk.ordinal, ...chunk.rawChunkRef })) } : {}),
     projectId: migration.project_id,
     sessionId: migration.session_id,
     migrationId: migration.migration_id,
@@ -914,7 +923,7 @@ function manifestForTarget(
     terminalVersionSha256,
     aggregateSha256: targetAggregateSha256,
     chunks: chunks.map((chunk) =>
-      targetChunkKey(config, migration, chunk.tableName, chunk.ordinal)
+      chunk.r2Key ?? targetChunkKey(config, migration, chunk.tableName, chunk.ordinal)
     ),
     chunkHashes: chunks.map((chunk) => chunk.sha256),
     createdAt: now,
@@ -923,7 +932,7 @@ function manifestForTarget(
 
 async function readMigration(env: Env, migrationId: string): Promise<MigrationRow | null> {
   return env.DATABASE.prepare(
-    `SELECT migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
+    `SELECT migration_id, project_id, session_id, storage_format, state, source_owner_name, target_owner_name,
             target_generation, source_intent_token, terminal_version_sha256,
             target_aggregate_sha256, r2_manifest_key, lease_owner, lease_epoch,
             lease_expires_at, attempt_count
@@ -961,7 +970,7 @@ async function selectReclaimableMigrations(
 ): Promise<MigrationRow[]> {
   if (limit <= 0) return [];
   const rows = await env.DATABASE.prepare(
-    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+    `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
             m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
             m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count
@@ -992,7 +1001,7 @@ async function selectScopedReclaimableMigrations(
   // An operator who names the session is asking for it now; the delay only paces the sweep.
   const retryDelayPredicate = scope.sessionId ? '' : FAILED_RETRY_DELAY_SQL;
   const rows = await env.DATABASE.prepare(
-    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+    `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
             m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
             m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count
@@ -1057,12 +1066,12 @@ function precopyRefusalExclusionBinds(
  * are the unit of work, so `message_count` from `session_summaries` is the size proxy the
  * coordinator can see without touching a Durable Object.
  */
-function applyMessageBudget(candidates: CandidateRow[], budget: number): CandidateRow[] {
+function applyMessageBudget(candidates: CandidateRow[], budget: number, strict = false): CandidateRow[] {
   const kept: CandidateRow[] = [];
   let used = 0;
   for (const candidate of candidates) {
     const size = Math.max(0, Number(candidate.message_count) || 0);
-    if (kept.length > 0 && used + size > budget) break;
+    if (used + size > budget && (strict || kept.length > 0)) continue;
     kept.push(candidate);
     used += size;
   }
@@ -1086,6 +1095,7 @@ async function selectCandidates(
      LEFT JOIN project_data_archive_circuit_breakers breaker
        ON breaker.project_id = ss.project_id
      WHERE ss.status IN ('stopped', 'failed')
+       ${env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? 'AND ss.message_count <= ?' : ''}
        AND ss.ended_at IS NOT NULL
        AND ss.ended_at <= ?
        AND (loc.session_id IS NULL OR loc.location_state = 'root')
@@ -1102,6 +1112,7 @@ async function selectCandidates(
      LIMIT ?`
   )
     .bind(
+      ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageBudget] : []),
       cutoff,
       nowIso,
       ...precopyRefusalExclusionBinds(config, now),
@@ -1135,6 +1146,7 @@ async function selectScopedCandidates(
      WHERE ss.project_id = ?
        ${sessionPredicate}
        AND ss.status IN ('stopped', 'failed')
+       ${env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? 'AND ss.message_count <= ?' : ''}
        AND ss.ended_at IS NOT NULL
        AND ss.ended_at <= ?
        AND (loc.session_id IS NULL OR loc.location_state = 'root')
@@ -1153,6 +1165,7 @@ async function selectScopedCandidates(
     .bind(
       scope.projectId,
       ...(scope.sessionId ? [scope.sessionId] : []),
+      ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageBudget] : []),
       cutoff,
       nowIso,
       ...(scope.sessionId ? [] : precopyRefusalExclusionBinds(config, now)),
@@ -1185,9 +1198,9 @@ async function createCandidateJournal(
       `INSERT INTO project_data_archive_migrations (
          migration_id, project_id, session_id, state, source_owner_name, target_owner_name,
          source_generation, target_generation, lease_epoch, attempt_count,
-         candidate_at, created_at, updated_at
+         candidate_at, created_at, updated_at, storage_format
        )
-       SELECT ?, ?, ?, 'candidate', ?, ?, 0, ?, 0, 0, ?, ?, ?
+       SELECT ?, ?, ?, 'candidate', ?, ?, 0, ?, 0, 0, ?, ?, ?, ?
        WHERE NOT EXISTS (
          SELECT 1
          FROM project_data_session_locations
@@ -1203,6 +1216,7 @@ async function createCandidateJournal(
       now,
       now,
       now,
+      env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? COMPACT_ARCHIVE_FORMAT : LEGACY_ARCHIVE_FORMAT,
       projectId,
       sessionId
     ),
@@ -1290,7 +1304,8 @@ async function selectMigrationWork(
   if (remaining <= 0) return { migrations: reclaimable, pending: [] };
   const pending = applyMessageBudget(
     await selectCandidates(env, config, nowDate, remaining),
-    config.sweepMessageBudget
+    config.sweepMessageBudget,
+    env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
   );
   return { migrations: reclaimable, pending };
 }
@@ -1322,7 +1337,8 @@ async function selectScopedMigrationWork(
 
   const candidates = applyMessageBudget(
     await selectScopedCandidates(env, config, nowDate, scope, remaining),
-    config.sweepMessageBudget
+    config.sweepMessageBudget,
+    env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
   );
   selected.push(
     ...candidates.map((candidate) => ({
@@ -1714,7 +1730,7 @@ async function recoverCrashGaps(
     ? `AND m.project_id = ? ${scope.sessionId ? 'AND m.session_id = ?' : ''}`
     : '';
   const rows = await env.DATABASE.prepare(
-    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+    `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
             m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
             m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count
@@ -1794,7 +1810,7 @@ async function ensureSourcePrepared(
   // trip on every candidate that turns out to be eligible (the common case) to avoid a rare
   // unwind that costs two D1 statements in a batch this worker already owns.
   const outcome = await source.archiveSourcePrepareIntent(
-    sourcePrepareInput(migration, sourceIntentToken, now, config.sessionGraceMs)
+    { ...sourcePrepareInput(migration, sourceIntentToken, now, config.sessionGraceMs), writeReservation: config.writeReservation }
   );
   if (isProjectDataArchiveSourcePrepareRefusal(outcome)) {
     return { refusal: outcome, migration };
@@ -1979,6 +1995,7 @@ async function ensureTargetPrepared(
   now: number
 ): Promise<ClaimedMigrationRow> {
   await target.archiveTargetPrepare({
+    storageFormat: migration.storage_format ?? LEGACY_ARCHIVE_FORMAT,
     projectId: migration.project_id,
     sessionId: migration.session_id,
     migrationId: migration.migration_id,
@@ -2024,6 +2041,7 @@ async function copySourceChunks(
   const chunkHashes: string[] = [];
   let chunksCopied = 0;
   let rowsCopied = 0;
+  const targetInfo = await target.archiveTargetInspectSession(targetInspectInput(migration));
   for (const tableName of PROJECT_DATA_ARCHIVE_TABLES) {
     let cursor: string | null = null;
     let ordinal = 0;
@@ -2040,10 +2058,16 @@ async function copySourceChunks(
         ordinal,
         cursor,
         maxRows: config.chunkRows,
-        maxBytes: config.chunkBytes,
+        maxBytes: targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT
+          ? Math.min(config.chunkBytes, COMPACT_ARCHIVE_CHUNK_BYTES) : config.chunkBytes,
       });
-      await putImmutableJson(r2, chunkKey(config, chunk), chunk);
-      await target.archiveTargetCommitChunk({ ...chunk, now });
+      if (targetInfo.storageFormat === COMPACT_ARCHIVE_FORMAT && tableName === 'chat_messages') {
+        const rawChunkRef = await writeCompactChunk(r2, config.r2Prefix, chunk, config.r2TimeoutMs);
+        await target.archiveTargetCommitChunk({ ...chunk, rawChunkRef, now });
+      } else {
+        await putImmutableJson(r2, chunkKey(config, chunk), chunk);
+        await target.archiveTargetCommitChunk({ ...chunk, now });
+      }
       chunkHashes.push(chunk.sha256);
       chunksCopied++;
       rowsCopied += chunk.rowCount;
@@ -2547,7 +2571,7 @@ export async function inspectFrozenProjectDataArchiveIntents(
   const limit = resolveProjectDataArchiveFrozenIntentInspectionLimit(env, input.limit);
   const projectPredicate = input.projectId ? 'AND m.project_id = ?' : '';
   const rows = await env.DATABASE.prepare(
-    `SELECT m.migration_id, m.project_id, m.session_id, m.state, m.source_owner_name,
+    `SELECT m.migration_id, m.project_id, m.session_id, m.storage_format, m.state, m.source_owner_name,
             m.target_owner_name, m.target_generation, m.source_intent_token,
             m.terminal_version_sha256, m.target_aggregate_sha256, m.r2_manifest_key,
             m.lease_owner, m.lease_epoch, m.lease_expires_at, m.attempt_count,
@@ -3076,11 +3100,23 @@ async function processArchiveMigrationBatch(input: {
   markFailedErrorEvent: string;
   candidateFailedEvent: string;
 }): Promise<void> {
-  const processOne = async (migration: MigrationRow): Promise<void> => {
+  const reserve = async (projectId: string, sessionId: string): Promise<ArchiveWriteReservation | null> => {
+    const { allowance, factor } = archiveWriteBudgetConfig(input.env);
+    const source = await ensureOwnerStub(input.env, projectId, projectId);
+    const estimatedWrites = await source.archiveSourceEstimateWrites(sessionId, factor, input.config.sweepMessageBudget);
+    if (!await reserveArchiveWrites(input.env.DATABASE, estimatedWrites, allowance, input.now)) {
+      input.stats.budgetDeferred = (input.stats.budgetDeferred ?? 0) + 1;
+      log.info('project_data_archive_write_budget_deferred', { projectId, sessionId, estimatedWrites, allowance });
+      return null;
+    }
+    log.info('project_data_archive_write_budget_reserved', { projectId, sessionId, estimatedWrites, allowance });
+    return { estimatedWrites, factor, maxMessages: input.config.sweepMessageBudget };
+  };
+  const processOne = async (migration: MigrationRow, writeReservation?: ArchiveWriteReservation): Promise<void> => {
     try {
       const result = await migrateCandidate(
         input.env,
-        input.config,
+        { ...input.config, writeReservation },
         input.archiveR2,
         migration,
         input.now
@@ -3120,17 +3156,24 @@ async function processArchiveMigrationBatch(input: {
 
   for (const migration of input.migrations) {
     if (outOfTime()) return;
-    await processOne(migration);
+    const compact = migration.storage_format === COMPACT_ARCHIVE_FORMAT;
+    const reservation = compact && !['source_deleted', 'published'].includes(migration.state)
+      ? await reserve(migration.project_id, migration.session_id) : undefined;
+    if (reservation === null) continue;
+    await processOne(migration, reservation);
   }
   // Fence-then-process, one session at a time: the wall-time check runs BEFORE the journal
   // row (and its `migrating` location fence) is created, so a tick never leaves sessions it
   // did not reach fenced until the next cadence-gated sweep.
   for (const candidate of input.pending ?? []) {
     if (outOfTime()) return;
+    const reservation = input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
+      ? await reserve(candidate.project_id, candidate.session_id) : undefined;
+    if (reservation === null) continue;
     const migration = await createCandidateJournal(input.env, candidate, input.now);
     if (!migration) continue;
     input.onJournaled?.(candidate, migration);
-    await processOne(migration);
+    await processOne(migration, reservation);
   }
 }
 

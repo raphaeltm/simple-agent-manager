@@ -140,6 +140,11 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS = "5000"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO = "0.98"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = "1"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
+# Compact format stays off until the staged rollout and production mutation approval.
+PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
+PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "250000"
+PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "32"
+PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS = "10000"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 # One hour, not the daily code fallback: this keeps automatic root relief moving while
 # firebreaking the DO SQLite write cost seen during the 2026-09-08 billing spike check.

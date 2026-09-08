@@ -22,6 +22,8 @@ import { DurableObject } from 'cloudflare:workers';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
+import { measureArchiveSql } from '../../project-data-archive/sql-metrics';
+import { estimateArchiveWrites } from '../../project-data-archive/write-budget';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
@@ -632,6 +634,10 @@ export class ProjectData extends DurableObject<Env> {
     return archiveSharding.resolveArchiveHashPageRows(this.env);
   }
 
+  archiveSourceEstimateWrites(sessionId: string, factor: number, maxMessages: number): number {
+    return estimateArchiveWrites(this.sql, sessionId, factor, maxMessages);
+  }
+
   async archiveSourcePrepareIntent(
     input: archiveSharding.ArchiveSourcePrepareInput
   ): Promise<archiveSharding.ArchiveSourcePrepareOutcome> {
@@ -696,10 +702,10 @@ export class ProjectData extends DurableObject<Env> {
     input: archiveSharding.ArchiveSourceFinalizeDeleteInput
   ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {
     return this.withArchiveTranscriptLock(() =>
-      archiveSharding.finalizeSourceDelete(this.sql, {
+      measureArchiveSql(this.sql, input.sessionId, 'source_delete', sql => archiveSharding.finalizeSourceDelete(sql, {
         ...input,
         hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
-      })
+      }))
     );
   }
 
@@ -795,36 +801,36 @@ export class ProjectData extends DurableObject<Env> {
 
   archiveTargetPrepare(
     input: archiveSharding.ArchiveTargetPrepareInput
-  ): archiveSharding.ArchiveTargetPrepareResult {
-    return this.ctx.storage.transactionSync(() =>
+  ): Promise<archiveSharding.ArchiveTargetPrepareResult> {
+    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
       archiveSharding.prepareArchiveTarget(this.sql, input)
-    );
+    ));
   }
 
   async archiveTargetCommitChunk(
     input: archiveSharding.ArchiveTargetCommitChunkInput
   ): Promise<archiveSharding.ArchiveTargetCommitChunkResult> {
-    return archiveSharding.commitArchiveTargetChunk(this.sql, input);
+    return this.withArchiveTranscriptLock(() => measureArchiveSql(this.sql, input.sessionId, 'target_commit', sql => archiveSharding.commitArchiveTargetChunk(sql, input, this.env)));
   }
 
   async archiveTargetSeal(
     input: archiveSharding.ArchiveTargetSealInput
   ): Promise<archiveSharding.ArchiveTargetSealResult> {
-    return archiveSharding.sealArchiveTarget(this.sql, {
+    return this.withArchiveTranscriptLock(() => measureArchiveSql(this.sql, input.sessionId, 'target_seal', sql => archiveSharding.sealArchiveTarget(sql, {
       ...input,
       hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
-    });
+    }, this.env)));
   }
 
   archiveTargetAbandonSession(
     input: archiveSharding.ArchiveTargetAbandonInput
-  ): archiveSharding.ArchiveTargetAbandonResult {
-    return this.ctx.storage.transactionSync(() =>
+  ): Promise<archiveSharding.ArchiveTargetAbandonResult> {
+    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
       archiveSharding.abandonArchiveTargetSession(this.sql, {
         ...input,
         hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
       })
-    );
+    ));
   }
 
   archiveTargetInspectSession(
@@ -836,7 +842,7 @@ export class ProjectData extends DurableObject<Env> {
   async archiveTargetExportChunk(
     input: archiveSharding.ArchiveTargetExportChunkInput
   ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {
-    return archiveSharding.exportArchiveTargetChunk(this.sql, input);
+    return this.withArchiveTranscriptLock(() => archiveSharding.exportArchiveTargetChunk(this.sql, input, this.env));
   }
 
   archiveTargetMarkRehomeExported(input: {
@@ -846,10 +852,10 @@ export class ProjectData extends DurableObject<Env> {
     targetOwnerName: string;
     targetGeneration: number;
     now: number;
-  }): boolean {
-    return this.ctx.storage.transactionSync(() =>
+  }): Promise<boolean> {
+    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
       archiveSharding.markArchiveTargetRehomeExported(this.sql, input)
-    );
+    ));
   }
 
   archiveTargetGetMessages(

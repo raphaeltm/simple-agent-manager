@@ -254,6 +254,8 @@ Knowledge observations do **not** currently carry their `observationId` in this 
 
 ### ProjectData DO
 
+Terminal-session archive shards support two pinned representations. Legacy shards store raw rows in SQLite; compact shards retain session metadata, complete consolidated conversation/search records and tool archive pointers in SQLite, with lossless raw history and bulky tool metadata in private compressed R2 chunks. Exact-owner reads verify object identity, sizes and hashes; recovery can export the original rows back to root. Compact migration admission uses a durable daily write estimate, and the new writer defaults off. See [compact archive configuration](/docs/reference/configuration/#compact-archive-shards).
+
 Each project gets one `ProjectData` Durable Object instance, accessed via `env.PROJECT_DATA.idFromName(projectId)`.
 Every user-visible chat session has exactly one backing D1 Task. `taskMode` controls autonomous task versus human-controlled conversation lifecycle semantics; it never controls whether the Task exists. D1 `tasks.chat_session_id` and ProjectData `chat_sessions.task_id` form a bidirectional soft link. Because the stores cannot share a transaction, creation and legacy repair are idempotent and retain compatibility readers while reconciliation is in progress.
 

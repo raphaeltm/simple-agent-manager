@@ -1313,3 +1313,22 @@ External analytics forwarding is off by default. When enabled, SAM forwards only
 | `GA4_API_SECRET`                   | _(unset)_                                     | Google Analytics 4 API secret              |
 | `GA4_API_URL`                      | `https://www.google-analytics.com/mp/collect` | GA4 Measurement Protocol endpoint          |
 | `GA4_MAX_BATCH_SIZE`               | `25`                                          | Max events per GA4 batch request           |
+
+### Compact archive shards
+
+`PROJECT_DATA_ARCHIVE_COMPACT_ENABLED=false` is the default. Enabling it affects newly journaled terminal-session migrations only. Their format is pinned in D1 and the shard, so retries, reads and copy-back continue with that format after the flag is disabled. Legacy shards are not rewritten by deployment. Keep the existing global-sweep throttle while validating a compact canary.
+
+| Optional Worker variable | Default | Meaning |
+| --- | --- | --- |
+| `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` | `false` | Write new archives as compact SQLite + compressed R2; existing formats remain readable. |
+| `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` | `250000` | Account-wide daily estimated SQL write allowance for compact migration attempts; 0 pauses admission. |
+| `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` | `32` | Conservative SQL write estimate per row/512 bytes of grouped FTS text; includes source deletion. |
+| `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS` | `10000` | Deadline for each compressed archive object write/read verification, in milliseconds. |
+
+Compact archives keep session metadata, complete consolidated conversation text, grouped FTS and existing tool-archive pointers in SQLite. Original message rows (IDs, timestamps, order, origins and full tool metadata) live in immutable gzip R2 chunks in the private `PROJECT_DATA_ARCHIVE_R2` binding. SQL chunk references contain sizes, SHA-256, role counts, time bounds and message IDs. Exact history and tool expansion fetch and verify those chunks. Missing/corrupt objects fail the request; they do not silently produce a truncated history. The original terminal hash must match before publication and source deletion. Version 2 recovery manifests include the compressed-object references; legacy version 1 manifests remain unchanged.
+
+Compact chunk exports use the smaller of `PROJECT_DATA_ARCHIVE_CHUNK_BYTES` and 2 MiB, with an 8 MiB serialized/decompressed object ceiling. A single row that cannot fit is refused by the exporter; it requires separate payload archival or an operator recovery plan, never truncation. R2 objects have no automatic expiry: deleting them destroys archive history and recovery data.
+
+The write allowance is a **durable admission estimate, not a hard invoice cap**. Each attempt reserves 1,000 writes plus the estimate factor times the sum of raw rows, grouped rows, tool-pointer rows and grouped UTF-8 text bytes rounded up to 512-byte units. The account-wide D1 reservation is atomic, resets on the next UTC day and is never refunded after an interrupted attempt. Source inventory is rechecked under the transcript lock before creating its intent. New sessions that cannot reserve remain readable on root; existing interrupted migrations retain their existing recovery fence and can retry when allowance is available. A session larger than `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` is excluded before candidate LIMIT for compact admission, so it cannot bypass the cap or starve smaller candidates. Such sessions require an explicitly sized migration plan; increasing the daily budget alone does not lift the message cap.
+
+Whole-session deletion and SQLite/FTS index maintenance still consume writes. `project_data_archive_sql_usage` reports actual cursor writes for target commit/seal and source deletion, plus database size before/after; compare these with Cloudflare account usage before raising throughput. At the default 250,000 estimated writes/day, 30 days admits at most 7.5 million estimated migration writes. Normal application traffic, legacy migrations, operator copy-back and other Workers are outside this pool, so operators must reserve account headroom separately. A zero allowance pauses new compact attempts without breaking reads or completed crash-gap publication. Source deletion is still one whole-session operation, not an interruptible per-row spending limit.

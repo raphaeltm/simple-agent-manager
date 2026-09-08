@@ -47,3 +47,9 @@ Incident lessons: Aug 26 unseekable scans amplified read bills; Sept 5 whole-ses
 ## Workflow notes
 
 The current SAM checkout is already clean, isolated on its prescribed feature branch at main 6895aacd5. User requested work here, so keep the task and implementation in this checkout/branch instead of creating another worktree or pushing a task-only main commit.
+
+## Implementation checkpoint (2026-09-08)
+
+Compact codec and real-SQLite compatibility: 30 unit tests passed (including legacy suite). Real Workers archive suite: 10 tests passed, including budget refusal before fencing, complete compact migration/source deletion/routed retrieval, writer-off reads, copy-back and concurrent daily reservations. Focused API typecheck passed before final docs/metadata refinements; rerun in progress. New code remains off in production.
+
+The daily budget is explicitly an estimate (default 250k/day with factor32 and FTS-text units), not an invoice cap. New compact candidates above the message cap remain on root; old legacy migration admission stays unchanged. Source deletion remains a whole-session operation. This is a deliberate safety boundary: do not claim arbitrary giant sessions can drain within a smaller per-day allowance. Actual SQL cursor-write and database-size telemetry accompanies target commit/seal/source delete. Additional cost comparison, failure/race tests, quality gates, independent review, staging and PR remain outstanding.
