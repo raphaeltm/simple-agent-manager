@@ -31,8 +31,8 @@ Incident lessons: Aug 26 unseekable scans amplified read bills; Sept 5 whole-ses
 - [x] Add realistic unit and Workers integration tests for complete migration/read/search/tool/copy-back, retries, corrupt R2, wrong ownership, budget exhaustion/refresh and demonstrably fewer target SQL writes.
 - [x] Update deployment env mapping, both env skills, examples, architecture/configuration docs and CLAUDE recent changes.
 - [x] Run local full quality gates and task completion/specialist review; fix findings.
-- [ ] Coordinate staging, deploy final candidate, prove full retrieval/search/tool behavior through API/MCP and UI; record cost/storage evidence and clean up test resources.
-- [ ] Create PR, get CI/CodeRabbit green, prepare exact production rollout plan under the existing approval policy; merge/deploy when authorized and gates satisfied.
+- [x] Coordinate staging, deploy final candidate, prove retrieval/tool behavior through live API/UI and history/search through Workers MCP HTTP; record cost/storage and copy-back evidence.
+- [ ] Restore staging defaults; finish PR CI/CodeRabbit, prepare exact production rollout plan under the existing approval policy; merge/deploy when authorized and gates satisfied.
 
 ## Acceptance criteria
 
@@ -91,4 +91,6 @@ Exact API comparisons preserved 19 messages (2 user, 7 assistant, 9 tool, 1 syst
 
 Live SQL telemetry at09:44:32–09:44:37 UTC: target commits9+18+31 writes, seal6 and idempotent reseal0; source deletion38 writes. Target database grew901,120→905,216 bytes; source shrank1,302,528→1,290,240 bytes (12KiB reclaimed). These are instrumented phases, not total billed request costs. The meaningful amplification comparison remains the identical1,001-fragment Workers fixture (3,058→63 target writes).
 
-Verified compact copy-back returned28 rows across3 chunks and restored root ownership. External post-copy-back equality and normal-configuration redeploy are being finalized. Both temporary GitHub staging overrides have been removed; the normal redeploy restores live compact=false/global=true. Recovery objects and audit journals are intentionally retained. Production remains unchanged.
+Verified compact copy-back returned28 rows across3 chunks and restored root ownership. External post-copy-back equality passed with the identical baseline hash, including all five tool payloads. Normal-configuration redeploy34211987879 is in progress. Both temporary GitHub staging overrides have been removed; the normal redeploy restores live compact=false/global=true. Recovery objects and audit journals are intentionally retained. Production remains unchanged.
+
+PR [2034](https://github.com/raphaeltm/simple-agent-manager/pull/2034) is open. Full runtime-candidate CI [34210615290](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34210615290) passed. PR preflight wording was clarified to identify official documentation and concrete repository paths; the preflight validator now passes locally. Final PR CI and CodeRabbit, normal staging settings, and the production approval gate are tracked in the PR.
