@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
+import { sleepWorkspaceSession } from '../../src/services/session-sleep';
 import { cleanupTerminalTaskResources } from '../../src/services/task-terminal-cleanup';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
@@ -219,6 +220,91 @@ describe('terminal session sleep lifecycle integration', () => {
   afterEach(() => {
     sqlite.close();
     vi.useRealTimers();
+  });
+
+  it('protects a long prompt immediately after completion in both sweep and teardown gates', async () => {
+    sqlite
+      .prepare('UPDATE tasks SET completed_at = ? WHERE id = ?')
+      .run(START.toISOString(), 'task-1');
+    activity = { activity: 'prompting', activityAt: START.getTime() - 60 * 60 * 1000 };
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    expect(await runSessionSleepSweep(env, START)).toMatchObject({
+      deferred: 1,
+      claimed: 0,
+      slept: 0,
+    });
+    expect(
+      sqlite.prepare('SELECT sleep_after FROM session_snapshots WHERE id = ?').get('snapshot-1')
+    ).toEqual({ sleep_after: RETRY_AT.toISOString() });
+    await expect(
+      sleepWorkspaceSession(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'explicit test sleep',
+      })
+    ).rejects.toThrow('Workspace agent is not idle (prompting)');
+    expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+  });
+
+  it('terminalizes a stopped capture in the service catch before the sweep handles it again', async () => {
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    activity = { activity: 'idle', activityAt: START.getTime() };
+    mocks.hibernateAgentSessionOnNode.mockRejectedValue(
+      new Error(
+        'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)'
+      )
+    );
+
+    const first = await runSessionSleepSweep(env, START);
+    const second = await runSessionSleepSweep(env, RETRY_AT);
+
+    expect(first).toMatchObject({ claimed: 1, failed: 1 });
+    expect(second).toMatchObject({ selected: 0 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_claim_id FROM session_snapshots
+      WHERE id = 'snapshot-1'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'terminal_failed',
+      sleep_claim_id: null,
+    });
+    expect(mocks.hibernateAgentSessionOnNode).toHaveBeenCalledTimes(1);
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+  });
+
+  it('preserves a concurrent renewed intent when an old capture fails', async () => {
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    activity = { activity: 'idle', activityAt: START.getTime() };
+    mocks.hibernateAgentSessionOnNode.mockImplementation(async () => {
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET sleep_status = 'scheduled',
+        sleep_claim_id = NULL, sleep_after = '2026-08-15T05:00:00.000Z',
+        capture_generation = 'renewed' WHERE id = 'snapshot-1'`
+        )
+        .run();
+      throw new Error(
+        'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)'
+      );
+    });
+    await runSessionSleepSweep(env, START);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, capture_generation FROM session_snapshots
+      WHERE id = 'snapshot-1'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'scheduled',
+      sleep_after: '2026-08-15T05:00:00.000Z',
+      capture_generation: 'renewed',
+    });
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
   });
 
   it('persists terminal intent, defers prompting without an attempt, then sleeps on idle', async () => {
