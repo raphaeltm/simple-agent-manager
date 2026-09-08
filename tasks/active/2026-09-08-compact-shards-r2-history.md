@@ -108,3 +108,10 @@ Full CI34215059313, Sonar and E2E smoke passed. Staging34215274019 passed. The s
 The first simultaneous API/UI check encountered two10-second R2 deadline errors. Tail RPC durations10.4–13.45s with0–1ms CPU support an I/O stall, but do not identify a provider outage or the precise R2 phase. Sequential exact-baseline retry and the identical concurrent API/UI repeat both passed on the unchanged runtime. The expanded tool screenshot was inspected. A real Workers Promise.all regression now verifies full history, role-filtered history, inline tool and legacy archived tool reads against the same owner after source deletion; all6 compact Workers tests passed. Safety and completion reviewers rechecked PASS. The transient failures remain recorded rather than ignored.
 
 Final copy-back and normal-settings restoration are in progress. Both temporary GitHub staging overrides are removed. Test-only concurrency coverage requires fresh final-head CI before CodeRabbit. Separately observed repeated no-op storage alarms are recorded in tasks/backlog/2026-09-08-staging-repeated-noop-storage-alarms.md; no causal link to the R2 errors is established. Production remains unchanged.
+
+
+## CodeRabbit review and final cleanup
+
+Normal-settings restoration34217173448 and smoke passed; livecompact=false/global=true and exact recovered API/UI/tool baseline passed. All temporary GitHub overrides and the authenticated test browser profile were removed. Final fullCI34217093183 and Sonar passed ond609bc285.
+
+CodeRabbit's initial label trigger did not produce a review; Raphaël manually triggered it at11:32UTC. Review at11:46 reported one minor heading nesting issue and one environment-default documentation nit. Promoted the compact archive section to a top-level configuration heading while preserving its anchor, and documented actual defaults in Env comments. No runtime changes. Fresh final-head CI and CodeRabbit follow-up remain required before merge; production activation still requires the exact-plan approval. Shared staging is released to node-pool and these documentation changes require no new deployment.

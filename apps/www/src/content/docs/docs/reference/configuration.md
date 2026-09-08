@@ -1314,7 +1314,7 @@ External analytics forwarding is off by default. When enabled, SAM forwards only
 | `GA4_API_URL`                      | `https://www.google-analytics.com/mp/collect` | GA4 Measurement Protocol endpoint          |
 | `GA4_MAX_BATCH_SIZE`               | `25`                                          | Max events per GA4 batch request           |
 
-### Compact archive shards
+## Compact archive shards
 
 `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED=false` is the default. Enabling it affects newly journaled terminal-session migrations only. Their format is pinned in D1 and the shard, so retries, reads and copy-back continue with that format after the flag is disabled. Legacy shards are not rewritten by deployment. Keep the existing global-sweep throttle while validating a compact canary.
 
