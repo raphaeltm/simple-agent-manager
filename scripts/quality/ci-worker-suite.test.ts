@@ -40,10 +40,14 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
     "needs.changes.outputs.api == 'true'"
   );
   expect(job).toContain('needs: [changes]');
-  // The job must carry a bound — an unbounded required check can hang for the
-  // 6h GitHub ceiling. The exact value is tuning, not contract, so assert the
-  // bound exists and stays sane rather than pinning a magic number (#2016).
-  const timeoutMatch = job.match(/timeout-minutes: (\d+)/);
+  // The job must carry a JOB-level bound — an unbounded required check can hang
+  // for the 6h GitHub ceiling, and a step-level `timeout-minutes` does not cap
+  // the job's wall time. Anchor to the 4-space job-property indent so a deeper
+  // step-level bound cannot satisfy this while the job-level one is missing.
+  // The exact value is tuning, not contract, so assert the bound exists and
+  // stays sane rather than pinning a magic number (#2016). The <= 30 ceiling is
+  // specific to THIS job; other jobs legitimately run longer (playwright: 45).
+  const timeoutMatch = job.match(/^ {4}timeout-minutes: (\d+)$/m);
   expect(timeoutMatch).not.toBeNull();
   const timeoutMinutes = Number(timeoutMatch![1]);
   expect(timeoutMinutes).toBeGreaterThan(0);
