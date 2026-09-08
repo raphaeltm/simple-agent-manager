@@ -46,15 +46,18 @@ describe('session sleep sweep', () => {
     mocks.checkAutomaticSessionSleepEligibility.mockResolvedValue({ eligible: true });
   });
 
-  afterEach(() => sqlite.close());
+  afterEach(() => {
+    vi.useRealTimers();
+    sqlite.close();
+  });
 
   function addDueSnapshot(id: string, sleepAttempts = 0): void {
     sqlite
       .prepare(
         `INSERT INTO session_snapshots
            (id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
-            manifest_r2_key, expires_at, sleep_status, sleep_after, sleep_attempts)
-         VALUES (?, ?, ?, ?, 'vm', 'available', 'none', ?, ?, 'scheduled', ?, ?)`
+            manifest_r2_key, expires_at, sleep_status, sleep_after, sleep_attempts, updated_at)
+         VALUES (?, ?, ?, ?, 'vm', 'available', 'none', ?, ?, 'scheduled', ?, ?, '2026-08-12T00:00:00.000Z')`
       )
       .run(
         id,
@@ -102,6 +105,161 @@ describe('session sleep sweep', () => {
       )
       .run(`${id}-agent`, `${id}-workspace`, '2026-08-12T00:00:00.000Z');
   }
+
+  it('drains a full batch of orphan intents and reaches valid work on the next sweep', async () => {
+    for (let index = 0; index < 12; index++) {
+      addDueSnapshot(`orphan-${index}`);
+    }
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots SET workspace_id = NULL,
+      sleep_status = 'failed', sleep_after = NULL`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots SET status = 'degraded', capture_generation = 'capture' WHERE id = 'orphan-1'`
+      )
+      .run();
+    addDueSnapshot('valid');
+    const artifactsBefore = sqlite
+      .prepare(
+        `SELECT id, status, manifest_r2_key, expires_at
+      FROM session_snapshots ORDER BY id`
+      )
+      .all();
+
+    const first = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00Z'));
+    const second = await runSessionSleepSweep(env, new Date('2026-08-12T01:05:00Z'));
+    const third = await runSessionSleepSweep(env, new Date('2026-08-12T01:10:00Z'));
+
+    expect(first).toMatchObject({ selected: 5, exhausted: 5, claimed: 0 });
+    expect(second).toMatchObject({ selected: 5, exhausted: 5, claimed: 0 });
+    expect(third).toMatchObject({ selected: 3, exhausted: 2, claimed: 1, slept: 1 });
+    expect(mocks.sleepWorkspaceSession).toHaveBeenCalledExactlyOnceWith(
+      env,
+      expect.objectContaining({ workspaceId: 'valid-workspace' })
+    );
+    expect(
+      sqlite
+        .prepare(
+          `SELECT id, status, manifest_r2_key, expires_at
+      FROM session_snapshots ORDER BY id`
+        )
+        .all()
+    ).toEqual(artifactsBefore);
+  });
+
+  it('does not reselect missing-workspace metadata on the next sweep', async () => {
+    addDueSnapshot('missing');
+    mocks.checkAutomaticSessionSleepEligibility.mockResolvedValue({
+      eligible: false,
+      reason: 'workspace_metadata_missing',
+    });
+    const first = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00Z'));
+    const second = await runSessionSleepSweep(env, new Date('2026-08-12T01:05:00Z'));
+    expect(first).toMatchObject({ selected: 1, exhausted: 1 });
+    expect(second).toMatchObject({ selected: 0 });
+    expect(mocks.sleepWorkspaceSession).not.toHaveBeenCalled();
+  });
+
+  it('does not terminalize a renewed intent after stale metadata lookup', async () => {
+    addDueSnapshot('renewed');
+    mocks.checkAutomaticSessionSleepEligibility.mockImplementation(async () => {
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET workspace_id = 'recovered-workspace',
+        sleep_status = 'scheduled', sleep_after = '2026-08-13T00:00:00Z'
+        WHERE id = 'renewed'`
+        )
+        .run();
+      return { eligible: false, reason: 'workspace_metadata_missing' };
+    });
+    await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00Z'));
+    expect(
+      sqlite
+        .prepare(
+          `SELECT workspace_id, sleep_status, sleep_after
+      FROM session_snapshots WHERE id = 'renewed'`
+        )
+        .get()
+    ).toEqual({
+      workspace_id: 'recovered-workspace',
+      sleep_status: 'scheduled',
+      sleep_after: '2026-08-13T00:00:00Z',
+    });
+  });
+
+  it.each([
+    ['sleep_claimed_at', '2026-08-12T01:00:00.001Z'],
+    ['capture_generation', 'new-generation'],
+    ['sleep_after', '2026-08-13T00:00:00Z'],
+  ])(
+    'preserves a concurrent change to %s during missing-metadata lookup',
+    async (column, value) => {
+      addDueSnapshot('concurrent');
+      mocks.checkAutomaticSessionSleepEligibility.mockImplementation(async () => {
+        sqlite
+          .prepare(`UPDATE session_snapshots SET ${column} = ? WHERE id = 'concurrent'`)
+          .run(value);
+        return { eligible: false, reason: 'workspace_metadata_missing' };
+      });
+      expect((await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00Z'))).exhausted).toBe(0);
+      expect(
+        sqlite.prepare(`SELECT sleep_status FROM session_snapshots WHERE id = 'concurrent'`).get()
+      ).toEqual({ sleep_status: 'scheduled' });
+    }
+  );
+
+  it('preserves an intent when workspace ownership metadata is repaired during lookup', async () => {
+    addDueSnapshot('repaired');
+    mocks.checkAutomaticSessionSleepEligibility.mockImplementation(async () => {
+      addUnscheduledWorkspace('repaired');
+      return { eligible: false, reason: 'workspace_metadata_missing' };
+    });
+    const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00Z'));
+    expect(result.exhausted).toBe(0);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status FROM session_snapshots
+      WHERE id = 'repaired'`
+        )
+        .get()
+    ).toEqual({ sleep_status: 'scheduled' });
+  });
+
+  it.each(['degraded', 'capture'])(
+    'backs off exhausted %s repair failures so later due work gets a slot',
+    async (repairKind) => {
+      vi.useFakeTimers();
+      const now = new Date('2026-08-12T01:00:00Z');
+      vi.setSystemTime(now);
+      env.SESSION_SLEEP_SWEEP_BATCH_SIZE = '1';
+      addDueSnapshot('repair', 3);
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET status = 'degraded',
+      sleep_status = 'failed', sleep_after = NULL WHERE id = 'repair'`
+        )
+        .run();
+      if (repairKind === 'capture')
+        sqlite
+          .prepare(
+            `UPDATE session_snapshots SET status = 'available', capture_generation = 'capture' WHERE id = 'repair'`
+          )
+          .run();
+      addDueSnapshot('valid');
+      mocks.sleepWorkspaceSession.mockRejectedValueOnce(new Error('capture unavailable'));
+
+      expect(await runSessionSleepSweep(env, now)).toMatchObject({ selected: 1, failed: 1 });
+      expect(await runSessionSleepSweep(env, now)).toMatchObject({ selected: 1, slept: 1 });
+      expect(mocks.sleepWorkspaceSession.mock.calls[1]?.[1].workspaceId).toBe('valid-workspace');
+      vi.setSystemTime(new Date(now.getTime() + 60_000));
+      expect(await runSessionSleepSweep(env, new Date())).toMatchObject({ claimed: 1, slept: 1 });
+      expect(mocks.sleepWorkspaceSession.mock.calls[2]?.[1].workspaceId).toBe('repair-workspace');
+    }
+  );
 
   it('uses a compare-and-swap claim so overlapping sweeps sleep a workspace once', async () => {
     addDueSnapshot('snapshot-once');
@@ -326,8 +484,8 @@ describe('session sleep sweep', () => {
         .prepare(
           `INSERT INTO session_snapshots
              (id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
-              manifest_r2_key, expires_at, sleep_status, sleep_after, sleep_attempts)
-           VALUES (?, ?, ?, ?, 'vm', 'pending', 'none', ?, ?, 'scheduled', ?, 0)`
+              manifest_r2_key, expires_at, sleep_status, sleep_after, sleep_attempts, updated_at)
+           VALUES (?, ?, ?, ?, 'vm', 'pending', 'none', ?, ?, 'scheduled', ?, 0, '2026-08-12T00:00:00.000Z')`
         )
         .run(
           'missing-snapshot',

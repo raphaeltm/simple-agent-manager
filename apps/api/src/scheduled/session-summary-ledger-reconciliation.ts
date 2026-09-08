@@ -14,6 +14,7 @@ import {
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { getSession } from '../services/project-data';
 import {
   findRestorableOrInFlightSleepSnapshot,
   restorableOrInFlightSleepSnapshotPredicateSql,
@@ -342,6 +343,14 @@ async function reconcileCandidate(
     ))
       ? 'deferred'
       : 'skipped';
+  }
+
+  // ProjectData owns the terminal verdict, including final-response drain and
+  // live work protection. The summary is a read index, not a second authority.
+  const authoritative = await getSession(env, candidate.projectId, candidate.id);
+  if (authoritative && ['active', 'sleeping'].includes(String(authoritative.status))) {
+    return (await deferCandidate(env, candidate, 'authoritative_session_open', deferUntil(now.getTime(), env)))
+      ? 'deferred' : 'skipped';
   }
 
   if (await terminalizeSummary(env, candidate, ownerTask, now)) {
