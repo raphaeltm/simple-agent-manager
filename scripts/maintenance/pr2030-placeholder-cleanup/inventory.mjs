@@ -158,8 +158,8 @@ export function safeServer(server, installation) {
     type: /^(?:cx|cpx|cax|ccx)[0-9]{2,3}$/.test(server.server_type?.name ?? '')
       ? server.server_type.name
       : null,
-    location: /^[a-z]{3}[0-9]$/.test(server.datacenter?.location?.name ?? '')
-      ? server.datacenter.location.name
+    location: /^[a-z]{3}[0-9]$/.test(server.location?.name ?? '')
+      ? server.location.name
       : null,
     resources: {
       vcpuCount:

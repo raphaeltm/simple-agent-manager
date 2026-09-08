@@ -13,7 +13,7 @@ function rawServer() {
     created: TARGET.providerCreatedAt,
     public_net: { ipv4: { ip: TARGET.ipv4 }, ipv6: { ip: TARGET.ipv6 } },
     server_type: { name: 'cx23', cores: 2, memory: 4, disk: 40 },
-    datacenter: { location: { name: 'nbg1' } },
+    location: { name: 'nbg1' },
     labels: {
       node: TARGET.node.toLowerCase(),
       managed: 'simple-agent-manager',
@@ -231,7 +231,7 @@ test('provider ownership/creation/type/region/IP mismatches refuse before any UP
       s.server_type.name = 'cx33';
     },
     (s) => {
-      s.datacenter.location.name = 'fsn1';
+      s.location.name = 'fsn1';
     },
     (s) => {
       s.public_net.ipv4.ip = '203.0.113.5';

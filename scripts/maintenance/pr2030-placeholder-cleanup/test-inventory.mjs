@@ -94,7 +94,7 @@ function server(id, overrides = {}) {
       installation,
     },
     server_type: { name: 'cx23', cores: 2, memory: 4, disk: 40 },
-    datacenter: { location: { name: 'nbg1' } },
+    location: { name: 'nbg1' },
     user_data: token,
     ...overrides,
   };
