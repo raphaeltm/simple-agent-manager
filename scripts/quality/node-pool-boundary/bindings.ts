@@ -42,10 +42,10 @@ export function createBindings(source: ts.SourceFile) {
         binding &&
         ts.isVariableDeclaration(binding) &&
         binding.initializer &&
-        ts.isVariableDeclarationList(binding.parent) &&
-        (binding.parent.flags & ts.NodeFlags.Const) !== 0
+        ts.isVariableDeclarationList(binding.parent)
       ) {
-        return stringValue(binding.initializer, seen);
+        const constantFlag = binding.parent.flags & ts.NodeFlags.Const;
+        if (constantFlag !== 0) return stringValue(binding.initializer, seen);
       }
     }
     return undefined;
