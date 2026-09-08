@@ -304,11 +304,22 @@ async function addNodeAndDeploymentResources(input: {
   remainingCoverage: Map<CoverageKey, RemainingAttachmentCoverage>;
   resourcesByKey: Map<string, ResourceDraft>;
 }): Promise<void> {
+  // Keep joined result sets below D1's column limit as node metadata grows.
+  const nodeFields = {
+    id: schema.nodes.id,
+    name: schema.nodes.name,
+    status: schema.nodes.status,
+    nodeRole: schema.nodes.nodeRole,
+    cloudProvider: schema.nodes.cloudProvider,
+    credentialAttributionSource: schema.nodes.credentialAttributionSource,
+    credentialAttributionUserId: schema.nodes.credentialAttributionUserId,
+    credentialAttributionProjectId: schema.nodes.credentialAttributionProjectId,
+  };
   const workspaceRows = await input.db
     .select({
       workspaceId: schema.workspaces.id,
       workspaceName: schema.workspaces.name,
-      node: schema.nodes,
+      node: nodeFields,
     })
     .from(schema.workspaces)
     .innerJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
@@ -353,8 +364,13 @@ async function addNodeAndDeploymentResources(input: {
 
   const deploymentRows = await input.db
     .select({
-      environment: schema.deploymentEnvironments,
-      node: schema.nodes,
+      environment: {
+        id: schema.deploymentEnvironments.id,
+        name: schema.deploymentEnvironments.name,
+        status: schema.deploymentEnvironments.status,
+        requiresVolumes: schema.deploymentEnvironments.requiresVolumes,
+      },
+      node: nodeFields,
     })
     .from(schema.deploymentEnvironments)
     .innerJoin(schema.nodes, eq(schema.deploymentEnvironments.nodeId, schema.nodes.id))

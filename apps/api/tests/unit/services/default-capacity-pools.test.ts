@@ -5185,6 +5185,119 @@ describe('capacity pool review findings', () => {
       }
     });
 
+    it.each(['unchanged', 'hardware', 'credential'] as const)(
+      'fences concurrent readiness and cursor publication for %s refreshes',
+      async (change) => {
+        createDb();
+        seedUserCredential({ id: 'user-hetzner' });
+        const offerings = manyLiveOfferings(4);
+        offerings[0] = liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx23',
+          displayName: 'CX23',
+        });
+        const options = {
+          userId: 'user-1',
+          includeInstallation: false,
+          candidatePublishBatchSize: 4,
+          offeringResolver: async () => offerings,
+        };
+        await ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, options);
+        const ready = await ensureDefaultCapacityPoolsForExistingCredentials(
+          poolDb() as never,
+          options
+        );
+        expect(ready.user?.effectiveState).toBe('configured-ready');
+        let releaseOlder!: () => void;
+        let reachedOlder!: () => void;
+        const olderReached = new Promise<void>((resolve) => {
+          reachedOlder = resolve;
+        });
+        const olderGate = new Promise<void>((resolve) => {
+          releaseOlder = resolve;
+        });
+        const database = createSqliteD1WithBindLimit(sqlite!, 100);
+        let candidateWrites = 0;
+        const pausedDatabase = {
+          ...database,
+          prepare(query: string) {
+            const statement = database.prepare(query);
+            return {
+              ...statement,
+              bind(...values: unknown[]) {
+                const bound = statement.bind(...values);
+                return {
+                  ...bound,
+                  async run() {
+                    if (
+                      query.includes('INSERT INTO capacity_pool_candidates') &&
+                      ++candidateWrites === 2
+                    ) {
+                      reachedOlder();
+                      await olderGate;
+                    }
+                    return bound.run();
+                  },
+                };
+              },
+            };
+          },
+        } as D1Database;
+        const older = ensureDefaultCapacityPoolsForExistingCredentials(
+          drizzleD1(pausedDatabase, { schema }) as never,
+          options
+        );
+        await olderReached;
+        let releaseNewer!: () => void;
+        let reachedNewer!: () => void;
+        const newerReached = new Promise<void>((resolve) => {
+          reachedNewer = resolve;
+        });
+        const newerGate = new Promise<void>((resolve) => {
+          releaseNewer = resolve;
+        });
+        if (change === 'credential')
+          sqlite?.exec(
+            "UPDATE credentials SET encrypted_token = 'concurrently-rotated' WHERE id = 'user-hetzner'"
+          );
+        const newerOfferings =
+          change === 'hardware'
+            ? offerings.map((offering, index) =>
+                index === 0 ? { ...offering, vcpu: 8 } : offering
+              )
+            : offerings;
+        const newer = ensureDefaultCapacityPoolsForExistingCredentials(poolDb() as never, {
+          ...options,
+          offeringResolver: async () => {
+            reachedNewer();
+            await newerGate;
+            return newerOfferings;
+          },
+        });
+        await newerReached;
+        releaseOlder();
+        const olderResult = await older;
+        const cursorAfterOlder = getRows<{ value: string }>(
+          "SELECT value FROM platform_settings WHERE key LIKE 'capacityPools.candidatePublication.v1:%'"
+        )[0]!;
+        releaseNewer();
+        const newerResult = await newer;
+        expect(JSON.parse(cursorAfterOlder.value).complete).toBe(true);
+        if (change === 'unchanged') {
+          expect(olderResult.user?.effectiveState).toBe('configured-ready');
+          expect(newerResult.user?.effectiveState).toBe('configured-ready');
+          expect(newerResult.user?.pool.revision).toBe(ready.user?.pool.revision);
+        } else {
+          expect(newerResult.user?.effectiveState).toBe('migration-pending');
+          const resumed = await ensureDefaultCapacityPoolsForExistingCredentials(
+            poolDb() as never,
+            { ...options, offeringResolver: async () => newerOfferings }
+          );
+          expect(resumed.user?.effectiveState).toBe('configured-ready');
+        }
+      }
+    );
+
     it.each([
       'hardware',
       'price',

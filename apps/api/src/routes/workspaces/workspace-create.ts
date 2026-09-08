@@ -6,7 +6,7 @@ import {
   DEFAULT_WORKSPACE_PROFILE,
   type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
-import { and, count, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, inArray, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Hono } from 'hono';
 
@@ -26,6 +26,7 @@ import {
 } from '../../services/canonical-vm-allocation';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
 import { toCapacityPlacementSnapshot } from '../../services/capacity-pools';
+import { stopComputeTracking } from '../../services/compute-usage';
 import { getRuntimeLimits } from '../../services/limits';
 import { waitForNodeAgentReady } from '../../services/node-agent';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
@@ -664,10 +665,20 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
               return;
             }
 
+            // Provisioning has persisted native hardware and final admission has
+            // attached the workspace. Meter now: readiness can outlive waitUntil,
+            // while cloud-init independently brings the workspace online.
+            await startComputeTrackingForNode(innerDb, {
+              userId,
+              workspaceId,
+              nodeId: targetNodeId,
+              vmSize: workspaceVmSize,
+            });
+
             try {
               await waitForNodeAgentReady(targetNodeId, c.env);
             } catch (err) {
-              await innerDb
+              const failedWorkspaces = await innerDb
                 .update(schema.workspaces)
                 .set({
                   status: 'error',
@@ -677,19 +688,29 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
                       : 'Node agent not reachable after provisioning',
                   updatedAt: new Date().toISOString(),
                 })
-                .where(eq(schema.workspaces.id, workspaceId));
+                .where(
+                  and(
+                    eq(schema.workspaces.id, workspaceId),
+                    eq(schema.workspaces.nodeId, targetNodeId),
+                    eq(schema.workspaces.userId, userId),
+                    eq(schema.workspaces.projectId, linkedProject.id),
+                    eq(schema.workspaces.status, 'creating'),
+                    isNull(schema.workspaces.runtimeDeletionConfirmedAt)
+                  )
+                )
+                .returning({ id: schema.workspaces.id });
+              // A callback or deletion may have won while readiness was pending.
+              // Only the owner of the creating -> error transition closes usage.
+              if (failedWorkspaces.length > 0) {
+                await stopComputeTracking(innerDb, workspaceId).catch((e) => {
+                  log.warn('workspace.compute_tracking_stop_failed', {
+                    workspaceId,
+                    error: String(e),
+                  });
+                });
+              }
               return;
             }
-
-            // Newly provisioned nodes only have provider-native capacity and price metadata
-            // after provisioning finishes. Start metering after that point so compute_usage
-            // records providerInstance* values instead of legacy vmSize fallbacks.
-            await startComputeTrackingForNode(innerDb, {
-              userId,
-              workspaceId,
-              nodeId: targetNodeId,
-              vmSize: workspaceVmSize,
-            });
           }
 
           await scheduleWorkspaceCreateOnNode(

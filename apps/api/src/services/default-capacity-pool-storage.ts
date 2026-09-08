@@ -288,10 +288,32 @@ export function sourceScopePredicates(scope: ScopeIdentity) {
  * Durable publication progress, reusing the existing platform_settings key/value store so a
  * partially published catalog resumes on the next tick instead of restarting from scratch.
  */
-export function platformSettingsCursorStore(db: Db): CapacityCandidatePublicationCursorStore {
+export function platformSettingsCursorStore(
+  db: Db,
+  source?: { sourceId: string; generation: number }
+): CapacityCandidatePublicationCursorStore {
   return {
     read: (key) => readBackfillCursor(db, key),
-    write: (key, value) => writeBackfillCursor(db, key, value),
+    write: async (key, value) => {
+      if (!source) return writeBackfillCursor(db, key, value);
+      const currentSource = sql`EXISTS (
+        SELECT 1 FROM capacity_sources
+        WHERE id = ${source.sourceId} AND source_generation = ${source.generation}
+          AND status = ${ACTIVE_STATUS}
+      )`;
+      if (value === null) {
+        await db
+          .delete(schema.platformSettings)
+          .where(and(eq(schema.platformSettings.key, key), currentSource));
+        return;
+      }
+      // Cursor completion is a publication result, so fence it just like candidate rows.
+      // An obsolete writer must neither rewind progress nor erase a newer semantic digest.
+      await db.run(sql`INSERT INTO platform_settings (key, value, updated_at, updated_by)
+        SELECT ${key}, ${value}, ${nextCapacityPoolTimestamp()}, NULL WHERE ${currentSource}
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+          updated_at = excluded.updated_at, updated_by = NULL`);
+    },
   };
 }
 

@@ -39,6 +39,8 @@ export interface ReadDefaultPoolSummaryOptions {
 }
 
 export interface PoolPublicationGuard {
+  /** Source refreshes whose results this pool readiness publication certifies. */
+  sourceGenerations?: Array<{ id: string; generation: number }>;
   revision: number;
   updatedAt: string;
   status: string;

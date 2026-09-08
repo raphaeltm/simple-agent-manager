@@ -412,6 +412,7 @@ async function ensureDefaultPoolForCredentialSeeds(
     revision: pool.revision,
     updatedAt: pool.updatedAt,
     status: pool.status,
+    sourceGenerations: [],
   };
   const activeSeedKeys = new Set<string>();
   let publicationComplete = true;
@@ -443,7 +444,15 @@ async function ensureDefaultPoolForCredentialSeeds(
     const publication = existingSource
       ? await updateCapacitySourceForSeed(db, existingSource, materializedSeed, scope)
       : await insertCapacitySourceForSeed(db, materializedSeed, scope);
-    if (!publication.published || publication.source.status !== ACTIVE_STATUS) continue;
+    if (publication.source.status !== ACTIVE_STATUS) continue;
+    // A newer publisher owns this refresh; do not certify its unfinished candidates.
+    if (!publication.published) {
+      return readDefaultPoolSummary(db, scope, { includeDisabled: true });
+    }
+    poolGuard.sourceGenerations?.push({
+      id: publication.source.id,
+      generation: publication.generation,
+    });
     if (!(await isCapacitySeedStillCurrent(db, seed))) {
       await disableCapacitySourceAvailability(db, scope, publication.source);
       continue;
@@ -477,7 +486,10 @@ async function ensureDefaultPoolForCredentialSeeds(
           catalogComplete:
             resolvedOfferings.refreshSucceeded && resolvedOfferings.catalogComplete !== false,
           publishBatchSize: resolveCandidatePublishBatchSize(options),
-          cursorStore: platformSettingsCursorStore(db),
+          cursorStore: platformSettingsCursorStore(db, {
+            sourceId: publication.source.id,
+            generation: publication.generation,
+          }),
         }
       );
       publicationComplete &&= result.publicationComplete;

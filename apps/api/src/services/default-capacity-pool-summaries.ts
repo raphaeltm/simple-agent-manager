@@ -202,6 +202,20 @@ export async function reconcileDefaultPoolStatus(
     );
   }
 
+  if (guard?.sourceGenerations?.length) {
+    // The pool CAS must also fence the source writes that produced its readiness result.
+    // A concurrent refresh can advance sources without having touched the pool row yet.
+    predicates.push(sql`NOT EXISTS (
+      SELECT 1 FROM json_each(${JSON.stringify(guard.sourceGenerations)}) expected
+      WHERE NOT EXISTS (
+        SELECT 1 FROM capacity_sources current_source
+        WHERE current_source.id = json_extract(expected.value, '$.id')
+          AND current_source.source_generation = json_extract(expected.value, '$.generation')
+          AND current_source.status = 'active'
+      )
+    )`);
+  }
+
   await db
     .update(schema.capacityPools)
     .set({

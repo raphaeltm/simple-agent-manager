@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 const CI_WORKFLOW_PATH = new URL('../../.github/workflows/ci.yml', import.meta.url);
@@ -27,7 +28,7 @@ function stepBlock(job: string, stepName: string): string {
 
 function withoutWorkerSuiteStep(workflow: string): string {
   return workflow.replace(
-    /\n      - name: Run Worker and Durable Object suites\n        run: pnpm --filter @simple-agent-manager\/api test:workers\n/,
+    /\n {6}- name: Run Worker and Durable Object suites\n {8}run: pnpm --filter @simple-agent-manager\/api test:workers\n/,
     '\n'
   );
 }
@@ -40,7 +41,7 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
     "needs.changes.outputs.api == 'true'"
   );
   expect(job).toContain('needs: [changes]');
-  expect(job).toContain('timeout-minutes: 15');
+  expect(job).toContain('timeout-minutes: 20');
   expect(step).toContain('run: pnpm --filter @simple-agent-manager/api test:workers');
   expect(step).not.toContain('continue-on-error');
 }

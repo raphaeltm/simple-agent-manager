@@ -59,7 +59,25 @@ crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   }
 
   const rows = await db
-    .select({ workspace: schema.workspaces, node: schema.nodes })
+    .select({
+      workspace: schema.workspaces,
+      // Full workspace + node rows exceed D1's result-column limit. Select only
+      // hardware consumed by the response mapper, retaining LEFT JOIN nullability.
+      node: {
+        vmSize: schema.nodes.vmSize,
+        cloudProvider: schema.nodes.cloudProvider,
+        providerInstanceType: schema.nodes.providerInstanceType,
+        providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
+        providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
+        providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+        providerInstanceBootDiskSizeGb: schema.nodes.providerInstanceBootDiskSizeGb,
+        providerInstanceArchitecture: schema.nodes.providerInstanceArchitecture,
+        observedProviderInstanceType: schema.nodes.observedProviderInstanceType,
+        observedProviderInstanceVcpuCount: schema.nodes.observedProviderInstanceVcpuCount,
+        observedProviderInstanceMemoryMb: schema.nodes.observedProviderInstanceMemoryMb,
+        observedProviderInstanceDiskGb: schema.nodes.observedProviderInstanceDiskGb,
+      },
+    })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(and(...conditions))
