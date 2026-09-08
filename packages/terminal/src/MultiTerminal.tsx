@@ -2,7 +2,14 @@ import '@xterm/xterm/css/xterm.css';
 
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
-import React, { useCallback, useEffect, useImperativeHandle,useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { TabBar } from './components/TabBar';
 import { useTerminalSessions } from './hooks/useTerminalSessions';
@@ -41,6 +48,7 @@ interface TerminalInstance {
   fitAddon: FitAddon;
   containerEl: HTMLDivElement | null;
   resizeObserver: ResizeObserver | null;
+  lastSentResize?: { socket: WebSocket; sessionId: string; rows: number; cols: number };
 }
 
 /**
@@ -94,6 +102,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
     const [wsConnected, setWsConnected] = useState(false);
     // Guard against duplicate list_sessions requests during rapid reconnect cycles
     const reconnectingRef = useRef(false);
+    const onSessionsChangeRef = useRef(onSessionsChange);
+    onSessionsChangeRef.current = onSessionsChange;
 
     // ── Stable refs for latest callback/state versions ──
     // This prevents re-creating the WebSocket connection when callbacks change reference.
@@ -137,6 +147,30 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       return localSession?.serverSessionId ?? localSessionId;
     }, []);
 
+    // React ref reattachments and overlapping resize sources may report the same size.
+    // Deduplicate only within the same socket and server session; a new connection still
+    // receives its initial dimensions even when the terminal itself has not changed size.
+    const sendTerminalResize = useCallback(
+      (localSessionId: string) => {
+        const instance = terminalsRef.current.get(localSessionId);
+        const socket = wsRef.current;
+        if (!instance || !socket || socket.readyState !== WebSocket.OPEN) return;
+        const sessionId = getOutboundSessionId(localSessionId);
+        const { rows, cols } = instance.terminal;
+        const previous = instance.lastSentResize;
+        if (
+          previous?.socket === socket &&
+          previous.sessionId === sessionId &&
+          previous.rows === rows &&
+          previous.cols === cols
+        )
+          return;
+        socket.send(encodeTerminalWsResize(rows, cols, sessionId));
+        instance.lastSentResize = { socket, sessionId, rows, cols };
+      },
+      [getOutboundSessionId]
+    );
+
     // Create xterm.js instance for a session (stable — only depends on scrollback config)
     const createTerminalInstance = useCallback(
       (sessionId: string): TerminalInstance => {
@@ -161,7 +195,12 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           }
         });
 
-        const instance: TerminalInstance = { terminal, fitAddon, containerEl: null, resizeObserver: null };
+        const instance: TerminalInstance = {
+          terminal,
+          fitAddon,
+          containerEl: null,
+          resizeObserver: null,
+        };
         terminalsRef.current.set(sessionId, instance);
         return instance;
       },
@@ -533,16 +572,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           }
           instance.fitAddon.fit();
 
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              encodeTerminalWsResize(
-                instance.terminal.rows,
-                instance.terminal.cols,
-                getOutboundSessionId(sessionId)
-              )
-            );
-          }
+          sendTerminalResize(sessionId);
 
           // Add ResizeObserver to handle container size changes (including
           // display:none → display:block transitions on tab switch).
@@ -563,23 +593,14 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
                 } catch {
                   return; // terminal may be disposed
                 }
-                const currentWs = wsRef.current;
-                if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-                  currentWs.send(
-                    encodeTerminalWsResize(
-                      instance.terminal.rows,
-                      instance.terminal.cols,
-                      getOutboundSessionId(sessionId)
-                    )
-                  );
-                }
+                sendTerminalResize(sessionId);
               }
             }, 100);
           });
           instance.resizeObserver.observe(containerEl);
         }
       },
-      [getOutboundSessionId]
+      [sendTerminalResize]
     );
 
     // Fit active terminal on window resize
@@ -589,21 +610,12 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         const instance = terminalsRef.current.get(activeSessionId);
         if (instance && instance.containerEl) {
           instance.fitAddon.fit();
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              encodeTerminalWsResize(
-                instance.terminal.rows,
-                instance.terminal.cols,
-                getOutboundSessionId(activeSessionId)
-              )
-            );
-          }
+          sendTerminalResize(activeSessionId);
         }
       };
       window.addEventListener('resize', handleResize);
       return () => window.removeEventListener('resize', handleResize);
-    }, [activeSessionId, getOutboundSessionId]);
+    }, [activeSessionId, sendTerminalResize]);
 
     // When active tab changes, fit the terminal.
     // Use double-rAF to ensure the browser has fully recalculated layout after
@@ -626,16 +638,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             return; // terminal disposed
           }
           instance.terminal.focus();
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              encodeTerminalWsResize(
-                instance.terminal.rows,
-                instance.terminal.cols,
-                getOutboundSessionId(activeSessionId)
-              )
-            );
-          }
+          sendTerminalResize(activeSessionId);
         });
       });
 
@@ -643,9 +646,9 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         cancelAnimationFrame(outerRaf);
         cancelAnimationFrame(innerRaf);
       };
-    }, [activeSessionId, getOutboundSessionId]);
+    }, [activeSessionId, sendTerminalResize]);
 
-    const sessionsArray = Array.from(sessions.values());
+    const sessionsArray = useMemo(() => Array.from(sessions.values()), [sessions]);
 
     useImperativeHandle(
       ref,
@@ -683,7 +686,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
     );
 
     useEffect(() => {
-      if (!onSessionsChange) return;
+      if (!onSessionsChangeRef.current) return;
 
       const snapshots: MultiTerminalSessionSnapshot[] = sessionsArray
         .slice()
@@ -696,8 +699,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           serverSessionId: session.serverSessionId,
         }));
 
-      onSessionsChange(snapshots, activeSessionId);
-    }, [activeSessionId, onSessionsChange, sessionsArray]);
+      onSessionsChangeRef.current(snapshots, activeSessionId);
+    }, [activeSessionId, sessionsArray]);
 
     return (
       <div
