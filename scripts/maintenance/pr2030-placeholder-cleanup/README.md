@@ -283,3 +283,42 @@ Pulumi installer actions as deployment):
 ```sh
 node --test scripts/maintenance/pr2030-placeholder-cleanup/test-inventory.mjs scripts/maintenance/pr2030-placeholder-cleanup/test-adopt-helper.mjs
 ```
+
+## Original helper workspace proof transfer after normal node stop
+
+`helper-workspace-proof` is an independent incident operation for original helper
+workspace `01M20KQE0J0YF60VCAAE8J9VGY`, task `01M20KQE6AM5N3CP4Z4H3Y1HBP`,
+and session `81c601af-3fc4-4886-b006-c585be20f1be`. Read-only staging checks on
+2026-09-08 confirmed it remains unattached in error with no runtime proof; its
+exact conversation task failed during reconciliation. The known paid helper
+server is `165154322` on node `01M20KQDHX8M3YP89Q6QTQP6S1`, incarnation
+`43ad0f49-94e5-44b2-9191-1fc40cab281f` (inventory/adoption evidence above).
+
+The operation refuses until the reviewed Worker version
+`f5233aa09bdf69f1180f19de20948092321937a7` is live on the exact staging
+account, installation, domain and D1. A missing source version pin also refuses;
+there is no runtime override. The normal authenticated node stop API must first
+set **this exact incarnation** to `deleted` with a valid termination timestamp.
+Root must preserve that node row until proof transfer finishes. Running,
+destroying, missing-proof, replaced or missing nodes all refuse, including a
+running node with stale positive proof. Timeout text and NULL IDs are never proof.
+
+Preview is the workflow default. The atomic UPDATE rechecks exact workspace,
+failed task, original node creation/provider/incarnation/platform fingerprint,
+and strict node proof. Original workspace usage or snapshots, including snapshots
+for its session, refuse; another active workspace on the node also refuses.
+The whole workspace snapshot fences concurrent metadata, ownership, attachment
+or status changes; the exact source proof timestamp is compared again in SQL.
+
+Only `runtime_deletion_proof='node_runtime_terminated'` and
+`runtime_deletion_confirmed_at` change, copying the actual strict node timestamp.
+Even `updated_at` remains unchanged. Complete workspace and node post-reads
+verify the result. A matching repeated run is read-only; partial/conflicting proof
+or an ambiguous response requires inspection rather than an automatic retry.
+No node, task, reservation, snapshot, usage or provider resource is mutated.
+
+Root reviews and pushes only this isolated maintenance branch, then runs
+`operation=helper-workspace-proof, apply=false` after the normal node stop.
+After inspecting that preview, run `apply=true`; use the normal authenticated
+workspace DELETE and node DELETE APIs for the remaining cleanup. Never merge
+this workflow or incident script into main.

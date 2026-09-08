@@ -15,6 +15,7 @@ on:
           - retry-provider-recovery
           - inventory-helper-vm
           - adopt-helper-vm
+          - helper-workspace-proof
         default: placeholder-proof
       apply:
         description: 'Apply the selected exact repair after reviewing its preview'
@@ -113,3 +114,12 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
         run: node scripts/maintenance/pr2030-placeholder-cleanup/adopt-helper.mjs
+
+      - name: Preview or transfer the exact terminated helper proof
+        if: ${{ inputs.operation == 'helper-workspace-proof' }}
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          APPLY_REPAIR: ${{ inputs.apply }}
+        run: python3 scripts/maintenance/pr2030-placeholder-cleanup/helper_workspace_proof.py
