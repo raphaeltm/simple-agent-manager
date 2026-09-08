@@ -818,8 +818,12 @@ session `ef07c74a-54c5-444a-a2ee-54d4ce21d939`. Pre-existing sleeping workspaces
 from cleanup. The earlier combined deployment failed on a Cloudflare AI binding
 internal validation error (10021); no final combined deployment success is claimed.
 
-- [ ] Reconstruct the three unpublished corrections and obtain independent review.
-- [ ] Verify final candidate cold provisioning and original-snapshot recovery.
+- [x] Reconstruct the three unpublished corrections and obtain independent review.
+      Preserved in `c1ab101da` and `475bb732c`; independent adversarial review passed.
+- [ ] Verify final candidate cold provisioning and a fresh capture/wake cycle.
+      The original snapshot restored in the parent session, then became ineligible
+      after successful restoration; it was removed through the supported API.
+      Do not attribute a new final-build restore to that original artifact.
 - [ ] Remove owned helper/test resources, preserve pre-existing sleeping sessions,
       and verify pool settings remain at the baseline.
 - [ ] Update PR evidence, pass final CI/staging, merge, and verify production deployment.
@@ -843,3 +847,20 @@ removed via the supported API; the bounded profile now selects the already
 configured Claude agent without changing user defaults. Live lifecycle testing
 continues on the same owned VM. This configuration failure is not a sleep/wake
 pass, and no duplicate active test workspace is retained.
+
+
+The fresh Claude conversation created and read both `PR2030-FINAL-1788889363195`
+markers. UI sleep returned 200, snapshot `01M211XXWT1ME9VGR2YVN77XE6` became
+available with no degradation and home/WIP hashes. The empty VM was deleted via
+SAM, preserving the snapshot. The profile default is now 2 GB for the pending
+wake test of the saved 1 GB reservation. All 13 owned session R2 prefixes were
+checked: only this fresh snapshot has objects. The original snapshot prefix is
+empty, and the unused primary-user test project was deleted via SAM.
+
+A refreshed sleeping screen showed an old task's Runtime lost card despite its
+canonical Sleeping state and zero recovery attempts. The final UI correction
+suppresses only that historical runtime-loss error; canonical recovery failure,
+local resume errors, active failures and other snapshot errors remain visible.
+Seven actual-header regressions and reviewed desktop/mobile screenshots cover
+these cases. Latest main's dependency updates and subsequent blog update were
+merged; no additional runtime implementation changes were introduced.

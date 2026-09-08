@@ -58,6 +58,15 @@ export function FloatingHeader({
   const failureClassification = lc.taskEmbed?.errorMessage
     ? classifyFailure(lc.taskEmbed.errorMessage, lc.taskEmbed.executionStep ?? undefined)
     : null;
+  // Sleeping intentionally releases its runtime. Reconciliation may later fail
+  // the old task after that workspace is deleted; this is not a failed wake.
+  const historicalSleepingRuntimeFailure =
+    lc.session.status === 'sleeping' &&
+    taskStatus === 'failed' &&
+    failureClassification?.code === 'runtime-lost' &&
+    lc.wakeRecoveryStatus !== 'failed' &&
+    !lc.resumeError;
+  const showTaskFailure = Boolean(lc.taskEmbed?.errorMessage) && !historicalSleepingRuntimeFailure;
   const failureShellClassName = failureClassification?.diagnosable
     ? "glass-chrome px-3 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
     : `glass-chrome px-3 py-2 ${flushRight ? 'rounded-bl-2xl' : 'rounded-b-2xl'} relative`;
@@ -84,7 +93,7 @@ export function FloatingHeader({
         lineageText={sourceContext?.lineageText}
         initialPromptFallback={initialPromptFallback}
         sourceContext={sourceContext}
-        hasContentBelow={!!lc.taskEmbed?.errorMessage}
+        hasContentBelow={showTaskFailure}
         onShowHierarchy={onShowHierarchy}
         expanded={expanded}
         onExpandedChange={onExpandedChange}
@@ -92,7 +101,7 @@ export function FloatingHeader({
         completeError={completeError}
         onDismissCompleteError={onDismissCompleteError}
       />
-      {lc.taskEmbed?.errorMessage && (
+      {showTaskFailure && lc.taskEmbed && (
         <div
           data-testid="failure-card-shell"
           className={failureShellClassName}
