@@ -26,7 +26,8 @@ interface TerminalWriterEvidence {
 
 const TERMINAL_WRITER_PATTERNS: Array<{ kind: string; pattern: RegExp }> = [
   { kind: 'workspace_or_node_deleted_object_write', pattern: /status\s*:\s*['"]deleted['"]/g },
-  { kind: 'workspace_or_node_deleted_sql_write', pattern: /status\s*=\s*['"]deleted['"]/g },
+  // SQLite SET targets are unqualified; n.status is a predicate read, not a state write.
+  { kind: 'workspace_or_node_deleted_sql_write', pattern: /(?<!\.)\bstatus\s*=\s*['"]deleted['"]/g },
   { kind: 'workspace_or_node_drizzle_delete', pattern: /delete\(schema\.(workspaces|nodes)\)/g },
   { kind: 'workspace_or_node_sql_delete', pattern: /DELETE\s+FROM\s+(workspaces|nodes)/gi },
   { kind: 'cf_container_teardown', pattern: /destroyVmAgentContainer\s*\(/g },
@@ -182,6 +183,18 @@ describe('workspace/node terminal writers route through shared lifecycle finaliz
 
     expect(findTerminalWriterEvidence(source).length).toBeGreaterThanOrEqual(2);
     expect(routesThroughSharedFinalizer(source)).toBe(false);
+  });
+
+  it('distinguishes a qualified termination-proof read from an actual deleted-state assignment', () => {
+    const proofRead = `UPDATE workspaces SET status='error'
+      WHERE EXISTS (SELECT 1 FROM nodes n WHERE n.status='deleted')`;
+    expect(findTerminalWriterEvidence(proofRead)).toEqual([]);
+    const actualWriter = `${proofRead}; UPDATE nodes SET status='deleted' WHERE id=?`;
+    expect(findTerminalWriterEvidence(actualWriter)).toMatchObject([
+      { kind: 'workspace_or_node_deleted_sql_write', matchedText: "status='deleted'" },
+    ]);
+    expect(routesThroughSharedFinalizer(actualWriter)).toBe(false);
+    expect(isAllowlistedWriter('services/direct-workspace-creation.ts', findTerminalWriterEvidence(actualWriter))).toBe(false);
   });
 
   it('accepts a synthetic writer routed through the shared finalizer', () => {

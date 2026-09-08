@@ -278,7 +278,7 @@ describe('provisionNode backend DNS records', () => {
     async (ip) => {
       createVM.mockResolvedValueOnce(vmResult(ip));
 
-      await expect(provisionNode('node-1', ENV)).resolves.toBeUndefined();
+      await expect(provisionNode('node-1', ENV)).resolves.toEqual({ allocationConfirmed: true });
 
       expect(createVM).toHaveBeenCalledOnce();
       expect(createNodeBackendDNSRecord).not.toHaveBeenCalled();
@@ -365,6 +365,10 @@ describe('provisionNode backend DNS records', () => {
   it('propagates exact installation ownership to the provider create boundary', async () => {
     await provisionNode('node-1', ENV);
 
+    const allocationClaim = ops.find((op) => op.set?.runtimeIncarnationId && op.set.runtimeTerminationConfirmedAt === null);
+    expect(allocationClaim?.set?.runtimeIncarnationId).toEqual(expect.any(String));
+    expect(allocationClaim?.set?.runtimeIncarnationId).not.toBe('runtime-1');
+
     expect(createVM).toHaveBeenCalledWith(
       expect.objectContaining({
         labels: {
@@ -373,6 +377,7 @@ describe('provisionNode backend DNS records', () => {
           role: 'workspace',
           env: 'production',
           installation: '0123456789abcdef0123456789abcdef',
+          incarnation: allocationClaim?.set?.runtimeIncarnationId,
         },
       })
     );
@@ -539,7 +544,7 @@ describe('provisionNode backend DNS records', () => {
 
     await expect(
       provisionNode('node-1', ENV, undefined, undefined, { environmentId: 'env-1' })
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ allocationConfirmed: true });
 
     expect(ops).toContainEqual(
       expect.objectContaining({

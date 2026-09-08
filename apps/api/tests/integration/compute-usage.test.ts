@@ -195,25 +195,22 @@ describe('compute usage metering pipeline', () => {
       expect(workspaceCreateFile).toContain('credentialSource');
     });
 
-    it('fresh-node provisioning starts metering after provider metadata is persisted', () => {
-      const provisioningBlockStart = workspaceCreateFile.indexOf('if (mustProvisionNode) {');
-      const provisionCall = workspaceCreateFile.indexOf(
-        'await provisionNode(',
-        provisioningBlockStart
-      );
-      const runningCheck = workspaceCreateFile.indexOf(
-        "provisionedNode.status !== 'running'",
-        provisionCall
-      );
-      const trackingCall = workspaceCreateFile.indexOf(
-        'await startComputeTrackingForNode(innerDb, {',
-        runningCheck
-      );
+    it('durable fresh-node continuation meters after provider metadata and attachment, before readiness', () => {
+      const durableOwner = readFileSync(resolve(process.cwd(), 'src/durable-objects/node-lifecycle-provisioning.ts'), 'utf8');
+      const continuation = readFileSync(resolve(process.cwd(), 'src/services/direct-workspace-creation.ts'), 'utf8');
+      expect(workspaceCreateFile).toContain('await scheduleDirectProvisioning(');
+      const provisionCall = durableOwner.indexOf('await provisionNode(');
+      expect(provisionCall).toBeGreaterThanOrEqual(0);
+      expect(durableOwner.indexOf('await continueDirectWorkspaceCreation(')).toBeGreaterThan(provisionCall);
 
-      expect(provisioningBlockStart).toBeGreaterThanOrEqual(0);
-      expect(provisionCall).toBeGreaterThan(provisioningBlockStart);
-      expect(runningCheck).toBeGreaterThan(provisionCall);
-      expect(trackingCall).toBeGreaterThan(runningCheck);
+      const runningCheck = continuation.indexOf("provisionedNode.status !== 'running'");
+      const attachCall = continuation.indexOf('await attachPrecreatedWorkspacePlacement(');
+      const trackingCall = continuation.indexOf('await startComputeTrackingForNode(innerDb, {');
+      const readinessCall = continuation.indexOf('await waitForNodeAgentReady(');
+      expect(runningCheck).toBeGreaterThanOrEqual(0);
+      expect(attachCall).toBeGreaterThan(runningCheck);
+      expect(trackingCall).toBeGreaterThan(attachCall);
+      expect(readinessCall).toBeGreaterThan(trackingCall);
     });
 
     it('workspace creation can continue when metering persistence fails', async () => {
