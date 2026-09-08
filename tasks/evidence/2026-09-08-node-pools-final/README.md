@@ -85,4 +85,6 @@ Normal API deletion confirmed removal of all four remaining owned workspace reco
 
 Three older node rows remain as deleted lifecycle audit records with termination proof; normal ownership lookup intentionally excludes deleted nodes and returns 404. These are retained records, not live VMs. Project deletion uses normal API storage semantics; no direct purge of ProjectData Durable Object transcript storage is claimed. `final-cleanup.json` records the bounded final checks.
 
-Runtime code, dependencies, infrastructure and workflows remain identical to staged `c6d1a987f`; subsequent commits contain documentation/evidence only. Final-head CI and authorized merge/production monitoring are tracked in PR #2030.
+Runtime code, dependencies, infrastructure and workflows remain identical to staged `c6d1a987f`; subsequent commits contain documentation/evidence and an exact reviewed non-secret archive fingerprint. Final-head CI and authorized merge/production monitoring are tracked in PR #2030.
+
+The archive move changed one existing non-secret checklist finding's exact path/line fingerprint. The security baseline adds only that reviewed digest in its existing expiring group; original entries and expiration remain unchanged. Both current-tree (52 reviewed, zero new) and PR-range (4 reviewed, zero new) scans passed locally. No scanner rule or broad exclusion changed.
