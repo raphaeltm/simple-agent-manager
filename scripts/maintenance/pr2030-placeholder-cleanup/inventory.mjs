@@ -18,13 +18,19 @@ export const TARGET = Object.freeze({
   incarnation: '43ad0f49-94e5-44b2-9191-1fc40cab281f',
   credential: '01KNY6DC06C9QCYQM0389NAGNT',
   createdAt: '2026-09-08T13:36:09.277Z',
+  providerId: '165154322',
+  ipv4: '2.28.123.221',
+  ipv6: '2a01:4f8:1c19:936e::/64',
+  agentIpv6: '2a01:4f8:1c19:936e::1',
+  providerCreatedAt: '2026-09-08T13:37:19.000Z',
+  installation: '395954c4f369d642341d757537b83c44',
 });
 const MAX_PAGES = 10;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const TIMEOUT_MS = 20_000;
 const INFRA = fileURLToPath(new URL('../../../infra/', import.meta.url));
-class DiagnosticError extends Error {}
-function requireGuard(condition, message) {
+export class DiagnosticError extends Error {}
+export function requireGuard(condition, message) {
   if (!condition) throw new DiagnosticError(message);
 }
 
@@ -118,7 +124,7 @@ function safeLabels(labels, installation) {
   }
   return result;
 }
-function safeServer(server, installation) {
+export function safeServer(server, installation) {
   requireGuard(
     Number.isSafeInteger(server.id) && server.id > 0,
     'Matching server identity invalid'
@@ -149,12 +155,32 @@ function safeServer(server, installation) {
         ? new Date(server.created).toISOString()
         : null,
     labels: safeLabels(server.labels, installation),
+    type: /^(?:cx|cpx|cax|ccx)[0-9]{2,3}$/.test(server.server_type?.name ?? '')
+      ? server.server_type.name
+      : null,
+    location: /^[a-z]{3}[0-9]$/.test(server.datacenter?.location?.name ?? '')
+      ? server.datacenter.location.name
+      : null,
+    resources: {
+      vcpuCount:
+        Number.isSafeInteger(server.server_type?.cores) && server.server_type.cores > 0
+          ? server.server_type.cores
+          : null,
+      memoryMb:
+        Number.isSafeInteger(server.server_type?.memory * 1024) && server.server_type.memory > 0
+          ? server.server_type.memory * 1024
+          : null,
+      diskGb:
+        Number.isSafeInteger(server.server_type?.disk) && server.server_type.disk >= 0
+          ? server.server_type.disk
+          : null,
+    },
   };
 }
 
-export async function inspectInventory(
+export async function createInventoryContext(
   environment,
-  { fetchImpl = fetch, exec = execFileSync } = {}
+  { fetchImpl = fetch, exec = execFileSync, includeAdopted = false } = {}
 ) {
   requireGuard(
     environment.CF_ACCOUNT_ID === TARGET.account && environment.BASE_DOMAIN === TARGET.domain,
@@ -211,7 +237,8 @@ export async function inspectInventory(
     WHERE n.id = ? AND n.user_id = ? AND n.runtime_incarnation_id = ? AND n.created_at = ?
       AND n.runtime = 'vm' AND n.node_class = 'managed' AND n.cloud_provider = 'hetzner'
       AND n.provider_instance_type = 'cx23' AND n.vm_location = 'nbg1'
-      AND n.provider_instance_id IS NULL AND n.runtime_termination_confirmed_at IS NULL
+      AND (n.provider_instance_id IS NULL OR (? = 1 AND n.provider_instance_id = ?))
+      AND n.runtime_termination_confirmed_at IS NULL
       AND n.credential_source = 'platform' AND n.placement_credential_source = 'platform'
       AND n.placement_credential_reference = ? AND n.placement_credential_fingerprint IS NOT NULL`,
       [
@@ -221,6 +248,8 @@ export async function inspectInventory(
         TARGET.user,
         TARGET.incarnation,
         TARGET.createdAt,
+        includeAdopted ? 1 : 0,
+        TARGET.providerId,
         `platform_credentials:${TARGET.credential}`,
       ]
     );
@@ -250,19 +279,43 @@ export async function inspectInventory(
   } catch {
     throw new DiagnosticError('Credential decryption unavailable; no provider request sent');
   }
-  const matches = new Map();
-  const nodeLabel = TARGET.node.toLowerCase();
-  let complete = false;
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const result = await readJson(
+  const readProvider = (suffix) =>
+    readJson(
       fetchImpl,
-      `https://api.hetzner.cloud/v1/servers?per_page=50&page=${page}`,
+      `https://api.hetzner.cloud/v1/servers${suffix}`,
       {
         method: 'GET',
         headers: { Authorization: `Bearer ${token}` },
       },
       'Hetzner'
     );
+  return {
+    cf,
+    query,
+    verifyWorker,
+    readNodes,
+    installation,
+    fingerprint,
+    credentialSnapshot: credential,
+    readProviderServer: () => readProvider(`/${TARGET.providerId}`),
+    readProviderPage: (page) => {
+      requireGuard(
+        Number.isInteger(page) && page >= 1 && page <= MAX_PAGES,
+        'Inventory page outside bound'
+      );
+      return readProvider(`?per_page=50&page=${page}`);
+    },
+  };
+}
+
+export async function inspectInventory(environment, dependencies = {}) {
+  const { readProviderPage, verifyWorker, readNodes, installation, fingerprint } =
+    await createInventoryContext(environment, dependencies);
+  const matches = new Map();
+  const nodeLabel = TARGET.node.toLowerCase();
+  let complete = false;
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const result = await readProviderPage(page);
     requireGuard(
       Array.isArray(result.servers) && result.servers.length <= 50,
       'Server inventory malformed'
@@ -305,7 +358,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     console.log(JSON.stringify(await inspectInventory(process.env), null, 2));
   } catch (error) {
-    console.error(error instanceof DiagnosticError ? error.message : 'Inventory diagnostic failed; details suppressed.');
+    console.error(
+      error instanceof DiagnosticError
+        ? error.message
+        : 'Inventory diagnostic failed; details suppressed.'
+    );
     console.error('No state changes made and no absence proof inferred.');
     process.exitCode = 1;
   }

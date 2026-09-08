@@ -93,6 +93,8 @@ function server(id, overrides = {}) {
       env: 'staging',
       installation,
     },
+    server_type: { name: 'cx23', cores: 2, memory: 4, disk: 40 },
+    datacenter: { location: { name: 'nbg1' } },
     user_data: token,
     ...overrides,
   };
@@ -118,6 +120,9 @@ test('decrypts real AES-GCM format, traverses pages, filters exact name or label
     ['1', '3']
   );
   assert.equal(result.matches[1].labels.env, '[mismatch]');
+  assert.deepEqual(result.matches[0].resources, { vcpuCount: 2, memoryMb: 4096, diskGb: 40 });
+  assert.equal(result.matches[0].type, 'cx23');
+  assert.equal(result.matches[0].location, 'nbg1');
   assert.equal(result.absenceProof, false);
   for (const secret of [
     token,

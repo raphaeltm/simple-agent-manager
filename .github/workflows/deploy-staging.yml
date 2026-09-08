@@ -14,6 +14,7 @@ on:
           - rearm-recovery
           - retry-provider-recovery
           - inventory-helper-vm
+          - adopt-helper-vm
         default: placeholder-proof
       apply:
         description: 'Apply the selected exact repair after reviewing its preview'
@@ -74,10 +75,14 @@ jobs:
           APPLY_REPAIR: ${{ inputs.apply }}
         run: python3 scripts/maintenance/pr2030-placeholder-cleanup/retry_provider_recovery.py
 
-      - name: Verify offline inventory guards
-        run: node --test scripts/maintenance/pr2030-placeholder-cleanup/test-inventory.mjs
-      - name: Install Pulumi CLI for read-only inventory
-        if: ${{ inputs.operation == 'inventory-helper-vm' }}
+      - name: Set up Node for offline SQLite adoption tests
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0, same as deploy-reusable.yml
+        with:
+          node-version: '22'
+      - name: Verify offline inventory and adoption guards
+        run: node --test scripts/maintenance/pr2030-placeholder-cleanup/test-inventory.mjs scripts/maintenance/pr2030-placeholder-cleanup/test-adopt-helper.mjs
+      - name: Install Pulumi CLI for credential reads
+        if: ${{ inputs.operation == 'inventory-helper-vm' || inputs.operation == 'adopt-helper-vm' }}
         uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0, same as deploy-reusable.yml
       - name: Read exact helper provider inventory
         if: ${{ inputs.operation == 'inventory-helper-vm' }}
@@ -93,3 +98,18 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
         run: node scripts/maintenance/pr2030-placeholder-cleanup/inventory.mjs
+      - name: Preview or adopt the exact confirmed helper VM
+        if: ${{ inputs.operation == 'adopt-helper-vm' }}
+        env:
+          APPLY_REPAIR: ${{ inputs.apply }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
+          PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+        run: node scripts/maintenance/pr2030-placeholder-cleanup/adopt-helper.mjs

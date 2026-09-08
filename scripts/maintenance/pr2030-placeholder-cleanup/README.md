@@ -236,3 +236,50 @@ unchanged-state assertions, exact proof/incarnation/provider guards, helper
 identity/health/capacity/freshness, absent workspace/usage, concurrent recovery,
 new snapshot generation/manifest, atomic race rejection, idempotent zero-counter
 no-op, and the D1 binding limit.
+
+## Exact helper VM metadata adoption (`adopt-helper-vm`)
+
+Read-only inventory run `34234712307` found exactly one paid VM for node
+`01M20KQDHX8M3YP89Q6QTQP6S1`: server `165154322`, created
+`2026-09-08T13:37:19Z`, IPv4 `2.28.123.221`, IPv6 subnet
+`2a01:4f8:1c19:936e::/64`. The provider claim incarnation is
+`43ad0f49-94e5-44b2-9191-1fc40cab281f`; the agent later reported IPv6
+`2a01:4f8:1c19:936e::1` while D1 still lacked the provider ID. This is an
+existing paid runtime, never an absence-proof case.
+
+`adopt-helper.mjs` is an isolated repair of this exact row. Preview remains the
+default. It verifies the same account/domain/D1/Worker `db06843dd...`, installation
+`395954c4f369d642341d757537b83c44`, original incarnation, exact owner/workspace/
+project, and ciphertext fingerprint as inventory. A direct Hetzner GET must show
+that exact server running with all five ownership labels, the known creation and
+IPv4/IPv6 identities, native type `cx23`, region `nbg1`, and valid observed
+CPU/memory/disk resources. Apply repeats the Worker check and provider GET.
+
+The node must still be running with a heartbeat no older than three minutes,
+NULL provider ID and termination proof, the exact agent IPv6, and no previously
+observed provider hardware. The atomic UPDATE compares **every captured node
+column**, plus exact current credential ciphertext/IV and workspace ownership.
+Its 85 binds for the current 70-column schema remain below D1's 100-bind bound.
+Any concurrent heartbeat, ownership, incarnation, identity, pool, or price change
+fails the CAS. There is no automatic retry.
+
+Only `provider_instance_id`, `ip_address`, the six `observed_*` hardware fields,
+and `updated_at` change. The provider's own server response supplies the hardware
+values in the normal `observedHardwareDbValues` JSON shape. Pool, configured
+hardware/prices, lifecycle status, error/DNS state, reservations, workspace rows,
+and runtime proofs remain untouched. Post-read compares the complete target row
+against the expected update; real SQLite tests retain unrelated node/workspace
+sentinels. A matching already-adopted row is a read-only no-op; a different server
+ID or conflicting metadata refuses. Provider API access remains GET-only.
+
+Root must review, commit/push only the isolated branch, run `apply=false`, inspect
+the sanitized exact-server preview, then explicitly run `apply=true`. The normal
+heartbeat path may subsequently create IPv4 DNS. This operation does not create,
+delete, or restart a VM, change workspace attachment, or trigger recovery.
+
+Run offline tests with Node 22 (the workflow uses the same pinned setup-node and
+Pulumi installer actions as deployment):
+
+```sh
+node --test scripts/maintenance/pr2030-placeholder-cleanup/test-inventory.mjs scripts/maintenance/pr2030-placeholder-cleanup/test-adopt-helper.mjs
+```
