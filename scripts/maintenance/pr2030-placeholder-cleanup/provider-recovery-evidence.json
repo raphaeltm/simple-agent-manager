@@ -166,5 +166,11 @@
   "source_file": "provider-recovery-rearm-original.json",
   "source_sha256": "41a4d9d969a04306fa62a7503842e085f258abf51dc4110e3d6dbfa61d0f2ebc",
   "manifest_json_sha256": "e249e7cf1ca1753bb243a81e346e415393d440325369974e59b930b79a57ee39",
-  "helper": null
+  "helper": {
+    "workspace_id": "01M20PXBR3WJ42SCSHA7AYVPSY",
+    "id": "01M20KQDHX8M3YP89Q6QTQP6S1",
+    "runtime_incarnation_id": "43ad0f49-94e5-44b2-9191-1fc40cab281f",
+    "provider_instance_id": "165154322",
+    "provider_instance_type": "cx23"
+  }
 }
