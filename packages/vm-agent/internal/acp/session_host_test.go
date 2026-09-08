@@ -1705,7 +1705,7 @@ func TestSessionHost_MonitorRapidExitCrashRecoveryFailsWithReport(t *testing.T) 
 	host.crashStderr = "write_stdin failed: stdin is closed\n" + syntheticOpenAIKeyEnvLine()
 	host.mu.Unlock()
 
-	host.monitorProcessExit(context.Background(), process, "openai-codex", nil, nil)
+	host.monitorProcessExit(process, "openai-codex", nil, nil)
 
 	select {
 	case stopReason := <-done:
@@ -1897,7 +1897,7 @@ func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t
 	host.intentionalPromptCancelProcessStop = true
 	host.mu.Unlock()
 
-	host.monitorProcessExit(context.Background(), process, "claude-code", nil, nil)
+	host.monitorProcessExit(process, "claude-code", nil, nil)
 
 	host.mu.RLock()
 	restartCount := host.restartCount
@@ -1948,7 +1948,6 @@ func TestSessionHost_MonitorIntentionalPromptCancelReportsIdleAfterSuccessfulRes
 	close(oldProc.waitCh)
 
 	host.monitorProcessExit(
-		context.Background(),
 		oldProc,
 		"claude-code",
 		&agentCredential{credentialKind: "api-key"},
@@ -1992,7 +1991,7 @@ func TestSessionHost_MonitorUnexpectedExitConsumesRestartBudget(t *testing.T) {
 	host.restartCount = 1
 	host.mu.Unlock()
 
-	host.monitorProcessExit(context.Background(), process, "claude-code", nil, nil)
+	host.monitorProcessExit(process, "claude-code", nil, nil)
 
 	host.mu.RLock()
 	restartCount := host.restartCount

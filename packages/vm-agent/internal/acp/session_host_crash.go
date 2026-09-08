@@ -235,7 +235,7 @@ func (h *SessionHost) watchCrashRecovery(timeout time.Duration, notify recoveryN
 	defer timer.Stop()
 
 	select {
-	case <-h.ctx.Done():
+	case <-h.lifecycleContext().Done():
 		return
 	case <-timer.C:
 	}

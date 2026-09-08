@@ -21,6 +21,17 @@ This rule is not limited to MCP tools. Any control-plane request that waits sync
 
 On 2026-07-18/19, ALL production instant (cf-container) sessions failed for ~28 hours: the standalone vm-agent clones the repository synchronously inside the control plane's create-workspace request (`handleStandaloneWorkspaceCreate`), which ran under the interactive 30s `DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS`. When accidental auto-commits of `.codex/` runtime state tripled the repo pack to 371 MiB, full-clone time crossed 30s on the container's fractional vCPU and every instant launch died with `Request timed out after 30000ms` (or worse: stuck `queued` when the client disconnected). Two margins eroded silently — clone cost grew with unmonitored repo history, and the fixed interactive deadline had no headroom. Fix: partial clone (`--filter=blob:none`, `STANDALONE_CLONE_FILTER`) making clone cost proportional to the working tree, plus a dedicated `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` (default 120s) budget. See `tasks/archive/2026-07-19-fix-instant-container-clone-timeout.md`.
 
+## Related: A Goroutine That Outlives Its Request
+
+The Dexxy lesson below is about *accepted work being cut off mid-flight* by the
+request deadline it inherited. Its sibling — a goroutine that captures a request
+context and then uses it for a NEW operation minutes or hours later, which can
+therefore never succeed at all — is
+`.claude/rules/71-request-context-must-not-outlive-its-request.md`. If you are
+here because you found a `context canceled` in vm-agent, check which of the two
+shapes you have: work that started under the request, or work that started after
+it.
+
 On 2026-06-25, Dexxy compose publishing failed twice on node `01KVY98XSGTJ0Q728TF5P4Z8XS` around 125 seconds after `host build starting`: first during `docker save` with `signal: killed`, then during R2 upload with `context canceled`. The likely cause was the synchronous MCP API to Cloudflare-proxied VM HTTP request and the VM handler deriving its long-running build context from `r.Context()`. Moving the compose file later may have made one run faster, but it was not the architectural fix.
 
 On 2026-06-25, Dexxy deployment apply also failed while loading an R2-backed docker-save artifact because the deploy engine's default `http.Client{Timeout: 30s}` bounded the entire streamed response body read. Large artifact downloads must use transport phase timeouts and an idle body-read watchdog, not a total client timeout.

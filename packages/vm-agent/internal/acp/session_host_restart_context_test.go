@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // The incident this file pins (SAM idea 01M0644866Q0000M4HP39WNCZW, 2026-09-08):
@@ -34,22 +36,45 @@ import (
 // then kill the caller's context before triggering the restart.
 
 // restartContextProbe records the context handed to each agent-startup attempt.
-// RuntimeAssetsProvider is the production hook that receives the exact startup
-// context, standing in for the container exec / auth-file writes that actually
-// failed in the incident.
+//
+// RuntimeAssetsProvider is a real production hook that receives the startup
+// context unmodified, which makes it a valid observation point for "what context
+// did this attempt get". It is NOT the incident's own failure site: that was
+// injectAuthFileCredential -> writeAuthFileToContainer -> execInContainer, which
+// needs agentType=openai-codex AND a resolved container. `ctx` is threaded as one
+// unmodified value from startAgentWithSessionMode through both, so observing it
+// here proves the same property — but a future change that re-derives a context
+// specifically inside the codex/container branch would not be caught here. That
+// gap is recorded in the task file.
 type restartContextProbe struct {
-	mu       sync.Mutex
-	errs     []error
-	failFrom int   // 1-based attempt from which to fail; 0 disables
-	failWith error // error returned once failFrom is reached
+	mu        sync.Mutex
+	errs      []error
+	deadlines []time.Duration // 0 = attempt context had no deadline
+	failFrom  int             // 1-based attempt from which to fail; 0 disables
+	failWith  error           // error returned once failFrom is reached
+
+	// onAttempt, when set, runs INSIDE the startup call for the given 1-based
+	// attempt, holding that attempt's own context. It is the only way to observe
+	// the attempt context while it is still live.
+	onAttempt func(attempt int, ctx context.Context)
 }
 
 func (p *restartContextProbe) provider(ctx context.Context) (RuntimeAssets, error) {
+	var remaining time.Duration
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining = time.Until(deadline)
+	}
 	p.mu.Lock()
 	p.errs = append(p.errs, ctx.Err())
+	p.deadlines = append(p.deadlines, remaining)
 	attempt := len(p.errs)
 	failFrom, failWith := p.failFrom, p.failWith
+	onAttempt := p.onAttempt
 	p.mu.Unlock()
+
+	if onAttempt != nil {
+		onAttempt(attempt, ctx)
+	}
 
 	// Model ctx-sensitive startup I/O: a cancelled context fails the attempt,
 	// exactly as `docker exec ... mkdir -p` did in production.
@@ -67,6 +92,14 @@ func (p *restartContextProbe) attempts() []error {
 	defer p.mu.Unlock()
 	out := make([]error, len(p.errs))
 	copy(out, p.errs)
+	return out
+}
+
+func (p *restartContextProbe) attemptDeadlines() []time.Duration {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]time.Duration, len(p.deadlines))
+	copy(out, p.deadlines)
 	return out
 }
 
@@ -201,7 +234,9 @@ func startAgentThroughDoomedRequest(t *testing.T, host *SessionHost, restore boo
 // context that dies long before the restart does (.claude/rules/61): the HTTP
 // snapshot restore (Server.handleRestoreAgentSession -> RestoreAgent, the path
 // both incident sessions took) and the viewer WebSocket (Gateway.handleMessage
-// -> SelectAgent, which dies when the browser tab closes).
+// -> SelectAgent, which dies when the browser tab closes). They converge on the
+// same selectAgent body, so this is "both real callers supply their own doomed
+// context", not two structurally different propagation paths.
 func TestSessionHost_RestartAfterCancelSurvivesFinishedCallerRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -318,6 +353,13 @@ func TestSessionHost_FailedRestartReportsErrorActivity(t *testing.T) {
 		t.Fatalf("activities = %v, want no idle report — no usable agent exists", cp.activities())
 	}
 
+	// Exactly one: finishCrashRecoveryFailure and completeActivePromptFailure sit
+	// on the same branch, so a future refactor that adds a second report here
+	// must be deliberate.
+	if got := cp.count("error"); got != 1 {
+		t.Fatalf("error activity reports = %d, want exactly 1 (activities = %v)", got, cp.activities())
+	}
+
 	payload, ok := cp.lastWith("error")
 	if !ok {
 		t.Fatal("no error activity payload recorded")
@@ -389,7 +431,10 @@ func TestSessionHost_MonitorSkipsRestartAfterStop(t *testing.T) {
 	// if the host had detached it first.
 	_ = process.Stop()
 
-	// Give the monitor more than its restart delay to misbehave.
+	// Longer than the monitor's 100ms + 1s restart delay, so a restart would have
+	// been observable. In practice Stop() detaches the process first and the
+	// monitor exits via the pre-existing "process replaced" guard well before
+	// that; this asserts the outcome, not which guard produced it.
 	time.Sleep(1500 * time.Millisecond)
 
 	if attempts := probe.attempts(); len(attempts) != 1 {
@@ -403,3 +448,173 @@ func TestSessionHost_MonitorSkipsRestartAfterStop(t *testing.T) {
 // errRestartProbeFailure is a non-context startup failure, so the error-activity
 // test cannot pass merely because the context was cancelled.
 var errRestartProbeFailure = errors.New("runtime assets unavailable for restart")
+
+// TestSessionHost_RestartAttemptIsBoundedButDoesNotLeakIntoNextMonitor covers
+// the other half of the context-ownership contract, and the trap that makes it
+// easy to get wrong (rule 71, requirement 4).
+//
+// The restart attempt must be BOUNDED: monitorProcessExit holds h.mu for its
+// whole duration and execInContainer has no timeout of its own, so an unbounded
+// attempt against a wedged container runtime would block Stop() forever.
+//
+// But that bound must be derived DOWNWARD from the host lifecycle and dropped
+// when the attempt resolves. If the bounded context were handed to the
+// replacement process's monitor, the host would silently lose the ability to
+// restart again once the timeout elapsed — trading the original wedge for a
+// slower one. A deliberately short timeout plus a second Stop→restart cycle
+// after it has elapsed is what discriminates the two.
+func TestSessionHost_RestartAttemptIsBoundedButDoesNotLeakIntoNextMonitor(t *testing.T) {
+	installFakeAgentBinary(t, "claude-agent-acp")
+	cp := newRestartControlPlane(t)
+	acpServer := newFakeACPServer(true, false)
+	probe := &restartContextProbe{}
+	host := newRestartTestHost(t, cp, acpServer, probe)
+	const attemptTimeout = 2 * time.Second
+	host.config.RestartAttemptTimeout = attemptTimeout
+	defer host.Stop()
+
+	startAgentThroughDoomedRequest(t, host, true)
+
+	// First Stop -> restart.
+	host.StopProcessForPromptCancel()
+	waitFor(t, 8*time.Second, func() bool { return len(probe.attempts()) >= 2 })
+	waitFor(t, 8*time.Second, func() bool { return host.Status() == HostReady })
+
+	deadlines := probe.attemptDeadlines()
+	if deadlines[0] != 0 {
+		t.Fatalf("initial startup deadline = %s, want none (it belongs to the caller's request)", deadlines[0])
+	}
+	if deadlines[1] <= 0 || deadlines[1] > attemptTimeout {
+		t.Fatalf("restart attempt deadline = %s, want a bound in (0, %s]", deadlines[1], attemptTimeout)
+	}
+
+	// Let the first attempt's bound elapse. If it leaked into the replacement
+	// process's monitor, the next restart starts already expired.
+	time.Sleep(attemptTimeout + 500*time.Millisecond)
+
+	// Second Stop -> restart, on the process installed by the first restart.
+	host.StopProcessForPromptCancel()
+	waitFor(t, 8*time.Second, func() bool { return len(probe.attempts()) >= 3 })
+
+	attempts := probe.attempts()
+	if attempts[2] != nil {
+		t.Fatalf("second restart context err = %v, want nil — the first attempt's timeout leaked into the replacement monitor", attempts[2])
+	}
+	waitFor(t, 8*time.Second, func() bool { return host.Status() == HostReady })
+	if cp.count("error") != 0 {
+		t.Fatalf("activities = %v, want no error report across two restart cycles", cp.activities())
+	}
+}
+
+// TestSessionHost_RestartAttemptTimeoutIsConfigurable pins the configured value
+// as the source of the bound (Constitution Principle XI: no hardcoded limits).
+func TestSessionHost_RestartAttemptTimeoutIsConfigurable(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig:     GatewayConfig{SessionID: "s", WorkspaceID: "w"},
+		MessageBufferSize: 8,
+		ViewerSendBuffer:  8,
+	})
+	defer host.Stop()
+	if got := host.restartAttemptTimeout(); got != config.DefaultACPRestartAttemptTimeout {
+		t.Fatalf("default restart attempt timeout = %s, want %s", got, config.DefaultACPRestartAttemptTimeout)
+	}
+
+	host.config.RestartAttemptTimeout = 90 * time.Second
+	if got := host.restartAttemptTimeout(); got != 90*time.Second {
+		t.Fatalf("configured restart attempt timeout = %s, want 90s", got)
+	}
+}
+
+// TestSessionHost_RestartContextIsDerivedFromHostLifecycle is the control that
+// actually discriminates the fix's other half.
+//
+// It exists because the obvious controls do not. Asserting that
+// lifecycleContext() is cancelled by Stop() only tests the accessor in
+// isolation, and asserting that a stopped host performs no restart passes on the
+// pre-existing "process replaced" guard in monitorProcessExit — neither notices
+// if the restart call site is changed to context.Background(). Verified: making
+// that exact substitution leaves the whole package suite green.
+//
+// A genuine "Stop() cancels a restart mid-flight" race is unreachable today
+// (h.mu is held for the whole attempt and Stop() needs it), so this asserts the
+// property that guard would depend on instead: the attempt context is a CHILD of
+// the host lifecycle context, and therefore observes host teardown. The attempt
+// bound is set far longer than the test, so the only thing that can end the
+// context quickly is the lifecycle parent.
+func TestSessionHost_RestartContextIsDerivedFromHostLifecycle(t *testing.T) {
+	installFakeAgentBinary(t, "claude-agent-acp")
+	cp := newRestartControlPlane(t)
+	acpServer := newFakeACPServer(true, false)
+	probe := &restartContextProbe{}
+	host := newRestartTestHost(t, cp, acpServer, probe)
+	host.config.RestartAttemptTimeout = 10 * time.Minute
+	defer host.Stop()
+
+	const observeWindow = 2 * time.Second
+	observed := make(chan error, 4)
+	probe.onAttempt = func(attempt int, ctx context.Context) {
+		if attempt != 2 { // 1 = initial start, 2 = the restart
+			return
+		}
+		// Tear the host down while this restart attempt is in flight.
+		host.cancel()
+		select {
+		case <-ctx.Done():
+			observed <- ctx.Err()
+		case <-time.After(observeWindow):
+			observed <- nil
+		}
+	}
+
+	startAgentThroughDoomedRequest(t, host, true)
+	host.StopProcessForPromptCancel()
+
+	select {
+	case err := <-observed:
+		if err == nil {
+			t.Fatalf("restart attempt context did not observe host teardown within %s — it is not derived from the host lifecycle context", observeWindow)
+		}
+	case <-time.After(15 * time.Second):
+		// Liveness: distinguishes "the restart never happened" from "the context
+		// was not derived", which would otherwise look identical.
+		t.Fatalf("restart never reached the startup probe (attempts = %d)", len(probe.attempts()))
+	}
+}
+
+// TestSessionHost_FailedCrashRecoveryRestartReportsErrorActivity covers the
+// second flavour of the restart-failure branch. The reportActivity("error") call
+// is unconditional, but the crash-recovery flavour runs extra teardown around it
+// (finishCrashRecoveryFailure, clearCrashRecoveryLocked, the prompt terminal
+// callback), so this proves that teardown neither suppresses the report nor
+// duplicates it.
+func TestSessionHost_FailedCrashRecoveryRestartReportsErrorActivity(t *testing.T) {
+	cp := newRestartControlPlane(t)
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+	host.config.ProjectID = "test-project"
+	host.config.NodeID = "test-node"
+	host.config.ControlPlaneURL = cp.server.URL
+	host.config.CallbackToken = "test-token"
+	host.config.HTTPClient = cp.server.Client()
+
+	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, true)
+	completed := startRecoveryMonitor(t, host, oldProc, "claude-code", func(*agentStartup) (agentProcess, error) {
+		return nil, errors.New("spawn failed")
+	})
+	finishWithPeerDisconnect(host)
+
+	expectCompletion(t, completed, fatalErrorStopReason, 5*time.Second, "failed crash-recovery restart did not report terminal error")
+
+	waitFor(t, 8*time.Second, func() bool { return cp.count("error") >= 1 })
+	if got := cp.count("error"); got != 1 {
+		t.Fatalf("error activity reports = %d, want exactly 1 (activities = %v)", got, cp.activities())
+	}
+	if cp.count("idle") != 0 {
+		t.Fatalf("activities = %v, want no idle report — the crash recovery failed", cp.activities())
+	}
+	if host.Status() != HostError {
+		t.Fatalf("status = %s, want HostError", host.Status())
+	}
+}
