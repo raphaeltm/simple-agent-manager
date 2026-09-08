@@ -246,6 +246,8 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 
 ## Recent Changes
 
+- Compact archive shards: opt-in `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` pins lossless `r2-gzip-v1` raw history while keeping complete grouped text/search and metadata in SQL. `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` (250000), `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` (32) and `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS` (10000) bound admission/object I/O; see compact archive configuration for estimated versus measured costs and whole-session deletion limits. Legacy archives remain readable and unchanged.
+
 Use the `/changelog` skill for structured queries.
 
 - codex-astra-runtime-selection: Codex ACP is upgraded 1.8.0→1.10.0 and its Codex companion 0.153.2→0.153.4 across the canonical install manifest, VM-agent installer, and cf-container runtime image; the sandbox image's CLI-only pin is aligned to 0.153.4. VM-agent now validates both exact executable versions and supplies `CODEX_PATH=codex`, ensuring the adapter launches the explicitly pinned companion rather than a nested dependency resolved relative to itself. An explicit Codex profile model is applied through ACP `session/set_config_option`; rejection now fails session establishment with the requested model in the diagnostic instead of silently retaining the adapter default. A wire-level ACP regression test pins both the successful `gpt-6-astra` request and the fail-closed case. Process fix: `.claude/rules/23-cross-boundary-contract-tests.md` now treats adapter/companion resolution as one runtime contract.

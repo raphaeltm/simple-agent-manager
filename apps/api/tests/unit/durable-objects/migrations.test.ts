@@ -529,7 +529,9 @@ describe('DO Migrations', () => {
       // terminal session reconcile marker: 1 from migration 041
       // chat search materialization state: 1 from migration 042
       // terminal archive sharding bridge: 3 from migration 043
-      expect(indexes).toHaveLength(90);
+      // compact raw chunk time ranges: 1 from migration 045
+      expect(indexes).toHaveLength(91);
+      expect(indexes.some((query) => query.includes('idx_archive_raw_chunk_time'))).toBe(true);
     });
   });
 });

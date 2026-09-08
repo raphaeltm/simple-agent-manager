@@ -325,9 +325,9 @@ export function persistMessageBatch(
  * We leave a 2 MiB margin for the session envelope, pagination metadata,
  * and JSON structural overhead.
  */
-const RPC_SIZE_BUDGET_BYTES = 30 * 1024 * 1024; // 30 MiB
+export const RPC_SIZE_BUDGET_BYTES = 30 * 1024 * 1024; // 30 MiB
 
-function estimateRowBytes(row: Record<string, unknown>): number {
+export function estimateRowBytes(row: Record<string, unknown>): number {
   let size = 64; // object overhead + fixed fields (id, role, created_at, sequence)
   const content = row.content;
   if (typeof content === 'string') size += content.length * 2; // UTF-16 chars
@@ -372,6 +372,30 @@ export function getMessages(
   params.push(limit + 1);
 
   const rows = sql.exec(query, ...params).toArray();
+  return formatMessageRows(rows, sessionId, limit, compact, order, compactOptions);
+}
+
+function parseListedMessage(
+  row: Record<string, unknown>, sessionId: string, compact: boolean, compactOptions?: CompactMessageOptions
+): Record<string, unknown> | null {
+  try {
+    return compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row);
+  } catch (e) {
+    log.warn('messages.list_row_skipped', {
+      rowId: typeof row.id === 'string' ? row.id : null,
+      rowSessionId: typeof row.session_id === 'string' ? row.session_id : null,
+      requestedSessionId: sessionId,
+      compact,
+      error: String(e),
+    });
+  }
+  return null;
+}
+
+export function formatMessageRows(
+  rows: Record<string, unknown>[], sessionId: string, limit: number,
+  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
+): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;
 
@@ -400,25 +424,15 @@ export function getMessages(
 
   const trimmedRows = candidateRows.slice(0, safeCount);
 
-  const orderedRows = order === 'desc' ? trimmedRows.reverse() : trimmedRows;
+  const orderedRows = trimmedRows;
+  if (order === 'desc') orderedRows.reverse();
   const messages: Record<string, unknown>[] = [];
   let skipped = 0;
 
   for (const row of orderedRows) {
-    try {
-      messages.push(
-        compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row)
-      );
-    } catch (e) {
-      skipped++;
-      log.warn('messages.list_row_skipped', {
-        rowId: typeof row.id === 'string' ? row.id : null,
-        rowSessionId: typeof row.session_id === 'string' ? row.session_id : null,
-        requestedSessionId: sessionId,
-        compact,
-        error: String(e),
-      });
-    }
+    const message = parseListedMessage(row, sessionId, compact, compactOptions);
+    if (message) messages.push(message);
+    else skipped++;
   }
 
   if (skipped > 0) {
