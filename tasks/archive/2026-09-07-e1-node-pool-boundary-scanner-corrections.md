@@ -203,6 +203,26 @@ check does not claim a new current-head CI result; final checks, live lifecycle
 acceptance, cleanup and release remain recorded in the parent compatibility task
 and PR #2030.
 
+### Final integration completion review — September 8
+
+The task-completion review confirms the scanner corrections, discriminating
+fixtures, zero-violation assertion and blocking CI integration are implemented.
+All executed CI/Sonar checks passed on integrated runtime candidate `c6d1a987f`;
+the documentation-only continuation at `d36e45450` still requires current-head
+checks. The parent also completed its fresh supported capture/delete/wake on c6
+with both original marker readbacks and the saved reservation after a profile
+default change. This satisfies the previously pending live recovery proof without
+relabeling the historical scanner counts above as current results.
+
+No scanner-slice implementation or validation gap remains. The coordinator has
+confirmed final reviewed marker/terminal evidence and complete owned-resource
+cleanup, with unrelated sleeping sessions and the pool baseline preserved. Final
+completion validation A–F passes for the integrated implementation. This scanner
+record is archived with the compatibility and scheduler tasks under /do Phase 4.
+Final documentation/evidence-head CI, final PR evidence publication, merge and
+production monitoring remain pending in PR #2030. Archive records implementation
+and validation closure; no release success is claimed here.
+
 ## Validation
 
 Commands are listed with their results in the completion report. Each guard was

@@ -245,10 +245,14 @@ Intentional non-sleep destroyers:
       screenshots in PR #2030 and the compatibility completion task; independently
       review and run focused validation for the continuation fixes through
       `c6d1a987f`. CodeRabbit is waived for #2030 because of its file limit.
-- [ ] Complete final current-head quality/CI checks and screenshot evidence,
-      staging on a pinned candidate, confirmed owned-resource cleanup with zero
-      staging VMs at rest, final completion review, merge and production deployment
-      monitoring.
+- [x] Complete reviewed screenshot evidence, staging on the pinned runtime
+      candidate, confirmed owned-resource cleanup with zero staging VMs at rest
+      and final completion validation.
+- [ ] Complete final documentation/evidence-head CI, final PR evidence publication,
+      merge and production deployment monitoring in PR #2030.
+- [x] Verify the corrected candidate's full supported sleep, node deletion and
+      same-conversation wake with original repository/home marker readbacks and
+      saved resources after profile defaults change; see the final checkpoint below.
 
 ## Acceptance Criteria
 
@@ -302,5 +306,45 @@ failed and in-flight snapshots without claiming they are eligible to wake;
 explicit workspace deletion still removes snapshot/R2 state. Ten real Workers/D1
 tests passed, including the reproduced failure, cleared chat pointers during
 handoff, waking at the attempt limit and explicit deletion. Independent review,
-API typecheck and scoped ESLint passed. A fresh supported capture, node deletion
-and wake on the corrected staging build, final cleanup and release remain pending.
+API typecheck and scoped ESLint passed. The fresh supported lifecycle subsequently
+passed on the corrected staging build as recorded below; cleanup is confirmed
+in the closure record, while release remains pending.
+
+### Final lifecycle and completion checkpoint
+
+Runtime candidate `c6d1a987f` passed deployment/smoke run `34262971288` and all
+executed PR CI/Sonar checks. Session `fb2b4d63-bbad-4419-809e-6bb5d2d22dbc`
+completed normal sleep (200), strict node deletion (409 until proof, then 200)
+with the snapshot's source workspace reference intact, and normal wake (202).
+The fresh replacement VM ran the same c6 binary. The resumed conversation read
+both original `PR2030-FINAL-1788892522814` repository/home markers and returned
+`WOKE-OK-1788893316876`; D1 confirmed recovery restored. Its saved 1024 MB /
+250 CPU-millis reservation survived the profile default change to 2 GB, and native
+CX23 pricing remained 8800 micros/hour.
+
+The final task-completion review reports A–F PASS for implementation and coverage,
+including real D1 foreign keys and the full live recovery path. Its detailed
+evidence and remaining release checklist are in the compatibility completion task.
+No extra implementation omission was found. The separate closure evidence below
+confirms terminal checks and cleanup; final-head CI, final PR evidence publication,
+merge and production monitoring remain pending.
+
+
+### Cleanup and archive — September 8
+
+Supported stop/delete operations removed the fresh snapshot, all four owned
+workspaces, replacement node, isolated profile and project. Final D1 checks found
+zero owned projects, workspaces, snapshots, profiles, tasks, session summaries and
+live nodes; all 18 owned R2 prefixes and seven DNS names were empty/absent. Three
+deleted node audit rows retain termination proof intentionally. Both unrelated
+sleeping workspaces were preserved. Pool revision 15, balanced/queue and all 135
+candidate IDs/statuses match baseline, with nine active offerings. Restored
+desktop/mobile terminal execution and all four restored marker/terminal images
+were verified and reviewed.
+
+Final completion validation A–F: PASS; no implementation or verification gap
+remains. Archived with the compatibility and E1 scanner records under /do Phase 4.
+Final documentation/evidence-head CI, final PR evidence publication, merge and
+production deployment monitoring remain pending in
+[PR #2030](https://github.com/raphaeltm/simple-agent-manager/pull/2030); archive is
+implementation/validation closure, not a claim that release has completed.

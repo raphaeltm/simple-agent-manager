@@ -70,3 +70,19 @@ Sleep returned 200 with available, non-degraded snapshot `01M215AEPJBTRVVPQCFT7S
 One wake prompt was accepted with delivery `01M215KKYAARTRYB7FM9JS4B4P`; recovery claimed the snapshot and created replacement node `01M215M9Z05Q8B72NB2SA082VQ`. Final restored marker readback and saved-reservation verification remain pending at this checkpoint.
 
 The earlier orphaned snapshot was separately removed by [guarded maintenance run 34264932643](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34264932643), after a mutation-free preview. Exactly its three hash-verified objects and one unchanged snapshot row were deleted; independent R2 listing and D1 checks confirmed absence. No recovery metadata was rearmed.
+
+## Final wake acceptance
+
+The single queued wake prompt was accepted by the recovered agent at 18:58:33 UTC. The agent read both original paths without modification and returned `PR2030-FINAL-1788892522814` from each, followed by `WOKE-OK-1788893316876`. Replacement workspace `01M215Y4QTQJNJBH0GE2MKHYNG` runs on a distinct CX23 with the exact c6 VM binary and hourly native price 8800 micros. Its saved reservation remains 250 CPU milliseconds / 1024 MB RAM / 40960 MB disk, despite the profile's 2 GB default. Recovery was observed as waking attempt 1 and then restored; the successful transition resets the attempt counter to 0.
+
+`final-restored-markers-desktop.png` / `final-restored-markers-mobile.png` show the authenticated readback in the same conversation. Both were opened and reviewed. `final-restored-terminal-desktop.png` / `final-restored-terminal-mobile.png` show successful actual terminal command outputs after recovery, with mobile overflow false. `final-lifecycle.json` contains the bounded IDs, timestamps, marker strings and saved reservations used for this proof.
+
+Supported session stop subsequently returned 200 and removed the fresh snapshot metadata. Remaining owned workspace/node/project cleanup is tracked separately below. No manual recovery metadata edits or duplicate wake prompts were used.
+
+## Cleanup accepted
+
+Normal API deletion confirmed removal of all four remaining owned workspace records, the replacement VM, the isolated profile, and the final test project. Both owned projects are absent. Final D1 counts are zero for owned workspaces, snapshots, profiles, tasks and session summaries, and zero for live staging nodes. All 18 inventoried R2 prefixes are empty. Seven checked owned node/workspace DNS names are absent. The two unrelated sleeping workspaces remain sleeping. Pool revision 15, balanced/queue policy and all 135 candidate ID/status pairs match the baseline, with nine active offerings.
+
+Three older node rows remain as deleted lifecycle audit records with termination proof; normal ownership lookup intentionally excludes deleted nodes and returns 404. These are retained records, not live VMs. Project deletion uses normal API storage semantics; no direct purge of ProjectData Durable Object transcript storage is claimed. `final-cleanup.json` records the bounded final checks.
+
+Runtime code, dependencies, infrastructure and workflows remain identical to staged `c6d1a987f`; subsequent commits contain documentation/evidence only. Final-head CI and authorized merge/production monitoring are tracked in PR #2030.

@@ -1,0 +1,133 @@
+{
+  "databaseCounts": {
+    "projects": 0,
+    "workspaces": 0,
+    "snapshots": 0,
+    "profiles": 0,
+    "tasks": 0,
+    "session_summaries": 0,
+    "live_nodes": 0
+  },
+  "r2Prefixes": [
+    {
+      "prefix": "session-snapshots/0d88426a-a997-4a51-8beb-3b2f65ec9e0e/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/9fa25a37-69e6-4efa-97e4-55b770d7d5c4/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/2f239f58-b75e-4762-82c5-3668c294004d/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/ef07c74a-54c5-444a-a2ee-54d4ce21d939/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/b14a045a-881d-4047-b20c-0ce22a53ae43/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/c7baf969-40bd-40c6-b1a6-b95fbd8352d9/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/81c601af-3fc4-4886-b006-c585be20f1be/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/f8055203-2084-4041-9688-969f3f867b46/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/9b9286d1-adb6-4ba0-b74b-57082263cf41/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/233950d8-67a3-4498-b0d9-e92a584dd869/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/e0ea37d2-4997-4e04-a9c8-6707e6e2fed0/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/cfa8c831-0da2-47a7-8e63-04d1c5f6a552/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/6998fb29-c42d-4ce1-ac02-7c5a73d7c3f9/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/bb03e84d-7778-412d-baf2-aec372da2364/",
+      "count": 0
+    },
+    {
+      "prefix": "session-snapshots/fb2b4d63-bbad-4419-809e-6bb5d2d22dbc/",
+      "count": 0
+    },
+    {
+      "prefix": "library/01M201HEKK895BY9Q7TYSJA4WY/",
+      "count": 0
+    },
+    {
+      "prefix": "project-data/tool-payloads/01M201HEKK895BY9Q7TYSJA4WY/",
+      "count": 0
+    },
+    {
+      "prefix": "project-data/session-archives/01M201HEKK895BY9Q7TYSJA4WY/",
+      "count": 0
+    }
+  ],
+  "dns": [
+    {
+      "name": "01m214wyj3vmvk7rrqk8w3jrv5.vm.sammy.party",
+      "count": 0
+    },
+    {
+      "name": "01m215m9z05q8b72nb2sa082vq.vm.sammy.party",
+      "count": 0
+    },
+    {
+      "name": "01m20c2px4k69wd7fxy6mpes9q.vm.sammy.party",
+      "count": 0
+    },
+    {
+      "name": "01m20kqdhx8m3yp89q6qtqp6s1.vm.sammy.party",
+      "count": 0
+    },
+    {
+      "name": "01m20qa7stjrdxvk2j6k0585ac.vm.sammy.party",
+      "count": 0
+    },
+    {
+      "name": "ws-01m2154kb0jnb384pgvdm50z7k.sammy.party",
+      "count": 0
+    },
+    {
+      "name": "ws-01m215y4qtqjnjbh0ge2mkhyng.sammy.party",
+      "count": 0
+    }
+  ],
+  "preservedSleepingWorkspaces": [
+    "01M1N2MGWMA0BYCRB250FT1907",
+    "01M1N3BWQJH10DQW564SV7BB65"
+  ],
+  "pool": {
+    "revision": 15,
+    "strategy": "balanced",
+    "exhaustionPolicy": "queue",
+    "candidateCount": 135,
+    "active": 9,
+    "matchesBaseline": true
+  },
+  "retainedDeletedNodeAuditIds": [
+    "01M20C2PX4K69WD7FXY6MPES9Q",
+    "01M20KQDHX8M3YP89Q6QTQP6S1",
+    "01M20QA7STJRDXVK2J6K0585AC"
+  ],
+  "retainedNodeNote": "Pre-existing deleted lifecycle audit rows retain runtime termination proof; the normal API excludes deleted nodes. No live runtime remains."
+}

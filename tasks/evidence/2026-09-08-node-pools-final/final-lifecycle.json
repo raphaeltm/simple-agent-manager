@@ -1,0 +1,120 @@
+{
+  "startedAt": 1788892522814,
+  "marker": "PR2030-FINAL-1788892522814",
+  "submissionStatus": 202,
+  "taskId": "01M214VD60962FHVV1FE2ZBGJT",
+  "sessionId": "fb2b4d63-bbad-4419-809e-6bb5d2d22dbc",
+  "branchName": "sam/bounded-staging-verification-create-2zbgjt",
+  "initialNodeId": "01M214WYJ3VMVK7RRQK8W3JRV5",
+  "initialAgentVersion": "c6d1a987fc558b22199ea1b80a90f48df66671c3",
+  "initialWorkspaceId": "01M2154KB0JNB384PGVDM50Z7K",
+  "initialReservation": {
+    "cpuMillis": 250,
+    "memoryMb": 1024,
+    "diskMb": 40960,
+    "exclusiveNode": false,
+    "maxCoTenants": 3,
+    "source": "agent-profile",
+    "sourceId": "01M210FVGNGCYGAX1ZB64R8GQB",
+    "version": 2,
+    "fieldProvenance": {
+      "minVcpu": {
+        "source": "agent-profile",
+        "sourceId": "01M210FVGNGCYGAX1ZB64R8GQB",
+        "value": 0.25
+      },
+      "minMemoryGb": {
+        "source": "agent-profile",
+        "sourceId": "01M210FVGNGCYGAX1ZB64R8GQB",
+        "value": 1
+      },
+      "maxCoTenants": {
+        "source": "project",
+        "sourceId": "01M201HEKK895BY9Q7TYSJA4WY",
+        "value": 3
+      },
+      "minDiskGb": {
+        "source": "platform",
+        "sourceId": "platform",
+        "value": 40
+      },
+      "exclusiveNode": {
+        "source": "platform",
+        "sourceId": "platform",
+        "value": false
+      }
+    },
+    "diagnostics": []
+  },
+  "initialMarkersReadbackVerified": true,
+  "initialTerminalDesktopMobileVerified": true,
+  "sleepStatus": 200,
+  "sleepResponse": {
+    "status": "sleeping",
+    "workspaceId": "01M2154KB0JNB384PGVDM50Z7K",
+    "chatSessionId": "fb2b4d63-bbad-4419-809e-6bb5d2d22dbc",
+    "snapshotExpiresAt": "2026-09-15T18:45:01.096Z"
+  },
+  "sleepAt": 1788893110165,
+  "snapshotId": "01M215AEPJBTRVVPQCFT7SFVT8",
+  "profileDefaultMemoryGbBeforeWake": 2,
+  "initialNodeDeleted": true,
+  "initialNodeDeletedAt": 1788893233796,
+  "snapshotWorkspaceReferencePreserved": true,
+  "wakeSubmittedAt": 1788893316876,
+  "wakeStatus": 202,
+  "wakeResponse": {
+    "accepted": true,
+    "status": "queued",
+    "deliveryId": "01M215KKYAARTRYB7FM9JS4B4P",
+    "messageId": "01M215KKYAARTRYB7FM9JS4B4P"
+  },
+  "recoveryTaskId": "01M215KNSRNCAE949DAEYWN18N",
+  "recoveryNodeId": "01M215M9Z05Q8B72NB2SA082VQ",
+  "recoveryWorkspaceId": "01M215Y4QTQJNJBH0GE2MKHYNG",
+  "recoveryReservation": {
+    "version": 2,
+    "cpuMillis": 250,
+    "memoryMb": 1024,
+    "diskMb": 40960,
+    "exclusiveNode": false,
+    "maxCoTenants": 3,
+    "source": "agent-profile",
+    "sourceId": "01M210FVGNGCYGAX1ZB64R8GQB",
+    "fieldProvenance": {
+      "minVcpu": {
+        "source": "agent-profile",
+        "sourceId": "01M210FVGNGCYGAX1ZB64R8GQB",
+        "value": 0.25
+      },
+      "minMemoryGb": {
+        "source": "agent-profile",
+        "sourceId": "01M210FVGNGCYGAX1ZB64R8GQB",
+        "value": 1
+      },
+      "minDiskGb": {
+        "source": "platform",
+        "sourceId": "platform",
+        "value": 40
+      },
+      "exclusiveNode": {
+        "source": "platform",
+        "sourceId": "platform",
+        "value": false
+      },
+      "maxCoTenants": {
+        "source": "project",
+        "sourceId": "01M201HEKK895BY9Q7TYSJA4WY",
+        "value": 3
+      }
+    },
+    "diagnostics": []
+  },
+  "recoveryAgentVersion": "c6d1a987fc558b22199ea1b80a90f48df66671c3",
+  "recoveryMarkersReadbackVerified": true,
+  "recoveryVerifiedAt": 1788893993190,
+  "recoveryTerminalDesktopMobileVerified": true,
+  "initialTaskSubmissionState": "queued",
+  "verificationOutcome": "passed",
+  "recoveryAttemptCounterNote": "Observed 1 while waking; reset to 0 on successful restored transition."
+}

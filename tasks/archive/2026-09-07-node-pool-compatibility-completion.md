@@ -320,9 +320,11 @@ Changing a deprecated size hint cannot change a native payload or accounting.
       compatibility-window instructions tied to actual code and migration diagnostics.
       Upgrade/configuration/provider references and the stale run-dialog VM-size
       row in `guides/idea-execution.md` are updated and source-checked.
-- [ ] Capture/review Playwright screenshots of every changed surface at 375x667
+- [x] Capture/review Playwright screenshots of changed surfaces at 375x667
       and 1280x800 with normal, long, empty, many-item and error states; assert no
-      horizontal overflow. Post evidence to the single final PR.
+      horizontal overflow. The inherited gallery is published on PR #2030, and
+      final live marker/terminal pairs are reviewed in the evidence archive.
+      Publishing the final evidence revision is included in the release item below.
 
 ### E. No-leakage gates and release validation
 
@@ -339,15 +341,22 @@ Changing a deprecated size hint cannot change a native payload or accounting.
 - [x] Cover old browser/API/CLI/MCP payloads, old agents, sleeping-session wake,
       queued retry, credential/provider change and explicit modern precedence in
       capability tests through the actual entry point to provider/atomic reservation.
-- [ ] Run lint, typecheck, test, build and real Workers/D1 race/migration suites,
+- [x] Run lint, typecheck, test, build and real Workers/D1 race/migration suites,
       provider payload tests, CLI Go scenario tests/coverage and visual checks.
+      Inherited local evidence is supplemented by all executed CI/Sonar checks
+      passing on runtime candidate `c6d1a987f`.
+- [ ] Obtain green checks on the final documentation/evidence head before merge;
+      `d36e45450` has no runtime changes relative to the validated candidate.
 - [x] Complete local /do specialist reviews and correct identified implementation
       findings through `c6d1a987f`, including independent review of snapshot
       context retention on node deletion. Completion and documentation audits
       identified the remaining live validation and release gates below.
-- [ ] Reconcile final validation evidence and run task-completion validation
-      before archive.
-- [ ] Coordinate shared staging; deploy one pinned integrated candidate. Exercise
+- [x] Run task-completion validation against the integrated implementation and
+      successful final lifecycle proof. The September 8 report below finds no
+      unimplemented requirement; release bookkeeping remains explicitly pending.
+- [x] Reconcile reviewed screenshot evidence and confirmed cleanup before
+      archive. Final-head CI and PR evidence publication remain release gates.
+- [x] Coordinate shared staging; deploy one pinned integrated candidate. Exercise
       fresh/legacy requests, default credentials, native catalog edits, empty-pool
       failure, reuse/burst admission, direct workspace and safe recovery on real VMs.
       Verify heartbeat, requested resources, persisted plan and observed hardware;
@@ -356,6 +365,11 @@ Changing a deprecated size hint cannot change a native payload or accounting.
       Record the pinned deployment, actual runtime behavior and confirmed cleanup
       in PR #2030. Earlier local or partially successful staging iterations do
       not substitute for the corrected candidate's complete live verification.
+      The final `c6d1a987f` capture/delete/wake cycle now passes, including both
+      original marker readbacks and the saved reservation after defaults changed.
+      Cleanup and reviewed evidence accounting are now complete; earlier matrix
+      scenarios retain their stated provenance and are not presented as additional
+      live reruns on c6. Final PR evidence publication remains a release step.
 - [ ] Complete the single PR with concrete validation/review/screenshot evidence,
       obtain green current-head checks, then merge and monitor production deployment.
       CodeRabbit is explicitly waived for PR #2030 because of its 100-file limit.
@@ -767,7 +781,7 @@ hypothesis was independently rejected by real workerd HTTP and DO probes.
       provider evidence, then verify the original snapshot's restoration, terminal
       and pricing. The September 8 15:00 UTC checkpoint records this parent-session
       result; it is not a restoration on the final continuation build.
-- [ ] Remove every owned runtime, artifact, DNS record and test project after
+- [x] Remove every owned runtime, artifact, DNS record and test project after
       the final candidate's supported lifecycle verification.
 
 These are release gates. The task remains active; maintenance operations and earlier
@@ -827,13 +841,15 @@ internal validation error (10021); no final combined deployment success is claim
 
 - [x] Reconstruct the three unpublished corrections and obtain independent review.
       Preserved in `c1ab101da` and `475bb732c`; independent adversarial review passed.
-- [ ] Verify final candidate cold provisioning and a fresh capture/wake cycle.
+- [x] Verify final candidate cold provisioning and a fresh capture/wake cycle.
+      The final `c6d1a987f` cycle is recorded below.
       The original snapshot restored in the parent session, then became ineligible
       after successful restoration; it was removed through the supported API.
       Do not attribute a new final-build restore to that original artifact.
-- [ ] Remove owned helper/test resources, preserve pre-existing sleeping sessions,
+- [x] Remove owned helper/test resources, preserve pre-existing sleeping sessions,
       and verify pool settings remain at the baseline.
-- [ ] Update PR evidence, pass final CI/staging, merge, and verify production deployment.
+- [ ] Publish final PR evidence, pass final documentation/evidence-head CI,
+      merge, and verify production deployment. Runtime staging is complete below.
 
 
 ### Historical continuation checkpoint: `99a620928`
@@ -887,8 +903,9 @@ therefore reverted: Sleeping alone is not proof of recoverability. The fix in
 `c6d1a987f` preserves same-owner snapshot-referenced workspace context when deleting
 a node, including pending, failed and in-flight snapshots; retention does not
 assert recovery eligibility. Explicit workspace deletion remains destructive.
-A new supported capture/delete/wake cycle is required; the orphaned test snapshot is not repaired
-by manually recreating metadata and does not count as a successful recovery.
+A new supported capture/delete/wake cycle was required and is recorded below;
+the orphaned test snapshot was not repaired by manually recreating metadata and
+does not count as a successful recovery.
 
 
 The node cleanup fix now retains same-owner snapshot-referenced workspaces
@@ -898,3 +915,82 @@ available/degraded snapshots, pending capture, waking at the attempt limit,
 cleared chat pointer during recovery handoff, BYO, and explicit workspace
 snapshot/R2 deletion. The original failure was reproduced before the fix;
 independent review, API typecheck and scoped ESLint passed.
+
+### Final supported lifecycle verification: `c6d1a987f`
+
+[Deployment and smoke run 34262971288](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34262971288)
+passed, as did all executed PR CI/Sonar checks on `c6d1a987f`. The fresh initial
+and replacement VMs both reported that exact binary. Session
+`fb2b4d63-bbad-4419-809e-6bb5d2d22dbc` wrote and read
+`PR2030-FINAL-1788892522814` in both the repository and home marker files before
+normal UI sleep returned 200. Snapshot `01M215AEPJBTRVVPQCFT7SFVT8` preserved
+workspace `01M2154KB0JNB384PGVDM50Z7K` after supported node deletion: the first
+DELETE returned 409 while termination was unconfirmed, and the retry returned
+200 with the source workspace reference intact and its node reference detached.
+
+With the profile default changed to 2 GB, normal wake returned 202 and durable
+delivery `01M215KKYAARTRYB7FM9JS4B4P`. Recovery created node
+`01M215M9Z05Q8B72NB2SA082VQ` and workspace `01M215Y4QTQJNJBH0GE2MKHYNG`,
+retaining the saved 1024 MB / 250 CPU-millis reservation and profile provenance.
+The same conversation read both exact original markers and returned
+`WOKE-OK-1788893316876`. D1 confirmed `recovery_status='restored'`, cleared
+`sleeping_at`, and recovery attempts reset from one during the claim to zero
+after restoration. Native identity remained CX23 with the 8800-micro hourly price.
+
+The live evidence is retained in the final evidence directory, including
+`final-restored-markers-desktop.png` and `final-restored-markers-mobile.png`.
+The coordinator's ignored `lifecycle-state.json` and `fresh-restored-db.json`
+correlate the source/replacement identities, saved reservation and restored state;
+the durable facts above do not depend on retaining those temporary files.
+At the wake checkpoint, final terminal follow-up, screenshot publication,
+owned-resource cleanup, current-head checks, merge and production monitoring
+were still pending. The closure record below supersedes the completed items.
+
+### Completion validation after final wake — September 8
+
+This review reconciles the inherited integrated implementation/test inventory,
+the independently reviewed continuation fixes and the actual final lifecycle.
+It does not claim to rerun every earlier specialist review or test.
+
+| Check | Verdict | Evidence / remaining action |
+| --- | --- | --- |
+| A: Research → checklist | PASS | Canonical authority, clients, migration, lifecycle and recovered runtime findings have implementation coverage; incidental agent-version publication is explicitly tracked in the September 8 backlog task. |
+| B: Checklist → diff | PASS | Checked items have substantive implementation and validation evidence. Confirmed cleanup is recorded below; final-head checks, PR evidence publication and release remain visibly unchecked. |
+| C: Criteria → verification | PASS | Joined upgrade/admission/provider/D1 tests and the final real capture/delete/wake cover saved resources, native identity, context retention and same-conversation file restoration. |
+| D: UI → backend | PASS | Inherited actual-page request tests cover resource writers/native Nodes selection; the continuation removes a false display inference and reverts the unsupported Sleeping-only error suppression. |
+| E: Multi-resource selection | PASS | Provider/scope/credential discrimination and precedence remain covered by the joined matrix; final live recovery retains the saved 1 GB request despite a 2 GB profile default. |
+| F: Vertical slice | PASS | Real Workers/D1 deletion and recovery claims, plus UI → API → replacement VM → exact marker readback, cover the final failure boundary. |
+
+Overall implementation and validation verdict: PASS. No additional implementation
+gap or uncovered acceptance criterion was identified. Cleanup and reviewed evidence
+are now complete as recorded below. Archive follows the /do pre-merge workflow;
+release remains pending until final-head CI, PR evidence publication, merge and
+production monitoring complete in PR #2030.
+
+
+### Confirmed cleanup and archive — September 8
+
+The coordinator verified the restored desktop/mobile terminal through actual
+WebSocket execution with no horizontal overflow and reviewed all four restored
+marker/terminal captures. Supported session stop returned 200 and removed the
+fresh snapshot; all four owned workspace DELETEs and the replacement node DELETE
+returned 200. All 18 owned R2 prefixes (15 sessions plus library, tool-payload and
+archive prefixes) were empty. The isolated profile and project DELETEs returned
+200. Final D1 evidence shows zero owned projects, workspaces, snapshots, profiles,
+tasks, session summaries and live nodes. All seven checked owned DNS names were
+absent. Three historical node audit rows intentionally remain `deleted` with
+termination proof; they are not live resources or a cleanup failure.
+
+The two unrelated workspaces `01M1N2MGWMA0BYCRB250FT1907` and
+`01M1N3BWQJH10DQW564SV7BB65` remain Sleeping. An independent comparison of
+`pool-baseline.json` and `pool-final.json` confirms revision 15, balanced/queue,
+nine active offerings and identical IDs/statuses for all 135 candidates. D1/DNS
+absence was checked directly in `final-cleanup-db.json` and `final-dns.json`; the
+key results are retained here and in the final evidence README.
+
+Completion validation A–F: PASS. Implementation, reviews, final supported live
+lifecycle, terminal verification and owned-resource cleanup are complete. This
+record is archived under /do Phase 4 with exactly the scheduler and E1 scanner
+records. Archive does not claim release: final documentation/evidence-head CI,
+final PR evidence publication, merge and production deployment monitoring remain
+explicitly pending and owned by [PR #2030](https://github.com/raphaeltm/simple-agent-manager/pull/2030).
