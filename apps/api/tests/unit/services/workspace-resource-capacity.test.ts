@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   type ActiveWorkspaceReservationUsage,
-  emptyUsage,
   aggregateWorkspaceReservationRows,
-  hasWorkspaceReservationCapacity,
-  parseResolvedResourceReservation,
+  emptyUsage,
   evaluateWorkspaceReservationCapacity,
+  hasWorkspaceReservationCapacity,
   isResolvedResourceReservation,
   normalizeLoadAverageToCpuPercent,
+  parseResolvedResourceReservation,
   parseWorkspaceAdmissionMetrics,
   type WorkspaceAdmissionPolicy,
 } from '../../../src/services/workspace-resource-capacity';

@@ -10,6 +10,7 @@ import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/sess
 
 type D1ResultMap = {
   persistedWarmClaim?: string | null;
+  persistedWarmNode?: PlacementRowNodeSource;
   runs?: Array<{ sql: string; bound: unknown[] }>;
   preferredNode?:
     | (PlacementSeedFields & {
@@ -231,7 +232,9 @@ function createStatement(sql: string, results: D1ResultMap) {
         const claimedWarmNodeId = results.persistedWarmClaim ?? null;
         return Promise.resolve({
           claimedWarmNodeId,
-          ...(claimedWarmNodeId ? toPlacementRow(defaultPlacementNode(claimedWarmNodeId)) : {}),
+          ...(claimedWarmNodeId
+            ? toPlacementRow(results.persistedWarmNode ?? defaultPlacementNode(claimedWarmNodeId))
+            : {}),
         });
       }
       if (sql.includes('FROM nodes WHERE id = ? AND user_id = ?')) {
@@ -587,6 +590,112 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
   });
+
+  it.each([
+    { occupiedCpuMillis: 7000, canRecover: true },
+    { occupiedCpuMillis: 8000, canRecover: false },
+  ])(
+    'rechecks persisted warm-claim capacity with $occupiedCpuMillis occupied CPU millis',
+    async ({ occupiedCpuMillis, canRecover }) => {
+      const now = new Date().toISOString();
+      const nodeId = 'warm-capacity-recheck';
+      const runs: Array<{ sql: string; bound: unknown[] }> = [];
+      const request = {
+        cpuMillis: 1000,
+        memoryMb: 1024,
+        diskMb: 1024,
+        exclusiveNode: false,
+        maxCoTenants: 4,
+        source: 'platform' as const,
+        sourceId: 'platform',
+        version: 1,
+      };
+      const state = createState({
+        config: { ...createState().config, resolvedReservation: request },
+      });
+      const tryClaim = vi.fn().mockResolvedValue({
+        claimed: true,
+        state: {
+          nodeId,
+          status: 'active',
+          warmSince: null,
+          claimedByTask: state.taskId,
+        },
+      });
+      const taskPointerClearedAtRelease: boolean[] = [];
+      const releaseClaim = vi.fn().mockImplementation(async () => {
+        taskPointerClearedAtRelease.push(
+          runs.some((run) => run.sql.includes('UPDATE tasks SET claimed_warm_node_id = NULL'))
+        );
+        return {
+          released: true,
+          state: { nodeId, status: 'warm', warmSince: Date.now(), claimedByTask: null },
+        };
+      });
+      const rc = createContext({
+        persistedWarmClaim: nodeId,
+        persistedWarmNode: {
+          ...defaultPlacementNode(nodeId),
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+          last_heartbeat_at: now,
+        },
+        warmNodes: [],
+        existingNodes: [],
+        runs,
+        workspaceReservations: [
+          {
+            nodeId,
+            resolvedReservationJson: JSON.stringify({ ...request, cpuMillis: occupiedCpuMillis }),
+          },
+        ],
+        healthByNode: {
+          [nodeId]: {
+            health_status: 'healthy',
+            last_heartbeat_at: now,
+            agent_ready_at: now,
+            agent_version: 'current-sha',
+          },
+        },
+      });
+      rc.env.NODE_LIFECYCLE = {
+        idFromName: vi.fn((id: string) => id),
+        get: vi.fn(() => ({ tryClaim, releaseClaim })),
+      } as unknown as DurableObjectNamespace;
+
+      await handleNodeSelection(state, rc);
+
+      // Both cases got through identity, current authority and the lifecycle claim.
+      expect(tryClaim).toHaveBeenCalledWith(state.taskId, undefined);
+      if (canRecover) {
+        expect(releaseClaim).not.toHaveBeenCalled();
+        expect(state.stepResults).toMatchObject({
+          nodeId,
+          claimedWarmNodeId: nodeId,
+          autoProvisioned: false,
+        });
+        expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+        expect(
+          runs.some((run) => run.sql.includes('UPDATE tasks SET claimed_warm_node_id = NULL'))
+        ).toBe(false);
+      } else {
+        expect(releaseClaim).toHaveBeenCalledWith(state.taskId);
+        // Check outside the callback: production deliberately catches release errors.
+        expect(taskPointerClearedAtRelease).toEqual([false]);
+        expect(
+          runs.some(
+            (run) =>
+              run.sql.includes('UPDATE tasks SET claimed_warm_node_id = NULL') &&
+              run.bound[1] === state.taskId &&
+              run.bound[2] === nodeId
+          )
+        ).toBe(true);
+        expect(state.stepResults.nodeId).toBeNull();
+        expect(state.stepResults.claimedWarmNodeId ?? null).toBeNull();
+        expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
+        expect(rc.advanceToStep).not.toHaveBeenCalledWith(state, 'workspace_creation');
+      }
+    }
+  );
 
   it('releases an unusable D1-persisted warm claim before clearing the task pointer', async () => {
     const runs: Array<{ sql: string; bound: unknown[] }> = [];
