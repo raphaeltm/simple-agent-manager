@@ -712,6 +712,22 @@ describe('node resource deletion services', () => {
     expect(updateCalls).toEqual([]);
   });
 
+  it('fails closed when a managed node has no cloud provider, even with full proof', async () => {
+    nodeRows.push(
+      managedPoolNode({ id: 'providerless-node', status: 'destroying', cloudProvider: null })
+    );
+
+    const error = await deleteNodeResourcesStrict('providerless-node', 'user-1', ENV).catch(
+      (err: unknown) => err as Error
+    );
+
+    expect(error.message).toContain('exact provider credential binding is missing');
+    expect(error.message).toContain('cloudProvider');
+    expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(updateCalls).toEqual([]);
+  });
+
   it('names the absent prerequisites without echoing the credential reference', async () => {
     nodeRows.push(
       managedPoolNode({

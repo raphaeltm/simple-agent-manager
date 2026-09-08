@@ -617,6 +617,31 @@ describe('exact credential binding — version-only generation proof', () => {
       expect(result).toBeNull();
       expect(providerFactory).not.toHaveBeenCalled();
       expect(mockDecrypt).not.toHaveBeenCalled();
+
+      // Liveness beside the absence (rule 62): `null` here must mean "the fence refused",
+      // not "the row was never found". The same fixture, addressed with the row's CURRENT
+      // version, resolves — so the lookup itself demonstrably works.
+      mockDecrypt.mockResolvedValueOnce('hetzner-api-token');
+      const live = await createProviderForExactCredential(
+        db as never,
+        'user-1',
+        'enc-key',
+        {} as never,
+        'hetzner',
+        null,
+        {
+          credentialSource: 'user',
+          credentialReference: 'credentials:user-cloud-1',
+          credentialVersion: Date.parse('2026-09-08T12:00:00.000Z'),
+          credentialFingerprint: null,
+        },
+        async () => ({
+          provider: {} as never,
+          providerName: 'hetzner' as const,
+          credentialSource: 'user' as const,
+        })
+      );
+      expect(live).not.toBeNull();
     } finally {
       sqlite.close();
     }
@@ -689,12 +714,147 @@ describe('exact credential binding — version-only generation proof', () => {
   });
 });
 
+/**
+ * The same version-only fence, reached through the composable-credentials join rather than the
+ * legacy `credentials` table. `exactCredentialGenerationMatches` is shared by both, but the row
+ * it compares arrives from a different query, so the wiring needs its own coverage.
+ */
+describe('exact composable credential — version-only generation proof', () => {
+  const PLACED_AT = '2026-03-01T10:00:00.000Z';
+  const PLACED_VERSION = Date.parse(PLACED_AT);
+
+  function seedComposable(sqlite: Database.Database, updatedAt: string) {
+    createSchemaTables(sqlite, [
+      schema.ccCredentials,
+      schema.ccConfigurations,
+      schema.ccAttachments,
+    ]);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_credentials (
+           id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at
+         )
+         VALUES ('cc-cloud-1', 'user-1', 'Cloud', 'cloud-provider', 'cc-ciphertext', 'cc-iv', 1, ?, ?)`
+      )
+      .run(PLACED_AT, updatedAt);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_configurations (
+           id, owner_id, name, consumer_kind, consumer_target, credential_id, is_active
+         )
+         VALUES ('cc-cfg-1', 'user-1', 'Compute', 'compute', 'hetzner', 'cc-cloud-1', 1)`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO cc_attachments (
+           id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active
+         )
+         VALUES ('cc-att-1', 'cc-cfg-1', 'compute', 'hetzner', 'user-1', NULL, 1)`
+      )
+      .run();
+    return drizzle(sqlite, { schema });
+  }
+
+  const versionOnlyBinding = (version: number | null) => ({
+    credentialSource: 'user' as const,
+    credentialReference: 'cc_credentials:cc-cloud-1',
+    credentialVersion: version,
+    credentialFingerprint: null,
+  });
+
+  it('resolves a cc_credentials binding whose version still matches', async () => {
+    mockDecrypt.mockClear();
+    mockDecrypt.mockResolvedValueOnce('hetzner-api-token');
+    const sqlite = new Database(':memory:');
+    try {
+      const db = seedComposable(sqlite, PLACED_AT);
+      const providerFactory = vi.fn(async () => ({
+        provider: {} as never,
+        providerName: 'hetzner' as const,
+        credentialSource: 'user' as const,
+      }));
+
+      const result = await createProviderForExactCredential(
+        db as never,
+        'user-1',
+        'enc-key',
+        {} as never,
+        'hetzner',
+        null,
+        versionOnlyBinding(PLACED_VERSION),
+        providerFactory
+      );
+
+      expect(result).toMatchObject({ providerName: 'hetzner' });
+      expect(providerFactory).toHaveBeenCalledTimes(1);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('refuses a cc_credentials binding after the row rotates, and still resolves the current one', async () => {
+    mockDecrypt.mockClear();
+    const sqlite = new Database(':memory:');
+    try {
+      const rotatedAt = '2026-09-08T12:00:00.000Z';
+      const db = seedComposable(sqlite, rotatedAt);
+      const providerFactory = vi.fn(() => {
+        throw new Error('rotated composable credential must not be constructed');
+      });
+
+      const stale = await createProviderForExactCredential(
+        db as never,
+        'user-1',
+        'enc-key',
+        {} as never,
+        'hetzner',
+        null,
+        versionOnlyBinding(PLACED_VERSION),
+        providerFactory
+      );
+
+      expect(stale).toBeNull();
+      expect(providerFactory).not.toHaveBeenCalled();
+      expect(mockDecrypt).not.toHaveBeenCalled();
+
+      // Liveness beside the absence: the join itself resolves for the current version.
+      mockDecrypt.mockResolvedValueOnce('hetzner-api-token');
+      const live = await createProviderForExactCredential(
+        db as never,
+        'user-1',
+        'enc-key',
+        {} as never,
+        'hetzner',
+        null,
+        versionOnlyBinding(Date.parse(rotatedAt)),
+        async () => ({
+          provider: {} as never,
+          providerName: 'hetzner' as const,
+          credentialSource: 'user' as const,
+        })
+      );
+      expect(live).not.toBeNull();
+    } finally {
+      sqlite.close();
+    }
+  });
+});
+
 describe('hasExactProviderCredentialGenerationProof', () => {
   it.each([
     ['fingerprint only', { credentialFingerprint: 'sha256:a', credentialVersion: null }, true],
     ['version only', { credentialFingerprint: null, credentialVersion: 1700000000000 }, true],
     ['both', { credentialFingerprint: 'sha256:a', credentialVersion: 1700000000000 }, true],
     ['neither', { credentialFingerprint: null, credentialVersion: null }, false],
+    // Empty string must read as ABSENT here, matching exactCredentialGenerationMatches'
+    // own truthiness check, or the two would disagree about what counts as proof.
+    ['empty-string fingerprint only', { credentialFingerprint: '', credentialVersion: null }, false],
+    [
+      'empty-string fingerprint with version',
+      { credentialFingerprint: '', credentialVersion: 1700000000000 },
+      true,
+    ],
   ])('%s -> %s', (_label, proof, expected) => {
     expect(
       hasExactProviderCredentialGenerationProof({

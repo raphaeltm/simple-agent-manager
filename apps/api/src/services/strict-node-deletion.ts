@@ -10,12 +10,10 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { deleteDNSRecord } from './dns';
 import { getTimeoutMs } from './fetch-timeout';
 import { persistError } from './observability';
-import {
-  type ExactProviderCredentialBinding,
-  hasExactProviderCredentialGenerationProof,
-} from './provider-credential-exact';
+import { hasExactProviderCredentialGenerationProof } from './provider-credential-exact';
 import {
   createProviderForUser,
+  type ExactProviderCredentialBinding,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
 import { destroyVmAgentContainer } from './vm-agent-container';
