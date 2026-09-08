@@ -382,6 +382,10 @@ async function startComputeTrackingBestEffort(
          provider_instance_boot_disk_size_gb,
          provider_instance_image,
          provider_instance_architecture,
+         provider_instance_price_display,
+         provider_instance_price_currency,
+         provider_instance_price_monthly_cents,
+         provider_instance_price_hourly_micros,
          observed_provider_instance_type,
          observed_provider_instance_vcpu_count,
          observed_provider_instance_memory_mb,
@@ -401,6 +405,10 @@ async function startComputeTrackingBestEffort(
         provider_instance_boot_disk_size_gb: number | null;
         provider_instance_image: string | null;
         provider_instance_architecture: string | null;
+        provider_instance_price_display: string | null;
+        provider_instance_price_currency: string | null;
+        provider_instance_price_monthly_cents: number | null;
+        provider_instance_price_hourly_micros: number | null;
         observed_provider_instance_type: string | null;
         observed_provider_instance_vcpu_count: number | null;
         observed_provider_instance_memory_mb: number | null;
@@ -422,6 +430,10 @@ async function startComputeTrackingBestEffort(
       providerInstanceBootDiskSizeGb: nodeRow?.provider_instance_boot_disk_size_gb,
       providerInstanceImage: nodeRow?.provider_instance_image,
       providerInstanceArchitecture: nodeRow?.provider_instance_architecture,
+      providerInstancePriceDisplay: nodeRow?.provider_instance_price_display,
+      providerInstancePriceCurrency: nodeRow?.provider_instance_price_currency,
+      providerInstancePriceMonthlyCents: nodeRow?.provider_instance_price_monthly_cents,
+      providerInstancePriceHourlyMicros: nodeRow?.provider_instance_price_hourly_micros,
       observedProviderInstanceType: nodeRow?.observed_provider_instance_type,
       observedProviderInstanceVcpuCount: nodeRow?.observed_provider_instance_vcpu_count,
       observedProviderInstanceMemoryMb: nodeRow?.observed_provider_instance_memory_mb,

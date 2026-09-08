@@ -98,21 +98,11 @@ function compactCapacityCandidateForTaskRunner(
 ): TaskStartCapacityCandidate {
   const rest = { ...candidate };
   delete rest.snapshot;
-  const {
-    machineClass,
-    providerInstancePriceDisplay,
-    providerInstancePriceCurrency,
-    providerInstancePriceMonthlyCents,
-    providerInstancePriceHourlyMicros,
-  } = candidate;
-
+  // Any candidate may become the selected reuse/provisioning target. Its prices
+  // remain part of placement diagnostics and ranking after snapshot compaction.
   return {
     ...rest,
-    machineClass: options.primary ? machineClass : null,
-    providerInstancePriceDisplay: options.primary ? providerInstancePriceDisplay : null,
-    providerInstancePriceCurrency: options.primary ? providerInstancePriceCurrency : null,
-    providerInstancePriceMonthlyCents: options.primary ? providerInstancePriceMonthlyCents : null,
-    providerInstancePriceHourlyMicros: options.primary ? providerInstancePriceHourlyMicros : null,
+    machineClass: options.primary ? candidate.machineClass : null,
   };
 }
 
