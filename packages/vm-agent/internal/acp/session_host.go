@@ -511,6 +511,26 @@ func NewSessionHost(config SessionHostConfig) *SessionHost {
 	}
 }
 
+// lifecycleContext returns the context that lives for as long as this
+// SessionHost does. It is created in NewSessionHost and cancelled only by
+// Stop().
+//
+// Any work that OUTLIVES the request which started it must use this instead of
+// the caller's context. The canonical case is monitorProcessExit: it is spawned
+// during startup but drives agent restarts minutes or hours later, long after
+// the HTTP snapshot-restore request or viewer WebSocket connection that started
+// the agent has finished and had its context cancelled. See
+// .claude/rules/71-request-context-must-not-outlive-its-request.md.
+//
+// Falls back to context.Background() for hosts built by struct literal in tests
+// rather than NewSessionHost, so a long-lived goroutine can never receive nil.
+func (h *SessionHost) lifecycleContext() context.Context {
+	if h.ctx == nil {
+		return context.Background()
+	}
+	return h.ctx
+}
+
 // httpClient returns the configured HTTP client for control-plane calls,
 // falling back to a default 30-second timeout client if none was provided.
 func (h *SessionHost) httpClient() *http.Client {

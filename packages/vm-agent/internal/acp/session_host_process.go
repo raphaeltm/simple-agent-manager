@@ -343,6 +343,17 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 		h.completeActivePromptFailure(err.Error())
 		h.broadcastAgentStatus(StatusError, agentType, err.Error())
 		h.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
+		// The detach path published "recovering" before this restart attempt.
+		// Without a closing transition the control-plane activity mirror stays
+		// "recovering" forever, and all three of its consumers wedge together
+		// (rule 57): the composer/stop button keeps showing work in flight, the
+		// durable-message gate keeps refusing delivery, and the idle scheduler
+		// never arms a sleep timer for a host that has no usable agent at all.
+		// Every sibling terminal branch in monitorProcessExit already reports
+		// this; the restart failure was the only one that did not.
+		// reportActivity attaches the redacted statusErr set above, so the
+		// restart diagnostic survives into the control plane.
+		h.reportActivity("error")
 		return false
 	}
 	h.setStatusLocked(HostReady)
