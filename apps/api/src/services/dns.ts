@@ -1,3 +1,4 @@
+import { completeAbortableResponse } from '@simple-agent-manager/providers';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -150,8 +151,10 @@ export async function createDNSRecord(
  */
 export async function deleteDNSRecord(
   recordId: string,
-  env: Env
+  env: Env,
+  signal?: AbortSignal
 ): Promise<void> {
+  if (signal?.aborted) throw signal.reason;
   const timeoutMs = getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS);
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}/dns_records/${recordId}`,
@@ -164,9 +167,12 @@ export async function deleteDNSRecord(
     timeoutMs
   );
 
+  // The background caller's deadline must also cover a stalled error body after
+  // fetchWithTimeout has received headers and cleared its own request timer.
+  const readableResponse = signal ? await completeAbortableResponse(response, signal) : response;
   // Ignore 404 errors (record already deleted)
-  if (!response.ok && response.status !== 404) {
-    throw new Error(await readCloudflareError(response, `Failed to delete DNS record: ${response.status}`));
+  if (!readableResponse.ok && readableResponse.status !== 404) {
+    throw new Error(await readCloudflareError(readableResponse, `Failed to delete DNS record: ${readableResponse.status}`));
   }
 }
 

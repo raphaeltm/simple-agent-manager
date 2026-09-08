@@ -378,6 +378,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_ABSOLUTE_MAX_LIFETIME_MS?: string; // Absolute age ceiling for auto-provisioned workspace nodes (default: 86400000 = 24 h)
   NODE_CLEANUP_SWEEP_LIMIT?: string; // Max node candidates per cleanup phase per cron run (default: 25)
   NODE_CLEANUP_FAILURE_BACKOFF_MS?: string; // Failed candidate exclusion window (default: 3600000)
+  NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS?: string; // Stopped-node phase wall-time budget (default: 20000)
+  NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS?: string; // Stopped-node provider/DNS budget per candidate (default: 5000)
   WORKSPACE_CLEANUP_SWEEP_LIMIT?: string; // Max workspace candidates per cleanup phase per cron run (default: 50)
   // Provider-side orphan reconciliation
   PROVIDER_ORPHAN_RECONCILIATION_ENABLED?: string; // Set 'false' to disable the provider-side reconciler (default: enabled)

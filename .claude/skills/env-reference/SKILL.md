@@ -159,6 +159,8 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `NODE_WORKSPACE_IDLE_TIMEOUT_MS` — Last-workspace-activity window before an auto-provisioned workspace-role node with no active workspaces is destroy-eligible (default: `1800000`; parsed by `buildCleanupConfig()` and enforced by `claimNodeForCleanup()` in `apps/api/src/scheduled/node-cleanup/shared.ts`)
 - `NODE_ORPHAN_IDLE_TIMEOUT_MS` — Legacy alias for `NODE_WORKSPACE_IDLE_TIMEOUT_MS` when the primary variable is unset (resolved by `buildCleanupConfig()` in `apps/api/src/scheduled/node-cleanup/shared.ts`)
 - `NODE_CLEANUP_FAILURE_BACKOFF_MS` — Failed cleanup-candidate exclusion window (default: `3600000`)
+- `NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS` — Wall-clock budget for the stopped-node handoff phase; unstarted candidates remain eligible for the next sweep (default: `20000`)
+- `NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS` — Per-candidate provider/DNS deadline during stopped-node handoff, capped by remaining sweep time; provider failures enter cleanup backoff (default: `5000`)
 - `IDLE_CLEANUP_MAX_RESIDENCE_MS` — Maximum ProjectData idle-cleanup schedule residence before preserved/error outcomes stop re-arming and surface attention (default: `7200000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)

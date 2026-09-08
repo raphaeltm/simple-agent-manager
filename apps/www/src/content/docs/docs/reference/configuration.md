@@ -531,6 +531,12 @@ Reaping only ever applies to nodes with `node_role = 'workspace'` and
 and legitimately hold zero workspaces forever, so they are never reaped by these
 timers; they are released when their last deployment environment is deleted.
 
+Stopped managed VM nodes created directly through a canonical pool can also be
+reaped using their server-recorded pool, credential, and native-offering identity.
+They retain the same workspace-activity and active-claim guards. A short project
+warm timeout does not bypass the workspace idle window. Runtime teardown preserves
+the saved snapshot and conversation for recovery on a fresh node.
+
 | Variable                                           | Default            | Description                                                                                                                                                                                                                                                |
 | -------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NODE_WORKSPACE_IDLE_TIMEOUT_MS`                   | `1800000` (30 min) | Last-workspace-activity window before an auto-provisioned `node_role = 'workspace'` node with no active workspaces can be destroyed. Uses `COALESCE(MAX(workspaces.updated_at), nodes.created_at)`, never heartbeat-updated `nodes.updated_at`.            |
@@ -538,6 +544,8 @@ timers; they are released when their last deployment environment is deleted.
 | `NODE_ABSOLUTE_MAX_LIFETIME_MS`                    | `86400000` (24 hr) | Hard ceiling on auto-provisioned workspace node age. Applies even when a workspace row still reports `running`, provided no workspace has reported activity within the idle window — this is what stops a stuck workspace row from making a node immortal. |
 | `NODE_CLEANUP_SWEEP_LIMIT`                         | `25`               | Max node candidates processed per cleanup phase per cron run.                                                                                                                                                                                              |
 | `NODE_CLEANUP_FAILURE_BACKOFF_MS`                  | `3600000` (1 hr)   | Expiring exclusion applied to failed cleanup candidates so a permanent provider error cannot monopolize the bounded page.                                                                                                                                  |
+| `NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS` | `20000` (20 sec) | Wall-clock budget for stopped-node handoff. Candidates not started within the budget remain eligible for the next sweep. |
+| `NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS` | `5000` (5 sec) | Per-candidate provider/DNS deadline during stopped-node handoff, capped by remaining sweep time. Provider failures enter cleanup backoff. |
 | `WORKSPACE_CLEANUP_SWEEP_LIMIT`                    | `50`               | Max workspace candidates processed per cleanup phase per cron run.                                                                                                                                                                                         |
 | `NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS`         | `5000` (5 s)       | VM-agent request timeout for background sweeps. Deliberately far below the interactive `NODE_AGENT_REQUEST_TIMEOUT_MS` (30 s) so a sweep over unreachable nodes cannot exhaust the Worker's wall-clock budget.                                             |
 | `WORKSPACE_DELETION_RETRY_BASE_MS`                 | `60000` (1 min)    | Initial retry delay after a VM workspace deletion remains unconfirmed.                                                                                                                                                                                     |

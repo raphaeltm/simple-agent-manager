@@ -16,6 +16,8 @@ import {
   DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS,
   DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS,
   DEFAULT_NODE_CLEANUP_SWEEP_LIMIT,
+  DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS,
+  DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS,
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
   DEFAULT_NODE_WARM_TIMEOUT_MS,
   DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS,
@@ -102,6 +104,8 @@ export interface CleanupConfig {
   failureBackoffMs: number;
   /** VM-agent timeout for background calls — see rule 47. */
   agentTimeoutMs: number;
+  stoppedHandoffSweepBudgetMs: number;
+  stoppedHandoffRequestTimeoutMs: number;
 }
 
 /**
@@ -183,6 +187,14 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS
     ),
     agentTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(env),
+    stoppedHandoffSweepBudgetMs: parseMs(
+      env.NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS,
+      DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS
+    ),
+    stoppedHandoffRequestTimeoutMs: parseMs(
+      env.NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS,
+      DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS
+    ),
   };
 }
 
@@ -202,6 +214,7 @@ interface DestroyNodeForCleanupOptions {
   allowActiveWorkspaces?: boolean;
   requireWorkspaceIdle?: boolean;
   workspaceIdleThresholdIso?: string;
+  requestDeadlineMs?: number;
   context: CleanupContext;
 }
 
@@ -228,6 +241,41 @@ export function boundedWarmPlacementClaimGuardSql(nodeIdSql: string): string {
       AND placement_claim.claimed_warm_node_at IS NOT NULL
       AND placement_claim.claimed_warm_node_at >= ?
   )`;
+}
+
+/**
+ * NodeLifecycle hands empty managed VMs to cleanup by marking them stopped.
+ * Direct workspace provisioning has no task.auto_provisioned_node_id: its
+ * server-written pool/credential snapshot is the ownership proof instead.
+ * Keep this alternative stopped-only and independent of current pool revisions
+ * so retiring a source cannot strand a VM provisioned under its old authority.
+ */
+export function cleanupNodeProvenanceSql(alias: 'n' | 'nodes'): string {
+  const present = [
+    'capacity_pool_id', 'capacity_source_id', 'capacity_pool_candidate_id',
+    'placement_credential_reference', 'placement_credential_fingerprint',
+    'cloud_provider', 'provider_instance_id', 'provider_instance_type',
+  ].map((column) => `NULLIF(TRIM(${alias}.${column}), '') IS NOT NULL`).join('\n         AND ');
+  return `(EXISTS (
+    SELECT 1 FROM tasks auto_task
+    WHERE auto_task.auto_provisioned_node_id = ${alias}.id
+  ) OR (
+    ${alias}.status = 'stopped'
+    AND ${alias}.node_class = 'managed'
+    AND ${alias}.runtime = 'vm'
+    AND ${alias}.workload_role = 'workspace'
+    AND ${alias}.capacity_pool_scope IN ('user', 'project', 'installation')
+    AND (${alias}.capacity_pool_scope != 'project'
+      OR NULLIF(TRIM(${alias}.capacity_pool_project_id), '') IS NOT NULL)
+    AND (${alias}.capacity_pool_scope = 'project' OR ${alias}.capacity_pool_project_id IS NULL)
+    AND ${alias}.capacity_pool_revision > 0
+    AND ${alias}.capacity_source_generation > 0
+    AND ${alias}.placement_credential_source IN ('user', 'project', 'platform')
+    AND ${alias}.placement_credential_version > 0
+    AND ${alias}.provider_instance_vcpu_count > 0
+    AND ${alias}.provider_instance_memory_mb > 0
+    AND ${present}
+  ))`;
 }
 
 export async function claimNodeForCleanup(
@@ -273,11 +321,8 @@ export async function claimNodeForCleanup(
        AND status = ?
        AND node_role = 'workspace'
        AND node_class != 'user-owned'
-       AND EXISTS (
-         SELECT 1
-         FROM tasks auto_task
-         WHERE auto_task.auto_provisioned_node_id = nodes.id
-       )
+       AND (cleanup_backoff_until IS NULL OR cleanup_backoff_until <= ?)
+       AND ${cleanupNodeProvenanceSql('nodes')}
        ${activeWorkspaceGuard}
        ${boundedWarmPlacementClaimGuardSql('nodes.id')}
        ${workspaceIdleGuard}`
@@ -287,6 +332,7 @@ export async function claimNodeForCleanup(
       node.id,
       node.user_id,
       node.status,
+      nowIso,
       workspaceIdleThresholdIso,
       ...(options.requireWorkspaceIdle === false ? [] : [workspaceIdleThresholdIso])
     )
@@ -481,6 +527,14 @@ export async function destroyNodeForCleanup(
     return 'skipped';
   }
 
+  const controller = options.requestDeadlineMs === undefined ? undefined : new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (controller && options.requestDeadlineMs !== undefined) {
+    timer = setTimeout(
+      () => controller.abort(new Error('Stopped node cleanup request deadline exceeded')),
+      Math.max(1, options.requestDeadlineMs - Date.now())
+    );
+  }
   try {
     log.info(options.logEvent, {
       nodeId: node.id,
@@ -488,7 +542,12 @@ export async function destroyNodeForCleanup(
       ...options.context,
     });
 
-    const strictDeletion = await deleteNodeResourcesStrict(node.id, node.user_id, env);
+    const strictDeletion = controller
+      ? await deleteNodeResourcesStrict(node.id, node.user_id, env, {
+        providerRequestContext: { signal: controller.signal },
+        requestDeadlineMs: options.requestDeadlineMs,
+      })
+      : await deleteNodeResourcesStrict(node.id, node.user_id, env);
     if (!strictDeletion.runtimeTerminationConfirmedAt) {
       throw new Error('Strict cleanup returned no managed-runtime termination proof');
     }
@@ -543,5 +602,7 @@ export async function destroyNodeForCleanup(
   } catch (error) {
     await handleCleanupFailure(env, node, nowIso, options, error);
     return 'failed';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
