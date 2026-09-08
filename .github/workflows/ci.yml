@@ -117,6 +117,14 @@ jobs:
     if: github.event_name == 'pull_request'
     timeout-minutes: 15
     runs-on: ubuntu-latest
+    # `pull-requests: read` + GITHUB_TOKEN let the check read the PR's CURRENT
+    # body/labels instead of the frozen event payload. Job-level `permissions`
+    # REPLACES the top-level block, so `contents: read` must be restated for
+    # actions/checkout. Without both of these the check silently degrades to the
+    # stale payload — see scripts/quality/ci-evidence-token-wiring.test.ts.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -145,6 +153,8 @@ jobs:
           github.actor != 'dependabot[bot]' ||
           github.event.pull_request.user.login != 'dependabot[bot]'
         run: pnpm quality:preflight
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Validate no stale binary artifacts are tracked
         run: pnpm quality:no-tracked-stale-binaries
@@ -153,6 +163,10 @@ jobs:
     name: Specialist Review Evidence
     if: github.event_name == 'pull_request'
     timeout-minutes: 15
+    # See preflight-evidence above: required for live PR body/label reads.
+    permissions:
+      contents: read
+      pull-requests: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -169,6 +183,8 @@ jobs:
 
       - name: Validate specialist review evidence
         run: pnpm quality:specialist-review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
 
   ci-workflow:
     name: CI Workflow
