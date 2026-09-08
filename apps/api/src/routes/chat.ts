@@ -37,6 +37,7 @@ import {
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
+import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';
 import { attachWakeState } from './chat/wake-state';
 import { resolveChatAgentState } from './chat-agent-state';
@@ -282,6 +283,7 @@ chatRoutes.get('/:sessionId', async (c) => {
           status: schema.tasks.status,
           executionStep: schema.tasks.executionStep,
           errorMessage: schema.tasks.errorMessage,
+          placementExplanationJson: schema.tasks.placementExplanationJson,
           outputBranch: schema.tasks.outputBranch,
           outputPrUrl: schema.tasks.outputPrUrl,
           outputSummary: schema.tasks.outputSummary,
@@ -305,6 +307,9 @@ chatRoutes.get('/:sessionId', async (c) => {
           status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
           executionStep: isTaskExecutionStep(taskRow.executionStep) ? taskRow.executionStep : null,
           errorMessage: taskRow.errorMessage ?? null,
+          placementExplanationJson: publicPlacementExplanationJson(
+            taskRow.placementExplanationJson
+          ),
           outputBranch: taskRow.outputBranch,
           outputPrUrl: taskRow.outputPrUrl,
           outputSummary: taskRow.outputSummary ?? null,

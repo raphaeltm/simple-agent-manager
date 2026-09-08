@@ -64,7 +64,9 @@ export function useSessionInfrastructure(workspaceId: string | null | undefined)
   const [node, setNode] = useState<NodeResponse | null>(null);
 
   useRetryingInfrastructureResource(workspaceId, workspace?.id, getWorkspace, setWorkspace);
-  useRetryingInfrastructureResource(workspace?.nodeId, node?.id, getNode, setNode);
+  const currentWorkspace = workspace?.id === workspaceId ? workspace : null;
+  useRetryingInfrastructureResource(currentWorkspace?.nodeId, node?.id, getNode, setNode);
+  const currentNode = node?.id === currentWorkspace?.nodeId ? node : null;
 
-  return { workspace, node };
+  return { workspace: currentWorkspace, node: currentNode };
 }

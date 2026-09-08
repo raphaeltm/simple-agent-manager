@@ -1,3 +1,4 @@
+import type { ProviderRequestContext } from '@simple-agent-manager/providers';
 import { type CredentialProvider, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -7,6 +8,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { deleteDNSRecord } from './dns';
+import { getTimeoutMs } from './fetch-timeout';
 import { persistError } from './observability';
 import {
   createProviderForUser,
@@ -201,7 +203,8 @@ async function deleteStrictProviderInstance(
   db: NodeDb,
   node: NodeRow,
   userId: string,
-  env: Env
+  env: Env,
+  requestContext?: ProviderRequestContext
 ): Promise<StrictNodeDeletionResult['providerVm']> {
   if (!node.providerInstanceId) {
     throw new Error(
@@ -212,7 +215,8 @@ async function deleteStrictProviderInstance(
   const providerResult = await resolveStrictNodeProvider(db, node, userId, env);
 
   await requireSameNodeIncarnation(db, node, 'provider delete');
-  await providerResult.provider.deleteVM(node.providerInstanceId);
+  if (requestContext) await providerResult.provider.deleteVM(node.providerInstanceId, requestContext);
+  else await providerResult.provider.deleteVM(node.providerInstanceId);
   return 'deleted';
 }
 
@@ -245,11 +249,22 @@ async function persistStrictDnsCleanupError(
   );
 }
 
-async function deleteStrictNodeDnsRecord(node: NodeRow, userId: string, env: Env): Promise<void> {
+async function deleteStrictNodeDnsRecord(
+  node: NodeRow, userId: string, env: Env, requestDeadlineMs?: number, signal?: AbortSignal
+): Promise<void> {
   if (!node.backendDnsRecordId) return;
 
   try {
-    await deleteDNSRecord(node.backendDnsRecordId, env);
+    const remainingMs = requestDeadlineMs === undefined ? undefined : requestDeadlineMs - Date.now();
+    if (remainingMs !== undefined && remainingMs <= 0) {
+      throw new Error('Stopped node cleanup DNS deadline exceeded');
+    }
+    const dnsEnv = remainingMs === undefined ? env : {
+      ...env,
+      CF_API_TIMEOUT_MS: String(Math.min(getTimeoutMs(env.CF_API_TIMEOUT_MS), remainingMs)),
+    };
+    if (signal) await deleteDNSRecord(node.backendDnsRecordId, dnsEnv, signal);
+    else await deleteDNSRecord(node.backendDnsRecordId, dnsEnv);
   } catch (err) {
     log.error('node_delete.strict_dns_cleanup_failed', { nodeId: node.id, ...serializeError(err) });
     try {
@@ -324,7 +339,12 @@ async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promi
 }
 
 async function claimManagedNodeDeletion(db: NodeDb, node: NodeRow): Promise<NodeRow> {
-  if (node.runtimeTerminationConfirmedAt || node.status === 'destroying') {
+  // Absence proof must also fence lifecycle changes: claim teardown before
+  // consuming proof on any node that has not already entered terminal cleanup.
+  if (
+    (node.runtimeTerminationConfirmedAt && node.status === 'deleted') ||
+    node.status === 'destroying'
+  ) {
     return await requireSameNodeIncarnation(db, node, 'managed deletion claim');
   }
 
@@ -353,7 +373,12 @@ export async function deleteNodeResourcesStrict(
   nodeId: string,
   userId: string,
   env: Env,
-  options: { cleanupDns?: boolean; expectedRuntime?: StrictNodeRuntimeIdentity } = {}
+  options: {
+    cleanupDns?: boolean;
+    expectedRuntime?: StrictNodeRuntimeIdentity;
+    providerRequestContext?: ProviderRequestContext;
+    requestDeadlineMs?: number;
+  } = {}
 ): Promise<StrictNodeDeletionResult> {
   const db = drizzle(env.DATABASE, { schema });
   const initialNode = await requireStrictNode(db, nodeId, userId);
@@ -391,7 +416,9 @@ export async function deleteNodeResourcesStrict(
     await requireSameNodeIncarnation(db, node, 'container teardown');
     await destroyVmAgentContainer(env, node.id);
     const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
-    if (options.cleanupDns !== false) await deleteStrictNodeDnsRecord(node, userId, env);
+    if (options.cleanupDns !== false) {
+      await deleteStrictNodeDnsRecord(node, userId, env, options.requestDeadlineMs, options.providerRequestContext?.signal);
+    }
     return {
       providerVm: 'no-instance',
       runtimeTerminationConfirmedAt,
@@ -400,9 +427,11 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
-  const providerVm = await deleteStrictProviderInstance(db, node, userId, env);
+  const providerVm = await deleteStrictProviderInstance(db, node, userId, env, options.providerRequestContext);
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
-  if (options.cleanupDns !== false) await deleteStrictNodeDnsRecord(node, userId, env);
+  if (options.cleanupDns !== false) {
+    await deleteStrictNodeDnsRecord(node, userId, env, options.requestDeadlineMs, options.providerRequestContext?.signal);
+  }
   return {
     providerVm,
     runtimeTerminationConfirmedAt,

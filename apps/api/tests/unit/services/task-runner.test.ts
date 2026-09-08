@@ -3,10 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { TaskRunError } from '../../../src/services/task-runner';
 
 // Mock all service dependencies
-vi.mock('../../../src/services/node-selector', () => ({
-  selectNodeForTaskRun: vi.fn(),
-}));
-
 vi.mock('../../../src/services/nodes', () => ({
   createNodeRecord: vi.fn(),
   provisionNode: vi.fn(),

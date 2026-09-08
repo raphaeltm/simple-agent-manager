@@ -41,6 +41,14 @@ vi.mock('../../../src/lib/ulid', () => ({
 }));
 
 function createMockD1() {
+  // `stop_subtask` re-derives the caller's CURRENT project membership before any
+  // effect. That query is answered out-of-band so it never consumes a slot in the
+  // positional sequences below; `_membershipRoles` lets a case model a removed
+  // (empty) or downgraded actor. The relational guard itself is proven against
+  // real project_members rows in mcp-orchestration-current-authority.test.ts.
+  const state = { lastSql: '', membershipRoles: ['owner'] as string[] };
+  const isMembershipQuery = () => state.lastSql.includes('"project_members"');
+
   const stmt = {
     bind: vi.fn().mockReturnThis(),
     all: vi.fn().mockResolvedValue({ results: [] }),
@@ -48,13 +56,34 @@ function createMockD1() {
     raw: vi.fn().mockResolvedValue([]),
     run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
   };
+
+  // Wrap raw/all so the membership lookup short-circuits ahead of whatever a test
+  // installed, without advancing that test's sequence cursor.
+  const wrap = <T>(inner: () => Promise<T>, membership: () => T) => () =>
+    isMembershipQuery() ? Promise.resolve(membership()) : inner();
+  const rawImpl = stmt.raw;
+  const allImpl = stmt.all;
+  const membershipRaw = () => state.membershipRoles.map((role) => [role]) as never;
+  const membershipAll = () =>
+    ({ results: state.membershipRoles.map((role) => ({ role })) }) as never;
+
   return {
-    prepare: vi.fn().mockReturnValue(stmt),
+    prepare: vi.fn().mockImplementation((sql: string) => {
+      state.lastSql = sql;
+      return stmt;
+    }),
     batch: vi.fn().mockResolvedValue([
       { success: true, meta: { changes: 1 } },
       { success: true, meta: { changes: 1 } },
     ]),
     _stmt: stmt,
+    _state: state,
+    _installMembershipShortCircuit() {
+      const currentRaw = stmt.raw.getMockImplementation() ?? rawImpl;
+      const currentAll = stmt.all.getMockImplementation() ?? allImpl;
+      stmt.raw.mockImplementation(wrap(currentRaw as never, membershipRaw) as never);
+      stmt.all.mockImplementation(wrap(currentAll as never, membershipAll) as never);
+    },
   };
 }
 
@@ -102,6 +131,10 @@ function mockD1ResultSequence(results: Record<string, unknown>[][]) {
     callIndex++;
     return Promise.resolve({ results: rows });
   });
+
+  // Re-install after the sequence takes over, so the membership lookup keeps
+  // bypassing the cursor.
+  mockD1._installMembershipShortCircuit();
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -113,6 +146,7 @@ describe('MCP Orchestration Communication Tools', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mockD1 = createMockD1();
+    mockD1._installMembershipShortCircuit();
     mockEnv.DATABASE = mockD1 as unknown as D1Database;
     mockSendPromptToAgentOnNode.mockResolvedValue(undefined);
     mockStopAgentSessionOnNode.mockResolvedValue(undefined);

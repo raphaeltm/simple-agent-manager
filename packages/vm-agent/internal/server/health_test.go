@@ -18,6 +18,19 @@ import (
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
+func TestWorkspaceRuntimeReportsAdmissionMetricsStatuses(t *testing.T) {
+	for _, status := range []string{"running", "creating", "recovery"} {
+		if !workspaceRuntimeReportsAdmissionMetrics(status) {
+			t.Fatalf("status %q should report admission metrics", status)
+		}
+	}
+	for _, status := range []string{"", "stopped", "error"} {
+		if workspaceRuntimeReportsAdmissionMetrics(status) {
+			t.Fatalf("status %q should not report admission metrics", status)
+		}
+	}
+}
+
 // newTestErrorReporter creates a minimal error reporter for tests.
 func newTestErrorReporter() *errorreport.Reporter {
 	return errorreport.New("http://localhost", "test", "test", errorreport.Config{})

@@ -378,7 +378,7 @@ VM node reuse is reservation-aware. `resolveTaskStartPlacement()` in
 exclusivity snapshot; TaskRunner carries that same snapshot into the workspace row.
 `findNodeWithCapacity()` in
 `apps/api/src/durable-objects/task-runner/node-selection.ts` subtracts reservations for
-`running`, `creating`, and `recovery` workspaces from provider-native node capacity. The final
+`running`, `creating`, and `recovery` workspaces from trusted observed node capacity. The final
 `reserveWorkspacePlacement()` `INSERT ... SELECT` in
 `apps/api/src/services/workspace-placement.ts` repeats the aggregate check atomically together
 with node state, ownership, and compute-pool scope, so concurrent placements cannot both consume
@@ -386,10 +386,11 @@ the last capacity.
 
 `hasWorkspaceReservationCapacity()` in
 `apps/api/src/services/workspace-resource-capacity.ts` makes legacy capacity intentionally
-conservative: an empty otherwise-compatible node may accept one workspace when provider-native
-capacity is unavailable, but an occupied node is not reused unless CPU, memory, disk, and every
-active reservation are valid and known. Exclusive requests require an empty node, and an active
-exclusive workspace prevents any additional placement. `MAX_WORKSPACES_PER_NODE` remains an
+conservative: both empty and occupied nodes require verified observed CPU, memory, and disk
+capacity. An occupied node also requires valid active reservations and fresh resource telemetry.
+Host memory reserve and measured pressure further constrain admission. Exclusive requests
+require an empty node, and an active exclusive workspace prevents any additional placement.
+`MAX_WORKSPACES_PER_NODE` remains an
 additional hard safety cap rather than the primary capacity model.
 
 ## ACP Session Lifecycle

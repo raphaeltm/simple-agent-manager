@@ -81,6 +81,7 @@ const TASK_COLUMNS = [
   'requestedVmSizeSource',
   'provisionedVmSize',
   'resourceRequirementsJson',
+  'resourceRequirementPlanJson',
   'resourceRequirementsSource',
   'resolvedReservationJson',
   'placementExplanationJson',
@@ -118,6 +119,7 @@ const PROJECT_COLUMNS = [
   'defaultBranch',
   'installationId',
   'defaultVmSize',
+  'resourceRequirementsJson',
   'defaultWorkspaceProfile',
   'defaultProvider',
   'defaultAgentType',
@@ -356,6 +358,15 @@ describe('MCP Orchestration Tools', () => {
       providerName: 'hetzner',
     });
     mockCheckQuotaForUser.mockResolvedValue({ allowed: true, used: 0, limit: 100 });
+    // Destructive child control re-derives the caller's CURRENT project
+    // membership before any effect. Default to an active owner so these cases
+    // continue to exercise their own subject; the removed/downgraded actor cases
+    // live in mcp-orchestration-current-authority.test.ts against real rows.
+    mockD1._handlers.push({
+      match: 'from "project_members"',
+      method: 'raw',
+      result: [['owner']],
+    });
     mockDoStub.createSession = vi.fn().mockResolvedValue('session-new');
     mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-1');
     const { mcpRoutes } = await import('../../../src/routes/mcp');

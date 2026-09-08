@@ -10,6 +10,7 @@ import {
 import type {
   CredentialProvider,
   ProviderCatalog,
+  ProviderCatalogRefreshStatus,
   ProviderInstanceOffering,
   SizeInfo,
   VMSize,
@@ -54,25 +55,66 @@ export interface ProviderCatalogCredentialSeed {
   externalSourceRef: string | null;
   active: boolean;
   createdBy: string | null;
+  stateFingerprint: string;
 }
 
 export interface ProviderCatalogListResult {
   catalogs: ProviderCatalog[];
   credentialCount: number;
+  refreshFailures: Array<{
+    provider: CredentialProvider;
+    credentialSource: ProviderCatalogCredentialSource;
+    reason: 'provider-unavailable';
+  }>;
+}
+
+export interface ProviderCatalogOfferingResolution {
+  offerings: ProviderInstanceOffering[];
+  refreshStatus: ProviderCatalogRefreshStatus;
 }
 
 export async function listProviderCatalogOfferings(
   providerName: CredentialProvider,
   provider: CloudProvider
-): Promise<ProviderInstanceOffering[]> {
+): Promise<ProviderCatalogOfferingResolution> {
   try {
-    return await provider.listInstanceOfferings({ preferApi: true });
+    const offerings = await provider.listInstanceOfferings({
+      preferApi: true,
+      allowStaticFallback: false,
+    });
+    return {
+      offerings,
+      refreshStatus: refreshStatusForOfferings(offerings, {
+        // The transport succeeded: `allowStaticFallback: false` means an API-backed provider
+        // either enumerated its inventory or threw. Completeness is therefore carried from
+        // the call, not inferred from whether the array happens to have members.
+        transportSucceeded: true,
+        apiBacked: provider.instanceOfferingApiBacked === true,
+      }),
+    };
   } catch (error) {
     log.warn('catalog.live_offerings_failed', {
       provider: providerName,
       ...serializeError(error),
     });
-    return provider.listInstanceOfferings({ preferApi: false });
+    // A transient live-enumeration failure must not delete the whole provider
+    // from the catalog: rethrowing here drops the credential's catalog in
+    // buildCatalogsFromCredentialRows, which empties the UI picker and starves
+    // default-pool candidate materialisation. Fall back to the provider's own
+    // static offerings, which are the same shape and are what preferApi:false
+    // returns. Only a failure of BOTH is fatal.
+    try {
+      return {
+        offerings: await provider.listInstanceOfferings({ preferApi: false }),
+        refreshStatus: { succeeded: false, origin: 'static', complete: false },
+      };
+    } catch (staticError) {
+      log.warn('catalog.static_offerings_failed', {
+        provider: providerName,
+        ...serializeError(staticError),
+      });
+      throw error;
+    }
   }
 }
 
@@ -102,12 +144,13 @@ export async function buildProviderCatalogForCredential(input: {
   );
   const providerToken = extractCloudProviderToken(providerName, decryptedToken);
   const provider = createCatalogProvider(providerName, providerToken, input.env);
-  const offerings = await listProviderCatalogOfferings(providerName, provider);
+  const resolved = await listProviderCatalogOfferings(providerName, provider);
   return buildProviderCatalog({
     seed: input.seed,
     providerName,
     provider,
-    offerings,
+    offerings: resolved.offerings,
+    refreshStatus: resolved.refreshStatus,
   });
 }
 
@@ -205,6 +248,7 @@ export async function listInstallationProviderCatalogSeeds(
     .select({
       id: schema.platformCredentials.id,
       provider: schema.platformCredentials.provider,
+      credentialType: schema.platformCredentials.credentialType,
       encryptedToken: schema.platformCredentials.encryptedToken,
       iv: schema.platformCredentials.iv,
       isEnabled: schema.platformCredentials.isEnabled,
@@ -234,6 +278,17 @@ export async function listInstallationProviderCatalogSeeds(
         externalSourceRef: null,
         active,
         createdBy: row.createdBy,
+        stateFingerprint: catalogSeedStateFingerprint([
+          'platform',
+          row.id,
+          row.provider,
+          row.credentialType,
+          row.isEnabled,
+          row.encryptedToken,
+          row.iv,
+          row.createdAt,
+          row.updatedAt,
+        ]),
       } satisfies ProviderCatalogCredentialSeed,
     ];
   });
@@ -265,6 +320,7 @@ async function listLegacyProviderCatalogSeeds(
       userId: schema.credentials.userId,
       projectId: schema.credentials.projectId,
       provider: schema.credentials.provider,
+      credentialType: schema.credentials.credentialType,
       encryptedToken: schema.credentials.encryptedToken,
       iv: schema.credentials.iv,
       isActive: schema.credentials.isActive,
@@ -292,6 +348,19 @@ async function listLegacyProviderCatalogSeeds(
         externalSourceRef: null,
         active: row.isActive,
         createdBy: row.userId,
+        stateFingerprint: catalogSeedStateFingerprint([
+          'legacy',
+          row.id,
+          row.userId,
+          row.projectId,
+          row.provider,
+          row.credentialType,
+          row.isActive,
+          row.encryptedToken,
+          row.iv,
+          row.createdAt,
+          row.updatedAt,
+        ]),
       } satisfies ProviderCatalogCredentialSeed,
     ];
   });
@@ -344,8 +413,19 @@ async function listComposableProviderCatalogSeeds(
       projectId: schema.ccAttachments.projectId,
       attachmentActive: schema.ccAttachments.isActive,
       consumerTarget: schema.ccAttachments.consumerTarget,
+      attachmentCreatedAt: schema.ccAttachments.createdAt,
+      attachmentUpdatedAt: schema.ccAttachments.updatedAt,
+      configurationId: schema.ccConfigurations.id,
       configurationActive: schema.ccConfigurations.isActive,
+      configurationOwnerId: schema.ccConfigurations.ownerId,
+      configurationConsumerKind: schema.ccConfigurations.consumerKind,
+      configurationConsumerTarget: schema.ccConfigurations.consumerTarget,
+      configurationCredentialId: schema.ccConfigurations.credentialId,
+      configurationCreatedAt: schema.ccConfigurations.createdAt,
+      configurationUpdatedAt: schema.ccConfigurations.updatedAt,
       credentialId: schema.ccCredentials.id,
+      credentialOwnerId: schema.ccCredentials.ownerId,
+      credentialKind: schema.ccCredentials.kind,
       credentialActive: schema.ccCredentials.isActive,
       encryptedToken: schema.ccCredentials.encryptedToken,
       iv: schema.ccCredentials.iv,
@@ -385,9 +465,39 @@ async function listComposableProviderCatalogSeeds(
         externalSourceRef,
         active,
         createdBy: row.userId,
+        stateFingerprint: catalogSeedStateFingerprint([
+          'composable',
+          row.attachmentId,
+          row.configurationId,
+          row.userId,
+          row.projectId,
+          row.attachmentActive,
+          row.consumerTarget,
+          row.attachmentCreatedAt,
+          row.attachmentUpdatedAt,
+          row.configurationActive,
+          row.configurationOwnerId,
+          row.configurationConsumerKind,
+          row.configurationConsumerTarget,
+          row.configurationCredentialId,
+          row.configurationCreatedAt,
+          row.configurationUpdatedAt,
+          row.credentialId,
+          row.credentialOwnerId,
+          row.credentialKind,
+          row.credentialActive,
+          row.encryptedToken,
+          row.iv,
+          row.credentialCreatedAt,
+          row.credentialUpdatedAt,
+        ]),
       } satisfies ProviderCatalogCredentialSeed,
     ];
   });
+}
+
+export function catalogSeedStateFingerprint(parts: readonly unknown[]): string {
+  return JSON.stringify(parts);
 }
 
 function dedupeCatalogSeeds(
@@ -494,6 +604,7 @@ function buildProviderCatalog(input: {
   providerName: CredentialProvider;
   provider: CloudProvider;
   offerings: ProviderInstanceOffering[];
+  refreshStatus: ProviderCatalogRefreshStatus;
 }): ProviderCatalog {
   const locationIds = [
     ...input.provider.locations,
@@ -524,6 +635,7 @@ function buildProviderCatalog(input: {
       ])
     ) as Record<VMSize, SizeInfo>,
     offerings: input.offerings,
+    refreshStatus: input.refreshStatus,
     defaultLocation: input.provider.defaultLocation,
   };
 }
@@ -537,13 +649,52 @@ async function buildCatalogsFromCredentialRows(
   );
 
   const catalogs: ProviderCatalog[] = [];
-  for (const result of results) {
+  const refreshFailures: ProviderCatalogListResult['refreshFailures'] = [];
+  for (const [index, result] of results.entries()) {
     if (result.status === 'fulfilled') {
       catalogs.push(result.value);
     } else {
       log.warn('catalog.build_failed', serializeError(result.reason));
+      const seed = seeds[index];
+      if (seed) {
+        refreshFailures.push({
+          provider: seed.provider,
+          credentialSource: seed.credentialSource,
+          reason: 'provider-unavailable',
+        });
+      }
     }
   }
 
-  return { catalogs, credentialCount: seeds.length };
+  return { catalogs, credentialCount: seeds.length, refreshFailures };
+}
+
+/**
+ * Explicit provenance/completeness for a catalog refresh.
+ *
+ * Deriving this from array members alone misclassified a SUCCESSFUL, COMPLETE, EMPTY API
+ * inventory (Hetzner `server_types: []`) as an incomplete static catalog, which made
+ * candidate reconciliation skip marking the pool's prior offerings unavailable — forever.
+ * The empty case is only authoritative when the provider actually has an API-backed catalog;
+ * an empty STATIC list stays incomplete so a provider without a live catalog can never
+ * wipe last-known-good availability.
+ */
+function refreshStatusForOfferings(
+  offerings: ProviderInstanceOffering[],
+  transport: { transportSucceeded: boolean; apiBacked: boolean }
+): ProviderCatalogRefreshStatus {
+  const hasApiOfferings = offerings.some((offering) => offering.catalogSource === 'api');
+  const hasStaticOfferings = offerings.some((offering) => offering.catalogSource === 'static');
+  if (hasApiOfferings && !hasStaticOfferings) {
+    return { succeeded: true, origin: 'api', complete: true };
+  }
+  if (offerings.length === 0 && transport.transportSucceeded && transport.apiBacked) {
+    return { succeeded: true, origin: 'api', complete: true };
+  }
+  return {
+    succeeded: true,
+    origin: hasApiOfferings ? 'api' : 'static',
+    complete: false,
+    reason: 'static-catalog',
+  };
 }

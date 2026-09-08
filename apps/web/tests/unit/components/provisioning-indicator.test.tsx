@@ -132,57 +132,25 @@ describe('ProvisioningIndicator', () => {
     expect(segments.length).toBe(0);
   });
 
-  describe('size-fallback downgrade annotation', () => {
-    it('surfaces the downgrade when the provisioned size differs from the requested size', () => {
-      const state = makeState({ requestedVmSize: 'large', provisionedVmSize: 'medium' });
-      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-      expect(
-        screen.getByText('No large machines were available — provisioned a medium node instead.'),
-      ).toBeInTheDocument();
-    });
+  it.each([
+    { requestedVmSize: 'medium', provisionedVmSize: 'small' },
+    { requestedVmSize: 'small', provisionedVmSize: 'large' },
+    { requestedVmSize: null, provisionedVmSize: 'medium' },
+  ])('does not infer capacity exhaustion from compatibility labels: %j', (sizes) => {
+    // A native offering can succeed on its first attempt while its historical
+    // size label differs from the request's compatibility label.
+    const state = makeState({ ...sizes, executionStep: 'node_agent_ready' });
+    const onViewLogs = vi.fn();
+    render(<ProvisioningIndicator state={state} bootLogCount={3} onViewLogs={onViewLogs} />);
 
-    it('does not surface a downgrade when the provisioned size matches the requested size', () => {
-      const state = makeState({ requestedVmSize: 'large', provisionedVmSize: 'large' });
-      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-      expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
-    });
-
-    it('does not surface a downgrade before any size has been provisioned', () => {
-      const state = makeState({ requestedVmSize: 'large', provisionedVmSize: null });
-      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-      expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
-    });
-
-    it.each(['failed', 'completed', 'cancelled'] as const)(
-      'does not surface a downgrade when the task status is %s',
-      (status) => {
-        const state = makeState({
-          status,
-          requestedVmSize: 'large',
-          provisionedVmSize: 'medium',
-          errorMessage: status === 'failed' ? 'Setup failed' : null,
-        });
-        render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-        expect(screen.queryByText(/machines were available/)).not.toBeInTheDocument();
-      }
+    expect(
+      screen.queryByText(/machines were available|larger size was unavailable/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Provisioning VM (1/4)')).toBeInTheDocument();
+    expect(screen.getByText(/Current detail:/)).toHaveTextContent(
+      EXECUTION_STEP_LABELS.node_agent_ready,
     );
-
-    it('announces the downgrade to assistive technology via role="status"', () => {
-      const state = makeState({ requestedVmSize: 'large', provisionedVmSize: 'medium' });
-      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-      const annotation = screen.getByText(
-        'No large machines were available — provisioned a medium node instead.',
-      );
-      expect(annotation).toHaveAttribute('role', 'status');
-      expect(annotation).toHaveAttribute('aria-live', 'polite');
-    });
-
-    it('uses the unknown-requested-size copy when no requested size is recorded', () => {
-      const state = makeState({ requestedVmSize: null, provisionedVmSize: 'medium' });
-      render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-      expect(
-        screen.getByText('Provisioned a medium node (a larger size was unavailable).'),
-      ).toBeInTheDocument();
-    });
+    screen.getByRole('button', { name: 'View Logs' }).click();
+    expect(onViewLogs).toHaveBeenCalledOnce();
   });
 });

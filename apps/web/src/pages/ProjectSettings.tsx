@@ -1,4 +1,3 @@
-import type { VMSize } from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
@@ -6,7 +5,7 @@ import {
   MIN_WORKSPACE_IDLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 import { Button, Tabs } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
@@ -17,13 +16,17 @@ import { ProjectMembersSection } from '../components/project-settings/ProjectMem
 import { ProjectRuntimeConfigSection } from '../components/project-settings/ProjectRuntimeConfigSection';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
-import { ScalingSettings } from '../components/ScalingSettings';
 import {
-  formatProviderCatalogContext,
-  selectProviderCatalog,
-} from '../components/vm/format-vm-size';
-import { VmSizeCard } from '../components/vm/VmSizeCard';
-import { useProviderCatalog } from '../hooks/useProviderCatalog';
+  deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
+  hasValidationErrors,
+  type ResourceRequirementsFormState,
+  ResourceRequirementsInput,
+  type ResourceValidationErrors,
+  serializeResourceRequirements,
+  validateResourceState,
+} from '../components/resource-requirements';
+import { ScalingSettings } from '../components/ScalingSettings';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { deleteProject, updateProject } from '../lib/api';
@@ -308,44 +311,60 @@ export function ProjectSettingsAgents() {
 export function ProjectSettingsInfrastructure() {
   const toast = useToast();
   const { projectId, project, reload } = useProjectContext();
-  const [defaultVmSize, setDefaultVmSize] = useState<VMSize | null>(project?.defaultVmSize ?? null);
-  const [savingVmSize, setSavingVmSize] = useState(false);
+  const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
+    ...EMPTY_RESOURCE_STATE,
+  });
+  const [savingResources, setSavingResources] = useState(false);
+  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
+  const [legacyCleared, setLegacyCleared] = useState(false);
   const [workspaceIdleTimeoutMs, setWorkspaceIdleTimeoutMs] = useState<number>(
     project?.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
   );
   const [savingWorkspaceTimeout, setSavingWorkspaceTimeout] = useState(false);
+  const resourceDirtyRef = useRef(false);
+  const lastProjectIdRef = useRef<string | null>(null);
 
-  const queryScope = useQueryScope();
-  const { catalogs, loading: catalogLoading } = useProviderCatalog(queryScope);
-  const activeCatalog = selectProviderCatalog(catalogs, project?.defaultProvider);
-  const catalogContext = formatProviderCatalogContext(activeCatalog, project?.defaultLocation);
+  const legacyVmSize = project?.defaultVmSize ?? null;
 
   useEffect(() => {
-    if (project) {
-      setDefaultVmSize(project.defaultVmSize ?? null);
-      setWorkspaceIdleTimeoutMs(
-        project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
+    if (!project) return;
+    const isProjectSwitch = lastProjectIdRef.current !== project.id;
+    lastProjectIdRef.current = project.id;
+    // Always sync timeout (it has its own save button, no dirty tracking needed)
+    setWorkspaceIdleTimeoutMs(
+      project.workspaceIdleTimeoutMs ?? DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS
+    );
+    // Only reset resource draft on project switch or when not dirty
+    if (isProjectSwitch || !resourceDirtyRef.current) {
+      setResourceReqs(
+        deserializeResourceRequirements(project.resourceRequirementsJson)
       );
+      setLegacyCleared(false);
+      resourceDirtyRef.current = false;
     }
   }, [project]);
 
-  const handleSaveVmSize = async (size: VMSize) => {
-    const newSize = size === defaultVmSize ? null : size;
-    setSavingVmSize(true);
-    setDefaultVmSize(newSize);
+  const handleSaveResources = async () => {
+    const resErrors = validateResourceState(resourceReqs);
+    setResourceErrors(resErrors);
+    if (hasValidationErrors(resErrors)) {
+      toast.error('Fix resource requirement errors before saving');
+      return;
+    }
+    setSavingResources(true);
     try {
-      await updateProject(projectId, { defaultVmSize: newSize });
+      const json = serializeResourceRequirements(resourceReqs);
+      await updateProject(projectId, {
+        defaultVmSize: legacyCleared ? null : (legacyVmSize ?? undefined),
+        resourceRequirementsJson: json,
+      });
+      resourceDirtyRef.current = false;
       await reload();
-      toast.success(
-        newSize
-          ? `Default VM size set to ${newSize}`
-          : 'Default VM size cleared (will use platform default)'
-      );
+      toast.success('Default resource requirements saved');
     } catch (err) {
-      setDefaultVmSize(project?.defaultVmSize ?? null);
-      toast.error(err instanceof Error ? err.message : 'Failed to update VM size');
+      toast.error(err instanceof Error ? err.message : 'Failed to update resources');
     } finally {
-      setSavingVmSize(false);
+      setSavingResources(false);
     }
   };
 
@@ -369,31 +388,31 @@ export function ProjectSettingsInfrastructure() {
     <div className="grid gap-4">
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <div>
-          <h2 className="sam-type-section-heading m-0 text-fg-primary">Default Node Size</h2>
+          <h2 className="sam-type-section-heading m-0 text-fg-primary">Default Resources</h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">
-            Used when launching new workspaces from this project. Click again to clear.
-            {catalogContext
-              ? ` Catalog: ${catalogContext}.`
-              : ' Exact specs depend on the selected provider.'}
+            Minimum resource requirements for new workspaces. Leave blank to use platform defaults.
           </p>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
-            <VmSizeCard
-              key={size}
-              size={size}
-              sizeInfo={activeCatalog?.sizes[size] ?? null}
-              selected={defaultVmSize === size}
-              disabled={savingVmSize || catalogLoading}
-              onClick={() => void handleSaveVmSize(size)}
-            />
-          ))}
+        <ResourceRequirementsInput
+          value={resourceReqs}
+          onChange={(next) => { setResourceReqs(next); setResourceErrors({}); resourceDirtyRef.current = true; }}
+          onClearLegacy={() => { setLegacyCleared(true); resourceDirtyRef.current = true; }}
+          disabled={savingResources}
+          legacyVmSize={legacyCleared ? null : legacyVmSize}
+          inheritLabel="platform default"
+          errors={resourceErrors}
+        />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void handleSaveResources()}
+            loading={savingResources}
+            disabled={savingResources}
+          >
+            Save
+          </Button>
         </div>
-        {!defaultVmSize && (
-          <div className="text-xs text-fg-muted">
-            No default set - workspaces will use the platform default (Medium).
-          </div>
-        )}
       </section>
 
       <section className="glass-surface rounded-lg p-4 grid gap-3">

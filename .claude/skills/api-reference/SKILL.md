@@ -35,15 +35,15 @@ user-invocable: false
 - `GET /api/projects` — List user's projects (supports `limit` and `cursor`)
 - `GET /api/projects/:id` — Get project detail (includes task status counts and linked workspace count)
 - `GET /api/projects/:projectId/comments` — List project-wide comment inbox across chat and library threads (supports `status=open|sent|resolved`, `limit`)
-- `GET /api/projects/:id/capacity-pools/defaults` — Read visible default capacity pool summaries for the current project/user context. Read-only by default; pass `?ensure=true` to perform idempotent lazy reconciliation before returning the safe summary payload. Project/user summaries require project `secret:read`, installation summaries are superadmin-only, and encrypted credential material is never returned.
-- `POST /api/projects/:id/capacity-pools/defaults/reconcile` — Explicitly reconcile visible default capacity pool metadata from existing credentials and return the same safe summary payload.
+- `GET /api/projects/:id/capacity-pools/defaults` — Read default capacity pool context for the current project/user context. Requires project `project:read`; every active member receives the redacted `effectiveSummary` plus safe `placementSettings` resource defaults/settings. Raw project/user summaries require project `secret:read`, raw installation summaries are superadmin-only, and encrypted credential material is never returned. `?ensure=true` reconciles only for callers that also have project `secret:read`; non-superadmins never reconcile installation credentials through this route.
+- `POST /api/projects/:id/capacity-pools/defaults/reconcile` — Explicitly reconcile visible default capacity pool metadata from existing credentials and return the same safe summary payload. Non-superadmins reconcile project/user scopes only.
 - `PATCH /api/projects/:id/capacity-pools/defaults` — Update only the project-owned default pool policy, candidate statuses, or provider-native `catalogAdditions`; requires project `secret:write` and never mutates user or installation fallback pools.
 - `PATCH /api/projects/:id` — Update project metadata (`name`, `description`, `defaultBranch`)
 - `DELETE /api/projects/:id` — Delete project (cascades project tasks/dependencies/events)
 
 ## Default Capacity Pools
 
-- `GET /api/capacity-pools/defaults` — Read the authenticated user's default compute pool summaries. Hidden project/installation scopes are represented structurally and are not rendered as user-facing placeholder rows. Pass `?ensure=true` for idempotent reconciliation before returning.
+- `GET /api/capacity-pools/defaults` — Read the authenticated user's default compute pool summaries. Hidden project/installation scopes are represented structurally and are not rendered as user-facing placeholder rows. Pass `?ensure=true` for idempotent user-scope reconciliation before returning. Existing installation metadata may appear only through redacted `effectiveSummary`; this route never reconciles installation credentials.
 - `POST /api/capacity-pools/defaults/reconcile` — Explicitly reconcile the authenticated user's default compute pool metadata from their cloud credentials.
 - `PATCH /api/capacity-pools/defaults` — Update only the authenticated user's owned default pool policy, candidate statuses, or provider-native `catalogAdditions`.
 - `GET /api/admin/capacity-pools/defaults` — Superadmin-only read for the SAM installation default compute pool summaries; reveals non-secret metadata about platform cloud credentials.
@@ -90,7 +90,7 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 ## MCP Orchestration
 
 - `wait_for_subtasks` — Task-agent-only tool that registers one durable wait for unique same-project task IDs. `waitKey` is a required stable workflow-step idempotency key and must be reused after a lost response. `condition` is `all` (default) or `any`; optional `wakeAfterSeconds` is positive and server-capped. Persist workflow state before calling, then end the turn. ProjectData wakes the caller through exact-once durable prompt delivery when the condition or finite deadline resolves.
-- `dispatch_task` — Create a direct child task subject to project dispatch depth and concurrency limits.
+- `dispatch_task` — Create a direct child task subject to project dispatch depth and concurrency limits. Accepts `resourceRequirements` for modern workload sizing and deprecated `vmSize` for legacy compatibility. `resourceRequirements` is VM-only and conflicts with `runtime: "cf-container"`.
 - `get_task_details` / `get_peer_agent_output` — Read authoritative child status and output after a durable wake.
 - `get_archived_tool_payloads` — Retrieve ProjectData tool-call payload JSON that has been archived to private R2 and stripped from message rows. Accepts `messageId`, `sessionId`, or `startTime`/`endTime` with bounded `limit`; returns payloads through the Worker without exposing R2 keys.
 - `create_project_event_subscription` / `list_project_event_subscriptions` / `get_project_event_subscription` / `cancel_project_event_subscription` — Task-agent-only ProjectData event-subscription tools. The server derives project, owner, task, workspace, chat session, and agent-session identity from the MCP token; callers cannot supply `projectId`, `owner`, `ownerScope`, or `cancelledBy`. Creates are short-lived and capped by the MCP token lifetime. Filters are v1 exact/set matches for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`. Requested delivery policy is recorded separately from matching/routing, and this wave resolves non-record-only modes to `recorded_not_injected`; it does not inject prompts, steer runtimes, interrupt runtimes, spawn tasks, or expose human/UI controls. Missing get/cancel requests error by default; `required=false` returns `subscription:null`.
@@ -147,6 +147,10 @@ Project event pull loop: create a subscription with the narrowest useful filter,
 
 All direct routes require the workspace-scoped node-management Bearer token. Omitting new version/delivery fields preserves the legacy start/prompt behavior. Automatic rollover remains disabled until a control-plane caller invokes it.
 
+## Agent Profiles and Skills
+
+Agent profile and skill create/update surfaces accept `resourceRequirements` as an object and `resourceRequirementsJson` as a compatibility JSON string/null. Modern object input takes precedence inside the same request body. Known fields use the same bounded client/API validation contract as task submit; unknown JSON metadata is preserved for compatibility. Deprecated `vmSizeOverride` remains accepted without client-side tier-to-hardware expansion.
+
 ## Agent Settings
 
 - `GET /api/agent-settings/:agentType` — Get user's agent settings
@@ -181,6 +185,8 @@ All direct routes require the workspace-scoped node-management Bearer token. Omi
 - `POST /api/projects/:projectId/triggers/:triggerId/webhook/rotate` — Rotate the webhook bearer token and return the replacement once.
 - `GET /api/projects/:projectId/triggers/:triggerId/webhook/deliveries` — List redacted webhook delivery audit metadata (`limit`, `cursor`).
 - `POST /api/webhooks/ingest` — Public generic webhook ingress. Requires `Authorization: Bearer <token>`, `Content-Type: application/json`, and a JSON object body. Supports optional `Idempotency-Key`.
+
+Trigger create/update accepts `resourceRequirements` or `resourceRequirementsJson` and persists normalized JSON on the trigger layer. Omitted fields inherit lower layers; explicit `null` clears the trigger-layer JSON. Deprecated `vmSizeOverride` remains accepted as `small`, `medium`, `large`, or `null`.
 
 The MCP `create_trigger` tool intentionally creates cron triggers only. Generic webhook creation, incident trigger creation, filter management, preview, and credential rotation use the authenticated UI/REST surface so one-time credentials and private operator configuration can be handled explicitly.
 

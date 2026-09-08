@@ -38,9 +38,12 @@ export function assertDefaultCapacityPoolUpdateResult(
     });
   }
   if (result.unavailableCandidateIds.length > 0) {
-    throw errors.badRequest('Candidate updates must be currently available in the provider catalog', {
-      unavailableCandidateIds: result.unavailableCandidateIds,
-    });
+    throw errors.badRequest(
+      'Candidate updates must be currently available in the provider catalog',
+      {
+        unavailableCandidateIds: result.unavailableCandidateIds,
+      }
+    );
   }
   if (result.missingCatalogAdditions.length > 0) {
     throw errors.badRequest('Catalog additions must belong to the default capacity pool', {
@@ -48,9 +51,20 @@ export function assertDefaultCapacityPoolUpdateResult(
     });
   }
   if (result.unavailableCatalogAdditions.length > 0) {
-    throw errors.badRequest('Catalog additions must be currently available in the provider catalog', {
-      unavailableCatalogAdditions: result.unavailableCatalogAdditions,
-    });
+    throw errors.badRequest(
+      'Catalog additions must be currently available in the provider catalog',
+      {
+        unavailableCatalogAdditions: result.unavailableCatalogAdditions,
+      }
+    );
+  }
+  if (result.conflict) {
+    // The pool advanced between this edit's read and its fenced write. Nothing was published,
+    // so the caller must re-read and retry rather than have a stale edit silently overwrite
+    // the concurrent editor's intent.
+    throw errors.conflict(
+      'Default capacity pool changed while this edit was in flight; reload and retry'
+    );
   }
 
   return;

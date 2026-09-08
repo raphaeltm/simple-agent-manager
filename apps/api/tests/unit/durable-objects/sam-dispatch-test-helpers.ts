@@ -126,9 +126,7 @@ export function buildDispatchPlacementResolution(input: DispatchPlacementResolut
     effectiveProvider: 'hetzner',
     credentialAttributionUserId: inherited.userId ?? input.userId,
     credentialAttributionProjectId:
-      credentialAttributionSource === 'project'
-        ? (inherited.projectId ?? input.projectId)
-        : null,
+      credentialAttributionSource === 'project' ? (inherited.projectId ?? input.projectId) : null,
     credentialAttributionSource,
   };
 }
@@ -137,6 +135,16 @@ export function resetDispatchTaskMocks(options: { title?: string } = {}) {
   vi.clearAllMocks();
   dispatchTaskMocks.db.select.mockImplementation(() => selectRows([]));
   dispatchTaskMocks.db.select.mockImplementationOnce(() => selectRows([dispatchProject]));
+  dispatchTaskMocks.db.select.mockImplementationOnce(() =>
+    selectRows([
+      {
+        projectId: 'proj-1',
+        userId: 'user-1',
+        role: 'owner',
+        status: 'active',
+      },
+    ])
+  );
   dispatchTaskMocks.resolveAgentProfile.mockResolvedValue(null);
   dispatchTaskMocks.resolveCredentialSource.mockResolvedValue({
     credentialSource: 'user',

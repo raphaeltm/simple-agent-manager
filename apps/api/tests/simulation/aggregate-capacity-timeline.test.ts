@@ -11,7 +11,8 @@ import {
 
 const HALF_NODE: ResolvedResourceReservation = {
   cpuMillis: 2_000,
-  memoryMb: 4_096,
+  // Half of 8192 MiB after the default 512 MiB host reserve.
+  memoryMb: 3_840,
   diskMb: 40_960,
   exclusiveNode: false,
   maxCoTenants: 4,
@@ -21,15 +22,18 @@ const HALF_NODE: ResolvedResourceReservation = {
 };
 
 const LARGE_NODE = {
-  providerInstanceVcpuCount: 4,
-  providerInstanceMemoryMb: 8_192,
-  providerInstanceDiskGb: 80,
+  nodeClass: 'managed',
+  providerInstanceId: 'server-timeline',
+  observedProviderInstanceVcpuCount: 4,
+  observedProviderInstanceMemoryMb: 8_192,
+  observedProviderInstanceDiskGb: 80,
+  observedHardwareSource: 'observed',
 };
 
 const FULL_NODE: ResolvedResourceReservation = {
   ...HALF_NODE,
   cpuMillis: 4_000,
-  memoryMb: 8_192,
+  memoryMb: 7_680,
   diskMb: 81_920,
   maxCoTenants: 1,
 };
@@ -65,6 +69,42 @@ describe('aggregate capacity deterministic virtual timeline', () => {
     expect(world.tasks.get('contender-a')?.status).toBe('running');
     expect(world.tasks.get('contender-b')?.status).toBe('retry-wait');
     expect(world.activeWorkspaces('node-1')).toHaveLength(2);
+    world.assertSafety();
+  });
+
+  it('rejects planned capacity without verified observed hardware, even on an empty node', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-unverified', {
+      providerInstanceId: 'server-unverified',
+      providerInstanceVcpuCount: 4,
+      providerInstanceMemoryMb: 8_192,
+      providerInstanceDiskGb: 80,
+    });
+    world.submit('denied', HALF_NODE, { preferredNodeId: 'node-unverified' });
+
+    expect(world.tasks.get('denied')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-unverified')).toHaveLength(0);
+  });
+
+  it('preserves host memory reserve when physical memory would otherwise fit', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-1', LARGE_NODE);
+    world.submit('denied', { ...FULL_NODE, memoryMb: 8_192 }, { preferredNodeId: 'node-1' });
+
+    expect(world.tasks.get('denied')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-1')).toHaveLength(0);
+  });
+
+  it('rejects an occupied node when resource telemetry disappears', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-1', LARGE_NODE);
+    world.submit('existing', HALF_NODE, { preferredNodeId: 'node-1' });
+    world.runUntilIdle();
+    world.nodes.get('node-1')!.lastMetrics = null;
+    world.submit('denied', HALF_NODE, { preferredNodeId: 'node-1' });
+
+    expect(world.tasks.get('denied')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-1')).toHaveLength(1);
     world.assertSafety();
   });
 

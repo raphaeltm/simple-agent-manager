@@ -73,6 +73,27 @@ class MockSqlStorage {
 }
 
 describe('DO Migrations', () => {
+  it('adds the submission checkpoint without reclassifying an existing in-flight prompt', () => {
+    const db = new Database(':memory:');
+    try {
+      const sql = createSqlStorage(db);
+      sql.exec(`CREATE TABLE session_inbox (
+        id TEXT PRIMARY KEY, delivery_state TEXT, attempt_id TEXT, runtime_identity TEXT
+      )`);
+      sql.exec(`INSERT INTO session_inbox VALUES ('existing', 'delivering', 'attempt-before-deploy', 'runtime-before-deploy')`);
+      const migration = MIGRATIONS.find((entry) => entry.name === '046-prompt-delivery-submit-phase');
+      expect(migration).toBeDefined();
+      migration!.run(sql);
+      migration!.run(sql);
+      expect(db.prepare('SELECT * FROM session_inbox').get()).toEqual({
+        id: 'existing', delivery_state: 'delivering', attempt_id: 'attempt-before-deploy',
+        runtime_identity: 'runtime-before-deploy', prompt_delivery_phase: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   describe('MIGRATIONS array', () => {
     it('has at least one migration defined', () => {
       expect(MIGRATIONS.length).toBeGreaterThanOrEqual(1);

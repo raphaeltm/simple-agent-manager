@@ -6,21 +6,35 @@
  * the shared Provider interface (no provider-specific branches).
  */
 
-import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
+import type { NativeVMConfig } from '@simple-agent-manager/providers';
+import type {
+  CapacityPlacementSnapshot,
+  CredentialProvider,
+  CredentialSource,
+} from '@simple-agent-manager/shared';
 import {
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-  DEFAULT_VM_LOCATION,
-  getDefaultLocationForProvider,
 } from '@simple-agent-manager/shared';
-import { and, eq, isNull, ne } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
+import { ulid } from '../lib/ulid';
+import {
+  placementProjectDefaultsFromRow,
+  resolveCanonicalVmAllocationPlan,
+} from './canonical-vm-allocation';
 import { createNodeRecord, provisionNode } from './nodes';
-import { resolveCredentialSource } from './provider-credentials';
+import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
+import {
+  assertDeploymentProvisioningAuthority,
+  cleanupFreshProvisioningNode,
+} from './provisioning-authority';
+
+type VMArchitecture = NonNullable<NativeVMConfig['architecture']>;
 
 /** Default VM size for deployment nodes — apps are typically smaller than dev workspaces. */
 export const DEPLOYMENT_DEFAULT_VM_SIZE = 'small';
@@ -45,16 +59,25 @@ export interface DeploymentNodeResult {
 }
 
 interface DeploymentPlacement {
+  projectId: string;
   provider: CredentialProvider;
   location: string;
   vmSize: string;
   credentialSource: CredentialSource;
+  credentialAttributionUserId: string;
+  credentialAttributionProjectId: string | null;
+  placementCredentialSource: CredentialSource | null;
+  placementCredentialReference: string | null;
+  placementCredentialVersion: number | null;
+  providerInstanceType: string | null;
+  providerInstanceBootDiskSizeGb: number | null;
+  providerInstanceImage: string | null;
+  providerInstanceArchitecture: VMArchitecture | null;
+  capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
 }
 
 interface DeploymentNodeCandidate {
   id: string;
-  vm_size: string;
-  vm_location: string;
   last_metrics: string | null;
 }
 
@@ -87,7 +110,24 @@ function parseMetrics(
   }
 }
 
-async function findDeploymentNodeWithCapacity(
+/** Native identity is independent of the historical vm_size label. The shared
+ * authority predicate additionally pins the current pool candidate and role. */
+function deploymentNativeIdentityPredicate(placement: DeploymentPlacement) {
+  return {
+    sql: `AND n.provider_instance_type = ?
+          AND n.provider_instance_boot_disk_size_gb IS ?
+          AND n.provider_instance_image IS ?
+          AND n.provider_instance_architecture IS ?`,
+    binds: [
+      placement.providerInstanceType,
+      placement.providerInstanceBootDiskSizeGb,
+      placement.providerInstanceImage,
+      placement.providerInstanceArchitecture,
+    ],
+  };
+}
+
+export async function findDeploymentNodeWithCapacity(
   env: Env,
   userId: string,
   placement: DeploymentPlacement,
@@ -112,19 +152,37 @@ async function findDeploymentNodeWithCapacity(
     DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT
   );
 
+  const authority = buildPlacementAuthoritySqlPredicate({
+    nodeAlias: 'n',
+    userId,
+    projectId: placement.projectId,
+    nodeRole: 'deployment',
+    workloadRole: 'deployment',
+    capacityPlacementSnapshot: placement.capacityPlacementSnapshot,
+    requireProjectMembership: true,
+  });
+
+  const nativeIdentity = deploymentNativeIdentityPredicate(placement);
   const nodes = await env.DATABASE.prepare(
-    `SELECT id, vm_size, vm_location, last_metrics
-     FROM nodes
-     WHERE user_id = ?
-       AND status = 'running'
-       AND health_status != 'unhealthy'
-       AND node_role = 'deployment'
-       AND COALESCE(node_mode, 'shared') = 'shared'
-       AND cloud_provider = ?
-       AND vm_location = ?
-       AND vm_size = ?`
+    `SELECT n.id, n.last_metrics
+     FROM nodes n
+     WHERE n.user_id = ?
+       AND n.status = 'running'
+       AND n.health_status != 'unhealthy'
+       AND n.node_role = 'deployment'
+       AND COALESCE(n.node_mode, 'shared') = 'shared'
+       AND n.cloud_provider = ?
+       AND n.vm_location = ?
+       ${nativeIdentity.sql}
+       ${authority.sql}`
   )
-    .bind(userId, placement.provider, placement.location, placement.vmSize)
+    .bind(
+      userId,
+      placement.provider,
+      placement.location,
+      ...nativeIdentity.binds,
+      ...authority.binds
+    )
     .all<DeploymentNodeCandidate>();
 
   const candidates = nodes.results ?? [];
@@ -147,36 +205,25 @@ async function findDeploymentNodeWithCapacity(
     .map((node) => {
       const metrics = parseMetrics(node.last_metrics);
       if (!metrics) {
-        return { id: node.id, vmSize: node.vm_size, vmLocation: node.vm_location, score: null };
+        return { id: node.id, score: null };
       }
       const cpu = metrics.cpuLoadAvg1 ?? 0;
       const mem = metrics.memoryPercent ?? 0;
       if (cpu >= cpuThreshold || mem >= memThreshold) return null;
       return {
         id: node.id,
-        vmSize: node.vm_size,
-        vmLocation: node.vm_location,
         score: cpu * 0.4 + mem * 0.6,
       };
     })
-    .filter(
-      (node): node is { id: string; vmSize: string; vmLocation: string; score: number | null } =>
-        node !== null
-    );
+    .filter((node): node is { id: string; score: number | null } => node !== null);
 
   if (scored.length === 0) return null;
 
   scored.sort((a, b) => {
-    const aLoc = a.vmLocation === placement.location ? 1 : 0;
-    const bLoc = b.vmLocation === placement.location ? 1 : 0;
-    if (aLoc !== bLoc) return bLoc - aLoc;
-    const aSize = a.vmSize === placement.vmSize ? 1 : 0;
-    const bSize = b.vmSize === placement.vmSize ? 1 : 0;
-    if (aSize !== bSize) return bSize - aSize;
-    if (a.score === null && b.score === null) return 0;
+    if (a.score === null && b.score === null) return a.id.localeCompare(b.id);
     if (a.score === null) return 1;
     if (b.score === null) return -1;
-    return a.score - b.score;
+    return a.score - b.score || a.id.localeCompare(b.id);
   });
 
   return scored[0]?.id ?? null;
@@ -194,64 +241,136 @@ async function readEnvironmentNodeId(
   return rows[0]?.nodeId ?? null;
 }
 
-async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promise<boolean> {
-  const { env, db, envId, nodeId, placement, userId, expectedNodeStatus, nodeMode } = opts;
-  if (typeof env.DATABASE.prepare === 'function') {
-    const result = await env.DATABASE.prepare(
-      `UPDATE deployment_environments
-       SET node_id = ?, provider = ?, location = ?, updated_at = ?
-       WHERE id = ?
-         AND node_id IS NULL
-         AND EXISTS (
-           SELECT 1 FROM nodes
-           WHERE id = ?
-             AND user_id = ?
-             AND status = ?
-             AND node_role = 'deployment'
-             AND cloud_provider = ?
-             AND vm_location = ?
-             AND vm_size = ?
-             AND COALESCE(node_mode, 'shared') = ?
-             AND (
-               COALESCE(node_mode, 'shared') = 'shared'
-               OR NOT EXISTS (
-                 SELECT 1 FROM deployment_environments existing
-                 WHERE existing.node_id = nodes.id
-               )
-             )
-         )`
-    )
-      .bind(
-        nodeId,
-        placement.provider,
-        placement.location,
-        new Date().toISOString(),
-        envId,
-        nodeId,
-        userId,
-        expectedNodeStatus,
-        placement.provider,
-        placement.location,
-        placement.vmSize,
-        nodeMode
-      )
-      .run();
-    return (result.meta?.changes ?? 0) > 0;
-  }
+export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promise<boolean> {
+  const { env, envId, nodeId, placement, userId, expectedNodeStatus, nodeMode } = opts;
+  if (typeof env.DATABASE.prepare !== 'function') return false;
 
+  const authority = buildPlacementAuthoritySqlPredicate({
+    nodeAlias: 'n',
+    userId,
+    projectId: placement.projectId,
+    nodeRole: 'deployment',
+    workloadRole: 'deployment',
+    capacityPlacementSnapshot: placement.capacityPlacementSnapshot,
+    requireProjectMembership: true,
+  });
+  const nativeIdentity = deploymentNativeIdentityPredicate(placement);
+  const maxEnvironments =
+    nodeMode === 'exclusive'
+      ? 1
+      : parseEnvInt(
+          env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
+          DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
+        );
+  const result = await env.DATABASE.prepare(
+    `UPDATE deployment_environments
+     SET node_id = ?, provider = ?, location = ?, updated_at = ?
+     WHERE id = ?
+       AND node_id IS NULL
+       AND EXISTS (
+         SELECT 1 FROM nodes n
+         WHERE n.id = ?
+           AND n.user_id = ?
+           AND n.status = ?
+           AND n.node_role = 'deployment'
+           AND n.cloud_provider = ?
+           AND n.vm_location = ?
+           ${nativeIdentity.sql}
+           AND COALESCE(n.node_mode, 'shared') = ?
+           AND (SELECT COUNT(*) FROM deployment_environments occupied WHERE occupied.node_id = n.id) < ?
+           AND (
+             COALESCE(n.node_mode, 'shared') = 'shared'
+             OR NOT EXISTS (
+               SELECT 1 FROM deployment_environments existing
+               WHERE existing.node_id = n.id
+             )
+           )
+           ${authority.sql}
+       )`
+  )
+    .bind(
+      nodeId,
+      placement.provider,
+      placement.location,
+      new Date().toISOString(),
+      envId,
+      nodeId,
+      userId,
+      expectedNodeStatus,
+      placement.provider,
+      placement.location,
+      ...nativeIdentity.binds,
+      nodeMode,
+      maxEnvironments,
+      ...authority.binds
+    )
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+async function rollbackEnvironmentNodeLink(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  envId: string,
+  nodeId: string
+): Promise<void> {
   await db
     .update(schema.deploymentEnvironments)
-    .set({
-      nodeId,
-      provider: placement.provider,
-      location: placement.location,
-      updatedAt: new Date().toISOString(),
-    })
+    .set({ nodeId: null, updatedAt: new Date().toISOString() })
     .where(
-      and(eq(schema.deploymentEnvironments.id, envId), isNull(schema.deploymentEnvironments.nodeId))
+      and(
+        eq(schema.deploymentEnvironments.id, envId),
+        eq(schema.deploymentEnvironments.nodeId, nodeId)
+      )
     );
+}
 
-  return true;
+async function assertFreshDeploymentProvisioningAuthority(input: {
+  env: Env;
+  envId: string;
+  projectId: string;
+  userId: string;
+  nodeId: string;
+  placement: DeploymentPlacement;
+  nodeMode: 'shared' | 'exclusive';
+  requiresVolumes: boolean;
+}): Promise<void> {
+  await assertDeploymentProvisioningAuthority(input.env, {
+    environmentId: input.envId,
+    projectId: input.projectId,
+    userId: input.userId,
+    nodeId: input.nodeId,
+    provider: input.placement.provider,
+    location: input.placement.location,
+    providerInstanceType: input.placement.providerInstanceType,
+    providerInstanceBootDiskSizeGb: input.placement.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: input.placement.providerInstanceImage,
+    providerInstanceArchitecture: input.placement.providerInstanceArchitecture,
+    nodeMode: input.nodeMode,
+    requiresVolumes: input.requiresVolumes,
+  });
+}
+
+async function failIfFreshDeploymentNodeNotProvisionable(
+  env: Env,
+  nodeId: string,
+  userId: string
+): Promise<void> {
+  const row = await env.DATABASE.prepare(
+    `SELECT status, error_message AS errorMessage
+       FROM nodes
+      WHERE id = ? AND user_id = ?
+      LIMIT 1`
+  )
+    .bind(nodeId, userId)
+    .first<{ status: string; errorMessage: string | null }>();
+  if (!row) {
+    throw new Error('Deployment node disappeared during provisioning');
+  }
+  if (row.status === 'error' || row.status === 'deleted' || row.status === 'stopped') {
+    throw new Error(
+      row.errorMessage || `Deployment node provisioning ended with status ${row.status}`
+    );
+  }
 }
 
 export async function resolveDeploymentPlacement(
@@ -265,38 +384,65 @@ export async function resolveDeploymentPlacement(
   }
 ): Promise<DeploymentPlacement | null> {
   const db = drizzle(env.DATABASE, { schema });
-
-  let cloudProvider: CredentialProvider;
-  let credentialSource: CredentialSource;
-  if (options?.providerOverride) {
-    const credential = await resolveCredentialSource(db, userId, options.providerOverride, projectId);
-    if (!credential) {
-      log.error('deployment_provisioning.no_provider', { userId, projectId, provider: options.providerOverride });
-      return null;
-    }
-    cloudProvider = credential.providerName;
-    credentialSource = credential.credentialSource;
-  } else {
-    const credential = await resolveCredentialSource(db, userId, undefined, projectId);
-    if (!credential) {
-      log.error('deployment_provisioning.no_provider', { userId, projectId });
-      return null;
-    }
-    cloudProvider = credential.providerName;
-    credentialSource = credential.credentialSource;
+  if (!projectId) return null;
+  const [project] = await db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .limit(1);
+  if (!project) {
+    log.error('deployment_provisioning.no_provider', {
+      userId,
+      projectId,
+      provider: options?.providerOverride,
+    });
+    return null;
+  }
+  const defaultVmSize = env.DEPLOYMENT_DEFAULT_VM_SIZE?.trim() || DEPLOYMENT_DEFAULT_VM_SIZE;
+  const allocation = await resolveCanonicalVmAllocationPlan(db, env, {
+    entryPoint: 'deployment-provisioning',
+    taskId: ulid(),
+    userId,
+    projectId,
+    project: placementProjectDefaultsFromRow(project),
+    explicit: {
+      vmSize: options?.vmSizeOverride?.trim() || defaultVmSize,
+      provider: options?.providerOverride ?? null,
+      vmLocation: options?.vmLocationOverride?.trim() || null,
+    },
+    credentialProjectPolicy: 'current-project',
+    taskModeDefault: 'task',
+    workloadRole: 'deployment',
+  });
+  if ('error' in allocation) {
+    log.error('deployment_provisioning.no_provider', {
+      userId,
+      projectId,
+      provider: options?.providerOverride,
+      reason: allocation.error,
+    });
+    return null;
   }
 
-  const vmLocation =
-    options?.vmLocationOverride?.trim() ||
-    getDefaultLocationForProvider(cloudProvider) ||
-    DEFAULT_VM_LOCATION;
-  const defaultVmSize = env.DEPLOYMENT_DEFAULT_VM_SIZE?.trim() || DEPLOYMENT_DEFAULT_VM_SIZE;
-
   return {
-    provider: cloudProvider,
-    location: vmLocation,
-    vmSize: options?.vmSizeOverride?.trim() || defaultVmSize,
-    credentialSource,
+    projectId,
+    provider: allocation.effectiveProvider,
+    location: allocation.vmLocation,
+    vmSize: allocation.vmSize,
+    credentialSource: allocation.credentialAttributionSource,
+    credentialAttributionUserId: allocation.credentialAttributionUserId,
+    credentialAttributionProjectId: allocation.credentialAttributionProjectId,
+    placementCredentialSource:
+      allocation.capacityPlacementSnapshot?.placementCredentialSource ?? null,
+    placementCredentialReference:
+      allocation.capacityPlacementSnapshot?.placementCredentialReference ?? null,
+    placementCredentialVersion:
+      allocation.capacityPlacementSnapshot?.placementCredentialVersion ?? null,
+    providerInstanceType: allocation.providerInstanceType,
+    providerInstanceBootDiskSizeGb: allocation.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: allocation.providerInstanceImage,
+    providerInstanceArchitecture: allocation.providerInstanceArchitecture,
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
   };
 }
 
@@ -382,16 +528,21 @@ export async function provisionDeploymentNode(
   // Create the node record with deployment role
   const node = await createNodeRecord(env, {
     userId,
-    credentialAttributionUserId: userId,
-    credentialAttributionProjectId: placement.credentialSource === 'project' ? projectId : null,
+    credentialAttributionUserId: placement.credentialAttributionUserId,
+    credentialAttributionProjectId: placement.credentialAttributionProjectId,
     credentialAttributionSource: placement.credentialSource,
     name: `deploy-${envId.slice(0, 8).toLowerCase()}`,
     vmSize: placement.vmSize,
     vmLocation: placement.location,
     heartbeatStaleAfterSeconds: 300,
     cloudProvider: placement.provider,
+    providerInstanceType: placement.providerInstanceType,
+    providerInstanceBootDiskSizeGb: placement.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: placement.providerInstanceImage,
+    providerInstanceArchitecture: placement.providerInstanceArchitecture,
     nodeRole: 'deployment',
     nodeMode,
+    capacityPlacementSnapshot: placement.capacityPlacementSnapshot,
   });
 
   const linkedFreshNode = await linkEnvironmentToNode({
@@ -441,15 +592,37 @@ export async function provisionDeploymentNode(
   });
 
   // Return the provisioning promise for the caller to pass to waitUntil()
-  const provisioningPromise = provisionNode(
-    node.id,
-    env,
-    undefined,
-    { rethrowProviderError: true },
-    {
-      environmentId: envId,
-    }
-  ).catch(async (err) => {
+  const assertExternalMutationAuthority = async () => {
+    await assertFreshDeploymentProvisioningAuthority({
+      env,
+      envId,
+      projectId,
+      userId,
+      nodeId: node.id,
+      placement,
+      nodeMode,
+      requiresVolumes,
+    });
+  };
+
+  const provisioningPromise = (async () => {
+    await provisionNode(
+      node.id,
+      env,
+      undefined,
+      {
+        rethrowProviderError: true,
+        authorityProjectId: projectId,
+        assertExternalMutationAuthority,
+      },
+      {
+        environmentId: envId,
+        projectId,
+      }
+    );
+    await assertExternalMutationAuthority();
+    await failIfFreshDeploymentNodeNotProvisionable(env, node.id, userId);
+  })().catch(async (err) => {
     log.error('deployment_provisioning.provision_failed', {
       nodeId: node.id,
       envId,
@@ -461,15 +634,7 @@ export async function provisionDeploymentNode(
     // Guard on nodeId = our node to avoid stomping a concurrent successful
     // re-provisioning that already wrote a different nodeId.
     try {
-      await db
-        .update(schema.deploymentEnvironments)
-        .set({ nodeId: null, updatedAt: new Date().toISOString() })
-        .where(
-          and(
-            eq(schema.deploymentEnvironments.id, envId),
-            eq(schema.deploymentEnvironments.nodeId, node.id)
-          )
-        );
+      await rollbackEnvironmentNodeLink(db, envId, node.id);
       log.info('deployment_provisioning.nodeId_rolled_back', { envId, nodeId: node.id });
     } catch (rollbackErr) {
       log.error('deployment_provisioning.nodeId_rollback_failed', {
@@ -478,6 +643,12 @@ export async function provisionDeploymentNode(
         ...serializeError(rollbackErr),
       });
     }
+    await cleanupFreshProvisioningNode(env, {
+      nodeId: node.id,
+      userId,
+      nodeRole: 'deployment',
+      reason: 'deployment_provisioning_failed',
+    });
     throw err;
   });
 

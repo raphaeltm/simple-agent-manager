@@ -34,6 +34,370 @@ function baseVariables(overrides?: Partial<CloudInitVariables>): CloudInitVariab
   };
 }
 
+type CloudInitWriteFile = {
+  path: string;
+  content: string;
+  permissions?: string;
+};
+
+function getWriteFile(
+  path: string,
+  overrides?: Partial<CloudInitVariables>
+): CloudInitWriteFile {
+  const config = generateCloudInit(baseVariables(overrides), { validateSize: false });
+  const parsed = YAML.parse(config.replace(/^#cloud-config\n/, '')) as {
+    write_files: CloudInitWriteFile[];
+  };
+  const entry = parsed.write_files.find((file) => file.path === path);
+  if (!entry) {
+    throw new Error(`missing write_files entry ${path}`);
+  }
+  return entry;
+}
+
+function joinAbsolute(root: string, absolutePath: string): string {
+  return join(root, absolutePath.replace(/^\/+/, ''));
+}
+
+function commandLogLines(path: string): string[] {
+  if (!existsSync(path)) {
+    return [];
+  }
+  const content = readFileSync(path, 'utf8').trim();
+  return content ? content.split('\n') : [];
+}
+
+function writeFakeExecutable(path: string, content: string): void {
+  writeFileSync(path, content, { mode: 0o755 });
+}
+
+function fakeLoggerScript(): string {
+  return `#!/bin/sh
+printf '%s\\n' "logger $*" >> "$COMMAND_LOG"
+`;
+}
+
+function fakeHeadroomSystemctlScript(): string {
+  return `#!/bin/sh
+printf '%s\\n' "systemctl $*" >> "$COMMAND_LOG"
+if [ "\${FAKE_SYSTEMCTL_FAIL:-0}" = "1" ]; then
+  echo "systemctl failed" >&2
+  exit 5
+fi
+if [ "$1" = "is-active" ]; then
+  if [ "\${FAKE_DOCKER_ACTIVE:-0}" = "1" ]; then
+    exit 0
+  fi
+  exit 3
+fi
+exit 0
+`;
+}
+
+function shSingleQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function shellifyRuncmd(entries: unknown[]): string {
+  const lines = ['#!/bin/sh'];
+  for (const entry of entries) {
+    if (Array.isArray(entry)) {
+      lines.push(entry.map((part) => shSingleQuote(String(part))).join(' '));
+    } else if (typeof entry === 'string') {
+      lines.push(entry);
+    } else if (entry !== null && entry !== undefined) {
+      throw new Error(`unsupported runcmd entry type: ${typeof entry}`);
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+function runConfigureDockerMemoryScript(options: {
+  totalMb: number;
+  reserveMb?: string;
+  minMb?: string;
+  dockerActive?: boolean;
+  systemctlFails?: boolean;
+}) {
+  const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-headroom-'));
+  const binDir = join(scratchDir, 'bin');
+  const systemdDir = join(scratchDir, 'systemd');
+  const procMeminfo = join(scratchDir, 'meminfo');
+  const commandLog = join(scratchDir, 'commands.log');
+  const scriptPath = join(scratchDir, 'sam-configure-docker-memory.sh');
+  mkdirSync(binDir, { recursive: true });
+  mkdirSync(systemdDir, { recursive: true });
+  writeFileSync(procMeminfo, `MemTotal:        ${options.totalMb * 1024} kB\n`);
+  writeFakeExecutable(join(binDir, 'logger'), fakeLoggerScript());
+  writeFakeExecutable(join(binDir, 'systemctl'), fakeHeadroomSystemctlScript());
+  writeFileSync(
+    scriptPath,
+    getWriteFile('/usr/local/sbin/sam-configure-docker-memory.sh', {
+      vmAgentMemoryReserveMb: options.reserveMb ?? '512',
+      dockerMemoryMinMb: options.minMb ?? '512',
+    }).content,
+    { mode: 0o755 }
+  );
+
+  try {
+    const result = spawnSync('/bin/sh', [scriptPath], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        COMMAND_LOG: commandLog,
+        FAKE_DOCKER_ACTIVE: options.dockerActive ? '1' : '0',
+        FAKE_SYSTEMCTL_FAIL: options.systemctlFails ? '1' : '0',
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        SAM_PROC_MEMINFO: procMeminfo,
+        SAM_SYSTEMD_SYSTEM_DIR: systemdDir,
+      },
+    });
+    const confPath = join(systemdDir, 'sam-workload.slice.d', '50-headroom.conf');
+    return {
+      calls: commandLogLines(commandLog),
+      conf: existsSync(confPath) ? readFileSync(confPath, 'utf8') : undefined,
+      result,
+    };
+  } finally {
+    rmSync(scratchDir, { force: true, recursive: true });
+  }
+}
+
+function fakeBootstrapCommandScript(name: string, extraBody = 'exit 0'): string {
+  return `#!/bin/sh
+printf '%s\\n' "${name} $*" >> "$COMMAND_LOG"
+${extraBody}
+`;
+}
+
+function runRenderedBootstrapRuncmd(options: {
+  totalMb: number;
+  reserveMb?: string;
+  minMb?: string;
+}) {
+  const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-bootstrap-'));
+  const binDir = join(scratchDir, 'bin');
+  const systemdDir = join(scratchDir, 'systemd');
+  const procMeminfo = join(scratchDir, 'meminfo');
+  const commandLog = join(scratchDir, 'commands.log');
+  const configureScriptPath = join(scratchDir, 'sam-configure-docker-memory.sh');
+  const bootstrapScriptPath = join(scratchDir, 'runcmd');
+  mkdirSync(binDir, { recursive: true });
+  mkdirSync(systemdDir, { recursive: true });
+  writeFileSync(procMeminfo, `MemTotal:        ${options.totalMb * 1024} kB\n`);
+
+  for (const [name, body] of [
+    ['logger', 'exit 0'],
+    ['chage', 'exit 0'],
+    ['chmod', 'exit 0'],
+    ['curl', 'exit 0'],
+    ['date', 'printf "%s\\n" "2026-09-07"'],
+    ['mkdir', 'exit 0'],
+    ['stat', 'printf "%s\\n" "123"'],
+    ['uname', 'printf "%s\\n" "x86_64"'],
+  ] as const) {
+    writeFakeExecutable(join(binDir, name), fakeBootstrapCommandScript(name, body));
+  }
+  writeFakeExecutable(join(binDir, 'systemctl'), fakeHeadroomSystemctlScript());
+  writeFileSync(
+    configureScriptPath,
+    getWriteFile('/usr/local/sbin/sam-configure-docker-memory.sh', {
+      dockerMemoryMinMb: options.minMb ?? '512',
+      vmAgentMemoryReserveMb: options.reserveMb ?? '512',
+    }).content,
+    { mode: 0o755 }
+  );
+
+  const config = generateCloudInit(
+    baseVariables({
+      dockerMemoryMinMb: options.minMb ?? '512',
+      swapSizeMb: '0',
+      vmAgentMemoryReserveMb: options.reserveMb ?? '512',
+    }),
+    { validateSize: false }
+  );
+  const parsed = YAML.parse(config) as { runcmd: unknown[] };
+  const shellifiedRuncmd = shellifyRuncmd(parsed.runcmd).replaceAll(
+    '/usr/local/sbin/sam-configure-docker-memory.sh',
+    shSingleQuote(configureScriptPath)
+  );
+  writeFileSync(bootstrapScriptPath, shellifiedRuncmd, { mode: 0o755 });
+
+  try {
+    const result = spawnSync('/bin/sh', [bootstrapScriptPath], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        COMMAND_LOG: commandLog,
+        FAKE_DOCKER_ACTIVE: '0',
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        SAM_PROC_MEMINFO: procMeminfo,
+        SAM_SYSTEMD_SYSTEM_DIR: systemdDir,
+      },
+    });
+    return {
+      calls: commandLogLines(commandLog),
+      result,
+      shellifiedRuncmd,
+    };
+  } finally {
+    rmSync(scratchDir, { force: true, recursive: true });
+  }
+}
+
+function fakeVerifyDockerScript(): string {
+  return `#!/bin/sh
+printf '%s\\n' "docker $*" >> "$COMMAND_LOG"
+if [ "\${FAKE_DOCKER_FAIL:-0}" = "1" ]; then
+  echo "docker inspect failed" >&2
+  exit 8
+fi
+if [ "$1" = "inspect" ]; then
+  printf '%s\\n' "\${FAKE_DOCKER_PID:-4321}"
+  exit 0
+fi
+echo "unsupported docker command $*" >&2
+exit 2
+`;
+}
+
+function fakeVerifySystemctlScript(): string {
+  return `#!/bin/sh
+printf '%s\\n' "systemctl $*" >> "$COMMAND_LOG"
+if [ "\${FAKE_SYSTEMCTL_FAIL:-0}" = "1" ]; then
+  echo "systemctl show failed" >&2
+  exit 9
+fi
+show_unit() {
+  case "$1" in
+    sam-workload.slice)
+      printf 'MemoryMax=%s\\n' "$FAKE_WORKLOAD_MEMORY_MAX"
+      printf 'EffectiveMemoryMax=%s\\n' "$FAKE_WORKLOAD_EFFECTIVE_MEMORY_MAX"
+      ;;
+    sam.slice)
+      printf 'MemoryMin=%s\\n' "$FAKE_SAM_MEMORY_MIN"
+      ;;
+    sam-infra.slice)
+      printf 'MemoryMin=%s\\n' "$FAKE_INFRA_MEMORY_MIN"
+      ;;
+  esac
+}
+if [ "$1" = "show" ]; then
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -*) break ;;
+      *) show_unit "$1" ;;
+    esac
+    shift
+  done
+  exit 0
+fi
+echo "unsupported systemctl command $*" >&2
+exit 2
+`;
+}
+
+function writeCgroupFile(root: string, path: string, name: string, value: string): void {
+  const dir = joinAbsolute(root, path);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, name), `${value}\n`);
+}
+
+function runVerifyWorkloadCgroupScript(options?: {
+  reserveMb?: string;
+  infraMinMb?: string;
+  minMb?: string;
+  totalMb?: number;
+  cgroupPath?: string;
+  procCgroupContent?: string;
+  memoryMax?: string | null;
+  samMemoryMin?: string;
+  infraMemoryMin?: string;
+  workloadMemoryMax?: string;
+  workloadEffectiveMemoryMax?: string;
+  dockerPid?: string;
+  dockerFails?: boolean;
+  systemctlFails?: boolean;
+}) {
+  const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-cgroup-'));
+  const binDir = join(scratchDir, 'bin');
+  const procRoot = join(scratchDir, 'proc');
+  const cgroupRoot = join(scratchDir, 'cgroup');
+  const commandLog = join(scratchDir, 'commands.log');
+  const scriptPath = join(scratchDir, 'sam-verify-workload-cgroup.sh');
+  const pid = options?.dockerPid ?? '4321';
+  const reserveMb = options?.reserveMb ?? '512';
+  const infraMinMb = options?.infraMinMb ?? '256';
+  const totalMb = options?.totalMb ?? 2048;
+  const expectedMaxBytes = String((totalMb - Number(reserveMb)) * 1024 * 1024);
+  const expectedMinBytes = String(Number(infraMinMb) * 1024 * 1024);
+  mkdirSync(binDir, { recursive: true });
+  mkdirSync(join(procRoot, pid), { recursive: true });
+  mkdirSync(cgroupRoot, { recursive: true });
+  writeFileSync(join(scratchDir, 'meminfo'), `MemTotal:        ${totalMb * 1024} kB\n`);
+  writeFileSync(
+    join(procRoot, pid, 'cgroup'),
+    options?.procCgroupContent ?? `0::${options?.cgroupPath ?? '/sam.slice/sam-workload.slice/docker-abc.scope'}\n`
+  );
+  if (options?.memoryMax !== null) {
+    writeCgroupFile(
+      cgroupRoot,
+      '/sam.slice/sam-workload.slice',
+      'memory.max',
+      options?.memoryMax ?? expectedMaxBytes
+    );
+  }
+  writeCgroupFile(
+    cgroupRoot,
+    '/sam.slice',
+    'memory.min',
+    options?.samMemoryMin ?? expectedMinBytes
+  );
+  writeCgroupFile(
+    cgroupRoot,
+    '/sam.slice/sam-infra.slice',
+    'memory.min',
+    options?.infraMemoryMin ?? expectedMinBytes
+  );
+  writeFakeExecutable(join(binDir, 'docker'), fakeVerifyDockerScript());
+  writeFakeExecutable(join(binDir, 'systemctl'), fakeVerifySystemctlScript());
+  writeFileSync(
+    scriptPath,
+    getWriteFile('/usr/local/sbin/sam-verify-workload-cgroup.sh', {
+      vmAgentMemoryReserveMb: reserveMb,
+      samInfraSliceMemoryMinMb: infraMinMb,
+      dockerMemoryMinMb: options?.minMb ?? '512',
+    }).content,
+    { mode: 0o755 }
+  );
+
+  try {
+    const result = spawnSync('/bin/sh', [scriptPath, 'container-abc'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        COMMAND_LOG: commandLog,
+        FAKE_DOCKER_FAIL: options?.dockerFails ? '1' : '0',
+        FAKE_DOCKER_PID: pid,
+        FAKE_INFRA_MEMORY_MIN: options?.infraMemoryMin ?? expectedMinBytes,
+        FAKE_SAM_MEMORY_MIN: options?.samMemoryMin ?? expectedMinBytes,
+        FAKE_SYSTEMCTL_FAIL: options?.systemctlFails ? '1' : '0',
+        FAKE_WORKLOAD_EFFECTIVE_MEMORY_MAX:
+          options?.workloadEffectiveMemoryMax ?? options?.workloadMemoryMax ?? expectedMaxBytes,
+        FAKE_WORKLOAD_MEMORY_MAX: options?.workloadMemoryMax ?? expectedMaxBytes,
+        PATH: `${binDir}:${process.env.PATH ?? ''}`,
+        SAM_CGROUP_ROOT: cgroupRoot,
+        SAM_PROC_MEMINFO: join(scratchDir, 'meminfo'),
+        SAM_PROC_ROOT: procRoot,
+      },
+    });
+    return { calls: commandLogLines(commandLog), result };
+  } finally {
+    rmSync(scratchDir, { force: true, recursive: true });
+  }
+}
+
 function runCaddySetupRuncmd(role: 'workspace' | 'deployment') {
   const config = generateCloudInit(baseVariables({ role }), { validateSize: false });
   const parsed = YAML.parse(config) as { runcmd: unknown[] };
@@ -327,6 +691,287 @@ describe('generateCloudInit', () => {
 
       // runcmd MUST contain systemctl start
       expect(runcmdSection).toContain('systemctl start vm-agent');
+    });
+
+    it('renders VM-agent and Docker headroom primitives as write_files entries', () => {
+      const config = generateCloudInit(
+        baseVariables({
+          vmAgentMemoryReserveMb: '512',
+          samInfraSliceMemoryMinMb: '256',
+          dockerMemoryMinMb: '768',
+          heartbeatDockerStatsTimeout: '1500ms',
+          heartbeatWorkspaceMetricsMaxContainers: '4',
+          heartbeatWorkspaceMetricsMaxOutputBytes: '32768',
+        })
+      );
+      const parsed = YAML.parse(config.replace(/^#cloud-config\n/, ''));
+      const unitFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+      );
+      const sliceFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam.slice'
+      );
+      const infraSliceFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam-infra.slice'
+      );
+      const workloadSliceFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/sam-workload.slice'
+      );
+      const headroomScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/usr/local/sbin/sam-configure-docker-memory.sh'
+      );
+      const verifyScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/usr/local/sbin/sam-verify-workload-cgroup.sh'
+      );
+      const dockerDaemon = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/docker/daemon.json'
+      );
+
+      expect(unitFile.content).toContain('Slice=sam-infra.slice');
+      expect(unitFile.content).toContain('OOMScoreAdjust=-900');
+      expect(unitFile.content).toContain('Environment=HEARTBEAT_DOCKER_STATS_TIMEOUT=1500ms');
+      expect(unitFile.content).toContain(
+        'Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS=4'
+      );
+      expect(unitFile.content).toContain(
+        'Environment=HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES=32768'
+      );
+      expect(sliceFile.content).toContain('MemoryMin=256M');
+      expect(infraSliceFile.content).toContain('MemoryMin=256M');
+      expect(workloadSliceFile.content).toContain('MemoryAccounting=yes');
+      expect(workloadSliceFile.content).not.toContain('MemoryMin=');
+      expect(headroomScript.permissions).toBe('0755');
+      expect(headroomScript.content).toContain('RESERVE_MB="512"');
+      expect(headroomScript.content).toContain('MIN_DOCKER_MB="768"');
+      expect(headroomScript.content).toContain('sam-workload.slice.d/50-headroom.conf');
+      expect(headroomScript.content).toContain('MemoryMax=${DOCKER_MEMORY_MAX_MB}M');
+      expect(headroomScript.content).not.toContain('docker.service.d/sam-headroom.conf');
+      expect(verifyScript.permissions).toBe('0755');
+      expect(verifyScript.content).toContain('docker inspect -f');
+      expect(verifyScript.content).toContain('sam-workload.slice');
+      expect(verifyScript.content).not.toContain('EffectiveMemoryMin');
+      expect(dockerDaemon.content).toContain('"cgroup-parent": "sam-workload.slice"');
+
+      const runcmd = parsed.runcmd as string[];
+      const headroomCommand = runcmd.find((entry) =>
+        entry.includes('/usr/local/sbin/sam-configure-docker-memory.sh')
+      );
+      expect(headroomCommand).toBe('/usr/local/sbin/sam-configure-docker-memory.sh || exit $?');
+      expect(runcmd.indexOf(headroomCommand ?? '')).toBeLessThan(
+        runcmd.findIndex((entry) => entry.includes('systemctl start vm-agent'))
+      );
+    });
+
+    it('defaults to a nonzero VM agent host memory reserve for new nodes', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config.replace(/^#cloud-config\n/, ''));
+      const headroomScript = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/usr/local/sbin/sam-configure-docker-memory.sh'
+      );
+
+      expect(headroomScript.content).toContain('RESERVE_MB="512"');
+      expect(headroomScript.content).toContain('sam-workload.slice.d/50-headroom.conf');
+    });
+
+    it('configure script writes a bounded workload MemoryMax and restarts active Docker', () => {
+      const { calls, conf, result } = runConfigureDockerMemoryScript({
+        dockerActive: true,
+        minMb: '512',
+        reserveMb: '512',
+        totalMb: 2048,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(conf).toContain('MemoryAccounting=yes');
+      expect(conf).toContain('MemoryMax=1536M');
+      expect(calls).toContain('systemctl daemon-reload');
+      expect(calls).toContain('systemctl restart docker');
+    });
+
+    it('configure script fails closed when enabled reserve leaves Docker below minimum', () => {
+      const { calls, conf, result } = runConfigureDockerMemoryScript({
+        minMb: '512',
+        reserveMb: '512',
+        totalMb: 1023,
+      });
+
+      expect(result.status).toBe(78);
+      expect(result.stderr).toContain('refusing to run without SAM workload MemoryMax');
+      expect(result.stderr).toContain('below minimum 512M');
+      expect(conf).toBeUndefined();
+      expect(calls).not.toContain('systemctl daemon-reload');
+      expect(calls).not.toContain('systemctl restart docker');
+    });
+
+    it('rendered bootstrap stops before vm-agent start when headroom admission fails', () => {
+      const { calls, result, shellifiedRuncmd } = runRenderedBootstrapRuncmd({
+        minMb: '512',
+        reserveMb: '512',
+        totalMb: 1023,
+      });
+
+      expect(shellifiedRuncmd).toContain('#!/bin/sh\n');
+      expect(shellifiedRuncmd).toContain('sam-configure-docker-memory.sh');
+      expect(shellifiedRuncmd).toContain('|| exit $?');
+      expect(result.status).toBe(78);
+      expect(result.stderr).toContain('refusing to run without SAM workload MemoryMax');
+      expect(calls).not.toContain('logger -t sam-boot PHASE START: vm-agent-start');
+      expect(calls).not.toContain('systemctl enable vm-agent');
+      expect(calls).not.toContain('systemctl start vm-agent');
+      expect(calls).not.toContain('logger -t sam-boot ALL PHASES COMPLETE');
+    });
+
+    it('configure script preserves explicit zero reserve as disabled mode', () => {
+      const { calls, conf, result } = runConfigureDockerMemoryScript({
+        minMb: '512',
+        reserveMb: '0',
+        totalMb: 1023,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(conf).toBeUndefined();
+      expect(calls).toContain('systemctl daemon-reload');
+      expect(calls).toContain('logger -t sam-headroom SAM workload MemoryMax reserve disabled');
+      expect(calls).not.toContain('systemctl restart docker');
+    });
+
+    it('rendered bootstrap still starts vm-agent when zero reserve disables admission', () => {
+      const { calls, result } = runRenderedBootstrapRuncmd({
+        minMb: '512',
+        reserveMb: '0',
+        totalMb: 1023,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(calls).toContain('logger -t sam-headroom SAM workload MemoryMax reserve disabled');
+      expect(calls).toContain('logger -t sam-boot PHASE START: vm-agent-start');
+      expect(calls).toContain('systemctl enable vm-agent');
+      expect(calls).toContain('systemctl start vm-agent');
+      expect(calls).toContain('logger -t sam-boot ALL PHASES COMPLETE');
+    });
+
+    it('configure script propagates systemctl failures', () => {
+      const { result } = runConfigureDockerMemoryScript({
+        minMb: '512',
+        reserveMb: '512',
+        systemctlFails: true,
+        totalMb: 2048,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('systemctl failed');
+    });
+  });
+
+  describe('workload cgroup verification script', () => {
+    it('accepts expected SAM ancestry for devcontainer, compose and build cgroup paths', () => {
+      for (const cgroupPath of [
+        '/sam.slice/sam-workload.slice/docker-abc.scope',
+        '/sam.slice/sam-workload.slice/docker-compose.slice/docker-abc.scope',
+        '/sam.slice/sam-workload.slice/buildkit-build.slice/docker-build.scope',
+      ]) {
+        const { result } = runVerifyWorkloadCgroupScript({ cgroupPath });
+
+        expect(result.status, `${cgroupPath}\n${result.stderr}`).toBe(0);
+        expect(result.stdout).toContain(cgroupPath);
+        expect(result.stdout).toContain('MemoryMax=1610612736');
+        expect(result.stdout).toContain('MemoryMin=268435456');
+      }
+    });
+
+    it('acknowledges explicit disabled mode without claiming memory protection', () => {
+      const { result } = runVerifyWorkloadCgroupScript({
+        infraMemoryMin: '0',
+        memoryMax: 'max',
+        reserveMb: '0',
+        samMemoryMin: '0',
+        workloadEffectiveMemoryMax: 'infinity',
+        workloadMemoryMax: 'infinity',
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(
+        'SAM workload MemoryMax reserve disabled; verified cgroup ancestry only'
+      );
+    });
+
+    it('rejects unsafe or unproven cgroup states', () => {
+      const cases: Array<{
+        name: string;
+        options: Parameters<typeof runVerifyWorkloadCgroupScript>[0];
+        stderr: string;
+      }> = [
+        {
+          name: 'missing cgroup v2 entry',
+          options: { procCgroupContent: '1:name=systemd:/sam.slice/sam-workload.slice\n' },
+          stderr: 'has no cgroup v2 entry',
+        },
+        {
+          name: 'wrong ancestor',
+          options: { cgroupPath: '/system.slice/docker-abc.scope' },
+          stderr: 'outside sam.slice',
+        },
+        {
+          name: 'missing workload cap',
+          options: { memoryMax: null },
+          stderr: 'missing cgroup memory.max',
+        },
+        {
+          name: 'infinite workload cap',
+          options: { memoryMax: 'max' },
+          stderr: 'sam-workload.slice cgroup memory.max expected',
+        },
+        {
+          name: 'wrong workload cap',
+          options: { memoryMax: '1073741824' },
+          stderr: 'sam-workload.slice cgroup memory.max expected 1610612736 bytes',
+        },
+        {
+          name: 'infinite workload systemd cap',
+          options: { workloadMemoryMax: 'infinity' },
+          stderr: 'sam-workload.slice MemoryMax expected',
+        },
+        {
+          name: 'wrong effective workload systemd cap',
+          options: { workloadEffectiveMemoryMax: '1073741824' },
+          stderr: 'sam-workload.slice EffectiveMemoryMax expected 1610612736 bytes',
+        },
+        {
+          name: 'zero parent minimum',
+          options: { samMemoryMin: '0' },
+          stderr: 'sam.slice cgroup memory.min expected at least 268435456 bytes',
+        },
+        {
+          name: 'zero infra minimum',
+          options: { infraMemoryMin: '0' },
+          stderr: 'sam-infra.slice cgroup memory.min expected at least 268435456 bytes',
+        },
+        {
+          name: 'small host',
+          options: { totalMb: 1023 },
+          stderr: 'SAM workload MemoryMax is not enforceable',
+        },
+        {
+          name: 'docker inspect failure',
+          options: { dockerFails: true },
+          stderr: 'docker inspect failed',
+        },
+        {
+          name: 'systemctl failure',
+          options: { systemctlFails: true },
+          stderr: 'systemctl show failed',
+        },
+      ];
+
+      for (const testCase of cases) {
+        const { result } = runVerifyWorkloadCgroupScript(testCase.options);
+
+        expect(result.status, testCase.name).not.toBe(0);
+        expect(result.stderr, testCase.name).toContain(testCase.stderr);
+      }
     });
   });
 
@@ -1405,6 +2050,24 @@ describe('validateCloudInitVariables', () => {
           })
         )
       ).toThrow('logJournalMaxRetention');
+    });
+
+    it('rejects heartbeat Docker metric output bounds outside the supported range', () => {
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            heartbeatWorkspaceMetricsMaxOutputBytes: '1023',
+          })
+        )
+      ).toThrow('heartbeatWorkspaceMetricsMaxOutputBytes');
+
+      expect(() =>
+        validateCloudInitVariables(
+          baseVariables({
+            heartbeatWorkspaceMetricsMaxOutputBytes: '1048577',
+          })
+        )
+      ).toThrow('heartbeatWorkspaceMetricsMaxOutputBytes');
     });
   });
 

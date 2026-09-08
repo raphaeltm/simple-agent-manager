@@ -1438,6 +1438,38 @@
         ],
         "additionalProperties": false
       },
+      "ResourceRequirements": {
+        "type": "object",
+        "properties": {
+          "minVcpu": {
+            "type": "number",
+            "description": "Minimum positive vCPU count requested by the workload.",
+            "exclusiveMinimum": 0
+          },
+          "minMemoryGb": {
+            "type": "number",
+            "description": "Minimum positive memory in GiB requested by the workload.",
+            "exclusiveMinimum": 0
+          },
+          "minDiskGb": {
+            "type": "number",
+            "description": "Minimum boot disk size in GiB requested by the workload. Zero is allowed.",
+            "minimum": 0
+          },
+          "exclusiveNode": {
+            "type": "boolean",
+            "description": "Whether the workload requests exclusive use of its node."
+          },
+          "maxCoTenants": {
+            "type": "integer",
+            "description": "Compatibility safety metadata preserved for older callers; must be a positive safe integer.",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [],
+        "additionalProperties": true
+      },
       "SubmitTaskRequest": {
         "type": "object",
         "properties": {
@@ -1469,7 +1501,12 @@
             "type": "string"
           },
           "vmSize": {
-            "type": "string"
+            "type": "string",
+            "description": "Deprecated legacy size hint. Prefer resourceRequirements; SAM compatibility policy translates old tiers.",
+            "deprecated": true
+          },
+          "resourceRequirements": {
+            "$ref": "#/components/schemas/ResourceRequirements"
           },
           "taskMode": {
             "type": "string"
@@ -1962,6 +1999,12 @@
           },
           "vmSizeOverride": {
             "type": "string",
+            "description": "Deprecated legacy size hint. Prefer resourceRequirementsJson/resourceRequirements on write paths.",
+            "nullable": true
+          },
+          "resourceRequirementsJson": {
+            "type": "string",
+            "description": "Persisted modern workload requirements JSON for trigger compatibility.",
             "nullable": true
           },
           "maxConcurrent": {
@@ -2145,6 +2188,12 @@
           },
           "vmSizeOverride": {
             "type": "string",
+            "description": "Deprecated legacy size hint. Prefer modern workload requirements on profiles/skills.",
+            "nullable": true
+          },
+          "resourceRequirementsJson": {
+            "type": "string",
+            "description": "Persisted modern workload requirements JSON for profile compatibility.",
             "nullable": true
           },
           "provider": {
@@ -2288,7 +2337,28 @@
             "type": "string"
           },
           "vmSize": {
-            "type": "string"
+            "type": "string",
+            "description": "Legacy compatibility size label; may not identify provider-native hardware."
+          },
+          "providerInstanceType": {
+            "type": "string",
+            "description": "Provider-native instance type/SKU when known.",
+            "nullable": true
+          },
+          "providerInstanceVcpuCount": {
+            "type": "number",
+            "description": "Provider-native vCPU count when known.",
+            "nullable": true
+          },
+          "providerInstanceMemoryMb": {
+            "type": "number",
+            "description": "Provider-native memory in MiB when known.",
+            "nullable": true
+          },
+          "providerInstanceDiskGb": {
+            "type": "number",
+            "description": "Provider-native disk size in GiB when known.",
+            "nullable": true
           },
           "ipAddress": {
             "type": "string"

@@ -246,7 +246,10 @@ describe('GET /api/providers/catalog', () => {
         }),
       ])
     );
-    expect(mockProvider.listInstanceOfferings).toHaveBeenCalledWith({ preferApi: true });
+    expect(mockProvider.listInstanceOfferings).toHaveBeenCalledWith({
+      preferApi: true,
+      allowStaticFallback: false,
+    });
   });
 
   it('identifies project-scoped provider catalogs on the authorized project scope', async () => {
@@ -296,7 +299,11 @@ describe('GET /api/providers/catalog', () => {
     ]);
     mockCreateProvider.mockReturnValue(makeMockProvider({ name: 'hetzner' }));
 
-    const res = await app.request('/api/providers/catalog?scope=user', { method: 'GET' }, makeEnv());
+    const res = await app.request(
+      '/api/providers/catalog?scope=user',
+      { method: 'GET' },
+      makeEnv()
+    );
     const body = (await res.json()) as ProviderCatalogResponse;
 
     expect(res.status).toBe(200);
@@ -518,7 +525,7 @@ describe('GET /api/providers/catalog', () => {
     expect(body.catalogs[0]!.provider).toBe('scaleway');
   });
 
-  it('falls back to static offerings when live provider catalog enumeration fails', async () => {
+  it('keeps static offerings visible when live enumeration fails and marks the refresh incomplete', async () => {
     createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-token', iv: 'test-iv' }]);
 
     const mockProvider = makeMockProvider({
@@ -527,10 +534,7 @@ describe('GET /api/providers/catalog', () => {
       locationMetadata: { fsn1: { name: 'Falkenstein', country: 'DE' } },
       defaultLocation: 'fsn1',
     });
-    const staticOfferings = await mockProvider.listInstanceOfferings({ preferApi: false });
-    mockProvider.listInstanceOfferings
-      .mockRejectedValueOnce(new Error('server_types timed out'))
-      .mockResolvedValueOnce(staticOfferings);
+    mockProvider.listInstanceOfferings.mockRejectedValueOnce(new Error('server_types timed out'));
     mockCreateProvider.mockReturnValue(mockProvider);
 
     const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
@@ -542,12 +546,33 @@ describe('GET /api/providers/catalog', () => {
     expect(body.catalogs[0]).toMatchObject({
       provider: 'hetzner',
       credentialSource: 'user',
-      credentialId: 'credential-1',
+      refreshStatus: { succeeded: false, origin: 'static', complete: false },
     });
-    expect(body.catalogs[0]!.offerings).toEqual(staticOfferings);
-    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(1, { preferApi: false });
-    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(2, { preferApi: true });
-    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(3, { preferApi: false });
+    expect(body.catalogs[0]!.offerings).toHaveLength(3);
+    expect(body.refreshFailures).toEqual([]);
+    expect(mockProvider.listInstanceOfferings).toHaveBeenCalledTimes(2);
+    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(1, {
+      preferApi: true,
+      allowStaticFallback: false,
+    });
+    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(2, { preferApi: false });
+  });
+
+  it('reports provider unavailability when both live and static catalog enumeration fail', async () => {
+    createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-token', iv: 'test-iv' }]);
+    const provider = makeMockProvider({ name: 'hetzner' });
+    provider.listInstanceOfferings.mockRejectedValue(new Error('catalog unavailable'));
+    mockCreateProvider.mockReturnValue(provider);
+
+    const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(res.status).toBe(200);
+    expect(body.credentialSetupRequired).toBe(false);
+    expect(body.catalogs).toEqual([]);
+    expect(body.refreshFailures).toEqual([
+      { provider: 'hetzner', credentialSource: 'user', reason: 'provider-unavailable' },
+    ]);
+    expect(provider.listInstanceOfferings).toHaveBeenCalledTimes(2);
   });
 
   it('should use location id as fallback name when metadata is missing', async () => {

@@ -5,6 +5,7 @@ import {
   type VmProvisioningLeaseResult,
   type VmTaskAdmissionIdentity,
 } from '../../services/vm-admission-control';
+import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export async function scheduleAdmissionWait(
@@ -12,6 +13,15 @@ export async function scheduleAdmissionWait(
   rc: TaskRunnerContext,
   result: VmAdmissionWait
 ): Promise<void> {
+  await persistPlacementDiagnostics(state, rc, {
+    selectedNodeId: null,
+    queue: {
+      state: 'waiting',
+      reason: result.reason,
+      nextRetryAt: result.nextRetryAt,
+      waitDeadlineAt: result.waitDeadlineAt,
+    },
+  });
   await rc.updateD1ExecutionStep(state.taskId, 'waiting_for_node_capacity');
   await rc.ctx.storage.put('state', state);
   const nextRetryMs = Date.parse(result.nextRetryAt);
@@ -30,6 +40,10 @@ export async function handleLeaseResult(
   result: VmProvisioningLeaseResult
 ): Promise<'granted' | 'waiting'> {
   if (result.kind === 'expired') {
+    await persistPlacementDiagnostics(state, rc, {
+      selectedNodeId: null,
+      queue: { state: 'expired', reason: result.reason, waitDeadlineAt: result.waitDeadlineAt },
+    });
     throw Object.assign(new Error('Timed out waiting for VM capacity'), { permanent: true });
   }
   if (result.kind === 'waiting') {

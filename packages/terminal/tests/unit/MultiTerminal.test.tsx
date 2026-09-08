@@ -11,6 +11,7 @@ const mockTerminalDispose = vi.fn();
 const mockTerminalFocus = vi.fn();
 const mockTerminalLoadAddon = vi.fn();
 const mockTerminalOnData = vi.fn();
+const mockTerminalDimensions = { rows: 24, cols: 80 };
 
 vi.mock('@xterm/xterm', () => {
   class Terminal {
@@ -21,8 +22,12 @@ vi.mock('@xterm/xterm', () => {
     focus = mockTerminalFocus;
     loadAddon = mockTerminalLoadAddon;
     onData = mockTerminalOnData;
-    rows = 24;
-    cols = 80;
+    get rows() {
+      return mockTerminalDimensions.rows;
+    }
+    get cols() {
+      return mockTerminalDimensions.cols;
+    }
   }
   return { Terminal };
 });
@@ -171,6 +176,8 @@ describe('MultiTerminal', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTerminalDimensions.rows = 24;
+    mockTerminalDimensions.cols = 80;
     sessionStorage.clear();
     MockWebSocket.sessionListResponse = [];
     MockWebSocket.instances = [];
@@ -179,6 +186,93 @@ describe('MultiTerminal', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
+  });
+
+  it('does not resend unchanged dimensions during rerender bursts but sends actual changes', async () => {
+    MockWebSocket.sessionListResponse = [
+      {
+        sessionId: 'srv-resize',
+        name: 'Resize',
+        status: 'running',
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    const { rerender } = render(<MultiTerminal {...defaultProps} />);
+    await waitFor(() => expect(screen.getByText('Resize')).toBeDefined());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    sendSpy.mockClear();
+    for (let index = 0; index < 70; index += 1) {
+      rerender(<MultiTerminal {...defaultProps} className={`layout-${index}`} />);
+      fireEvent.resize(window);
+    }
+    const resizeMessages = () =>
+      sendSpy.mock.calls
+        .map(([data]) => JSON.parse(data as string))
+        .filter((msg) => msg.type === 'resize');
+    expect(resizeMessages()).toHaveLength(0);
+    mockTerminalDimensions.rows = 32;
+    mockTerminalDimensions.cols = 100;
+    fireEvent.resize(window);
+    expect(resizeMessages()).toEqual([
+      { type: 'resize', sessionId: 'srv-resize', data: { rows: 32, cols: 100 } },
+    ]);
+  });
+
+  it('sends the same dimensions again when the terminal reconnects on a new socket', async () => {
+    MockWebSocket.sessionListResponse = [
+      {
+        sessionId: 'srv-reconnect-size',
+        name: 'Reconnect size',
+        status: 'running',
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const sendSpy = vi.spyOn(MockWebSocket.prototype, 'send');
+    render(<MultiTerminal {...defaultProps} />);
+    const sentResizeOn = (socket: MockWebSocket | undefined) =>
+      sendSpy.mock.calls.some(([data], index) => {
+        const message = JSON.parse(data as string);
+        return (
+          sendSpy.mock.contexts[index] === socket &&
+          message.type === 'resize' &&
+          message.sessionId === 'srv-reconnect-size' &&
+          message.data.rows === 24 &&
+          message.data.cols === 80
+        );
+      });
+    await waitFor(() => expect(sentResizeOn(MockWebSocket.instances[0])).toBe(true));
+    act(() => {
+      MockWebSocket.instances[0]?.close();
+    });
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2), { timeout: 4500 });
+    await waitFor(() => expect(sentResizeOn(MockWebSocket.instances[1])).toBe(true));
+  });
+
+  it('notifies session changes without feeding parent callback rerenders back into notifications', async () => {
+    MockWebSocket.sessionListResponse = [
+      {
+        sessionId: 'srv-notify',
+        name: 'Notify',
+        status: 'running',
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    const initialCallback = vi.fn();
+    const { rerender } = render(
+      <MultiTerminal {...defaultProps} onSessionsChange={initialCallback} />
+    );
+    await waitFor(() => expect(screen.getByText('Notify')).toBeDefined());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    const latestCallback = vi.fn();
+    rerender(<MultiTerminal {...defaultProps} onSessionsChange={latestCallback} />);
+    expect(latestCallback).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('new-tab'));
+    await waitFor(() => expect(latestCallback).toHaveBeenCalled());
   });
 
   it('should render empty state initially', () => {

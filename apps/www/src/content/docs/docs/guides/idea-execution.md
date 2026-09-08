@@ -21,13 +21,25 @@ The **Ideas** board holds work you've drafted but not started yet. Once an idea 
 
 Before you send, you can optionally choose:
 
-| Option                | Description                                                         | Default                  |
-| --------------------- | ------------------------------------------------------------------- | ------------------------ |
-| **Agent profile**     | Which agent, model, and settings run                                | Project default profile  |
-| **Skill**             | A profile-override layer for the run                                | None                     |
-| **Workspace profile** | `full` or `lightweight` environment                                 | `full`                   |
-| **VM size**           | small, medium, or large                                             | Project default          |
-| **Provider**          | Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP | Project default provider |
+| Option                    | Description                                                         | Default                  |
+| ------------------------- | ------------------------------------------------------------------- | ------------------------ |
+| **Agent profile**         | Which agent, model, and settings run                                | Project default profile  |
+| **Skill**                 | A profile-override layer for the run                                | None                     |
+| **Workspace profile**     | `full` or `lightweight` environment                                 | `full`                   |
+| **Workload requirements** | Minimum vCPU, memory, disk, and optional exclusive node             | Inherited defaults       |
+| **Provider**              | Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP | Project default provider |
+
+For VM runs, blank resource fields inherit defaults from the selected skill,
+agent profile, project, and platform. The effective compute pool selects an
+eligible provider-native offering for those requirements. Node details show the
+actual provider type and hardware separately from the workload's reservation.
+
+Older profiles and API or CLI requests using `small`, `medium`, or `large` remain
+compatible: SAM translates those presets into workload requirements. Explicit
+modern fields take precedence at the same configuration layer. See
+[Creating Workspaces](/docs/guides/creating-workspaces/) for resource controls and
+[Upgrading existing compute pools](/docs/reference/configuration/#upgrading-existing-compute-pools)
+for migration and rollback behavior.
 
 ## Idea Lifecycle
 
@@ -125,6 +137,11 @@ An agent running inside a workspace has access to MCP tools that provide project
 | `request_human_input` | Ask the user for a decision                                                   |
 
 `dispatch_task` accepts an optional `runtime` value of `vm` or `cf-container`. Container dispatch starts an [Instant](/docs/guides/instant-sessions/) task without VM sizing or cloud credentials — but only when asked: dispatch defaults to a VM unless `cf-container` is set explicitly or comes from the dispatching profile. Explicit VM-only options such as `vmSize`, `provider`, `vmLocation`, `workspaceProfile`, and `devcontainerConfigName` cannot be combined with a container runtime; choose `runtime: "vm"` or remove those options.
+
+For VM dispatch, pass workload overrides in `resourceRequirements`, using
+`minVcpu`, `minMemoryGb`, `minDiskGb`, and `exclusiveNode`. Omitted fields inherit
+through the same resource-resolution path as other VM runs. The deprecated
+`vmSize` field remains accepted for older clients.
 
 ### Dispatch Limits
 

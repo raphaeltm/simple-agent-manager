@@ -493,7 +493,10 @@ func (s *Server) casWorkspaceStatus(workspaceID string, expectedStatuses []strin
 
 func (s *Server) removeWorkspaceRuntime(workspaceID string) {
 	s.workspaceMu.Lock()
-	defer s.workspaceMu.Unlock()
+	defer func() {
+		s.workspaceMu.Unlock()
+		s.clearRemovedWorkspaceRestores(workspaceID)
+	}()
 
 	if runtime, ok := s.workspaces[workspaceID]; ok {
 		runtime.PTY.CloseAllSessions()

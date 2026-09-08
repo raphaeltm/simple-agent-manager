@@ -10,11 +10,30 @@ import {
   applyPromptDeliveryResult,
   claimDuePromptDeliveries,
   expireDuePromptDeliveries,
+  markPromptDeliverySubmitting,
   nudgePromptDeliveriesForTarget,
 } from '../../../src/durable-objects/project-data/prompt-delivery';
 import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
-import type { VmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
+import {
+  DefaultVmPromptDeliveryAdapter,
+  type VmPromptDeliveryAdapter,
+} from '../../../src/services/vm-prompt-delivery-adapter';
+import { acceptedPromptResponse } from '../../helpers/vm-prompt-delivery-fixtures';
 import { createSqlStorage } from './sql-storage-test-utils';
+
+const preparationMocks = vi.hoisted(() => ({
+  recover: vi.fn(),
+  capabilities: vi.fn(),
+  send: vi.fn(),
+}));
+vi.mock('../../../src/services/session-recovery', () => ({
+  ensureSessionRecovery: preparationMocks.recover,
+}));
+vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/node-agent')>()),
+  nodeAgentRequest: preparationMocks.capabilities,
+  sendPromptToAgentOnNode: preparationMocks.send,
+}));
 
 const config: DurableExecutionConfig = {
   deliveryEnabled: true,
@@ -55,6 +74,7 @@ describe('ProjectData durable prompt delivery', () => {
   let sql: SqlStorage;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(10_000);
     db = new Database(':memory:');
@@ -164,6 +184,124 @@ describe('ProjectData durable prompt delivery', () => {
     recalculateAlarm: vi.fn(async () => {}),
     broadcastEvent: vi.fn(),
   };
+
+  it('keeps a slow recovery retryable and sends once after the late preparation finishes', async () => {
+    let finishRecovery!: (result: { status: 'waking'; taskId: string }) => void;
+    preparationMocks.recover.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishRecovery = resolve;
+        })
+    );
+    preparationMocks.capabilities.mockResolvedValue(capabilities);
+    preparationMocks.send.mockImplementation(async () =>
+      acceptedPromptResponse('acp-1', 'delivery-1', 'runtime-1', Date.now())
+    );
+    const target = {
+      workspace_id: 'workspace-1',
+      user_id: 'user-1',
+      workspace_status: 'sleeping',
+      node_id: 'node-1',
+      node_status: 'running',
+      node_health_status: 'healthy',
+      node_runtime: 'vm',
+      agent_session_id: 'acp-1',
+      agent_session_status: 'running',
+    };
+    const env = {
+      DATABASE: { prepare: () => ({ bind: () => ({ first: async () => target }) }) },
+    } as never;
+    const adapter = new DefaultVmPromptDeliveryAdapter(env);
+    accept();
+    const claim = claimDuePromptDeliveries(sql, config)[0]!;
+    const attempt = runPromptDeliveryClaim(sql, env, config, claim, adapter, hooks);
+    await vi.advanceTimersByTimeAsync(config.backgroundTimeoutMs);
+
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      terminalReason: null,
+      acceptedAt: null,
+    });
+    await expect(attempt).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    finishRecovery({ status: 'waking', taskId: 'recovery-1' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(preparationMocks.send).not.toHaveBeenCalled();
+    target.workspace_status = 'running';
+    await vi.advanceTimersByTimeAsync(config.retryBaseMs);
+    const retry = claimDuePromptDeliveries(sql, config)[0]!;
+    expect(retry.mode).toBe('submit');
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, retry, adapter, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'acked',
+      terminalReason: null,
+    });
+    expect(preparationMocks.send).toHaveBeenCalledTimes(1);
+    expect(preparationMocks.recover).toHaveBeenCalledTimes(1);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM chat_messages').get()).toEqual({ count: 1 });
+  });
+
+  it('never submits from a capability preparation that completes after its deadline', async () => {
+    let finishProbe!: (result: typeof capabilities) => void;
+    preparationMocks.capabilities.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishProbe = resolve;
+        })
+    );
+    const env = {} as never;
+    const adapter = new DefaultVmPromptDeliveryAdapter(env);
+    accept();
+    const claim = claimDuePromptDeliveries(sql, config)[0]!;
+    const pending = adapter.submit({
+      projectId: 'project-1',
+      claim,
+      allowLegacyVm: false,
+      requestTimeoutMs: config.backgroundTimeoutMs,
+      resolvedTarget: {
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+        agentSessionId: 'acp-1',
+        userId: 'user-1',
+        runtimeIdentity: 'runtime-1',
+        runtime: 'vm',
+      },
+    });
+    await vi.advanceTimersByTimeAsync(config.backgroundTimeoutMs);
+    await expect(pending).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    finishProbe(capabilities);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(preparationMocks.send).not.toHaveBeenCalled();
+  });
+
+  it('retries a recovery exception before any prompt could have been sent', async () => {
+    preparationMocks.recover.mockRejectedValue(
+      new Error('Recovery storage temporarily unavailable')
+    );
+    const env = {
+      DATABASE: { prepare: () => ({ bind: () => ({ first: async () => null }) }) },
+    } as never;
+    accept();
+    const claim = claimDuePromptDeliveries(sql, config)[0]!;
+    await expect(
+      runPromptDeliveryClaim(
+        sql,
+        env,
+        config,
+        claim,
+        new DefaultVmPromptDeliveryAdapter(env),
+        hooks
+      )
+    ).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      terminalReason: null,
+    });
+    expect(preparationMocks.send).not.toHaveBeenCalled();
+  });
 
   it('persists one transcript message and one queue record idempotently', () => {
     const first = accept();
@@ -466,11 +604,88 @@ describe('ProjectData durable prompt delivery', () => {
     accept();
     const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
     expect(claim?.mode).toBe('submit');
+    expect(markPromptDeliverySubmitting(sql, claim!, capabilities)).toBe(true);
 
     const [reconciliation] = claimDuePromptDeliveries(sql, config, 20_000);
     expect(reconciliation?.mode).toBe('reconcile');
     expect(reconciliation?.message.deliveryAttempts).toBe(1);
     expect(claimDuePromptDeliveries(sql, config, 20_000)).toHaveLength(0);
+  });
+
+  it('reclaims interrupted preparation and fences the previous attempt before sending', () => {
+    accept();
+    const original = claimDuePromptDeliveries(sql, config, 10_000)[0]!;
+    const replacement = claimDuePromptDeliveries(sql, config, 20_000)[0]!;
+    expect(replacement.mode).toBe('submit');
+    expect(replacement.message.deliveryAttempts).toBe(1);
+    expect(replacement.attemptId).not.toBe(original.attemptId);
+    expect(markPromptDeliverySubmitting(sql, original, capabilities)).toBe(false);
+    expect(markPromptDeliverySubmitting(sql, replacement, capabilities)).toBe(true);
+    expect(markPromptDeliverySubmitting(sql, replacement, capabilities)).toBe(false);
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      runtimeIdentity: 'runtime-1',
+      adapterProtocolVersion: 1,
+      receiptSupported: true,
+    });
+  });
+
+  it('reconciles legacy claims without a positive preparation checkpoint', () => {
+    accept();
+    claimDuePromptDeliveries(sql, config, 10_000);
+    sql.exec('UPDATE session_inbox SET prompt_delivery_phase = NULL WHERE id = ?', 'delivery-1');
+    expect(claimDuePromptDeliveries(sql, config, 20_000)[0]?.mode).toBe('reconcile');
+  });
+
+  it('prevents late preparation from sending after another alarm reclaims the attempt', async () => {
+    let finishProbe!: (result: typeof capabilities) => void;
+    preparationMocks.capabilities.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishProbe = resolve;
+        })
+    );
+    preparationMocks.capabilities.mockResolvedValue(capabilities);
+    preparationMocks.send.mockImplementation(async () => {
+      expect(
+        db.prepare('SELECT prompt_delivery_phase, runtime_identity FROM session_inbox').get()
+      ).toEqual({ prompt_delivery_phase: 'submitting', runtime_identity: 'runtime-1' });
+      return acceptedPromptResponse('acp-1', 'delivery-1', 'runtime-1', Date.now());
+    });
+    const target = {
+      workspace_id: 'workspace-1',
+      user_id: 'user-1',
+      workspace_status: 'running',
+      node_id: 'node-1',
+      node_status: 'running',
+      node_health_status: 'healthy',
+      node_runtime: 'vm',
+      agent_session_id: 'acp-1',
+      agent_session_status: 'running',
+    };
+    const env = {
+      DATABASE: { prepare: () => ({ bind: () => ({ first: async () => target }) }) },
+    } as never;
+    const adapter = new DefaultVmPromptDeliveryAdapter(env);
+    // A suspended preparation may outlive its lease, even before its timeout fires.
+    const suspendedConfig = { ...config, backgroundTimeoutMs: config.receiptTimeoutMs * 3 };
+    accept();
+    const original = claimDuePromptDeliveries(sql, suspendedConfig)[0]!;
+    const pending = runPromptDeliveryClaim(sql, env, suspendedConfig, original, adapter, hooks);
+    await vi.advanceTimersByTimeAsync(config.receiptTimeoutMs);
+    const replacement = claimDuePromptDeliveries(sql, suspendedConfig)[0]!;
+    expect(replacement.mode).toBe('submit');
+    finishProbe(capabilities);
+    await expect(pending).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(preparationMocks.send).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'delivering',
+      attemptId: replacement.attemptId,
+    });
+    await expect(
+      runPromptDeliveryClaim(sql, env, suspendedConfig, replacement, adapter, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(preparationMocks.send).toHaveBeenCalledTimes(1);
+    expect(mailbox.getMessage(sql, 'delivery-1')?.deliveryState).toBe('acked');
   });
 
   it.each([

@@ -1069,6 +1069,47 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	finishCreate, err := s.beginSessionCreation(r.Context(), workspaceID, strings.TrimSpace(body.SessionID))
+	if err != nil {
+		writeError(w, http.StatusConflict, "session creation wait canceled")
+		return
+	}
+	defer finishCreate()
+
+	// A persisted tab does not retain immutable bootstrap provenance. Refuse
+	// automatic replay after restart before changing reporter/routing state.
+	if _, exists := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); !exists && s.store != nil {
+		tabs, err := s.store.ListTabs(workspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot verify persisted session identity")
+			return
+		}
+		for _, tab := range tabs {
+			if _, known := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); tab.ID == strings.TrimSpace(body.SessionID) && !known {
+				writeError(w, http.StatusConflict, "persisted session requires reconnect before bootstrap retry")
+				return
+			}
+		}
+	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	s.sessionHostMu.Lock()
+	if _, exists := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); !exists && s.workspaceRestorePendingLocked(workspaceID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
+		return
+	}
+	session, idempotentHit, err := s.agentSessions.CreateRouted(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey, projectID, chatSID)
+	s.sessionHostMu.Unlock()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if idempotentHit {
+		finishCreate()
+		writeJSON(w, http.StatusCreated, session)
+		return
+	}
+
 	// Store projectID on workspace runtime for ACP heartbeat goroutine.
 	if projectID != "" {
 		s.workspaceMu.Lock()
@@ -1093,12 +1134,6 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	session, idempotentHit, err := s.agentSessions.Create(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	s.registerSessionMcpServers(workspaceID, session.ID, mcpServers)
 
 	if !idempotentHit {
@@ -1120,6 +1155,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	finishCreate()
 	writeJSON(w, http.StatusCreated, session)
 }
 
@@ -1265,11 +1301,14 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.registerSessionMcpServers(workspaceID, sessionID, mcpServers)
-
 	// Always store profile overrides so getOrCreateSessionHost can apply them.
 	// Even empty overrides are stored to distinguish "no profile" from "not set".
 	s.sessionHostMu.Lock()
+	if s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusConflict, "workspace session bootstrap is in progress")
+		return
+	}
 	if s.sessionTaskCtx == nil {
 		s.sessionTaskCtx = make(map[string]taskCallbackContext)
 	}
@@ -1300,6 +1339,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		delete(s.sessionTaskCtx, hostKey)
 	}
 	s.sessionHostMu.Unlock()
+	s.registerSessionMcpServers(workspaceID, sessionID, mcpServers)
 	if body.Model != "" || body.PermissionMode != "" || body.Effort != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {
 		slog.Info("Profile overrides registered for agent session",
 			"workspace", workspaceID, "session", sessionID,
@@ -1310,6 +1350,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 
 	// Create or retrieve the SessionHost for this session.
 	host := s.getOrCreateSessionHost(hostKey, workspaceID, sessionID, session, runtime, "")
+	if host == nil {
+		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
+		return
+	}
 
 	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{
 		"sessionId": sessionID,

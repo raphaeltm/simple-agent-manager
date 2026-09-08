@@ -10,6 +10,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
+import { resolveTriggerExecutionUserId } from './trigger-execution-principal';
 import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 import { submitTriggeredTask } from './trigger-submit';
 
@@ -252,17 +253,19 @@ export async function admitAndSubmitTriggerExecution(
 
     await input.beforeSubmit?.(executionId);
 
+    const executionUserId = resolveTriggerExecutionUserId(trigger);
     const submitted = await submitter(env, {
       triggerId: trigger.id,
       triggerExecutionId: executionId,
       projectId: trigger.projectId,
-      userId: trigger.userId,
+      userId: executionUserId,
       renderedPrompt,
       triggeredBy: input.triggeredBy,
       agentProfileId: trigger.agentProfileId,
       skillId: trigger.skillId,
       taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
       vmSizeOverride: trigger.vmSizeOverride,
+      resourceRequirementsJson: trigger.resourceRequirementsJson,
       triggerName: trigger.name,
     });
 

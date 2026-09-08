@@ -69,6 +69,10 @@ const capacityPlacementColumns = () => ({
   capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
     onDelete: 'set null',
   }),
+  /** Capacity source row generation used for final authority checks. */
+  capacitySourceGeneration: integer('capacity_source_generation'),
+  /** Non-secret capacity source external reference snapshot used for attachment fencing. */
+  capacitySourceExternalRef: text('capacity_source_external_ref'),
   /** Capacity pool candidate selected for placement/provisioning. Snapshot only. */
   capacityPoolCandidateId: text('capacity_pool_candidate_id'),
   /** Credential provenance snapshot used for placement/provisioning, without secret material. */
@@ -77,6 +81,10 @@ const capacityPlacementColumns = () => ({
   placementCredentialReference: text('placement_credential_reference'),
   /** Optional credential version snapshot for future rotating credential records. */
   placementCredentialVersion: integer('placement_credential_version'),
+  /** Effective placement settings generation used to derive the selected authority. */
+  selectionSettingsVersion: integer('selection_settings_version'),
+  /** Stable semantic authority for the selected pool/source/candidate/settings plan. */
+  capacityAuthorityGeneration: integer('capacity_authority_generation'),
   /** Project scope snapshot for project-scoped pools. */
   capacityPoolProjectId: text('capacity_pool_project_id').references(() => projects.id, {
     onDelete: 'set null',
@@ -88,6 +96,9 @@ const capacityPlacementColumns = () => ({
   providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
   providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
   providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+  providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+  providerInstanceImage: text('provider_instance_image'),
+  providerInstanceArchitecture: text('provider_instance_architecture'),
   providerInstancePriceDisplay: text('provider_instance_price_display'),
   providerInstancePriceCurrency: text('provider_instance_price_currency'),
   providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
@@ -391,6 +402,8 @@ export const projects = sqliteTable(
     // Per-project defaults (null = use platform defaults from env vars).
     // Resolved via `resolveProjectScalingConfig()` in task-runner and node services.
     defaultVmSize: text('default_vm_size'),
+    /** Project-layer modern workload requirements JSON. Null = inherit lower layers. */
+    resourceRequirementsJson: text('resource_requirements_json'),
     defaultAgentType: text('default_agent_type'),
     defaultWorkspaceProfile: text('default_workspace_profile'),
     /** Default devcontainer config name for new workspaces. null = auto-discover default. */
@@ -929,6 +942,8 @@ export const tasks = sqliteTable(
     provisionedVmSize: text('provisioned_vm_size'),
     /** JSON snapshot of ResourceRequirements as resolved from the precedence chain. */
     resourceRequirementsJson: text('resource_requirements_json'),
+    /** Versioned persisted resource intent and resolved reservation plan. */
+    resourceRequirementPlanJson: text('resource_requirement_plan_json'),
     /** Which level of the precedence chain provided the resource requirements. */
     resourceRequirementsSource: text('resource_requirements_source'),
     /** JSON snapshot of ResolvedResourceReservation (scheduler-facing units). */
@@ -1188,6 +1203,12 @@ export const nodes = sqliteTable(
     vmLocation: text('vm_location').notNull().default('nbg1'),
     cloudProvider: text('cloud_provider'),
     providerInstanceId: text('provider_instance_id'),
+    observedProviderInstanceType: text('observed_provider_instance_type'),
+    observedProviderInstanceVcpuCount: integer('observed_provider_instance_vcpu_count'),
+    observedProviderInstanceMemoryMb: integer('observed_provider_instance_memory_mb'),
+    observedProviderInstanceDiskGb: integer('observed_provider_instance_disk_gb'),
+    observedHardwareJson: text('observed_hardware_json'),
+    observedHardwareSource: text('observed_hardware_source'),
     ipAddress: text('ip_address'),
     backendDnsRecordId: text('backend_dns_record_id'),
     lastHeartbeatAt: text('last_heartbeat_at'),
@@ -1595,6 +1616,7 @@ export const agentProfiles = sqliteTable(
     maxTurns: integer('max_turns'),
     timeoutMinutes: integer('timeout_minutes'),
     vmSizeOverride: text('vm_size_override'),
+    resourceRequirementsJson: text('resource_requirements_json'),
     provider: text('provider'),
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
@@ -2228,6 +2250,14 @@ export const triggers = sqliteTable(
     cronTimezone: text('cron_timezone').default('UTC'),
     skipIfRunning: integer('skip_if_running', { mode: 'boolean' }).notNull().default(true),
     promptTemplate: text('prompt_template').notNull(),
+    /** Current authorized execution principal. Null means legacy owner-based execution. */
+    executionUserId: text('execution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Audit timestamp for execution principal assignment/transfer. */
+    executionUserAuthorizedAt: text('execution_user_authorized_at'),
+    /** Actor who authorized execution principal assignment/transfer. */
+    executionUserAuthorizedBy: text('execution_user_authorized_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     /** Optional agent profile for triggered tasks. set null on profile delete — trigger continues with defaults. */
     agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
       onDelete: 'set null',
@@ -2236,6 +2266,7 @@ export const triggers = sqliteTable(
     skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     taskMode: text('task_mode').default('task'),
     vmSizeOverride: text('vm_size_override'),
+    resourceRequirementsJson: text('resource_requirements_json'),
     maxConcurrent: integer('max_concurrent').notNull().default(1),
     lastTriggeredAt: text('last_triggered_at'),
     triggerCount: integer('trigger_count').notNull().default(0),
@@ -2516,6 +2547,8 @@ export const capacitySources = sqliteTable(
     credentialReference: text('credential_reference'),
     credentialVersion: integer('credential_version'),
     externalSourceRef: text('external_source_ref'),
+    authorityGeneration: integer('authority_generation').notNull().default(0),
+    sourceGeneration: integer('source_generation').notNull().default(0),
     status: text('status').notNull().default('active'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: text('created_at')
@@ -2538,6 +2571,15 @@ export const capacitySources = sqliteTable(
     platformCredentialIdx: index('idx_capacity_sources_platform_credential')
       .on(table.platformCredentialId)
       .where(sql`platform_credential_id IS NOT NULL`),
+    scopeGenerationIdx: index('idx_capacity_sources_scope_generation').on(
+      table.scope,
+      table.ownerUserId,
+      table.ownerProjectId,
+      table.sourceGeneration
+    ),
+    authorityGenerationIdx: index('idx_capacity_sources_authority_generation').on(
+      table.authorityGeneration
+    ),
   })
 );
 
@@ -2558,8 +2600,19 @@ export const capacityPools = sqliteTable(
     isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
     revision: integer('revision').notNull().default(1),
     status: text('status').notNull().default('active'),
+    configurationState: text('configuration_state').notNull().default('configured-ready'),
     strategy: text('strategy').notNull().default('balanced'),
     exhaustionPolicy: text('exhaustion_policy').notNull().default('queue'),
+    lastReconciledAt: text('last_reconciled_at'),
+    /**
+     * Digest of the pool's selection-affecting candidate state. Reconciliation bumps
+     * `revision` only when this changes, so an identical catalog refresh is stable while a
+     * ranking-affecting change (e.g. two comparable offerings swapping cheapest position)
+     * invalidates prior placement authority. NULL = not yet computed.
+     */
+    selectionDigest: text('selection_digest'),
+    migrationVersion: text('migration_version'),
+    migrationState: text('migration_state').notNull().default('complete'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: text('created_at')
       .notNull()
@@ -2579,6 +2632,9 @@ export const capacityPools = sqliteTable(
       .on(table.ownerProjectId)
       .where(sql`scope = 'project' AND is_default = 1`),
     scopeStatusIdx: index('idx_capacity_pools_scope_status').on(table.scope, table.status),
+    configurationStateIdx: index('idx_capacity_pools_configuration_state').on(
+      table.configurationState
+    ),
   })
 );
 
@@ -2607,12 +2663,20 @@ export const capacityPoolCandidates = sqliteTable(
     providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
     providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
     providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+    providerInstanceImage: text('provider_instance_image'),
+    providerInstanceArchitecture: text('provider_instance_architecture'),
     providerInstancePriceDisplay: text('provider_instance_price_display'),
     providerInstancePriceCurrency: text('provider_instance_price_currency'),
     providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
     providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     providerInstanceCatalogSource: text('provider_instance_catalog_source'),
     providerInstanceCatalogLastSeenAt: text('provider_instance_catalog_last_seen_at'),
+    catalogAvailability: text('catalog_availability').notNull().default('available'),
+    catalogUnavailableAt: text('catalog_unavailable_at'),
+    catalogReturnedAt: text('catalog_returned_at'),
+    catalogGeneration: integer('catalog_generation').notNull().default(0),
+    authorityGeneration: integer('authority_generation').notNull().default(0),
     priority: integer('priority').notNull().default(0),
     candidateOrder: integer('candidate_order').notNull().default(0),
     status: text('status').notNull().default('active'),
@@ -2631,6 +2695,17 @@ export const capacityPoolCandidates = sqliteTable(
       table.candidateOrder
     ),
     sourceIdx: index('idx_capacity_pool_candidates_source').on(table.capacitySourceId),
+    catalogAvailabilityIdx: index('idx_capacity_pool_candidates_catalog_availability').on(
+      table.catalogAvailability
+    ),
+    sourceGenerationIdx: index('idx_capacity_pool_candidates_source_generation').on(
+      table.capacitySourceId,
+      table.catalogGeneration
+    ),
+    authorityGenerationIdx: index('idx_capacity_pool_candidates_authority_generation').on(
+      table.capacitySourceId,
+      table.authorityGeneration
+    ),
   })
 );
 
@@ -2690,6 +2765,15 @@ export const computeUsage = sqliteTable(
     providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
     providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
     providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+    providerInstanceImage: text('provider_instance_image'),
+    providerInstanceArchitecture: text('provider_instance_architecture'),
+    observedProviderInstanceType: text('observed_provider_instance_type'),
+    observedProviderInstanceVcpuCount: integer('observed_provider_instance_vcpu_count'),
+    observedProviderInstanceMemoryMb: integer('observed_provider_instance_memory_mb'),
+    observedProviderInstanceDiskGb: integer('observed_provider_instance_disk_gb'),
+    observedHardwareJson: text('observed_hardware_json'),
+    observedHardwareSource: text('observed_hardware_source'),
     providerInstancePriceDisplay: text('provider_instance_price_display'),
     providerInstancePriceCurrency: text('provider_instance_price_currency'),
     providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),

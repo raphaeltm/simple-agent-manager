@@ -230,13 +230,17 @@ export function claimDuePromptDeliveries(
       });
       continue;
     }
-    const mode: DeliveryClaimMode = message.deliveryState === 'delivering' ? 'reconcile' : 'submit';
+    const wasDelivering = message.deliveryState === 'delivering';
+    // Only the positive, durable preparation checkpoint proves that no prompt
+    // submission began. Old NULL-phase claims and submitting claims reconcile.
+    const mode: DeliveryClaimMode =
+      wasDelivering && row.prompt_delivery_phase !== 'preparing' ? 'reconcile' : 'submit';
     const attemptId = ulid();
-    const result =
-      mode === 'submit'
-        ? sql.exec(
-            `UPDATE session_inbox
+    const result = !wasDelivering
+      ? sql.exec(
+          `UPDATE session_inbox
            SET delivery_state = 'delivering',
+               prompt_delivery_phase = 'preparing',
                delivery_attempts = delivery_attempts + 1,
                attempt_id = ?,
                attempt_started_at = ?,
@@ -245,28 +249,50 @@ export function claimDuePromptDeliveries(
            WHERE id = ?
              AND delivery_state IN ('queued', 'retry_wait')
              AND COALESCE(next_attempt_at, created_at) <= ?`,
-            attemptId,
-            now,
-            now,
-            message.id,
-            now
-          )
-        : sql.exec(
-            `UPDATE session_inbox
+          attemptId,
+          now,
+          now,
+          message.id,
+          now
+        )
+      : sql.exec(
+          `UPDATE session_inbox
            SET attempt_id = ?, attempt_started_at = ?
            WHERE id = ?
              AND delivery_state = 'delivering'
              AND attempt_started_at <= ?`,
-            attemptId,
-            now,
-            message.id,
-            staleBefore
-          );
+          attemptId,
+          now,
+          message.id,
+          staleBefore
+        );
     if (result.rowsWritten === 0) continue;
     const claimed = mailbox.getMessage(sql, message.id);
     if (claimed) claims.push({ message: claimed, attemptId, mode });
   }
   return claims;
+}
+
+/** Persist the possible-send boundary and reject preparation owned by an older attempt. */
+export function markPromptDeliverySubmitting(
+  sql: SqlStorage,
+  claim: PromptDeliveryClaim,
+  capabilities: VmPromptDeliveryCapabilities
+): boolean {
+  return (
+    sql.exec(
+      `UPDATE session_inbox
+     SET prompt_delivery_phase = 'submitting', runtime_identity = ?,
+         adapter_protocol_version = ?, receipt_supported = ?
+     WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?
+       AND prompt_delivery_phase = 'preparing'`,
+      capabilities.runtimeIdentity,
+      capabilities.protocolVersion,
+      capabilities.promptReceipts.supported ? 1 : 0,
+      claim.message.id,
+      claim.attemptId
+    ).rowsWritten > 0
+  );
 }
 
 export interface AcceptedDeliveryResult {

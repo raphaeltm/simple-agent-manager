@@ -203,11 +203,7 @@ func runChatNew(ctx context.Context, runtime Runtime, parsed parsedArgs, args []
 		return fail(runtime.Stderr, err)
 	}
 	options.Mode = "conversation"
-	response, err := client.SubmitTask(ctx, projectID, message, options)
-	if err != nil {
-		return fail(runtime.Stderr, err)
-	}
-	return writeOrFail(runtime, parsed.Globals.JSON, formatSubmitResponse(response), response)
+	return submitTaskWithClient(ctx, runtime, parsed, client, projectID, message, options)
 }
 
 func runChatView(ctx context.Context, runtime Runtime, parsed parsedArgs, sessionID string) int {
@@ -453,14 +449,14 @@ func runProfiles(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	if len(response.Items) == 0 {
 		return writeOrFail(runtime, parsed.Globals.JSON, "No agent profiles found", response)
 	}
-	headers := []string{"ID", "NAME", "AGENT", "VM SIZE", "MODE"}
+	headers := []string{"ID", "NAME", "AGENT", "WORKLOAD", "MODE"}
 	var rows [][]string
 	for _, p := range response.Items {
 		rows = append(rows, []string{
 			TruncateID(p.ID),
 			or(p.Name, "—"),
 			or(p.AgentType, "—"),
-			or(or(p.VMSizeOverride, p.VMSize), "—"),
+			or(formatProfileWorkload(p), "—"),
 			or(p.TaskMode, "—"),
 		})
 	}
@@ -516,13 +512,13 @@ func runNodes(ctx context.Context, runtime Runtime, parsed parsedArgs) int {
 	if len(response.Nodes) == 0 {
 		return writeOrFail(runtime, parsed.Globals.JSON, "No nodes found", response)
 	}
-	headers := []string{"ID", "PROVIDER", "SIZE", "LOCATION", "STATUS", "IP"}
+	headers := []string{"ID", "PROVIDER", "HARDWARE", "LOCATION", "STATUS", "IP"}
 	var rows [][]string
 	for _, n := range response.Nodes {
 		rows = append(rows, []string{
 			TruncateID(n.ID),
 			or(n.CloudProvider, "—"),
-			or(n.VMSize, "—"),
+			or(formatNodeHardware(n), "—"),
 			or(n.VMLocation, "—"),
 			or(n.Status, "—"),
 			or(n.IPAddress, "—"),

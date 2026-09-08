@@ -62,6 +62,7 @@ const doSource = [
   'types.ts',
   'node-steps.ts',
   'workspace-steps.ts',
+  'workspace-ready-steps.ts',
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',

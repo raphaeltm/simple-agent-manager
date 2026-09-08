@@ -364,39 +364,86 @@ export async function scheduleWorkspaceCreateOnNode(
   branch: string,
   project: WorkspaceGitSourceProject,
   gitUserName?: string | null,
-  gitUserEmail?: string | null
+  gitUserEmail?: string | null,
+  options: { beforeExternalMutation?: () => Promise<void>; durableRetry?: boolean } = {}
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
 
-  await db
-    .update(schema.workspaces)
-    .set({ status: 'creating', errorMessage: null, updatedAt: now })
-    .where(eq(schema.workspaces.id, workspaceId));
+  const assertCurrent = async () => {
+    await options.beforeExternalMutation?.();
+  };
 
   try {
+    await assertCurrent();
+    const claimed = await env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET status = 'creating', error_message = NULL, updated_at = ?
+        WHERE id = ?
+          AND user_id = ?
+          AND node_id = ?
+          AND status = 'creating'
+          AND runtime_deletion_confirmed_at IS NULL`
+    )
+      .bind(now, workspaceId, userId, nodeId)
+      .run();
+    if ((claimed.meta?.changes ?? 0) !== 1) {
+      throw errors.gone('Workspace changed before workspace creation dispatch');
+    }
+
     const callbackToken = await signCallbackToken(workspaceId, env);
     const gitSource = await resolveWorkspaceGitSource(db, project);
-    await createWorkspaceOnNode(nodeId, env, userId, {
-      workspaceId,
-      repository,
-      branch,
-      ...gitSource,
-      callbackToken,
-      gitUserName,
-      gitUserEmail,
-    });
-    await env.DATABASE.prepare(`UPDATE workspaces SET dispatched_at = ? WHERE id = ?`)
-      .bind(new Date().toISOString(), workspaceId)
+    const acknowledgement = await createWorkspaceOnNode(
+      nodeId,
+      env,
+      userId,
+      {
+        workspaceId,
+        repository,
+        branch,
+        ...gitSource,
+        callbackToken,
+        gitUserName,
+        gitUserEmail,
+      },
+      { beforeExternalMutation: assertCurrent }
+    );
+    if (options.durableRetry && (!acknowledgement || typeof acknowledgement !== 'object'
+      || !('workspaceId' in acknowledgement) || acknowledgement.workspaceId !== workspaceId)) {
+      throw new Error('Node agent did not acknowledge the expected workspace identity');
+    }
+    await assertCurrent();
+    await env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET dispatched_at = ?, updated_at = ?
+        WHERE id = ?
+          AND user_id = ?
+          AND node_id = ?
+          AND status = 'creating'
+          AND dispatched_at IS NULL
+          AND runtime_deletion_confirmed_at IS NULL`
+    )
+      .bind(new Date().toISOString(), new Date().toISOString(), workspaceId, userId, nodeId)
       .run();
   } catch (err) {
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'error',
-        errorMessage: err instanceof Error ? err.message : 'Failed to create workspace on node',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.workspaces.id, workspaceId));
+    // A durable caller replays the same idempotent VM-agent workspace ID after a lost response.
+    if (options.durableRetry) throw err;
+    await env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET status = 'error', error_message = ?, updated_at = ?
+        WHERE id = ?
+          AND user_id = ?
+          AND node_id = ?
+          AND status = 'creating'
+          AND runtime_deletion_confirmed_at IS NULL`
+    )
+      .bind(
+        err instanceof Error ? err.message : 'Failed to create workspace on node',
+        new Date().toISOString(),
+        workspaceId,
+        userId,
+        nodeId
+      )
+      .run();
   }
 }

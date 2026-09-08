@@ -35,8 +35,7 @@ const ROLE_CAPABILITIES: Record<ProjectMemberRole, ReadonlySet<ProjectCapability
   owner: new Set(PROJECT_CAPABILITIES),
   admin: new Set(
     PROJECT_CAPABILITIES.filter(
-      (capability) =>
-        capability !== 'project:delete' && capability !== 'project:transfer_ownership'
+      (capability) => capability !== 'project:delete' && capability !== 'project:transfer_ownership'
     )
   ),
   maintainer: new Set([
@@ -89,12 +88,7 @@ function assertActiveMembership(
   projectId: string,
   userId: string
 ): schema.ProjectMember {
-  if (
-    !row ||
-    row.projectId !== projectId ||
-    row.userId !== userId ||
-    row.status !== 'active'
-  ) {
+  if (!row || row.projectId !== projectId || row.userId !== userId || row.status !== 'active') {
     throw errors.notFound('Project');
   }
   return row;
@@ -106,10 +100,21 @@ function parseProjectMemberRole(role: string): ProjectMemberRole | null {
     : null;
 }
 
-function roleHasCapability(role: string, capability: ProjectCapability): boolean {
+/**
+ * Single source of truth for role -> capability. Exported so callers that
+ * already hold membership rows (offboarding principal selection) rank them
+ * against the same table the request-time guards use, instead of duplicating it.
+ */
+export function projectRoleHasCapability(role: string, capability: ProjectCapability): boolean {
   const parsedRole = parseProjectMemberRole(role);
   if (!parsedRole) return false;
   return ROLE_CAPABILITIES[parsedRole].has(capability);
+}
+
+export function projectMemberRolesWithCapability(
+  capability: ProjectCapability
+): ProjectMemberRole[] {
+  return PROJECT_MEMBER_ROLES.filter((role) => ROLE_CAPABILITIES[role].has(capability));
 }
 
 async function requireActiveProjectMembership(
@@ -185,7 +190,7 @@ export async function requireProjectCapability(
   capability: ProjectCapability
 ): Promise<schema.Project> {
   const { project, membership } = await requireActiveProjectMembership(db, projectId, userId);
-  if (!roleHasCapability(membership.role, capability)) {
+  if (!projectRoleHasCapability(membership.role, capability)) {
     throw errors.forbidden('Project capability is required');
   }
   return project;
@@ -209,7 +214,7 @@ export async function hasProjectCapability(
     )
     .limit(1);
   const membership = memberRows[0];
-  return membership ? roleHasCapability(membership.role, capability) : false;
+  return membership ? projectRoleHasCapability(membership.role, capability) : false;
 }
 
 export async function requireOwnedProject(

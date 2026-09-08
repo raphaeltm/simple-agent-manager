@@ -3,7 +3,11 @@ import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
 import {
   aggregateWorkspaceReservationRows,
   hasWorkspaceReservationCapacity,
-  type WorkspaceReservationNodeCapacity,
+  parseWorkspaceAdmissionMetrics,
+  resolveTrustedWorkspaceNodeCapacity,
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceAdmissionPolicy,
+  type WorkspaceResourceNode,
 } from '../../src/services/workspace-resource-capacity';
 
 type TaskStatus =
@@ -24,7 +28,7 @@ interface TimelineEvent {
   run: () => void;
 }
 
-interface TimelineNode extends WorkspaceReservationNodeCapacity {
+interface TimelineNode extends Omit<WorkspaceResourceNode, 'lastHeartbeatAt'> {
   id: string;
   status: 'provisioning' | 'running';
   lastHeartbeatAt: number | null;
@@ -97,6 +101,8 @@ export class AggregateCapacityTimeline {
   readonly providerRequests: ProviderRequest[] = [];
   readonly trace: string[] = [];
 
+  readonly admissionPolicy: WorkspaceAdmissionPolicy;
+
   now = 60_000;
   private sequence = 0;
   private readonly events: TimelineEvent[] = [];
@@ -106,17 +112,28 @@ export class AggregateCapacityTimeline {
     readonly policy: AggregateCapacityTimelinePolicy = CURRENT_AGGREGATE_CAPACITY_POLICY,
     readonly maxWorkspaces = 10,
     readonly heartbeatStaleMs = 30_000
-  ) {}
+  ) {
+    this.admissionPolicy = resolveWorkspaceAdmissionPolicy(
+      {},
+      { maxWorkspacesPerNode: maxWorkspaces }
+    );
+  }
 
   addNode(
     id: string,
-    capacity: WorkspaceReservationNodeCapacity,
+    capacity: Omit<WorkspaceResourceNode, 'id' | 'lastHeartbeatAt'>,
     options: { status?: TimelineNode['status']; lastHeartbeatAt?: number | null } = {}
   ): void {
     this.nodes.set(id, {
       id,
       status: options.status ?? 'running',
       lastHeartbeatAt: options.lastHeartbeatAt === undefined ? this.now : options.lastHeartbeatAt,
+      lastMetrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0.2,
+        memoryPercent: 10,
+        diskPercent: 10,
+      }),
       ...capacity,
     });
     this.record(`node ${id} added (${options.status ?? 'running'})`);
@@ -291,7 +308,15 @@ export class AggregateCapacityTimeline {
           resolvedReservationJson: workspace.resolvedReservationJson,
         }))
       );
-      if (hasWorkspaceReservationCapacity(node, usage, reservation, this.maxWorkspaces)) {
+      if (
+        hasWorkspaceReservationCapacity(
+          this.resourceNode(node),
+          usage,
+          reservation,
+          this.admissionPolicy,
+          parseWorkspaceAdmissionMetrics(this.resourceNode(node), this.admissionPolicy, this.now)
+        )
+      ) {
         return node;
       }
     }
@@ -318,10 +343,11 @@ export class AggregateCapacityTimeline {
     );
     const heartbeatAllowed = !this.policy.rejectStaleHeartbeats || this.hasFreshHeartbeat(node);
     const capacityAllowed = hasWorkspaceReservationCapacity(
-      node,
+      this.resourceNode(node),
       usage,
       task.reservation,
-      this.maxWorkspaces
+      this.admissionPolicy,
+      parseWorkspaceAdmissionMetrics(this.resourceNode(node), this.admissionPolicy, this.now)
     );
     if (this.policy.recheckCapacityAtCommit && (!heartbeatAllowed || !capacityAllowed)) {
       task.status = 'retry-wait';
@@ -359,9 +385,12 @@ export class AggregateCapacityTimeline {
     this.addNode(
       nodeId,
       {
-        providerInstanceVcpuCount: 8,
-        providerInstanceMemoryMb: 16_384,
-        providerInstanceDiskGb: 160,
+        nodeClass: 'managed',
+        providerInstanceId: `server-${nodeId}`,
+        observedProviderInstanceVcpuCount: 8,
+        observedProviderInstanceMemoryMb: 16_384,
+        observedProviderInstanceDiskGb: 160,
+        observedHardwareSource: 'observed',
       },
       { status: 'provisioning', lastHeartbeatAt: null }
     );
@@ -387,6 +416,14 @@ export class AggregateCapacityTimeline {
         workspace.status = status;
       }
     }
+  }
+
+  private resourceNode(node: TimelineNode): WorkspaceResourceNode {
+    return {
+      ...node,
+      lastHeartbeatAt:
+        node.lastHeartbeatAt === null ? null : new Date(node.lastHeartbeatAt).toISOString(),
+    };
   }
 
   private hasFreshHeartbeat(node: TimelineNode): boolean {
@@ -420,30 +457,34 @@ export class AggregateCapacityTimeline {
     if (usage.activeCount > this.maxWorkspaces) {
       this.failInvariant(`workspace count exceeded on ${node.id}`);
     }
-    if (usage.activeCount > 1 && usage.hasInvalidReservation) {
+    if (usage.activeCount > 1 && usage.invalidCount > 0) {
       this.failInvariant(`unknown reservation was co-tenanted on ${node.id}`);
     }
-    if (usage.activeCount > 1 && usage.hasExclusiveReservation) {
+    if (usage.activeCount > 1 && usage.exclusiveCount > 0) {
       this.failInvariant(`exclusive reservation was co-tenanted on ${node.id}`);
     }
-    if (usage.minimumMaxCoTenants !== null && usage.activeCount > usage.minimumMaxCoTenants) {
+    if (usage.minMaxCoTenants !== null && usage.activeCount > usage.minMaxCoTenants) {
       this.failInvariant(`co-tenant cap exceeded on ${node.id}`);
     }
+    const capacity = resolveTrustedWorkspaceNodeCapacity(this.resourceNode(node));
+    if (capacity.source === null) this.failInvariant(`untrusted capacity on ${node.id}`);
     this.assertResourceDimension(
       node.id,
       'cpu',
       usage.cpuMillis,
-      node.providerInstanceVcpuCount,
-      1_000
+      capacity.vcpuCount,
+      (1_000 * this.admissionPolicy.cpuShareBudgetPercent) / 100
     );
     this.assertResourceDimension(
       node.id,
       'memory',
       usage.memoryMb,
-      node.providerInstanceMemoryMb,
+      capacity.memoryMb === null
+        ? null
+        : Math.max(0, capacity.memoryMb - this.admissionPolicy.hostMemoryReserveMb),
       1
     );
-    this.assertResourceDimension(node.id, 'disk', usage.diskMb, node.providerInstanceDiskGb, 1_024);
+    this.assertResourceDimension(node.id, 'disk', usage.diskMb, capacity.diskGb, 1_024);
     for (const workspace of active) {
       this.assertWorkspaceSafety(workspace, liveTaskOwners);
     }

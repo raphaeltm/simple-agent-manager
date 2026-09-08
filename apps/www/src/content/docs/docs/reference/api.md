@@ -17,6 +17,8 @@ Private feedback-project agents can also call `list_incident_queue`, `get_incide
 
 Project eventing uses a pull loop over the canonical ProjectData `project_event_*` tables. Agents create a short-lived subscription with `create_project_event_subscription`, using v1 exact/set filters for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`; recover existing subscriptions with `list_project_event_subscriptions`; inspect or cancel with `get_project_event_subscription` and `cancel_project_event_subscription`. Project, task, session, workspace, owner, and agent identity come from the verified MCP token, not tool arguments.
 
+`dispatch_task` accepts modern VM workload input through `resourceRequirements` with optional `minVcpu`, `minMemoryGb`, `minDiskGb`, `exclusiveNode`, and preserved compatibility metadata such as `maxCoTenants`. Known numeric fields must be finite and non-negative; `exclusiveNode: false` is preserved. Deprecated `vmSize` remains accepted as a legacy compatibility hint and is not expanded into hardware by the client or MCP handler.
+
 After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. V1 records matches, delivery decisions, and pull acknowledgements only. It does not inject prompts, steer runtimes, interrupt sessions, spawn tasks, or expose human/UI controls.
 
 ## Authentication
@@ -181,18 +183,44 @@ with `credentialSetupRequired: true` and a `credentialSetupMessage` suitable for
 ## Capacity pools
 
 Default capacity-pool endpoints expose non-secret pool, source, and concrete candidate metadata.
-Responses have this shape: `effective`, `effectiveScope`, `defaults`, `precedence`,
-`reconciledScopes`, and `policyMutationSupported`. Use `ensure=true` on GET endpoints, or call the
-matching `/reconcile` endpoint, to refresh pool metadata from the credential-scoped provider-native
-catalog. Provider API failures fall back to static curated catalog rows for that provider. Provider
-catalog offerings expose `catalogSource`; capacity-pool candidates expose the persisted
-`providerInstanceCatalogSource` snapshot.
+Responses have this shape: `effective`, `effectiveScope`, `effectiveState`, `defaults`,
+`precedence`, `reconciledScopes`, `policyMutationSupported`, and `placementSettings`. Each summary
+includes `activeCandidateCount`, `availableCandidateCount`, `effectiveState`, and non-secret
+diagnostics. `placementSettings` is a redacted settings contract containing the effective settings
+fingerprint, selected source labels, selection weights, rollout percent, and normalized
+`resourceDefaults.legacyWorkloadMapping` plus `resourceDefaults.platformDefaults`; it does not
+include internal diagnostics or credential/source identifiers. Use `ensure=true` on GET endpoints,
+or call the matching `/reconcile` endpoint, to refresh pool metadata from the credential-scoped
+provider-native catalog. Provider API failures are reported in catalog refresh metadata and do not
+synthesize static available rows for reconciliation. Provider catalog offerings expose
+`catalogSource`; capacity-pool candidates expose the persisted `providerInstanceCatalogSource` and
+`catalogAvailability` snapshot. `sourceGeneration` and `catalogGeneration` are refresh/fencing
+epochs and may advance on identical reconciliations. `authorityGeneration` on sources and
+candidates is a stable semantic authority value for the selected credential/source/offering state.
+Placement snapshots persist `capacityAuthorityGeneration`; the legacy `sourceGeneration` snapshot
+field is a compatibility alias for that same authority value, not the refresh epoch.
+
+Only an unconfigured scope inherits from the next default-pool scope. A configured project or user
+pool with state `configured-empty`, `source-disabled`, `catalog-unavailable`, or `migration-pending`
+remains authoritative and is returned as `effective`; placement then queues/fails inside that pool
+according to its exhaustion policy.
 
 ### `GET /api/capacity-pools/defaults`
 
 Read the authenticated user's default compute pool. Optional `ensure=true` reconciles it from the
-user's active personal compute credentials. Disabled zero-active owned pools remain visible for the
-editor; they are not selected as `effective`.
+user's active personal compute credentials. The response includes `effectiveSummary`, a redacted
+project/user/installation selection summary with no credential IDs or source metadata. Configured
+zero-active or catalog-unavailable owned pools remain visible and are still selected as `effective`
+so clients do not infer unsupported cross-scope fallback. Ordinary users may receive an
+installation-funded `effectiveSummary` from existing installation metadata, but this endpoint never
+reconciles installation credentials.
+
+When the effective pool is ready, `effectiveSummary.nativeOfferings` lists its eligible VM
+provider, location, native instance type, display name, resources and displayed price. These
+choices omit pool, source, credential and owner identifiers. The Nodes creation form uses them
+even when the user has no personal cloud credential. Empty, disabled or migrating effective
+pools return no choices; they do not fall back to a personal credential catalog. Final node
+creation still revalidates the selected offering against current pool authority.
 
 ### `POST /api/capacity-pools/defaults/reconcile`
 
@@ -224,9 +252,12 @@ provider/location/instance type; it does not accept secret material:
 
 ### `GET /api/projects/:id/capacity-pools/defaults`
 
-Read a project's default pool context. Requires project `secret:read`. Optional `ensure=true`
-reconciles project credentials plus visible fallback summaries. Non-superadmins do not receive
-installation fallback details.
+Read a project's default pool context. Requires project `project:read`. All members receive
+`effectiveSummary`, a redacted authoritative project → user → installation selection summary with no
+credential IDs or source metadata. Raw project/user summaries require project `secret:read`; raw
+installation details remain superadmin-only. Optional `ensure=true` reconciles only when the caller
+also has project `secret:read`, and non-superadmins never reconcile installation credentials through
+this route.
 
 ### `POST /api/projects/:id/capacity-pools/defaults/reconcile`
 
@@ -312,9 +343,16 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 
 ```json
 {
-  "message": "Fix the login button on the settings page"
+  "message": "Fix the login button on the settings page",
+  "resourceRequirements": {
+    "minVcpu": 4,
+    "minMemoryGb": 16,
+    "exclusiveNode": false
+  }
 }
 ```
+
+`resourceRequirements` is additive modern workload input. The API validates known fields and persists the normalized JSON through task launch inputs. Legacy `vmSize` is still accepted for old clients as a deprecated compatibility hint; clients should not infer provider hardware from it. Profiles, skills, and triggers persist the same modern data as `resourceRequirementsJson` for compatibility, with explicit `null` clearing that layer and omitted fields preserving inherited behavior.
 
 ## File Proxy (Project Chat)
 

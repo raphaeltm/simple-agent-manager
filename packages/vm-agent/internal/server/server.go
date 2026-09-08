@@ -71,6 +71,7 @@ var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 
 // Server is the HTTP server for the VM Agent.
 type Server struct {
+	systemProvisioning    *systemProvisioningBarrier
 	config                *config.Config
 	httpServer            *http.Server
 	jwtValidator          *auth.JWTValidator
@@ -90,9 +91,11 @@ type Server struct {
 	acpConfig             acp.GatewayConfig
 	sessionHostMu         sync.Mutex
 	sessionHosts          map[string]*acp.SessionHost
-	sessionMcpServers     map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
-	sessionProfileOvr     map[string]profileOverrides     // hostKey → model/permissionMode/effort overrides from agent profiles
-	sessionTaskCtx        map[string]taskCallbackContext  // hostKey → task callback ownership context
+	sessionRestores       map[string]*sessionRestoreAttempt // guarded by sessionHostMu
+	sessionCreations      map[string]chan struct{}          // guarded by sessionHostMu
+	sessionMcpServers     map[string][]acp.McpServerEntry   // hostKey → MCP servers for ACP injection
+	sessionProfileOvr     map[string]profileOverrides       // hostKey → model/permissionMode/effort overrides from agent profiles
+	sessionTaskCtx        map[string]taskCallbackContext    // hostKey → task callback ownership context
 	store                 *persistence.Store
 	executionRuntimeID    string
 	errorReporter         *errorreport.Reporter

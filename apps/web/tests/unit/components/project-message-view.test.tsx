@@ -396,7 +396,7 @@ function renderWorkspaceBadgeFixture(sessionId: string, workspace: WorkspaceBadg
     healthStatus: 'healthy',
   });
   mocks.getChatSession.mockResolvedValue({
-    session: makeSession(sessionId, 'active'),
+    session: { ...makeSession(sessionId, 'active'), workspaceId: workspace.id },
     messages: [makeMessage('m1', sessionId, 'Hello')],
     hasMore: false,
   });
@@ -1101,13 +1101,13 @@ describe('ProjectMessageView — collapsible session header', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({
-      id: 'ws-test',
+    mocks.getWorkspace.mockImplementation(async (id: string) => ({
+      id,
       name: 'test',
       status: 'running',
       vmSize: 'medium',
       vmLocation: 'fsn1',
-    });
+    }));
     mocks.getNode.mockResolvedValue({
       id: 'node-test',
       name: 'node-test',
@@ -1334,7 +1334,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       cloudProvider: 'hetzner',
     });
 
-    const session = makeSession('sess-ctx', 'active');
+    const session = { ...makeSession('sess-ctx', 'active'), workspaceId: 'ws-ctx-1' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-ctx', 'Hello')],
@@ -1361,9 +1361,10 @@ describe('ProjectMessageView — session context dropdown', () => {
     // Workspace status "(running)" may appear alongside timing "(running)" — check at least one exists
     expect(screen.getAllByText('(running)').length).toBeGreaterThanOrEqual(1);
 
-    // Should show VM size
-    expect(screen.getByText('VM Size:')).toBeTruthy();
-    expect(screen.getByText('Medium')).toBeTruthy();
+    // Requested resources and reported hardware must remain distinct.
+    expect(screen.getByText('Requested:')).toBeTruthy();
+    expect(screen.getByText('Unknown — no saved resource request')).toBeTruthy();
+    expect(screen.getByText('Unknown — no hardware report')).toBeTruthy();
 
     // Should show node info
     expect(screen.getByText('Node:')).toBeTruthy();
@@ -1495,7 +1496,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       healthStatus: 'healthy',
     });
 
-    const session = makeSession('sess-dn', 'active');
+    const session = { ...makeSession('sess-dn', 'active'), workspaceId: 'ws-nodn' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-dn', 'Hello')],
@@ -1527,7 +1528,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       // no nodeId
     });
 
-    const session = makeSession('sess-nonode', 'active');
+    const session = { ...makeSession('sess-nonode', 'active'), workspaceId: 'ws-nonode' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-nonode', 'Hello')],
@@ -1566,7 +1567,7 @@ describe('ProjectMessageView — session context dropdown', () => {
     });
     mocks.getNode.mockRejectedValue(new Error('Node not found'));
 
-    const session = makeSession('sess-partial', 'active');
+    const session = { ...makeSession('sess-partial', 'active'), workspaceId: 'ws-partial' };
     mocks.getChatSession.mockResolvedValue({
       session,
       messages: [makeMessage('m1', 'sess-partial', 'Hello')],
@@ -1587,7 +1588,7 @@ describe('ProjectMessageView — session context dropdown', () => {
       expect(screen.getByText('partial-ws')).toBeTruthy();
     });
     expect(screen.getByText('Workspace:')).toBeTruthy();
-    expect(screen.getByText('VM Size:')).toBeTruthy();
+    expect(screen.getByText('Requested:')).toBeTruthy();
 
     // Node details should NOT appear
     await waitFor(() => {

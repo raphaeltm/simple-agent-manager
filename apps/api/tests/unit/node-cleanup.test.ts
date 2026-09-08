@@ -337,7 +337,10 @@ describe('runNodeCleanupSweep', () => {
       const result = await runNodeCleanupSweep(env);
 
       expect(result.lifetimeDestroyed).toBe(1);
-      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-stopped-handoff', 'user-1', env);
+      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-stopped-handoff', 'user-1', env, {
+        providerRequestContext: { signal: expect.any(AbortSignal) },
+        requestDeadlineMs: expect.any(Number),
+      });
     });
 
     it('does not destroy stopped handoff nodes with active workspaces', async () => {

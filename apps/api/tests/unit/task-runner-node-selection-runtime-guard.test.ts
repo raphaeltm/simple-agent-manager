@@ -21,6 +21,7 @@ function makeCapturingDb(issuedSql: string[]) {
         bind: () => ({
           all: async () => ({ results: [] }),
           first: async () => null,
+          run: async () => ({ meta: { changes: 1 } }),
         }),
       };
     },
@@ -34,6 +35,7 @@ describe('handleNodeSelection runtime guards', () => {
       env: { DATABASE: makeCapturingDb(issuedSql), NODE_LIFECYCLE: {} },
       updateD1ExecutionStep: vi.fn().mockResolvedValue(undefined),
       advanceToStep: vi.fn().mockResolvedValue(undefined),
+      ctx: { storage: { put: vi.fn().mockResolvedValue(undefined) } },
     } as unknown as TaskRunnerContext;
     const state = {
       taskId: 'task-1',

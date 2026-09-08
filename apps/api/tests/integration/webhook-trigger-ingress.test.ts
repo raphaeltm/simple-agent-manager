@@ -30,7 +30,9 @@ CREATE TABLE triggers (
   description TEXT, status TEXT NOT NULL DEFAULT 'active', source_type TEXT NOT NULL,
   cron_expression TEXT, cron_timezone TEXT DEFAULT 'UTC', skip_if_running INTEGER NOT NULL DEFAULT 1,
   prompt_template TEXT NOT NULL, agent_profile_id TEXT, skill_id TEXT, task_mode TEXT DEFAULT 'task',
-  vm_size_override TEXT, max_concurrent INTEGER NOT NULL DEFAULT 1, last_triggered_at TEXT,
+  execution_user_id TEXT, execution_user_authorized_at TEXT, execution_user_authorized_by TEXT,
+  vm_size_override TEXT, resource_requirements_json TEXT,
+  max_concurrent INTEGER NOT NULL DEFAULT 1, last_triggered_at TEXT,
   trigger_count INTEGER NOT NULL DEFAULT 0, next_execution_sequence INTEGER NOT NULL DEFAULT 1,
   next_fire_at TEXT, credential_blocked_reason TEXT, credential_blocked_at TEXT,
   credential_blocked_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL

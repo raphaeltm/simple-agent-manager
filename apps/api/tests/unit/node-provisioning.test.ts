@@ -1,615 +1,364 @@
-/**
- * Source contract and behavioral tests for node provisioning flow (TDF-3).
- *
- * Validates:
- * 1. Node limit enforcement logic in TaskRunner DO
- * 2. Provisioning success path
- * 3. Hetzner API failure handling
- * 4. Retry behavior for already-provisioned nodes
- * 5. Health check timeout in handleNodeAgentReady
- *
- * Uses source contract tests for the DO step handlers (which can't be
- * instantiated directly) and behavioral tests for pure helper functions.
- */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+/** Execute extracted handlers against SQLite; only node service boundaries are mocked. */
+import { ProviderError } from '@simple-agent-manager/providers';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe, expect, it } from 'vitest';
-
+import * as schema from '../../src/db/schema';
 import { parseEnvInt } from '../../src/durable-objects/task-runner/helpers';
+import {
+  handleNodeAgentReady,
+  handleNodeProvisioning,
+} from '../../src/durable-objects/task-runner/node-steps';
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner/types';
+import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
-// TaskRunner DO is split across task-runner/ directory — read all module files
-const doDir = resolve(process.cwd(), 'src/durable-objects/task-runner');
-const doSource = [
-  readFileSync(resolve(doDir, 'index.ts'), 'utf8'),
-  readFileSync(resolve(doDir, 'types.ts'), 'utf8'),
-  readFileSync(resolve(doDir, 'node-steps.ts'), 'utf8'),
-  readFileSync(resolve(doDir, 'node-agent-ready-step.ts'), 'utf8'),
-  readFileSync(resolve(doDir, 'node-provisioning-target.ts'), 'utf8'),
-  readFileSync(resolve(doDir, 'node-selection.ts'), 'utf8'),
-  readFileSync(resolve(doDir, 'workspace-steps.ts'), 'utf8'),
-  readFileSync(resolve(doDir, 'agent-session-step.ts'), 'utf8'),
-  readFileSync(resolve(doDir, 'state-machine.ts'), 'utf8'),
-  readFileSync(resolve(doDir, 'helpers.ts'), 'utf8'),
-].join('\n');
-const indexSource = readFileSync(resolve(process.cwd(), 'src/env.ts'), 'utf8');
+const { createNodeRecord, provisionNode } = vi.hoisted(() => ({
+  createNodeRecord: vi.fn(),
+  provisionNode: vi.fn(),
+}));
+vi.mock('../../src/services/nodes', () => ({ createNodeRecord, provisionNode }));
 
-// =============================================================================
-// Node Limit Enforcement
-// =============================================================================
+let sqlite: Database.Database;
+const persistedStates: TaskRunnerState[] = [];
+const NOW = Date.parse('2026-09-07T12:00:00Z');
+
+function makeState(): TaskRunnerState {
+  return {
+    version: 1,
+    taskId: 'task-1',
+    projectId: 'project-1',
+    userId: 'user-1',
+    currentStep: 'node_provisioning',
+    stepResults: {
+      nodeId: null,
+      autoProvisioned: false,
+      workspaceId: null,
+      chatSessionId: 'chat-1',
+      agentSessionId: null,
+      agentStarted: false,
+      mcpToken: null,
+    },
+    config: {
+      vmSize: 'medium',
+      vmLocation: 'hel1',
+      branch: 'main',
+      preferredNodeId: null,
+      userName: 'Test User',
+      userEmail: 'test@example.com',
+      githubId: null,
+      taskTitle: 'Provision this task with a title longer than forty characters',
+      taskDescription: null,
+      repository: 'org/repo',
+      installationId: 'installation-1',
+      outputBranch: null,
+      defaultBranch: 'main',
+      projectDefaultVmSize: null,
+      chatSessionId: null,
+      agentType: null,
+      workspaceProfile: null,
+      devcontainerConfigName: null,
+      cloudProvider: 'hetzner',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
+      taskMode: 'task',
+      model: null,
+      effort: null,
+      permissionMode: null,
+      opencodeProvider: null,
+      opencodeBaseUrl: null,
+      systemPromptAppend: null,
+      agentProfileHint: null,
+      attachments: null,
+      projectScaling: null,
+      capacityPoolSelection: null,
+    },
+    retryCount: 0,
+    workspaceReadyReceived: false,
+    workspaceReadyStatus: null,
+    workspaceErrorMessage: null,
+    createdAt: NOW,
+    lastStepAt: NOW,
+    provisioningStartedAt: null,
+    agentReadyStartedAt: null,
+    workspaceReadyStartedAt: null,
+    workspaceDispatchStartedAt: null,
+    workspaceDispatchAttempts: 0,
+    workspaceDispatchLastAttemptAt: null,
+    workspaceDispatchLastError: null,
+    workspaceDispatchAckedAt: null,
+    lastD1Step: null,
+    completed: false,
+  };
+}
+
+function makeContext(envOverrides: Record<string, string> = {}): TaskRunnerContext {
+  return {
+    env: {
+      DATABASE: createSqliteD1(sqlite),
+      COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
+      VM_AGENT_REQUIRED_VERSION: 'current-agent',
+      ...envOverrides,
+    },
+    ctx: {
+      storage: {
+        put: vi.fn(async (_key: string, state: TaskRunnerState) => {
+          persistedStates.push(structuredClone(state));
+        }),
+        setAlarm: vi.fn().mockResolvedValue(undefined),
+      },
+    },
+    assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
+    advanceToStep: vi.fn().mockResolvedValue(undefined),
+    updateD1ExecutionStep: vi.fn().mockResolvedValue(undefined),
+    getProvisionPollIntervalMs: () => 700,
+    getProvisionTimeoutMs: () => 60_000,
+    getAgentPollIntervalMs: () => 900,
+    getAgentReadyTimeoutMs: () => 120_000,
+    getAgentReadyFreshnessSkewMs: () => 2_000,
+  } as unknown as TaskRunnerContext;
+}
+
+function seedNode(
+  id: string,
+  status = 'running',
+  userId = 'user-1',
+  role = 'workspace',
+  nodeClass = 'managed'
+): void {
+  sqlite
+    .prepare(
+      `INSERT INTO nodes
+    (id, user_id, name, status, vm_size, vm_location, cloud_provider, node_role, node_class)
+    VALUES (?, ?, ?, ?, 'medium', 'hel1', 'hetzner', ?, ?)`
+    )
+    .run(id, userId, id, status, role, nodeClass);
+}
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  persistedStates.length = 0;
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+  sqlite = new Database(':memory:');
+  createAllSchemaTables(sqlite, schema);
+  sqlite.exec(
+    `INSERT INTO tasks (id, project_id, user_id) VALUES ('task-1', 'project-1', 'user-1')`
+  );
+  createNodeRecord.mockImplementation(async () => {
+    seedNode('new-node', 'creating');
+    return { id: 'new-node' };
+  });
+  provisionNode.mockImplementation(async (nodeId: string) => {
+    sqlite.prepare("UPDATE nodes SET status = 'running' WHERE id = ?").run(nodeId);
+  });
+});
+
+afterEach(() => {
+  sqlite.close();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('node limit enforcement', () => {
-  describe('MAX_NODES_PER_USER env var', () => {
-    it('Env interface declares MAX_NODES_PER_USER as optional', () => {
-      expect(indexSource).toContain('MAX_NODES_PER_USER?: string');
-    });
-
-    it('handleNodeProvisioning reads MAX_NODES_PER_USER via parseEnvInt', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      expect(section).toContain('MAX_NODES_PER_USER');
-      expect(section).toContain('parseEnvInt');
-    });
-
-    it('defaults to 10 when env var is not set', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      expect(section).toContain('parseEnvInt(rc.env.MAX_NODES_PER_USER, 10)');
-    });
+  it.each([
+    [undefined, 10],
+    ['5', 5],
+    ['1', 1],
+    ['0', 10],
+    ['-3', 10],
+    ['unlimited', 10],
+    ['50', 50],
+  ] as const)('parses configured limit %s as %s', (value, expected) => {
+    expect(parseEnvInt(value, 10)).toBe(expected);
   });
 
-  describe('parseEnvInt for node limits', () => {
-    it('returns 10 (default) when env var is undefined', () => {
-      expect(parseEnvInt(undefined, 10)).toBe(10);
-    });
-
-    it('returns custom limit when env var is valid', () => {
-      expect(parseEnvInt('5', 10)).toBe(5);
-    });
-
-    it('returns custom limit of 1 (minimum useful)', () => {
-      expect(parseEnvInt('1', 10)).toBe(1);
-    });
-
-    it('returns default for zero (invalid)', () => {
-      expect(parseEnvInt('0', 10)).toBe(10);
-    });
-
-    it('returns default for negative numbers', () => {
-      expect(parseEnvInt('-3', 10)).toBe(10);
-    });
-
-    it('returns default for non-numeric string', () => {
-      expect(parseEnvInt('unlimited', 10)).toBe(10);
-    });
-
-    it('returns 50 for large but valid limit', () => {
-      expect(parseEnvInt('50', 10)).toBe(50);
-    });
-  });
-
-  describe('limit check in handleNodeProvisioning', () => {
-    it('queries node count for the user from D1', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      expect(section).toContain(
-        "SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery')"
-      );
-    });
-
-    it('only counts active nodes (excludes deleted/stopped) in limit check', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      // Must filter by active statuses to avoid false limit hits from deleted/stopped nodes.
-      // See: 2026-03-09-fix-node-workspace-limit-count-filters
-      expect(section).toContain("status IN ('running', 'creating', 'recovery')");
-    });
-
-    it('throws permanent error when at or over limit', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      expect(section).toContain('>= maxNodes');
-      expect(section).toContain('Cannot auto-provision');
-      expect(section).toContain('permanent: true');
-    });
-
-    it('error message includes the actual limit value', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      expect(section).toContain('`Maximum ${maxNodes} nodes allowed');
-    });
-
-    it('uses >= comparison (at limit = rejected)', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      // Verify it uses >= not >
-      expect(section).toContain('>= maxNodes');
-      expect(section).not.toContain('> maxNodes');
-    });
-  });
-});
-
-// =============================================================================
-// Node Provisioning Success Path
-// =============================================================================
-
-describe('node provisioning success path', () => {
-  it('dynamically imports createNodeRecord and provisionNode', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain("import('../../services/nodes')");
-    expect(section).toContain('createNodeRecord');
-    expect(section).toContain('provisionNode');
-  });
-
-  it('uses task title in auto-provisioned node name (truncated to 40 chars)', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain('name: `Auto: ${state.config.taskTitle.slice(0, 40)}`');
-  });
-
-  it('sets autoProvisioned = true in step results', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain('state.stepResults.autoProvisioned = true');
-  });
-
-  it('stores autoProvisionedNodeId on the task in D1', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain('auto_provisioned_node_id');
-    expect(section.replace(/\s+/g, ' ')).toContain('UPDATE tasks SET auto_provisioned_node_id = ?');
-  });
-
-  it('persists state to DO storage after creating node', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain("rc.ctx.storage.put('state', state)");
-  });
-
-  it('verifies node is running after provisionNode call', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain("provisionedNode.status !== 'running'");
-  });
-
-  it('advances to node_agent_ready after successful provisioning', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain("advanceToStep(state, 'node_agent_ready')");
-  });
-
-  it('uses vmSize and vmLocation from task config', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain('state.config.vmSize');
-    expect(section).toContain('state.config.vmLocation');
-  });
-});
-
-// =============================================================================
-// Node Provisioning Failure Handling
-// =============================================================================
-
-describe('node provisioning failure handling', () => {
-  it('throws error when provisioned node status is error', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain("node?.status === 'error'");
-    expect(section).toContain("node.error_message || 'Node provisioning failed'");
-  });
-
-  it('throws error when provisioned node status is stopped', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain("node?.status === 'stopped'");
-  });
-
-  it('throws error when provisionedNode is null or not running', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain("!provisionedNode || provisionedNode.status !== 'running'");
-  });
-});
-
-// =============================================================================
-// Retry for Already-Provisioned Node
-// =============================================================================
-
-describe('retry for already-provisioned node', () => {
-  it('checks if nodeId already exists in step results (retry scenario)', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain('if (state.stepResults.nodeId)');
-  });
-
-  it('queries node status from D1 on retry', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain('SELECT id, status, error_message FROM nodes WHERE id = ?');
-  });
-
-  it('advances immediately if node is already running on retry', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('// Check user node limit')
-    );
-    expect(section).toContain("node?.status === 'running'");
-    expect(section).toContain("advanceToStep(state, 'node_agent_ready')");
-  });
-
-  it('schedules poll alarm if node is still creating', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('// Check user node limit')
-    );
-    expect(section).toContain('getProvisionPollIntervalMs()');
-    expect(section).toContain('setAlarm');
-  });
-});
-
-// =============================================================================
-// handleNodeAgentReady — timeout and polling
-// =============================================================================
-
-describe('handleNodeAgentReady', () => {
-  it('throws when nodeId is missing from state', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain('No nodeId in state');
-  });
-
-  it('initializes agentReadyStartedAt on first entry', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain('if (!state.agentReadyStartedAt)');
-    expect(section).toContain('state.agentReadyStartedAt = Date.now()');
-  });
-
-  it('persists state after setting agentReadyStartedAt', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    // Find the section between agentReadyStartedAt assignment and the timeout check
-    const startAtSection = section.slice(
-      section.indexOf('agentReadyStartedAt = Date.now()'),
-      section.indexOf('Check timeout')
-    );
-    expect(startAtSection).toContain("storage.put('state'");
-  });
-
-  it('throws permanent error when timeout is exceeded', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain('elapsed > timeoutMs');
-    expect(section).toContain('Node agent not ready within');
-    expect(section).toContain('permanent: true');
-  });
-
-  it('uses configurable agent ready timeout', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain('rc.getAgentReadyTimeoutMs()');
-  });
-
-  it('uses configurable agent ready freshness skew', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain('rc.getAgentReadyFreshnessSkewMs()');
-    expect(section).not.toContain('30_000');
-  });
-
-  it('checks health via D1 heartbeat query (not direct VM fetch)', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain('rc.env.DATABASE.prepare');
-    expect(section).toContain('health_status');
-    expect(section).toContain('last_heartbeat_at');
-    // Must NOT use direct fetch to VM (same-zone routing intercepts it)
-    expect(section).not.toContain('fetch(healthUrl');
-  });
-
-  it('verifies heartbeat is recent (not stale from previous boot)', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain('isNodeAgentReadyForWorkspaceDispatch');
-    expect(section).toContain('agent_ready_at');
-    expect(section).toContain('agentReadyStartedAt');
-  });
-
-  it('advances to workspace_creation on healthy + recent heartbeat', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain("health_status === 'healthy'");
-    expect(section).toContain("advanceToStep(state, 'workspace_creation')");
-  });
-
-  it('schedules poll alarm when not ready', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain('rc.getAgentPollIntervalMs()');
-    expect(section).toContain('setAlarm');
-  });
-
-  it('documents same-zone routing issue in comments', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeAgentReady('),
-      doSource.indexOf('export async function handleWorkspaceCreation(')
-    );
-    expect(section).toContain('same-zone routing');
-  });
-});
-
-// =============================================================================
-// Task context passed to cloud-init (TDF message relay fix)
-// =============================================================================
-
-describe('task context passed to provisionNode for cloud-init', () => {
-  it('passes projectId to provisionNode call', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain('state.projectId');
-    expect(section).toContain('provisionNode');
-  });
-
-  it('passes chatSessionId from step results to provisionNode', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain('chatSessionId');
-    expect(section).toContain('state.stepResults.chatSessionId');
-  });
-
-  it('passes taskId to provisionNode call', () => {
-    const section = doSource.slice(
-      doSource.indexOf('export async function handleNodeProvisioning('),
-      doSource.indexOf('export async function handleNodeAgentReady(')
-    );
-    expect(section).toContain('state.taskId');
-  });
-});
-
-// =============================================================================
-// Provider-aware node creation and error observability
-// =============================================================================
-
-describe('provider-aware node provisioning', () => {
-  const nodesSource = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
-  const strictNodeDeletionSource = readFileSync(
-    resolve(process.cwd(), 'src/services/strict-node-deletion.ts'),
-    'utf8'
+  it.each(['running', 'creating', 'recovery'])(
+    'counts managed %s nodes at the exact limit',
+    async (status) => {
+      seedNode('existing', status);
+      const rc = makeContext({ MAX_NODES_PER_USER: '1' });
+      await expect(handleNodeProvisioning(makeState(), rc)).rejects.toMatchObject({
+        message: 'Maximum 1 nodes allowed. Cannot auto-provision.',
+        permanent: true,
+      });
+      expect(createNodeRecord).not.toHaveBeenCalled();
+      expect(provisionNode).not.toHaveBeenCalled();
+    }
   );
 
-  it('CreateNodeInput includes optional cloudProvider field', () => {
-    expect(nodesSource).toContain('cloudProvider?: string');
+  it('uses the default limit of ten and rejects counts above it', async () => {
+    for (let index = 0; index < 11; index++) seedNode(`existing-${index}`);
+    await expect(handleNodeProvisioning(makeState(), makeContext())).rejects.toMatchObject({
+      message: 'Maximum 10 nodes allowed. Cannot auto-provision.',
+      permanent: true,
+    });
+    expect(createNodeRecord).not.toHaveBeenCalled();
   });
 
-  it('ProvisionedNode includes cloudProvider field', () => {
-    expect(nodesSource).toContain('cloudProvider: string | null');
-  });
-
-  it('createNodeRecord stores cloudProvider in DB insert', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function createNodeRecord'),
-      nodesSource.indexOf('async function provisionNode')
-    );
-    expect(section).toContain('cloudProvider: input.cloudProvider');
-  });
-
-  it('provisionNode reads cloudProvider from node record for credential lookup', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function provisionNode'),
-      nodesSource.indexOf('async function stopNodeResources')
-    );
-    expect(section).toContain('node.cloudProvider as CredentialProvider');
-    expect(section).toContain('targetProvider');
-  });
-
-  it('provisionNode passes targetProvider to createProviderForUser', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function provisionNode'),
-      nodesSource.indexOf('async function stopNodeResources')
-    );
-    expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
-    );
-  });
-
-  it('provisionNode persists the resolved provider identity for later cleanup', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function provisionNode'),
-      nodesSource.indexOf('async function stopNodeResources')
-    );
-    expect(section).toContain('cloudProvider: providerResult.providerName');
-    expect(section).toContain('credentialSource: providerResult.credentialSource');
-  });
-
-  it('provisionNode persists error to observability database on failure', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function provisionNode'),
-      nodesSource.indexOf('async function stopNodeResources')
-    );
-    expect(section).toMatch(/persistError\(\s*env\.OBSERVABILITY_DATABASE/);
-    expect(section).toContain("source: 'api'");
-    expect(section).toContain("component: 'node-provisioning'");
-  });
-
-  it('provisionNode stores detailed error message in node record (not generic)', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function provisionNode'),
-      nodesSource.indexOf('async function stopNodeResources')
-    );
-    expect(section).toContain('`[${providerName}] ${truncatedError}`');
-    // Must NOT use the old generic message
-    expect(section).not.toContain("errorMessage: 'Node provisioning failed'");
-  });
-
-  it('provisionNode includes provider and statusCode in console.error context', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function provisionNode'),
-      nodesSource.indexOf('async function stopNodeResources')
-    );
-    expect(section).toContain('provider: providerName');
-    expect(section).toContain('statusCode');
-  });
-
-  it('stopNodeResources delegates managed teardown to strict proof-bearing deletion', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function stopNodeResources'),
-      nodesSource.indexOf('async function deleteNodeResources')
-    );
-    expect(section).toContain('await deleteNodeResourcesStrict(nodeId, userId, env, {');
-    expect(section).toContain('cleanupDns: false');
-    expect(section).toContain('expectedRuntime:');
-    expect(section).toContain("status: 'stopping'");
-    expect(section).toContain('schema.nodes.runtimeTerminationConfirmedAt} IS');
-    expect(section).toContain('schema.nodes.runtimeIncarnationId} IS');
-    expect(section).not.toContain('providerResult.provider.deleteVM');
-  });
-
-  it('provisionNode clears stale runtime termination proof before allocating a new incarnation', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function provisionNode'),
-      nodesSource.indexOf('async function stopNodeResources')
-    );
-    const firstClear = section.indexOf('runtimeTerminationConfirmedAt: null');
-    const providerAllocation = section.indexOf('provider.createVM');
-    expect(firstClear).toBeGreaterThan(-1);
-    expect(providerAllocation).toBeGreaterThan(firstClear);
-  });
-
-  it('deleteNodeResources delegates provider credential lookup to strict deletion', () => {
-    const section = strictNodeDeletionSource.slice(
-      strictNodeDeletionSource.indexOf('function getStrictNodeCredentialContext'),
-      strictNodeDeletionSource.indexOf('async function resolveStrictNodeProvider')
-    );
-    expect(section).toContain('node.cloudProvider as CredentialProvider');
-    expect(section).toContain('exactProviderCredentialBindingFromPlacementSnapshot(node)');
-    expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId,\s*exactCredential\s*\)/
-    );
-  });
-
-  it('deleteNodeResourcesStrict fails closed without an exact provider credential binding', () => {
-    const strictSection = strictNodeDeletionSource.slice(
-      strictNodeDeletionSource.indexOf('async function deleteNodeResourcesStrict')
-    );
-    const verificationSection = strictNodeDeletionSource.slice(
-      strictNodeDeletionSource.indexOf('async function resolveStrictNodeProvider'),
-      strictNodeDeletionSource.indexOf('async function deleteStrictProviderInstance')
-    );
-    const deletionSection = strictNodeDeletionSource.slice(
-      strictNodeDeletionSource.indexOf('async function deleteStrictProviderInstance'),
-      strictNodeDeletionSource.indexOf('async function persistStrictDnsCleanupError')
-    );
-    expect(strictSection).toContain('await deleteStrictProviderInstance(db, node, userId, env)');
-    expect(verificationSection).toContain('requireStrictNodeProvider(db, node, userId, env)');
-    expect(strictNodeDeletionSource).toContain(
-      '!targetProvider || !exactCredential?.credentialFingerprint'
-    );
-    expect(verificationSection).not.toContain('CREDENTIAL_PROVIDERS');
-    expect(deletionSection).toContain('await requireSameNodeIncarnation');
-    expect(deletionSection).toContain(
-      'await providerResult.provider.deleteVM(node.providerInstanceId)'
-    );
+  it('excludes stopped, deleted, other-user, deployment, and user-owned nodes from the limit', async () => {
+    seedNode('stopped', 'stopped');
+    seedNode('deleted', 'deleted');
+    seedNode('other-user', 'running', 'user-2');
+    seedNode('deployment', 'running', 'user-1', 'deployment');
+    seedNode('byo', 'running', 'user-1', 'workspace', 'user-owned');
+    const state = makeState();
+    const rc = makeContext({ MAX_NODES_PER_USER: '1' });
+    await handleNodeProvisioning(state, rc);
+    expect(createNodeRecord).toHaveBeenCalledOnce();
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
   });
 });
 
-// =============================================================================
-// provisionNode accepts task context (nodes.ts)
-// =============================================================================
-
-describe('provisionNode task context', () => {
-  const nodesSource = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
-
-  it('defines ProvisionTaskContext interface with projectId, chatSessionId, taskId', () => {
-    expect(nodesSource).toContain('export interface ProvisionTaskContext');
-    expect(nodesSource).toContain('projectId: string');
-    expect(nodesSource).toContain('chatSessionId: string');
-    expect(nodesSource).toContain('taskId: string');
-  });
-
-  it('provisionNode accepts optional taskContext parameter', () => {
-    expect(nodesSource).toContain('taskContext?: ProvisionTaskContext');
-  });
-
-  it('passes taskContext projectId to generateCloudInit', () => {
-    expect(nodesSource).toContain('taskContext?.projectId');
-  });
-
-  it('passes taskContext chatSessionId to generateCloudInit', () => {
-    expect(nodesSource).toContain('taskContext?.chatSessionId');
-  });
-
-  it('passes taskContext taskId to generateCloudInit', () => {
-    expect(nodesSource).toContain('taskContext?.taskId');
-  });
-
-  it('passes deploy signing public key to deployment node cloud-init', () => {
-    expect(nodesSource).toContain(
-      'deploySigningPubKey: isDeploymentNode ? env.DEPLOY_SIGNING_PUBLIC_KEY : undefined'
+describe('provisioning service handoff', () => {
+  it('persists task ownership before allocation and passes placement plus task context', async () => {
+    const state = makeState();
+    const rc = makeContext();
+    let ownershipAtAllocation: unknown;
+    provisionNode.mockImplementation(async (nodeId: string) => {
+      ownershipAtAllocation = sqlite
+        .prepare('SELECT auto_provisioned_node_id FROM tasks WHERE id = ?')
+        .get(state.taskId);
+      expect(persistedStates.at(-1)?.stepResults).toMatchObject({
+        nodeId: 'new-node',
+        autoProvisioned: true,
+      });
+      sqlite.prepare("UPDATE nodes SET status = 'running' WHERE id = ?").run(nodeId);
+    });
+    await handleNodeProvisioning(state, rc);
+    expect(ownershipAtAllocation).toEqual({ auto_provisioned_node_id: 'new-node' });
+    expect(createNodeRecord).toHaveBeenCalledWith(
+      rc.env,
+      expect.objectContaining({
+        userId: 'user-1',
+        name: `Auto: ${state.config.taskTitle.slice(0, 40)}`,
+        vmSize: 'medium',
+        vmLocation: 'hel1',
+        cloudProvider: 'hetzner',
+      })
     );
+    expect(provisionNode).toHaveBeenCalledWith(
+      'new-node',
+      rc.env,
+      {
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+        taskId: 'task-1',
+        taskMode: 'task',
+      },
+      expect.objectContaining({
+        rethrowProviderError: true,
+        assertExternalMutationAuthority: expect.any(Function),
+      })
+    );
+    expect(state.stepResults).toMatchObject({ nodeId: 'new-node', autoProvisioned: true });
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+  });
+
+  it.each(['creating', 'error', 'missing'])(
+    'does not advance when provisionNode returns with node %s',
+    async (status) => {
+      provisionNode.mockImplementation(async () => {
+        if (status === 'missing') sqlite.prepare('DELETE FROM nodes WHERE id = ?').run('new-node');
+        else sqlite.prepare('UPDATE nodes SET status = ? WHERE id = ?').run(status, 'new-node');
+      });
+      const rc = makeContext();
+      await expect(handleNodeProvisioning(makeState(), rc)).rejects.toThrow(
+        'Node provisioning failed'
+      );
+      expect(rc.advanceToStep).not.toHaveBeenCalled();
+    }
+  );
+
+  it('propagates a provider failure without allocating again or advancing', async () => {
+    const error = new ProviderError('hetzner', 401, 'Unauthorized', { category: 'auth_error' });
+    provisionNode.mockRejectedValue(error);
+    const rc = makeContext();
+    await expect(handleNodeProvisioning(makeState(), rc)).rejects.toMatchObject({
+      message: 'Unauthorized',
+      permanent: true,
+    });
+    expect(createNodeRecord).toHaveBeenCalledOnce();
+    expect(provisionNode).toHaveBeenCalledOnce();
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+
+  it.each(['running', 'creating', 'error', 'stopped'])(
+    'resumes an existing %s node without duplicating it',
+    async (status) => {
+      seedNode('existing', status);
+      const state = makeState();
+      state.stepResults.nodeId = 'existing';
+      const rc = makeContext();
+      if (status === 'error' || status === 'stopped') {
+        await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
+        expect(rc.advanceToStep).not.toHaveBeenCalled();
+      } else {
+        await handleNodeProvisioning(state, rc);
+        if (status === 'running')
+          expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+        else expect(rc.ctx.storage.setAlarm).toHaveBeenCalledWith(NOW + 700);
+      }
+      expect(createNodeRecord).not.toHaveBeenCalled();
+      expect(provisionNode).not.toHaveBeenCalled();
+    }
+  );
+});
+
+describe('agent readiness through persisted heartbeat records', () => {
+  it('rejects a missing node id before checking readiness', async () => {
+    await expect(handleNodeAgentReady(makeState(), makeContext())).rejects.toThrow(
+      'No nodeId in state'
+    );
+  });
+
+  it.each([
+    ['fresh', 0, true],
+    ['inside configured skew', -1_000, true],
+    ['outside configured skew', -3_000, false],
+  ] as const)(
+    '%s heartbeat controls dispatch without a direct VM fetch',
+    async (_name, offset, ready) => {
+      seedNode('existing');
+      sqlite
+        .prepare(
+          `UPDATE nodes SET health_status = 'healthy', agent_version = 'current-agent',
+      last_heartbeat_at = ?, agent_ready_at = ? WHERE id = 'existing'`
+        )
+        .run(new Date(NOW + offset).toISOString(), new Date(NOW - 10_000).toISOString());
+      const fetch = vi.fn();
+      vi.stubGlobal('fetch', fetch);
+      const state = makeState();
+      state.stepResults.nodeId = 'existing';
+      const rc = makeContext();
+      await handleNodeAgentReady(state, rc);
+      expect(state.agentReadyStartedAt).toBe(NOW);
+      expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
+      expect(fetch).not.toHaveBeenCalled();
+      if (ready) {
+        expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+        expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
+      } else {
+        expect(rc.advanceToStep).not.toHaveBeenCalled();
+        expect(rc.ctx.storage.setAlarm).toHaveBeenCalledWith(NOW + 900);
+      }
+    }
+  );
+
+  it('throws a permanent error at the configured agent-ready timeout', async () => {
+    seedNode('existing');
+    const state = makeState();
+    state.stepResults.nodeId = 'existing';
+    state.agentReadyStartedAt = NOW - 120_001;
+    const rc = makeContext();
+    await expect(handleNodeAgentReady(state, rc)).rejects.toMatchObject({
+      message: 'Node agent not ready within 120000ms',
+      permanent: true,
+    });
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+    expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
   });
 });

@@ -12,11 +12,14 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
 import { CreateNodeSchema, jsonValidator } from '../schemas';
+import { resolveCanonicalVmAllocationPlan } from '../services/canonical-vm-allocation';
 import { collectEnvironmentRouteHostnames } from '../services/deployment-routing';
+import { scheduleDirectProvisioning } from '../services/direct-provisioning';
 import { cleanupAppRouteDNSRecords } from '../services/dns';
 import { signNodeManagementToken } from '../services/jwt';
 import { getRuntimeLimits } from '../services/limits';
@@ -37,7 +40,6 @@ import type { DeleteNodeResourcesResult } from '../services/node-resource-deleti
 import {
   createNodeRecord,
   deleteNodeResources,
-  provisionNode,
   retireDeletedDeploymentNodeRecord,
   stopNodeResources,
 } from '../services/nodes';
@@ -74,6 +76,30 @@ nodesRoutes.use('/*', async (c, next) => {
 });
 
 type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
+
+function workspaceHasNoSnapshotContext() {
+  // Removing a host must not erase the workspace metadata the snapshot resumer
+  // needs. Retain in-flight/failed snapshots too: their context remains useful
+  // for recovery and diagnostics. Explicit workspace deletion discards artifacts.
+  return sql`NOT EXISTS (
+    SELECT 1 FROM session_snapshots AS snapshot
+    WHERE snapshot.workspace_id = ${schema.workspaces.id}
+      AND snapshot.user_id = ${schema.workspaces.userId}
+  )`;
+}
+
+function optionalPositiveInteger(value: number | undefined, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value <= 0) {
+    throw errors.badRequest(`${field} must be a positive integer`);
+  }
+  return value;
+}
+
+function optionalTrimmedString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
 
 async function cleanupHostedDeploymentRouteDns(
   db: NodesDb,
@@ -123,7 +149,8 @@ async function removeManagedNodeRecords(
       and(
         eq(schema.workspaces.nodeId, nodeId),
         eq(schema.workspaces.userId, userId),
-        eq(schema.workspaces.runtimeDeletionConfirmedAt, cleanup.runtimeTerminationConfirmedAt)
+        eq(schema.workspaces.runtimeDeletionConfirmedAt, cleanup.runtimeTerminationConfirmedAt),
+        workspaceHasNoSnapshotContext()
       )
     );
   const deletedNode = await db
@@ -137,7 +164,9 @@ async function removeManagedNodeRecords(
       )
     )
     .run();
-  if ((deletedNode.meta.changes ?? 0) !== 1) {
+  // The predicate targets one primary key, but D1 also counts FK SET NULL
+  // writes (for example tasks.auto_provisioned_node_id) in meta.changes.
+  if ((deletedNode.meta.changes ?? 0) < 1) {
     throw errors.conflict('Managed node incarnation changed after deletion proof');
   }
 }
@@ -165,7 +194,11 @@ async function removeDeletedNodeRecords(input: {
     await input.db
       .delete(schema.workspaces)
       .where(
-        and(eq(schema.workspaces.nodeId, input.nodeId), eq(schema.workspaces.userId, input.userId))
+        and(
+          eq(schema.workspaces.nodeId, input.nodeId),
+          eq(schema.workspaces.userId, input.userId),
+          workspaceHasNoSnapshotContext()
+        )
       );
     await input.db
       .delete(schema.nodes)
@@ -238,16 +271,42 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     );
   }
 
-  // Enforce compute quota when platform credentials will be used
-  const { resolveCredentialSource } = await import('../services/provider-credentials');
-  const credResult = await resolveCredentialSource(db, userId, provider ?? undefined);
-  if (!credResult) {
-    throw errors.forbidden(
-      'Cloud provider credentials required. Connect your account in Settings.'
-    );
+  const providerInstanceType =
+    optionalTrimmedString(body.providerInstanceType) ?? optionalTrimmedString(body.nativeOffering);
+  const providerInstanceBootDiskSizeGb = optionalPositiveInteger(
+    body.bootDiskSizeGb,
+    'bootDiskSizeGb'
+  );
+  const providerInstanceImage = optionalTrimmedString(body.image) ?? null;
+  const providerInstanceArchitecture = body.architecture ?? null;
+  const allocation = await resolveCanonicalVmAllocationPlan(db, c.env, {
+    entryPoint: 'direct-node',
+    taskId: ulid(),
+    userId,
+    projectId: null,
+    explicit: {
+      vmSize: body.vmSize ?? DEFAULT_VM_SIZE,
+      provider: provider ?? null,
+      vmLocation,
+      native: {
+        providerInstanceType,
+        providerInstanceBootDiskSizeGb,
+        providerInstanceImage,
+        providerInstanceArchitecture,
+      },
+    },
+    credentialProjectPolicy: 'inherited-or-none',
+    taskModeDefault: 'task',
+    workloadRole: 'workspace',
+    credentialsRequiredMessage:
+      'Cloud provider credentials required. Connect your account in Settings.',
+  });
+  if ('error' in allocation) {
+    if (allocation.errorKind === 'credentials') throw errors.forbidden(allocation.error);
+    throw errors.badRequest(allocation.error);
   }
   if (
-    credResult.credentialSource === 'platform' &&
+    allocation.quotaCredentialSource === 'platform' &&
     c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false'
   ) {
     const { checkQuotaForUser } = await import('../services/compute-quotas');
@@ -262,11 +321,19 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
 
   const created = await createNodeRecord(c.env, {
     userId,
+    credentialAttributionUserId: allocation.credentialAttributionUserId,
+    credentialAttributionProjectId: allocation.credentialAttributionProjectId,
+    credentialAttributionSource: allocation.credentialAttributionSource,
     name: body.name.trim(),
-    vmSize: body.vmSize ?? DEFAULT_VM_SIZE,
-    vmLocation,
-    cloudProvider: provider,
+    vmSize: allocation.vmSize,
+    vmLocation: allocation.vmLocation,
+    cloudProvider: allocation.effectiveProvider,
+    providerInstanceType: allocation.providerInstanceType,
+    providerInstanceBootDiskSizeGb: allocation.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: allocation.providerInstanceImage,
+    providerInstanceArchitecture: allocation.providerInstanceArchitecture,
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
+    capacityPlacementSnapshot: allocation.capacityPlacementSnapshot,
   });
 
   recordNodeRoutingMetric(
@@ -280,7 +347,7 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     c.env
   );
 
-  c.executionCtx.waitUntil(provisionNode(created.id, c.env));
+  await scheduleDirectProvisioning(c.env, { nodeId: created.id, userId });
   return c.json(created, 201);
 });
 

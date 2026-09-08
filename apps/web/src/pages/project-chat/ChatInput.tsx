@@ -1,14 +1,38 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
-import type { AgentInfo, AgentProfile, AgentProfileRuntime, AgentSkill, ProviderCatalog, TaskMode, UpdateAgentProfileRequest, VMSize } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
-import { Check, ChevronRight, MessageSquare, Monitor, Plus, Server, Settings, Wrench, Zap } from 'lucide-react';
+import type {
+  AgentInfo,
+  AgentProfile,
+  AgentProfileRuntime,
+  AgentSkill,
+  TaskMode,
+  UpdateAgentProfileRequest,
+} from '@simple-agent-manager/shared';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  MessageSquare,
+  Plus,
+  Server,
+  Settings,
+  Wrench,
+  Zap,
+} from 'lucide-react';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
-import { formatProviderCatalogContext, lookupSizeInfo, selectProviderCatalog } from '../../components/vm/format-vm-size';
+import {
+  EMPTY_RESOURCE_STATE,
+  hasAnyResourceValue,
+  hasValidationErrors,
+  type ResourceRequirementsFormState,
+  ResourceRequirementsInput,
+  type ResourceValidationErrors,
+  validateResourceState,
+} from '../../components/resource-requirements';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { ProfileWizardState, ProfileWizardStep } from './useProjectChatState';
 
@@ -20,13 +44,12 @@ interface ChatAttachmentDisplay {
   error?: string;
 }
 
-const VM_SIZES: VMSize[] = ['small', 'medium', 'large'];
-const WIZARD_STEPS: ProfileWizardStep[] = ['agent', 'work-type', 'runtime', 'vm-size', 'name'];
+const WIZARD_STEPS: ProfileWizardStep[] = ['agent', 'work-type', 'runtime', 'resources', 'name'];
 
 function getWizardSteps(skipAgent: boolean, runtime: AgentProfileRuntime | null) {
   return WIZARD_STEPS.filter((step) => {
     if (skipAgent && step === 'agent') return false;
-    if (runtime === 'cf-container' && step === 'vm-size') return false;
+    if (runtime === 'cf-container' && step === 'resources') return false;
     return true;
   });
 }
@@ -49,10 +72,6 @@ function getWizardPreviousStep(step: ProfileWizardStep, visibleSteps: ProfileWiz
 
 function getAgentInitial(agent: AgentInfo) {
   return (agent.name.trim()[0] ?? agent.id[0] ?? 'A').toUpperCase();
-}
-
-function getVmSizeLabel(size: VMSize) {
-  return VM_SIZE_LABELS[size]?.label ?? `${size.charAt(0).toUpperCase()}${size.slice(1)}`;
 }
 
 function getRuntimeLabel(runtime: AgentProfileRuntime | null) {
@@ -107,10 +126,10 @@ type ChatInputProps = Readonly<{
   selectedSkillId: string | null;
   onSkillChange: (skillId: string | null) => void;
   onUpdateProfile: (profileId: string, data: UpdateAgentProfileRequest) => Promise<void>;
-  providerCatalogs: ProviderCatalog[];
-  projectDefaultProvider?: string | null;
-  projectDefaultLocation?: string | null;
-  hasUserCloudCredentials: boolean;
+  taskResourceReqs: ResourceRequirementsFormState;
+  onTaskResourceReqsChange: (next: ResourceRequirementsFormState) => void;
+  taskResourceErrors: ResourceValidationErrors;
+  onTaskResourceErrorsClear: () => void;
   profileWizard: ProfileWizardState;
   onOpenProfileWizard: () => void;
   onCloseProfileWizard: () => void;
@@ -130,7 +149,12 @@ function getComposerPlaceholder({
   needsProfileBeforeSubmit,
   wizardOpen,
   placeholder,
-}: Readonly<{ noAgents: boolean; needsProfileBeforeSubmit: boolean; wizardOpen: boolean; placeholder: string }>) {
+}: Readonly<{
+  noAgents: boolean;
+  needsProfileBeforeSubmit: boolean;
+  wizardOpen: boolean;
+  placeholder: string;
+}>) {
   if (noAgents) return 'Add an agent in Settings to start chatting...';
   if (needsProfileBeforeSubmit || wizardOpen) return 'Create a profile to start chatting...';
   return placeholder;
@@ -140,7 +164,9 @@ function canAdvanceWizard(profileWizard: ProfileWizardState) {
   if (profileWizard.step === 'agent') return Boolean(profileWizard.selectedAgentType);
   if (profileWizard.step === 'work-type') return Boolean(profileWizard.workType);
   if (profileWizard.step === 'runtime') return Boolean(profileWizard.runtime);
-  if (profileWizard.step === 'vm-size') return Boolean(profileWizard.vmSize);
+  if (profileWizard.step === 'resources') {
+    return !hasValidationErrors(validateResourceState(profileWizard.resourceReqs));
+  }
   return Boolean(profileWizard.profileName.trim());
 }
 
@@ -162,18 +188,18 @@ function getWizardTitle(step: ProfileWizardStep) {
     agent: 'Which agent?',
     'work-type': 'What kind of work?',
     runtime: 'Where should it run?',
-    'vm-size': 'VM size',
+    resources: 'Resources',
     name: 'Name the profile',
   };
   return titles[step];
 }
 
-function getWizardDescription(step: ProfileWizardStep, providerContext: string) {
+function getWizardDescription(step: ProfileWizardStep) {
   const descriptions: Record<ProfileWizardStep, string> = {
     agent: 'Choose the agent this profile should use.',
     'work-type': 'Pick whether this profile should work independently or stay conversational.',
     runtime: 'Choose Instant for quick chat, or Cloud VM for heavier work.',
-    'vm-size': providerContext ? `Specs are from ${providerContext}.` : 'Choose a general machine tier.',
+    resources: 'Set minimum resource requirements, or leave blank for defaults.',
     name: 'Use a short name that will be easy to pick later.',
   };
   return descriptions[step];
@@ -196,10 +222,10 @@ export function ChatInput({
   selectedSkillId,
   onSkillChange,
   onUpdateProfile,
-  providerCatalogs,
-  projectDefaultProvider,
-  projectDefaultLocation,
-  hasUserCloudCredentials,
+  taskResourceReqs,
+  onTaskResourceReqsChange,
+  taskResourceErrors,
+  onTaskResourceErrorsClear,
   profileWizard,
   onOpenProfileWizard,
   onCloseProfileWizard,
@@ -215,12 +241,13 @@ export function ChatInput({
 }: ChatInputProps) {
   const isMobile = useIsMobile();
   const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [resourceOverrideOpen, setResourceOverrideOpen] = useState(false);
+  const hasTaskResources = hasAnyResourceValue(taskResourceReqs);
+  const hasResourceErrors = hasValidationErrors(taskResourceErrors);
 
   const selectedProfile = selectedProfileId
-    ? agentProfiles.find((p) => p.id === selectedProfileId) ?? null
+    ? (agentProfiles.find((p) => p.id === selectedProfileId) ?? null)
     : null;
-  const activeCatalog = selectProviderCatalog(providerCatalogs, projectDefaultProvider);
-  const providerContext = formatProviderCatalogContext(activeCatalog, projectDefaultLocation ?? activeCatalog?.defaultLocation ?? null);
   const skipAgentStep = agents.length === 1;
   const needsProfileBeforeSubmit = agentProfiles.length === 0 && agents.length >= 1;
   const noAgents = agents.length === 0;
@@ -233,8 +260,8 @@ export function ChatInput({
   });
   const canProceed = canAdvanceWizard(profileWizard);
 
-  const selectedWizardAgent = agents.find((agent) => agent.id === profileWizard.selectedAgentType) ?? agents[0] ?? null;
-  const selectedWizardSize = profileWizard.vmSize ?? DEFAULT_VM_SIZE;
+  const selectedWizardAgent =
+    agents.find((agent) => agent.id === profileWizard.selectedAgentType) ?? agents[0] ?? null;
   const visibleWizardSteps = getWizardSteps(skipAgentStep, profileWizard.runtime);
   const stepNumber = getWizardStepNumber(profileWizard.step, visibleWizardSteps);
   const totalSteps = visibleWizardSteps.length;
@@ -251,7 +278,9 @@ export function ChatInput({
     if (nextStep === 'name') {
       onUpdateProfileWizard({
         step: 'name',
-        profileName: profileWizard.profileName.trim() || suggestProfileName(profileWizard.selectedAgentType, profileWizard.workType),
+        profileName:
+          profileWizard.profileName.trim() ||
+          suggestProfileName(profileWizard.selectedAgentType, profileWizard.workType),
       });
       return;
     }
@@ -268,25 +297,19 @@ export function ChatInput({
     updateWizardStep(previousStep);
   };
 
-  const renderVmSizeDetail = (size: VMSize) => {
-    const info = lookupSizeInfo(providerCatalogs, projectDefaultProvider, size);
-    if (!info) return 'Exact specs unavailable';
-    const specs = `${info.vcpu} vCPU, ${info.ramGb} GB RAM, ${info.storageGb} GB storage`;
-    return hasUserCloudCredentials ? `${info.type} · ${specs} · ${info.price}` : `${info.type} · ${specs}`;
-  };
-
   return (
     <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
       {error && (
-        <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
-          {error}
-        </div>
+        <div className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">{error}</div>
       )}
 
       {noAgents && <NoAgentsNotice projectId={projectId} />}
 
       {agentProfiles.length > 0 && !profileWizard.open && (
-        <div className="mb-2 flex flex-wrap items-center gap-1.5" aria-label="Agent profiles and skills">
+        <div
+          className="mb-2 flex flex-wrap items-center gap-1.5"
+          aria-label="Agent profiles and skills"
+        >
           {agentProfiles.map((profile) => (
             <button
               key={profile.id}
@@ -338,17 +361,22 @@ export function ChatInput({
           </div>
           <div className="p-3 sm:p-4">
             <div className="mb-3">
-              <div className="text-[10px] uppercase text-fg-muted">Step {stepNumber} of {totalSteps}</div>
+              <div className="text-[10px] uppercase text-fg-muted">
+                Step {stepNumber} of {totalSteps}
+              </div>
               <h2 className="m-0 mt-1 text-sm font-semibold text-fg-primary">
                 {getWizardTitle(profileWizard.step)}
               </h2>
               <p className="m-0 mt-1 text-xs text-fg-muted">
-                {getWizardDescription(profileWizard.step, providerContext)}
+                {getWizardDescription(profileWizard.step)}
               </p>
             </div>
 
             {profileWizard.error && (
-              <div role="alert" className="mb-3 rounded-sm bg-danger-tint px-3 py-2 text-xs text-danger">
+              <div
+                role="alert"
+                className="mb-3 rounded-sm bg-danger-tint px-3 py-2 text-xs text-danger"
+              >
                 {profileWizard.error}
               </div>
             )}
@@ -367,8 +395,12 @@ export function ChatInput({
                         {getAgentInitial(agent)}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-fg-primary">{agent.name}</div>
-                        <div className="line-clamp-2 text-xs text-fg-muted">{agent.description || agent.id}</div>
+                        <div className="truncate text-sm font-semibold text-fg-primary">
+                          {agent.name}
+                        </div>
+                        <div className="line-clamp-2 text-xs text-fg-muted">
+                          {agent.description || agent.id}
+                        </div>
                       </div>
                     </div>
                   </SelectionCard>
@@ -383,7 +415,7 @@ export function ChatInput({
                   icon={<Wrench size={20} />}
                   title="Build and open PRs"
                   description="Best when you want the agent to make changes, run checks, and carry the task to a pull request."
-                  onClick={() => onUpdateProfileWizard({ workType: 'task', runtime: null, vmSize: profileWizard.vmSize ?? DEFAULT_VM_SIZE })}
+                  onClick={() => onUpdateProfileWizard({ workType: 'task', runtime: null })}
                   disabled={profileWizard.saving}
                 />
                 <WorkTypeCard
@@ -391,7 +423,7 @@ export function ChatInput({
                   icon={<MessageSquare size={20} />}
                   title="Chat and explore"
                   description="Best for questions, planning, code reading, and lighter back-and-forth work."
-                  onClick={() => onUpdateProfileWizard({ workType: 'conversation', runtime: null, vmSize: null })}
+                  onClick={() => onUpdateProfileWizard({ workType: 'conversation', runtime: null })}
                   disabled={profileWizard.saving}
                 />
               </div>
@@ -404,7 +436,13 @@ export function ChatInput({
                   icon={<Zap size={20} />}
                   title="Instant container"
                   description="Starts a chat workspace in a Cloudflare Container without a VM provisioning step."
-                  onClick={() => onUpdateProfileWizard({ runtime: 'cf-container', vmSize: null, workType: 'conversation' })}
+                  onClick={() =>
+                    onUpdateProfileWizard({
+                      runtime: 'cf-container',
+                      resourceReqs: { ...EMPTY_RESOURCE_STATE },
+                      workType: 'conversation',
+                    })
+                  }
                   disabled={profileWizard.saving}
                 />
                 <WorkTypeCard
@@ -412,37 +450,24 @@ export function ChatInput({
                   icon={<Server size={20} />}
                   title="Cloud VM"
                   description="Uses the project's cloud provisioning path for larger or longer-running work."
-                  onClick={() => onUpdateProfileWizard({ runtime: 'vm', vmSize: profileWizard.vmSize ?? DEFAULT_VM_SIZE })}
+                  onClick={() => onUpdateProfileWizard({ runtime: 'vm' })}
                   disabled={profileWizard.saving}
                 />
               </div>
             )}
 
-            {profileWizard.step === 'vm-size' && (
-              <div className="grid gap-2">
-                {VM_SIZES.map((size) => (
-                  <SelectionCard
-                    key={size}
-                    selected={selectedWizardSize === size}
-                    onClick={() => onUpdateProfileWizard({ vmSize: size })}
-                    disabled={profileWizard.saving}
-                  >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-page text-fg-muted">
-                        <Monitor size={17} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-fg-primary">
-                          {getVmSizeLabel(size)}
-                          {size === 'medium' && (
-                            <span className="rounded-sm bg-accent/10 px-1.5 py-0.5 text-[10px] uppercase text-accent">Recommended</span>
-                          )}
-                        </div>
-                        <div className="text-xs text-fg-muted">{renderVmSizeDetail(size)}</div>
-                      </div>
-                    </div>
-                  </SelectionCard>
-                ))}
+            {profileWizard.step === 'resources' && (
+              <div className="rounded-md border border-border-default bg-surface p-3">
+                <ResourceRequirementsInput
+                  value={profileWizard.resourceReqs}
+                  onChange={(next: ResourceRequirementsFormState) =>
+                    onUpdateProfileWizard({ resourceReqs: next })
+                  }
+                  disabled={profileWizard.saving}
+                  inheritLabel="platform default"
+                  hideDisk
+                  errors={validateResourceState(profileWizard.resourceReqs)}
+                />
               </div>
             )}
 
@@ -460,10 +485,16 @@ export function ChatInput({
                   />
                 </label>
                 <div className="text-xs text-fg-muted">
-                  Summary: <strong className="text-fg-secondary">{selectedWizardAgent?.name ?? 'Agent'}</strong> ·{' '}
-                  {profileWizard.workType === 'task' ? 'Build and open PRs' : 'Chat and explore'} ·{' '}
-                  {getRuntimeSummary(profileWizard.runtime)}
-                  {profileWizard.runtime !== 'cf-container' && <> · {getVmSizeLabel(selectedWizardSize)} VM</>}
+                  Summary:{' '}
+                  <strong className="text-fg-secondary">
+                    {selectedWizardAgent?.name ?? 'Agent'}
+                  </strong>{' '}
+                  · {profileWizard.workType === 'task' ? 'Build and open PRs' : 'Chat and explore'}{' '}
+                  · {getRuntimeSummary(profileWizard.runtime)}
+                  {profileWizard.runtime !== 'cf-container' &&
+                    profileWizard.resourceReqs.minVcpu && (
+                      <> · {profileWizard.resourceReqs.minVcpu} vCPU</>
+                    )}
                 </div>
               </div>
             )}
@@ -497,6 +528,45 @@ export function ChatInput({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {!noAgents && !profileWizard.open && !needsProfileBeforeSubmit && (
+        <div className="mb-1.5 flex items-center">
+          <button
+            type="button"
+            onClick={() => setResourceOverrideOpen((v) => !v)}
+            disabled={submitting}
+            className={[
+              'text-[11px] flex items-center gap-1 bg-transparent border-none cursor-pointer p-0 disabled:opacity-50',
+              hasTaskResources
+                ? 'text-accent font-medium'
+                : 'text-fg-muted hover:text-fg-secondary',
+            ].join(' ')}
+          >
+            <Server size={12} aria-hidden="true" />
+            Resources{hasTaskResources ? ' (custom)' : ''}
+            {resourceOverrideOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          </button>
+        </div>
+      )}
+
+      {(resourceOverrideOpen || hasResourceErrors) && !profileWizard.open && (
+        <div className="mb-2 rounded-md border border-border-default bg-surface px-3 py-2">
+          <ResourceRequirementsInput
+            value={taskResourceReqs}
+            onChange={(next) => {
+              onTaskResourceReqsChange(next);
+              onTaskResourceErrorsClear();
+            }}
+            disabled={submitting}
+            inheritLabel="profile/project default"
+            errors={taskResourceErrors}
+            compact={isMobile}
+          />
+          <p className="m-0 mt-1 text-[10px] text-fg-muted">
+            Override resources for this task only. Leave blank to inherit.
+          </p>
         </div>
       )}
 
@@ -542,7 +612,9 @@ function NoAgentsNotice({ projectId }: Readonly<{ projectId: string }>) {
     <div className="mb-2 flex flex-col gap-3 rounded-md border border-border-default bg-surface px-3 py-3 sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-fg-primary">Add an agent to start chatting</div>
-        <div className="mt-1 text-xs text-fg-muted">Connect or enable an ACP-capable agent in project settings.</div>
+        <div className="mt-1 text-xs text-fg-muted">
+          Connect or enable an ACP-capable agent in project settings.
+        </div>
       </div>
       <button
         type="button"
@@ -560,7 +632,9 @@ function NoProfilesGate({ onStartWizard }: Readonly<{ onStartWizard: () => void 
     <div className="mb-3 flex flex-col gap-3 rounded-lg border border-accent/20 bg-accent/5 p-3 sm:flex-row sm:items-center">
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-fg-primary">Create a profile to start</div>
-        <div className="mt-1 text-xs text-fg-muted">Choose an agent and default runtime settings for this project chat.</div>
+        <div className="mt-1 text-xs text-fg-muted">
+          Choose an agent and default runtime settings for this project chat.
+        </div>
       </div>
       <button
         type="button"
@@ -591,7 +665,9 @@ function SelectionCard({
       onClick={onClick}
       disabled={disabled}
       className={`min-h-[56px] w-full rounded-md border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
-        selected ? 'border-accent bg-accent/10' : 'border-border-default bg-page hover:border-accent/60'
+        selected
+          ? 'border-accent bg-accent/10'
+          : 'border-border-default bg-page hover:border-accent/60'
       }`}
     >
       <div className="flex items-center gap-2">
@@ -623,7 +699,9 @@ function WorkTypeCard({
       onClick={onClick}
       disabled={disabled}
       className={`min-h-[132px] rounded-md border p-3 text-left transition-colors disabled:opacity-50 ${
-        selected ? 'border-accent bg-accent/10' : 'border-border-default bg-page hover:border-accent/60'
+        selected
+          ? 'border-accent bg-accent/10'
+          : 'border-border-default bg-page hover:border-accent/60'
       }`}
     >
       <div className="mb-2 text-fg-muted">{icon}</div>

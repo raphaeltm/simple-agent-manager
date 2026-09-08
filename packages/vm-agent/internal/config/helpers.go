@@ -252,6 +252,24 @@ func (c *Config) Validate() error {
 			c.ErrorReportCollectorJobs,
 		))
 	}
+	if c.HeartbeatDockerStatsTimeout <= 0 {
+		errs = append(errs, fmt.Errorf(
+			"HEARTBEAT_DOCKER_STATS_TIMEOUT must be > 0, got %s",
+			c.HeartbeatDockerStatsTimeout,
+		))
+	}
+	if c.HeartbeatWorkspaceMetricsMaxContainers < 0 || c.HeartbeatWorkspaceMetricsMaxContainers > 128 {
+		errs = append(errs, fmt.Errorf(
+			"HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS must be 0-128, got %d",
+			c.HeartbeatWorkspaceMetricsMaxContainers,
+		))
+	}
+	if c.HeartbeatWorkspaceMetricsMaxOutputBytes < 1024 || c.HeartbeatWorkspaceMetricsMaxOutputBytes > 1048576 {
+		errs = append(errs, fmt.Errorf(
+			"HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES must be 1024-1048576, got %d",
+			c.HeartbeatWorkspaceMetricsMaxOutputBytes,
+		))
+	}
 
 	if c.JWTIssuer != "" {
 		if err := auth.ValidateIssuerURL(c.JWTIssuer); err != nil {

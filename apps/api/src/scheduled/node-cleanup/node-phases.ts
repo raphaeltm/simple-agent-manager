@@ -21,6 +21,7 @@ import {
   boundedWarmPlacementClaimGuardSql,
   type CleanupConfig,
   type CleanupDb,
+  cleanupNodeProvenanceSql,
   destroyNodeForCleanup,
   getNodeWorkspaceIdleThresholdIso,
   LAST_WORKSPACE_ACTIVITY_SQL,
@@ -356,6 +357,7 @@ export async function sweepStoppedHandoffNodes(
   config: CleanupConfig,
   result: NodeCleanupResult
 ): Promise<void> {
+  const sweepDeadlineMs = Date.now() + config.stoppedHandoffSweepBudgetMs;
   const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at,
@@ -366,10 +368,7 @@ export async function sweepStoppedHandoffNodes(
      WHERE n.status = 'stopped'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
-       AND EXISTS (
-         SELECT 1 FROM tasks t
-         WHERE t.auto_provisioned_node_id = n.id
-       )
+       AND ${cleanupNodeProvenanceSql('n')}
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        ${boundedWarmPlacementClaimGuardSql('n.id')}
      GROUP BY n.id, n.user_id, n.status, n.created_at
@@ -388,6 +387,7 @@ export async function sweepStoppedHandoffNodes(
     }>();
 
   for (const node of candidates.results) {
+    if (Date.now() >= sweepDeadlineMs) break;
     if (node.active_ws_count > 0) {
       log.warn('node_cleanup.stopped_handoff_skipped_active_workspaces', {
         nodeId: node.id,
@@ -401,8 +401,12 @@ export async function sweepStoppedHandoffNodes(
 
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
       logEvent: 'node_cleanup.destroying_stopped_handoff',
+      requestDeadlineMs: Math.min(
+        sweepDeadlineMs,
+        Date.now() + config.stoppedHandoffRequestTimeoutMs
+      ),
       failureLogEvent: 'node_cleanup.stopped_handoff_destroy_failed',
-      successMessage: 'Destroyed stopped auto-provisioned node left by NodeLifecycle alarm',
+      successMessage: 'Destroyed stopped managed node left by NodeLifecycle alarm',
       failureMessagePrefix: 'Failed to destroy stopped handoff node',
       recoveryType: 'stopped_node_handoff_cleanup',
       failureRecoveryType: 'stopped_node_handoff_cleanup_failure',

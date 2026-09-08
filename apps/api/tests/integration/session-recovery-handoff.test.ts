@@ -8,7 +8,7 @@ import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { isSessionRecoverySourceTaskGuardValid } from '../../src/services/session-recovery-authority';
 import { claimSessionSnapshotRecovery } from '../../src/services/session-snapshot-recovery-lifecycle';
-import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const { ensureTaskRunnerStartedMock, startTaskRunnerDOMock } = vi.hoisted(() => ({
   ensureTaskRunnerStartedMock: vi.fn(async () => false),
@@ -21,21 +21,10 @@ vi.mock('../../src/services/task-runner-do', () => ({
 }));
 
 function seedRecoveryFixture(sqlite: Database.Database): void {
-  createSchemaTables(sqlite, [
-    schema.users,
-    schema.projects,
-    schema.workspaces,
-    schema.tasks,
-    schema.taskStatusEvents,
-    schema.sessionSnapshots,
-    schema.agentProfiles,
-    schema.nodes,
-    schema.credentials,
-    schema.capacityPools,
-    schema.capacitySources,
-    schema.capacityPoolCandidates,
-    schema.projectDataSessionLocations,
-  ]);
+  // Recovery now resolves current pool/settings/credential authority before the
+  // handoff. Materialize the real schema so these reads remain part of the joined
+  // lifecycle test instead of turning a missing fixture table into a deferred wake.
+  createAllSchemaTables(sqlite, schema);
   sqlite.exec(`
     INSERT INTO users (id, name, email, github_id)
     VALUES ('user-1', 'Test User', 'test@example.com', 'gh-1');
@@ -70,6 +59,9 @@ function seedRecoveryFixture(sqlite: Database.Database): void {
       ('workspace-1', 'user-1', 'project-1', 'node-1', 'sleeping', 'main', 'small',
        'nbg1', 'lightweight', 'chat-1', '2026-08-15T00:00:00.000Z',
        '2026-08-15T00:00:00.000Z');
+
+    INSERT INTO project_members (project_id, user_id, role, status)
+    VALUES ('project-1', 'user-1', 'owner', 'active');
 
     INSERT INTO tasks
       (id, project_id, user_id, chat_session_id, workspace_id, title, description,
@@ -109,7 +101,7 @@ async function expectWakingRecovery(
     'chat-1',
     sourceTaskGuard
   );
-  expect(wake).toMatchObject({ status: 'waking' });
+  expect(wake, JSON.stringify(wake)).toMatchObject({ status: 'waking' });
   if (wake.status !== 'waking') throw new Error('wake was not claimable');
   return wake;
 }
@@ -201,6 +193,17 @@ describe('session recovery handoff', () => {
         superseded_by_task_id: wake.taskId,
       });
       expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
+      expect(startTaskRunnerDOMock).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          capacityPoolSelection: expect.objectContaining({
+            scope: 'user',
+            candidates: expect.arrayContaining([
+              expect.objectContaining({ provider: 'hetzner', location: 'nbg1' }),
+            ]),
+          }),
+        })
+      );
     } finally {
       sqlite.close();
     }

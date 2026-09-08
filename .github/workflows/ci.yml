@@ -635,6 +635,9 @@ jobs:
       - name: Runtime-boundary semantic check (blocking for apps/api/src)
         run: pnpm quality:runtime-boundary-semantics
 
+      - name: Native node-pool allocation boundaries
+        run: pnpm quality:node-pool-boundary
+
       - name: CI workflow wiring tests
         run: pnpm exec vitest run --config scripts/quality/vitest.config.ts ci-quality-program.test.ts ci-worker-suite.test.ts
 
@@ -682,6 +685,7 @@ jobs:
     name: Durable Object Workers
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.api == 'true'
+    # Real workerd startup per test file can exceed 15 minutes on cold runners.
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:

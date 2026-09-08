@@ -33,7 +33,11 @@ export async function seedInstallation(
   userId: string,
   opts?: { installationIdValue?: string; accountName?: string }
 ): Promise<void> {
-  const externalInstallationId = opts?.installationIdValue ?? 'inst-12345';
+  // Derived per installation, not a shared literal: github_installations is unique
+  // on external_installation_id, so a shared default made every installation after
+  // the first a silent INSERT OR IGNORE no-op and the next seedProject failed its
+  // installation_id foreign key.
+  const externalInstallationId = opts?.installationIdValue ?? `inst-${installationId}`;
   const accountName = opts?.accountName ?? 'test-user';
 
   await env.DATABASE.prepare(
@@ -212,8 +216,23 @@ export async function seedWorkspace(
     updatedAt?: string;
   }
 ): Promise<void> {
+  const resolvedReservationJson =
+    opts?.resolvedReservationJson === undefined
+      ? JSON.stringify({
+          cpuMillis: 1000,
+          memoryMb: 1024,
+          diskMb: 1024,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+          source: 'platform',
+          sourceId: 'platform',
+          version: 1,
+        })
+      : opts.resolvedReservationJson;
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO workspaces (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location, chat_session_id, resolved_reservation_json, created_at, updated_at)
+    `INSERT OR IGNORE INTO workspaces
+       (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location,
+        chat_session_id, resolved_reservation_json, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?, ?)`
   )
     .bind(
@@ -225,7 +244,7 @@ export async function seedWorkspace(
       'test-org/test-repo',
       opts?.status ?? 'running',
       opts?.chatSessionId ?? null,
-      opts?.resolvedReservationJson ?? null,
+      resolvedReservationJson,
       opts?.createdAt ?? new Date().toISOString(),
       opts?.updatedAt ?? new Date().toISOString()
     )

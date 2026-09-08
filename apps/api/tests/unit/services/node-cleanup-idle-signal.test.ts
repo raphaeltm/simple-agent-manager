@@ -139,7 +139,14 @@ beforeEach(() => {
       node_class TEXT NOT NULL DEFAULT 'managed', runtime TEXT NOT NULL DEFAULT 'vm',
       health_status TEXT NOT NULL DEFAULT 'unhealthy', agent_version TEXT,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, cleanup_backoff_until TEXT,
-      runtime_termination_confirmed_at TEXT, runtime_incarnation_id TEXT
+      runtime_termination_confirmed_at TEXT, runtime_incarnation_id TEXT,
+      capacity_pool_id TEXT, capacity_source_id TEXT, capacity_pool_candidate_id TEXT,
+      capacity_pool_scope TEXT, capacity_pool_project_id TEXT, capacity_pool_revision INTEGER,
+      capacity_source_generation INTEGER, placement_credential_source TEXT,
+      placement_credential_reference TEXT, placement_credential_fingerprint TEXT,
+      placement_credential_version INTEGER, workload_role TEXT, cloud_provider TEXT,
+      provider_instance_id TEXT, provider_instance_type TEXT,
+      provider_instance_vcpu_count INTEGER, provider_instance_memory_mb INTEGER
     );
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY, node_id TEXT, user_id TEXT, status TEXT NOT NULL,

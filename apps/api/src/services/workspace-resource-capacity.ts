@@ -1,72 +1,550 @@
-import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
+  type ResolvedResourceReservation,
+} from '@simple-agent-manager/shared';
+
+import type { Env } from '../env';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 
 export const ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL = "'running', 'creating', 'recovery'";
+export const DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT = 100;
+export const DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB = 512;
+export const DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT = 90;
+export const DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS = 180_000;
+export const DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT = 40;
+export const DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT = 60;
+export const RESOURCE_REQUIREMENTS_SOURCE_SQL =
+  "'task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'";
+const D1_BIND_LIMIT = D1_MAX_BOUND_PARAMETERS;
 
-const RESOURCE_REQUIREMENTS_SOURCES = [
-  'task',
-  'trigger',
-  'skill',
-  'agent-profile',
-  'project',
-  'user',
-  'platform',
-] as const;
-
-export const RESOURCE_REQUIREMENTS_SOURCE_SQL = RESOURCE_REQUIREMENTS_SOURCES.map(
-  (source) => `'${source}'`
-).join(', ');
-
-const RESOURCE_REQUIREMENT_SOURCE_SET = new Set<string>(RESOURCE_REQUIREMENTS_SOURCES);
-
-export interface WorkspaceReservationNodeCapacity {
-  providerInstanceVcpuCount?: number | null;
-  providerInstanceMemoryMb?: number | null;
-  providerInstanceDiskGb?: number | null;
+export interface WorkspaceAdmissionPolicy {
+  maxWorkspaces: number;
+  cpuShareBudgetPercent: number;
+  hostMemoryReserveMb: number;
+  diskPressureThresholdPercent: number;
+  metricsTtlMs: number;
+  cpuThresholdPercent: number;
+  memoryThresholdPercent: number;
+  cpuScoreWeightPercent: number;
+  memoryScoreWeightPercent: number;
 }
 
-export interface WorkspaceReservationUsage {
+export interface WorkspaceAdmissionMetrics {
+  cpuLoadAvg1: number | null;
+  cpuPercent: number | null;
+  memoryPercent: number | null;
+  diskPercent: number | null;
+  creatingWorkspaces: number;
+  fresh: boolean;
+  malformed: boolean;
+  unsupportedVersion: boolean;
+}
+
+export interface ActiveWorkspaceReservationUsage {
   activeCount: number;
+  invalidCount: number;
+  exclusiveCount: number;
+  minMaxCoTenants: number | null;
   cpuMillis: number;
   memoryMb: number;
   diskMb: number;
-  hasExclusiveReservation: boolean;
-  hasInvalidReservation: boolean;
-  minimumMaxCoTenants: number | null;
 }
 
-interface ActiveWorkspaceReservationRow {
-  nodeId: string;
-  resolvedReservationJson: string | null;
+export interface WorkspaceReservationCapacityResult {
+  admitted: boolean;
+  reasons: string[];
 }
 
-export function emptyWorkspaceReservationUsage(): WorkspaceReservationUsage {
+export interface WorkspaceResourceNode {
+  id: string;
+  nodeClass?: string | null;
+  providerInstanceId?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareSource?: string | null;
+  lastMetrics?: string | null;
+  lastHeartbeatAt?: string | null;
+}
+
+export interface TrustedWorkspaceNodeCapacity {
+  vcpuCount: number | null;
+  memoryMb: number | null;
+  diskGb: number | null;
+  source: 'observed' | 'planned' | null;
+  reasons: string[];
+}
+
+export function resolveWorkspaceAdmissionPolicy(
+  env: Pick<
+    Env,
+    | 'MAX_WORKSPACES_PER_NODE'
+    | 'TASK_RUN_NODE_CPU_THRESHOLD_PERCENT'
+    | 'TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT'
+    | 'TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT'
+    | 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB'
+    | 'VM_AGENT_MEMORY_RESERVE_MB'
+    | 'TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT'
+    | 'TASK_RUN_NODE_METRICS_TTL_MS'
+    | 'TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT'
+    | 'TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT'
+  >,
+  scaling?: {
+    maxWorkspacesPerNode?: number | null;
+    nodeCpuThresholdPercent?: number | null;
+    nodeMemoryThresholdPercent?: number | null;
+    nodeCpuShareBudgetPercent?: number | null;
+    nodeHostMemoryReserveMb?: number | null;
+    nodeDiskPressureThresholdPercent?: number | null;
+    nodeMetricsTtlMs?: number | null;
+    nodeCpuScoreWeightPercent?: number | null;
+    nodeMemoryScoreWeightPercent?: number | null;
+  } | null
+): WorkspaceAdmissionPolicy {
+  const cpuScoreWeightPercent = positiveInt(
+    scaling?.nodeCpuScoreWeightPercent,
+    parseEnvInt(
+      env.TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT,
+      DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT
+    )
+  );
+  const memoryScoreWeightPercent = positiveInt(
+    scaling?.nodeMemoryScoreWeightPercent,
+    parseEnvInt(
+      env.TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT,
+      DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT
+    )
+  );
+  const totalWeight = cpuScoreWeightPercent + memoryScoreWeightPercent;
+
   return {
-    activeCount: 0,
-    cpuMillis: 0,
-    memoryMb: 0,
-    diskMb: 0,
-    hasExclusiveReservation: false,
-    hasInvalidReservation: false,
-    minimumMaxCoTenants: null,
+    maxWorkspaces: positiveInt(
+      scaling?.maxWorkspacesPerNode,
+      parseEnvInt(env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE)
+    ),
+    cpuShareBudgetPercent: boundedInt(
+      scaling?.nodeCpuShareBudgetPercent,
+      parseEnvInt(
+        env.TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT,
+        DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT
+      ),
+      1,
+      1_000
+    ),
+    hostMemoryReserveMb: resolveEffectiveNodeHostMemoryReserveMb(env, scaling),
+    diskPressureThresholdPercent: boundedInt(
+      scaling?.nodeDiskPressureThresholdPercent,
+      parseEnvInt(
+        env.TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT,
+        DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT
+      ),
+      1,
+      100
+    ),
+    metricsTtlMs: positiveInt(
+      scaling?.nodeMetricsTtlMs,
+      parseEnvInt(env.TASK_RUN_NODE_METRICS_TTL_MS, DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS)
+    ),
+    cpuThresholdPercent: boundedInt(
+      scaling?.nodeCpuThresholdPercent,
+      parseEnvInt(env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT, 50),
+      1,
+      1_000
+    ),
+    memoryThresholdPercent: boundedInt(
+      scaling?.nodeMemoryThresholdPercent,
+      parseEnvInt(env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT, 50),
+      1,
+      100
+    ),
+    cpuScoreWeightPercent:
+      totalWeight > 0
+        ? cpuScoreWeightPercent
+        : DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT,
+    memoryScoreWeightPercent:
+      totalWeight > 0
+        ? memoryScoreWeightPercent
+        : DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT,
   };
+}
+
+export function resolveEffectiveNodeHostMemoryReserveMb(
+  env: Pick<Env, 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB' | 'VM_AGENT_MEMORY_RESERVE_MB'>,
+  scaling?: { nodeHostMemoryReserveMb?: number | null } | null
+): number {
+  return nonNegativeInt(
+    scaling?.nodeHostMemoryReserveMb,
+    parseEnvInt(
+      env.TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB ?? env.VM_AGENT_MEMORY_RESERVE_MB,
+      DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB
+    )
+  );
 }
 
 export function isResolvedResourceReservation(
   value: unknown
 ): value is ResolvedResourceReservation {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const row = value as Record<string, unknown>;
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
   return (
-    positiveInteger(row['cpuMillis']) !== null &&
-    positiveInteger(row['memoryMb']) !== null &&
-    positiveInteger(row['diskMb']) !== null &&
-    typeof row['exclusiveNode'] === 'boolean' &&
-    positiveInteger(row['maxCoTenants']) !== null &&
-    typeof row['source'] === 'string' &&
-    RESOURCE_REQUIREMENT_SOURCE_SET.has(row['source']) &&
-    typeof row['sourceId'] === 'string' &&
-    positiveInteger(row['version']) !== null
+    (record.version === 1 || record.version === 2) &&
+    positiveInteger(record.cpuMillis) !== null &&
+    positiveInteger(record.memoryMb) !== null &&
+    nonNegativeInteger(record.diskMb) !== null &&
+    positiveInteger(record.maxCoTenants) !== null &&
+    typeof record.exclusiveNode === 'boolean' &&
+    typeof record.source === 'string' &&
+    ['task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'].includes(
+      record.source
+    )
   );
+}
+
+export function parseWorkspaceAdmissionMetrics(
+  node: WorkspaceResourceNode,
+  policy: WorkspaceAdmissionPolicy,
+  nowMs = Date.now()
+): WorkspaceAdmissionMetrics | null {
+  if (!node.lastMetrics) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(node.lastMetrics);
+  } catch {
+    return {
+      cpuLoadAvg1: null,
+      cpuPercent: null,
+      memoryPercent: null,
+      diskPercent: null,
+      creatingWorkspaces: 0,
+      fresh: false,
+      malformed: true,
+      unsupportedVersion: false,
+    };
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return {
+      cpuLoadAvg1: null,
+      cpuPercent: null,
+      memoryPercent: null,
+      diskPercent: null,
+      creatingWorkspaces: 0,
+      fresh: false,
+      malformed: true,
+      unsupportedVersion: false,
+    };
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const version = record.version;
+  const unsupportedVersion =
+    typeof version === 'number' && Number.isInteger(version) && version > 1;
+  const malformed =
+    unsupportedVersion ||
+    malformedOptionalNumber(record, 'cpuLoadAvg1', nonNegativeNumber) ||
+    malformedOptionalNumber(record, 'memoryPercent', percentNumber) ||
+    malformedOptionalNumber(record, 'diskPercent', percentNumber) ||
+    malformedOptionalNumber(record, 'creatingWorkspaces', nonNegativeInteger) ||
+    (version !== undefined && !unsupportedVersion && version !== 1);
+  const cpuLoadAvg1 = nonNegativeNumber(record.cpuLoadAvg1);
+  const memoryPercent = percentNumber(record.memoryPercent);
+  const diskPercent = percentNumber(record.diskPercent);
+  const creatingWorkspaces = nonNegativeInteger(record.creatingWorkspaces) ?? 0;
+  const heartbeatMs = parseTimestampMs(node.lastHeartbeatAt);
+  const fresh =
+    heartbeatMs !== null &&
+    nowMs >= heartbeatMs &&
+    nowMs - heartbeatMs <= Math.max(1, policy.metricsTtlMs);
+
+  return {
+    cpuLoadAvg1,
+    cpuPercent: normalizeLoadAverageToCpuPercent(
+      cpuLoadAvg1,
+      resolveTrustedWorkspaceNodeCapacity(node).vcpuCount
+    ),
+    memoryPercent,
+    diskPercent,
+    creatingWorkspaces,
+    fresh,
+    malformed,
+    unsupportedVersion,
+  };
+}
+
+export function normalizeLoadAverageToCpuPercent(
+  loadAvg1: number | null,
+  vcpuCount: number | null | undefined
+): number | null {
+  const vcpu = positiveInteger(vcpuCount);
+  if (loadAvg1 === null || vcpu === null) return null;
+  return (loadAvg1 / vcpu) * 100;
+}
+
+/**
+ * The exact node columns `resolveTrustedWorkspaceNodeCapacity` reads, as an
+ * aliased SQL projection. Every node query whose rows feed capacity evaluation
+ * or legacy-adoption evaluation must include this fragment: a projection that
+ * omits it makes `providerInstanceId`/`observedHardwareSource` undefined, so
+ * every node resolves to "no trusted observed hardware" and is silently rejected
+ * — advisory selection then disagrees with the final admission SQL, which reads
+ * the same columns directly off the row.
+ */
+export function trustedWorkspaceNodeCapacityColumnsSql(alias = ''): string {
+  if (alias && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+    throw new Error(`Unsafe SQL alias: ${alias}`);
+  }
+  const prefix = alias ? `${alias}.` : '';
+  return `${prefix}node_class AS nodeClass,
+       ${prefix}provider_instance_id AS providerInstanceId,
+       ${prefix}observed_provider_instance_type AS observedProviderInstanceType,
+       ${prefix}observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
+       ${prefix}observed_provider_instance_memory_mb AS observedProviderInstanceMemoryMb,
+       ${prefix}observed_provider_instance_disk_gb AS observedProviderInstanceDiskGb,
+       ${prefix}observed_hardware_source AS observedHardwareSource`;
+}
+
+/** Row shape produced by `trustedWorkspaceNodeCapacityColumnsSql`. */
+export interface TrustedWorkspaceNodeCapacityRow {
+  nodeClass: string | null;
+  providerInstanceId: string | null;
+  observedProviderInstanceType: string | null;
+  observedProviderInstanceVcpuCount: number | null;
+  observedProviderInstanceMemoryMb: number | null;
+  observedProviderInstanceDiskGb: number | null;
+  observedHardwareSource: string | null;
+}
+
+export function resolveTrustedWorkspaceNodeCapacity(
+  node: WorkspaceResourceNode
+): TrustedWorkspaceNodeCapacity {
+  const reasons: string[] = [];
+  const observedVcpu = positiveInteger(node.observedProviderInstanceVcpuCount);
+  const observedMemoryMb = positiveInteger(node.observedProviderInstanceMemoryMb);
+  const observedDiskGb = positiveInteger(node.observedProviderInstanceDiskGb);
+  const hasProviderInstance =
+    typeof node.providerInstanceId === 'string' && node.providerInstanceId.trim().length > 0;
+  const isUserOwnedNode = node.nodeClass === 'user-owned';
+  const hasObservedSource = node.observedHardwareSource === 'observed';
+
+  if (hasProviderInstance || isUserOwnedNode) {
+    if (observedVcpu !== null && observedMemoryMb !== null && observedDiskGb !== null) {
+      if (!hasObservedSource) {
+        reasons.push('node observed hardware source is not verified');
+        return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
+      }
+      return {
+        vcpuCount: observedVcpu,
+        memoryMb: observedMemoryMb,
+        diskGb: observedDiskGb,
+        source: 'observed',
+        reasons,
+      };
+    }
+    reasons.push('node has no trusted observed hardware capacity');
+    return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
+  }
+
+  reasons.push('managed node has no provider runtime identity');
+  return { vcpuCount: null, memoryMb: null, diskGb: null, source: null, reasons };
+}
+
+export function scoreWorkspaceAdmissionMetrics(
+  metrics: WorkspaceAdmissionMetrics | null,
+  policy: WorkspaceAdmissionPolicy
+): number | null {
+  if (!metrics) return null;
+  const cpu = metrics.cpuPercent ?? 0;
+  const memory = metrics.memoryPercent ?? 0;
+  const weight = policy.cpuScoreWeightPercent + policy.memoryScoreWeightPercent;
+  if (weight <= 0) return null;
+  return (cpu * policy.cpuScoreWeightPercent + memory * policy.memoryScoreWeightPercent) / weight;
+}
+
+export async function loadActiveWorkspaceReservationUsage(
+  database: D1Database,
+  nodeIds: readonly string[]
+): Promise<Map<string, ActiveWorkspaceReservationUsage>> {
+  const usage = new Map<string, ActiveWorkspaceReservationUsage>();
+  const uniqueNodeIds = Array.from(new Set(nodeIds)).filter((id) => id.length > 0);
+
+  for (let i = 0; i < uniqueNodeIds.length; i += D1_BIND_LIMIT) {
+    const chunk = uniqueNodeIds.slice(i, i + D1_BIND_LIMIT);
+    if (!chunk.length) continue;
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = await database
+      .prepare(
+        `SELECT node_id AS nodeId, resolved_reservation_json AS reservationJson
+         FROM workspaces
+         WHERE node_id IN (${placeholders})
+           AND status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL})`
+      )
+      .bind(...chunk)
+      .all<{ nodeId: string; reservationJson: string | null }>();
+
+    for (const row of rows.results ?? []) {
+      const existing = usage.get(row.nodeId) ?? emptyUsage();
+      existing.activeCount += 1;
+      addReservationUsage(existing, row.reservationJson);
+      usage.set(row.nodeId, existing);
+    }
+  }
+
+  return usage;
+}
+
+export function aggregateWorkspaceReservationRows(
+  rows: ReadonlyArray<{ resolvedReservationJson: string | null }>
+): ActiveWorkspaceReservationUsage {
+  const usage = emptyUsage();
+  for (const row of rows) {
+    usage.activeCount += 1;
+    addReservationUsage(usage, row.resolvedReservationJson);
+  }
+  return usage;
+}
+
+function addReservationUsage(usage: ActiveWorkspaceReservationUsage, value: string | null): void {
+  const reservation = parseResolvedResourceReservation(value);
+  if (!reservation) {
+    usage.invalidCount += 1;
+    return;
+  }
+  usage.cpuMillis += reservation.cpuMillis;
+  usage.memoryMb += reservation.memoryMb;
+  usage.diskMb += reservation.diskMb;
+  if (reservation.exclusiveNode) usage.exclusiveCount += 1;
+  usage.minMaxCoTenants = Math.min(
+    usage.minMaxCoTenants ?? reservation.maxCoTenants,
+    reservation.maxCoTenants
+  );
+}
+
+export function evaluateWorkspaceReservationCapacity(
+  node: WorkspaceResourceNode,
+  usage: ActiveWorkspaceReservationUsage | undefined,
+  request: ResolvedResourceReservation,
+  policy: WorkspaceAdmissionPolicy,
+  metrics = parseWorkspaceAdmissionMetrics(node, policy)
+): WorkspaceReservationCapacityResult {
+  const reasons: string[] = [];
+  const active = usage ?? emptyUsage();
+
+  if (!isResolvedResourceReservation(request)) {
+    reasons.push('requested reservation is malformed');
+  }
+  if (policy.maxWorkspaces < 1) {
+    reasons.push('max workspaces per node must be positive');
+  }
+  if (active.activeCount >= policy.maxWorkspaces) {
+    reasons.push('workspace count cap reached');
+  }
+  if (active.activeCount >= request.maxCoTenants) {
+    reasons.push('requested co-tenant cap reached');
+  }
+  if (active.minMaxCoTenants !== null && active.activeCount >= active.minMaxCoTenants) {
+    reasons.push('existing reservation co-tenant cap reached');
+  }
+  if (request.exclusiveNode && active.activeCount > 0) {
+    reasons.push('requested reservation requires an exclusive node');
+  }
+  if (active.exclusiveCount > 0) {
+    reasons.push('existing reservation requires an exclusive node');
+  }
+  if (active.activeCount > 0 && active.invalidCount > 0) {
+    reasons.push('active reservation snapshot is missing or malformed');
+  }
+
+  const trustedCapacity = resolveTrustedWorkspaceNodeCapacity(node);
+  const vcpu = trustedCapacity.vcpuCount;
+  const memoryMb = trustedCapacity.memoryMb;
+  const diskGb = trustedCapacity.diskGb;
+  if (trustedCapacity.source === null) {
+    reasons.push(...trustedCapacity.reasons);
+  }
+
+  const measuredAdmissionReason = measuredAdmissionDiagnostic(
+    metrics,
+    policy,
+    active.activeCount === 0 && vcpu === null
+  );
+  if (measuredAdmissionReason) {
+    if (active.activeCount > 0 || metrics !== null) {
+      reasons.push(measuredAdmissionReason);
+    }
+  }
+
+  if (vcpu !== null && active.cpuMillis + request.cpuMillis > cpuBudgetMillis(vcpu, policy)) {
+    reasons.push('CPU share budget would be exceeded');
+  }
+  if (memoryMb !== null && active.memoryMb + request.memoryMb > usableMemoryMb(memoryMb, policy)) {
+    reasons.push('memory budget would be exceeded after host reserve');
+  }
+  if (diskGb !== null && active.diskMb + request.diskMb > diskGb * 1024) {
+    reasons.push('disk reservation budget would be exceeded');
+  }
+
+  return { admitted: reasons.length === 0, reasons };
+}
+
+export function hasWorkspaceReservationCapacity(
+  node: WorkspaceResourceNode,
+  usage: ActiveWorkspaceReservationUsage | undefined,
+  request: ResolvedResourceReservation,
+  policy: WorkspaceAdmissionPolicy,
+  metrics?: WorkspaceAdmissionMetrics | null
+): boolean {
+  return evaluateWorkspaceReservationCapacity(node, usage, request, policy, metrics).admitted;
+}
+
+export function emptyUsage(): ActiveWorkspaceReservationUsage {
+  return {
+    activeCount: 0,
+    invalidCount: 0,
+    exclusiveCount: 0,
+    minMaxCoTenants: null,
+    cpuMillis: 0,
+    memoryMb: 0,
+    diskMb: 0,
+  };
+}
+
+export function cpuBudgetMillis(vcpuCount: number, policy: WorkspaceAdmissionPolicy): number {
+  return Math.floor((vcpuCount * 1000 * policy.cpuShareBudgetPercent) / 100);
+}
+
+export function usableMemoryMb(memoryMb: number, policy: WorkspaceAdmissionPolicy): number {
+  return Math.max(0, memoryMb - policy.hostMemoryReserveMb);
+}
+
+function measuredAdmissionDiagnostic(
+  metrics: WorkspaceAdmissionMetrics | null,
+  policy: WorkspaceAdmissionPolicy,
+  allowUnknownCpuPressure: boolean
+): string | null {
+  if (!metrics) return 'occupied node has no resource telemetry';
+  if (metrics.unsupportedVersion) return 'node resource telemetry version is unsupported';
+  if (metrics.malformed) return 'node resource telemetry is malformed';
+  if (!metrics.fresh) return 'node telemetry is stale';
+  if (metrics.cpuPercent === null && !allowUnknownCpuPressure) {
+    return 'node has no CPU pressure telemetry';
+  }
+  if (metrics.memoryPercent === null) return 'node has no memory pressure telemetry';
+  if (metrics.diskPercent === null) return 'node has no disk pressure telemetry';
+  if (metrics.creatingWorkspaces > 0) return 'node is already creating a workspace';
+  if (metrics.cpuPercent !== null && metrics.cpuPercent >= policy.cpuThresholdPercent) {
+    return 'CPU pressure threshold reached';
+  }
+  if (metrics.memoryPercent >= policy.memoryThresholdPercent) {
+    return 'memory pressure threshold reached';
+  }
+  if (metrics.diskPercent >= policy.diskPressureThresholdPercent) {
+    return 'disk pressure threshold reached';
+  }
+  return null;
 }
 
 export function parseResolvedResourceReservation(
@@ -81,111 +559,61 @@ export function parseResolvedResourceReservation(
   }
 }
 
-export function aggregateWorkspaceReservationRows(
-  rows: ReadonlyArray<{ resolvedReservationJson: string | null }>
-): WorkspaceReservationUsage {
-  const usage = emptyWorkspaceReservationUsage();
-  for (const row of rows) {
-    usage.activeCount += 1;
-    const reservation = parseResolvedResourceReservation(row.resolvedReservationJson);
-    if (!reservation) {
-      usage.hasInvalidReservation = true;
-      continue;
-    }
-    usage.cpuMillis += reservation.cpuMillis;
-    usage.memoryMb += reservation.memoryMb;
-    usage.diskMb += reservation.diskMb;
-    usage.hasExclusiveReservation ||= reservation.exclusiveNode;
-    usage.minimumMaxCoTenants = Math.min(
-      usage.minimumMaxCoTenants ?? reservation.maxCoTenants,
-      reservation.maxCoTenants
-    );
-  }
-  return usage;
+function parseTimestampMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
-export async function loadActiveWorkspaceReservationUsage(
-  database: D1Database,
-  nodeIds: readonly string[]
-): Promise<Map<string, WorkspaceReservationUsage>> {
-  if (nodeIds.length === 0) return new Map();
-  const placeholders = nodeIds.map(() => '?').join(',');
-  const rows = await database
-    .prepare(
-      `SELECT node_id AS nodeId, resolved_reservation_json AS resolvedReservationJson
-       FROM workspaces
-       WHERE node_id IN (${placeholders})
-         AND status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL})`
-    )
-    .bind(...nodeIds)
-    .all<ActiveWorkspaceReservationRow>();
-
-  const rowsByNode = new Map<string, ActiveWorkspaceReservationRow[]>();
-  for (const row of rows.results ?? []) {
-    const nodeRows = rowsByNode.get(row.nodeId) ?? [];
-    nodeRows.push(row);
-    rowsByNode.set(row.nodeId, nodeRows);
-  }
-
-  return new Map(
-    [...rowsByNode].map(([nodeId, nodeRows]) => [
-      nodeId,
-      aggregateWorkspaceReservationRows(nodeRows),
-    ])
-  );
+function parseEnvInt(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === '') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) ? parsed : fallback;
 }
 
-/**
- * Advisory reusable-node capacity check. The final INSERT ... SELECT repeats
- * these invariants atomically in workspace-placement.ts.
- *
- * Empty legacy nodes retain one explicit placement path. Once occupied, every
- * active reservation and all provider-native capacity dimensions must be known;
- * unknown data therefore never permits unsafe co-tenancy.
- */
-export function hasWorkspaceReservationCapacity(
-  node: WorkspaceReservationNodeCapacity,
-  usage: WorkspaceReservationUsage,
-  request: ResolvedResourceReservation,
-  maxWorkspaces: number
-): boolean {
-  if (!isResolvedResourceReservation(request) || positiveInteger(maxWorkspaces) === null) {
-    return false;
-  }
-  if (usage.activeCount >= maxWorkspaces) return false;
-  if (usage.activeCount + 1 > request.maxCoTenants) return false;
-  if (usage.minimumMaxCoTenants !== null && usage.activeCount + 1 > usage.minimumMaxCoTenants) {
-    return false;
-  }
-  if (request.exclusiveNode && usage.activeCount > 0) return false;
-  if (usage.hasExclusiveReservation) return false;
+function positiveInt(value: number | null | undefined, fallback: number): number {
+  return Number.isInteger(value) && value !== null && value !== undefined && value > 0
+    ? value
+    : Math.max(1, Math.floor(fallback));
+}
 
-  const cpuMillis = multiplyPositiveInteger(node.providerInstanceVcpuCount, 1_000);
-  const memoryMb = positiveInteger(node.providerInstanceMemoryMb);
-  const diskMb = multiplyPositiveInteger(node.providerInstanceDiskGb, 1_024);
-  if (usage.activeCount > 0) {
-    if (usage.hasInvalidReservation || cpuMillis === null || memoryMb === null || diskMb === null) {
-      return false;
-    }
-    return (
-      usage.cpuMillis + request.cpuMillis <= cpuMillis &&
-      usage.memoryMb + request.memoryMb <= memoryMb &&
-      usage.diskMb + request.diskMb <= diskMb
-    );
-  }
+function nonNegativeInt(value: number | null | undefined, fallback: number): number {
+  return Number.isInteger(value) && value !== null && value !== undefined && value >= 0
+    ? value
+    : Math.max(0, Math.floor(fallback));
+}
 
-  return (
-    (cpuMillis === null || request.cpuMillis <= cpuMillis) &&
-    (memoryMb === null || request.memoryMb <= memoryMb) &&
-    (diskMb === null || request.diskMb <= diskMb)
-  );
+function boundedInt(
+  value: number | null | undefined,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  return Math.min(max, Math.max(min, positiveInt(value, fallback)));
 }
 
 function positiveInteger(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
 }
 
-function multiplyPositiveInteger(value: unknown, multiplier: number): number | null {
-  const integer = positiveInteger(value);
-  return integer === null ? null : integer * multiplier;
+function nonNegativeInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function nonNegativeNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function percentNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+    ? value
+    : null;
+}
+
+function malformedOptionalNumber(
+  record: Record<string, unknown>,
+  key: string,
+  parser: (value: unknown) => number | null
+): boolean {
+  return Object.hasOwn(record, key) && parser(record[key]) === null;
 }

@@ -312,6 +312,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
   MAX_WORKSPACES_PER_NODE?: string;
+  CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE?: string; // Optional max user/project scopes reconciled by one unscoped capacity-pool backfill call
+  CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE?: string; // Optional candidate rows published per source per pass before the durable cursor resumes the rest
+  CAPACITY_POOL_CATALOG_CACHE_TTL_MS?: string; // Optional per-isolate credential-scoped provider catalog cache TTL
+  CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON?: string; // Optional legacy-size workload slice mapping; platform_settings overrides it
+  CAPACITY_POOL_PLATFORM_DEFAULTS_JSON?: string; // Optional platform resource defaults for capacity-aware reservation; platform_settings overrides it
+  CAPACITY_POOL_SELECTION_SETTINGS_JSON?: string; // Optional capacity-pool ranking/cohort settings; platform_settings overrides it
   VM_ADMISSION_CONTROL_MODE?: string;
   VM_ADMISSION_LEASE_TTL_MS?: string;
   VM_ADMISSION_RETRY_MIN_MS?: string;
@@ -352,8 +358,18 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Task run configuration (autonomous execution)
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
+  TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT?: string;
+  TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB?: string;
+  TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT?: string;
+  TASK_RUN_NODE_METRICS_TTL_MS?: string;
+  TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT?: string;
+  TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT?: string;
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   // Warm node pooling configuration
+  NODE_PROVISIONING_REQUEST_TIMEOUT_MS?: string;
+  NODE_PROVISIONING_RETRY_INTERVAL_MS?: string;
+  NODE_PROVISIONING_MAX_AGE_MS?: string;
+  NODE_PROVISIONING_MAX_ATTEMPTS?: string;
   NODE_WARM_TIMEOUT_MS?: string;
   NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS?: string; // Destroying-state alarm backstop (default: 86400000)
   MAX_AUTO_NODE_LIFETIME_MS?: string;
@@ -366,6 +382,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_ABSOLUTE_MAX_LIFETIME_MS?: string; // Absolute age ceiling for auto-provisioned workspace nodes (default: 86400000 = 24 h)
   NODE_CLEANUP_SWEEP_LIMIT?: string; // Max node candidates per cleanup phase per cron run (default: 25)
   NODE_CLEANUP_FAILURE_BACKOFF_MS?: string; // Failed candidate exclusion window (default: 3600000)
+  NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS?: string; // Stopped-node phase wall-time budget (default: 20000)
+  NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS?: string; // Stopped-node provider/DNS budget per candidate (default: 5000)
   WORKSPACE_CLEANUP_SWEEP_LIMIT?: string; // Max workspace candidates per cleanup phase per cron run (default: 50)
   // Provider-side orphan reconciliation
   PROVIDER_ORPHAN_RECONCILIATION_ENABLED?: string; // Set 'false' to disable the provider-side reconciler (default: enabled)
@@ -935,6 +953,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string; // "https" (default) or "http"
   VM_AGENT_PORT?: string; // "8443" (default) or custom port
+  VM_AGENT_MEMORY_RESERVE_MB?: string; // Optional Docker workload-slice MemoryMax reserve for VM-agent reachability headroom
+  SAM_INFRA_SLICE_MEMORY_MIN_MB?: string; // systemd MemoryMin for vm-agent/system services slice
+  DOCKER_MEMORY_MIN_MB?: string; // Minimum Docker MemoryMax retained when VM_AGENT_MEMORY_RESERVE_MB is enabled
+  HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES?: string; // Max bytes read from heartbeat Docker metric commands
+  HEARTBEAT_DOCKER_STATS_TIMEOUT?: string; // VM-agent heartbeat Docker stats timeout (default: 2s)
+  HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS?: string; // Max workspace containers measured per heartbeat (default: 8)
   // Devcontainer image caching
   DEVCONTAINER_CACHE_ENABLED?: string; // "true" to enable managed registry caching (default: disabled)
   DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID?: string; // Cloudflare account for managed registry credentials
@@ -1114,7 +1138,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Compute quota enforcement
   COMPUTE_QUOTA_ENFORCEMENT_ENABLED?: string; // Kill switch for quota checks (default: true)
   // VM size fallback on transient capacity exhaustion
-  CAPACITY_SIZE_FALLBACK_ENABLED?: string; // Kill switch: "false" disables size descent on capacity exhaustion (default: true)
   // Event-driven triggers (cron) configuration
   MAX_TRIGGERS_PER_PROJECT?: string; // Max triggers per project (default: 10)
   CRON_MIN_INTERVAL_MINUTES?: string; // Min cron interval in minutes (default: 15)

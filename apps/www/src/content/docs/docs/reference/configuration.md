@@ -204,8 +204,64 @@ Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of t
 | `TERMINAL_NODE_LIFECYCLE_REPAIR_WALL_BUDGET_MS` | `10000` (10 seconds)      | Wall-clock budget for `runTerminalNodeLifecycleRepair()` in `apps/api/src/scheduled/terminal-node-lifecycle-repair.ts` inside the scheduled sweep. Values above `30000` are capped so this repair cannot monopolize the cron event.                                                                                                                                                                               |
 | `REQUIRE_APPROVAL`                              | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access).                                                                                      |
 | `TRIAL_ANONYMOUS_USER_ID`                       | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                                                                                                      |
-| `CAPACITY_SIZE_FALLBACK_ENABLED`                | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                                                                                                                  |
+| `CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE`       | `25`                      | Maximum user scopes and maximum project scopes reconciled by one unscoped capacity-pool backfill pass. Values above `200` are capped; rerun the backfill to continue.                                                                                                                                                                                                                                             |
+| `CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON`    | built-in slices           | Environment fallback for the versioned legacy `small`/`medium`/`large` to workload requirements adapter. Persisted `platform_settings.capacityPools.legacyWorkloadMapping.v1` wins when present. Values are workload slices, not old whole-VM shapes.                                                                                                                                                             |
+| `CAPACITY_POOL_PLATFORM_DEFAULTS_JSON`          | built-in defaults         | Environment fallback for platform resource requirement defaults used when no task/trigger/skill/profile/project/user layer sets a field. Persisted `platform_settings.capacityPools.platformDefaults.v1` wins when present. Values are validated by the shared `ResourceRequirements` validator and must provide every field.                                                                                     |
+| `CAPACITY_POOL_SELECTION_SETTINGS_JSON`         | built-in scoring weights  | Environment fallback for default capacity-pool selection weights and ranking rollout. Persisted `platform_settings.capacityPools.selectionSettings.v1` wins when present. Candidate priority remains explicit pool policy; price comparisons are normalized by unit and currency, with unknown price sorted after known comparable prices.                                                                        |
 | `ORIGIN_CA_CERT_VALIDITY_DAYS`                  | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                                                                                                        |
+
+The `rolloutCohortPercent` field in capacity-pool selection settings accepts 0–100
+(default 100). `resolvePlacementRollout` in `services/placement-rollout.ts` assigns
+stable user/pool cohorts. Enabled cohorts use the pool's configured ranking;
+other cohorts use native `balanced` ranking while the reuse selector records
+which host the configured strategy would select and why the selections differ.
+The same eligible host set feeds both comparisons. Pool precedence, membership,
+credential generation, workload role, aggregate reservations, and paid allocation
+fences remain enforced at every percentage. Reducing rollout changes ranking;
+it never restores legacy size labels as allocation authority. Settings and plan
+columns remain additive, and readers accept plans without rollout diagnostics.
+
+### Upgrading existing compute pools
+
+Deploy the normal additive migrations before starting the updated Worker. Existing
+tasks, workspaces, credentials, and recorded hardware remain in place. Background
+reconciliation creates missing default pools from existing credentials and resumes
+in bounded batches; opening the settings page is not required. Larger installations
+may need several scheduled passes before every scope is ready.
+
+In project Infrastructure settings, inspect the effective default pool before
+starting new work. A project default takes precedence over a personal default,
+which takes precedence over installation capacity. These states need different
+responses:
+
+| Pool state          | What to do                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Migration pending   | Allow reconciliation to finish; if it persists, check scheduled reconciliation errors and the affected credential. |
+| Configured empty    | Select a supported offering in that pool. An empty configured pool intentionally blocks new allocation.            |
+| Source disabled     | Re-enable or replace the pool's credential source.                                                                 |
+| Catalog unavailable | Check provider access and retry after inventory refresh. A failed refresh preserves the last valid inventory.      |
+| Configured ready    | Start a small test workload and check its requested resources and provider-native hardware in the node details.    |
+
+An administrator can verify completion in D1 by inspecting `capacity_pools`:
+`migration_state` must be `complete` for the affected pool. The durable user and
+project backfill cursors are stored in `platform_settings` under
+`capacityPools.backfill.userCursor.v1` and `capacityPools.backfill.projectCursor.v1`.
+Their presence indicates resumable progress, not an error. Do not delete pools or
+reset cursors to resolve an unavailable credential.
+
+Existing nodes without verified pool and provider identity may finish their
+current work but are not automatically treated as eligible pool capacity. New
+work must pass the current pool, credential, and resource checks. Previously
+recorded hardware remains visible even if an offering is later removed. Old
+browser, API, CLI, and MCP size fields remain accepted as compatibility inputs;
+new resource fields take precedence at the same configuration layer. Saved
+reservations survive retry rather than adopting changed defaults.
+
+For a ranking rollback, reduce `rolloutCohortPercent` in the effective selection
+settings. This uses balanced ranking for the excluded cohort while retaining
+pool authorization and capacity checks. It does not roll back migrations, revive
+removed offerings, or permit reuse of unverified nodes. Keep the additive schema
+and saved plans; do not drop columns or recreate tables as a rollback step.
 
 Activity coalescing and binding caches are per Worker isolate, so burst reduction scales with the number of active isolates for the same session. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
 
@@ -276,22 +332,22 @@ Google login and Google infrastructure authorization are independent credential 
 
 Configuring one family never enables or modifies the other. Users who choose service-account JSON do not need either infrastructure OAuth variable.
 
-| Variable                             | Default                                          | Description                                                                                 |
-| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` | `65536`                                          | Maximum UTF-8 byte size accepted by `PUT /api/gcp/service-account`                          |
-| `GCP_DEFAULT_ZONE`                   | `us-central1-a`                                  | Default Compute zone                                                                        |
-| `GCP_IMAGE_FAMILY`                   | `ubuntu-2404-lts-amd64`                          | Compute image family                                                                        |
-| `GCP_IMAGE_PROJECT`                  | `ubuntu-os-cloud`                                | Compute image project                                                                       |
-| `GCP_DISK_SIZE_GB`                   | `50`                                             | Boot disk size                                                                              |
-| `GCP_TOKEN_CACHE_TTL_SECONDS`        | `3300`                                           | Maximum derivative access-token cache TTL; actual TTL is capped by Google's returned expiry |
-| `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS`  | `600`                                            | SAM identity-token lifetime for WIF                                                         |
-| `GCP_OPERATION_POLL_TIMEOUT_MS`      | `300000`                                         | Maximum wait for GCP asynchronous operations                                                |
-| `GCP_API_TIMEOUT_MS`                 | `30000`                                          | GCP OAuth, IAM, and Compute request timeout                                                 |
-| `GCP_STS_SCOPE`                      | `https://www.googleapis.com/auth/cloud-platform` | WIF STS exchange scope                                                                      |
-| `GCP_SA_IMPERSONATION_SCOPES`        | `https://www.googleapis.com/auth/compute`        | Comma-separated scopes for WIF service-account impersonation                                |
-| `GCP_SA_TOKEN_LIFETIME_SECONDS`      | `3600`                                           | WIF impersonated access-token lifetime                                                      |
-| `GCP_STS_TOKEN_URL`                  | `https://sts.googleapis.com/v1/token`            | WIF STS endpoint override for controlled environments                                       |
-| `GCP_IAM_CREDENTIALS_BASE_URL`       | Google IAM Credentials API                       | WIF impersonation base URL override                                                         |
+| Variable                             | Default                                          | Description                                                                                                                                                                                       |
+| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` | `65536`                                          | Maximum UTF-8 byte size accepted by `PUT /api/gcp/service-account`                                                                                                                                |
+| `GCP_DEFAULT_ZONE`                   | `us-central1-a`                                  | Default Compute zone                                                                                                                                                                              |
+| `GCP_IMAGE_FAMILY`                   | `ubuntu-2404-lts-amd64`                          | Compute image family. Native image overrides may be a family name or a Compute Engine image/family reference.                                                                                     |
+| `GCP_IMAGE_PROJECT`                  | `ubuntu-os-cloud`                                | Compute image project                                                                                                                                                                             |
+| `GCP_DISK_SIZE_GB`                   | `50`                                             | Default boot disk size for GCP legacy callers and native requests without `bootDiskSizeGb`. A native VM request with `bootDiskSizeGb` overrides this value before the Compute Engine insert call. |
+| `GCP_TOKEN_CACHE_TTL_SECONDS`        | `3300`                                           | Maximum derivative access-token cache TTL; actual TTL is capped by Google's returned expiry                                                                                                       |
+| `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS`  | `600`                                            | SAM identity-token lifetime for WIF                                                                                                                                                               |
+| `GCP_OPERATION_POLL_TIMEOUT_MS`      | `300000`                                         | Maximum wait for GCP asynchronous operations                                                                                                                                                      |
+| `GCP_API_TIMEOUT_MS`                 | `30000`                                          | GCP OAuth, IAM, and Compute request timeout                                                                                                                                                       |
+| `GCP_STS_SCOPE`                      | `https://www.googleapis.com/auth/cloud-platform` | WIF STS exchange scope                                                                                                                                                                            |
+| `GCP_SA_IMPERSONATION_SCOPES`        | `https://www.googleapis.com/auth/compute`        | Comma-separated scopes for WIF service-account impersonation                                                                                                                                      |
+| `GCP_SA_TOKEN_LIFETIME_SECONDS`      | `3600`                                           | WIF impersonated access-token lifetime                                                                                                                                                            |
+| `GCP_STS_TOKEN_URL`                  | `https://sts.googleapis.com/v1/token`            | WIF STS endpoint override for controlled environments                                                                                                                                             |
+| `GCP_IAM_CREDENTIALS_BASE_URL`       | Google IAM Credentials API                       | WIF impersonation base URL override                                                                                                                                                               |
 
 The service-account JWT bearer flow always uses `https://oauth2.googleapis.com/token`; it has no endpoint override, and uploaded `token_uri` values are ignored. Source credentials are encrypted in D1. Only derivative short-lived tokens are cached.
 
@@ -451,6 +507,19 @@ unauthenticated `/api/config/*` endpoints are marked `public`. Endpoints returni
 | `PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS` | `0`     | `max-age` for project agent-profile and skill lists (0 = always revalidate) |
 | `PROJECT_REFERENCE_CACHE_SWR_SECONDS`     | `30`    | `stale-while-revalidate` for project agent-profile and skill lists          |
 
+## Durable Direct Provisioning
+
+Direct node allocation and workspace creation use isolated NodeLifecycle Durable Object instances. These optional Worker runtime overrides accept positive integers; invalid or unset values use the defaults.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` | `5000` (5 s) | Allocation/reconciliation request budget, also used for background readiness and workspace dispatch. |
+| `NODE_PROVISIONING_RETRY_INTERVAL_MS` | `30000` (30 s) | Delay between durable provisioning attempts. |
+| `NODE_PROVISIONING_MAX_AGE_MS` | `900000` (15 min) | Maximum provisioning intent age before retries stop. |
+| `NODE_PROVISIONING_MAX_ATTEMPTS` | `30` | Maximum provisioning attempts before retries stop. |
+
+Reaching either the age or attempt limit stops allocation retries. Diagnostic publication then uses a separate retry budget with the same interval and attempt limit; the age limit applies only to allocation and reconciliation. The unresolved intent is retained for inspection. Empty provider inventory does not authorize another provider create request or establish cleanup proof.
+
 ## Warm Node Pooling
 
 | Variable                               | Default            | Description                                                                                                                      |
@@ -475,6 +544,12 @@ Reaping only ever applies to nodes with `node_role = 'workspace'` and
 and legitimately hold zero workspaces forever, so they are never reaped by these
 timers; they are released when their last deployment environment is deleted.
 
+Stopped managed VM nodes created directly through a canonical pool can also be
+reaped using their server-recorded pool, credential, and native-offering identity.
+They retain the same workspace-activity and active-claim guards. A short project
+warm timeout does not bypass the workspace idle window. Runtime teardown preserves
+the saved snapshot and conversation for recovery on a fresh node.
+
 | Variable                                           | Default            | Description                                                                                                                                                                                                                                                |
 | -------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NODE_WORKSPACE_IDLE_TIMEOUT_MS`                   | `1800000` (30 min) | Last-workspace-activity window before an auto-provisioned `node_role = 'workspace'` node with no active workspaces can be destroyed. Uses `COALESCE(MAX(workspaces.updated_at), nodes.created_at)`, never heartbeat-updated `nodes.updated_at`.            |
@@ -482,6 +557,8 @@ timers; they are released when their last deployment environment is deleted.
 | `NODE_ABSOLUTE_MAX_LIFETIME_MS`                    | `86400000` (24 hr) | Hard ceiling on auto-provisioned workspace node age. Applies even when a workspace row still reports `running`, provided no workspace has reported activity within the idle window — this is what stops a stuck workspace row from making a node immortal. |
 | `NODE_CLEANUP_SWEEP_LIMIT`                         | `25`               | Max node candidates processed per cleanup phase per cron run.                                                                                                                                                                                              |
 | `NODE_CLEANUP_FAILURE_BACKOFF_MS`                  | `3600000` (1 hr)   | Expiring exclusion applied to failed cleanup candidates so a permanent provider error cannot monopolize the bounded page.                                                                                                                                  |
+| `NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS` | `20000` (20 sec) | Wall-clock budget for stopped-node handoff. Candidates not started within the budget remain eligible for the next sweep. |
+| `NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS` | `5000` (5 sec) | Per-candidate provider/DNS deadline during stopped-node handoff, capped by remaining sweep time. Provider failures enter cleanup backoff. |
 | `WORKSPACE_CLEANUP_SWEEP_LIMIT`                    | `50`               | Max workspace candidates processed per cleanup phase per cron run.                                                                                                                                                                                         |
 | `NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS`         | `5000` (5 s)       | VM-agent request timeout for background sweeps. Deliberately far below the interactive `NODE_AGENT_REQUEST_TIMEOUT_MS` (30 s) so a sweep over unreachable nodes cannot exhaust the Worker's wall-clock budget.                                             |
 | `WORKSPACE_DELETION_RETRY_BASE_MS`                 | `60000` (1 min)    | Initial retry delay after a VM workspace deletion remains unconfirmed.                                                                                                                                                                                     |
@@ -754,7 +831,7 @@ Durable prompt delivery is enabled by default so a follow-up can remain queued w
 | `PROMPT_DELIVERY_RETRY_MAX_MS`               | `300000`          | Maximum exponential retry delay.                                                                                |
 | `PROMPT_DELIVERY_TTL_MS`                     | `3600000`         | Maximum unresolved delivery lifetime.                                                                           |
 | `PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS`         | `30000`           | Age at which an unconfirmed claim enters receipt reconciliation.                                                |
-| `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`      | `5000`            | Timeout for background VM delivery and receipt calls.                                                           |
+| `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`      | `5000`            | Deadline for pre-send target/recovery preparation; also bounds background VM submit and receipt calls. Preparation timeouts remain retryable without sending a prompt. |
 | `PROMPT_DELIVERY_MIN_ALARM_DELAY_MS`         | `1000`            | Minimum delay before the next delivery alarm.                                                                   |
 | `ACP_LONG_TURN_SUPERVISOR_ENABLED`           | `false`           | Reserved long-turn candidate/preemption engine switch; this release leaves it inert.                            |
 | `ACP_LONG_TURN_CHECKPOINT_MS`                | `18000000` (5 hr) | Reserved checkpoint eligibility threshold.                                                                      |
@@ -838,22 +915,28 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 
 ## Platform Limits
 
-| Variable                                     | Default            | Description                                                                                                                |
-| -------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `MAX_NODES_PER_USER`                         | `10`               | Max nodes per user                                                                                                         |
-| `MAX_WORKSPACES_PER_NODE`                    | `3`                | Additional hard workspace-count cap; declared CPU, memory, disk, and exclusivity reservations are the primary reuse limits |
-| `VM_ADMISSION_CONTROL_MODE`                  | `enforce`          | VM task/session admission mode: `off`, `shadow`, or `enforce`                                                              |
-| `VM_ADMISSION_LEASE_TTL_MS`                  | `1200000` (20 min) | Fenced provisioning-claim lease duration                                                                                   |
-| `VM_ADMISSION_RETRY_MIN_MS`                  | `15000`            | Minimum retry delay for tasks waiting on VM capacity                                                                       |
-| `VM_ADMISSION_RETRY_MAX_MS`                  | `60000`            | Maximum retry delay for tasks waiting on VM capacity                                                                       |
-| `VM_ADMISSION_WAIT_TIMEOUT_MS`               | `7200000` (2 h)    | Maximum visible wait for VM capacity before failing the task                                                               |
-| `VM_ADMISSION_PROVIDER_COOLDOWN_MS`          | `600000` (10 min)  | Cooldown after provider/account capacity errors such as Hetzner server limits                                              |
-| `VM_ADMISSION_WAKE_BATCH_SIZE`               | `25`               | Maximum waiting TaskRunner DOs nudged by one capacity event                                                                |
-| `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` | `500`              | Maximum provider diagnostic message length stored on admission records                                                     |
-| `MAX_AGENT_SESSIONS_PER_WORKSPACE`           | `10`               | Max concurrent agent sessions                                                                                              |
-| `MAX_PROJECTS_PER_USER`                      | `100`              | Max projects per user                                                                                                      |
-| `MAX_TASKS_PER_PROJECT`                      | `10000`            | Max ideas per project                                                                                                      |
-| `MAX_TASK_MESSAGE_LENGTH`                    | `16000`            | Max idea description length                                                                                                |
+| Variable                                        | Default            | Description                                                                                                           |
+| ----------------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `MAX_NODES_PER_USER`                            | `10`               | Max nodes per user                                                                                                    |
+| `MAX_WORKSPACES_PER_NODE`                       | `3`                | Additional workspace-count cap; aggregate CPU, memory, disk and exclusivity reservations are the primary reuse limits |
+| `TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT`        | `100`              | CPU millicore share budget per node for aggregate workspace reservations                                              |
+| `TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB`          | `512`              | Memory reserved for the host/VM agent before admitting occupied-node packing                                          |
+| `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT` | `90`               | Fresh node disk telemetry at or above this percent vetoes VM workspace reuse                                          |
+| `TASK_RUN_NODE_METRICS_TTL_MS`                  | `180000`           | Freshness window for occupied-node resource telemetry                                                                 |
+| `TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT`        | `40`               | CPU weight in existing-node load scoring after load average is normalized by vCPU                                     |
+| `TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT`     | `60`               | Memory weight in existing-node load scoring                                                                           |
+| `VM_ADMISSION_CONTROL_MODE`                     | `enforce`          | VM task/session admission mode: `off`, `shadow`, or `enforce`                                                         |
+| `VM_ADMISSION_LEASE_TTL_MS`                     | `1200000` (20 min) | Fenced provisioning-claim lease duration                                                                              |
+| `VM_ADMISSION_RETRY_MIN_MS`                     | `15000`            | Minimum retry delay for tasks waiting on VM capacity                                                                  |
+| `VM_ADMISSION_RETRY_MAX_MS`                     | `60000`            | Maximum retry delay for tasks waiting on VM capacity                                                                  |
+| `VM_ADMISSION_WAIT_TIMEOUT_MS`                  | `7200000` (2 h)    | Maximum visible wait for VM capacity before failing the task                                                          |
+| `VM_ADMISSION_PROVIDER_COOLDOWN_MS`             | `600000` (10 min)  | Cooldown after provider/account capacity errors such as Hetzner server limits                                         |
+| `VM_ADMISSION_WAKE_BATCH_SIZE`                  | `25`               | Maximum waiting TaskRunner DOs nudged by one capacity event                                                           |
+| `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH`    | `500`              | Maximum provider diagnostic message length stored on admission records                                                |
+| `MAX_AGENT_SESSIONS_PER_WORKSPACE`              | `10`               | Max concurrent agent sessions                                                                                         |
+| `MAX_PROJECTS_PER_USER`                         | `100`              | Max projects per user                                                                                                 |
+| `MAX_TASKS_PER_PROJECT`                         | `10000`            | Max ideas per project                                                                                                 |
+| `MAX_TASK_MESSAGE_LENGTH`                       | `16000`            | Max idea description length                                                                                           |
 
 ## Durable Object Limits
 
@@ -1152,13 +1235,23 @@ lifecycle bookkeeping.
 
 ## VM TLS
 
-| Variable                       | Default | Description                                                           |
-| ------------------------------ | ------- | --------------------------------------------------------------------- |
-| `VM_AGENT_PROTOCOL`            | `https` | Protocol for VM agent communication                                   |
-| `VM_AGENT_PORT`                | `8443`  | VM agent listening port                                               |
-| `ORIGIN_CA_CERT_VALIDITY_DAYS` | `7`     | Validity for per-node Origin CA certificates signed by the API Worker |
+| Variable                                       | Default | Description                                                                      |
+| ---------------------------------------------- | ------- | -------------------------------------------------------------------------------- |
+| `VM_AGENT_PROTOCOL`                            | `https` | Protocol for VM agent communication                                              |
+| `VM_AGENT_PORT`                                | `8443`  | VM agent listening port                                                          |
+| `VM_AGENT_MEMORY_RESERVE_MB`                   | `512`   | Optional Docker workload-slice memory reserve for VM-agent reachability headroom |
+| `SAM_INFRA_SLICE_MEMORY_MIN_MB`                | `256`   | systemd `MemoryMin` for the VM-agent/system-services slice                       |
+| `DOCKER_MEMORY_MIN_MB`                         | `512`   | Minimum Docker `MemoryMax` retained when `VM_AGENT_MEMORY_RESERVE_MB` is enabled |
+| `HEARTBEAT_DOCKER_STATS_TIMEOUT`               | `2s`    | VM-agent timeout for heartbeat Docker stats used by workspace memory telemetry   |
+| `HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS`   | `8`     | Maximum workspace containers measured by one heartbeat                           |
+| `HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES` | `65536` | Maximum bytes read from each heartbeat Docker metric command                     |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS`                 | `7`     | Validity for per-node Origin CA certificates signed by the API Worker            |
 
 New nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
+
+VM workspace admission uses persisted `workspaces.resolved_reservation_json` snapshots and provider capacity fields in a final single-statement D1 reservation (`apps/api/src/services/workspace-placement.ts`). Advisory selection applies the same aggregate accounting, host-memory reserve, measured CPU/memory/disk pressure vetoes, telemetry TTL, and normalized CPU-load scoring (`apps/api/src/services/workspace-resource-capacity.ts`, `apps/api/src/durable-objects/task-runner/node-selection.ts`). VM agents report optional per-workspace memory telemetry in heartbeat metrics when Docker stats can be collected within the configured bounds (`packages/vm-agent/internal/server/health.go`, `packages/vm-agent/internal/sysinfo/docker_metrics.go`).
+
+For managed VM nodes, the effective host-memory reserve contract is shared by admission and cloud-init: project scaling overrides win, then `TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB`, then `VM_AGENT_MEMORY_RESERVE_MB`, then the 512 MB default. Cloud-init applies the cgroup hierarchy only on newly provisioned nodes. Existing nodes need a drain/recreate, a VM-agent/bootstrap upgrade flow, or a manual in-place systemd/Docker reconfiguration before they can be treated as protected by the workload-slice cap; SAM does not destructively evict existing workspaces to retrofit this.
 
 ## Journald Configuration (VM)
 

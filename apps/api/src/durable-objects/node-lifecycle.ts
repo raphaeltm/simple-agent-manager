@@ -19,10 +19,11 @@
  *   cancelWorkspaceDeletion(workspaceId) → removes pending deletion, recalculates alarm
  *   alarm() → also processes expired workspace deletions (calls VM agent, updates D1)
  *
- * Actual infrastructure destruction (Hetzner API, DNS) is handled by the
- * cron sweep, NOT by this DO — because user credentials are encrypted in D1
- * and must be decrypted with CREDENTIAL_ENCRYPTION_KEY (or ENCRYPTION_KEY
- * fallback) in the worker context via getCredentialEncryptionKey(env).
+ * Bare node-ID instances hand infrastructure destruction to the cron sweep.
+ * Prefixed allocation/workspace-create instances additionally own durable direct
+ * provisioning intents, isolated from this warm/deletion state machine. Their
+ * bounded background calls use the same full Worker bindings and credential
+ * resolution as TaskRunner provisioning.
  *
  * See: specs/021-task-chat-architecture/tasks.md (Phase 5)
  */
@@ -35,13 +36,16 @@ import {
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
+import type { Env } from '../env';
 import { log } from '../lib/logger';
+import type { DirectProvisioningInput } from '../services/direct-provisioning';
 import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
 import {
   isSessionRecoveryTaskAuthorized,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
+import { NodeLifecycleProvisioning } from './node-lifecycle-provisioning';
 import {
   type NodeLifecycleDeletionEnv,
   NodeLifecycleWorkspaceDeletionQueue,
@@ -71,6 +75,14 @@ interface StoredState {
 }
 
 export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
+  private provisioningController?: NodeLifecycleProvisioning;
+  private provisioning(): NodeLifecycleProvisioning {
+    return this.provisioningController ??= new NodeLifecycleProvisioning(this.ctx, this.env as Env);
+  }
+  async startProvisioning(input: DirectProvisioningInput): Promise<void> {
+    await this.provisioning().start(input);
+  }
+
   private async persistWarmClaim(
     nodeId: string,
     taskId: string,
@@ -167,7 +179,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   ): Promise<NodeLifecycleState> {
     // Resolve node class FIRST, before reading DO state. isUserOwnedNode does a D1 fetch (external
     // I/O), which opens the DO input gate. If it ran BETWEEN the state read and the storage.put
-    // below, a concurrent tryClaim (fired by node-selector's warm-node claim on every new task)
+    // below, a concurrent tryClaim (fired by the TaskRunner's warm-node claim on every new task)
     // could interleave during that fetch and then be silently stomped by our blind overwrite —
     // leaving the node stuck 'stopped' while serving a live workspace. Fetching it before the read
     // keeps the read→put critical section free of external I/O so the input gate serializes it,
@@ -451,6 +463,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    */
   async alarm(): Promise<void> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'NodeLifecycle')) return;
+    if (await this.provisioning().alarm()) return;
 
     // Workspace deletion is independent from warm-pool state. In particular,
     // long-lived conversation workspaces can sleep before markIdle() has ever

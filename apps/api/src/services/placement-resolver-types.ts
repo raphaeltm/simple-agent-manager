@@ -1,12 +1,17 @@
 import type {
   AgentProfileRuntime,
+  CapacityExhaustionPolicy,
   CapacityPlacementSnapshot,
+  CapacityPoolPlacementSettings,
   CapacityPoolScope,
   CapacityPoolStrategy,
   CapacityWorkloadRole,
   CredentialProvider,
   CredentialSource,
+  DefaultCapacityPoolEffectiveState,
+  PlacementRolloutDiagnostic,
   ResolvedResourceReservation,
+  ResourceRequirements,
   ResourceRequirementsSource,
   ResourceResolutionInput,
   TaskMode,
@@ -19,6 +24,11 @@ import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
 export type PlacementEntryPoint =
   | 'task-submit'
+  | 'direct-node'
+  | 'direct-workspace'
+  | 'deployment-provisioning'
+  | 'trial-orchestrator'
+  | 'session-snapshot-relay'
   | 'mcp-dispatch'
   | 'sam-session-dispatch'
   | 'trigger-submit'
@@ -47,6 +57,7 @@ export interface PlacementProjectDefaults {
   defaultWorkspaceProfile?: string | null;
   defaultDevcontainerConfigName?: string | null;
   defaultAgentType?: string | null;
+  resourceRequirementsJson?: string | null;
 }
 
 export interface PlacementProfileDefaults {
@@ -54,6 +65,8 @@ export interface PlacementProfileDefaults {
   skillId?: string | null;
   agentType?: string | null;
   vmSizeOverride?: string | null;
+  skillVmSizeOverride?: string | null;
+  agentProfileVmSizeOverride?: string | null;
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
@@ -61,11 +74,12 @@ export interface PlacementProfileDefaults {
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
   resourceRequirementsJson?: string | null;
+  resourceRequirementsSource?: PlacementProfileVmSizeSource | null;
 }
 
 export interface PlacementExplicitOverrides {
   vmSize?: VMSize | null;
-  vmSizeSource?: Extract<ResourceRequirementsSource, 'task' | 'trigger'>;
+  vmSizeSource?: ResourceRequirementsSource;
   provider?: CredentialProvider | string | null;
   vmLocation?: string | null;
   workspaceProfile?: WorkspaceProfile | null;
@@ -100,6 +114,11 @@ export interface TaskStartPlacementInput {
   taskModeDefault: PlacementTaskModeDefault;
   profileVmSizeSource?: PlacementProfileVmSizeSource;
   resourceRequirements?: ResourceResolutionInput;
+  workloadRole?: CapacityWorkloadRole;
+  resolvedReservationOverride?: ResolvedResourceReservation | null;
+  placementSettings?: CapacityPoolPlacementSettings | null;
+  platformDefaults?: Required<ResourceRequirements>;
+  legacyWorkloadMapping?: Record<VMSize, Required<ResourceRequirements>>;
   validateLocation?: boolean;
   runtimeDecision?: WorkspaceRuntimeDecision | null;
 }
@@ -133,6 +152,8 @@ export interface TaskStartPlacement {
   taskMode: TaskMode;
   agentType: string | null;
   resolvedReservation: ResolvedResourceReservation;
+  workloadRole: CapacityWorkloadRole;
+  placementSettings?: CapacityPoolPlacementSettings | null;
   credentialLookup: PlacementCredentialLookup;
   inheritedCredentialAttribution: Required<PlacementCredentialAttributionInput>;
   runtime: PlacementRuntimeResolution;
@@ -142,6 +163,8 @@ export interface TaskStartCapacityCandidate {
   id: string;
   poolId: string;
   capacitySourceId: string;
+  capacitySourceGeneration: number | null;
+  capacitySourceExternalRef: string | null;
   provider: CredentialProvider;
   location: VMLocation;
   workloadRole: CapacityWorkloadRole;
@@ -153,16 +176,24 @@ export interface TaskStartCapacityCandidate {
   providerInstanceVcpuCount: number;
   providerInstanceMemoryMb: number;
   providerInstanceDiskGb: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
   providerInstancePriceDisplay: string | null;
   providerInstancePriceCurrency: string | null;
   providerInstancePriceMonthlyCents: number | null;
   providerInstancePriceHourlyMicros: number | null;
+  priceComparability: 'known' | 'unknown' | 'currency-mismatch';
+  catalogAvailability: 'available' | 'last-known-unavailable';
   priority: number;
   candidateOrder: number;
   credentialAttributionSource: CredentialSource;
   placementCredentialSource: CredentialSource;
   placementCredentialReference: string | null;
   placementCredentialVersion: number | null;
+  sourceAuthorityGeneration?: number;
+  candidateAuthorityGeneration?: number;
+  capacityAuthorityGeneration?: number;
   capacityPoolProjectId: string | null;
   /**
    * Optional precomputed placement snapshot. TaskRunner state may omit this to
@@ -173,10 +204,14 @@ export interface TaskStartCapacityCandidate {
 }
 
 export interface TaskStartCapacityPoolSelection {
+  rollout?: PlacementRolloutDiagnostic;
   poolId: string;
   scope: CapacityPoolScope;
   revision: number;
   strategy: CapacityPoolStrategy;
+  exhaustionPolicy: CapacityExhaustionPolicy;
+  effectiveState: DefaultCapacityPoolEffectiveState;
+  selectionSettings: CapacityPoolPlacementSettings;
   capacityPoolProjectId: string | null;
   workloadRole: CapacityWorkloadRole;
   poolSnapshot: CapacityPlacementSnapshot;
@@ -191,10 +226,14 @@ export interface CapacityAwareNodePlacementRow {
   capacityPoolScope: string | null;
   capacityPoolRevision?: number | null;
   capacitySourceId: string | null;
+  capacitySourceGeneration?: number | null;
+  capacitySourceExternalRef?: string | null;
   capacityPoolCandidateId?: string | null;
   placementCredentialSource?: string | null;
   placementCredentialReference?: string | null;
   placementCredentialVersion?: number | null;
+  selectionSettingsVersion?: number | null;
+  capacityAuthorityGeneration?: number | null;
   capacityPoolProjectId: string | null;
   workloadRole: string | null;
   providerInstanceType?: string | null;
@@ -226,4 +265,6 @@ export interface TaskStartPlacementWithCredential extends PlacementCredentialAtt
 export type PlacementResolutionErrorCode =
   | 'invalid-provider'
   | 'invalid-location'
+  | 'invalid-resource-requirements'
+  | 'invalid-credential-attribution'
   | 'no-eligible-capacity-candidate';

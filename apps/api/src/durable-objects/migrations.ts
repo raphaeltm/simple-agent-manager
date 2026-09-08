@@ -242,7 +242,6 @@ const PROJECT_EVENT_TABLE_SCHEMAS: readonly MigrationTableSchema[] = [
     },
     constraints: ['PRIMARY KEY (project_id, category)'],
   },
-
 ];
 
 const PROJECT_EVENT_INDEX_SCHEMAS: readonly MigrationIndexSchema[] = [
@@ -1840,8 +1839,10 @@ export const MIGRATIONS: Migration[] = [
     name: '045-project-data-compact-archive',
     run: (sql) => {
       const columns = sql.exec('PRAGMA table_info(project_data_archive_target_sessions)').toArray();
-      if (!columns.some(column => column.name === 'storage_format')) {
-        sql.exec("ALTER TABLE project_data_archive_target_sessions ADD COLUMN storage_format TEXT NOT NULL DEFAULT 'sqlite-v1'");
+      if (!columns.some((column) => column.name === 'storage_format')) {
+        sql.exec(
+          "ALTER TABLE project_data_archive_target_sessions ADD COLUMN storage_format TEXT NOT NULL DEFAULT 'sqlite-v1'"
+        );
       }
       sql.exec(`CREATE TABLE IF NOT EXISTS project_data_archive_raw_chunks (
         session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
@@ -1858,6 +1859,17 @@ export const MIGRATIONS: Migration[] = [
       )`);
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_archive_raw_chunk_time
         ON project_data_archive_raw_chunks(session_id, first_created_at, last_created_at)`);
+    },
+  },
+  {
+    name: '046-prompt-delivery-submit-phase',
+    run: (sql) => {
+      const columns = sql.exec('PRAGMA table_info(session_inbox)').toArray();
+      if (!columns.some((column) => column.name === 'prompt_delivery_phase')) {
+        // Existing claims remain NULL: they may have sent a prompt before this
+        // checkpoint existed, so deployment must not turn them into safe retries.
+        sql.exec('ALTER TABLE session_inbox ADD COLUMN prompt_delivery_phase TEXT');
+      }
     },
   },
 ];

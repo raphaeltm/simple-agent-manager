@@ -289,10 +289,14 @@ describe('userHasOwnCloudCredentials with targetProvider', () => {
 describe('quota enforcement pattern: credential source, not existence', () => {
   const submitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
   const nodeStepsSource = readFileSync(
-    resolve(process.cwd(), 'src/durable-objects/task-runner/node-steps.ts'),
+    resolve(process.cwd(), 'src/durable-objects/task-runner/node-provisioning-step.ts'),
     'utf8'
   );
   const nodesSource = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
+  const canonicalAllocationSource = readFileSync(
+    resolve(process.cwd(), 'src/services/canonical-vm-allocation.ts'),
+    'utf8'
+  );
   const dispatchSource = readFileSync(
     resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
     'utf8'
@@ -312,12 +316,12 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(submitSource).not.toContain('userHasByocCredentials');
     });
 
-    it('node-steps.ts does NOT have raw SQL credential check', () => {
+    it('node-provisioning-step.ts does NOT have raw SQL credential check', () => {
       // The old pattern: SELECT id FROM credentials WHERE ... LIMIT 1
       expect(nodeStepsSource).not.toContain("credential_type = 'cloud-provider' LIMIT 1");
     });
 
-    it('node-steps.ts does NOT use hasOwnCreds guard', () => {
+    it('node-provisioning-step.ts does NOT use hasOwnCreds guard', () => {
       expect(nodeStepsSource).not.toContain('if (!hasOwnCreds)');
     });
 
@@ -338,12 +342,19 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(submitSource).not.toContain('resolveCredentialSource');
     });
 
-    it('node-steps.ts uses resolveCredentialSource', () => {
+    it('node-provisioning-step.ts uses resolveCredentialSource', () => {
       expect(nodeStepsSource).toContain('resolveCredentialSource');
     });
 
-    it('nodes.ts (manual creation) uses resolveCredentialSource', () => {
-      expect(nodesSource).toContain('resolveCredentialSource');
+    it('nodes.ts (manual creation) resolves credentials through the canonical allocation plan', () => {
+      // Manual node creation no longer calls resolveCredentialSource directly:
+      // every VM writer goes through the one canonical allocation entrypoint,
+      // which resolves the credential source (and the capacity-aware quota
+      // source) centrally. The invariant is "no local credential resolution",
+      // not "this specific call site".
+      expect(nodesSource).toContain('resolveCanonicalVmAllocationPlan');
+      expect(nodesSource).not.toContain('resolveCredentialSource(');
+      expect(canonicalAllocationSource).toContain('resolveCredentialSource');
     });
 
     it('dispatch-tool.ts (MCP dispatch) uses the task-start placement credential resolver', () => {
@@ -367,13 +378,14 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(submitSource).toContain("quotaCredentialSource === 'platform'");
     });
 
-    it('node-steps.ts checks capacity-aware quota source === platform', () => {
+    it('node-provisioning-step.ts checks capacity-aware quota source === platform', () => {
       expect(nodeStepsSource).toContain('resolveCapacityAwareQuotaCredentialSource');
       expect(nodeStepsSource).toContain("quotaCredentialSource === 'platform'");
     });
 
-    it('nodes.ts checks credentialSource === platform', () => {
-      expect(nodesSource).toContain("credResult.credentialSource === 'platform'");
+    it('nodes.ts checks the canonical plan quota credential source === platform', () => {
+      expect(canonicalAllocationSource).toContain('resolveCapacityAwareQuotaCredentialSource');
+      expect(nodesSource).toContain("allocation.quotaCredentialSource === 'platform'");
     });
 
     it('dispatch-tool.ts checks capacity-aware quota source === platform', () => {
@@ -397,12 +409,14 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(placementResolverSource).toContain('credentialLookup.provider');
     });
 
-    it('node-steps.ts passes cloudProvider from config', () => {
+    it('node-provisioning-step.ts passes cloudProvider from config', () => {
       expect(nodeStepsSource).toContain('state.config.cloudProvider');
     });
 
-    it('nodes.ts passes provider from request body for user-scoped manual creation', () => {
-      expect(nodesSource).toContain('resolveCredentialSource(db, userId, provider ?? undefined)');
+    it('nodes.ts passes the requested provider into the canonical allocation plan', () => {
+      const section = nodesSource.slice(nodesSource.indexOf('resolveCanonicalVmAllocationPlan('));
+      expect(section).toContain('provider');
+      expect(canonicalAllocationSource).toContain('credentialLookup.provider');
     });
 
     it('dispatch-tool.ts passes inherited root attribution scope', () => {
@@ -427,7 +441,7 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(submitSource).toContain('quotaCheck.limit');
     });
 
-    it('node-steps.ts rejects with permanent quota exceeded error', () => {
+    it('node-provisioning-step.ts rejects with permanent quota exceeded error', () => {
       expect(nodeStepsSource).toContain('Monthly compute quota exceeded');
       expect(nodeStepsSource).toContain('quotaCheck.used');
       expect(nodeStepsSource).toContain('quotaCheck.limit');
@@ -445,8 +459,8 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(dispatchSource).toContain('Cloud provider credentials required');
     });
 
-    it('node-steps.ts rejects with permanent error when no credential exists', () => {
-      // node-steps.ts now has an explicit null check matching submit.ts and nodes.ts
+    it('node-provisioning-step.ts rejects with permanent error when no credential exists', () => {
+      // node-provisioning-step.ts now has an explicit null check matching submit.ts and nodes.ts
       expect(nodeStepsSource).toContain('No cloud provider credentials available');
       expect(nodeStepsSource).toContain('{ permanent: true }');
     });
@@ -460,7 +474,7 @@ describe('quota enforcement pattern: credential source, not existence', () => {
       expect(submitSource).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
     });
 
-    it('node-steps.ts respects COMPUTE_QUOTA_ENFORCEMENT_ENABLED', () => {
+    it('node-provisioning-step.ts respects COMPUTE_QUOTA_ENFORCEMENT_ENABLED', () => {
       expect(nodeStepsSource).toContain('COMPUTE_QUOTA_ENFORCEMENT_ENABLED');
     });
 
@@ -488,7 +502,7 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     });
 
     it('nodes.ts checks quota before createNodeRecord', () => {
-      const quotaIdx = nodesSource.indexOf('resolveCredentialSource');
+      const quotaIdx = nodesSource.indexOf('checkQuotaForUser(db, userId)');
       const createIdx = nodesSource.indexOf('createNodeRecord(c.env');
       expect(quotaIdx).toBeGreaterThan(0);
       expect(createIdx).toBeGreaterThan(0);

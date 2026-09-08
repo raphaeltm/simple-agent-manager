@@ -1,6 +1,8 @@
 import { AGENT_EFFORT_LEVELS, AGENT_PROFILE_RUNTIMES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { ResourceRequirementsSchema } from './resource-requirements';
+
 const GitHubCliPermissionLevelSchema = v.picklist(['none', 'read', 'write']);
 const GitHubCliContentsPermissionLevelSchema = v.picklist(['read', 'write']);
 const AgentEffortSchema = v.picklist([...AGENT_EFFORT_LEVELS]);
@@ -29,6 +31,8 @@ export const CreateAgentProfileSchema = v.object({
   maxTurns: v.optional(v.nullable(v.number())),
   timeoutMinutes: v.optional(v.nullable(v.number())),
   vmSizeOverride: v.optional(v.nullable(v.string())),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
+  resourceRequirementsJson: v.optional(v.nullable(v.string())),
   provider: v.optional(v.nullable(v.string())),
   vmLocation: v.optional(v.nullable(v.string())),
   workspaceProfile: v.optional(v.nullable(v.string())),
@@ -49,6 +53,8 @@ export const UpdateAgentProfileSchema = v.object({
   maxTurns: v.optional(v.nullable(v.number())),
   timeoutMinutes: v.optional(v.nullable(v.number())),
   vmSizeOverride: v.optional(v.nullable(v.string())),
+  resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
+  resourceRequirementsJson: v.optional(v.nullable(v.string())),
   provider: v.optional(v.nullable(v.string())),
   vmLocation: v.optional(v.nullable(v.string())),
   workspaceProfile: v.optional(v.nullable(v.string())),

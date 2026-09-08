@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
+import { agentSessionRoutes } from '../../../src/routes/workspaces/agent-sessions';
 
 // Must match RUNTIME_REQUEST_INTERRUPTED_MESSAGE in
 // src/durable-objects/vm-agent-container-recovery.ts (inlined to keep this unit
@@ -94,8 +95,9 @@ vi.mock('drizzle-orm/d1', () => ({
   }),
 }));
 
-async function createTestApp() {
-  const { agentSessionRoutes } = await import('../../../src/routes/workspaces/agent-sessions');
+// Routes import during collection so cold compilation is outside the callback test deadline.
+function createTestApp() {
+
   const app = new Hono<{ Bindings: Env }>();
   app.route('/api/workspaces', agentSessionRoutes);
   app.onError((error, c) => {
@@ -148,7 +150,7 @@ describe('agent session Instant recovery route', () => {
           resolveRecovery = resolve;
         })
     );
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const responsePromise = postResume(app);
     await vi.waitFor(() =>
@@ -185,7 +187,7 @@ describe('agent session Instant recovery route', () => {
       mocks.session.updatedAt = '2026-07-21T00:05:00.000Z';
       return { ok: true, status: 'running', degraded: false };
     });
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const response = await postResume(app);
 
@@ -206,7 +208,7 @@ describe('agent session Instant recovery route', () => {
       message:
         'The Instant session could not restore its last safe checkpoint. Your transcript and partial output are still available.',
     });
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const response = await postResume(app);
 
@@ -227,7 +229,7 @@ describe('agent session Instant recovery route', () => {
       code: 'RUNTIME_STOPPED',
       message: 'This Instant session was stopped and cannot be resumed.',
     });
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const response = await postResume(app);
 
@@ -247,7 +249,7 @@ describe('agent session Instant recovery route', () => {
     mocks.session.status = 'suspended';
     mocks.session.suspendedAt = '2026-07-21T00:01:00.000Z';
     mocks.session.errorMessage = null;
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const response = await postResume(app);
 

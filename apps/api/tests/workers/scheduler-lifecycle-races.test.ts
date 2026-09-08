@@ -38,6 +38,29 @@ beforeAll(async () => {
   await seedProject(PROJECT_ID, USER_ID, INSTALLATION_ID);
 });
 
+async function seedPlacementNode(
+  nodeId: string,
+  options?: Parameters<typeof seedNode>[2]
+): Promise<void> {
+  await seedNode(nodeId, USER_ID, options);
+  // Bare seedNode rows have no trusted hardware and are intentionally refused
+  // by final admission. Model a provisioned, observed VM so these races reach
+  // the slot/cleanup CAS instead of failing an unrelated capacity prerequisite.
+  await env.DATABASE.prepare(
+    `UPDATE nodes SET
+       cloud_provider = 'hetzner', provider_instance_id = ?,
+       provider_instance_type = 'cx33',
+       observed_provider_instance_type = 'cx33',
+       observed_provider_instance_vcpu_count = 4,
+       observed_provider_instance_memory_mb = 8192,
+       observed_provider_instance_disk_gb = 80,
+       observed_hardware_source = 'observed'
+     WHERE id = ?`
+  )
+    .bind(`server-${nodeId}`, nodeId)
+    .run();
+}
+
 function placement(
   workspaceId: string,
   nodeId: string,
@@ -143,7 +166,7 @@ describe('scheduler lifecycle D1 races', () => {
   it('allows only one concurrent placement to consume the final node slot', async () => {
     for (let iteration = 0; iteration < RACE_REPETITIONS; iteration += 1) {
       const nodeId = `node-scheduler-final-slot-${iteration}`;
-      await seedNode(nodeId, USER_ID);
+      await seedPlacementNode(nodeId);
 
       const placements = [
         () =>
@@ -172,7 +195,7 @@ describe('scheduler lifecycle D1 races', () => {
       const nodeId = `node-scheduler-cleanup-placement-${iteration}`;
       const taskId = `task-scheduler-cleanup-placement-${iteration}`;
       const old = new Date(Date.now() - 60 * 60_000).toISOString();
-      await seedNode(nodeId, USER_ID, { createdAt: old, updatedAt: old });
+      await seedPlacementNode(nodeId, { createdAt: old, updatedAt: old });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
         status: 'in_progress',
         autoProvisionedNodeId: nodeId,
@@ -263,7 +286,7 @@ describe('scheduler lifecycle D1 races', () => {
     const old = new Date(Date.now() - 60 * 60_000).toISOString();
     const claimTime = new Date().toISOString();
 
-    await seedNode(nodeId, USER_ID, {
+    await seedPlacementNode(nodeId, {
       status: 'running',
       warmSince: old,
       createdAt: old,
@@ -364,7 +387,7 @@ describe('scheduler lifecycle D1 races', () => {
   it('makes the real TaskRunner reselect when its advisory node slot was consumed', async () => {
     const nodeId = 'node-scheduler-task-runner-reselect';
     const taskId = 'task-scheduler-task-runner-reselect';
-    await seedNode(nodeId, USER_ID);
+    await seedPlacementNode(nodeId);
     await seedWorkspace('workspace-scheduler-existing-occupant', nodeId, USER_ID, {
       projectId: PROJECT_ID,
       status: 'running',

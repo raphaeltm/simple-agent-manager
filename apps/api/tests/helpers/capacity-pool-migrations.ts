@@ -22,6 +22,24 @@ export const candidateCatalogMetadataMigrationSql = readDbMigration(
 export const capacitySourceExternalCredentialsMigrationSql = readDbMigration(
   '0129_capacity_source_external_credentials.sql'
 );
+export const capacityPoolPolicyContractMigrationSql = readDbMigration(
+  '0144_capacity_pool_policy_contract.sql'
+);
+export const capacityPoolGenerationFencingMigrationSql = readDbMigration(
+  '0145_capacity_pool_generation_fencing.sql'
+);
+export const runtimeNativeObservedMetadataMigrationSql = readDbMigration(
+  '0146_runtime_native_observed_metadata.sql'
+);
+export const capacitySourceAuthoritySnapshotsMigrationSql = readDbMigration(
+  '0148_capacity_source_authority_snapshots.sql'
+);
+export const capacityPoolAuthorityGenerationMigrationSql = readDbMigration(
+  '0152_capacity_pool_authority_generation.sql'
+);
+export const capacityPoolSelectionDigestMigrationSql = readDbMigration(
+  '0153_capacity_pool_selection_digest.sql'
+);
 
 export function applyCapacityPoolSchemaMigrations(database: SqliteMigrationTarget): void {
   database.exec(migrationSql);
@@ -29,4 +47,10 @@ export function applyCapacityPoolSchemaMigrations(database: SqliteMigrationTarge
   database.exec(concreteOfferingMigrationSql);
   database.exec(candidateCatalogMetadataMigrationSql);
   database.exec(capacitySourceExternalCredentialsMigrationSql);
+  database.exec(capacityPoolPolicyContractMigrationSql);
+  database.exec(capacityPoolGenerationFencingMigrationSql);
+  database.exec(runtimeNativeObservedMetadataMigrationSql);
+  database.exec(capacitySourceAuthoritySnapshotsMigrationSql);
+  database.exec(capacityPoolAuthorityGenerationMigrationSql);
+  database.exec(capacityPoolSelectionDigestMigrationSql);
 }
