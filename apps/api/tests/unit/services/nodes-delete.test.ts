@@ -679,7 +679,20 @@ describe('node resource deletion services', () => {
         placementCredentialVersion: null,
         placementCredentialFingerprint: null,
       },
-      'placementCredentialSource+placementCredentialReference',
+      'placementCredentialSource, placementCredentialReference',
+    ],
+    [
+      // A null binding can mean EITHER an invalid source OR an absent reference. The
+      // diagnostic must name only the one that actually failed, or it sends an operator
+      // to the wrong column (caught by CodeRabbit on this PR).
+      'a valid source but no reference',
+      { placementCredentialReference: null },
+      'placementCredentialReference',
+    ],
+    [
+      'a reference but an unrecognised source',
+      { placementCredentialSource: 'nonsense' },
+      'placementCredentialSource',
     ],
     [
       'a reference but no generation proof of either kind',
@@ -699,8 +712,10 @@ describe('node resource deletion services', () => {
     );
 
     expect(error.message).toContain('exact provider credential binding is missing');
-    // The diagnostic names exactly which prerequisites are absent (rule 49)...
-    expect(error.message).toContain(expectedMissing);
+    // The diagnostic names exactly which prerequisites are absent, and ONLY those (rule 49).
+    // Matching the parenthesised list in full is what makes this discriminating: a substring
+    // check would let the old conflated "source+reference" text satisfy a reference-only case.
+    expect(error.message).toContain(`(${expectedMissing})`);
     // ...without echoing the reference. It is an ID rather than a secret, but strict teardown
     // deliberately keeps it out of logs and error strings.
     expect(error.message).not.toContain('credentials:project-cloud-1');

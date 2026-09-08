@@ -115,7 +115,7 @@ No other call site of `exactProviderCredentialBindingFromPlacementSnapshot` chan
 
 ## Test evidence
 
-Baselines reconciled (rule 02): `nodes-delete` 35 → 39, `provider-credentials-edge-cases` 32 → 45 (the fail-closed disjuncts
+Baselines reconciled (rule 02): `nodes-delete` 35 → 41, `provider-credentials-edge-cases` 32 → 45 (the fail-closed disjuncts
 are one `it.each` table, so the case count exceeds the test count).
 Full `apps/api` suite reconciled separately: 9075 tests, 0 collection failures.
 
@@ -181,6 +181,7 @@ Fixed in this branch:
 | Three resolver "refuses" tests were absence-only in isolation | test-engineer | each now carries a liveness assertion in the same test — the same fixture, addressed with the row's current version, resolves |
 | Discrimination-check-2 recipe was imprecise and mislabelled a control | test-engineer | corrected above; both checks re-run with exact mutations |
 | Redundant type import (`ExactProviderCredentialBinding` from two modules) | cloudflare-specialist | consolidated into the barrel import |
+| Diagnostic conflated two distinct absent states: a `null` binding reported `placementCredentialSource+placementCredentialReference` whether the source was invalid OR the reference merely absent | CodeRabbit | reads the raw columns and names only the field that actually failed; two new disjunct rows, and the assertion now pins the full parenthesised list because a substring check let the conflated text satisfy a reference-only case |
 | Follow-ups tracked as prose rather than a filed artifact | security-auditor | idea IDs now recorded below (project policy `7cf74246` makes SAM Ideas the tracker for this repo, not `tasks/backlog/`) |
 
 ## Follow-up (not in this PR)

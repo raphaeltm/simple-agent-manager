@@ -71,7 +71,7 @@ function parseProviderCredentialReference(
   return null;
 }
 
-function isExactCredentialSource(value: string | null | undefined): value is CredentialSource {
+export function isExactCredentialSource(value: string | null | undefined): value is CredentialSource {
   return value === 'user' || value === 'project' || value === 'platform';
 }
 

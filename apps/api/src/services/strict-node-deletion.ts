@@ -10,7 +10,10 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { deleteDNSRecord } from './dns';
 import { getTimeoutMs } from './fetch-timeout';
 import { persistError } from './observability';
-import { hasExactProviderCredentialGenerationProof } from './provider-credential-exact';
+import {
+  hasExactProviderCredentialGenerationProof,
+  isExactCredentialSource,
+} from './provider-credential-exact';
 import {
   createProviderForUser,
   type ExactProviderCredentialBinding,
@@ -131,14 +134,25 @@ function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
  * error strings, so this reports which fields are missing and never what they contain.
  */
 function describeMissingExactBinding(
+  node: NodeRow,
   targetProvider: CredentialProvider | undefined,
   exactCredential: ExactProviderCredentialBinding | null
 ): string {
   const missing: string[] = [];
   if (!targetProvider) missing.push('cloudProvider');
-  if (!exactCredential) missing.push('placementCredentialSource+placementCredentialReference');
-  else if (!exactCredential.credentialReference) missing.push('placementCredentialReference');
-  else if (!hasExactProviderCredentialGenerationProof(exactCredential)) {
+  if (!exactCredential) {
+    // A null binding means the snapshot was rejected, which happens for either an invalid
+    // source OR an absent reference. Report only the field that actually failed — reading
+    // the raw columns rather than inferring from the null. Collapsing two distinct absent
+    // states into one label is the exact defect this whole change exists to fix, and it
+    // would send an operator looking at the wrong column.
+    if (!isExactCredentialSource(node.placementCredentialSource)) {
+      missing.push('placementCredentialSource');
+    }
+    if (!node.placementCredentialReference) missing.push('placementCredentialReference');
+  } else if (!hasExactProviderCredentialGenerationProof(exactCredential)) {
+    // A non-null binding always carries a truthy reference, so the only remaining
+    // absence at this point is the generation proof.
     missing.push('placementCredentialFingerprint and placementCredentialVersion');
   }
   return missing.join(', ');
@@ -160,7 +174,7 @@ async function requireStrictNodeProvider(
   if (!targetProvider || !hasExactProviderCredentialGenerationProof(exactCredential)) {
     throw new Error(
       `Cannot strictly delete node ${node.id}: exact provider credential binding is missing ` +
-        `(${describeMissingExactBinding(targetProvider, exactCredential)})`
+        `(${describeMissingExactBinding(node, targetProvider, exactCredential)})`
     );
   }
   const providerResult = await createProviderForUser(
