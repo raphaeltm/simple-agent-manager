@@ -14,7 +14,10 @@ import {
   resolveReusableNodeCapacitySnapshot,
 } from '../../services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
-import { trustedWorkspaceNodeCapacityColumnsSql } from '../../services/workspace-resource-capacity';
+import {
+  resolveEffectiveNodeHostMemoryReserveMb,
+  trustedWorkspaceNodeCapacityColumnsSql,
+} from '../../services/workspace-resource-capacity';
 import {
   findNodeWithCapacity,
   getTaskReservation,
@@ -43,6 +46,16 @@ export async function handleNodeSelection(
     taskId: state.taskId,
     preferredNodeId: state.config.preferredNodeId,
   });
+
+  // Revalidate persisted plans created before usable-memory filtering was deployed.
+  const selection = state.config.capacityPoolSelection;
+  if (selection?.workloadRole === 'workspace') {
+    const reservation = getTaskReservation(state);
+    const reserve = resolveEffectiveNodeHostMemoryReserveMb(rc.env, state.config.projectScaling);
+    selection.candidates = selection.candidates.filter(
+      (candidate) => candidate.providerInstanceMemoryMb - reserve >= reservation.memoryMb
+    );
+  }
 
   if (
     state.config.capacityPoolSelection &&

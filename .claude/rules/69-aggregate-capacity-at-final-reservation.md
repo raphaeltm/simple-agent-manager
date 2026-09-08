@@ -28,6 +28,9 @@ subtracted active reservations. Three whole-node requests therefore passed a thr
 ## Required tests
 
 - A fixture where one request consumes the smallest node's full declared CPU or memory.
+- A provider-offering boundary test that subtracts the configured host memory reserve before
+  provisioning, including the exact-fit boundary and persisted plans created by older schedulers.
+  A healthy host that cannot admit even one requested workspace must not enter a provisioning loop.
 - A larger-node matrix that admits fitting sums and rejects the first overflowing dimension.
 - A real database race where two contenders request the final capacity and exactly one wins.
 - Both directions of exclusivity: exclusive request onto occupied node and ordinary request onto

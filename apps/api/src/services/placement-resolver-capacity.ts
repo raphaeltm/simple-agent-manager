@@ -41,6 +41,7 @@ import type {
   TaskStartPlacement,
 } from './placement-resolver-types';
 import { resolvePlacementRollout } from './placement-rollout';
+import { DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB } from './workspace-resource-capacity';
 
 export {
   rankCapacityCandidatesForRuntime,
@@ -224,7 +225,8 @@ export function buildCapacityPoolSelection(
   summary: CapacityPoolSummary,
   placement: TaskStartPlacement,
   workloadRole: CapacityWorkloadRole,
-  settings: CapacityPoolPlacementSettings = defaultPlacementSettings()
+  settings: CapacityPoolPlacementSettings = defaultPlacementSettings(),
+  hostMemoryReserveMb = DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB
 ): TaskStartCapacityPoolSelection | null {
   const pool = summary.pool;
   const rollout = resolvePlacementRollout({
@@ -263,7 +265,8 @@ export function buildCapacityPoolSelection(
               placement,
               workloadRole,
               settings,
-              effectiveState
+              effectiveState,
+              hostMemoryReserveMb
             );
             return normalized ? [normalized] : [];
           })
@@ -292,7 +295,8 @@ function normalizeCapacityCandidate(
   placement: TaskStartPlacement,
   workloadRole: CapacityWorkloadRole,
   settings: CapacityPoolPlacementSettings,
-  effectiveState: TaskStartCapacityPoolSelection['effectiveState']
+  effectiveState: TaskStartCapacityPoolSelection['effectiveState'],
+  hostMemoryReserveMb: number
 ): TaskStartCapacityCandidate | null {
   if (!isActiveCapacityPlacementOption(pool, source, candidate)) return null;
   if (!capacityCandidateWorkloadRoleEligible(candidate.workloadRole, workloadRole)) return null;
@@ -323,6 +327,14 @@ function normalizeCapacityCandidate(
       },
       placement.resolvedReservation
     )
+  ) {
+    return null;
+  }
+  // Provision only hardware that can pass the final workspace reservation.
+  // Provider memory includes the host reserve; workload memory does not.
+  if (
+    workloadRole === 'workspace' &&
+    providerInstanceMemoryMb - hostMemoryReserveMb < placement.resolvedReservation.memoryMb
   ) {
     return null;
   }

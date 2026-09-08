@@ -58,6 +58,7 @@ import {
   mergeResourceRequirementLayers,
   ResourceRequirementsValidationError,
 } from './resource-requirements-input';
+import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-capacity';
 import type { WorkspaceRuntimeDecision } from './workspace-runtime';
 
 export type { RankCapacityCandidatesInput } from './placement-resolver-capacity';
@@ -306,6 +307,7 @@ export async function resolveTaskStartCapacityPoolSelection(
       userId: placement.userId,
       projectId: placement.projectId,
       ensure: options.ensure ?? true,
+      initializeOnly: true,
       env: options.env,
       // Allocation filters by the requested role; editor summaries hide deployment mirrors.
       workloadRoles: 'all',
@@ -319,7 +321,8 @@ export async function resolveTaskStartCapacityPoolSelection(
         placementSettings: resolvedSettings?.placementSettings ?? placement.placementSettings,
       },
       placement.workloadRole,
-      resolvedSettings?.placementSettings ?? placement.placementSettings ?? undefined
+      resolvedSettings?.placementSettings ?? placement.placementSettings ?? undefined,
+      resolveEffectiveNodeHostMemoryReserveMb(options.env ?? {})
     );
   } catch (error) {
     if (options.failOpen === false) throw error;

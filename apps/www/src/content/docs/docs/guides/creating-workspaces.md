@@ -119,6 +119,13 @@ pool offerings, SAM provisions the exact provider instance type rather than deri
 the old small/medium/large label. The legacy labels remain compatibility presets for older profiles,
 tasks, and direct workspace requests.
 
+Pool selection accounts for memory reserved for the host. With the default 512 MiB reserve,
+a 4 GiB offering can host at most a 3584 MiB workspace reservation; a 4 GiB workspace
+request needs a larger offering. If no configured offering fits, submission fails with a
+resource-capacity error before provisioning. Task submission uses the existing pool catalog;
+provider catalog refreshes happen through pool management, with initialization retained for
+installations that do not yet have a default pool.
+
 Provider responses are also kept separate from requested compatibility labels. The provider layer
 returns provenance-labeled observed hardware from the cloud API: returned server types and resource
 fields are marked observed, and omitted CPU, memory, or disk details are marked unknown instead of

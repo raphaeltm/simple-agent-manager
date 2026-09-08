@@ -51,9 +51,11 @@ import {
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
 import { resolveSkillProfile } from '../../services/skills';
+import { submitInstantTask } from '../../services/submit-instant-task';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import type { TaskTitleConfig } from '../../services/task-title';
 import { generateTaskTitle, getTaskTitleConfig, truncateTitle } from '../../services/task-title';
+import { resolveWorkspaceRuntime } from '../../services/workspace-runtime';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
@@ -305,6 +307,51 @@ submitRoutes.post(
       body.agentProfileId || body.skillId
         ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
         : null;
+    if (resolvedProfile?.runtime === 'cf-container') {
+      if (
+        body.nodeId ||
+        body.vmSize ||
+        body.vmLocation ||
+        body.provider ||
+        body.workspaceProfile === 'full' ||
+        body.devcontainerConfigName ||
+        (taskResourceRequirements && Object.keys(taskResourceRequirements).length > 0)
+      ) {
+        throw errors.badRequest(
+          'Instant containers cannot use VM resource overrides. Clear the overrides or choose a VM profile.'
+        );
+      }
+      const runtime = await resolveWorkspaceRuntime(db, c.env, {
+        userId,
+        projectId,
+        explicitRuntime: 'cf-container',
+      });
+      if (runtime.runtime !== 'cf-container') {
+        throw errors.conflict('Instant containers are disabled. Choose a VM profile.');
+      }
+      return c.json(
+        await submitInstantTask({
+          db,
+          env: c.env,
+          waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+          project,
+          userId,
+          taskId,
+          branchName,
+          message,
+          profile: resolvedProfile,
+          parentTaskId: body.parentTaskId,
+          contextSummary: body.contextSummary,
+          taskMode: body.taskMode,
+          agentType: body.agentType,
+          attachments: validatedAttachments,
+          credentialAttributionUserId: inheritedAttributionUserId ?? userId,
+          credentialAttributionProjectId: inheritedAttributionProjectId ?? null,
+          credentialAttributionSource: inheritedAttributionSource ?? 'user',
+        }),
+        202
+      );
+    }
     const {
       resourceRequirementLayers,
       persistedResourceRequirementsJson,

@@ -1,4 +1,4 @@
-import type { AgentProfileRuntime, TaskMode } from '@simple-agent-manager/shared';
+import type { AgentProfileRuntime, TaskAttachment, TaskMode } from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH, taskExecutionStep } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -27,6 +27,7 @@ import {
   requireVmAgentContainer,
   runContainerPhase,
 } from './vm-agent-container';
+import { transferWorkspaceAttachments } from './workspace-attachments';
 import { ensureWorkspaceBranchOnRemote, logWorkspaceBranchResult } from './workspace-branch';
 import { resolveWorkspaceGitSource } from './workspace-git-source';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
@@ -46,6 +47,7 @@ export interface LaunchInstantSessionInput {
   branch?: string | null;
   workspaceName?: string | null;
   taskMode?: TaskMode;
+  attachments?: TaskAttachment[];
   overrides?: AgentSessionOverrides;
 }
 
@@ -449,6 +451,13 @@ export async function continueInstantSessionLaunch(
     );
     const workspaceCreateDurationMs = Date.now() - workspaceCreateStart;
 
+    await transferWorkspaceAttachments({
+      env,
+      userId: input.userId,
+      nodeId,
+      workspaceId,
+      attachments: input.attachments ?? [],
+    });
     const acpSessionCreateStart = Date.now();
     const phaseDurations = new Map<string, number>();
     const bootstrapResult = await startSamAwareAgentSession(db, env, {

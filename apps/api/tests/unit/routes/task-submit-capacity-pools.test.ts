@@ -16,6 +16,8 @@ const authState = vi.hoisted(() => ({
 
 const mocks = vi.hoisted(() => ({
   requireRepositoryUserAccess: vi.fn(),
+  acceptInstantSession: vi.fn(),
+  continueInstantSessionLaunch: vi.fn(),
   createSession: vi.fn(),
   persistMessage: vi.fn(),
   recordActivityEvent: vi.fn(),
@@ -26,6 +28,11 @@ const mocks = vi.hoisted(() => ({
   getTaskTitleConfig: vi.fn(),
   truncateTitle: vi.fn(),
   enrichMessageWithMentions: vi.fn(),
+}));
+
+vi.mock('../../../src/services/instant-session', () => ({
+  acceptInstantSession: mocks.acceptInstantSession,
+  continueInstantSessionLaunch: mocks.continueInstantSessionLaunch,
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
@@ -202,6 +209,163 @@ describe('task submit capacity-pool placement', () => {
     mocks.enrichMessageWithMentions.mockResolvedValue({
       enrichedMessage: 'Run in project pool',
     });
+  });
+
+  it.each([false, true])(
+    'honors an Instant profile through task-submit without cloud credentials or a VM pool (attachment=%s)',
+    async (withAttachment) => {
+      const { sqlite, env } = createEnv();
+      seedUser(sqlite, 'user-1');
+      seedProjectWithMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+      sqlite.exec(`INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime)
+      VALUES ('instant', 'project-1', 'user-1', 'Instant', 'openai-codex', 'cf-container')`);
+      env.CF_CONTAINER_ENABLED = 'true';
+      const attachment = {
+        uploadId: 'upload-1',
+        filename: 'debug.txt',
+        size: 4,
+        contentType: 'text/plain',
+      };
+      env.R2 = { head: vi.fn().mockResolvedValue({ size: 4 }) } as unknown as R2Bucket;
+      seedParentTask(sqlite, { taskId: 'parent-instant', userId: 'user-1' });
+      mocks.acceptInstantSession.mockResolvedValue({ chatSessionId: 'instant-chat' });
+      mocks.continueInstantSessionLaunch.mockResolvedValue({});
+      const res = await createApp().request(
+        '/api/projects/project-1/tasks/submit',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: 'Use Instant',
+            agentProfileId: 'instant',
+            parentTaskId: 'parent-instant',
+            contextSummary: 'Fork context',
+            ...(withAttachment ? { attachments: [attachment] } : {}),
+          }),
+        },
+        env,
+        executionCtx
+      );
+      expect(res.status).toBe(202);
+      expect(await res.json()).toMatchObject({ sessionId: 'instant-chat' });
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+      expect(
+        sqlite
+          .prepare("SELECT capacity_pool_id FROM tasks WHERE parent_task_id = 'parent-instant'")
+          .get()
+      ).toEqual({ capacity_pool_id: null });
+      expect(mocks.acceptInstantSession).toHaveBeenCalledWith(
+        expect.anything(),
+        env,
+        expect.objectContaining({
+          contextSummary: 'Fork context',
+          attachments: withAttachment ? [attachment] : [],
+        })
+      );
+      expect(mocks.continueInstantSessionLaunch).toHaveBeenCalled();
+    }
+  );
+
+  it.each([{ resourceRequirements: { minMemoryGb: 4 } }, { vmSize: 'medium' }])(
+    'rejects VM overrides on an Instant profile instead of changing runtime: %j',
+    async (overrides) => {
+      const { sqlite, env } = createEnv();
+      seedTaskSubmitRows(sqlite);
+      sqlite.exec(`INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime)
+      VALUES ('instant', 'project-1', 'user-1', 'Instant', 'openai-codex', 'cf-container')`);
+      env.CF_CONTAINER_ENABLED = 'true';
+      const res = await createApp().request(
+        '/api/projects/project-1/tasks/submit',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'Instant', agentProfileId: 'instant', ...overrides }),
+        },
+        env,
+        executionCtx
+      );
+      expect(res.status).toBe(400);
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+      expect(mocks.acceptInstantSession).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT count(*) AS count FROM tasks').get()).toEqual({ count: 0 });
+    }
+  );
+
+  it('preserves the explicit agent, project defaults, and enriched prompt for Instant', async () => {
+    const { sqlite, env } = createEnv();
+    seedTaskSubmitRows(sqlite);
+    sqlite.exec(`INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime)
+      VALUES ('instant', 'project-1', 'user-1', 'Instant', 'openai-codex', 'cf-container')`);
+    sqlite.prepare('UPDATE projects SET agent_defaults = ? WHERE id = ?').run(
+      JSON.stringify({
+        'claude-code': { model: 'project-claude-model', permissionMode: 'acceptEdits' },
+        'openai-codex': { model: 'different-agent-model', permissionMode: 'plan' },
+      }),
+      'project-1'
+    );
+    env.CF_CONTAINER_ENABLED = 'true';
+    mocks.enrichMessageWithMentions.mockResolvedValue({
+      enrichedMessage: 'Use @reviewer\nReviewer context',
+    });
+    mocks.acceptInstantSession.mockResolvedValue({ chatSessionId: 'instant-chat' });
+    mocks.continueInstantSessionLaunch.mockResolvedValue(undefined);
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/submit',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Use @reviewer',
+          agentProfileId: 'instant',
+          agentType: 'claude-code',
+        }),
+      },
+      env,
+      executionCtx
+    );
+    expect(res.status).toBe(202);
+    expect(mocks.acceptInstantSession).toHaveBeenCalledWith(
+      expect.anything(),
+      env,
+      expect.objectContaining({
+        agentType: 'claude-code',
+        displayMessage: 'Use @reviewer',
+        initialPrompt: 'Use @reviewer\nReviewer context',
+        overrides: expect.objectContaining({
+          model: 'project-claude-model',
+          permissionMode: 'acceptEdits',
+        }),
+      })
+    );
+    expect(sqlite.prepare('SELECT description FROM tasks').get()).toEqual({
+      description: 'Use @reviewer\nReviewer context',
+    });
+    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+  });
+
+  it('rejects a disabled Instant runtime before creating a task or allocating VM capacity', async () => {
+    const { sqlite, env } = createEnv();
+    seedTaskSubmitRows(sqlite);
+    sqlite.exec(`INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime)
+      VALUES ('instant', 'project-1', 'user-1', 'Instant', 'openai-codex', 'cf-container')`);
+    env.CF_CONTAINER_ENABLED = 'false';
+    const res = await createApp().request(
+      '/api/projects/project-1/tasks/submit',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Use Instant', agentProfileId: 'instant' }),
+      },
+      env,
+      executionCtx
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      message: expect.stringContaining('Instant containers are disabled'),
+    });
+    expect(sqlite.prepare('SELECT count(*) AS count FROM tasks').get()).toEqual({ count: 0 });
+    expect(mocks.acceptInstantSession).not.toHaveBeenCalled();
+    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 
   it('uses the effective default pool and persists task placement snapshots before TaskRunner start', async () => {
