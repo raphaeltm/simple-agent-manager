@@ -74,3 +74,21 @@ All three independent specialist reviewers returned PASS after the final relevan
 ## Staging-discovered recovery transition
 
 The first green staging deployment preserved baseline history and tools. A legacy archived fixture copied back exactly, but a new compact migration was blocked before copying because the completed old source intent rejected a successor identity. Fixed successor admission to require a verified copy-back anchor matching the old migration, generation and owner, plus a strictly higher safe-integer generation. Eligibility and budget checks precede replacement; active/deleted sources and stale RPCs fail closed. Eight guard cases and a real Workers second-migration/recovery round-trip pass. Safety reviewer rechecked PASS; staging rerun is required for this fix.
+
+## Proposed production mutation plan — not approved or executed
+
+After final CI, independent review, CodeRabbit and staging/recovery proof, ship the code with compact writes disabled. Production's existing one-session/hour and 5,000-message settings remain the baseline.
+
+The proposed approval scope is: pause the global sweep, enable compact writes with an initial installation-wide **100,000 estimated writes/day**, and run one named canary in SAM project `01KHRJGANBBWGDY1NZ0KVF0D4J`: session `f5de2e85-fd7b-493d-bb68-7a1464ada665` ("List files and say hello", 20 raw messages in the read-only D1 preflight). Capture complete history/tool/search baseline first; if any eligibility guard refuses it, stop rather than substituting a session. Migration may remove its raw source SQL rows only after persisted R2/target proofs validate. Verify exact retrieval and actual source/target SQL counters before re-enabling the hourly sweep with the same 100k estimate and 5,000-message ceiling. Stop compact admission if verification fails or observed billable usage consumes the remaining included allowance; retain readers and verified recovery objects. No production copy-back or cleanup outside that exact scope is authorized by this document.
+
+The 100k setting is a conservative scheduling estimate, not a guaranteed invoice ceiling. It excludes ordinary application traffic, existing legacy migrations and operator recovery. Sessions too large for a whole-session budget remain on root and require a separate explicit budget plan. Existing legacy archives are not automatically rewritten. This plan remains subject to policy `66060db4-b224-4a18-af68-6693f71280ba` and Raphaël's final approval.
+
+## Live staging evidence (candidate 76265fe4c)
+
+[Staging deployment 34210529169](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34210529169) and smoke tests passed. Compact writes were enabled with the global sweep disabled. Named fixture session `79aaaa68-6ddc-464f-ab23-9389c08d1a69` in Deployment Test 1 migrated through journal `7842aed9-e705-49df-bdda-7c53a9789dd9` and published as `r2-gzip-v1` to generation2 shard29. The failed predecessor transition resumed successfully after the fix.
+
+Exact API comparisons preserved 19 messages (2 user, 7 assistant, 9 tool, 1 system), role filters, paging and all five legacy tool payloads. Combined response SHA-256 stayed `ed315c8113c3ec50b27d6540b387011b57907c884ff5ae244f86c52b412ae9ae`. Playwright verified dashboard, global/project settings, retained conversation display and tool expansion with a200 payload response. The only browser errors were the independently recorded pre-existing deleted-workspace404; no archive API failures remained after publication.
+
+Live SQL telemetry at09:44:32–09:44:37 UTC: target commits9+18+31 writes, seal6 and idempotent reseal0; source deletion38 writes. Target database grew901,120→905,216 bytes; source shrank1,302,528→1,290,240 bytes (12KiB reclaimed). These are instrumented phases, not total billed request costs. The meaningful amplification comparison remains the identical1,001-fragment Workers fixture (3,058→63 target writes).
+
+Verified compact copy-back returned28 rows across3 chunks and restored root ownership. External post-copy-back equality and normal-configuration redeploy are being finalized. Both temporary GitHub staging overrides have been removed; the normal redeploy restores live compact=false/global=true. Recovery objects and audit journals are intentionally retained. Production remains unchanged.
