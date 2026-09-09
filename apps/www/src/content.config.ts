@@ -13,7 +13,7 @@ const blog = defineCollection({
     tags: z.array(z.string()),
     excerpt: z.string(),
     draft: z.boolean().optional().default(false),
-    interactive: z.enum(['scheduler']).optional(),
+    interactive: z.enum(['scheduler', 'placement']).optional(),
   }),
 });
 
