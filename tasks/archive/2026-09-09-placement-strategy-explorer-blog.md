@@ -104,29 +104,69 @@ and every behavioural claim must cite a code path (rule 01). -> Checklist C13.
 
 ## Implementation checklist
 
-- [ ] C1. Extend `interactive` enum in `src/content.config.ts` to `['scheduler', 'placement']`
-- [ ] C2. Add the `placement` branch to `src/pages/blog/[slug].astro`
-- [ ] C3. `src/components/placement/PlacementExplorer.astro` — custom element, scoped styles,
+- [x] C1. Extend `interactive` enum in `src/content.config.ts` to `['scheduler', 'placement']`
+- [x] C2. Add the `placement` branch to `src/pages/blog/[slug].astro`
+- [x] C3. `src/components/placement/PlacementExplorer.astro` — custom element, scoped styles,
       `<noscript>` fallback, `prefers-reduced-motion` handling, 650px mobile breakpoint
-- [ ] C4. `src/components/placement/model.ts` — aggregate CPU/MEM/DISK model (NOT slot counts):
+- [x] C4. `src/components/placement/model.ts` — aggregate CPU/MEM/DISK model (NOT slot counts):
       admission gate separate from ranking; host reserve applied; warm/drain lifecycle
-- [ ] C5. `src/components/placement/catalog.ts` — snapshot of real provider SIZE_CONFIGS +
+- [x] C5. `src/components/placement/catalog.ts` — snapshot of real provider SIZE_CONFIGS +
       LOCATIONS, with a dated provenance comment naming the source symbols
-- [ ] C6. Implement the four host-ordering keys exactly as `PLACEMENT_STRATEGY_HOST_ORDERING`
-- [ ] C7. Implement offering ordering + the region no-op, so "same price, three regions" is
+- [x] C6. Implement the four host-ordering keys exactly as `PLACEMENT_STRATEGY_HOST_ORDERING`
+- [x] C7. Implement offering ordering + the region no-op, so "same price, three regions" is
       visibly a tie the strategy does not break
-- [ ] C8. Model provisioning -> distribution -> drain (warm window) -> destroy
-- [ ] C9. Model `fail` / `queue` / `fallback-chain` on a stockout, with a region-stockout toggle
+- [x] C8. Model provisioning -> distribution -> drain (warm window) -> destroy
+- [x] C9. Model `fail` / `queue` / `fallback-chain` on a stockout, with a region-stockout toggle
       that reproduces the 2026-09-09 incident
-- [ ] C10. `tests/placement-model.test.ts` — one test per strategy proving the ordering key is
+- [x] C10. `tests/placement-model.test.ts` — one test per strategy proving the ordering key is
       the discriminator, plus a catalog drift test against `@simple-agent-manager/providers`
-- [ ] C11. `tests/playwright/placement-explorer.spec.ts` — real interaction (submit, step, switch
+- [x] C11. `tests/playwright/placement-explorer.spec.ts` — real interaction (submit, step, switch
       strategy), overflow assertion at both viewports, absence assertions paired with a positive
       render assertion (rule 62)
-- [ ] C12. Confirm the new page is covered by `public-surface-a11y.spec.ts` or add it
-- [ ] C13. `src/content/blog/<slug>.md` — the post. Declare every simplification; cite real code
+- [x] C12. Confirm the new page is covered by `public-surface-a11y.spec.ts` or add it
+- [x] C13. `src/content/blog/<slug>.md` — the post. Declare every simplification; cite real code
       paths; do not present illustrative constants as SAM defaults
-- [ ] C14. File a follow-up for the slot-count model in `how-sam-scheduler-works.md` (R3)
+- [x] C14. Follow-up filed: `tasks/backlog/2026-09-09-scheduler-explorer-slot-count-model.md`
+
+## Outcome
+
+Delivered. `pnpm lint` clean, `pnpm typecheck` 0 new errors (4 pre-existing baseline),
+`pnpm test` 5 files / 40 tests (baseline 3 / 9), `pnpm test:browser` 132 passed including 14 new
+across Desktop 1280x800 and Mobile Chrome 375x667.
+
+### Post-mortem — six defects found during implementation
+
+1. **Astro scoped styles never reach JS-created DOM.** Astro compiles `.fleet li` to
+   `.fleet:where(.astro-xxx) li:where(.astro-xxx)`; every node built by `document.createElement`
+   lacks that class, so the fleet cards, workload rows, event log and comparison table were
+   ENTIRELY unstyled while all 12 behavioural tests passed. Class of bug: a test that asserts text
+   and attributes cannot see a styling failure (`.claude/rules/62`, and `.claude/rules/17`'s
+   "screenshot evidence must be checked, not just produced" — opening the screenshot is what found
+   it). Fixed by rooting styles at the `placement-explorer` custom element via `is:global`.
+2. **Host prose styles bleeding into an embedded dark panel.** `strong` at 1.15:1, `code` at
+   1.9:1, and the site's table rule painting the last comparison row `#f8fbf8` under light text.
+3. **axe reports unresolvable contrast as `incomplete`, not `violations`.** The unreadable row in
+   (2) passed the a11y assertion. The test now also fails on unresolved contrast, with a written
+   selector allowlist for the genuinely-unresolvable gradient-backed header nodes.
+4. **The `<table>` was the scroll container rather than its wrapper**, making it an unfocusable
+   scrollable region.
+5. **Two strategies collapsed into one another** on a homogeneous fleet — the exact defect
+   `placement-strategy.ts` documents for `balanced`/`spread`. Also found that `pack` and
+   `smallest-fit` genuinely coincide on an idle fleet; that is a real property and is now pinned
+   by a test rather than papered over.
+6. **The host-reserve subtraction was duplicated** in the admission gate and the offering filter,
+   so a mutation of one left the other intact. Single-sourced as `usableMemoryForOffering`.
+
+Mutation-verified discrimination: removing the host reserve reddens exactly the admission and
+offering-exclusion tests; inverting `pack`'s ordering key reddens exactly the two strategy-identity
+tests; drifting the catalog snapshot reddens exactly the two drift tests. Restored after each.
+
+### Process note
+
+No `.claude/rules/` change is proposed. Defects 1-4 are Astro/axe platform behaviours rather than a
+recurring SAM class, and the two that ARE general — "green behavioural tests cannot see a styling
+failure" and "prove the guard discriminating" — are already rules 17 and 62, and both did their job
+here once the screenshots were actually opened.
 
 ## Acceptance criteria
 
