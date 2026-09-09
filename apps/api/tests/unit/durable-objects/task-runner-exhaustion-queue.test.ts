@@ -295,7 +295,7 @@ describe('queue exhaustion policy', () => {
     const rc = createContext();
 
     await expect(handleNodeProvisioning(createState('queue'), rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No capacity`,
       permanent: true,
     });
     expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
@@ -309,7 +309,7 @@ describe('queue exhaustion policy', () => {
     const rc = createContext();
 
     await expect(handleNodeProvisioning(createState('fail'), rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No capacity`,
       permanent: true,
     });
     expect(waitForVmAdmissionCapacity).not.toHaveBeenCalled();
