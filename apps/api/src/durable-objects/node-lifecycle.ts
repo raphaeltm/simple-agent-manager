@@ -32,19 +32,23 @@ import {
   DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS,
   DEFAULT_NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS,
   DEFAULT_NODE_WARM_TIMEOUT_MS,
+  DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS,
   isUserOwnedNodeClass,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import type { DirectProvisioningInput } from '../services/direct-provisioning';
 import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
 import {
   isSessionRecoveryTaskAuthorized,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
+import { boundedWarmPlacementClaimGuardSql } from '../services/warm-placement-claims';
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
+import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../services/workspace-resource-capacity';
 import { NodeLifecycleProvisioning } from './node-lifecycle-provisioning';
 import {
   type NodeLifecycleDeletionEnv,
@@ -56,6 +60,8 @@ import {
 type NodeLifecycleEnv = NodeLifecycleDeletionEnv & {
   KV: KVNamespace;
   NODE_WARM_TIMEOUT_MS?: string;
+  NODE_WORKSPACE_IDLE_TIMEOUT_MS?: string;
+  NODE_ORPHAN_IDLE_TIMEOUT_MS?: string;
   NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS?: string;
   DO_ALARMS_ENABLED_KV_KEY?: string;
   CONTROL_LOOP_KILL_SWITCH_CACHE_MS?: string;
@@ -77,7 +83,10 @@ interface StoredState {
 export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   private provisioningController?: NodeLifecycleProvisioning;
   private provisioning(): NodeLifecycleProvisioning {
-    return this.provisioningController ??= new NodeLifecycleProvisioning(this.ctx, this.env as Env);
+    return (this.provisioningController ??= new NodeLifecycleProvisioning(
+      this.ctx,
+      this.env as Env
+    ));
   }
   async startProvisioning(input: DirectProvisioningInput): Promise<void> {
     await this.provisioning().start(input);
@@ -101,6 +110,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
               claimed_warm_node_id = ?, updated_at = ?
         WHERE recovery.id = ?
           AND recovery.status NOT IN ('completed', 'failed', 'cancelled')
+          AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND status = 'running')
           AND NOT EXISTS (
             SELECT 1 FROM tasks incumbent
              WHERE incumbent.claimed_warm_node_id = ?
@@ -136,6 +146,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         nodeId,
         now,
         taskId,
+        nodeId,
         nodeId,
         guarded,
         sourceTaskGuard?.taskId ?? '',
@@ -185,27 +196,24 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     // keeps the read→put critical section free of external I/O so the input gate serializes it,
     // matching the original pre-guard behavior. See rule 45 + architecture-critique #2.
     const userOwned = await this.isUserOwnedNode(nodeId);
+    const occupied = await this.hasActiveWorkspace(nodeId);
 
     const state = await this.getStoredState();
     const previousClaim = state?.claimedByTask ?? null;
     const now = Date.now();
 
-    if (state && state.status === 'destroying') {
-      throw new Error('node_lifecycle_conflict: node is being destroyed');
-    }
-
     // User-owned (BYO) machines must NEVER enter the warm → destroying teardown pipeline: SAM does
     // not own the hardware and must not schedule its destruction. Keep the node active (no warm
     // alarm) instead. BYO nodes are never auto-provisioned so markIdle should not reach them, but
     // this is the DO chokepoint guard. See architecture-critique #2.
-    if (userOwned) {
-      log.info('node_lifecycle.mark_idle_skipped_user_owned', { nodeId, action: 'kept_active' });
+    if (userOwned || occupied) {
+      log.info('node_lifecycle.mark_idle_preserved', { nodeId, userOwned, occupied });
       const activeState: StoredState = {
         nodeId,
         userId,
         status: 'active',
         warmSince: null,
-        claimedByTask: null,
+        claimedByTask: previousClaim,
         warmTimeoutOverrideMs: null,
       };
       await this.ctx.storage.put('state', activeState);
@@ -213,6 +221,10 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       await this.recalculateAlarm(null);
       await this.updateD1WarmSince(nodeId, null);
       return this.toPublicState(activeState);
+    }
+
+    if (state && state.status === 'destroying') {
+      throw new Error('node_lifecycle_conflict: node is being destroyed');
     }
 
     const warmTimeout = warmTimeoutOverrideMs ?? this.getWarmTimeoutMs();
@@ -499,34 +511,12 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       }
     }
 
-    // Warm timeout expired → transition to destroying
-    state.status = 'destroying';
-    state.destroyingSince = Date.now();
-    await this.ctx.storage.put('state', state);
-
-    log.info('node_lifecycle.alarm.warm_to_destroying', {
-      nodeId: state.nodeId,
-      userId: state.userId,
-      warmSince: state.warmSince ? new Date(state.warmSince).toISOString() : null,
+    await this.ctx.blockConcurrencyWhile(async () => {
+      // Re-read after acquiring the input gate: a claim may have won during D1 I/O.
+      const current = await this.getStoredState();
+      if (!current || current.status !== 'warm') return;
+      await this.handoffIdleNode(current);
     });
-
-    // Mark the node as stopped in D1 so the cron sweep can clean it up
-    try {
-      await this.env.DATABASE.prepare(
-        `UPDATE nodes SET status = 'stopped', warm_since = NULL, health_status = 'stale', updated_at = ? WHERE id = ?`
-      )
-        .bind(new Date().toISOString(), state.nodeId)
-        .run();
-    } catch (err) {
-      log.error('node_lifecycle.alarm.d1_update_failed', {
-        nodeId: state.nodeId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Observe the D1 handoff on the next tick. This also retries the write when
-    // the first transition failed and gives the state a bounded terminal path.
-    await this.recalculateAlarm(Date.now() + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
   }
 
   // =========================================================================
@@ -565,13 +555,12 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         return;
       }
 
-      // The initial warm→destroying handoff may have failed. Retry it while the
-      // row is still non-terminal; cron/provider reconciliation owns teardown.
-      await this.env.DATABASE.prepare(
-        `UPDATE nodes SET status = 'stopped', warm_since = NULL, health_status = 'stale', updated_at = ? WHERE id = ?`
-      )
-        .bind(new Date(now).toISOString(), state.nodeId)
-        .run();
+      // Legacy destroying records also need the final occupancy fence.
+      await this.ctx.blockConcurrencyWhile(async () => {
+        const current = await this.getStoredState();
+        if (current?.status === 'destroying') await this.handoffIdleNode(current);
+      });
+      return;
     } catch (err) {
       log.error('node_lifecycle.destroying_d1_retry_failed', {
         nodeId: state.nodeId,
@@ -579,6 +568,62 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       });
     }
 
+    await this.recalculateAlarm(now + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
+  }
+
+  /** Atomic with workspace reservation, which only admits onto running nodes. */
+  private async handoffIdleNode(state: StoredState): Promise<void> {
+    const now = Date.now();
+    const claimWindowMs = parsePositiveInt(
+      this.env.NODE_WORKSPACE_IDLE_TIMEOUT_MS ?? this.env.NODE_ORPHAN_IDLE_TIMEOUT_MS,
+      DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS
+    );
+    try {
+      const result = await this.env.DATABASE.prepare(
+        `UPDATE nodes SET status = 'stopped', warm_since = NULL,
+            health_status = 'stale', updated_at = ?
+          WHERE id = ? AND user_id = ? AND status = 'running' AND node_class != 'user-owned'
+            AND node_role = 'workspace'
+            AND NOT EXISTS (
+              SELECT 1 FROM workspaces
+              WHERE node_id = nodes.id
+                AND status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL})
+            )
+            ${boundedWarmPlacementClaimGuardSql('nodes.id')}`
+      )
+        .bind(
+          new Date(now).toISOString(),
+          state.nodeId,
+          state.userId,
+          new Date(now - claimWindowMs).toISOString()
+        )
+        .run();
+      if ((result.meta.changes ?? 0) === 0) {
+        // A live reservation/claim or changed lifecycle won. Retire the stale
+        // warm timer; workspace cleanup will arm a fresh timer when truly idle.
+        state.status = 'active';
+        state.warmSince = null;
+        delete state.destroyingSince;
+        await this.ctx.storage.put('state', state);
+        await this.updateD1WarmSince(state.nodeId, null);
+        await this.recalculateAlarm(null);
+        log.info('node_lifecycle.warm_handoff_preserved', { nodeId: state.nodeId });
+        return;
+      }
+      state.status = 'destroying';
+      state.destroyingSince ??= now;
+      await this.ctx.storage.put('state', state);
+      log.info('node_lifecycle.alarm.warm_to_destroying', {
+        nodeId: state.nodeId,
+        userId: state.userId,
+        warmSince: state.warmSince ? new Date(state.warmSince).toISOString() : null,
+      });
+    } catch (err) {
+      log.error('node_lifecycle.alarm.d1_update_failed', {
+        nodeId: state.nodeId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     await this.recalculateAlarm(now + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
   }
 
@@ -612,6 +657,22 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * managed) — the common case is a managed node, and the node-cleanup cron guards are the teardown
    * backstop, so failing to "managed" cannot destroy a BYO node.
    */
+  private async hasActiveWorkspace(nodeId: string): Promise<boolean> {
+    try {
+      const row = await this.env.DATABASE.prepare(
+        `SELECT 1 AS occupied FROM workspaces WHERE node_id = ?
+          AND status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL}) LIMIT 1`
+      )
+        .bind(nodeId)
+        .first<{ occupied: number }>();
+      return row !== null;
+    } catch (error) {
+      // Never turn an uncertain occupancy read into a destructive fallback.
+      log.warn('node_lifecycle.occupancy_unknown', { nodeId, error: String(error) });
+      return true;
+    }
+  }
+
   private async isUserOwnedNode(nodeId: string): Promise<boolean> {
     try {
       const row = await this.env.DATABASE.prepare('SELECT node_class FROM nodes WHERE id = ?')

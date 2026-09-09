@@ -39,3 +39,16 @@ Root cause: native offering qualification (PR #2030) compared raw memory while f
 Class: inconsistent policy across entry points and admission boundaries.
 Why missed: tests covered raw offering fit and direct Instant starts independently; no reserve boundary or attachment task-route regression.
 Process fix: `.claude/rules/69-aggregate-capacity-at-final-reservation.md` now requires reserve-aware offering and persisted-plan tests. New task-route and upload tests cover the cross-entrypoint runtime contract.
+
+## Recovery and shared-node interruption (2026-09-09)
+
+Recovered pushed implementation e9e59cf98 from parent branch; no PR existed. Production logs show the parent node's warm-retention alarm fired at 2026-09-08 22:41:14Z (warm since 22:11:13Z), despite an active workspace and successful heartbeat at 22:40:42Z. Its next heartbeat was rejected with 410 because D1 had been marked stopped. Task reconciliation failed the task at 22:45:20Z; runtime workspace deletion was confirmed at 22:51:36Z and node cleanup ran at 23:25:22Z. The original runtime was responsive after the erroneous stopped label; provider disappearance was not the initiating evidence.
+
+Additional root cause: TaskRunner failure before workspace creation can call markIdle on a shared node; the NodeLifecycle warm alarm and destroying retry blindly marked D1 stopped. Final workspace admission already checks node running state, but teardown lacked the reciprocal atomic occupancy check.
+
+- [x] Preserve active sibling workspaces when markIdle is called after failed placement.
+- [x] Atomically fence warm expiry and destroying retries on node ownership, class, role, running state, workspace occupancy, and bounded warm claims.
+- [x] Reject warm claims after node shutdown wins.
+- [ ] Validate real D1/DO occupancy and placement races; complete staging and release gates.
+
+Validation runs use serial package execution on this 4 GiB host after unconstrained parallel root checks exhausted memory (exit137); an interrupted run is not passing evidence.

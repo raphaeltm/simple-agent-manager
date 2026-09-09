@@ -2,7 +2,7 @@ import type {
   CapacityPlacementSnapshot,
   ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { findNodeWithCapacity } from '../../src/durable-objects/task-runner/node-selection';
@@ -25,6 +25,7 @@ import {
   seedUser,
   seedWorkspace,
 } from './helpers/seed-d1';
+import type { NodeLifecycleTestDouble } from './support/expected-error-doubles';
 
 const USER_ID = 'user-workspace-resource-capacity';
 const INSTALLATION_ID = 'installation-workspace-resource-capacity';
@@ -465,6 +466,43 @@ function selectorContext(): TaskRunnerContext {
 }
 
 describe('workspace resource capacity final reservation CAS', () => {
+  it.each(['admission-first', 'shutdown-first', 'concurrent'] as const)(
+    'orders workspace admission against stale warm shutdown (%s)', async (ordering) => {
+      const nodeId = `node-wrc-shutdown-${ordering}`;
+      await makeReadyNode(nodeId);
+      const snapshot = await seedCurrentAuthorityForNode({
+        nodeId, userId: USER_ID, projectId: PROJECT_ID, label: `shutdown-${ordering}`,
+      });
+      const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId)) as DurableObjectStub<NodeLifecycleTestDouble>;
+      await runInDurableObject(stub, async (instance) => {
+        await instance.ctx.storage.put('state', {
+          nodeId, userId: USER_ID, status: 'warm', warmSince: Date.now() - 600_000,
+          claimedByTask: null,
+        });
+      });
+      const admit = () => reserveWorkspacePlacement(env.DATABASE,
+        placement(`ws-wrc-shutdown-${ordering}`, nodeId, { capacityPlacementSnapshot: snapshot }),
+        admissionPolicy());
+      const shutdown = () => runInDurableObject(stub, async (instance) => instance.alarm());
+      let admitted: boolean;
+      if (ordering === 'admission-first') {
+        admitted = await admit();
+        expect(admitted).toBe(true);
+        await shutdown();
+      } else if (ordering === 'shutdown-first') {
+        await shutdown();
+        admitted = await admit();
+        expect(admitted).toBe(false);
+      } else {
+        [admitted] = await Promise.all([admit(), shutdown()]);
+      }
+      const node = await env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?').bind(nodeId).first<{status: string}>();
+      const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE node_id = ?').bind(nodeId).first<{status: string}>();
+      expect(node?.status).toBe(admitted ? 'running' : 'stopped');
+      expect(workspace).toEqual(admitted ? { status: 'creating' } : null);
+    }
+  );
+
   it('atomically admits only the varied reservation that fits the remaining CPU-share budget', async () => {
     const nodeId = 'node-wrc-cpu-share-budget';
     await makeReadyNode(nodeId);

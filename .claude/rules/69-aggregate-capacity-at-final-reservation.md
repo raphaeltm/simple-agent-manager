@@ -44,3 +44,5 @@ subtracted active reservations. Three whole-node requests therefore passed a thr
 - `apps/api/src/services/workspace-placement.ts`
 - `apps/api/src/services/workspace-resource-capacity.ts`
 - `tasks/active/2026-09-04-aggregate-workspace-resource-reservations.md`
+
+Teardown must enforce the reciprocal admission predicate in its final atomic database mutation: no active workspace reservations or live bounded placement claims. A timer's cached idle state is not proof that a shared node is empty. Cover stale warm alarms, retry paths, failed placement with an active sibling, and both orderings of admission versus shutdown using real database mutations.
