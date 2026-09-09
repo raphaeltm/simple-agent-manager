@@ -123,6 +123,7 @@ export {
   HETZNER_VOLUME_MAX_SIZE_GB,
   HETZNER_VOLUME_MIN_SIZE_GB,
   HetznerProvider,
+  isHetznerPlacementCapacityError,
   isTransientCapacityError,
 } from './hetzner';
 export { HETZNER_SIZE_CONFIGS } from './hetzner-metadata';

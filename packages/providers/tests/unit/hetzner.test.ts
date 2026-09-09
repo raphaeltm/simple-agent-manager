@@ -753,8 +753,16 @@ describe('isTransientCapacityError', () => {
     expect(isTransientCapacityError(err)).toBe(false);
   });
 
-  it('should return false for 412 errors', () => {
+  // Inverted 2026-09-09. This pinned the defect: a 412 placement failure IS capacity
+  // scarcity, and treating it as non-capacity stopped the compute pool's fallback chain
+  // from ever reaching its second offering in production.
+  it('should return true for 412 placement errors', () => {
     const err = new ProviderError('hetzner', 412, 'error during placement');
+    expect(isTransientCapacityError(err)).toBe(true);
+  });
+
+  it('should still return false for a 412 that is not a placement failure', () => {
+    const err = new ProviderError('hetzner', 412, 'server is locked', { providerCode: 'locked' });
     expect(isTransientCapacityError(err)).toBe(false);
   });
 

@@ -139,6 +139,22 @@ const TRANSIENT_CAPACITY_PATTERNS: RegExp[] = [
 const INVALID_INPUT_CAPACITY_PATTERNS: RegExp[] = [UNSUPPORTED_LOCATION_CAPACITY_PATTERN];
 
 /**
+ * Hetzner 412 placement failures. Observed in production as
+ * `hetzner API error (412): error during placement`.
+ *
+ * A placement failure says Hetzner cannot place THIS server type in THIS location right now.
+ * Nothing about the request is invalid, so it is capacity scarcity, not `invalid_config`.
+ * Used as the message fallback for a 412 whose structured `error.code` is absent or unrecognized.
+ */
+const PLACEMENT_CAPACITY_PATTERNS: RegExp[] = [/placement/i];
+
+/** Hetzner's structured error code for a placement failure. */
+const HETZNER_PLACEMENT_ERROR_CODE = 'placement_error';
+
+/** HTTP status Hetzner returns for a placement failure. */
+const HETZNER_PLACEMENT_STATUS_CODE = 412;
+
+/**
  * Classify a Hetzner API error into a normalized ProviderErrorCategory.
  *
  * Primary signal: structured `error.code` from the JSON response, except for a
@@ -174,12 +190,18 @@ export function classifyHetznerError(
     switch (providerCode) {
       case 'resource_unavailable':
         return 'transient_capacity';
+      // A placement failure is capacity scarcity for one server type in one location, NOT a
+      // config error. Classifying it `invalid_config` made `node-provisioning-step` take its
+      // "any non-capacity provider failure fails fast — never descend" branch, so a pool with
+      // `exhaustionPolicy: fallback-chain` terminalized on its first offering and never tried
+      // the rest. See tasks/archive/2026-09-09-hetzner-412-placement-blocks-fallback-chain.md.
+      case HETZNER_PLACEMENT_ERROR_CODE:
+        return 'transient_capacity';
       case 'server_limit_exceeded':
         return 'quota_exceeded';
       case 'uniqueness_error':
       case 'invalid_input':
       case 'conflict':
-      case 'placement_error':
         return 'invalid_config';
       case 'forbidden':
       case 'unauthorized':
@@ -196,7 +218,40 @@ export function classifyHetznerError(
     return 'transient_capacity';
   }
 
+  // Production only proves the status code and message for this case: the observability record
+  // for the 2026-09-09 incident carried `statusCode: 412` and "error during placement" but no
+  // structured code. Do not rely on `placement_error` being present.
+  if (
+    statusCode === HETZNER_PLACEMENT_STATUS_CODE &&
+    PLACEMENT_CAPACITY_PATTERNS.some((pattern) => pattern.test(message))
+  ) {
+    return 'transient_capacity';
+  }
+
   return 'unknown';
+}
+
+/**
+ * A Hetzner placement failure specifically, as opposed to capacity scarcity in general.
+ *
+ * Composed as its own predicate rather than reusing `isTransientCapacityError` because the two
+ * answer different questions and drive different actions (`.claude/rules/67`):
+ *
+ *   isTransientCapacityError  "should the CONTROL PLANE try a different offering?"  -> yes
+ *   isHetznerPlacementCapacityError  "should the PROVIDER retry this same SKU?"     -> no
+ *
+ * `createVM`'s outer capacity loop waits up to `DEFAULT_CAPACITY_RETRY_BUDGET_MS` (300 s) on the
+ * requested server type. That is right for a generic capacity error and wrong for a placement
+ * failure: the pool already holds other offerings, and choosing between them is a control-plane
+ * decision (see `attemptCreateWithPlacementFallback`'s "Cross-location fallback must be a new
+ * control-plane placement decision"). Before this change a 412 escaped that loop immediately, so
+ * excluding it here keeps provisioning latency exactly as it is today.
+ */
+export function isHetznerPlacementCapacityError(err: ProviderError): boolean {
+  if (err.statusCode !== HETZNER_PLACEMENT_STATUS_CODE) return false;
+  if (err.providerCode === HETZNER_PLACEMENT_ERROR_CODE) return true;
+  if (err.providerCode !== undefined) return false;
+  return PLACEMENT_CAPACITY_PATTERNS.some((pattern) => pattern.test(err.message));
 }
 
 /**
@@ -206,7 +261,16 @@ export function classifyHetznerError(
  */
 export function isTransientCapacityError(err: ProviderError): boolean {
   if (err.category === 'transient_capacity') return true;
-  if (err.statusCode === 422 && err.category === 'unknown') {
+  // `providerFetch` constructs every HTTP ProviderError with `{ providerCode }` and no
+  // `category`, so the create path always arrives here as 'unknown' and the classifier is the
+  // only thing that can answer. Kept to the two status codes with production-observed capacity
+  // semantics (422 scarcity, 412 placement) rather than opened to every status, so this stays a
+  // reviewable hotfix. Without the 412 arm, fixing `classifyHetznerError` alone changes nothing
+  // in production while its unit tests go green (`.claude/rules/62`).
+  if (
+    (err.statusCode === 422 || err.statusCode === HETZNER_PLACEMENT_STATUS_CODE) &&
+    err.category === 'unknown'
+  ) {
     return (
       classifyHetznerError(err.statusCode, err.providerCode, err.message) === 'transient_capacity'
     );

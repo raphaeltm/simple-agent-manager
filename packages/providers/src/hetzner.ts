@@ -16,6 +16,7 @@ import {
   HETZNER_VOLUME_CAPABILITIES,
   type HetznerProviderRuntimeOptions,
   isAlreadyDetachedVolumeError,
+  isHetznerPlacementCapacityError,
   isTransientCapacityError,
   mapHetznerProviderError,
   mapHetznerServerToVMInstance,
@@ -76,6 +77,7 @@ export {
   HETZNER_MAX_VOLUMES_PER_SERVER,
   HETZNER_VOLUME_MAX_SIZE_GB,
   HETZNER_VOLUME_MIN_SIZE_GB,
+  isHetznerPlacementCapacityError,
   isTransientCapacityError,
 } from './hetzner-metadata';
 
@@ -186,6 +188,12 @@ export class HetznerProvider implements Provider {
   ): Promise<ProviderError> {
     rethrowIfProviderRequestAborted(error, context);
     if (!(error instanceof ProviderError) || !isTransientCapacityError(error)) throw error;
+    // A placement failure is transient capacity for the CONTROL PLANE (it should try another
+    // offering from the pool) but not for THIS loop, which would spend the whole
+    // `capacityRetryBudgetMs` re-asking for the same server type in the same location. Surface it
+    // immediately so the pool's fallback chain descends. `attemptCreateWithPlacementFallback` has
+    // already retried the primary location twice. See `.claude/rules/67`.
+    if (isHetznerPlacementCapacityError(error)) throw error;
 
     const delay = this.computeCapacityRetryDelay(attempt);
     const isLastAttempt = attempt >= this.capacityRetryMaxAttempts - 1;
