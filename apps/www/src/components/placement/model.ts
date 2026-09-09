@@ -20,303 +20,41 @@
  * asynchronous work into countable steps so the consequences are visible. `HOST_MEMORY_RESERVE_MB`
  * and `MAX_CO_TENANTS` are the real defaults and are marked as such.
  */
-import type { CatalogOffering, ProviderCatalog, Tier } from './catalog';
-import { candidatesFor } from './catalog';
+import type { ProviderCatalog } from './catalog';
+import { admissionRefusal, rankHosts, rankOfferings, usageOf } from './ranking';
+import type { RankedCandidate } from './ranking';
+import type {
+  CreateLabOptions,
+  ExhaustionPolicy,
+  Lab,
+  LabNode,
+  SeedHost,
+  Strategy,
+  Workload,
+  WorkloadShape,
+} from './types';
+import {
+  DEFAULT_MAX_SIMULATION_STEPS,
+  DEFAULT_STRATEGY,
+  HOST_ORDERING,
+  LAB,
+  OFFERING_ORDERING,
+  WORKLOAD_PRESETS,
+} from './types';
 
-/** Real default: `DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB`
- * (apps/api/src/services/workspace-resource-capacity.ts). Memory the host keeps for itself. */
-export const HOST_MEMORY_RESERVE_MB = 512;
-
-/** Real default: `PLATFORM_RESOURCE_DEFAULTS.maxCoTenants` (packages/shared). */
-export const MAX_CO_TENANTS = 4;
-
-/** Illustrative step counts. Real equivalents are wall-clock and configurable. */
-export const LAB = {
-  bootSteps: 3,
-  runSteps: 6,
-  /** Real equivalent: `NODE_WARM_TIMEOUT_MS`, 30 minutes by default. */
-  warmSteps: 4,
-  /** Real equivalent: the bounded admission wait deadline. */
-  queueDeadlineSteps: 10,
-  maxNodes: 8,
-  maxWorkloads: 24,
-} as const;
-
-export const STRATEGIES = ['pack', 'spread', 'balanced', 'smallest-fit'] as const;
-export type Strategy = (typeof STRATEGIES)[number];
-
-/** Verbatim from `PLACEMENT_STRATEGY_HOST_ORDERING`. */
-export const HOST_ORDERING: Record<Strategy, string> = {
-  pack: 'highest projected utilization first',
-  balanced: 'lowest projected utilization first',
-  spread: 'fewest co-tenant workspaces first',
-  'smallest-fit': 'smallest sufficient host capacity first',
-};
-
-/** How each strategy orders brand-new hardware. Mirrors `compareCapacityCandidates`
- * (apps/api/src/services/placement-capacity-ranking.ts). */
-export const OFFERING_ORDERING: Record<Strategy, string> = {
-  pack: 'largest offering first',
-  balanced: 'cheapest offering first',
-  spread: 'cheapest offering first',
-  'smallest-fit': 'tightest fit first, then cheapest',
-};
-
-export const EXHAUSTION_POLICIES = ['fail', 'queue', 'fallback-chain'] as const;
-export type ExhaustionPolicy = (typeof EXHAUSTION_POLICIES)[number];
-
-export type WorkloadShape = 'chat' | 'standard' | 'heavy';
-
-export interface WorkloadPreset {
-  readonly label: string;
-  readonly cpuMillis: number;
-  readonly memoryMb: number;
-  readonly diskMb: number;
-  readonly note: string;
-}
-
-/** Reservation shapes taken from real resolved reservations. */
-export const WORKLOAD_PRESETS: Record<WorkloadShape, WorkloadPreset> = {
-  chat: {
-    label: 'Chat',
-    cpuMillis: 500,
-    memoryMb: 1024,
-    diskMb: 4 * 1024,
-    note: 'An agent-profile reservation: 0.5 vCPU, 1 GB.',
-  },
-  standard: {
-    label: 'Standard',
-    cpuMillis: 2000,
-    memoryMb: 4096,
-    diskMb: 40 * 1024,
-    note: 'The platform default: 2 vCPU, 4 GB. Note it does NOT fit a 4 GB host once the reserve is taken.',
-  },
-  heavy: {
-    label: 'Heavy',
-    cpuMillis: 4000,
-    memoryMb: 8192,
-    diskMb: 80 * 1024,
-    note: 'A large build: 4 vCPU, 8 GB.',
-  },
-};
-
-export type WorkloadState = 'queued' | 'running' | 'done' | 'rejected';
-
-export interface Workload {
-  id: number;
-  shape: WorkloadShape;
-  /** Pre-existing pool work, not something the user submitted. Excluded from outcome counts. */
-  seeded?: boolean;
-  state: WorkloadState;
-  nodeId: number | null;
-  remaining: number;
-  waited: number;
-  reason: string;
-}
-
-export type NodeState = 'booting' | 'active' | 'warm' | 'destroyed';
-
-export interface LabNode {
-  id: number;
-  offering: CatalogOffering;
-  region: string;
-  state: NodeState;
-  bootRemaining: number;
-  warmRemaining: number;
-  /** Step the node was created on, for stable ordering. */
-  createdAt: number;
-}
-
-export interface Lab {
-  step: number;
-  strategy: Strategy;
-  policy: ExhaustionPolicy;
-  catalog: ProviderCatalog;
-  regions: string[];
-  /** Regions the provider currently has no stock in — the 412 case. */
-  stockedOut: Set<string>;
-  nodes: LabNode[];
-  workloads: Workload[];
-  events: string[];
-  nextNodeId: number;
-  nextWorkloadId: number;
-}
-
-export interface Usage {
-  cpuMillis: number;
-  memoryMb: number;
-  diskMb: number;
-  coTenants: number;
-}
-
-// ---------------------------------------------------------------------------
-// Capacity arithmetic
-// ---------------------------------------------------------------------------
-
-export function cpuBudgetMillis(node: LabNode): number {
-  return node.offering.vcpu * 1000;
-}
-
-/** Assignable memory after the host keeps its reserve. This is the line that disqualifies a
- * 4 GB host from a 4 GB workload. Single source: both the admission gate and the
- * provision-time offering filter must subtract the reserve the SAME way, or hardware gets
- * bought that the final reservation check then refuses. */
-export function usableMemoryForOffering(offering: CatalogOffering): number {
-  return Math.max(0, offering.memoryMb - HOST_MEMORY_RESERVE_MB);
-}
-
-export function usableMemoryMb(node: LabNode): number {
-  return usableMemoryForOffering(node.offering);
-}
-
-export function usageOf(lab: Lab, nodeId: number): Usage {
-  const usage: Usage = { cpuMillis: 0, memoryMb: 0, diskMb: 0, coTenants: 0 };
-  for (const workload of lab.workloads) {
-    if (workload.nodeId !== nodeId || workload.state !== 'running') continue;
-    const preset = WORKLOAD_PRESETS[workload.shape];
-    usage.cpuMillis += preset.cpuMillis;
-    usage.memoryMb += preset.memoryMb;
-    usage.diskMb += preset.diskMb;
-    usage.coTenants += 1;
-  }
-  return usage;
-}
-
-/**
- * THE ADMISSION GATE. Ranking never changes this answer.
- * Returns null when the host may take the workload, or a human-readable refusal.
- */
-export function admissionRefusal(lab: Lab, node: LabNode, shape: WorkloadShape): string | null {
-  // A warm node is reusable — that is the entire point of the warm pool. Only booting and
-  // destroyed hosts are unavailable.
-  if (node.state !== 'active' && node.state !== 'warm') return `node is ${node.state}`;
-  const preset = WORKLOAD_PRESETS[shape];
-  const usage = usageOf(lab, node.id);
-  if (usage.coTenants >= MAX_CO_TENANTS) return `co-tenant cap (${MAX_CO_TENANTS}) reached`;
-  if (usage.cpuMillis + preset.cpuMillis > cpuBudgetMillis(node)) return 'not enough vCPU';
-  if (usage.memoryMb + preset.memoryMb > usableMemoryMb(node)) {
-    return `not enough memory after the ${HOST_MEMORY_RESERVE_MB} MB host reserve`;
-  }
-  if (usage.diskMb + preset.diskMb > node.offering.diskMb) return 'not enough disk';
-  return null;
-}
-
-/** Dominant-resource utilization: a host is as full as its fullest dimension. */
-export function projectedUtilization(lab: Lab, node: LabNode, shape: WorkloadShape): number {
-  const preset = WORKLOAD_PRESETS[shape];
-  const usage = usageOf(lab, node.id);
-  const ratios = [
-    (usage.cpuMillis + preset.cpuMillis) / Math.max(1, cpuBudgetMillis(node)),
-    (usage.memoryMb + preset.memoryMb) / Math.max(1, usableMemoryMb(node)),
-    (usage.diskMb + preset.diskMb) / Math.max(1, node.offering.diskMb),
-  ];
-  return Math.max(...ratios);
-}
-
-/** Total normalized capacity, used by `smallest-fit` and `pack` offering ordering. */
-function offeringSize(item: CatalogOffering): number {
-  return item.vcpu * 1000 + item.memoryMb;
-}
-
-function hostSize(node: LabNode): number {
-  return node.offering.vcpu * 1000 + usableMemoryMb(node);
-}
-
-// ---------------------------------------------------------------------------
-// Ranking — orders only what admission already accepted
-// ---------------------------------------------------------------------------
-
-/**
- * Order admitted hosts by the strategy's DEFINING key, lexicographically, then break ties to a
- * total order so repeated runs are byte-identical (rule 65).
- */
-export function rankHosts(lab: Lab, hosts: LabNode[], shape: WorkloadShape): LabNode[] {
-  const strategy = lab.strategy;
-  return [...hosts].sort((a, b) => {
-    let primary = 0;
-    if (strategy === 'pack') {
-      primary = projectedUtilization(lab, b, shape) - projectedUtilization(lab, a, shape);
-    } else if (strategy === 'balanced') {
-      primary = projectedUtilization(lab, a, shape) - projectedUtilization(lab, b, shape);
-    } else if (strategy === 'spread') {
-      primary = usageOf(lab, a.id).coTenants - usageOf(lab, b.id).coTenants;
-    } else {
-      primary = hostSize(a) - hostSize(b);
-    }
-    if (Math.abs(primary) > 1e-9) return primary;
-    if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
-    return a.id - b.id;
-  });
-}
-
-export interface RankedCandidate {
-  offering: CatalogOffering;
-  region: string;
-  /** True when this candidate is only excluded because its region is out of stock. */
-  stockedOut: boolean;
-}
-
-/**
- * Order brand-new hardware. Region is NOT a ranking input except for `pack`/`spread`, which
- * cluster or scatter by how many nodes already live in each region — mirroring
- * `comparePlacementLocationsByStrategy`, which returns 0 for every other strategy.
- *
- * That no-op is the point of the whole exercise: two regions offering the same machine at the
- * same price are a genuine tie, so nothing prefers the one that happens to be out of stock.
- */
-export function rankOfferings(lab: Lab, shape: WorkloadShape): RankedCandidate[] {
-  const preset = WORKLOAD_PRESETS[shape];
-  const strategy = lab.strategy;
-  const nodesPerRegion = new Map<string, number>();
-  for (const node of lab.nodes) {
-    if (node.state === 'destroyed') continue;
-    nodesPerRegion.set(node.region, (nodesPerRegion.get(node.region) ?? 0) + 1);
-  }
-
-  const viable = candidatesFor(lab.catalog, lab.regions).filter(({ offering: item }) => {
-    // Admission arithmetic applied to hardware that does not exist yet: provision only what
-    // could pass the final reservation check. Mirrors the host-reserve filter in
-    // `normalizeCapacityCandidate` (placement-resolver-capacity.ts).
-    if (item.vcpu * 1000 < preset.cpuMillis) return false;
-    if (usableMemoryForOffering(item) < preset.memoryMb) return false;
-    if (item.diskMb < preset.diskMb) return false;
-    return true;
-  });
-
-  return viable
-    .map(({ offering: item, region }) => ({
-      offering: item,
-      region,
-      stockedOut: lab.stockedOut.has(region),
-    }))
-    .sort((a, b) => {
-      if (strategy === 'pack' || strategy === 'spread') {
-        const aCount = nodesPerRegion.get(a.region) ?? 0;
-        const bCount = nodesPerRegion.get(b.region) ?? 0;
-        const byRegion = strategy === 'pack' ? bCount - aCount : aCount - bCount;
-        if (byRegion !== 0) return byRegion;
-      }
-      if (strategy === 'pack') {
-        const bySize = offeringSize(b.offering) - offeringSize(a.offering);
-        if (bySize !== 0) return bySize;
-      } else if (strategy === 'smallest-fit') {
-        const surplusA = offeringSize(a.offering) - (preset.cpuMillis + preset.memoryMb);
-        const surplusB = offeringSize(b.offering) - (preset.cpuMillis + preset.memoryMb);
-        if (surplusA !== surplusB) return surplusA - surplusB;
-      }
-      const byPrice = a.offering.monthlyCents - b.offering.monthlyCents;
-      if (byPrice !== 0) return byPrice;
-      if (strategy !== 'pack') {
-        const bySize = offeringSize(a.offering) - offeringSize(b.offering);
-        if (bySize !== 0) return bySize;
-      }
-      // Total order. Region sorts LAST and only as a determinism tiebreak — never as a preference.
-      return (
-        a.offering.instanceType.localeCompare(b.offering.instanceType) ||
-        a.region.localeCompare(b.region)
-      );
-    });
-}
+// Re-exported so every consumer keeps importing the model from one place.
+export * from './types';
+export {
+  admissionRefusal,
+  cpuBudgetMillis,
+  projectedUtilization,
+  rankHosts,
+  rankOfferings,
+  usableMemoryForOffering,
+  usableMemoryMb,
+  usageOf,
+} from './ranking';
+export type { RankedCandidate } from './ranking';
 
 // ---------------------------------------------------------------------------
 // Lifecycle
@@ -347,7 +85,7 @@ export function createLab(
   regions: string[],
   options: CreateLabOptions = {}
 ): Lab {
-  const strategy = options.strategy ?? 'balanced';
+  const strategy = options.strategy ?? DEFAULT_STRATEGY;
   const lab: Lab = {
     step: 0,
     strategy,
@@ -408,7 +146,7 @@ export function defaultSeedFleet(regions: readonly string[]): SeedHost[] {
 
 function record(lab: Lab, message: string): void {
   lab.events.unshift(`${String(lab.step).padStart(2, '0')} · ${message}`);
-  lab.events = lab.events.slice(0, 40);
+  lab.events = lab.events.slice(0, LAB.eventHistory);
 }
 
 export function submit(lab: Lab, shape: WorkloadShape): Workload | null {
@@ -637,7 +375,7 @@ export function simulate(
   });
   for (const shape of shapes) submit(lab, shape);
 
-  const maxSteps = options.maxSteps ?? 60;
+  const maxSteps = options.maxSteps ?? DEFAULT_MAX_SIMULATION_STEPS;
   for (let i = 0; i < maxSteps; i++) {
     const pending = lab.workloads.some((w) => w.state === 'queued' || w.state === 'running');
     if (!pending) break;

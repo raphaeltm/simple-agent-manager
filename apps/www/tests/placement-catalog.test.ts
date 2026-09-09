@@ -23,8 +23,14 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { PROVIDER_CATALOG, type ProviderId, type Tier } from '../src/components/placement/catalog';
+import {
+  HOST_MEMORY_RESERVE_MB,
+  MAX_CO_TENANTS,
+  MAX_WORKSPACES_PER_NODE,
+} from '../src/components/placement/types';
 
-const PROVIDERS_SRC = join(__dirname, '..', '..', '..', 'packages', 'providers', 'src');
+const REPO_ROOT = join(__dirname, '..', '..', '..');
+const PROVIDERS_SRC = join(REPO_ROOT, 'packages', 'providers', 'src');
 
 interface SourceSpec {
   file: string;
@@ -59,10 +65,21 @@ function readProviderSource(spec: SourceSpec): string {
   return readFileSync(join(PROVIDERS_SRC, spec.file), 'utf8');
 }
 
-/** Extract the balanced `{ ... }` or `[ ... ]` literal following `export const <symbol>`. */
+/**
+ * Extract the balanced `{ ... }` or `[ ... ]` literal following `export const <symbol>`.
+ *
+ * The symbol match is WORD-ANCHORED. A plain `indexOf` substring search silently matched
+ * `HETZNER_SIZE_CONFIGS` inside a renamed `HETZNER_SIZE_CONFIGS_V2` and reported "no drift" —
+ * the guard passed while the thing it guards had been renamed out from under it.
+ *
+ * Known limitation: the brace counter below is not string-aware, so a brace inside a string
+ * literal (e.g. `price: '{promo}'`) would desync the depth count. No provider currently has one;
+ * if that changes, this needs a real tokenizer rather than a counter.
+ */
 function extractLiteral(source: string, symbol: string, open: '{' | '['): string {
-  const declaration = source.indexOf(`export const ${symbol}`);
-  expect(declaration, `${symbol} not found — the provider source moved or was renamed`).toBeGreaterThan(-1);
+  const anchored = new RegExp(`export const ${symbol}\\b`).exec(source);
+  expect(anchored, `${symbol} not found — the provider source moved or was renamed`).not.toBeNull();
+  const declaration = anchored?.index ?? -1;
   const start = source.indexOf(open, declaration);
   expect(start, `no ${open} after ${symbol}`).toBeGreaterThan(-1);
   const close = open === '{' ? '}' : ']';
@@ -148,5 +165,69 @@ describe('placement catalog snapshot matches packages/providers', () => {
 
   it('covers every provider the explorer offers', () => {
     expect(Object.keys(SOURCES).sort()).toEqual(Object.keys(PROVIDER_CATALOG).sort());
+  });
+
+  it('does not match a symbol that is merely a PREFIX of the real declaration', () => {
+    // Guard-the-guard. With an unanchored `indexOf`, renaming FOO to FOO_V2 upstream left this
+    // whole suite green: the search matched the prefix and happily parsed the renamed object.
+    const fixture = "export const FOO_V2 = {\n  small: { type: 'x' },\n};\n";
+    expect(() => extractLiteral(fixture, 'FOO', '{')).toThrow();
+    // Owner control: the real symbol still extracts.
+    expect(extractLiteral(fixture, 'FOO_V2', '{')).toContain("type: 'x'");
+  });
+});
+
+/**
+ * The explorer states these three as REAL SAM defaults rather than illustrative values — the
+ * widget's model-note and the blog post both say so in as many words. A claim made that
+ * confidently deserves at least the same drift protection as the machine catalog above. Same
+ * text-extraction technique, for the same reason: `apps/www` must not take a build dependency on
+ * `apps/api` or `packages/shared`.
+ */
+describe('real SAM defaults mirrored by the explorer', () => {
+  function readNumericConst(relativePath: string, symbol: string): number {
+    const source = readFileSync(join(REPO_ROOT, relativePath), 'utf8');
+    const match = new RegExp(`export const ${symbol}\\s*(?::\\s*\\w+\\s*)?=\\s*([\\d_]+)`).exec(source);
+    expect(
+      match,
+      `${symbol} not found in ${relativePath} — moved, renamed, or no longer a plain numeric literal`
+    ).not.toBeNull();
+    return Number((match?.[1] ?? '').replace(/_/g, ''));
+  }
+
+  it('HOST_MEMORY_RESERVE_MB matches DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB', () => {
+    const upstream = readNumericConst(
+      'apps/api/src/services/workspace-resource-capacity.ts',
+      'DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB'
+    );
+    expect(upstream).toBeGreaterThan(0);
+    expect(HOST_MEMORY_RESERVE_MB).toBe(upstream);
+  });
+
+  it('MAX_WORKSPACES_PER_NODE matches DEFAULT_MAX_WORKSPACES_PER_NODE', () => {
+    const upstream = readNumericConst(
+      'packages/shared/src/constants/task-execution.ts',
+      'DEFAULT_MAX_WORKSPACES_PER_NODE'
+    );
+    expect(upstream).toBeGreaterThan(0);
+    expect(MAX_WORKSPACES_PER_NODE).toBe(upstream);
+  });
+
+  it('MAX_CO_TENANTS matches PLATFORM_RESOURCE_DEFAULTS.maxCoTenants', () => {
+    const source = readFileSync(
+      join(REPO_ROOT, 'packages', 'shared', 'src', 'constants', 'resource-defaults.ts'),
+      'utf8'
+    );
+    const block = /export const PLATFORM_RESOURCE_DEFAULTS[^{]*\{([\s\S]*?)\}/.exec(source);
+    expect(block, 'PLATFORM_RESOURCE_DEFAULTS not found').not.toBeNull();
+    const match = /maxCoTenants:\s*(\d+)/.exec(block?.[1] ?? '');
+    expect(match, 'maxCoTenants not found in PLATFORM_RESOURCE_DEFAULTS').not.toBeNull();
+    const upstream = Number(match?.[1]);
+    expect(upstream).toBeGreaterThan(0);
+    expect(MAX_CO_TENANTS).toBe(upstream);
+  });
+
+  it('the node-wide cap is the stricter of the two, which is why the model enforces it first', () => {
+    expect(MAX_WORKSPACES_PER_NODE).toBeLessThan(MAX_CO_TENANTS);
   });
 });

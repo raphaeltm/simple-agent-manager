@@ -2,12 +2,15 @@ import type { ProviderCatalog, ProviderId } from './catalog';
 import { DEFAULT_REGION_COUNT, formatPrice, PROVIDER_CATALOG } from './catalog';
 import type { ExhaustionPolicy, Lab, LabNode, Strategy, WorkloadShape } from './model';
 import {
+  COMPARE_COLUMN_COUNT,
   createLab,
+  DEFAULT_STRATEGY,
   cpuBudgetMillis,
   defaultSeedFleet,
   generateBatch,
   HOST_ORDERING,
   LAB,
+  EVENT_DISPLAY_LIMIT,
   MAX_CO_TENANTS,
   setStockout,
   simulate,
@@ -16,6 +19,7 @@ import {
   submit,
   usableMemoryMb,
   usageOf,
+  WORKLOAD_DISPLAY_LIMIT,
   WORKLOAD_PRESETS,
 } from './model';
 
@@ -36,7 +40,7 @@ function isShape(value: string): value is WorkloadShape {
 class PlacementExplorer extends HTMLElement {
   private catalog: ProviderCatalog = PROVIDER_CATALOG.hetzner;
   private regions: string[] = [];
-  private strategy: Strategy = 'balanced';
+  private strategy: Strategy = DEFAULT_STRATEGY;
   private policy: ExhaustionPolicy = 'queue';
   private stockedOut = new Set<string>();
   private lab: Lab;
@@ -370,7 +374,7 @@ class PlacementExplorer extends HTMLElement {
       return;
     }
     host.replaceChildren(
-      ...submitted.slice(-12).map((workload) => {
+      ...submitted.slice(-WORKLOAD_DISPLAY_LIMIT).map((workload) => {
         const li = document.createElement('li');
         li.dataset.state = workload.state;
         const tag = document.createElement('span');
@@ -391,7 +395,7 @@ class PlacementExplorer extends HTMLElement {
     const host = this.querySelector<HTMLElement>('[data-events]');
     if (!host) return;
     host.replaceChildren(
-      ...this.lab.events.slice(0, 12).map((message) => {
+      ...this.lab.events.slice(0, EVENT_DISPLAY_LIMIT).map((message) => {
         const li = document.createElement('li');
         li.textContent = message;
         return li;
@@ -411,7 +415,7 @@ class PlacementExplorer extends HTMLElement {
     if (shapes.length === 0) {
       const row = document.createElement('tr');
       const cell = document.createElement('td');
-      cell.colSpan = 7;
+      cell.colSpan = COMPARE_COLUMN_COUNT;
       cell.className = 'empty';
       cell.textContent = 'Submit some work to compare the strategies.';
       row.append(cell);

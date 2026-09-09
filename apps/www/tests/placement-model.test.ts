@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { PROVIDER_CATALOG } from '../src/components/placement/catalog';
+import { PROVIDER_CATALOG, type ProviderCatalog } from '../src/components/placement/catalog';
 import {
   admissionRefusal,
   createLab,
   defaultSeedFleet,
   HOST_MEMORY_RESERVE_MB,
   LAB,
+  MAX_CO_TENANTS,
+  MAX_WORKSPACES_PER_NODE,
   rankOfferings,
   simulate,
   step,
@@ -62,22 +64,38 @@ describe('admission gate', () => {
     expect(admissionRefusal(lab, nodeOf('cx23'), 'chat')).toBeNull();
   });
 
-  it('enforces the co-tenant cap before any resource dimension is exhausted', () => {
+  it('enforces a density cap before any resource dimension is exhausted', () => {
+    // Two real ceilings exist: the node-wide `MAX_WORKSPACES_PER_NODE` (3) and the per-request
+    // `MAX_CO_TENANTS` (4). At the defaults the node-wide one is stricter, so it is the one that
+    // binds — a model that only knew about the co-tenant cap would admit a fourth workload a
+    // default deployment refuses.
+    expect(MAX_WORKSPACES_PER_NODE).toBeLessThan(MAX_CO_TENANTS);
+
     const lab = createLab(hetzner, EU);
     const node = nodeOf('cx43');
     lab.nodes.push(node);
-    for (let i = 0; i < 4; i++) {
-      const workload = submit(lab, 'chat');
-      if (!workload) throw new Error('submit failed');
-      workload.state = 'running';
-      workload.nodeId = node.id;
-    }
+    const fill = (count: number): void => {
+      for (let i = 0; i < count; i++) {
+        const workload = submit(lab, 'chat');
+        if (!workload) throw new Error('submit failed');
+        workload.state = 'running';
+        workload.nodeId = node.id;
+      }
+    };
+
+    fill(MAX_WORKSPACES_PER_NODE - 1);
+    // Owner control: below the cap the same host still accepts work, so the refusal below is the
+    // cap talking and not a broken fixture.
+    expect(admissionRefusal(lab, node, 'chat')).toBeNull();
+
+    fill(1);
     const usage = usageOf(lab, node.id);
-    expect(usage.coTenants).toBe(4);
-    // 4 chat workloads is 2 vCPU / 4 GB on an 8 vCPU / 16 GB host — resources are nowhere near
-    // exhausted, so only the cap can be refusing.
+    expect(usage.coTenants).toBe(MAX_WORKSPACES_PER_NODE);
+    // 3 chat workloads is 1.5 vCPU / 3 GB on an 8 vCPU / 16 GB host — no resource dimension is
+    // anywhere near exhausted, so only a density cap can be refusing.
     expect(usage.memoryMb).toBeLessThan(node.offering.memoryMb - HOST_MEMORY_RESERVE_MB);
-    expect(admissionRefusal(lab, node, 'chat')).toContain('co-tenant cap');
+    expect(usage.cpuMillis).toBeLessThan(node.offering.vcpu * 1000);
+    expect(admissionRefusal(lab, node, 'chat')).toContain('node workspace cap');
   });
 });
 
@@ -101,6 +119,36 @@ describe('offering ranking', () => {
     expect(ranked.some((c) => c.offering.instanceType === 'cx23')).toBe(false);
     // Control: the same catalog does offer cx23 to a workload that fits it.
     expect(rankOfferings(lab, 'chat').some((c) => c.offering.instanceType === 'cx23')).toBe(true);
+  });
+
+  it('orders balanced/spread by FIT, not price, when the two disagree', () => {
+    // The Hetzner catalog cannot discriminate these: its cheapest offering is also its tightest,
+    // so "cheapest first" and "tightest fit first" name the same machine and a test over it
+    // passes either way (rule 62). This synthetic catalog inverts the relationship — the roomiest
+    // machine is also the cheapest — so only the real ordering key can satisfy it.
+    //
+    // Fit must win, because production's default selection weights are `fit: 1_000_000` against
+    // `price: 1` (`DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS`).
+    const inverted: ProviderCatalog = {
+      id: 'hetzner',
+      label: 'Inverted',
+      currency: 'EUR',
+      currencySymbol: '€',
+      regions: ['r1'],
+      offerings: [
+        // tight fit, expensive
+        { provider: 'hetzner', tier: 'small', instanceType: 'tight', vcpu: 2, memoryMb: 4096, diskMb: 40 * 1024, monthlyCents: 9000 },
+        // roomy, cheap
+        { provider: 'hetzner', tier: 'large', instanceType: 'roomy', vcpu: 8, memoryMb: 32768, diskMb: 320 * 1024, monthlyCents: 100 },
+      ],
+    };
+    for (const strategy of ['balanced', 'spread', 'smallest-fit'] as Strategy[]) {
+      const lab = createLab(inverted, ['r1'], { strategy });
+      expect(rankOfferings(lab, 'chat')[0]?.offering.instanceType, strategy).toBe('tight');
+    }
+    // Control: `pack` explicitly wants the largest, so it takes the roomy one despite the tie-break.
+    const packLab = createLab(inverted, ['r1'], { strategy: 'pack' });
+    expect(rankOfferings(packLab, 'chat')[0]?.offering.instanceType).toBe('roomy');
   });
 
   it('orders new hardware by the strategy key', () => {
