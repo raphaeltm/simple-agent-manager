@@ -15,6 +15,15 @@ export const STAGING_APP = 'https://app.sammy.party';
 /** Per-attempt budget for the login request, well under any sane per-test timeout. */
 const LOGIN_TIMEOUT_MS = 20_000;
 const LOGIN_ATTEMPTS = 3;
+/**
+ * How long to wait for the first-run modal before deciding it is not coming.
+ *
+ * This is paid on EVERY navigation where the modal is absent, which is the common case, so it
+ * trades directly against suite runtime. Kept short deliberately: the modal is rendered by the
+ * same lazy chunk as the page under test, so if the page has painted and the modal has not
+ * appeared within this window, it is not coming.
+ */
+const ONBOARDING_PROBE_TIMEOUT_MS = 2_000;
 
 type StoredCookies = Awaited<ReturnType<BrowserContext['storageState']>>['cookies'];
 let cachedCookies: StoredCookies | null = null;
@@ -73,8 +82,20 @@ export async function stagingLogin(page: Page): Promise<void> {
  */
 export async function dismissStagingOnboarding(page: Page): Promise<void> {
   const wizard = page.getByRole('dialog', { name: 'Account setup' });
-  // Short probe: absent is the common case and must not cost the test its budget.
-  if (!(await wizard.isVisible({ timeout: 3_000 }).catch(() => false))) return;
+  /*
+   * `waitFor`, NOT `isVisible({ timeout })`. Playwright deprecated that option and IGNORES it:
+   * `isVisible` is a one-shot check that returns the state right now. The modal renders after
+   * the route chunk loads, so a one-shot probe usually runs too early, reports "absent", and the
+   * caller proceeds into a screen the modal is about to cover — which is the click-swallowing
+   * failure this helper exists to prevent, reintroduced by the probe meant to avoid it.
+   *
+   * Absent is still the common case and must not cost the test its budget, hence the short
+   * bounded wait rather than an assertion.
+   */
+  const appeared = await wizard
+    .waitFor({ state: 'visible', timeout: ONBOARDING_PROBE_TIMEOUT_MS })
+    .then(() => true, () => false);
+  if (!appeared) return;
   await page.getByRole('button', { name: 'Exit setup' }).click();
   await expect(wizard).toBeHidden({ timeout: 10_000 });
 }

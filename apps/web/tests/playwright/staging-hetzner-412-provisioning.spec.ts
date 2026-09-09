@@ -122,6 +122,14 @@ test.describe('Staging — Hetzner 412 placement fix', () => {
   });
 
   test('core surfaces are unregressed', async ({ page }) => {
+    /*
+     * The file-level 600s budget exists for the VM-provisioning test above, which legitimately
+     * waits on a real Hetzner boot. This test only navigates, so inheriting that budget means a
+     * hang burns ten minutes before reporting — observed once against staging. Give it a budget
+     * proportional to its work so a stall surfaces as a stall.
+     */
+    test.setTimeout(120_000);
+
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
