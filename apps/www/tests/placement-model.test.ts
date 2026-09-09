@@ -10,6 +10,7 @@ import {
   MAX_CO_TENANTS,
   MAX_WORKSPACES_PER_NODE,
   rankOfferings,
+  setStockout,
   simulate,
   step,
   STRATEGIES,
@@ -247,6 +248,76 @@ describe('provider stockout (the 412 case)', () => {
     const outcome = simulate(hetzner, single, 'balanced', shapes, { policy: 'fail' });
     expect(outcome.rejected).toBe(0);
     expect(outcome.regions).toEqual(['fsn1']);
+  });
+});
+
+describe('coverage for branches the catalog cannot reach', () => {
+  it('refuses on disk when disk is the binding dimension', () => {
+    // No real (preset x tier) pair makes disk bind before CPU — for Hetzner they tie exactly and
+    // the CPU check is ordered first — so this branch is unreachable through the shipped catalog
+    // and would be invisible if it broke. Construct a host where only disk is short.
+    const lab = createLab(hetzner, EU);
+    const node: LabNode = {
+      id: 99,
+      offering: {
+        provider: 'hetzner',
+        tier: 'large',
+        instanceType: 'roomy-but-diskless',
+        vcpu: 16,
+        memoryMb: 65536,
+        diskMb: 1024,
+        monthlyCents: 100,
+      },
+      region: 'fsn1',
+      state: 'active',
+      bootRemaining: 0,
+      warmRemaining: 0,
+      createdAt: 0,
+    };
+    expect(admissionRefusal(lab, node, 'standard')).toBe('not enough disk');
+    // Owner control: give it disk and the same host admits the same workload.
+    expect(
+      admissionRefusal(lab, { ...node, offering: { ...node.offering, diskMb: 400 * 1024 } }, 'standard')
+    ).toBeNull();
+  });
+
+  it('queue policy admits the work once stock returns before the deadline', () => {
+    // The existing stockout tests only cover the expiry branch. The whole point of `queue` over
+    // `fail` is that it survives a transient shortage — untested, that could silently stop
+    // re-checking and nobody would notice, because the deadline test would still pass.
+    const lab = createLab(hetzner, ['fsn1'], { strategy: 'balanced', policy: 'queue' });
+    setStockout(lab, 'fsn1', true);
+    submit(lab, 'standard');
+    for (let i = 0; i < 3; i++) step(lab);
+    expect(lab.workloads[0]?.state).toBe('queued');
+    expect(lab.workloads[0]?.reason).toContain('412');
+
+    setStockout(lab, 'fsn1', false);
+    for (let i = 0; i < LAB.bootSteps + 2; i++) step(lab);
+    expect(lab.workloads[0]?.state).toBe('running');
+    expect(lab.workloads[0]?.reason).toContain('placed on');
+  });
+
+  it('holds a workload at the node ceiling rather than rejecting it, and places it when capacity frees', () => {
+    const lab = createLab(hetzner, ['fsn1'], { strategy: 'balanced' });
+    for (let i = 0; i < LAB.maxNodes; i++) {
+      lab.nodes.push({
+        ...nodeOf('cx23'),
+        id: 100 + i,
+        state: 'active',
+        createdAt: 0,
+      });
+    }
+    // Every host is too small for a heavy workload, and the ceiling forbids buying another.
+    submit(lab, 'heavy');
+    step(lab);
+    expect(lab.workloads[0]?.state).toBe('queued');
+    expect(lab.workloads[0]?.reason).toContain('node ceiling');
+
+    // Escape path: free a slot and the workload is placed rather than being stuck forever.
+    lab.nodes[0] = { ...(lab.nodes[0] as LabNode), offering: hetzner.offerings[2] as never };
+    step(lab);
+    expect(lab.workloads[0]?.state).toBe('running');
   });
 });
 

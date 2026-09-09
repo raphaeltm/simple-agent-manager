@@ -10,7 +10,7 @@ way to see what a strategy actually does to a batch of workloads.
 The gap has a concrete cost. On 2026-09-09 a session wake failed three times with
 `hetzner API error (412): error during placement` because the pool asked for `cx33` in `fsn1` and
 Hetzner had none. The same pool carries `cx33` in `hel1` and `nbg1` **at exactly the same price**
-(€8.49/mo, verified in production `capacity_pool_candidates`), and no strategy would have
+(€8.49/mo, verified in production `capacity_pool_candidates` — note the in-repo catalog snapshot says €7.49, because `HETZNER_SIZE_CONFIGS` carries display defaults rather than live billing prices; both numbers are real, from different sources), and no strategy would have
 preferred `fsn1` — region is not a ranking input at all except for `pack`/`spread` clustering.
 Nobody could see that, because there is nothing that shows how placement decides.
 
@@ -134,6 +134,34 @@ Delivered. `pnpm lint` clean, `pnpm typecheck` 0 new errors (4 pre-existing base
 `pnpm test` 5 files / 40 tests (baseline 3 / 9), `pnpm test:browser` 132 passed including 14 new
 across Desktop 1280x800 and Mobile Chrome 375x667.
 
+### Review findings addressed after the first pass
+
+Five local reviewers ran against the branch. Their substantive findings, all fixed:
+
+- **doc-sync + task-completion-validator (HIGH, same finding independently):** the post and the
+  model both claimed `balanced`/`spread` buy "the cheapest offering first". False. The real default
+  weights are `fit: 1_000_000` against `price: 1`, so fit dominates and price is only a tie-break.
+  Both reviewers verified by calling the real `compareCapacityCandidates`. Corrected in the post,
+  in `OFFERING_ORDERING`, and in `rankOfferings`; the old test could not catch it because Hetzner's
+  cheapest offering is also its tightest, so a synthetic inverted-price catalog was added.
+- **task-completion-validator (HIGH):** the fail-policy stockout browser test was flaky at a
+  boundary — seeded load shared `LAB.runSteps`, so the seeded host freed itself at exactly the step
+  the test asserted on. Fixed at root cause: seeded work is steady-state occupancy
+  (`LAB.seededWorkRunSteps`), not something that evaporates mid-demo.
+- **test-engineer (HIGH):** the catalog drift guard used `indexOf`, so a prefix-preserving rename
+  passed silently. Now word-anchored, with a guard-the-guard test.
+- **doc-sync (HIGH):** the post said the NodeLifecycle DO destroys warm nodes. It marks them
+  `destroying`; the cron sweep destroys. Corrected, matching CLAUDE.md.
+- **doc-sync (MEDIUM):** `MAX_WORKSPACES_PER_NODE` (3) binds before the co-tenant cap (4) at the
+  defaults and was not modelled at all. Now modelled, enforced first, and disclosed.
+- **constitution-validator (MEDIUM):** the two mirrored real defaults had no drift guard while the
+  catalog did. All three are now pinned to their real sources.
+- **constitution-validator (MEDIUM):** `aria-pressed={index === 2}` hardcoded a list position;
+  now derived from `DEFAULT_STRATEGY`. Magic numbers named.
+- **test-engineer (MEDIUM/LOW):** added coverage for the queue policy's success path, the
+  unreachable disk-refusal branch, the node ceiling and its escape path, play/pause/reset,
+  provider-switch stockout reset, and warm reuse in the browser.
+
 ### Post-mortem — six defects found during implementation
 
 1. **Astro scoped styles never reach JS-created DOM.** Astro compiles `.fleet li` to
@@ -159,7 +187,14 @@ across Desktop 1280x800 and Mobile Chrome 375x667.
 
 Mutation-verified discrimination: removing the host reserve reddens exactly the admission and
 offering-exclusion tests; inverting `pack`'s ordering key reddens exactly the two strategy-identity
-tests; drifting the catalog snapshot reddens exactly the two drift tests. Restored after each.
+tests. Restored after each.
+
+CORRECTION to an earlier version of this note: I wrote that "drifting the catalog snapshot reddens
+exactly the two drift tests". That was over-stated, and the test-engineer review disproved it. It
+holds only for an identity-level drift (a symbol renamed to a non-colliding name). A value-level
+drift reddens one test, and a prefix-preserving rename (`FOO` -> `FOO_V2`) reddened **zero** —
+`extractLiteral` used `indexOf`, which matched the old name as a prefix of the new one and reported
+no drift. The guard is now word-anchored with its own guard-the-guard test.
 
 ### Process note
 
@@ -170,17 +205,17 @@ here once the screenshots were actually opened.
 
 ## Acceptance criteria
 
-- [ ] A user can pick a provider and 2+ regions from real catalog data and see real SKUs/prices
-- [ ] A user can submit workloads individually and generate a batch
-- [ ] Nodes visibly provision, receive workloads, drain to warm, and are destroyed
-- [ ] All four strategies are selectable and produce *observably different* placements for the
+- [x] A user can pick a provider and 2+ regions from real catalog data and see real SKUs/prices
+- [x] A user can submit workloads individually and generate a batch
+- [x] Nodes visibly provision, receive workloads, drain to warm, and are destroyed
+- [x] All four strategies are selectable and produce *observably different* placements for the
       same workload set — asserted in tests, not just claimed
-- [ ] A same-price multi-region tie is visible as a tie (the incident's teaching moment)
-- [ ] The stockout toggle reproduces "no capacity in this region" and shows what each exhaustion
+- [x] A same-price multi-region tie is visible as a tie (the incident's teaching moment)
+- [x] The stockout toggle reproduces "no capacity in this region" and shows what each exhaustion
       policy does about it
-- [ ] `pnpm --filter @simple-agent-manager/www test` and `test:browser` pass
-- [ ] No horizontal overflow at 375px or 1280px
-- [ ] Post states plainly that the explorer's constants are illustrative
+- [x] `pnpm --filter @simple-agent-manager/www test` and `test:browser` pass
+- [x] No horizontal overflow at 375px or 1280px
+- [x] Post states plainly that the explorer's constants are illustrative
 
 ## References
 

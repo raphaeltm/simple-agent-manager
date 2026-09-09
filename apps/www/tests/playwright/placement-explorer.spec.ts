@@ -151,6 +151,73 @@ test.describe('placement explorer', () => {
     await assertNoOverflow(page);
   });
 
+  test('play advances the clock on its own, pause stops it, reset returns to step zero', async ({
+    page,
+  }) => {
+    await openExplorer(page);
+    const clock = page.locator('[data-clock]');
+    const play = page.locator('button[data-action="play"]');
+    await page.locator('button[data-action="batch"]').click();
+    await expect(clock).toHaveText('STEP 00');
+
+    await play.click();
+    await expect(play).toHaveText('Pause ▮▮');
+    // Advances with no further clicks — the point of the control.
+    await expect(clock).not.toHaveText('STEP 00', { timeout: 10_000 });
+
+    await play.click();
+    await expect(play).toHaveText('Play ▸▸');
+    const stopped = await clock.textContent();
+    await page.waitForTimeout(2500); // longer than one tick, so a still-running timer would show
+    await expect(clock).toHaveText(stopped ?? '');
+
+    await page.locator('button[data-action="reset"]').click();
+    await expect(clock).toHaveText('STEP 00');
+    await expect(page.locator('[data-workloads]')).toContainText('Submit some work');
+    // Positive control: reset rebuilds the seeded fleet rather than emptying the widget.
+    await expect(page.locator('[data-fleet] li')).toHaveCount(3);
+  });
+
+  test('switching provider clears stockouts that belonged to the previous catalog', async ({
+    page,
+  }) => {
+    await openExplorer(page);
+    const flame = page.locator('button[data-stockout="fsn1"]');
+    await flame.click();
+    await expect(flame).toHaveAttribute('aria-pressed', 'true');
+
+    await page.locator('[data-provider]').selectOption('digitalocean');
+    await expect(page.locator('input[data-region][value="fra1"]')).toBeChecked();
+    await page.locator('[data-provider]').selectOption('hetzner');
+
+    // Without the reset the flame would come back pressed with no user action.
+    await expect(page.locator('button[data-stockout="fsn1"]')).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
+  });
+
+  test('a warm host is reused instead of provisioning a replacement', async ({ page }) => {
+    await openExplorer(page);
+    const fleet = page.locator('[data-fleet] li');
+    await expect(fleet).toHaveCount(3);
+
+    // `spread` picks the host with the fewest co-tenants, which is the seeded fleet's idle small
+    // host — the only one that can drain to warm, since the other two carry steady-state load.
+    // Under `balanced` the work lands on the medium host instead and nothing ever goes warm, which
+    // would make this assertion depend on the default strategy rather than on warm reuse.
+    await page.locator('button[data-strategy="spread"]').click();
+    await page.locator('button[data-shape="chat"]').click();
+    for (let i = 0; i < 10; i++) await page.locator('button[data-action="step"]').click();
+    // The host that took the work must have gone warm once it drained.
+    await expect(page.locator('[data-fleet] .state[data-state="warm"]').first()).toBeVisible();
+
+    await page.locator('button[data-shape="chat"]').click();
+    await page.locator('button[data-action="step"]').click();
+    // Reuse, not replacement: still the same three hosts.
+    await expect(fleet).toHaveCount(3);
+  });
+
   test('has no serious accessibility violations', async ({ page }, testInfo) => {
     await openExplorer(page);
     await page.locator('button[data-action="batch"]').click();

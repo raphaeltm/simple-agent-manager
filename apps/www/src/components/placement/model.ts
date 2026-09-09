@@ -60,25 +60,7 @@ export type { RankedCandidate } from './ranking';
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-/** A pre-existing host in the pool, by catalog tier. Pools accumulate mixed hardware over time —
- * a tier escalation leaves bigger machines alongside smaller ones — and a heterogeneous fleet is
- * the only condition under which all four host-ordering keys are distinguishable. */
-export interface SeedHost {
-  tier: Tier;
-  region: string;
-  /** Workloads already running on this host. Occupancy is what separates `pack` (prefers the
-   * fullest host) from `smallest-fit` (prefers the smallest); on a completely idle fleet the two
-   * coincide, because for a fixed reservation the smallest host is also the highest-utilization
-   * one. */
-  load?: readonly WorkloadShape[];
-}
 
-export interface CreateLabOptions {
-  strategy?: Strategy;
-  policy?: ExhaustionPolicy;
-  seedFleet?: readonly SeedHost[];
-  stockedOut?: readonly string[];
-}
 
 export function createLab(
   catalog: ProviderCatalog,
@@ -118,7 +100,7 @@ export function createLab(
         shape,
         state: 'running',
         nodeId: node.id,
-        remaining: LAB.runSteps,
+        remaining: LAB.seededWorkRunSteps,
         waited: 0,
         reason: `pre-existing work on node ${node.id}`,
         seeded: true,

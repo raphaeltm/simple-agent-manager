@@ -26,7 +26,7 @@ second one is the strategy's business.
 
 **Admission** decides whether a host *may* take a workload. That is
 `evaluateWorkspaceReservationCapacity` (`apps/api/src/services/workspace-resource-capacity.ts`),
-which is the only gate for CPU, memory and disk budgets, exclusivity, and the co-tenant cap.
+which is the only gate for CPU, memory and disk budgets, exclusivity, and the two density caps.
 
 **Ranking** then orders the hosts admission already accepted. That is `placement-strategy.ts`,
 whose header says it plainly: it "does not re-implement any hard constraint", so "a ranking change
@@ -69,9 +69,9 @@ verbatim from `PLACEMENT_STRATEGY_HOST_ORDERING`:
 "Projected utilization" is dominant-resource: a host is as full as its fullest dimension, measured
 *after* the workload would land. A host at 20% CPU and 90% memory is a 90% host.
 
-The keys are compared lexicographically rather than blended into a weighted score, and there is a
-reason for that in the source: `balanced` and `spread` once shared one weighted score and were
-byte-identical. A strategy you selected has to stay observable no matter how the tuning weights
+These *host* keys are compared lexicographically rather than blended into a weighted score (unlike
+the offering ordering below, which is weighted), and there is a reason for that in the source:
+`balanced` and `spread` once shared one weighted score and were byte-identical. A strategy you selected has to stay observable no matter how the tuning weights
 are set.
 
 ### When the four agree
@@ -97,8 +97,15 @@ ordering changes (`compareCapacityCandidates`, `placement-capacity-ranking.ts`):
 | Strategy | Buys |
 | --- | --- |
 | `pack` | the largest offering first |
-| `balanced`, `spread` | the cheapest offering first |
+| `balanced`, `spread` | the tightest fit first, then the cheapest |
 | `smallest-fit` | the tightest fit first, then the cheapest |
+
+That is not a typo, and it surprised us too. `balanced` and `spread` reach that ordering through a
+weighted score rather than an explicit key, and the default weights are
+`fit: 1_000_000` against `price: 1` (`DEFAULT_CAPACITY_POOL_SELECTION_SETTINGS` in
+`capacity-pool-placement-settings.ts`). Six orders of magnitude means fit decides and price is only
+ever a tie-break. Where price and fit disagree — a roomy machine that happens to be cheaper than a
+tight one — every strategy except `pack` takes the tight one.
 
 Offerings that could never pass admission are dropped before ranking begins — the same host-reserve
 arithmetic, applied to hardware that does not exist yet. That is why the explorer never offers you
@@ -150,8 +157,11 @@ borrow another tenant's credentials or cross into a different billing account.
 ## Machines are given back, not just taken
 
 Placement is only half a lifecycle. When a host's last workload finishes it does not disappear —
-it goes **warm** and stays reusable for `NODE_WARM_TIMEOUT_MS` (30 minutes by default) before the
-NodeLifecycle Durable Object destroys it. A warm host is fully admissible, so the next workload
+it goes **warm** and stays reusable for `NODE_WARM_TIMEOUT_MS` (30 minutes by default). When that
+expires, the NodeLifecycle Durable Object's alarm moves it to `destroying` — it does not delete
+anything itself. The actual provider-side teardown is the cron sweep's job
+(`destroyNodeForCleanup` in `scheduled/node-cleanup/shared.ts`), which is what finally calls the
+provider and marks the row `deleted`. A warm host is fully admissible, so the next workload
 usually lands on a machine that already exists instead of waiting on a boot.
 
 Let the explorer run to the end of a batch. The fleet drains to warm, then empties. Submit
@@ -165,15 +175,20 @@ that fired earlier.
 
 It is a teaching model, not production scheduling code.
 
-Real: the 512 MB host reserve, the co-tenant cap of 4, the four ordering keys, the offering
-ordering, the exhaustion policies, and the machine names, sizes and prices — snapshotted from the
-provider catalogs in `packages/providers`, with a test that fails if the snapshot drifts.
+Real: the 512 MB host reserve, both density caps — the node-wide `MAX_WORKSPACES_PER_NODE` (3) and
+the per-request `maxCoTenants` (4), of which the stricter one binds — the four ordering keys, the
+offering ordering, the exhaustion policies, and the machine names, sizes and prices. Those are
+snapshotted from the provider catalogs in `packages/providers`, and the reserve and both caps are
+pinned to their real sources, by tests that fail if any of it drifts.
 
 **Illustrative values, not SAM defaults:** boot, run, warm and wait durations are compressed into
 countable steps so you can see the consequences; real ones are wall-clock and configurable. One
 price per SKU across regions, where real catalogs sometimes charge more in some locations. And the
 provisioning lease is modelled as "one boot at a time", which is the shape of SAM's VM admission
 control rather than its full behaviour.
+
+If you want to actually configure this rather than just watch it, the reference guide is
+[Compute pools](/docs/guides/compute-pools/).
 
 The thing to take away is not which strategy is best. It is that the strategy only decides between
 options that admission already approved — and that if your pool spans regions with identical

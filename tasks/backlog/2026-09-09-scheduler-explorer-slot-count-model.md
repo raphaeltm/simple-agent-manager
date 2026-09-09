@@ -48,3 +48,4 @@ are how capacity works.
 - `.claude/rules/69-aggregate-capacity-at-final-reservation.md`
 - `apps/www/src/components/scheduler/model.ts`, `src/content/blog/how-sam-scheduler-works.md`
 - The aggregate model built alongside: `apps/www/src/components/placement/ranking.ts`
+  (`admissionRefusal` / `rankHosts` / `rankOfferings`)

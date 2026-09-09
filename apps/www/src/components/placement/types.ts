@@ -34,6 +34,12 @@ export const LAB = {
   maxWorkloads: 24,
   /** Entries retained in the in-memory decision log. */
   eventHistory: 40,
+  /** Lifetime of the pool's PRE-EXISTING load. Deliberately much longer than `runSteps`: seeded
+   * work represents the fleet's steady-state occupancy, not something that should evaporate a
+   * handful of steps into the demo. When it shared `runSteps`, the seeded host freed itself at
+   * exactly step 6 — which silently turned "this workload must provision new hardware" into "it
+   * landed on the host that just drained", and made a stockout test flaky at that boundary. */
+  seededWorkRunSteps: 60,
 } as const;
 
 /** How many rows each live list renders. Display truncation only — the model keeps more. */
@@ -160,4 +166,24 @@ export interface Usage {
   memoryMb: number;
   diskMb: number;
   coTenants: number;
+}
+
+/** A pre-existing host in the pool, by catalog tier. Pools accumulate mixed hardware over time —
+ * a tier escalation leaves bigger machines alongside smaller ones — and a heterogeneous fleet is
+ * the only condition under which all four host-ordering keys are distinguishable. */
+export interface SeedHost {
+  tier: Tier;
+  region: string;
+  /** Workloads already running on this host. Occupancy is what separates `pack` (prefers the
+   * fullest host) from `smallest-fit` (prefers the smallest); on a completely idle fleet the two
+   * coincide, because for a fixed reservation the smallest host is also the highest-utilization
+   * one. */
+  load?: readonly WorkloadShape[];
+}
+
+export interface CreateLabOptions {
+  strategy?: Strategy;
+  policy?: ExhaustionPolicy;
+  seedFleet?: readonly SeedHost[];
+  stockedOut?: readonly string[];
 }
