@@ -16,6 +16,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-old-chats-got-a-lighter-home/',
     screenshotName: 'daily-r2-history',
   },
+  {
+    name: 'the task-start journal',
+    path: '/blog/sams-journal-a-task-needs-the-right-start/',
+    screenshotName: 'task-start',
+  },
 ];
 
 for (const post of mermaidPosts) {
