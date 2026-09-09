@@ -458,7 +458,7 @@ describe('TaskRunner capacity exhaustion', () => {
     const state = createState({ vmSize: 'large', vmSizeSource: 'task' });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: 'No capacity available for large.',
+      message: 'No capacity available for large. Last provider error: No large capacity',
       permanent: true,
     });
     // Only the requested size attempted — no descent.
@@ -478,7 +478,7 @@ describe('TaskRunner capacity exhaustion', () => {
       const state = createState({ vmSize: 'large', vmSizeSource: source });
 
       await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-        message: 'No capacity available for large.',
+        message: 'No capacity available for large. Last provider error: No large capacity',
         permanent: true,
       });
       expect(provisionNode).toHaveBeenCalledTimes(1);
@@ -536,7 +536,7 @@ describe('TaskRunner capacity exhaustion', () => {
       const state = createState({ vmSize: 'large', vmSizeSource: source });
 
       await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-        message: 'No capacity available for large.',
+        message: 'No capacity available for large. Last provider error: No large capacity',
         permanent: true,
       });
       expect(provisionNode).toHaveBeenCalledTimes(1);
@@ -743,7 +743,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(1);
@@ -755,7 +755,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     const { rc, state } = fallbackChainFixture();
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}).`,
+      message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}). Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(2);
@@ -799,7 +799,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     const { rc, state } = fallbackChainFixture();
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}).`,
+      message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}). Last provider error: hetzner API error (412): error during placement`,
       permanent: true,
     });
     expect(attemptedInstanceTypes()).toEqual([PRIMARY, ALTERNATE]);
@@ -843,9 +843,11 @@ describe('TaskRunner capacity exhaustion policy', () => {
 
     const attempts = state.stepResults.placementDiagnostics?.attempts ?? [];
     expect(attempts.map((a) => a.outcome)).toEqual(['capacity-exhausted', 'capacity-exhausted']);
+    // The provider's own words, not just the category. This is the field production's
+    // placement_explanation_json recorded as the useless "Provider allocation failed".
     expect(attempts.map((a) => a.reason)).toEqual([
-      'Provider offering has no available capacity',
-      'Provider offering has no available capacity',
+      'Provider offering has no available capacity: hetzner API error (412): error during placement',
+      'Provider offering has no available capacity: hetzner API error (412): error during placement',
     ]);
   });
 
@@ -859,7 +861,9 @@ describe('TaskRunner capacity exhaustion policy', () => {
 
     const attempts = state.stepResults.placementDiagnostics?.attempts ?? [];
     expect(attempts[0]?.outcome).toBe('failed');
-    expect(attempts[0]?.reason).toBe('Provider allocation failed');
+    expect(attempts[0]?.reason).toBe(
+      'Provider allocation failed: hetzner API error (401): invalid token'
+    );
   });
 
   it('fallback-chain: a non-capacity provider failure still fails fast (discriminating control)', async () => {
@@ -897,7 +901,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(1);
@@ -921,7 +925,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(attemptedInstanceTypes()).toEqual([PRIMARY]);
@@ -944,7 +948,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(attemptedInstanceTypes()).toEqual([PRIMARY]);
@@ -956,7 +960,8 @@ describe('TaskRunner capacity exhaustion policy', () => {
     const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: 'No capacity available for large.',
+      // This block's beforeEach throws capacityError('primary'), not capacityError('large').
+      message: 'No capacity available for large. Last provider error: No primary capacity',
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(1);

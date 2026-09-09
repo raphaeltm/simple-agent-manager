@@ -148,7 +148,19 @@ const INVALID_INPUT_CAPACITY_PATTERNS: RegExp[] = [UNSUPPORTED_LOCATION_CAPACITY
  */
 const PLACEMENT_CAPACITY_PATTERNS: RegExp[] = [/placement/i];
 
-/** Hetzner's structured error code for a placement failure. */
+/**
+ * Hetzner's structured error code for a placement failure.
+ *
+ * CAUTION: Hetzner uses this ONE code for two different causes — "no physical host available for
+ * this server type here" (transient scarcity, what we map it to) and "the placement GROUP
+ * constraint cannot be satisfied" (a hard configuration limit that no amount of retrying or
+ * trying other offerings will fix). The mapping below is only safe because SAM never sends a
+ * `placement_group` on server creation — grep confirms the field appears nowhere in this repo,
+ * and `createVM`'s request body carries only name/server_type/image/location/user_data/labels/
+ * start_after_create. If placement-group support is ever added, this classification must
+ * distinguish the two causes first, or a group-full error will silently burn the whole fallback
+ * chain and report it as scarcity.
+ */
 const HETZNER_PLACEMENT_ERROR_CODE = 'placement_error';
 
 /** HTTP status Hetzner returns for a placement failure. */

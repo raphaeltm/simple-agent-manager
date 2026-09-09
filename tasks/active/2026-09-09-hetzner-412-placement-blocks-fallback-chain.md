@@ -116,6 +116,32 @@ previously returned `false` whenever any provider code was present, while the cl
 divergence would have let a 412 be `transient_capacity` everywhere else while still entering the
 300 s same-SKU retry loop.
 
+### Diagnosability must not regress (added after review)
+
+Routing 412 into the capacity path has a cost that is easy to miss. BEFORE this change, a 412
+took the non-capacity branch, so `nodes.error_message` kept
+`[hetzner] hetzner API error (412): error during placement` and that exact string became the
+task's failure message. AFTER, the capacity branch deletes the node row and the user sees
+`exhaustionTerminalMessage()` — a template naming no provider, no status and no cause. The
+per-attempt diagnostic reason was likewise a fixed `'Provider allocation failed'`.
+
+That is a strict regression on the three surfaces a human checks first, and it is precisely how
+the originating incident stayed mysterious across three wake attempts. `exhaustionTerminalMessage`
+now takes the final provider message and appends `Last provider error: …`, and the diagnostic
+reason appends the same. The text is already sanitized and length-bounded by `providerFetch`'s
+`boundProviderErrorDetail` and is read from the parsed error body, so nothing from the request is
+reachable. The raw error was always persisted to `OBSERVABILITY_DATABASE` regardless; this is
+about the surfaces a user actually sees.
+
+### `placement_error` is a two-cause code
+
+Hetzner uses `placement_error` for BOTH "no physical host available" (scarcity) and "placement
+GROUP constraint cannot be satisfied" (a hard config limit). Mapping it to `transient_capacity` is
+only safe because SAM never sends a `placement_group`: the field appears nowhere in the repo, and
+`createVM`'s body carries only name/server_type/image/location/user_data/labels/
+start_after_create. Recorded as a caution comment on `HETZNER_PLACEMENT_ERROR_CODE` so that adding
+placement-group support forces the distinction first.
+
 ### A sixth consumer, reached through `mapHetznerProviderError`
 
 The table above covers `isTransientCapacityError`. `classifyHetznerError` has one further consumer
