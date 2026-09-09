@@ -2,6 +2,7 @@
 import { getCollection, render } from 'astro:content';
 import BlogPost from '../../layouts/BlogPost.astro';
 import SchedulerExplorer from '../../components/scheduler/SchedulerExplorer.astro';
+import PlacementExplorer from '../../components/placement/PlacementExplorer.astro';
 
 export async function getStaticPaths() {
   const posts = await getCollection('blog', ({ data }) => !data.draft);
@@ -24,5 +25,6 @@ const { Content } = await render(post);
   tags={post.data.tags}
 >
   {post.data.interactive === 'scheduler' && <SchedulerExplorer />}
+  {post.data.interactive === 'placement' && <PlacementExplorer />}
   <Content />
 </BlogPost>

@@ -607,6 +607,10 @@ export interface StrategyOutcome {
   /** Which host each workload landed on, in submission order. This is the signal that
    * distinguishes host-ordering keys even when the fleet size comes out the same. */
   placement: string[];
+  /** Submitted workloads per host, largest first — the compact shape of the answer. `pack`
+   * concentrates (4·1·1), `spread` levels (2·2·2). Fleet size and cost frequently match across
+   * strategies, so this is what makes the difference legible at a glance. */
+  distribution: number[];
 }
 
 /**
@@ -656,5 +660,15 @@ export function simulate(
     rejected: submitted.filter((w) => w.state === 'rejected').length,
     regions: [...new Set(used.map((node) => node.region))].sort(),
     placement: submitted.map((w) => label(w.nodeId)),
+    distribution: [
+      ...submitted
+        .filter((w) => w.nodeId !== null)
+        .reduce((counts, w) => {
+          const key = w.nodeId as number;
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+          return counts;
+        }, new Map<number, number>())
+        .values(),
+    ].sort((a, b) => b - a),
   };
 }
