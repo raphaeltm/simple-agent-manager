@@ -24,13 +24,16 @@
  * `apps/api/tests/unit/durable-objects/task-runner-capacity-exhaustion.test.ts`.
  * This limitation is stated in the PR rather than papered over (`.claude/rules/30`).
  */
-import { type BrowserContext, expect, type Page, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
-const STAGING_API = 'https://api.sammy.party';
-const STAGING_APP = 'https://app.sammy.party';
+import {
+  dismissStagingOnboarding,
+  STAGING_API,
+  STAGING_APP,
+  stagingLogin,
+  stagingShot,
+} from './staging-helpers';
 
-const LOGIN_TIMEOUT_MS = 20_000;
-const LOGIN_ATTEMPTS = 3;
 /** A real Hetzner boot takes minutes; poll well past the optimistic case. */
 const PROVISION_TIMEOUT_MS = 6 * 60_000;
 const POLL_INTERVAL_MS = 10_000;
@@ -42,53 +45,9 @@ test.skip(
 
 test.describe.configure({ timeout: 600_000 });
 
-type StoredCookies = Awaited<ReturnType<BrowserContext['storageState']>>['cookies'];
-let cachedCookies: StoredCookies | null = null;
-
-async function login(page: Page) {
-  if (cachedCookies) {
-    await page.context().addCookies(cachedCookies);
-    return;
-  }
-  const token = process.env.SAM_PLAYWRIGHT_PRIMARY_USER;
-  let lastError = '';
-  for (let attempt = 1; attempt <= LOGIN_ATTEMPTS; attempt += 1) {
-    try {
-      const res = await page.request.post(`${STAGING_API}/api/auth/token-login`, {
-        data: { token },
-        headers: { 'Content-Type': 'application/json' },
-        timeout: LOGIN_TIMEOUT_MS,
-      });
-      expect(res.status(), `token-login rejected: ${await res.text()}`).toBe(200);
-      cachedCookies = (await page.context().storageState()).cookies;
-      return;
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-      if (lastError.includes('token-login rejected')) throw err;
-    }
-  }
-  throw new Error(`token-login did not complete in ${LOGIN_ATTEMPTS} attempts: ${lastError}`);
-}
-
-async function dismissOnboardingIfPresent(page: Page) {
-  const wizard = page.getByRole('dialog', { name: 'Account setup' });
-  if (!(await wizard.isVisible({ timeout: 3_000 }).catch(() => false))) return;
-  await page.getByRole('button', { name: 'Exit setup' }).click();
-  await expect(wizard).toBeHidden({ timeout: 10_000 });
-}
-
-async function shot(page: Page, name: string) {
-  const w = page.viewportSize()?.width ?? 0;
-  await page.waitForTimeout(800);
-  await page.screenshot({
-    path: `../../.codex/tmp/staging-screenshots/${name}-${w}.png`,
-    fullPage: false,
-  });
-}
-
 test.describe('Staging — Hetzner 412 placement fix', () => {
   test('a real VM still provisions through the modified provider path', async ({ page }) => {
-    await login(page);
+    await stagingLogin(page);
 
     const created = await page.request.post(`${STAGING_API}/api/nodes`, {
       data: {
@@ -168,27 +127,27 @@ test.describe('Staging — Hetzner 412 placement fix', () => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
     });
 
-    await login(page);
+    await stagingLogin(page);
 
     await page.goto(`${STAGING_APP}/dashboard`);
-    await dismissOnboardingIfPresent(page);
+    await dismissStagingOnboarding(page);
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
-    await shot(page, 'dashboard');
+    await stagingShot(page, 'dashboard');
 
     await page.goto(`${STAGING_APP}/projects`);
-    await dismissOnboardingIfPresent(page);
+    await dismissStagingOnboarding(page);
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
-    await shot(page, 'projects');
+    await stagingShot(page, 'projects');
 
     await page.goto(`${STAGING_APP}/settings`);
-    await dismissOnboardingIfPresent(page);
+    await dismissStagingOnboarding(page);
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
-    await shot(page, 'settings');
+    await stagingShot(page, 'settings');
 
     await page.goto(`${STAGING_APP}/nodes`);
-    await dismissOnboardingIfPresent(page);
+    await dismissStagingOnboarding(page);
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
-    await shot(page, 'nodes');
+    await stagingShot(page, 'nodes');
 
     // Chunk-load races and auth redirects produce console errors that are not this PR's
     // doing; assert on the ones that would indicate a broken page.

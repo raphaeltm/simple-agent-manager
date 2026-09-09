@@ -566,18 +566,23 @@ describe('HetznerProvider', () => {
       });
     });
 
-    it('should throw after all locations exhausted on 412', async () => {
-      vi.useFakeTimers();
-      // Mint a response per call: a `Response` body can be read only once, so reusing one
-      // instance degrades every call after the first to `HTTP 412` with no providerCode —
-      // a fixture that stops resembling production (`.claude/rules/72`).
-      globalThis.fetch = vi.fn().mockImplementation(() =>
+    /**
+     * A FRESH 412 response per call. A `Response` body can be read only once, so a mock that
+     * resolves one shared instance degrades every call after the first to `HTTP 412` with no
+     * providerCode — a fixture that stops resembling production (`.claude/rules/72`).
+     */
+    const alwaysPlacementError = () =>
+      vi.fn().mockImplementation(() =>
         Promise.resolve(
           new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
             status: 412,
           })
         )
       );
+
+    it('should throw after all locations exhausted on 412', async () => {
+      vi.useFakeTimers();
+      globalThis.fetch = alwaysPlacementError();
 
       const promise = provider.createVM(vmConfig).catch((err) => err);
       await vi.runAllTimersAsync();
@@ -592,13 +597,7 @@ describe('HetznerProvider', () => {
 
     it('should never retry the primary location in the fallback phase', async () => {
       vi.useFakeTimers();
-      const mockFetch = vi.fn().mockImplementation(() =>
-        Promise.resolve(
-          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
-            status: 412,
-          })
-        )
-      );
+      const mockFetch = alwaysPlacementError();
       globalThis.fetch = mockFetch;
 
       const promise = provider.createVM(vmConfig).catch(() => {});

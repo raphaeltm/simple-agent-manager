@@ -691,6 +691,24 @@ function alternateCandidate(): PoolCandidate {
   });
 }
 
+/**
+ * The standard two-offering fallback-chain fixture: primary plus an alternative that is
+ * identical on every ranking signal. Six cases below need exactly this, so it lives in one
+ * place — a divergence between them would silently change what the policy is being tested
+ * against.
+ */
+function fallbackChainFixture(policy: 'fail' | 'queue' | 'fallback-chain' = 'fallback-chain') {
+  const { DATABASE } = createDbMock({});
+  const rc = createContext(DATABASE);
+  const state = createState({
+    capacityPoolSelection: poolWith(policy, [
+      capacityPoolSelection().candidates[0] as PoolCandidate,
+      alternateCandidate(),
+    ]),
+  });
+  return { DATABASE, rc, state };
+}
+
 /** Provider instance types actually handed to createNodeRecord, in order. */
 function attemptedInstanceTypes(): Array<string | null | undefined> {
   return createNodeRecord.mock.calls.map(
@@ -734,14 +752,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
   });
 
   it("fallback-chain: tries the pool's other permitted offering before failing", async () => {
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
       message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}).`,
@@ -757,14 +768,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
       throw capacityError('primary');
     });
     provisionNode.mockImplementationOnce(async () => undefined);
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await handleNodeProvisioning(state, rc);
 
@@ -792,14 +796,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     provisionNode.mockImplementation(async () => {
       throw placementError();
     });
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
       message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}).`,
@@ -812,14 +809,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     provisionNode.mockImplementation(async () => {
       throw placementErrorWithoutCode();
     });
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
     expect(attemptedInstanceTypes()).toEqual([PRIMARY, ALTERNATE]);
@@ -830,14 +820,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
       throw placementError();
     });
     provisionNode.mockImplementationOnce(async () => undefined);
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await handleNodeProvisioning(state, rc);
 
@@ -854,14 +837,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     provisionNode.mockImplementation(async () => {
       throw placementError();
     });
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
 
@@ -877,14 +853,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     provisionNode.mockImplementation(async () => {
       throw authError();
     });
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
 
@@ -899,14 +868,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     provisionNode.mockImplementation(async () => {
       throw authError();
     });
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
       message: 'hetzner API error (401): invalid token',
