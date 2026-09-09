@@ -759,6 +759,46 @@ describe('initialStatusForProviderOffering', () => {
 });
 
 describe('default capacity pool creation', () => {
+  it('reads an existing authoritative pool without refreshing provider catalogs on placement', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, { userId: 'user-1' });
+    const offeringResolver = vi.fn(async () => []);
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      ensure: true,
+      initializeOnly: true,
+      offeringResolver,
+    });
+    expect(summary?.pool.scope).toBe('user');
+    expect(summary?.activeCandidateCount).toBeGreaterThan(0);
+    expect(offeringResolver).not.toHaveBeenCalled();
+  });
+
+  it('keeps an abstract pool with a disabled source authoritative without catalog refresh', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const initial = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1', ensure: true,
+    });
+    const poolId = initial!.pool.id;
+    const sourceId = initial!.sources[0]!.id;
+    sqlite!.prepare('DELETE FROM capacity_pool_candidates WHERE pool_id = ?').run(poolId);
+    sqlite!.prepare(`INSERT INTO capacity_pool_candidates
+      (id, pool_id, capacity_source_id, provider, location, workload_role, runtime, machine_class, machine_size)
+      VALUES ('old-abstract', ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small')`
+    ).run(poolId, sourceId);
+    sqlite!.prepare("UPDATE capacity_sources SET status = 'disabled' WHERE id = ?").run(sourceId);
+    const offeringResolver = vi.fn(async () => []);
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1', ensure: true, initializeOnly: true, offeringResolver,
+    });
+    expect(summary?.pool.id).toBe(poolId);
+    expect(summary?.sources[0]?.status).toBe('disabled');
+    expect(summary?.activeCandidateCount).toBe(0);
+    expect(offeringResolver).not.toHaveBeenCalled();
+  });
+
   it('creates project, user, and installation default records from legacy no-pool state when ensure is requested', async () => {
     const db = createDb();
     seedPlatformCredential({ id: 'platform-hetzner' });
@@ -2205,7 +2245,7 @@ describe('default capacity pool creation', () => {
       credentialProjectPolicy: 'current-project-unless-inherited',
       taskModeDefault: 'task',
       resourceRequirements: {
-        task: { minVcpu: 32, minMemoryGb: 64 },
+        task: { minVcpu: 32, minMemoryGb: 63 },
       },
     });
     const selection = await resolveTaskStartCapacityPoolSelection(db as never, placement, {
@@ -5629,6 +5669,24 @@ describe('workload-role eligibility contract', () => {
       deployment?.candidates.every((candidate) => candidate.workloadRole === 'deployment')
     ).toBe(true);
     expect(deployment?.candidates[0]?.providerInstanceType).toBe('cx23');
+  });
+
+  it('rejects a full-memory request before provisioning while admitting a request that leaves the host reserve', async () => {
+    const db = await seedRoleCapablePool();
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      ensure: false,
+      workloadRoles: 'all',
+    });
+    const placement = hetznerTaskStartPlacement();
+    placement.resolvedReservation = { ...placement.resolvedReservation, memoryMb: 4096 };
+    expect(buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates).toHaveLength(
+      0
+    );
+    placement.resolvedReservation = { ...placement.resolvedReservation, memoryMb: 3584 };
+    expect(buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates).toHaveLength(
+      1
+    );
   });
 
   it('still selects the workspace candidate for a workspace-role placement', async () => {

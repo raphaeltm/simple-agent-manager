@@ -123,6 +123,12 @@ memory, or disk details, they are recorded as unknown rather than inferred
 (`packages/providers/src/native-vm-config.ts`), and a machine SAM cannot measure is never given
 work.
 
+Offering selection accounts for the memory held back for the host itself. With the default 512 MiB
+reserve, a 4 GiB offering can host at most a 3584 MiB workspace reservation, so a request for a
+full 4 GiB needs a larger offering. If no allowed offering fits, submission fails with a
+resource-capacity error **before** anything is provisioned, rather than starting a machine that
+cannot hold the work.
+
 :::note
 Older projects, profiles, and tasks may still carry a legacy `small` / `medium` / `large` label.
 It still works — SAM translates it into concrete requirements — but it is shown as _Legacy_ in the

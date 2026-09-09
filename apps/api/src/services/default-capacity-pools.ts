@@ -177,6 +177,8 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
     userId: string;
     projectId?: string | null;
     ensure?: boolean;
+    /** Placement reads existing authority without synchronously refreshing catalogs. */
+    initializeOnly?: boolean;
     includeInstallation?: boolean;
     env?: Env;
     offeringResolver?: DefaultCapacityPoolOfferingResolver;
@@ -184,7 +186,7 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
     workloadRoles?: CapacityPoolSummaryWorkloadRoles;
   }
 ): Promise<CapacityPoolSummary | null> {
-  if (input.ensure === true) {
+  if (input.ensure === true && !input.initializeOnly) {
     await ensureDefaultCapacityPoolsForExistingCredentials(db, {
       userId: input.userId,
       projectId: input.projectId ?? null,
@@ -205,11 +207,44 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
   });
   for (const scope of scopes) {
     if (await findDefaultPool(db, scope)) {
-      return readDefaultPoolSummary(db, scope, {
+      const summary = await readDefaultPoolSummary(db, scope, {
         includeDisabled: true,
         workloadRoles: input.workloadRoles,
       });
+      // Upgraded installations can still contain only abstract VM-size rows.
+      // Materialize native offerings once; do not refresh migrated catalogs or
+      // override deliberate empty/disabled pool membership on every submission.
+      const needsNativeInitialization =
+        summary?.pool.status === ACTIVE_STATUS &&
+        summary.candidates.some(
+          (candidate) =>
+            candidate.runtime === 'vm' &&
+            candidate.status === ACTIVE_STATUS &&
+            candidate.providerInstanceType === null &&
+            summary.sources.some(
+              (source) => source.id === candidate.capacitySourceId && source.status === ACTIVE_STATUS
+            )
+        ) &&
+        !summary.candidates.some(
+          (candidate) => candidate.runtime === 'vm' && candidate.providerInstanceType !== null
+        );
+      if (input.ensure === true && input.initializeOnly && needsNativeInitialization) break;
+      return summary;
     }
+  }
+
+  // Existing pools are authoritative snapshots. Catalog reconciliation belongs
+  // to credential lifecycle hooks and the scheduled reconciler, not every submit.
+  // Preserve lazy initialization for installations with no materialized pool yet.
+  if (input.ensure === true && input.initializeOnly) {
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: input.userId,
+      projectId: input.projectId ?? null,
+      includeInstallation: input.includeInstallation,
+      env: input.env,
+      offeringResolver: input.offeringResolver,
+    });
+    return resolveEffectiveDefaultCapacityPoolSummary(db, { ...input, ensure: false });
   }
 
   return null;

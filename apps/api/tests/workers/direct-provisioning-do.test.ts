@@ -169,7 +169,9 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
       body: JSON.stringify({
         name: 'Durable create',
-        ...(!directNode ? { projectId } : {}),
+        // Keep the durable-lifetime scenario on a fitting 2 GiB reservation:
+        // the sole 4 GiB offering cannot fit the default medium plus host reserve.
+        ...(directNode ? { vmSize: 'small' } : { projectId }),
         vmLocation: 'fsn1',
       }),
     },

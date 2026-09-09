@@ -136,6 +136,26 @@ describe('transitionTaskToTerminal', () => {
       .all(taskId);
   }
 
+  it('records an unstarted launch failure once while preserving its failure phase', async () => {
+    sqlite.prepare("UPDATE tasks SET status = 'queued' WHERE id = 'task-1'").run();
+    const options = {
+      taskId: 'task-1', projectId: PROJECT_ID, status: 'failed' as const,
+      reason: 'Instant acceptance failed', source: 'test.instant_launch',
+      executionStep: 'launch_failed', fillMissingStartedAt: false, stopWorkspace: false,
+    };
+    expect(await transitionTaskToTerminal(env, options)).toBe('transitioned');
+    expect(await transitionTaskToTerminal(env, options)).toBe('already_terminal');
+    expect(taskRow()).toMatchObject({
+      status: 'failed', execution_step: 'launch_failed', started_at: null,
+      error_message: options.reason, completed_at: NOW.toISOString(),
+    });
+    expect(statusEvents()).toEqual([{
+      from_status: 'queued', to_status: 'failed', actor_type: 'system', actor_id: null,
+      reason: options.reason,
+    }]);
+    expect(sqlite.prepare("SELECT status FROM workspaces WHERE id = 'workspace-1'").get()).toEqual({status: 'running'});
+  });
+
   it('records the full terminal contract once and remains idempotent on retry', async () => {
     const first = await transitionTaskToTerminal(env, {
       taskId: 'task-1',

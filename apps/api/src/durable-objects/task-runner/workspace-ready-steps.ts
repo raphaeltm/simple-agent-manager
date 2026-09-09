@@ -119,94 +119,14 @@ export async function handleAttachmentTransfer(
     throw new Error('Missing nodeId or workspaceId for attachment transfer');
   }
 
-  const { getAttachmentFromR2, cleanupAttachments } =
-    await import('../../services/attachment-upload');
-  const { signTerminalToken } = await import('../../services/jwt');
-
-  // Build VM agent URL for file upload
-  const protocol = rc.env.VM_AGENT_PROTOCOL || 'https';
-  const port = rc.env.VM_AGENT_PORT || '8443';
-  const workspaceId = state.stepResults.workspaceId;
-  const nodeId = state.stepResults.nodeId;
-  const baseDomain = rc.env.BASE_DOMAIN || '';
-  // Use the two-level node backend hostname for internal Worker → VM-agent calls.
-  // The single-level ws-* hostname is the browser workspace proxy and now enforces
-  // browser-session-bound terminal tokens.
-  const vmUrl = `${protocol}://${nodeId.toLowerCase()}.vm.${baseDomain}:${port}`;
-  // Token passed as query param — VM agent's requireWorkspaceRequestAuth() checks
-  // r.URL.Query().Get("token"), not Authorization header.
-  const uploadBaseUrl = `${vmUrl}/workspaces/${workspaceId}/files/upload`;
-
-  // Generate a terminal token for authenticating with the VM agent
-  const { token } = await signTerminalToken(state.userId, workspaceId, rc.env);
-
-  log.info('task_runner_do.step.attachment_transfer_start', {
-    taskId: state.taskId,
-    workspaceId,
-    attachmentCount: attachments.length,
-  });
-
-  // Configurable timeout for each attachment transfer
-  const DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS = 60_000;
-  const transferTimeoutMs =
-    parseInt(
-      rc.env.ATTACHMENT_TRANSFER_TIMEOUT_MS || String(DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS),
-      10
-    ) || DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS;
-
-  // Transfer each attachment: R2 GET → FormData → VM agent POST
-  for (const attachment of attachments) {
-    const r2Object = await getAttachmentFromR2(rc.env.R2, state.userId, attachment);
-
-    // Read the R2 body into a Uint8Array for FormData
-    const bodyBytes = new Uint8Array(await new Response(r2Object.body).arrayBuffer());
-
-    const formData = new FormData();
-    formData.append(
-      'files',
-      new Blob([bodyBytes], { type: r2Object.contentType }),
-      attachment.filename
-    );
-    // Omit 'destination' field — VM agent defaults to ../.private (sanitizeFilePath rejects explicit ../ paths)
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), transferTimeoutMs);
-    let resp: Response;
-    try {
-      const uploadUrl = `${uploadBaseUrl}?token=${encodeURIComponent(token)}`;
-      await rc.assertRecoveryAuthority(state);
-      resp = await fetch(uploadUrl, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-
-    if (!resp.ok) {
-      const errorText = await resp.text().catch(() => 'unknown');
-      throw Object.assign(
-        new Error(
-          `Attachment transfer failed for ${attachment.filename}: ${resp.status} ${errorText}`
-        ),
-        { permanent: resp.status >= 400 && resp.status < 500 }
-      );
-    }
-
-    log.info('task_runner_do.step.attachment_transferred', {
-      taskId: state.taskId,
-      filename: attachment.filename,
-      size: attachment.size,
-    });
-  }
-
-  // Eager R2 cleanup (best-effort)
-  await cleanupAttachments(rc.env.R2, state.userId, attachments);
-
-  log.info('task_runner_do.step.attachment_transfer_complete', {
-    taskId: state.taskId,
-    attachmentCount: attachments.length,
+  const { transferWorkspaceAttachments } = await import('../../services/workspace-attachments');
+  await transferWorkspaceAttachments({
+    env: rc.env,
+    userId: state.userId,
+    nodeId: state.stepResults.nodeId,
+    workspaceId: state.stepResults.workspaceId,
+    attachments,
+    beforeTransfer: () => rc.assertRecoveryAuthority(state),
   });
 
   await rc.advanceToStep(state, 'agent_session');

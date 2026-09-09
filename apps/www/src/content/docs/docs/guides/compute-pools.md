@@ -158,6 +158,11 @@ decisions:
   supported, so a fresh pool works immediately.
 - A provider API failure during refresh is reported as a refresh error; SAM does not invent
   availability it could not confirm.
+- **Starting work never refreshes the catalog.** Placement reads the pool as it stands, so a
+  submission is never delayed by a provider API call and a deliberately emptied pool is never
+  quietly repopulated. Refreshing is something you do — via **Reconcile** — not a side effect of
+  running a task. (The one exception is an installation upgraded from the old size presets, whose
+  pool is materialized into native offerings once.)
 
 :::note
 Allowing an offering allows it for **both** workspace machines and
@@ -351,18 +356,18 @@ remove it so a lower scope applies.
 
 ## Troubleshooting
 
-| Symptom                                                        | Likely cause                                                                                                                                 |
-| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| "Waiting for capacity" that never clears                       | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**. |
-| Work fails immediately with a capacity error                   | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                          |
-| No offering satisfies the request                              | Requirements exceed every allowed machine. Lower the requirements or allow a bigger instance type.                                           |
-| A new machine is provisioned for every task                    | Requirements ask for an exclusive node, `maxCoTenants` is 1, or each request is large enough to fill a machine.                              |
-| Machines are bigger or pricier than expected                   | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor.          |
-| Editing is disabled                                            | Project pools need owner or admin (`secret:write`); maintainers can view and reconcile but not edit.                                         |
-| The project ignores your personal pool                         | The project has its own pool. Remove it if you want the personal pool to apply.                                                              |
-| Everything lands on one cloud although the pool allows several | A default provider is set on the project or the agent profile, and it filters the others out.                                                |
-| Too many, or too few, workspaces share a machine               | Adjust **Max Workspaces Per Node** and the CPU/memory thresholds in Scaling & Scheduling, or set a co-tenant cap on the work itself.         |
-| Work waits for capacity even though the policy is **Fail**     | The provider reported account-wide exhaustion, which always retries. Check your provider account's server limit.                             |
+| Symptom                                                        | Likely cause                                                                                                                                                                                  |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Waiting for capacity" that never clears                       | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**.                                                  |
+| Work fails immediately with a capacity error                   | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                           |
+| No offering satisfies the request                              | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3584 MiB reservation. Lower the requirements or allow a bigger instance type. |
+| A new machine is provisioned for every task                    | Requirements ask for an exclusive node, `maxCoTenants` is 1, or each request is large enough to fill a machine.                                                                               |
+| Machines are bigger or pricier than expected                   | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor.                                                           |
+| Editing is disabled                                            | Project pools need owner or admin (`secret:write`); maintainers can view and reconcile but not edit.                                                                                          |
+| The project ignores your personal pool                         | The project has its own pool. Remove it if you want the personal pool to apply.                                                                                                               |
+| Everything lands on one cloud although the pool allows several | A default provider is set on the project or the agent profile, and it filters the others out.                                                                                                 |
+| Too many, or too few, workspaces share a machine               | Adjust **Max Workspaces Per Node** and the CPU/memory thresholds in Scaling & Scheduling, or set a co-tenant cap on the work itself.                                                          |
+| Work waits for capacity even though the policy is **Fail**     | The provider reported account-wide exhaustion, which always retries. Check your provider account's server limit.                                                                              |
 
 ## Where to look when you want the details
 
