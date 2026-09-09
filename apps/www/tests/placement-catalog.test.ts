@@ -164,7 +164,8 @@ describe('placement catalog snapshot matches packages/providers', () => {
   }
 
   it('covers every provider the explorer offers', () => {
-    expect(Object.keys(SOURCES).sort()).toEqual(Object.keys(PROVIDER_CATALOG).sort());
+    const byName = (a: string, b: string): number => a.localeCompare(b);
+    expect(Object.keys(SOURCES).sort(byName)).toEqual(Object.keys(PROVIDER_CATALOG).sort(byName));
   });
 
   it('does not match a symbol that is merely a PREFIX of the real declaration', () => {

@@ -378,7 +378,8 @@ export function simulate(
     monthlyCents: used.reduce((total, node) => total + node.offering.monthlyCents, 0),
     placed: submitted.filter((w) => w.state === 'done' || w.state === 'running').length,
     rejected: submitted.filter((w) => w.state === 'rejected').length,
-    regions: [...new Set(used.map((node) => node.region))].sort(),
+    // Explicit comparator: bare `.sort()` orders by UTF-16 code unit, not locale.
+    regions: [...new Set(used.map((node) => node.region))].sort((a, b) => a.localeCompare(b)),
     placement: submitted.map((w) => label(w.nodeId)),
     distribution: [
       ...submitted
