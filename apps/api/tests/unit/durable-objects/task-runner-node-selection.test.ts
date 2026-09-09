@@ -533,6 +533,16 @@ function nodeCapacityFields(selection: TaskStartCapacityPoolSelection) {
 }
 
 describe('TaskRunner node selection VM size minimum behavior', () => {
+  it('rejects an impossible persisted plan before selecting or provisioning a node', async () => {
+    const rc = createContext({});
+    const state = createState();
+    state.config.capacityPoolSelection = capacityPoolSelection('user');
+    state.config.capacityPoolSelection.candidates[0].providerInstanceMemoryMb = 4096;
+    state.config.resourceRequirements = { minMemoryGb: 4 };
+    await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({ permanent: true });
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+
   it('does not reuse legacy nodes when the selected pool has no candidates', async () => {
     const rc = createContext({});
     const state = createState();

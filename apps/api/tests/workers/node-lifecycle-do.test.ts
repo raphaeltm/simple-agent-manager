@@ -563,6 +563,140 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(await getAlarm(stub)).not.toBeNull();
   });
 
+  it.each(['creating', 'running', 'recovery'] as const)(
+    'does not warm a shared node with a %s sibling workspace',
+    async (workspaceStatus) => {
+      const nodeId = `nl-shared-idle-${workspaceStatus}`;
+      await seedTestNode(nodeId);
+      await seedWorkspace(`ws-shared-${workspaceStatus}`, nodeId, TEST_USER_ID, {
+        status: workspaceStatus,
+      });
+      const stub = getStub(nodeId);
+      expect((await stub.markIdle(nodeId, TEST_USER_ID)).status).toBe('active');
+      expect((await getNodeFromD1(nodeId))?.status).toBe('running');
+      expect(await getAlarm(stub)).toBeNull();
+    }
+  );
+
+  it('preserves an occupied node when failure cleanup sees stale destroying state', async () => {
+    const nodeId = 'nl-occupied-destroying-mark-idle';
+    await seedTestNode(nodeId);
+    await seedWorkspace('ws-occupied-destroying-mark-idle', nodeId, TEST_USER_ID, {
+      status: 'running',
+    });
+    const stub = getStub(nodeId);
+    await runInDurableObject(stub, async (instance) => {
+      await instance.ctx.storage.put('state', {
+        nodeId,
+        userId: TEST_USER_ID,
+        status: 'destroying',
+        warmSince: null,
+        claimedByTask: null,
+      });
+    });
+    expect((await stub.markIdle(nodeId, TEST_USER_ID)).status).toBe('active');
+    expect((await getNodeFromD1(nodeId))?.status).toBe('running');
+    expect(await getAlarm(stub)).toBeNull();
+  });
+
+  it.each(['warm', 'destroying'] as const)(
+    'repairs stale %s state without stopping an occupied node',
+    async (status) => {
+      const nodeId = `nl-occupied-${status}`;
+      await seedTestNode(nodeId);
+      await seedWorkspace(`ws-occupied-${status}`, nodeId, TEST_USER_ID, { status: 'running' });
+      const stub = getStub(nodeId);
+      await runInDurableObject(stub, async (instance) => {
+        await instance.ctx.storage.put('state', {
+          nodeId,
+          userId: TEST_USER_ID,
+          status,
+          warmSince: Date.now() - 600_000,
+          destroyingSince: Date.now(),
+          claimedByTask: null,
+        });
+        await instance.alarm();
+      });
+      expect((await getNodeFromD1(nodeId))?.status).toBe('running');
+      expect((await stub.getStatus()).status).toBe('active');
+      expect(await getAlarm(stub)).toBeNull();
+      expect(
+        await env.DATABASE.prepare('SELECT status FROM workspaces WHERE node_id = ?')
+          .bind(nodeId)
+          .first()
+      ).toEqual({ status: 'running' });
+    }
+  );
+
+  it.each(['absent', 'stopped', 'deleted'] as const)(
+    'retires expired warm state for a %s node without erasing other durable work',
+    async (status) => {
+      const nodeId = `nl-terminal-warm-${status}`;
+      await seedTestNode(nodeId);
+      const stub = getStub(nodeId);
+      if (status === 'absent') {
+        await env.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(nodeId).run();
+      } else {
+        await env.DATABASE.prepare('UPDATE nodes SET status = ? WHERE id = ?').bind(status, nodeId).run();
+      }
+      await runInDurableObject(stub, async (instance) => {
+        await instance.ctx.storage.put('state', {
+          nodeId, userId: TEST_USER_ID, status: 'warm',
+          warmSince: Date.now() - 600_000, claimedByTask: null,
+        });
+        await instance.ctx.storage.put('other-durable-work', { preserve: true });
+        await instance.alarm();
+        expect(await instance.ctx.storage.get('state')).toBeUndefined();
+        expect(await instance.ctx.storage.get('other-durable-work')).toEqual({ preserve: true });
+      });
+      expect(await getAlarm(stub)).toBeNull();
+      expect((await getNodeFromD1(nodeId))?.status ?? 'absent').toBe(status);
+    }
+  );
+
+  it.each([false, true])('bounds the warm claim fence (expired=%s)', async (expired) => {
+    const nodeId = `nl-claim-fence-${expired}`;
+    const taskId = `task-claim-fence-${expired}`;
+    await seedTestNode(nodeId);
+    await seedClaimTask(taskId);
+    await env.DATABASE.prepare(
+      "UPDATE tasks SET status = 'queued', claimed_warm_node_id = ?, claimed_warm_node_at = ? WHERE id = ?"
+    )
+      .bind(nodeId, new Date(Date.now() - (expired ? 86_400_000 : 0)).toISOString(), taskId)
+      .run();
+    const stub = getStub(nodeId);
+    await runInDurableObject(stub, async (instance) => {
+      await instance.ctx.storage.put('state', {
+        nodeId,
+        userId: TEST_USER_ID,
+        status: 'warm',
+        warmSince: Date.now() - 600_000,
+        claimedByTask: null,
+      });
+      await instance.alarm();
+    });
+    expect((await getNodeFromD1(nodeId))?.status).toBe(expired ? 'stopped' : 'running');
+    expect((await stub.getStatus()).status).toBe(expired ? 'destroying' : 'active');
+  });
+
+  it('rejects a placement claim after the atomic shutdown wins', async () => {
+    const nodeId = 'nl-claim-after-stop';
+    const taskId = 'task-claim-after-stop';
+    await seedTestNode(nodeId);
+    await seedClaimTask(taskId);
+    const stub = getStub(nodeId);
+    await stub.markIdle(nodeId, TEST_USER_ID);
+    await env.DATABASE.prepare("UPDATE nodes SET status = 'stopped' WHERE id = ?")
+      .bind(nodeId)
+      .run();
+    expect((await stub.tryClaim(taskId)).claimed).toBe(false);
+    expect(
+      await env.DATABASE.prepare('SELECT claimed_warm_node_id FROM tasks WHERE id = ?')
+        .bind(taskId)
+        .first()
+    ).toEqual({ claimed_warm_node_id: null });
+  });
+
   it('terminally cleans a destroying node and does not re-arm on a second alarm', async () => {
     const nodeId = 'nl-test-destroy-terminal-001';
     await seedTestNode(nodeId);

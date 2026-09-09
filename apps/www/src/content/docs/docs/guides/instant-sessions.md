@@ -22,26 +22,26 @@ Set it under a project's **Profiles** page: create or edit a profile and choose 
 
 Choosing Instant on a profile also fixes some of its other settings, because they don't apply: the workspace profile becomes lightweight, VM size and devcontainer options are disabled, and the task mode becomes `conversation` — which is what determines whether SAM commits and pushes the agent's work for you. See [What happens to your work](#what-happens-to-your-work).
 
-Two paths are never Instant unless explicitly told to be:
+Task submission preserves the runtime selected by your profile:
 
-- **Submitted tasks always use a VM.** Attaching a file or executing a saved idea also forces task submission, even with an Instant profile selected — those paths need a VM workspace.
+- **Attachments and saved ideas can use Instant.** With an Instant profile selected, these submissions skip VM compute pools. Attached files are delivered to the workspace before the agent starts. Clear explicit VM resource, size, location, provider, or devcontainer overrides before submitting; incompatible overrides return an error instead of changing your runtime.
 - **`dispatch_task` uses Instant only when asked**, via the call's `runtime` argument or the profile it dispatches with.
 
-The practical trade: an Instant session needs **no cloud provider credential**, which makes it the way to work on a fresh account or a self-hosted deployment where users haven't connected a cloud account. A task, by contrast, fails with `Cloud provider credentials required` if there's no credential available — yours, the project's, or the platform's.
+The practical trade: an Instant session needs **no cloud provider credential**, which makes it the way to work on a fresh account or a self-hosted deployment where users haven't connected a cloud account. A VM task fails with `Cloud provider credentials required` if there's no credential available — yours, the project's, or the platform's.
 
 ## What you give up, and what you gain
 
-|                                   | Instant                                            | VM workspace                                  |
-| --------------------------------- | -------------------------------------------------- | --------------------------------------------- |
+|                                   | Instant                                            | VM workspace                                             |
+| --------------------------------- | -------------------------------------------------- | -------------------------------------------------------- |
 | Your own cloud credential needed  | No                                                 | Only when no project or platform credential is available |
-| Start time                        | Seconds                                            | Minutes                                       |
-| Repository clone                  | Yes — partial clone by default                     | Yes                                           |
-| SAM MCP tools                     | Yes                                                | Yes                                           |
-| Your `.devcontainer`              | Not built — always a lightweight environment       | Built with the `full` profile                 |
-| Toolchain                         | `git`, `gh`, `curl`, `jq`, `uv`, Node + agent CLIs | Whatever your devcontainer installs           |
-| Docker inside the workspace       | No                                                 | Yes                                           |
-| Automatic port detection/exposure | No                                                 | Yes                                           |
-| Survives runtime teardown         | Yes — via snapshot restore, see below              | Yes — via snapshot and replacement VM restore |
+| Start time                        | Seconds                                            | Minutes                                                  |
+| Repository clone                  | Yes — partial clone by default                     | Yes                                                      |
+| SAM MCP tools                     | Yes                                                | Yes                                                      |
+| Your `.devcontainer`              | Not built — always a lightweight environment       | Built with the `full` profile                            |
+| Toolchain                         | `git`, `gh`, `curl`, `jq`, `uv`, Node + agent CLIs | Whatever your devcontainer installs                      |
+| Docker inside the workspace       | No                                                 | Yes                                                      |
+| Automatic port detection/exposure | No                                                 | Yes                                                      |
+| Survives runtime teardown         | Yes — via snapshot restore, see below              | Yes — via snapshot and replacement VM restore            |
 
 Instant is the right choice for conversation, planning, code reading, and focused edits. Reach for a VM when the agent has to build your stack, run your test suite, start services, or use Docker.
 
@@ -210,8 +210,8 @@ See the [Configuration Reference](/docs/reference/configuration/) for the full l
 
 Instant sessions require **Cloudflare Containers**, which requires a Workers Paid plan.
 
-The runtime is enabled only when `CF_CONTAINER_ENABLED` is exactly `true` (or the legacy `SANDBOX_ENABLED`) — it is **off when neither is set**. The deploy workflow injects `true` for you, so a deployment made through it has Instant sessions on by default; a Worker started some other way (a local `wrangler dev`, a hand-rolled config) does not, and every session falls back to a VM.
+The runtime is enabled only when `CF_CONTAINER_ENABLED` is exactly `true` (or the legacy `SANDBOX_ENABLED`) — it is **off when neither is set**. The deploy workflow injects `true` for you, so a deployment made through it has Instant sessions on by default; a Worker started some other way (a local `wrangler dev`, a hand-rolled config) does not, and explicit Instant task submissions return an unavailable-runtime error.
 
-Set it to `false` in your GitHub Environment before deploying if your account cannot use Containers. With Containers off, every session provisions a cloud VM. SAM uses a project-scoped compute credential first, then a personal compute credential, then an administrator-configured platform compute credential as the installation fallback.
+Set it to `false` in your GitHub Environment before deploying if your account cannot use Containers. With Containers off, use a VM profile; an explicitly selected Instant profile is rejected. SAM uses a project-scoped compute credential first, then a personal compute credential, then an administrator-configured platform compute credential as the installation fallback.
 
 See the [Self-Hosting Guide](/docs/guides/self-hosting/).

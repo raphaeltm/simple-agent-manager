@@ -219,10 +219,11 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
 
 describe('TDF-6 Fix 4: Required session and message persistence', () => {
   it('task-submit persists initial message as REQUIRED', () => {
-    const messageArea = taskSubmitSource.slice(
-      taskSubmitSource.indexOf('Persist initial user message'),
-      taskSubmitSource.indexOf('Record activity event')
-    );
+    const messageStart = taskSubmitSource.indexOf('Persist initial user message');
+    const backgroundWorkStart = taskSubmitSource.indexOf('schedulePostSubmitWork(', messageStart);
+    expect(messageStart).toBeGreaterThanOrEqual(0);
+    expect(backgroundWorkStart).toBeGreaterThan(messageStart);
+    const messageArea = taskSubmitSource.slice(messageStart, backgroundWorkStart);
     expect(messageArea).toContain('REQUIRED');
     expect(messageArea).not.toContain('best-effort');
   });

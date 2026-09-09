@@ -51,9 +51,11 @@ import {
   ResourceRequirementsValidationError,
 } from '../../services/resource-requirements-input';
 import { resolveSkillProfile } from '../../services/skills';
+import { submitInstantTask } from '../../services/submit-instant-task';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import type { TaskTitleConfig } from '../../services/task-title';
 import { generateTaskTitle, getTaskTitleConfig, truncateTitle } from '../../services/task-title';
+import { resolveWorkspaceRuntime } from '../../services/workspace-runtime';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
@@ -114,6 +116,33 @@ async function updateGeneratedTaskTitle(input: {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+function schedulePostSubmitWork(
+  input: Parameters<typeof updateGeneratedTaskTitle>[0] & {
+    waitUntil: (promise: Promise<unknown>) => void;
+    userId: string;
+    branchName: string;
+  }
+): void {
+  input.waitUntil(updateGeneratedTaskTitle(input));
+  input.waitUntil(
+    projectDataService
+      .recordActivityEvent(
+        input.env,
+        input.projectId,
+        'task.submitted',
+        'user',
+        input.userId,
+        null,
+        input.sessionId,
+        input.taskId,
+        { title: input.initialTitle, branchName: input.branchName }
+      )
+      .catch(() => {
+        /* best-effort */
+      })
+  );
 }
 
 /**
@@ -305,6 +334,62 @@ submitRoutes.post(
       body.agentProfileId || body.skillId
         ? await resolveSkillProfile(db, projectId, body.agentProfileId, body.skillId, userId, c.env)
         : null;
+    if (resolvedProfile?.runtime === 'cf-container') {
+      if (
+        body.nodeId ||
+        body.vmSize ||
+        body.vmLocation ||
+        body.provider ||
+        body.workspaceProfile === 'full' ||
+        body.devcontainerConfigName ||
+        (taskResourceRequirements && Object.keys(taskResourceRequirements).length > 0)
+      ) {
+        throw errors.badRequest(
+          'Instant containers cannot use VM resource overrides. Clear the overrides or choose a VM profile.'
+        );
+      }
+      const runtime = await resolveWorkspaceRuntime(db, c.env, {
+        userId,
+        projectId,
+        explicitRuntime: 'cf-container',
+      });
+      if (runtime.runtime !== 'cf-container') {
+        throw errors.conflict('Instant containers are disabled. Choose a VM profile.');
+      }
+      const result = await submitInstantTask({
+        db,
+        env: c.env,
+        waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+        project,
+        userId,
+        taskId,
+        branchName,
+        message,
+        profile: resolvedProfile,
+        parentTaskId: body.parentTaskId,
+        contextSummary: body.contextSummary,
+        taskMode: body.taskMode,
+        agentType: body.agentType,
+        attachments: validatedAttachments,
+        credentialAttributionUserId: inheritedAttributionUserId ?? userId,
+        credentialAttributionProjectId: inheritedAttributionProjectId ?? null,
+        credentialAttributionSource: inheritedAttributionSource ?? 'user',
+      });
+      const titleConfig = getTaskTitleConfig(c.env);
+      schedulePostSubmitWork({
+        env: c.env,
+        projectId,
+        taskId,
+        sessionId: result.sessionId,
+        message,
+        initialTitle: getInitialTaskTitle(message, titleConfig),
+        titleConfig,
+        waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+        userId,
+        branchName,
+      });
+      return c.json(result, 202);
+    }
     const {
       resourceRequirementLayers,
       persistedResourceRequirementsJson,
@@ -551,36 +636,18 @@ submitRoutes.post(
       throw err; // Re-throw to return 500 to the frontend
     }
 
-    c.executionCtx.waitUntil(
-      updateGeneratedTaskTitle({
-        env: c.env,
-        projectId,
-        taskId,
-        sessionId,
-        message,
-        initialTitle: taskTitle,
-        titleConfig,
-      })
-    );
-
-    // Record activity event (best-effort)
-    c.executionCtx.waitUntil(
-      projectDataService
-        .recordActivityEvent(
-          c.env,
-          projectId,
-          'task.submitted',
-          'user',
-          userId,
-          null,
-          sessionId,
-          taskId,
-          { title: taskTitle, branchName }
-        )
-        .catch(() => {
-          /* best-effort */
-        })
-    );
+    schedulePostSubmitWork({
+      env: c.env,
+      projectId,
+      taskId,
+      sessionId,
+      message,
+      initialTitle: taskTitle,
+      titleConfig,
+      waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+      userId,
+      branchName,
+    });
 
     log.info('task_submit.created', {
       taskId,

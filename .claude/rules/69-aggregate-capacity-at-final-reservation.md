@@ -28,6 +28,9 @@ subtracted active reservations. Three whole-node requests therefore passed a thr
 ## Required tests
 
 - A fixture where one request consumes the smallest node's full declared CPU or memory.
+- A provider-offering boundary test that subtracts the configured host memory reserve before
+  provisioning, including the exact-fit boundary and persisted plans created by older schedulers.
+  A healthy host that cannot admit even one requested workspace must not enter a provisioning loop.
 - A larger-node matrix that admits fitting sums and rejects the first overflowing dimension.
 - A real database race where two contenders request the final capacity and exactly one wins.
 - Both directions of exclusivity: exclusive request onto occupied node and ordinary request onto
@@ -41,3 +44,5 @@ subtracted active reservations. Three whole-node requests therefore passed a thr
 - `apps/api/src/services/workspace-placement.ts`
 - `apps/api/src/services/workspace-resource-capacity.ts`
 - `tasks/active/2026-09-04-aggregate-workspace-resource-reservations.md`
+
+Teardown must enforce the reciprocal admission predicate in its final atomic database mutation: no active workspace reservations or live bounded placement claims. A timer's cached idle state is not proof that a shared node is empty. Cover stale warm alarms, retry paths, failed placement with an active sibling, and both orderings of admission versus shutdown using real database mutations.

@@ -23,6 +23,17 @@ const CANONICAL_TASK_START: EvidenceRequirement[] = [
 
 export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntry[] = [
   {
+    filePath: 'apps/api/src/services/submit-instant-task.ts',
+    table: 'tasks',
+    owner: 'submitInstantTask',
+    role: 'explicit Instant task submission adapter; no VM allocation',
+    canonicalService: 'acceptInstantSession -> continueInstantSessionLaunch',
+    requiredEvidence: [
+      { kind: 'call', name: 'acceptInstantSession' },
+      { kind: 'call', name: 'continueInstantSessionLaunch' },
+    ],
+  },
+  {
     filePath: 'apps/api/src/routes/tasks/submit.ts',
     table: 'tasks',
     owner: 'post /submit',
