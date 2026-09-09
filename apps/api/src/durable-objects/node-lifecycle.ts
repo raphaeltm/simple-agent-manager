@@ -599,6 +599,17 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         )
         .run();
       if ((result.meta.changes ?? 0) === 0) {
+        const node = await this.env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?')
+          .bind(state.nodeId)
+          .first<{ status: string }>();
+        if (!node || node.status === 'stopped' || node.status === 'deleted') {
+          await this.cleanupDestroyingState(
+            state.nodeId,
+            node ? `node_${node.status}` : 'node_absent',
+            false
+          );
+          return;
+        }
         // A live reservation/claim or changed lifecycle won. Retire the stale
         // warm timer; workspace cleanup will arm a fresh timer when truly idle.
         state.status = 'active';

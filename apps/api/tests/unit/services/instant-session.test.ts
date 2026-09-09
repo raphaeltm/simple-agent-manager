@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
     runContainerPhase: vi.fn(),
   },
   ulid: vi.fn(),
+  transitionTaskToTerminal: vi.fn(),
 }));
 
 vi.mock('../../../src/services/jwt', () => mocks.jwt);
@@ -47,6 +48,8 @@ vi.mock('../../../src/services/nodes', () => mocks.nodes);
 vi.mock('../../../src/services/project-data', () => mocks.projectData);
 vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
 vi.mock('../../../src/lib/ulid', () => ({ ulid: mocks.ulid }));
+
+vi.mock('../../../src/services/task-terminal-transition', () => ({ transitionTaskToTerminal: mocks.transitionTaskToTerminal }));
 
 import { launchInstantSession } from '../../../src/services/instant-session';
 
@@ -112,6 +115,7 @@ function baseLaunchInput() {
 describe('launchInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.transitionTaskToTerminal.mockResolvedValue('transitioned');
     mocks.ulid.mockReturnValueOnce('workspace-1').mockReturnValueOnce('agent-session-1');
     mocks.jwt.signCallbackToken.mockResolvedValue('workspace-callback-token');
     mocks.jwt.signNodeCallbackToken.mockResolvedValue('node-callback-token');
@@ -423,7 +427,7 @@ describe('launchInstantSession', () => {
   it.each([200, 403])(
     'uploads attachments between workspace creation and agent startup (upload status %s)',
     async (status) => {
-      const { db, updates } = makeDb();
+      const { db } = makeDb();
       const get = vi.fn(async () => ({
         body: new Blob(['test']).stream(),
         httpMetadata: { contentType: 'text/plain' },
@@ -469,8 +473,11 @@ describe('launchInstantSession', () => {
           'chat-session-1',
           'Attachment transfer failed for debug.txt: 403'
         );
-        expect(updates).toContainEqual(
-          expect.objectContaining({ status: 'failed', executionStep: 'launch_failed' })
+        expect(mocks.transitionTaskToTerminal).toHaveBeenCalledWith(attachmentEnv,
+          expect.objectContaining({ taskId: 'task-1', status: 'failed', executionStep: 'launch_failed',
+            expectedWorkspaceId: 'workspace-1', expectedChatSessionId: 'chat-session-1',
+            reason: 'Attachment transfer failed for debug.txt: 403', fillMissingStartedAt: false, stopWorkspace: false,
+          })
         );
         expect(remove).not.toHaveBeenCalled();
       }
@@ -529,8 +536,10 @@ describe('launchInstantSession', () => {
     expect(updates).toContainEqual(
       expect.objectContaining({ status: 'error', errorMessage: 'Request timed out after 120000ms' })
     );
-    expect(updates).toContainEqual(
-      expect.objectContaining({ status: 'failed', executionStep: 'launch_failed' })
+    expect(mocks.transitionTaskToTerminal).toHaveBeenCalledWith(env,
+      expect.objectContaining({ taskId: 'task-1', status: 'failed', executionStep: 'launch_failed',
+        reason: 'Request timed out after 120000ms', fillMissingStartedAt: false, stopWorkspace: false,
+      })
     );
   });
 

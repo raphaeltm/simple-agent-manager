@@ -1,6 +1,5 @@
 import type { CredentialSource, TaskAttachment, TaskMode } from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -16,6 +15,7 @@ import {
 import { enrichMessageWithMentions } from './mention-enrichment';
 import { resolveProjectAgentDefault } from './project-agent-defaults';
 import type { resolveSkillProfile } from './skills';
+import { transitionTaskToTerminal } from './task-terminal-transition';
 import { getTaskTitleConfig, truncateTitle } from './task-title';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -124,15 +124,16 @@ export async function submitInstantTask(input: {
       status: 'queued',
     };
   } catch (error) {
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        executionStep: 'launch_failed',
-        errorMessage: error instanceof Error ? error.message : String(error),
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.tasks.id, taskId));
+    await transitionTaskToTerminal(env, {
+      taskId,
+      projectId: project.id,
+      status: 'failed',
+      reason: error instanceof Error ? error.message : String(error),
+      source: 'task_submit.instant_acceptance',
+      executionStep: 'launch_failed',
+      fillMissingStartedAt: false,
+      stopWorkspace: false,
+    });
     throw error;
   }
 }

@@ -31,8 +31,9 @@ describe('runtime-aware workspace attachments', () => {
     mocks.signTerminalToken.mockResolvedValue({ token: 'private-test-token' });
     mocks.fetchNodeAgent.mockResolvedValue(new Response('{}'));
   });
-  it('uses owner-scoped R2 data and runtime-aware transport before cleaning up', async () => {
+  it.each(['https', 'http'])('honors configured %s transport while using owner-scoped uploads', async (protocol) => {
     const { env, get, remove } = fixture();
+    env.VM_AGENT_PROTOCOL = protocol;
     const beforeTransfer = vi.fn();
     await transferWorkspaceAttachments({
       env,
@@ -45,6 +46,7 @@ describe('runtime-aware workspace attachments', () => {
     expect(get).toHaveBeenCalledWith('temp-uploads/owner/upload-1/debug.txt');
     expect(mocks.signTerminalToken).toHaveBeenCalledWith('owner', 'workspace', env);
     const [, , url, request, , controls] = mocks.fetchNodeAgent.mock.calls[0]!;
+    expect(new URL(url).protocol).toBe(protocol + ':');
     expect(new URL(url).pathname).toBe('/workspaces/workspace/files/upload');
     expect(controls.beforeExternalMutation).toBe(beforeTransfer);
     expect(request.body.get('destination')).toBeNull();

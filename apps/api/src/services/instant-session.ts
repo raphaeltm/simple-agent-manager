@@ -19,6 +19,7 @@ import {
 } from './node-agent';
 import { createNodeRecord } from './nodes';
 import * as projectDataService from './project-data';
+import { transitionTaskToTerminal } from './task-terminal-transition';
 import { truncateTitle } from './task-title';
 import {
   destroyVmAgentContainer,
@@ -554,17 +555,18 @@ export async function continueInstantSessionLaunch(
   } catch (err) {
     const message = errorMessage(err);
     const failedAt = new Date().toISOString();
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        executionStep: 'launch_failed',
-        errorMessage: message,
-        workspaceId,
-        autoProvisionedNodeId: nodeId,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.tasks.id, input.taskId))
+    await transitionTaskToTerminal(env, {
+      taskId: input.taskId,
+      projectId: input.project.id,
+      status: 'failed',
+      reason: message,
+      source: 'instant_session.launch',
+      expectedWorkspaceId: workspaceId,
+      expectedChatSessionId: chatSessionId,
+      executionStep: 'launch_failed',
+      fillMissingStartedAt: false,
+      stopWorkspace: false,
+    })
       .catch((updateErr) => {
         log.warn('instant_session.task_error_update_failed', {
           taskId: input.taskId,

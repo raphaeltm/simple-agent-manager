@@ -263,8 +263,34 @@ describe('task submit capacity-pool placement', () => {
         })
       );
       expect(mocks.continueInstantSessionLaunch).toHaveBeenCalled();
+      await Promise.all(vi.mocked(executionCtx.waitUntil).mock.calls.map(([promise]) => promise));
+      expect(mocks.updateSessionTopic).toHaveBeenCalledWith(env, 'project-1', 'instant-chat', 'Generated task title');
+      expect(sqlite.prepare("SELECT title FROM tasks WHERE parent_task_id = 'parent-instant'").get()).toEqual({ title: 'Generated task title' });
+      expect(mocks.recordActivityEvent).toHaveBeenCalledWith(env, 'project-1', 'task.submitted', 'user', 'user-1', null, 'instant-chat', expect.any(String), expect.objectContaining({ branchName: expect.any(String) }));
     }
   );
+
+  it('records acceptance failure in both task state and lifecycle history', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectWithMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'owner' });
+    sqlite.exec(`INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, runtime)
+      VALUES ('instant', 'project-1', 'user-1', 'Instant', 'openai-codex', 'cf-container')`);
+    env.CF_CONTAINER_ENABLED = 'true';
+    mocks.acceptInstantSession.mockRejectedValueOnce(new Error('Instant acceptance rejected'));
+    const res = await createApp().request('/api/projects/project-1/tasks/submit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Use Instant', agentProfileId: 'instant' }),
+    }, env, executionCtx);
+    expect(res.status).toBe(500);
+    expect(sqlite.prepare('SELECT status, execution_step, error_message FROM tasks').get()).toEqual({
+      status: 'failed', execution_step: 'launch_failed', error_message: 'Instant acceptance rejected',
+    });
+    expect(sqlite.prepare('SELECT from_status, to_status FROM task_status_events ORDER BY created_at, rowid').all()).toEqual([
+      { from_status: null, to_status: 'queued' }, { from_status: 'queued', to_status: 'failed' },
+    ]);
+    expect(mocks.recordActivityEvent).not.toHaveBeenCalled();
+  });
 
   it.each([{ resourceRequirements: { minMemoryGb: 4 } }, { vmSize: 'medium' }])(
     'rejects VM overrides on an Instant profile instead of changing runtime: %j',

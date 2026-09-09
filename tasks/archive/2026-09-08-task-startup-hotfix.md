@@ -71,3 +71,9 @@ A 4 GiB VM request returned 202 in 6.8 seconds and selected an 8 GiB cx33. Node 
 Cleanup confirmed deletion of all three test nodes and deletion/removal of their workspaces. Test tasks and ideas were removed. One-hour D1 observability noise check passed. The 24-hour check retained older Sept 8 08:23–09:05 errors from before this deployment. Optional DO monitoring showed no wall-time regression and healthy cron; pre-deployment invocation-rate increases remained in the historical comparison. No runtime code changed after the staging-tested commit.
 
 CI full coverage, lint, types, builds, browser and smoke checks passed. The full Worker run passed978/979 tests; its only failure was a direct-node provisioning lifetime fixture relying on the default4GiB reservation with only a4GiB offering. The fixture now explicitly requests a fitting2GiB small allocation; specialist review confirmed the correction and its4/4 Worker tests plus ESLint passed. No production code changed after staging. Full CI is rerunning for the test-only correction.
+
+## CodeRabbit review follow-up
+
+Raphaël manually triggered the review, which completed on c33715711 with five findings. Four are addressed: zero-row warm handoffs retire absent/terminal node state; Instant acceptance and continuation failures use the shared atomic terminal transition with failure phase preserved; both submission paths share background title/activity hooks. The blanket HTTPS-only upload proposal is declined because VM_AGENT_PROTOCOL=http is explicitly supported and the existing runtime-aware transport handles Instant over its private DO path; HTTPS remains the default. Added transport compatibility coverage.
+
+Independent local review passed. Targeted unit tests34/34 and real Worker/D1 tests82/82 passed. Fresh staging and CI are required for these runtime follow-up changes; release gates remain pending.

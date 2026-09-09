@@ -628,6 +628,32 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     }
   );
 
+  it.each(['absent', 'stopped', 'deleted'] as const)(
+    'retires expired warm state for a %s node without erasing other durable work',
+    async (status) => {
+      const nodeId = `nl-terminal-warm-${status}`;
+      await seedTestNode(nodeId);
+      const stub = getStub(nodeId);
+      if (status === 'absent') {
+        await env.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(nodeId).run();
+      } else {
+        await env.DATABASE.prepare('UPDATE nodes SET status = ? WHERE id = ?').bind(status, nodeId).run();
+      }
+      await runInDurableObject(stub, async (instance) => {
+        await instance.ctx.storage.put('state', {
+          nodeId, userId: TEST_USER_ID, status: 'warm',
+          warmSince: Date.now() - 600_000, claimedByTask: null,
+        });
+        await instance.ctx.storage.put('other-durable-work', { preserve: true });
+        await instance.alarm();
+        expect(await instance.ctx.storage.get('state')).toBeUndefined();
+        expect(await instance.ctx.storage.get('other-durable-work')).toEqual({ preserve: true });
+      });
+      expect(await getAlarm(stub)).toBeNull();
+      expect((await getNodeFromD1(nodeId))?.status ?? 'absent').toBe(status);
+    }
+  );
+
   it.each([false, true])('bounds the warm claim fence (expired=%s)', async (expired) => {
     const nodeId = `nl-claim-fence-${expired}`;
     const taskId = `task-claim-fence-${expired}`;
