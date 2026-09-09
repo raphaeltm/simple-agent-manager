@@ -248,6 +248,13 @@ export function classifyHetznerError(
  * decision (see `attemptCreateWithPlacementFallback`'s "Cross-location fallback must be a new
  * control-plane placement decision"). Before this change a 412 escaped that loop immediately, so
  * excluding it here keeps provisioning latency exactly as it is today.
+ *
+ * THREE 412 CHECKS, THREE PRECISIONS — keep them in mind together:
+ *   - `attemptCreateWithPlacementFallback` (hetzner.ts): any 412 retries another location.
+ *     Deliberately broad; being wrong costs one extra create attempt.
+ *   - `providerAllocationRejected` (node-provisioning.ts): any 412 means "Hetzner definitely
+ *     rejected the allocation". Also broad, and safe in that direction.
+ *   - this predicate: gates a 300 s retry budget, so it must be precise.
  */
 export function isHetznerPlacementCapacityError(err: ProviderError): boolean {
   if (err.statusCode !== HETZNER_PLACEMENT_STATUS_CODE) return false;
