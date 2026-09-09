@@ -166,6 +166,43 @@ describe('Hetzner 412 placement failures are transient capacity', () => {
   });
 });
 
+/**
+ * `isTransientCapacityError` calls a HETZNER-specific classifier, but
+ * `node-provisioning-step.ts` and `node-provisioning.ts` call it on any `ProviderError` without
+ * checking which provider raised it. GCP is the live hazard: `classifyGcpError` has no call
+ * sites, so GCP errors also arrive with `category: 'unknown'`, and GCP uses 412 for
+ * ETag/precondition mismatches while using "placement policy" in its own vocabulary.
+ */
+describe('cross-provider isolation', () => {
+  it('does not read a GCP 412 mentioning placement as Hetzner capacity', () => {
+    const gcp = new ProviderError('gcp', 412, 'gcp API error (412): placement policy conflict');
+    expect(gcp.category).toBe('unknown');
+    expect(isTransientCapacityError(gcp)).toBe(false);
+    expect(isHetznerPlacementCapacityError(gcp)).toBe(false);
+  });
+
+  it('does not run Hetzner 422 capacity heuristics over another provider', () => {
+    // This message matches TRANSIENT_CAPACITY_PATTERNS, so without the providerName guard the
+    // Hetzner classifier would claim it.
+    const scaleway = new ProviderError('scaleway', 422, 'not enough resources available');
+    expect(isTransientCapacityError(scaleway)).toBe(false);
+  });
+
+  it('still honours another provider that classified its OWN error as capacity', () => {
+    // The guard must only fence the Hetzner-classifier fallback, never the category itself.
+    const gcp = new ProviderError('gcp', 503, 'ZONE_RESOURCE_POOL_EXHAUSTED', {
+      category: 'transient_capacity',
+    });
+    expect(isTransientCapacityError(gcp)).toBe(true);
+  });
+
+  it('owner control: the identical error from Hetzner IS capacity', () => {
+    const hetzner = new ProviderError('hetzner', 412, 'hetzner API error (412): error during placement');
+    expect(isTransientCapacityError(hetzner)).toBe(true);
+    expect(isHetznerPlacementCapacityError(hetzner)).toBe(true);
+  });
+});
+
 describe('isHetznerPlacementCapacityError', () => {
   it('matches a 412 placement failure, by code or by message', () => {
     expect(
@@ -180,6 +217,22 @@ describe('isHetznerPlacementCapacityError', () => {
         new ProviderError('hetzner', 412, 'hetzner API error (412): error during placement')
       )
     ).toBe(true);
+  });
+
+  it('agrees with the classifier when the provider code is unrecognized', () => {
+    // `classifyHetznerError`'s switch has no `default`, so an unrecognized code falls through to
+    // the same message check. If this predicate disagreed, such an error would be capacity
+    // everywhere else while still entering the 300 s same-SKU retry loop.
+    const err = new ProviderError(
+      'hetzner',
+      412,
+      'hetzner API error (412): error during placement',
+      { providerCode: 'some_new_code' }
+    );
+    expect(classifyHetznerError(err.statusCode, err.providerCode, err.message)).toBe(
+      'transient_capacity'
+    );
+    expect(isHetznerPlacementCapacityError(err)).toBe(true);
   });
 
   it('does not match other errors, including ordinary capacity scarcity', () => {

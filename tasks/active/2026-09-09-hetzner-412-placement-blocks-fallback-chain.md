@@ -93,6 +93,29 @@ Deliberately NOT affected: `classifyVmProviderCapacityError`
 only, so a 412 cannot trip the account-wide provider cooldown or park the task on the admission
 queue. Verified by reading the predicate.
 
+### Cross-provider isolation (added after review)
+
+`isTransientCapacityError` calls a Hetzner-specific classifier, but `node-provisioning-step.ts`
+and `node-provisioning.ts` call it on ANY `ProviderError` without checking `providerName`. That
+was already true for status 422; adding 412 widened the same unguarded surface.
+
+GCP is the live hazard, not a hypothetical: `classifyGcpError` has **no call sites**, so every GCP
+error also arrives with `category: 'unknown'`, and GCP uses 412 for ETag/precondition mismatches
+while using "placement policy" in its own vocabulary. A GCP precondition failure whose message
+said "placement" would have been read as Hetzner capacity scarcity — deleting the node row and
+silently descending instead of surfacing a real conflict.
+
+Both predicates now require `providerName === 'hetzner'` before applying Hetzner heuristics,
+matching what `providerAllocationRejected` already does in `node-provisioning.ts`. The
+`category === 'transient_capacity'` fast path stays provider-agnostic, so a provider that
+classifies its own errors correctly is still honoured (tested).
+
+The two placement predicates were also brought into agreement: `isHetznerPlacementCapacityError`
+previously returned `false` whenever any provider code was present, while the classifier's `switch`
+(which has no `default`) falls through an unrecognized code to the same message check. That
+divergence would have let a 412 be `transient_capacity` everywhere else while still entering the
+300 s same-SKU retry loop.
+
 ### A sixth consumer, reached through `mapHetznerProviderError`
 
 The table above covers `isTransientCapacityError`. `classifyHetznerError` has one further consumer

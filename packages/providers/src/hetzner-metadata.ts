@@ -257,9 +257,14 @@ export function classifyHetznerError(
  *   - this predicate: gates a 300 s retry budget, so it must be precise.
  */
 export function isHetznerPlacementCapacityError(err: ProviderError): boolean {
+  if (err.providerName !== 'hetzner') return false;
   if (err.statusCode !== HETZNER_PLACEMENT_STATUS_CODE) return false;
   if (err.providerCode === HETZNER_PLACEMENT_ERROR_CODE) return true;
-  if (err.providerCode !== undefined) return false;
+  // Mirrors `classifyHetznerError`'s message fallback exactly, INCLUDING for an unrecognized
+  // provider code. The classifier's `switch` has no `default`, so an unmatched code falls through
+  // to the same message check. An earlier cut of this returned false whenever any code was
+  // present, which let a 412 be `transient_capacity` everywhere else while still entering the
+  // 300 s same-SKU retry loop here — the two predicates must agree on what a placement failure is.
   return PLACEMENT_CAPACITY_PATTERNS.some((pattern) => pattern.test(err.message));
 }
 
@@ -279,15 +284,19 @@ export function isTransientCapacityError(err: ProviderError): boolean {
   //   422 — Hetzner's observed status for server-type scarcity (`resource_unavailable`, and the
   //         `invalid_input` + "unsupported location" conflicting-signal case).
   //   412 — Hetzner's status for `placement_error`, the 2026-09-09 incident.
-  // Every other status is deliberately excluded because this predicate is also reached with
-  // errors from OTHER providers (`node-provisioning-step.ts` calls it on any `ProviderError`
-  // without checking `providerName`), so a wider gate would run Hetzner's message heuristics over
-  // Scaleway/GCP/Vultr errors. The root fix is to assign `category` at construction on the
-  // createVM path the way `createVolume` already does via `mapHetznerProviderError`; tracked in
-  // idea 01M236QPGGC6B150FG4QHT17MW rather than done inside this hotfix. That idea also records
-  // that GCP's `classifyGcpError` is never called at all, so GCP currently has the very bug this
-  // change fixes for Hetzner.
+  //
+  // The `providerName` guard matters as much as the status list. `node-provisioning-step.ts` and
+  // `node-provisioning.ts` call this on ANY `ProviderError` without checking which provider
+  // raised it, and `classifyHetznerError` is a Hetzner-specific heuristic. GCP is the concrete
+  // hazard: `classifyGcpError` has no call sites at all, so every GCP error also arrives here as
+  // 'unknown', and GCP uses 412 for ETag/precondition mismatches while using "placement policy"
+  // in its own vocabulary. Without this guard a GCP precondition failure whose message happened
+  // to say "placement" would be read as Hetzner capacity scarcity — deleting the node row and
+  // silently descending to another offering instead of surfacing a real conflict.
+  // `providerAllocationRejected` in node-provisioning.ts already guards this way; this matches it.
+  // Wiring up `classifyGcpError` is tracked in idea 01M236QPGGC6B150FG4QHT17MW.
   if (
+    err.providerName === 'hetzner' &&
     (err.statusCode === 422 || err.statusCode === HETZNER_PLACEMENT_STATUS_CODE) &&
     err.category === 'unknown'
   ) {
