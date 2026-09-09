@@ -17,7 +17,7 @@ Use existing runtime, admission, attachment authorization and launch machinery. 
 - [x] Use existing runtime-aware attachment transport and preserve original user message/file context.
 - [x] Eliminate synchronous catalog reconciliation during submission while preserving effective pool precedence and first-install behavior.
 - [x] Investigate revision rejection; preserve legitimate pool invalidation and avoid silently adopting stale authorization.
-- [ ] Add regression tests for each boundary and run relevant quality checks.
+- [x] Add regression tests for each boundary and run relevant quality checks.
 - [ ] Update public docs; specialist review; staging; CI/CodeRabbit; merge; production verification.
 
 ## Acceptance criteria
@@ -49,6 +49,13 @@ Additional root cause: TaskRunner failure before workspace creation can call mar
 - [x] Preserve active sibling workspaces when markIdle is called after failed placement.
 - [x] Atomically fence warm expiry and destroying retries on node ownership, class, role, running state, workspace occupancy, and bounded warm claims.
 - [x] Reject warm claims after node shutdown wins.
-- [ ] Validate real D1/DO occupancy and placement races; complete staging and release gates.
+- [x] Validate real D1/DO occupancy and placement races.
+- [ ] Complete staging and release gates.
 
 Validation runs use serial package execution on this 4 GiB host after unconstrained parallel root checks exhausted memory (exit137); an interrupted run is not passing evidence.
+
+## Recovered implementation validation
+
+Full API discovery completed: 707 files, 9,589 tests; two failures exposed a missing allocation-writer inventory entry and legacy abstract-pool initialization. Both are fixed: the boundary suite passes 83/83, and upgrade/default-pool suites pass 111/111 including new disabled-source and no-repeat-catalog-refresh regressions. Other API tests passed (9,587). The first native offering initialization remains enabled only for active legacy pools, candidates, and sources; explicit disabled or native membership is preserved.
+
+All 19 non-API package test tasks passed (web: 3,744 tests). Lint/typecheck/build completed 35/35 tasks. Focused startup tests pass 166/166; real Worker/D1 lifecycle/admission tests pass 79/79. Local Cloudflare, security, constitution, completion, documentation, and test review passed, including review of the final native-initialization predicate. Staging and release evidence will be appended after execution.

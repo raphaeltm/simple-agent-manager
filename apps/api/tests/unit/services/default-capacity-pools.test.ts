@@ -775,6 +775,30 @@ describe('default capacity pool creation', () => {
     expect(offeringResolver).not.toHaveBeenCalled();
   });
 
+  it('keeps an abstract pool with a disabled source authoritative without catalog refresh', async () => {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const initial = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1', ensure: true,
+    });
+    const poolId = initial!.pool.id;
+    const sourceId = initial!.sources[0]!.id;
+    sqlite!.prepare('DELETE FROM capacity_pool_candidates WHERE pool_id = ?').run(poolId);
+    sqlite!.prepare(`INSERT INTO capacity_pool_candidates
+      (id, pool_id, capacity_source_id, provider, location, workload_role, runtime, machine_class, machine_size)
+      VALUES ('old-abstract', ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small')`
+    ).run(poolId, sourceId);
+    sqlite!.prepare("UPDATE capacity_sources SET status = 'disabled' WHERE id = ?").run(sourceId);
+    const offeringResolver = vi.fn(async () => []);
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1', ensure: true, initializeOnly: true, offeringResolver,
+    });
+    expect(summary?.pool.id).toBe(poolId);
+    expect(summary?.sources[0]?.status).toBe('disabled');
+    expect(summary?.activeCandidateCount).toBe(0);
+    expect(offeringResolver).not.toHaveBeenCalled();
+  });
+
   it('creates project, user, and installation default records from legacy no-pool state when ensure is requested', async () => {
     const db = createDb();
     seedPlatformCredential({ id: 'platform-hetzner' });

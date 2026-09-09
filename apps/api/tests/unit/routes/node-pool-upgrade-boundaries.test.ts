@@ -10,6 +10,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { nodeLifecycleRoutes } from '../../../src/routes/node-lifecycle';
+import { resolveEffectiveDefaultCapacityPoolSummary } from '../../../src/services/default-capacity-pools';
 import { clearCapacityCatalogCache } from '../../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../../src/services/encryption';
 import { signNodeCallbackToken } from '../../../src/services/jwt';
@@ -199,6 +200,16 @@ describe('node-pool upgrade boundaries', () => {
             .prepare('SELECT provider_instance_type FROM capacity_pool_candidates WHERE id = ?')
             .get(abstractId)
         ).toEqual({ provider_instance_type: null });
+        const offeringResolver = vi.fn(async () => []);
+        const existing = await resolveEffectiveDefaultCapacityPoolSummary(f.db, {
+          userId: 'user-1',
+          ensure: true,
+          initializeOnly: true,
+          env: f.env,
+          offeringResolver,
+        });
+        expect(existing?.activeCandidateCount).toBeGreaterThan(0);
+        expect(offeringResolver).not.toHaveBeenCalled();
       }
       expect(
         sqlite

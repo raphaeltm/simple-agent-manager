@@ -207,10 +207,29 @@ export async function resolveEffectiveDefaultCapacityPoolSummary(
   });
   for (const scope of scopes) {
     if (await findDefaultPool(db, scope)) {
-      return readDefaultPoolSummary(db, scope, {
+      const summary = await readDefaultPoolSummary(db, scope, {
         includeDisabled: true,
         workloadRoles: input.workloadRoles,
       });
+      // Upgraded installations can still contain only abstract VM-size rows.
+      // Materialize native offerings once; do not refresh migrated catalogs or
+      // override deliberate empty/disabled pool membership on every submission.
+      const needsNativeInitialization =
+        summary?.pool.status === ACTIVE_STATUS &&
+        summary.candidates.some(
+          (candidate) =>
+            candidate.runtime === 'vm' &&
+            candidate.status === ACTIVE_STATUS &&
+            candidate.providerInstanceType === null &&
+            summary.sources.some(
+              (source) => source.id === candidate.capacitySourceId && source.status === ACTIVE_STATUS
+            )
+        ) &&
+        !summary.candidates.some(
+          (candidate) => candidate.runtime === 'vm' && candidate.providerInstanceType !== null
+        );
+      if (input.ensure === true && input.initializeOnly && needsNativeInitialization) break;
+      return summary;
     }
   }
 
