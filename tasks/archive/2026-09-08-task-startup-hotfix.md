@@ -18,7 +18,8 @@ Use existing runtime, admission, attachment authorization and launch machinery. 
 - [x] Eliminate synchronous catalog reconciliation during submission while preserving effective pool precedence and first-install behavior.
 - [x] Investigate revision rejection; preserve legitimate pool invalidation and avoid silently adopting stale authorization.
 - [x] Add regression tests for each boundary and run relevant quality checks.
-- [ ] Update public docs; specialist review; staging; CI/CodeRabbit; merge; production verification.
+- [x] Update public docs; specialist review; staging.
+- [ ] CI/CodeRabbit; merge; production verification (release gates tracked in PR).
 
 ## Acceptance criteria
 
@@ -50,7 +51,8 @@ Additional root cause: TaskRunner failure before workspace creation can call mar
 - [x] Atomically fence warm expiry and destroying retries on node ownership, class, role, running state, workspace occupancy, and bounded warm claims.
 - [x] Reject warm claims after node shutdown wins.
 - [x] Validate real D1/DO occupancy and placement races.
-- [ ] Complete staging and release gates.
+- [x] Complete staging verification and cleanup.
+- [ ] Complete release gates (tracked in PR).
 
 Validation runs use serial package execution on this 4 GiB host after unconstrained parallel root checks exhausted memory (exit137); an interrupted run is not passing evidence.
 
@@ -59,3 +61,11 @@ Validation runs use serial package execution on this 4 GiB host after unconstrai
 Full API discovery completed: 707 files, 9,589 tests; two failures exposed a missing allocation-writer inventory entry and legacy abstract-pool initialization. Both are fixed: the boundary suite passes 83/83, and upgrade/default-pool suites pass 111/111 including new disabled-source and no-repeat-catalog-refresh regressions. Other API tests passed (9,587). The first native offering initialization remains enabled only for active legacy pools, candidates, and sources; explicit disabled or native membership is preserved.
 
 All 19 non-API package test tasks passed (web: 3,744 tests). Lint/typecheck/build completed 35/35 tasks. Focused startup tests pass 166/166; real Worker/D1 lifecycle/admission tests pass 79/79. Local Cloudflare, security, constitution, completion, documentation, and test review passed, including review of the final native-initialization predicate. Staging and release evidence will be appended after execution.
+
+## Staging verification
+
+Deployment [34316492417](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34316492417) passed on 11497f0af, including smoke tests. Playwright executed a saved idea with the Codex Instant profile and a text attachment: submit returned 202 in 5.9 seconds, idea linking returned 201, GET confirmed the linked idea, and the agent returned the exact unique marker stored only in the attachment. An earlier browser harness closed before its asynchronous idea-link request; keeping the browser open until that response confirmed the existing UI behavior.
+
+A 4 GiB VM request returned 202 in 6.8 seconds and selected an 8 GiB cx33. Node creation was 06:03:57Z, ready callback 06:06:24Z, and heartbeat was verified at 06:07:00Z. The workspace reached running, the browser displayed the agent response STARTUP_VM_VERIFIED, and the runtime containers endpoint returned 200. Dashboard, project, settings and chat navigation completed without browser page errors; screenshots were inspected.
+
+Cleanup confirmed deletion of all three test nodes and deletion/removal of their workspaces. Test tasks and ideas were removed. One-hour D1 observability noise check passed. The 24-hour check retained older Sept 8 08:23–09:05 errors from before this deployment. Optional DO monitoring showed no wall-time regression and healthy cron; pre-deployment invocation-rate increases remained in the historical comparison. No runtime code changed after the staging-tested commit.
