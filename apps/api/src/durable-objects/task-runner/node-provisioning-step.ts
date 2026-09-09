@@ -592,10 +592,14 @@ export async function handleNodeProvisioning(
         err instanceof ProviderError && isTransientCapacityError(err)
           ? 'capacity-exhausted'
           : 'failed';
+      // Name the provider's own cause. A fixed string here is what made the originating
+      // incident's `placement_explanation_json` say only "Provider allocation failed" — true,
+      // and useless for working out that Hetzner could not place a cx53 in fsn1.
+      const providerDetail = err instanceof ProviderError ? `: ${err.message}` : '';
       diagnosticAttempt.reason =
         diagnosticAttempt.outcome === 'capacity-exhausted'
-          ? 'Provider offering has no available capacity'
-          : 'Provider allocation failed';
+          ? `Provider offering has no available capacity${providerDetail}`
+          : `Provider allocation failed${providerDetail}`;
       await persistPlacementDiagnostics(state, rc, {
         attempts: diagnosticAttempts,
         selectedNodeId: null,
@@ -726,7 +730,10 @@ export async function handleNodeProvisioning(
       state.admissionLeaseToken = null;
       await rc.ctx.storage.put('state', state);
 
-      const terminalMessage = exhaustionTerminalMessage(exhaustionPlan);
+      const terminalMessage = exhaustionTerminalMessage(
+        exhaustionPlan,
+        err instanceof ProviderError ? err.message : null
+      );
       if (admissionIdentity && exhaustionPolicyQueues(exhaustionPlan)) {
         const waitResult = await waitForVmAdmissionCapacity(
           rc.env,

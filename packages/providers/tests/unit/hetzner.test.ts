@@ -566,29 +566,38 @@ describe('HetznerProvider', () => {
       });
     });
 
+    /**
+     * A FRESH 412 response per call. A `Response` body can be read only once, so a mock that
+     * resolves one shared instance degrades every call after the first to `HTTP 412` with no
+     * providerCode — a fixture that stops resembling production (`.claude/rules/72`).
+     */
+    const alwaysPlacementError = () =>
+      vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          })
+        )
+      );
+
     it('should throw after all locations exhausted on 412', async () => {
       vi.useFakeTimers();
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
-          status: 412,
-        })
-      );
+      globalThis.fetch = alwaysPlacementError();
 
       const promise = provider.createVM(vmConfig).catch((err) => err);
       await vi.runAllTimersAsync();
       const result = await promise;
       expect(result).toBeInstanceOf(ProviderError);
+      expect((result as ProviderError).message).toBe(
+        'hetzner API error (412): error during placement'
+      );
       // primary (1) + primary retry (2) + 4 fallback locations = 6
       expect(fetch).toHaveBeenCalledTimes(6);
     });
 
     it('should never retry the primary location in the fallback phase', async () => {
       vi.useFakeTimers();
-      const mockFetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
-          status: 412,
-        })
-      );
+      const mockFetch = alwaysPlacementError();
       globalThis.fetch = mockFetch;
 
       const promise = provider.createVM(vmConfig).catch(() => {});
@@ -753,8 +762,16 @@ describe('isTransientCapacityError', () => {
     expect(isTransientCapacityError(err)).toBe(false);
   });
 
-  it('should return false for 412 errors', () => {
+  // Inverted 2026-09-09. This pinned the defect: a 412 placement failure IS capacity
+  // scarcity, and treating it as non-capacity stopped the compute pool's fallback chain
+  // from ever reaching its second offering in production.
+  it('should return true for 412 placement errors', () => {
     const err = new ProviderError('hetzner', 412, 'error during placement');
+    expect(isTransientCapacityError(err)).toBe(true);
+  });
+
+  it('should still return false for a 412 that is not a placement failure', () => {
+    const err = new ProviderError('hetzner', 412, 'server is locked', { providerCode: 'locked' });
     expect(isTransientCapacityError(err)).toBe(false);
   });
 

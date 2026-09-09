@@ -163,15 +163,34 @@ function attemptFor(
   };
 }
 
-/** Operator-facing terminal message when every permissible attempt is exhausted. */
-export function exhaustionTerminalMessage(plan: ProvisioningExhaustionPlan): string {
+/**
+ * Operator-facing terminal message when every permissible attempt is exhausted.
+ *
+ * `lastProviderError` is the final attempt's provider message, and it is not decoration. Before
+ * 2026-09-09 a Hetzner 412 was classified non-capacity, so the task's failure message WAS the
+ * provider's own text ("hetzner API error (412): error during placement") and the failed node row
+ * kept the same string in `error_message`. Routing 412 into the capacity path fixes the fallback
+ * chain but would otherwise replace that with a template naming no provider, no status and no
+ * cause — on the three surfaces a human checks first. Losing the cause is how the originating
+ * incident stayed mysterious across three wake attempts; the chain descending is not worth
+ * paying for it again.
+ *
+ * The text is already sanitized and length-bounded by `providerFetch`'s
+ * `boundProviderErrorDetail`, and is taken from the parsed error body, so nothing from the
+ * request (token, URL) is reachable here.
+ */
+export function exhaustionTerminalMessage(
+  plan: ProvisioningExhaustionPlan,
+  lastProviderError?: string | null
+): string {
+  const cause = lastProviderError ? ` Last provider error: ${lastProviderError}` : '';
   if (plan.attempts.length <= 1) {
     const only = plan.attempts[0];
     const label = only?.providerInstanceType ?? only?.vmSize ?? 'requested';
-    return `No capacity available for ${label}.`;
+    return `No capacity available for ${label}.${cause}`;
   }
   const tried = plan.attempts
     .map((attempt) => attempt.providerInstanceType ?? attempt.vmSize)
     .join(', ');
-  return `No capacity for any permitted offering in this compute pool (tried ${tried}).`;
+  return `No capacity for any permitted offering in this compute pool (tried ${tried}).${cause}`;
 }

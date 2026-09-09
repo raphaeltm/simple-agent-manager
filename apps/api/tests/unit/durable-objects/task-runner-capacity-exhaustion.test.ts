@@ -58,6 +58,40 @@ function capacityError(size: string): ProviderError {
   });
 }
 
+/**
+ * The 2026-09-09 production incident, at provider fidelity.
+ *
+ * `providerFetch` builds every HTTP ProviderError as
+ * `new ProviderError(name, status, message, { providerCode })` — with NO `category`, so it
+ * defaults to 'unknown'. Every pre-existing test in this file uses `capacityError()`, which
+ * hand-feeds `category: 'transient_capacity'`; that is why the whole fallback-chain suite was
+ * green while the chain was dead in production (`.claude/rules/62`). This factory must never
+ * set `category`.
+ *
+ * Message and status are copied verbatim from prod `platform_errors`
+ * (`statusCode: 412`, "hetzner API error (412): error during placement").
+ */
+function placementError(): ProviderError {
+  return new ProviderError('hetzner', 412, 'hetzner API error (412): error during placement', {
+    providerCode: 'placement_error',
+  });
+}
+
+/** The same 412, with no structured code at all — the shape prod logs actually prove. */
+function placementErrorWithoutCode(): ProviderError {
+  return new ProviderError('hetzner', 412, 'hetzner API error (412): error during placement');
+}
+
+/**
+ * Discriminating control: a genuinely non-capacity provider failure, built the same way
+ * `providerFetch` builds it. Must still fail fast without touching the alternative.
+ */
+function authError(): ProviderError {
+  return new ProviderError('hetzner', 401, 'hetzner API error (401): invalid token', {
+    providerCode: 'unauthorized',
+  });
+}
+
 /** Sentinel returned by a `firstResolver` to defer to the default SELECT handling. */
 const FALLTHROUGH = Symbol('fallthrough');
 
@@ -424,7 +458,7 @@ describe('TaskRunner capacity exhaustion', () => {
     const state = createState({ vmSize: 'large', vmSizeSource: 'task' });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: 'No capacity available for large.',
+      message: 'No capacity available for large. Last provider error: No large capacity',
       permanent: true,
     });
     // Only the requested size attempted — no descent.
@@ -444,7 +478,7 @@ describe('TaskRunner capacity exhaustion', () => {
       const state = createState({ vmSize: 'large', vmSizeSource: source });
 
       await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-        message: 'No capacity available for large.',
+        message: 'No capacity available for large. Last provider error: No large capacity',
         permanent: true,
       });
       expect(provisionNode).toHaveBeenCalledTimes(1);
@@ -502,7 +536,7 @@ describe('TaskRunner capacity exhaustion', () => {
       const state = createState({ vmSize: 'large', vmSizeSource: source });
 
       await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-        message: 'No capacity available for large.',
+        message: 'No capacity available for large. Last provider error: No large capacity',
         permanent: true,
       });
       expect(provisionNode).toHaveBeenCalledTimes(1);
@@ -657,6 +691,24 @@ function alternateCandidate(): PoolCandidate {
   });
 }
 
+/**
+ * The standard two-offering fallback-chain fixture: primary plus an alternative that is
+ * identical on every ranking signal. Six cases below need exactly this, so it lives in one
+ * place — a divergence between them would silently change what the policy is being tested
+ * against.
+ */
+function fallbackChainFixture(policy: 'fail' | 'queue' | 'fallback-chain' = 'fallback-chain') {
+  const { DATABASE } = createDbMock({});
+  const rc = createContext(DATABASE);
+  const state = createState({
+    capacityPoolSelection: poolWith(policy, [
+      capacityPoolSelection().candidates[0] as PoolCandidate,
+      alternateCandidate(),
+    ]),
+  });
+  return { DATABASE, rc, state };
+}
+
 /** Provider instance types actually handed to createNodeRecord, in order. */
 function attemptedInstanceTypes(): Array<string | null | undefined> {
   return createNodeRecord.mock.calls.map(
@@ -691,7 +743,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(1);
@@ -700,17 +752,10 @@ describe('TaskRunner capacity exhaustion policy', () => {
   });
 
   it("fallback-chain: tries the pool's other permitted offering before failing", async () => {
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}).`,
+      message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}). Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(2);
@@ -723,14 +768,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
       throw capacityError('primary');
     });
     provisionNode.mockImplementationOnce(async () => undefined);
-    const { DATABASE } = createDbMock({});
-    const rc = createContext(DATABASE);
-    const state = createState({
-      capacityPoolSelection: poolWith('fallback-chain', [
-        capacityPoolSelection().candidates[0] as PoolCandidate,
-        alternateCandidate(),
-      ]),
-    });
+    const { rc, state } = fallbackChainFixture();
 
     await handleNodeProvisioning(state, rc);
 
@@ -741,6 +779,107 @@ describe('TaskRunner capacity exhaustion policy', () => {
     expect(state.stepResults.capacityPlacementSnapshot?.capacityPoolCandidateId).toBe(
       'candidate-user-alternate'
     );
+  });
+
+  // ---------------------------------------------------------------------------------------
+  // 2026-09-09 incident: Hetzner 412 "error during placement".
+  //
+  // Prod tasks 01M232PGCM4Q25TRJPNB3NX01A / 01M232Q6H5GTYAFGPZYK1DYRV3 /
+  // 01M232QYT0S7WZGSH0KEH95ZPF each recorded
+  //   attempts: [cx53 failed, cx43 not-attempted, cx33 not-attempted, cx23 not-attempted]
+  // because `placement_error` classified as `invalid_config`, so `handleNodeProvisioning`
+  // took its "any non-capacity provider failure fails fast" branch on the first offering.
+  // All three tests below FAIL against pre-fix code.
+  // ---------------------------------------------------------------------------------------
+
+  it('fallback-chain: descends past a Hetzner 412 placement failure (incident regression)', async () => {
+    provisionNode.mockImplementation(async () => {
+      throw placementError();
+    });
+    const { rc, state } = fallbackChainFixture();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: `No capacity for any permitted offering in this compute pool (tried ${PRIMARY}, ${ALTERNATE}). Last provider error: hetzner API error (412): error during placement`,
+      permanent: true,
+    });
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY, ALTERNATE]);
+  });
+
+  it('fallback-chain: descends on a 412 that carries no structured provider code', async () => {
+    provisionNode.mockImplementation(async () => {
+      throw placementErrorWithoutCode();
+    });
+    const { rc, state } = fallbackChainFixture();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY, ALTERNATE]);
+  });
+
+  it('fallback-chain: recovers on the alternative offering after a 412 (the user-visible fix)', async () => {
+    provisionNode.mockImplementationOnce(async () => {
+      throw placementError();
+    });
+    provisionNode.mockImplementationOnce(async () => undefined);
+    const { rc, state } = fallbackChainFixture();
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY, ALTERNATE]);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    expect(state.config.providerInstanceType).toBe(ALTERNATE);
+  });
+
+  // Consumer #4 of `isTransientCapacityError` (`node-provisioning-step.ts:592`). The diagnostic
+  // outcome is what production's `tasks.placement_explanation_json` recorded during the incident
+  // ("failed" / "Provider allocation failed"), and it is the artifact an operator reads to work
+  // out why a run stopped. It must now say the offering ran out of capacity.
+  it('records a 412 as capacity-exhausted in placement diagnostics, not a generic failure', async () => {
+    provisionNode.mockImplementation(async () => {
+      throw placementError();
+    });
+    const { rc, state } = fallbackChainFixture();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
+
+    const attempts = state.stepResults.placementDiagnostics?.attempts ?? [];
+    expect(attempts.map((a) => a.outcome)).toEqual(['capacity-exhausted', 'capacity-exhausted']);
+    // The provider's own words, not just the category. This is the field production's
+    // placement_explanation_json recorded as the useless "Provider allocation failed".
+    expect(attempts.map((a) => a.reason)).toEqual([
+      'Provider offering has no available capacity: hetzner API error (412): error during placement',
+      'Provider offering has no available capacity: hetzner API error (412): error during placement',
+    ]);
+  });
+
+  it('records a non-capacity failure as a generic failure (discriminating control)', async () => {
+    provisionNode.mockImplementation(async () => {
+      throw authError();
+    });
+    const { rc, state } = fallbackChainFixture();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
+
+    const attempts = state.stepResults.placementDiagnostics?.attempts ?? [];
+    expect(attempts[0]?.outcome).toBe('failed');
+    expect(attempts[0]?.reason).toBe(
+      'Provider allocation failed: hetzner API error (401): invalid token'
+    );
+  });
+
+  it('fallback-chain: a non-capacity provider failure still fails fast (discriminating control)', async () => {
+    // Stays green before AND after the fix. Without it, "the chain descended" would also be
+    // satisfied by a change that made EVERY provider error descend.
+    provisionNode.mockImplementation(async () => {
+      throw authError();
+    });
+    const { rc, state } = fallbackChainFixture();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: 'hetzner API error (401): invalid token',
+      permanent: true,
+    });
+    expect(provisionNode).toHaveBeenCalledTimes(1);
+    expect(attemptedInstanceTypes()).toEqual([PRIMARY]);
   });
 
   it('fallback-chain: refuses an alternative from a different capacity source credential', async () => {
@@ -762,7 +901,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(1);
@@ -786,7 +925,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(attemptedInstanceTypes()).toEqual([PRIMARY]);
@@ -809,7 +948,7 @@ describe('TaskRunner capacity exhaustion policy', () => {
     });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: `No capacity available for ${PRIMARY}.`,
+      message: `No capacity available for ${PRIMARY}. Last provider error: No primary capacity`,
       permanent: true,
     });
     expect(attemptedInstanceTypes()).toEqual([PRIMARY]);
@@ -821,7 +960,8 @@ describe('TaskRunner capacity exhaustion policy', () => {
     const state = createState({ vmSize: 'large', vmSizeSource: 'project' });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
-      message: 'No capacity available for large.',
+      // This block's beforeEach throws capacityError('primary'), not capacityError('large').
+      message: 'No capacity available for large. Last provider error: No primary capacity',
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(1);
