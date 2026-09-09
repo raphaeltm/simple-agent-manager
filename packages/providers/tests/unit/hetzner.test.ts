@@ -568,26 +568,36 @@ describe('HetznerProvider', () => {
 
     it('should throw after all locations exhausted on 412', async () => {
       vi.useFakeTimers();
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
-          status: 412,
-        })
+      // Mint a response per call: a `Response` body can be read only once, so reusing one
+      // instance degrades every call after the first to `HTTP 412` with no providerCode —
+      // a fixture that stops resembling production (`.claude/rules/72`).
+      globalThis.fetch = vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          })
+        )
       );
 
       const promise = provider.createVM(vmConfig).catch((err) => err);
       await vi.runAllTimersAsync();
       const result = await promise;
       expect(result).toBeInstanceOf(ProviderError);
+      expect((result as ProviderError).message).toBe(
+        'hetzner API error (412): error during placement'
+      );
       // primary (1) + primary retry (2) + 4 fallback locations = 6
       expect(fetch).toHaveBeenCalledTimes(6);
     });
 
     it('should never retry the primary location in the fallback phase', async () => {
       vi.useFakeTimers();
-      const mockFetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
-          status: 412,
-        })
+      const mockFetch = vi.fn().mockImplementation(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ error: { message: 'error during placement' } }), {
+            status: 412,
+          })
+        )
       );
       globalThis.fetch = mockFetch;
 

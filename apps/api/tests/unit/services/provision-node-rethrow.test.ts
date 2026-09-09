@@ -139,6 +139,16 @@ function capacityError(): ProviderError {
   });
 }
 
+/**
+ * The 2026-09-09 incident shape, exactly as `providerFetch` builds it: no `category`.
+ * Both existing helpers hand-feed one, so neither can observe the classifier actually running.
+ */
+function placementError(): ProviderError {
+  return new ProviderError('hetzner', 412, 'hetzner API error (412): error during placement', {
+    providerCode: 'placement_error',
+  });
+}
+
 function invalidConfigError(): ProviderError {
   return new ProviderError('hetzner', 400, 'Bad VM config', {
     providerCode: 'invalid_input',
@@ -807,6 +817,23 @@ describe('provisionNode rethrowProviderError', () => {
     ).rejects.toBe(err);
 
     // Failed capacity attempt must leave NO orphaned error row — the row is deleted.
+    expect(ops.some((o) => o.kind === 'delete')).toBe(true);
+    expect(ops.some((o) => o.kind === 'update' && o.set?.status === 'error')).toBe(false);
+  });
+
+  // Consumer #3 of `isTransientCapacityError` (`node-provisioning.ts:661`). A 412 placement
+  // failure previously fell into the non-capacity branch and left a stray `status='error'` node
+  // row behind — production still holds one from the incident (01M2332BQAT29TV0VWT5NSG25A).
+  // Deleting is safe here specifically because `providerAllocationRejected` already proves
+  // Hetzner rejected the create, so no paid VM is orphaned.
+  it('deletes the failed node row on a Hetzner 412 placement failure', async () => {
+    const err = placementError();
+    createVM.mockRejectedValue(err);
+
+    await expect(
+      provisionNode('node-1', ENV, undefined, { rethrowProviderError: true })
+    ).rejects.toBe(err);
+
     expect(ops.some((o) => o.kind === 'delete')).toBe(true);
     expect(ops.some((o) => o.kind === 'update' && o.set?.status === 'error')).toBe(false);
   });

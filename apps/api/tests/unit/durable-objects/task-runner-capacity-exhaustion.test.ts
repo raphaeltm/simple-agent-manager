@@ -846,6 +846,53 @@ describe('TaskRunner capacity exhaustion policy', () => {
     expect(state.config.providerInstanceType).toBe(ALTERNATE);
   });
 
+  // Consumer #4 of `isTransientCapacityError` (`node-provisioning-step.ts:592`). The diagnostic
+  // outcome is what production's `tasks.placement_explanation_json` recorded during the incident
+  // ("failed" / "Provider allocation failed"), and it is the artifact an operator reads to work
+  // out why a run stopped. It must now say the offering ran out of capacity.
+  it('records a 412 as capacity-exhausted in placement diagnostics, not a generic failure', async () => {
+    provisionNode.mockImplementation(async () => {
+      throw placementError();
+    });
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: poolWith('fallback-chain', [
+        capacityPoolSelection().candidates[0] as PoolCandidate,
+        alternateCandidate(),
+      ]),
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
+
+    const attempts = state.stepResults.placementDiagnostics?.attempts ?? [];
+    expect(attempts.map((a) => a.outcome)).toEqual(['capacity-exhausted', 'capacity-exhausted']);
+    expect(attempts.map((a) => a.reason)).toEqual([
+      'Provider offering has no available capacity',
+      'Provider offering has no available capacity',
+    ]);
+  });
+
+  it('records a non-capacity failure as a generic failure (discriminating control)', async () => {
+    provisionNode.mockImplementation(async () => {
+      throw authError();
+    });
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({
+      capacityPoolSelection: poolWith('fallback-chain', [
+        capacityPoolSelection().candidates[0] as PoolCandidate,
+        alternateCandidate(),
+      ]),
+    });
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
+
+    const attempts = state.stepResults.placementDiagnostics?.attempts ?? [];
+    expect(attempts[0]?.outcome).toBe('failed');
+    expect(attempts[0]?.reason).toBe('Provider allocation failed');
+  });
+
   it('fallback-chain: a non-capacity provider failure still fails fast (discriminating control)', async () => {
     // Stays green before AND after the fix. Without it, "the chain descended" would also be
     // satisfied by a change that made EVERY provider error descend.

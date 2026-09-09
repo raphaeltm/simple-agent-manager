@@ -93,6 +93,20 @@ Deliberately NOT affected: `classifyVmProviderCapacityError`
 only, so a 412 cannot trip the account-wide provider cooldown or park the task on the admission
 queue. Verified by reading the predicate.
 
+### A sixth consumer, reached through `mapHetznerProviderError`
+
+The table above covers `isTransientCapacityError`. `classifyHetznerError` has one further consumer
+that the first pass of this inventory missed: `mapHetznerProviderError`
+(`hetzner-metadata.ts`), called by `createVolume` (`hetzner.ts`) on any thrown `ProviderError`.
+So a Hetzner 412 raised during VOLUME creation would now be categorised `transient_capacity` if its
+code is `placement_error` or its message matches `/placement/i`.
+
+Practical impact today is nil — `category === 'transient_capacity'` has no consumer on the volume
+path, and nothing in `apps/api` calls `isTransientCapacityError` on a volume error. Recorded here
+because rule 72 requires the enumeration to be complete rather than convenient, and because a
+future volume-retry feature would inherit this silently. `attachVolume` / `detachVolume` /
+`resizeVolume` do not call `mapHetznerProviderError` and are unaffected.
+
 ### Caller #1 must be narrowed, not widened
 
 `retryAfterCapacityError` drives the provider's own 5-minute same-SKU backoff loop. A placement
@@ -142,6 +156,11 @@ behaviour.
 - [x] Process-fix rule added.
 
 ## Explicitly out of scope (follow-up PR, user's instruction)
+
+Both are tracked in idea `01M236QPGGC6B150FG4QHT17MW`, together with two further findings raised
+during review of this PR: GCP's `classifyGcpError` is dead code (so GCP has this exact
+fallback-chain bug, unfixed), and `ProviderErrorCategory` should be assigned at construction so the
+`{422, 412}` status allowlist in `isTransientCapacityError` can be removed entirely.
 
 1. **Pool-revision node reuse.** `buildPlacementAuthoritySqlPredicate` requires
    `nodes.capacity_pool_revision = <current revision>`, so any pool edit bumps the revision and

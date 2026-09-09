@@ -276,8 +276,10 @@ export function isTransientCapacityError(err: ProviderError): boolean {
   // errors from OTHER providers (`node-provisioning-step.ts` calls it on any `ProviderError`
   // without checking `providerName`), so a wider gate would run Hetzner's message heuristics over
   // Scaleway/GCP/Vultr errors. The root fix is to assign `category` at construction on the
-  // createVM path the way `createVolume` already does via `mapHetznerProviderError`; tracked as
-  // follow-up rather than done inside this hotfix.
+  // createVM path the way `createVolume` already does via `mapHetznerProviderError`; tracked in
+  // idea 01M236QPGGC6B150FG4QHT17MW rather than done inside this hotfix. That idea also records
+  // that GCP's `classifyGcpError` is never called at all, so GCP currently has the very bug this
+  // change fixes for Hetzner.
   if (
     (err.statusCode === 422 || err.statusCode === HETZNER_PLACEMENT_STATUS_CODE) &&
     err.category === 'unknown'
