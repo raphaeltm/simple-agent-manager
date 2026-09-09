@@ -260,6 +260,22 @@ test.describe('placement explorer', () => {
     await expect(page.locator('[data-events]')).toContainText('simulation restarted');
   });
 
+  test('surfaces the same-price-across-regions tie in the UI', async ({ page }) => {
+    // The teaching moment the whole post is built around, and the condition behind the incident:
+    // identical machine, identical price, several regions, so nothing prefers the one with stock.
+    // The arithmetic is model-tested; this asserts a reader actually SEES it.
+    await openExplorer(page);
+    const note = page.locator('[data-catalog-note]');
+    await expect(note).toContainText('cx33');
+    await expect(note).toContainText('the same price in every region');
+    await expect(note).toContainText('region is a tie no strategy breaks');
+
+    // And it tracks the selected provider rather than being static prose.
+    await page.locator('[data-provider]').selectOption('vultr');
+    await expect(note).toContainText('vc2-2c-4gb');
+    await expect(note).toContainText('the same price in every region');
+  });
+
   test('has no serious accessibility violations', async ({ page }, testInfo) => {
     await openExplorer(page);
     await page.locator('button[data-action="batch"]').click();
