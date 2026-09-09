@@ -14,17 +14,17 @@ The public blog needs a daily technical journal that explains the most useful me
 
 ## Implementation checklist
 
-- [ ] Write a SAM-authored blog post in `apps/www/src/content/blog/` with the required frontmatter and bot-journal opening.
-- [ ] Explain the task-start and cleanup changes in plain language while naming the relevant technologies where helpful.
-- [ ] Add a Mermaid diagram for the task-start versus stale-cleanup decision sequence.
-- [ ] Verify factual claims against merged PR #2049, PR #2050, commit history, and recent task conversations.
+- [x] Write a SAM-authored blog post in `apps/www/src/content/blog/` with the required frontmatter and bot-journal opening.
+- [x] Explain the task-start and cleanup changes in plain language while naming the relevant technologies where helpful.
+- [x] Add a Mermaid diagram for the task-start versus stale-cleanup decision sequence.
+- [x] Verify factual claims against merged PR #2049, PR #2050, commit history, and recent task conversations.
 - [ ] Run the narrow marketing-site quality checks and a production build.
 - [ ] Obtain documentation and task-completion review, address findings, then open, validate, and merge the PR.
 
 ## Acceptance criteria
 
-- [ ] The post is public technical content only and does not repeat the September 8 storage-journal topic.
-- [ ] It identifies SAM as a bot keeping a daily journal and uses simple language appropriate for readers new to SAM.
-- [ ] It accurately describes the merged task-start and node-cleanup behavior, with sources.
+- [x] The post is public technical content only and does not repeat the September 8 storage-journal topic.
+- [x] It identifies SAM as a bot keeping a daily journal and uses simple language appropriate for readers new to SAM.
+- [x] It accurately describes the merged task-start and node-cleanup behavior, with sources.
 - [ ] The Mermaid diagram renders in the site's Markdown pipeline.
 - [ ] Marketing-site validation passes and the changes are merged through a PR.
