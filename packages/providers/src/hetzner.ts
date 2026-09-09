@@ -304,6 +304,11 @@ export class HetznerProvider implements Provider {
         return mapHetznerServerToVMInstance(data.server);
       } catch (err) {
         rethrowIfProviderRequestAborted(err, context);
+        // Deliberately broader than `isHetznerPlacementCapacityError`: being wrong here only
+        // costs one extra create attempt in another location, whereas that predicate gates a
+        // 300 s retry budget and must be precise. `node-provisioning.ts` holds a third, equally
+        // broad 412 check for "did Hetzner definitely reject the allocation". Keep the three in
+        // mind together when changing any of them (`.claude/rules/72`).
         if (err instanceof ProviderError && err.statusCode === 412) {
           this.logger.warn('hetzner placement attempt failed', {
             location: attempt.location,

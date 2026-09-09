@@ -108,38 +108,38 @@ behaviour.
 
 ## Implementation checklist
 
-- [ ] `classifyHetznerError`: map `placement_error` to `transient_capacity` (move it out of the
+- [x] `classifyHetznerError`: map `placement_error` to `transient_capacity` (move it out of the
       `invalid_config` group), and classify a 412 with an unrecognized/absent code by placement
       message pattern.
-- [ ] Add `HETZNER_PLACEMENT_CAPACITY_PATTERNS` alongside the existing pattern constants.
-- [ ] `isTransientCapacityError`: extend the category-`unknown` fallback to `412` as well as `422`,
+- [x] Add `PLACEMENT_CAPACITY_PATTERNS` alongside the existing pattern constants (unprefixed, matching `TRANSIENT_CAPACITY_PATTERNS` / `INVALID_INPUT_CAPACITY_PATTERNS` in the same file).
+- [x] `isTransientCapacityError`: extend the category-`unknown` fallback to `412` as well as `422`,
       with a comment explaining that `providerFetch` never assigns a category. Keep the fallback
       narrowed to those two status codes for this hotfix.
-- [ ] Add exported `isHetznerPlacementCapacityError` and use it in `retryAfterCapacityError` to
+- [x] Add exported `isHetznerPlacementCapacityError` and use it in `retryAfterCapacityError` to
       exclude placement errors from the provider's 300 s same-SKU backoff loop.
-- [ ] Update `packages/providers/tests/unit/error-classification.test.ts:45`, which currently
+- [x] Update `packages/providers/tests/unit/error-classification.test.ts:45`, which currently
       pins the buggy `412 placement_error -> invalid_config` mapping.
-- [ ] Regression test at production fidelity: a `ProviderError` built the way `providerFetch`
+- [x] Regression test at production fidelity: a `ProviderError` built the way `providerFetch`
       builds it (no `category`), asserted through `isTransientCapacityError`.
-- [ ] Regression test for the descent itself: attempt 1 returns the 412, assert attempt 2 is
+- [x] Regression test for the descent itself: attempt 1 returns the 412, assert attempt 2 is
       reached with the next offering.
-- [ ] Discriminating control: a genuinely non-capacity provider failure (e.g. `auth_error`) still
+- [x] Discriminating control: a genuinely non-capacity provider failure (e.g. `auth_error`) still
       fails fast and does NOT descend.
-- [ ] Control: `retryAfterCapacityError` still retries a real 422 capacity error, and does NOT
+- [x] Control: `retryAfterCapacityError` still retries a real 422 capacity error, and does NOT
       retry a placement error.
-- [ ] Process fix: new `.claude/rules/72-provider-error-category-must-match-the-recovery-action.md`.
+- [x] Process fix: new `.claude/rules/72-error-categories-must-match-the-recovery-action.md`.
 
 ## Acceptance criteria
 
-- [ ] A Hetzner 412 placement error is classified `transient_capacity`.
-- [ ] `isTransientCapacityError` returns `true` for a production-shaped 412 whose `category` is
+- [x] A Hetzner 412 placement error is classified `transient_capacity`.
+- [x] `isTransientCapacityError` returns `true` for a production-shaped 412 whose `category` is
       `'unknown'`. This test must FAIL against pre-fix code.
-- [ ] The provisioning loop descends from cx53 to cx43 on a 412 instead of terminalizing.
-- [ ] A non-capacity error still fails fast (proven by a control test that stays green).
-- [ ] A placement error does not enter the provider's 300 s same-SKU capacity retry loop.
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
+- [x] The provisioning loop descends from cx53 to cx43 on a 412 instead of terminalizing.
+- [x] A non-capacity error still fails fast (proven by a control test that stays green).
+- [x] A placement error does not enter the provider's 300 s same-SKU capacity retry loop.
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
 - [ ] Staging deploy green; no regression in dashboard/projects/settings.
-- [ ] Process-fix rule added.
+- [x] Process-fix rule added.
 
 ## Explicitly out of scope (follow-up PR, user's instruction)
 

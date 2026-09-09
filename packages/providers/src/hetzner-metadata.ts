@@ -170,7 +170,9 @@ const HETZNER_PLACEMENT_STATUS_CODE = 412;
  * - rate_limit_exceeded → rate_limited
  * - conflict → invalid_config
  * - server_limit_exceeded → quota_exceeded
- * - placement_error → invalid_config (handled separately as 412)
+ * - placement_error → transient_capacity (Hetzner cannot place that server type in that
+ *   location right now; the request itself is valid, so the caller should try another
+ *   offering rather than give up)
  */
 export function classifyHetznerError(
   statusCode: number | undefined,
@@ -263,10 +265,19 @@ export function isTransientCapacityError(err: ProviderError): boolean {
   if (err.category === 'transient_capacity') return true;
   // `providerFetch` constructs every HTTP ProviderError with `{ providerCode }` and no
   // `category`, so the create path always arrives here as 'unknown' and the classifier is the
-  // only thing that can answer. Kept to the two status codes with production-observed capacity
-  // semantics (422 scarcity, 412 placement) rather than opened to every status, so this stays a
-  // reviewable hotfix. Without the 412 arm, fixing `classifyHetznerError` alone changes nothing
-  // in production while its unit tests go green (`.claude/rules/62`).
+  // only thing that can answer. Without the 412 arm, fixing `classifyHetznerError` alone changes
+  // nothing in production while its unit tests go green (`.claude/rules/62`).
+  //
+  // Per-status justification for this allowlist (`.claude/rules/72` requirement 4):
+  //   422 — Hetzner's observed status for server-type scarcity (`resource_unavailable`, and the
+  //         `invalid_input` + "unsupported location" conflicting-signal case).
+  //   412 — Hetzner's status for `placement_error`, the 2026-09-09 incident.
+  // Every other status is deliberately excluded because this predicate is also reached with
+  // errors from OTHER providers (`node-provisioning-step.ts` calls it on any `ProviderError`
+  // without checking `providerName`), so a wider gate would run Hetzner's message heuristics over
+  // Scaleway/GCP/Vultr errors. The root fix is to assign `category` at construction on the
+  // createVM path the way `createVolume` already does via `mapHetznerProviderError`; tracked as
+  // follow-up rather than done inside this hotfix.
   if (
     (err.statusCode === 422 || err.statusCode === HETZNER_PLACEMENT_STATUS_CODE) &&
     err.category === 'unknown'
