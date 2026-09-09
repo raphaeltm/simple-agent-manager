@@ -64,7 +64,7 @@ When you start a chat you can optionally choose:
 
 - **Agent profile** — which agent, model, and settings to run (see [AI Agents](/docs/guides/agents/)).
 - **Workspace profile** — a **Full** environment that builds your project's `.devcontainer` (best when the agent needs to run your stack), or a **Lightweight** environment that starts faster (best for quick questions and code exploration). Workspace profile and runtime are separate choices: **Full has no effect on an [Instant session](/docs/guides/instant-sessions/)**, which never builds a devcontainer. To get your devcontainer you need a VM workspace.
-- **VM size** — more CPU and memory for heavy builds. You can set a default size per project in project settings.
+- **Resources** — how much CPU, memory, and disk this piece of work needs, and whether it wants a machine to itself. Leave it blank to inherit the profile, project, and platform defaults. See [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for).
 
 ## Using a Workspace Directly
 
@@ -100,31 +100,34 @@ Restarting starts from a clean checkout. Any uncommitted changes from the previo
 
 **Delete** permanently removes a workspace and cleans up everything associated with it.
 
-## VM Sizes
+## Machine sizing
 
-SAM offers small, medium, and large sizes, trading cost for CPU and memory:
+You do not pick a server. You state what the work needs — **vCPU**, **memory**, **disk**, and
+optionally an **exclusive node** — and SAM picks a machine that satisfies it from the instance
+types your [compute pool](/docs/guides/compute-pools/) permits.
 
-| Size       | Best for                                     |
-| ---------- | -------------------------------------------- |
-| **Small**  | Simple changes, code review, quick questions |
-| **Medium** | Most development work                        |
-| **Large**  | Large builds and heavy compilation           |
+Requirements are inherited field by field, so you only set what you care about:
 
-Exact specs and pricing are shown in the size picker when you create a workspace and vary by cloud provider. Start with **Medium** for most work, and set a per-project default in project settings.
+```
+task  →  trigger  →  skill  →  agent profile  →  project  →  platform default
+```
 
-Projects that use Infrastructure Compute Pools can go beyond the three legacy size presets. Pool
-editors reconcile from the selected provider credential's native instance catalog and let you add or
-remove concrete offerings by provider, location, vCPU, memory, storage, and price. For those native
-pool offerings, SAM provisions the exact provider instance type rather than deriving hardware from
-the old small/medium/large label. The legacy labels remain compatibility presets for older profiles,
-tasks, and direct workspace requests.
+The platform default is 2 vCPU, 4 GB RAM, and 40 GB disk. Set a project baseline in
+**Project → Settings → Infrastructure → Default Resources**, a per-profile or per-skill default in
+their editors, or a one-off override from the **Resources** control next to the chat composer.
 
-Provider responses are also kept separate from requested compatibility labels. The provider layer
-returns provenance-labeled observed hardware from the cloud API: returned server types and resource
-fields are marked observed, and omitted CPU, memory, or disk details are marked unknown instead of
-being invented from the legacy size (`packages/providers/src/native-vm-config.ts`). The node-pool
-integration that persists those observations into pool/admission records is tracked in the active
-node-pool section C work.
+SAM provisions the exact provider instance type the pool selected, and records what the machine
+actually reports about itself. A node's detail page shows both: **Observed hardware** (from the
+cloud provider) next to the **Configured offering** the pool asked for. When a provider omits CPU,
+memory, or disk details, they are recorded as unknown rather than inferred
+(`packages/providers/src/native-vm-config.ts`), and a machine SAM cannot measure is never given
+work.
+
+:::note
+Older projects, profiles, and tasks may still carry a legacy `small` / `medium` / `large` label.
+It still works — SAM translates it into concrete requirements — but it is shown as _Legacy_ in the
+resource editor with a link to clear it. Prefer explicit vCPU, memory, and disk values.
+:::
 
 :::note
 Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud). On the hosted platform, compute is typically provided for you.
