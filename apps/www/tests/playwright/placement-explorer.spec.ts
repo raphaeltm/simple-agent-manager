@@ -218,6 +218,48 @@ test.describe('placement explorer', () => {
     await expect(fleet).toHaveCount(3);
   });
 
+  test('the stockout toggle keeps a visible focus ring in BOTH states', async ({ page }) => {
+    // axe passes this widget with zero violations and still missed it: `filter` on the button
+    // rasterized its focus outline along with the emoji, dimming the ring to 45% opacity in the
+    // in-stock state — which is the default, so it was the normal experience. The assertion is on
+    // the button carrying no filter, because that is the actual mechanism; a screenshot or an axe
+    // scan cannot see it.
+    await openExplorer(page);
+    const flame = page.locator('button[data-stockout="fsn1"]');
+
+    for (const expectedPressed of ['false', 'true']) {
+      await expect(flame).toHaveAttribute('aria-pressed', expectedPressed);
+      const style = await flame.evaluate((el) => {
+        const computed = getComputedStyle(el);
+        const glyph = el.querySelector('.flame-glyph');
+        return {
+          buttonFilter: computed.filter,
+          glyphFilter: glyph ? getComputedStyle(glyph).filter : null,
+        };
+      });
+      // The button itself must never be filtered — that is what dimmed the ring.
+      expect(style.buttonFilter, `button filter while pressed=${expectedPressed}`).toBe('none');
+      if (expectedPressed === 'false') {
+        // The dim still has to happen, just on the glyph. Otherwise this "fix" is only a deletion.
+        expect(style.glyphFilter).not.toBe('none');
+      }
+      if (expectedPressed === 'false') await flame.click();
+    }
+  });
+
+  test('changing the pool says the simulation restarted instead of silently wiping it', async ({
+    page,
+  }) => {
+    await openExplorer(page);
+    await page.locator('button[data-action="batch"]').click();
+    for (let i = 0; i < 3; i++) await page.locator('button[data-action="step"]').click();
+    await expect(page.locator('[data-clock]')).toHaveText('STEP 03');
+
+    await page.locator('input[data-region][value="nbg1"]').uncheck();
+    await expect(page.locator('[data-clock]')).toHaveText('STEP 00');
+    await expect(page.locator('[data-events]')).toContainText('simulation restarted');
+  });
+
   test('has no serious accessibility violations', async ({ page }, testInfo) => {
     await openExplorer(page);
     await page.locator('button[data-action="batch"]').click();

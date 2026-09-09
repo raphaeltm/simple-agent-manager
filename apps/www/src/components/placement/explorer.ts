@@ -79,9 +79,12 @@ class PlacementExplorer extends HTMLElement {
     });
   }
 
-  private reset(): void {
+  private reset(reason?: string): void {
     this.stopPlaying();
     this.lab = this.freshLab();
+    // Changing the pool restarts the simulation. Say so: silently discarding a run the user had
+    // stepped through several times, with no acknowledgement, reads as the widget breaking.
+    if (reason) this.lab.events.unshift(`-- ${reason} — simulation restarted.`);
     this.render();
   }
 
@@ -178,7 +181,7 @@ class PlacementExplorer extends HTMLElement {
         this.regions = this.catalog.regions.slice(0, DEFAULT_REGION_COUNT);
         this.stockedOut.clear();
         this.renderRegions();
-        this.reset();
+        this.reset(`Switched provider to ${this.catalog.label}`);
       }
       return;
     }
@@ -207,7 +210,7 @@ class PlacementExplorer extends HTMLElement {
         input.checked = true;
         return;
       }
-      this.reset();
+      this.reset(`Pool regions changed to ${this.regions.join(', ')}`);
     }
   };
 
@@ -246,7 +249,11 @@ class PlacementExplorer extends HTMLElement {
         'aria-label',
         `${region} is ${out ? 'out of stock' : 'in stock'} — toggle provider stockout`
       );
-      flame.textContent = '🔥';
+      // The dim lives on this span, not the button — see the focus-ring note in explorer.css.
+      const glyph = document.createElement('span');
+      glyph.className = 'flame-glyph';
+      glyph.textContent = '🔥';
+      flame.append(glyph);
 
       chip.append(label, flame);
       grid.append(chip);

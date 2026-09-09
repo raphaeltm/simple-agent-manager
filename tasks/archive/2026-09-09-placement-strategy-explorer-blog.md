@@ -158,6 +158,17 @@ Five local reviewers ran against the branch. Their substantive findings, all fix
   catalog did. All three are now pinned to their real sources.
 - **constitution-validator (MEDIUM):** `aria-pressed={index === 2}` hardcoded a list position;
   now derived from `DEFAULT_STRATEGY`. Magic numbers named.
+- **ui-ux-specialist (HIGH):** the stockout flame's keyboard focus ring was nearly invisible in
+  its default (in-stock) state. `filter: grayscale(1) opacity(0.45)` on the BUTTON rasterizes the
+  whole element including its focus outline, dimming the ring to 45% — WCAG 2.4.7. axe reported
+  zero violations at any impact level and could not see it. The dim now lives on an inner glyph
+  span; a regression test asserts the button itself carries no filter while the glyph still does,
+  and was mutation-verified to go red when the filter is put back on the button.
+- **ui-ux-specialist (MEDIUM-HIGH):** at 375px only 2 of the comparison table's 7 columns were
+  visible, with no fade, peek or hint — on the section that is the whole point of the widget.
+  Added a trailing-edge mask and a visible scroll hint below the `lg` breakpoint.
+- **ui-ux-specialist (MEDIUM):** toggling a region silently discarded an in-progress run. The
+  restart is now announced in the decision log, with a regression test.
 - **test-engineer (MEDIUM/LOW):** added coverage for the queue policy's success path, the
   unreachable disk-refusal branch, the node ceiling and its escape path, play/pause/reset,
   provider-switch stockout reset, and warm reuse in the browser.

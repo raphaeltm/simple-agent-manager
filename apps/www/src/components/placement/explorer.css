@@ -192,11 +192,24 @@ placement-explorer .region-chip button {
   line-height: 1;
   padding: 2px 4px;
   border-radius: 5px;
+}
+/* The dim MUST live on the glyph, not the button. `filter` rasterizes the whole element —
+   including its focus ring — before compositing, so filtering the button multiplied its focus
+   outline down to 45% opacity and made keyboard focus almost invisible (WCAG 2.4.7). The
+   in-stock state is the common one, so that was the default experience. */
+placement-explorer .region-chip .flame-glyph {
+  display: block;
   filter: grayscale(1) opacity(0.45);
 }
-placement-explorer .region-chip button[aria-pressed='true'] {
+placement-explorer .region-chip button[aria-pressed='true'] .flame-glyph {
   filter: none;
+}
+placement-explorer .region-chip button[aria-pressed='true'] {
   background: #3a1414;
+}
+placement-explorer .region-chip button:focus-visible {
+  outline: 2px solid var(--lab-green);
+  outline-offset: 1px;
 }
 placement-explorer .catalog-note {
   margin: 0;
@@ -418,6 +431,26 @@ placement-explorer .empty {
 
 placement-explorer .compare-scroll {
   overflow-x: auto;
+  /* Fade the trailing edge so it reads as "there is more to the right". At 375px only two of
+     seven columns fit, and the scroll region's aria-label is not something a sighted user sees. */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+}
+placement-explorer .scroll-hint {
+  display: none;
+  font-size: 11px;
+  color: var(--lab-dim);
+  margin: 0 0 8px;
+}
+@media (max-width: 860px) {
+  placement-explorer .scroll-hint {
+    display: block;
+  }
+  /* No mask once it all fits, or the last column looks clipped. */
+  placement-explorer .compare-scroll {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
 }
 placement-explorer .compare {
   /* `max-content` + `min-width: 100%` keeps the WRAPPER the only scrollable element. With a
