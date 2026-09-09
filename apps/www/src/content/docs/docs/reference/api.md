@@ -182,6 +182,9 @@ with `credentialSetupRequired: true` and a `credentialSetupMessage` suitable for
 
 ## Capacity pools
 
+See the [Compute Pools guide](/docs/guides/compute-pools/) for what these concepts mean and how
+they are surfaced in the app.
+
 Default capacity-pool endpoints expose non-secret pool, source, and concrete candidate metadata.
 Responses have this shape: `effective`, `effectiveScope`, `effectiveState`, `defaults`,
 `precedence`, `reconciledScopes`, `policyMutationSupported`, and `placementSettings`. Each summary

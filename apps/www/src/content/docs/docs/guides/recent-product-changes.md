@@ -18,6 +18,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 | **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                    | Any task or chat-started work     |
 | **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                       | Any Codex profile                 |
 | **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                               | Project chat timeline             |
+| **Machines come from a compute pool** | Workspaces are provisioned from the exact provider instance types your compute pool allows, and work states what it needs in vCPU, memory, and disk instead of a small/medium/large label. | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/) |
 
 ### For self-hosters & admins
 
@@ -27,6 +28,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 | **Automated error triage**     | SAM groups recent platform errors hourly and files deduplicated draft Ideas for them.                                                 | `PLATFORM_FEEDBACK_TRIAGE_*`                                       |
 | **Deployment diagnosis agent** | Superadmins can hand an error — or a whole time window — to an AI agent from **Admin → Errors**, and save the result as a draft Idea. | `DEBUG_AGENT_*`                                                    |
 | **Durable diagnosis runs**     | A diagnosis keeps running if you close the tab, with a runs list, status, and retry.                                                  | **Admin → Errors**                                                 |
+| **Canonical compute pools**    | Project, user, and installation pools are reconciled from each credential's live provider catalog, with a placement strategy and an exhaustion policy per pool. | Project/Settings/Admin → **Infrastructure**; `CAPACITY_POOL_*`     |
 
 ## Report an issue without leaving SAM
 
@@ -49,6 +51,21 @@ What you actually see:
 - A terminal **stopped** state, which closes the composer instead of offering retries against a runtime that can never come back.
 
 Starting an Instant chat is now durable too: SAM accepts the session first and finishes the launch in the background, so closing the tab partway through no longer leaves a chat stuck in a queued state.
+
+## Machines come from a compute pool
+
+SAM no longer derives hardware from a `small` / `medium` / `large` label. Each scope — project,
+user, and installation — has a **compute pool**: the concrete provider instance types SAM is
+allowed to rent, discovered from your provider's live catalog. Work states what it needs (vCPU,
+memory, disk, and optionally an exclusive machine) and SAM picks a permitted machine that
+satisfies it.
+
+Two per-pool settings decide the rest: a **strategy** (balanced, pack, spread, or smallest fit)
+for which permitted machine wins, and an **exhaustion policy** (queue, fail, or fallback chain)
+for what happens when your provider has nothing to give. Legacy size labels still work and are
+translated for you.
+
+See [Compute Pools](/docs/guides/compute-pools/).
 
 ## Agent work lands on its own branch
 

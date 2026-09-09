@@ -221,6 +221,10 @@ fences remain enforced at every percentage. Reducing rollout changes ranking;
 it never restores legacy size labels as allocation authority. Settings and plan
 columns remain additive, and readers accept plans without rollout diagnostics.
 
+For the user-facing explanation of what these settings control — pool scopes and precedence,
+allowed offerings, strategies, exhaustion policies, and resource requirements — see the
+[Compute Pools guide](/docs/guides/compute-pools/).
+
 ### Upgrading existing compute pools
 
 Deploy the normal additive migrations before starting the updated Worker. Existing
