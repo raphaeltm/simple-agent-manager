@@ -465,10 +465,17 @@ class PlacementExplorer extends HTMLElement {
 
     if (note) {
       const distinct = new Set(outcomes.map((outcome) => outcome.placement.join(' '))).size;
-      note.textContent =
-        distinct === 1
-          ? 'Every strategy placed this work identically. That happens when the fleet is homogeneous or the workloads are small enough that any host will do — the strategy only matters when the choice is real.'
-          : `${distinct} of ${outcomes.length} strategies produced a different placement for this work.`;
+      const placedNothing = outcomes.every((outcome) => outcome.placed === 0);
+      if (placedNothing) {
+        // "Placed identically" would be actively misleading here: nothing was placed at all.
+        note.textContent =
+          'No strategy could place this work. A strategy chooses between hosts that admission already accepted — it cannot create capacity that does not exist.';
+      } else {
+        note.textContent =
+          distinct === 1
+            ? 'Every strategy placed this work identically. That happens when the fleet is homogeneous or the workloads are small enough that any host will do — the strategy only matters when the choice is real.'
+            : `${distinct} of ${outcomes.length} strategies produced a different placement for this work.`;
+      }
     }
   }
 }

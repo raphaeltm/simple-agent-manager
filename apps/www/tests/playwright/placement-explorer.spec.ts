@@ -125,6 +125,9 @@ test.describe('placement explorer', () => {
     const workloads = page.locator('[data-workloads]');
     await expect(workloads).toContainText('412');
     await expect(workloads.locator('li[data-state="rejected"]')).toHaveCount(1);
+    // When nothing could be placed, the comparison note must not claim the strategies "placed
+    // this work identically" — they placed nothing, which is a different lesson.
+    await expect(page.locator('[data-compare-note]')).toContainText('cannot create capacity');
   });
 
   test('fallback-chain reaches the same machine in another region', async ({ page }) => {
