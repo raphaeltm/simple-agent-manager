@@ -32,11 +32,11 @@ get rented, _how big_ they are, or _what happens when your provider is out of ca
 
 Pools exist at three **scopes**, each edited in a different place:
 
-| Scope               | Where                                       | Who can edit it           |
-| ------------------- | ------------------------------------------- | ------------------------- |
-| **Project**         | Project → **Settings** → **Infrastructure** | Project owners and admins |
-| **User** (personal) | **Settings** → **Infrastructure**           | You                       |
-| **Installation**    | **Admin** → **Infrastructure**              | Platform superadmins only |
+| Scope               | Where to edit it                                                                                     |
+| ------------------- | ---------------------------------------------------------------------------------------------------- |
+| **Project**         | Project → Settings → Infrastructure. Owners and admins can edit; maintainers can view and reconcile. |
+| **User** (personal) | Settings → Infrastructure. Yours alone.                                                              |
+| **Installation**    | Admin → Infrastructure. Platform superadmins only.                                                   |
 
 Each panel shows the pool that is currently in effect for that context, the credentials feeding
 it, and the list of provider instance types it permits.
@@ -44,6 +44,33 @@ it, and the list of provider instance types it permits.
 You can also see the pool in effect without leaving your work: the **workspace sidebar** and a
 chat session's **infrastructure** section both show a "Current compute pool" line with the scope,
 state, strategy, and how many offerings are available.
+
+### The other settings on the same page
+
+A project's **Infrastructure** tab holds three things, and it is worth knowing which is which:
+
+| Section                         | What it controls                                                                               |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Default Resources**           | How much machine work asks for, when nothing more specific says otherwise                      |
+| **Scaling & Scheduling**        | The default provider and region, plus how densely nodes are packed and how long they stay warm |
+| **Infrastructure Compute Pool** | Which concrete machines SAM may rent, and how it chooses between them                          |
+
+The first two feed the pool decisions described below, so they are covered here too.
+
+### Default provider and region
+
+**Scaling & Scheduling → Provider & Location** sets a project's default provider and region. They
+are not part of the pool, but they narrow what the pool may choose from:
+
+- The **provider** is a hard filter. Once a provider is resolved — from an explicit request, then
+  the agent profile, then the project default — offerings from every other provider are dropped,
+  even if the pool allows them. If your pool spans two clouds and everything lands on one of them,
+  this setting is usually why.
+- The **region** is only a preference. A project default region influences which offering is picked
+  but does not exclude the others; only a region requested explicitly for that piece of work pins
+  placement to it.
+
+Leave both blank and SAM uses whatever the pool and the resolved credentials allow.
 
 ## Scopes and precedence
 
@@ -143,12 +170,12 @@ SAM keeps the two workload roles in sync behind it.
 **Strategy** decides the order SAM considers machines in — both existing nodes it could reuse and
 fresh offerings it could provision. New pools default to **Balanced**.
 
-| Strategy                 | Orders by                                            | Choose it when                                                                                            |
-| ------------------------ | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| **Balanced** _(default)_ | Lowest projected utilization first                   | You want work spread over the machines you already pay for, with headroom on each                         |
-| **Pack**                 | Highest projected utilization that still fits, first | You want to keep the machine count (and bill) as low as possible, filling one host before opening another |
-| **Spread**               | Fewest neighbouring workspaces first                 | Isolation and predictable performance matter more than cost                                               |
-| **Smallest fit**         | Smallest sufficient capacity first                   | You want cheap machines for small work and big machines kept free for work that needs them                |
+| Strategy                 | What it does                                                                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Balanced** _(default)_ | **Lowest projected utilization first.** Spreads work over the machines you already pay for, leaving headroom on each.                            |
+| **Pack**                 | **Highest projected utilization that still fits, first.** Fills one host before opening another, keeping the machine count — and the bill — low. |
+| **Spread**               | **Fewest neighbouring workspaces first.** Buys isolation and predictable performance at the cost of running more machines.                       |
+| **Smallest fit**         | **Smallest sufficient capacity first.** Puts small work on cheap machines and keeps the big ones free for work that needs them.                  |
 
 A few things worth knowing:
 
@@ -171,7 +198,7 @@ policy** is what SAM does when no permitted machine can be obtained. New pools d
 | Policy                | Behaviour                                                                                                                                                             |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Queue** _(default)_ | Park the work and keep retrying until capacity returns, up to a maximum visible wait (2 hours by default). Good when the work can wait and you would rather not fail. |
-| **Fail**              | Stop immediately with a capacity error. Good when you would rather know at once than discover a task waited an hour.                                                  |
+| **Fail**              | Stop with a capacity error instead of waiting. Good when you would rather know at once than discover a task waited an hour. One exception, below.                     |
 | **Fallback chain**    | Try the pool's other allowed offerings, in ranked order, before giving up. Good when you have several acceptable machine types and just want _something_ that fits.   |
 
 :::note
@@ -180,6 +207,19 @@ region if you pinned one, and only offerings that still satisfy the work's requi
 never downgrades to a machine smaller than the work asked for, never borrows another account's
 capacity, and never crosses into a different pool. If every permitted alternative is exhausted,
 the failure names what was tried.
+:::
+
+:::caution
+**One capacity failure ignores the policy.** These three policies govern _per-offering_ scarcity —
+a particular instance type being sold out in a particular region. When the provider instead reports
+that your whole **account** is out of capacity (a Hetzner server-limit error, for example), SAM
+always parks the work and retries after a provider cooldown, even under **Fail**, and gives up only
+when the overall capacity wait expires.
+
+That is deliberate: trying other instance types against an account that has hit its own limit
+cannot succeed, and just multiplies failed provider calls. But it does mean **Fail** is not a
+guarantee of an immediate error in every capacity situation. If you are hitting this, the fix is
+your provider account's server limit, not the pool.
 :::
 
 While work is waiting for capacity, the chat's infrastructure section shows "Waiting for capacity"
@@ -211,14 +251,17 @@ Requirements resolve in this order, highest priority first:
 task  →  trigger  →  skill  →  agent profile  →  project  →  platform default
 ```
 
-| Level             | Where you set it                                                                                                                                                         | Use it for                                                           |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| **Task**          | The **Resources** control next to the chat composer, or the task submit form                                                                                             | A one-off heavy job                                                  |
-| **Trigger**       | The trigger form                                                                                                                                                         | Scheduled or webhook work with different needs from interactive chat |
-| **Skill**         | The skill editor                                                                                                                                                         | A kind of work that always needs more (or less) machine              |
-| **Agent profile** | The profile editor                                                                                                                                                       | The normal size for work run with this profile                       |
-| **Project**       | Project → **Settings** → **Infrastructure** → _Default Resources_                                                                                                        | The baseline for everything in the project                           |
-| **Platform**      | Deployment configuration (`CAPACITY_POOL_PLATFORM_DEFAULTS_JSON`, or the persisted platform setting) — see the [Configuration Reference](/docs/reference/configuration/) | The installation-wide floor                                          |
+- **Task** — the **Resources** control next to the chat composer, or the task submit form.
+  Use it for a one-off heavy job.
+- **Trigger** — the trigger form. Use it when scheduled or webhook work needs a different
+  machine from interactive chat.
+- **Skill** — the skill editor. Use it for a kind of work that always needs more, or less.
+- **Agent profile** — the profile editor. This is the normal size for work run with that profile.
+- **Project** — Project → Settings → Infrastructure → **Default Resources**. The baseline for
+  everything in the project.
+- **Platform** — set by the deployment (`CAPACITY_POOL_PLATFORM_DEFAULTS_JSON`, or the persisted
+  platform setting; see the [Configuration Reference](/docs/reference/configuration/)). The
+  installation-wide floor.
 
 Each level fills in only the fields the levels above it left blank, so a project can set the disk
 floor while a profile sets CPU and memory. SAM records where each field came from, which is what
@@ -254,8 +297,10 @@ Sharing a node ("co-tenancy") is what makes follow-up work start in seconds inst
 A node accepts additional work only if **all** of these hold:
 
 - The sum of every active workspace's reserved CPU, memory, and disk — plus this request — still
-  fits the machine's real hardware, leaving a reserve for the host itself.
-- The workspace count is under `MAX_WORKSPACES_PER_NODE` (3 by default) and under the co-tenant
+  fits the machine's real hardware. By default only memory holds headroom back for the host
+  itself (512 MB); CPU may be committed up to 100% of the machine, and disk is compared
+  against the whole disk, unless the deployment configures otherwise.
+- The workspace count is under **Max Workspaces Per Node** (3 by default) and under the co-tenant
   cap requested by this work _and_ by everything already on the node.
 - Nothing on the node asked for an exclusive machine, and this work is not asking for one.
 - A node that is **already hosting work** is reporting fresh health telemetry, and its CPU,
@@ -265,6 +310,12 @@ A node accepts additional work only if **all** of these hold:
 If a node's real hardware is unknown, or a busy node's telemetry is missing, malformed, or stale,
 SAM refuses it rather than guessing. A machine SAM cannot measure is never given work.
 
+**Max Workspaces Per Node**, **Node CPU Threshold**, and **Node Memory Threshold** are per-project
+overrides in **Scaling & Scheduling → Node Scheduling**; leave a field blank to use the platform
+default shown as its placeholder. Raise them to pack machines harder and spend less, lower them for
+more headroom per workspace. The disk-pressure threshold has no per-project control and is set by
+the deployment.
+
 ### Warm reuse
 
 When the last workspace leaves a machine SAM provisioned automatically, the machine stays **warm**
@@ -272,33 +323,46 @@ for 30 minutes by default. Follow-up work in that window reuses it, turning a tw
 provisioning wait into a few seconds. After that, idle machines are cleaned up automatically, so
 you are not paying for capacity you stopped using.
 
+**Warm Node Timeout** is a per-project override in **Scaling & Scheduling → Node Scheduling**. A
+longer window makes bursts of follow-up work start faster, at the cost of holding a machine you are
+not currently using; a shorter one releases capacity sooner.
+
+:::note
+This is not the same as **Workspace Idle Timeout**, which sits on the same settings tab. Warm
+timeout is about a _machine_ that has no workspaces left on it. Workspace idle timeout is about an
+individual _workspace_ that has gone quiet.
+:::
+
 ## Pool states and what to do about them
 
 The panel shows a state for the pool in effect. What each one means:
 
-| State                                     | What it means                                                                   | What to do                                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **Available**                             | Ready — the pool has active sources and at least one available allowed offering | Nothing                                                                   |
-| **Not configured**                        | No pool exists at any scope                                                     | Connect a cloud credential, then **Reconcile**                            |
-| **Empty — no eligible offerings**         | The pool exists but has no active source, or no offering is enabled             | **Edit** the pool and allow at least one offering, or attach a credential |
-| **Unavailable — compute source disabled** | The credential behind the pool was disabled, revoked, or deleted                | Reconnect or re-enable the credential, then **Reconcile**                 |
-| **Unavailable — catalog refresh needed**  | Every allowed offering is currently unavailable at the provider                 | **Reconcile** to refresh, then allow an offering that is still sold       |
-| **Migration in progress**                 | SAM is still upgrading this pool's stored configuration                         | Wait, then reload                                                         |
+| State                                     | What it means, and what to do                                                                                        |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| **Available**                             | Ready — active sources and at least one available allowed offering. Nothing to do.                                   |
+| **Not configured**                        | No pool exists at any scope. Connect a cloud credential, then **Reconcile**.                                         |
+| **Empty — no eligible offerings**         | The pool has no active source, or no offering is enabled. **Edit** it and allow an offering, or attach a credential. |
+| **Unavailable — compute source disabled** | The credential behind the pool was disabled, revoked, or deleted. Reconnect or re-enable it, then **Reconcile**.     |
+| **Unavailable — catalog refresh needed**  | Every allowed offering is currently unavailable at the provider. **Reconcile**, then allow one that is still sold.   |
+| **Migration in progress**                 | SAM is still upgrading this pool's stored configuration. Wait, then reload.                                          |
 
 Remember that a project pool in any of the unhealthy states stays authoritative — fix it, or
 remove it so a lower scope applies.
 
 ## Troubleshooting
 
-| Symptom                                      | Likely cause                                                                                                                                 |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| "Waiting for capacity" that never clears     | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**. |
-| Work fails immediately with a capacity error | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                          |
-| No offering satisfies the request            | Requirements exceed every allowed machine. Lower the requirements or allow a bigger instance type.                                           |
-| A new machine is provisioned for every task  | Requirements ask for an exclusive node, `maxCoTenants` is 1, or each request is large enough to fill a machine.                              |
-| Machines are bigger or pricier than expected | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor.          |
-| Editing is disabled                          | Project pools need owner or admin (`secret:write`); maintainers can view and reconcile but not edit.                                         |
-| The project ignores your personal pool       | The project has its own pool. Remove it if you want the personal pool to apply.                                                              |
+| Symptom                                                        | Likely cause                                                                                                                                 |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Waiting for capacity" that never clears                       | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**. |
+| Work fails immediately with a capacity error                   | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                          |
+| No offering satisfies the request                              | Requirements exceed every allowed machine. Lower the requirements or allow a bigger instance type.                                           |
+| A new machine is provisioned for every task                    | Requirements ask for an exclusive node, `maxCoTenants` is 1, or each request is large enough to fill a machine.                              |
+| Machines are bigger or pricier than expected                   | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor.          |
+| Editing is disabled                                            | Project pools need owner or admin (`secret:write`); maintainers can view and reconcile but not edit.                                         |
+| The project ignores your personal pool                         | The project has its own pool. Remove it if you want the personal pool to apply.                                                              |
+| Everything lands on one cloud although the pool allows several | A default provider is set on the project or the agent profile, and it filters the others out.                                                |
+| Too many, or too few, workspaces share a machine               | Adjust **Max Workspaces Per Node** and the CPU/memory thresholds in Scaling & Scheduling, or set a co-tenant cap on the work itself.         |
+| Work waits for capacity even though the policy is **Fail**     | The provider reported account-wide exhaustion, which always retries. Check your provider account's server limit.                             |
 
 ## Where to look when you want the details
 

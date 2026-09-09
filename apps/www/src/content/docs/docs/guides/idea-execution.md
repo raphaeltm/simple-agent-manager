@@ -30,8 +30,9 @@ Before you send, you can optionally choose:
 | **Provider**              | Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP | Project default provider |
 
 For VM runs, blank resource fields inherit defaults from the selected skill,
-agent profile, project, and platform. The effective compute pool selects an
-eligible provider-native offering for those requirements. Node details show the
+agent profile, project, and platform. The effective
+[compute pool](/docs/guides/compute-pools/) selects an eligible provider-native
+offering for those requirements. Node details show the
 actual provider type and hardware separately from the workload's reservation.
 
 Older profiles and API or CLI requests using `small`, `medium`, or `large` remain
