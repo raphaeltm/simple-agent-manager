@@ -10,6 +10,7 @@ Keep startup context small and load detail only when the current task needs it. 
 - Treat root `.claude/rules/*.md` as compact routing and safety guidance. When a stub points to scoped copies, read only the copy for the affected app/package.
 - Use skills for bulky reference material: `/changelog` for recent changes, `env-reference` for env vars, `api-reference` for routes, and specialist skills for domain reviews.
 - Search before reading large collections. Do not bulk-read all rules, task archives, specs, or docs unless the task explicitly requires a broad audit.
+- Measure instruction surface with `pnpm quality:agent-context-budget` when changing agent steering docs or scoped rule layout.
 - Keep volatile history and incident narratives out of root startup docs. Put durable lessons in scoped rules or skills, and route to them from concise root guidance.
 - When compaction risk appears, write state to the task file, `.do-state.md`, or the PR body before continuing.
 
