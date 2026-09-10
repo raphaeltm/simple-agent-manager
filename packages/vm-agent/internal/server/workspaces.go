@@ -594,7 +594,7 @@ func createWorkspaceRuntimeOptions(body createWorkspaceRequest, devcontainerConf
 		CloneURL:               strings.TrimSpace(body.CloneURL),
 		RepositoryHost:         strings.TrimSpace(body.RepositoryHost),
 		RepositoryPath:         strings.TrimSpace(body.RepositoryPath),
-		Lightweight:            body.Lightweight,
+		Lightweight:            lightweightOpt(body.Lightweight),
 		DevcontainerConfigName: devcontainerConfigName,
 		DefaultBranch:          strings.TrimSpace(body.DefaultBranch),
 		ProjectID:              strings.TrimSpace(body.ProjectID),

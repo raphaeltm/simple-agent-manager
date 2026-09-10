@@ -30,6 +30,13 @@ func firstNonEmpty(vals ...string) string {
 // workspaceRuntimeOpts holds optional fields for upsertWorkspaceRuntime that
 // must be set under the workspace mutex to avoid data races with concurrent
 // goroutines reading the runtime struct.
+//
+// Every string field uses its zero value to mean "not supplied", so a caller
+// that only refreshes status or a callback token leaves the rest untouched.
+// Lightweight is a pointer for the same reason: a plain bool cannot express
+// "not supplied", and the flag gates cf-container runtime-asset injection
+// (agent_ws.go) plus devcontainer recovery (workspace_provisioning.go), so an
+// unrelated caller must not be able to clear it. Use lightweightOpt to set it.
 type workspaceRuntimeOpts struct {
 	GitUserName            string
 	GitUserEmail           string
@@ -39,13 +46,18 @@ type workspaceRuntimeOpts struct {
 	CloneURL               string
 	RepositoryHost         string
 	RepositoryPath         string
-	Lightweight            bool
+	Lightweight            *bool // nil leaves the runtime's existing flag unchanged
 	DevcontainerConfigName string
 	DevcontainerCache      DevcontainerCacheCredentials
 	DefaultBranch          string // project's actual default branch; used by the push guard
 	ProjectID              string
 	TaskID                 string
 }
+
+// lightweightOpt returns an explicit override for workspaceRuntimeOpts.Lightweight.
+// "Not supplied" is expressed by omitting this call entirely, leaving the struct
+// field at its nil zero value.
+func lightweightOpt(v bool) *bool { return &v }
 
 func (s *Server) routedNodeID(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-SAM-Node-Id"))
@@ -249,7 +261,9 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.RepositoryPath = opt.RepositoryPath
 			metadataChanged = true
 		}
-		runtime.Lightweight = opt.Lightweight
+		if opt.Lightweight != nil {
+			runtime.Lightweight = *opt.Lightweight
+		}
 		if opt.DevcontainerConfigName != "" {
 			runtime.DevcontainerConfigName = opt.DevcontainerConfigName
 		}
@@ -356,7 +370,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		GitUserName:            opt.GitUserName,
 		GitUserEmail:           opt.GitUserEmail,
 		GitHubID:               opt.GitHubID,
-		Lightweight:            opt.Lightweight || persistedLightweight,
+		Lightweight:            (opt.Lightweight != nil && *opt.Lightweight) || persistedLightweight,
 		DevcontainerConfigName: firstNonEmpty(opt.DevcontainerConfigName, persistedDevcontainerConfigName),
 		DefaultBranch:          firstNonEmpty(opt.DefaultBranch, persistedDefaultBranch),
 		DevcontainerCache:      opt.DevcontainerCache,
