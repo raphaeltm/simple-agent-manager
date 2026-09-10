@@ -1,0 +1,441 @@
+/**
+ * Regression suite for the wake attempt budget.
+ *
+ * Incident (production, 2026-09-09): four sessions with complete, unexpired
+ * snapshots became permanently unwakeable. `recovery_attempts` was a LIFETIME
+ * cap consumed identically by failures that prove a snapshot cannot be restored
+ * and by transient infrastructure failures that never reached the snapshot.
+ * Session 516141ed burnt all three attempts in 34 minutes on the same
+ * `hetzner API error (412): error during placement`, and every reset of the
+ * counter requires a successful wake, a fresh capture, or a fresh sleep
+ * transition — none of which a sleeping session can reach.
+ *
+ * These tests drive the REAL claim against a REAL SQL engine (`.claude/rules/28`,
+ * `.claude/rules/62`): the predicate under test is a WHERE clause, so a mock
+ * whose `.where()` ignores its arguments would pass with the fix deleted.
+ */
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import * as schema from '../../../src/db/schema';
+import type { Env } from '../../../src/env';
+import { deriveAgentActivityState } from '../../../src/services/agent-activity';
+import { failAndRestoreSessionRecoveryHandoff } from '../../../src/services/session-recovery-authority';
+import {
+  claimSessionSnapshotRecovery,
+  completeSessionSnapshotRecovery,
+  failSessionSnapshotRecovery,
+  hasRestorableSleepingSessionSnapshot,
+} from '../../../src/services/session-snapshot-recovery-lifecycle';
+import { isSessionResumable } from '../../../src/services/task-runtime-liveness';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+
+const CHAT_SESSION_ID = 'chat-516141ed';
+const USER_ID = 'user-1';
+const PROJECT_ID = 'project-1';
+const WORKSPACE_ID = 'workspace-1';
+const MAX_ATTEMPTS = 3;
+const DECAY_MS = 15 * 60 * 1000;
+const NOW = new Date('2026-09-09T18:00:00.000Z');
+
+/** The exact error that stranded session 516141ed three times in 34 minutes. */
+const TRANSIENT_PLACEMENT_ERROR = 'hetzner API error (412): error during placement';
+
+let sqlite: Database.Database;
+
+function makeEnv(overrides: Partial<Env> = {}): Env {
+  return {
+    DATABASE: createSqliteD1(sqlite),
+    SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS: String(MAX_ATTEMPTS),
+    SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS: String(DECAY_MS),
+    ...overrides,
+  } as Env;
+}
+
+function db() {
+  return drizzle(createSqliteD1(sqlite), { schema });
+}
+
+/** Wake this session the way `ensureSessionRecovery` does. */
+function wake(taskId: string, now: Date = NOW) {
+  return claimSessionSnapshotRecovery(db(), makeEnv(), {
+    chatSessionId: CHAT_SESSION_ID,
+    userId: USER_ID,
+    taskId,
+    now,
+  });
+}
+
+/** Report a wake failure the way the TaskRunner's recovery lifecycle does. */
+function reportFailure(taskId: string, error = TRANSIENT_PLACEMENT_ERROR) {
+  return failSessionSnapshotRecovery(db(), makeEnv(), CHAT_SESSION_ID, taskId, error);
+}
+
+function seedSleepingSnapshot(
+  input: { recoveryAttempts?: number; recoveryFailedAt?: string | null } = {}
+): void {
+  sqlite
+    .prepare(
+      `INSERT INTO session_snapshots (
+         id, project_id, workspace_id, user_id, chat_session_id, runtime,
+         status, degradation, manifest_r2_key, expires_at, sleeping_at,
+         sleep_status, recovery_status, recovery_attempts, recovery_failed_at,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, 'vm', 'available', 'none', 'manifest', ?, ?,
+                 'sleeping', ?, ?, ?, ?, ?)`
+    )
+    .run(
+      'snapshot-1',
+      PROJECT_ID,
+      WORKSPACE_ID,
+      USER_ID,
+      CHAT_SESSION_ID,
+      new Date(NOW.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      '2026-09-09T12:03:01.120Z',
+      input.recoveryAttempts === undefined ? null : 'failed',
+      input.recoveryAttempts ?? 0,
+      input.recoveryFailedAt ?? null,
+      '2026-09-09T12:00:00.000Z',
+      '2026-09-09T12:37:21.894Z'
+    );
+}
+
+function readSnapshot(): {
+  recovery_attempts: number;
+  recovery_failed_at: string | null;
+  recovery_status: string | null;
+} {
+  return sqlite
+    .prepare(
+      `SELECT recovery_attempts, recovery_failed_at, recovery_status
+         FROM session_snapshots WHERE chat_session_id = ?`
+    )
+    .get(CHAT_SESSION_ID) as never;
+}
+
+/** Minutes before `NOW`, as an ISO timestamp. */
+function minutesAgo(minutes: number): string {
+  return new Date(NOW.getTime() - minutes * 60 * 1000).toISOString();
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+beforeEach(() => {
+  sqlite = new Database(':memory:');
+  createSchemaTables(sqlite, [
+    schema.sessionSnapshots,
+    schema.tasks,
+    schema.workspaces,
+    schema.taskStatusEvents,
+    // Read by the claim's archive-migration fence.
+    schema.projectDataSessionLocations,
+  ]);
+});
+
+describe('wake attempt budget', () => {
+  it('releases a spent budget once the last clean failure ages past the decay window', async () => {
+    // The incident: three transient placement failures, the last one an hour ago.
+    seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(60) });
+
+    const claim = await wake('task-wake');
+
+    expect(claim).toEqual({ status: 'claimed', taskId: 'task-wake' });
+  });
+
+  it('starts a NEW burst rather than continuing the spent one', async () => {
+    seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(60) });
+
+    await wake('task-wake');
+
+    const row = readSnapshot();
+    // 1, not MAX_ATTEMPTS + 1: the cap must still bound the next burst.
+    expect(row.recovery_attempts).toBe(1);
+    // Cleared, or every later claim would read as decayed and the cap would be gone.
+    expect(row.recovery_failed_at).toBeNull();
+  });
+
+  it('still refuses a burst of failures inside the decay window', async () => {
+    // The control. Without this, the suite passes with the cap deleted outright.
+    seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(5) });
+
+    const claim = await wake('task-wake');
+
+    expect(claim).toEqual({ status: 'unavailable', reason: 'recovery_attempts_exhausted' });
+    expect(readSnapshot().recovery_attempts).toBe(MAX_ATTEMPTS);
+  });
+
+  it('does not release the budget for an attempt that never reported back', async () => {
+    // A crashed or still-leased attempt leaves recovery_failed_at NULL. Releasing
+    // on absence would launder a wedged claim into an unlimited retry.
+    seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: null });
+
+    const claim = await wake('task-wake');
+
+    expect(claim).toEqual({ status: 'unavailable', reason: 'recovery_attempts_exhausted' });
+  });
+
+  it('leaves an unspent budget on the normal increment path', async () => {
+    seedSleepingSnapshot({ recoveryAttempts: 1, recoveryFailedAt: minutesAgo(60) });
+
+    await wake('task-wake');
+
+    // Decayed, so the burst restarts at 1 rather than continuing to 2.
+    expect(readSnapshot().recovery_attempts).toBe(1);
+  });
+
+  it('records the failure instant through the real failure writer', async () => {
+    // Drives the production writer rather than seeding the column, so the test
+    // notices if `failSessionSnapshotRecovery` stops maintaining it.
+    seedSleepingSnapshot({ recoveryAttempts: 0 });
+    await wake('task-wake');
+    expect(readSnapshot().recovery_failed_at).toBeNull();
+
+    await reportFailure('task-wake');
+
+    const row = readSnapshot();
+    expect(row.recovery_status).toBe('failed');
+    expect(row.recovery_failed_at).not.toBeNull();
+  });
+
+  it('recovers a session across three transient failures and a wait', async () => {
+    // The whole incident, end to end, through production writers only. The
+    // failure writer reads its own clock, so the clock — not the column — is
+    // what this test controls (`.claude/rules/62`: drive the real writer).
+    vi.useFakeTimers();
+    seedSleepingSnapshot({ recoveryAttempts: 0 });
+
+    // Three failures inside 34 minutes, exactly as production recorded them.
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const at = new Date(NOW.getTime() - (60 - attempt * 10) * 60 * 1000);
+      vi.setSystemTime(at);
+      const claim = await wake(`task-${attempt}`, at);
+      expect(claim.status).toBe('claimed');
+      await reportFailure(`task-${attempt}`);
+    }
+
+    // The burst is spent: the fourth attempt, taken immediately, is refused.
+    vi.setSystemTime(new Date(NOW.getTime() - 29 * 60 * 1000));
+    const immediately = await wake('task-4', new Date(NOW.getTime() - 29 * 60 * 1000));
+    expect(immediately).toEqual({
+      status: 'unavailable',
+      reason: 'recovery_attempts_exhausted',
+    });
+
+    // After the decay window the same session wakes again.
+    vi.setSystemTime(NOW);
+    const afterWait = await wake('task-5');
+
+    expect(afterWait).toEqual({ status: 'claimed', taskId: 'task-5' });
+  });
+});
+
+describe('stale-claim reclaim', () => {
+  /** Park the snapshot in the stuck `waking` state a dead claim leaves behind. */
+  function seedStaleWakingClaim(failedAt: string): void {
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+            SET recovery_status = 'waking', recovery_task_id = 'dead-task',
+                recovery_claimed_at = ?, recovery_failed_at = ?
+          WHERE chat_session_id = ?`
+      )
+      .run(minutesAgo(60), failedAt, CHAT_SESSION_ID);
+  }
+
+  it('reclaims a stale waking claim once its spent budget has decayed', async () => {
+    // A structurally separate branch from the initial claim: it has its own
+    // guard AND its own UPDATE predicate, so it needs its own proof.
+    seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS });
+    seedStaleWakingClaim(minutesAgo(60));
+
+    const claim = await wake('task-reclaim');
+
+    expect(claim).toEqual({ status: 'claimed', taskId: 'task-reclaim' });
+    const row = readSnapshot();
+    expect(row.recovery_attempts).toBe(1);
+    expect(row.recovery_failed_at).toBeNull();
+  });
+
+  it('does not reclaim a stale waking claim inside the decay window', async () => {
+    seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS });
+    seedStaleWakingClaim(minutesAgo(5));
+
+    const claim = await wake('task-reclaim');
+
+    expect(claim).not.toEqual({ status: 'claimed', taskId: 'task-reclaim' });
+    expect(readSnapshot().recovery_attempts).toBe(MAX_ATTEMPTS);
+  });
+});
+
+describe('sibling resets clear the decay anchor', () => {
+  /**
+   * `.claude/rules/61`: leaving a stale `recovery_failed_at` behind would make
+   * every later claim read as decayed, silently removing the cap for any
+   * session that has ever woken successfully — the opposite failure to the
+   * incident, and for exactly the population most likely to need the cap.
+   */
+  it('completeSessionSnapshotRecovery clears it alongside the count', async () => {
+    seedSleepingSnapshot({ recoveryAttempts: 2, recoveryFailedAt: minutesAgo(60) });
+    await wake('task-wake');
+    await reportFailure('task-wake');
+    // Re-open the claim the completion writer requires, then succeed.
+    sqlite
+      .prepare(`UPDATE session_snapshots SET recovery_status = 'waking' WHERE chat_session_id = ?`)
+      .run(CHAT_SESSION_ID);
+    expect(readSnapshot().recovery_failed_at).not.toBeNull();
+
+    await completeSessionSnapshotRecovery(db(), CHAT_SESSION_ID, 'task-wake', WORKSPACE_ID);
+
+    const row = readSnapshot();
+    expect(row.recovery_attempts).toBe(0);
+    expect(row.recovery_failed_at).toBeNull();
+  });
+});
+
+describe('every writer of the failed status maintains the decay anchor', () => {
+  /** The recovery task row the handoff's authoritative first statement requires. */
+  function seedRecoveryTask(taskId: string): void {
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, project_id, user_id, title, description, status,
+                            chat_session_id, recovery_source_task_id, created_at, updated_at)
+         VALUES (?, ?, ?, 'wake', 'wake', 'in_progress', ?, 'source-task', ?, ?)`
+      )
+      .run(taskId, PROJECT_ID, USER_ID, CHAT_SESSION_ID, NOW.toISOString(), NOW.toISOString());
+  }
+  /**
+   * `.claude/rules/44`: `recovery_status = 'failed'` has TWO production writers.
+   * `failSessionSnapshotRecovery` is the obvious one; `ensureSessionRecovery`'s
+   * generic catch reaches the raw-SQL batch below instead, for a kickoff that
+   * throws before the TaskRunner is durably started. Because the budget fails
+   * closed on a NULL anchor, a writer that forgets it strands the session
+   * exactly as the incident did — through a different door.
+   */
+  it('failAndRestoreSessionRecoveryHandoff records the anchor', async () => {
+    seedSleepingSnapshot({ recoveryAttempts: 0 });
+    seedRecoveryTask('task-kickoff');
+    await wake('task-kickoff');
+    expect(readSnapshot().recovery_failed_at).toBeNull();
+
+    await failAndRestoreSessionRecoveryHandoff(createSqliteD1(sqlite), {
+      recoveryTaskId: 'task-kickoff',
+      chatSessionId: CHAT_SESSION_ID,
+      error: 'Session recovery failed: TaskRunner start threw',
+      statusEventId: 'event-1',
+    });
+
+    const row = readSnapshot();
+    expect(row.recovery_status).toBe('failed');
+    expect(row.recovery_failed_at).not.toBeNull();
+  });
+
+  it('recovers after three kickoff failures through that writer', async () => {
+    vi.useFakeTimers();
+    seedSleepingSnapshot({ recoveryAttempts: 0 });
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const at = new Date(NOW.getTime() - (60 - attempt * 10) * 60 * 1000);
+      vi.setSystemTime(at);
+      seedRecoveryTask(`task-${attempt}`);
+      const claim = await wake(`task-${attempt}`, at);
+      expect(claim.status).toBe('claimed');
+      await failAndRestoreSessionRecoveryHandoff(createSqliteD1(sqlite), {
+        recoveryTaskId: `task-${attempt}`,
+        chatSessionId: CHAT_SESSION_ID,
+        error: 'Session recovery failed: TaskRunner start threw',
+        statusEventId: `event-${attempt}`,
+      });
+    }
+
+    vi.setSystemTime(NOW);
+    await expect(wake('task-4')).resolves.toEqual({ status: 'claimed', taskId: 'task-4' });
+  });
+});
+
+describe('consumers that mirror the budget', () => {
+  /** The destroyer's verdict for a spent budget whose failure is `agoMs` old. */
+  function destroyerSeesResumable(agoMs: number): boolean {
+    return isSessionResumable(
+      {
+        chatSessionId: CHAT_SESSION_ID,
+        projectId: PROJECT_ID,
+        workspaceId: WORKSPACE_ID,
+        sleepingAt: NOW.getTime() - 60 * 60 * 1000,
+        sleepStatus: 'sleeping',
+        expiresAtMs: NOW.getTime() + 60 * 60 * 1000,
+        status: 'available',
+        degradation: 'none',
+        recoveryAttempts: MAX_ATTEMPTS,
+        recoveryFailedAtMs: NOW.getTime() - agoMs,
+      },
+      PROJECT_ID,
+      WORKSPACE_ID,
+      { maxRecoveryAttempts: MAX_ATTEMPTS, recoveryAttemptDecayMs: DECAY_MS, nowMs: NOW.getTime() }
+    );
+  }
+
+  it('hasRestorableSleepingSessionSnapshot sees a decayed budget as restorable', async () => {
+    seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(60) });
+
+    await expect(
+      hasRestorableSleepingSessionSnapshot(createSqliteD1(sqlite), makeEnv(), {
+        projectId: PROJECT_ID,
+        workspaceId: WORKSPACE_ID,
+        chatSessionId: CHAT_SESSION_ID,
+        now: NOW,
+      })
+    ).resolves.toBe(true);
+  });
+
+  it('hasRestorableSleepingSessionSnapshot still refuses an undecayed burst', async () => {
+    seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(5) });
+
+    await expect(
+      hasRestorableSleepingSessionSnapshot(createSqliteD1(sqlite), makeEnv(), {
+        projectId: PROJECT_ID,
+        workspaceId: WORKSPACE_ID,
+        chatSessionId: CHAT_SESSION_ID,
+        now: NOW,
+      })
+    ).resolves.toBe(false);
+  });
+
+  it('the destroyer withholds a terminal verdict while the resumer would still wake', () => {
+    // `.claude/rules/58`: a widened resumer with an un-widened classifier means the
+    // sweep terminalizes tasks whose sessions are demonstrably restorable.
+    expect(destroyerSeesResumable(60 * 60 * 1000)).toBe(true);
+  });
+
+  it('the destroyer still terminalizes an undecayed exhausted burst', () => {
+    expect(destroyerSeesResumable(60 * 1000)).toBe(false);
+  });
+
+  it('agent activity reports a decayed-budget session as still sleeping', () => {
+    const row = {
+      status: 'in_progress' as const,
+      executionStep: null,
+      workspaceStatus: 'deleted',
+      supersededByTaskId: null,
+      snapshotSleepStatus: 'sleeping',
+      snapshotSleepingAt: '2026-09-09T12:03:01.120Z',
+      snapshotStatus: 'available',
+      snapshotDegradation: 'none',
+      snapshotExpiresAt: new Date(NOW.getTime() + 60 * 60 * 1000).toISOString(),
+      snapshotRecoveryAttempts: MAX_ATTEMPTS,
+      snapshotRecoveryFailedAt: minutesAgo(60),
+    };
+
+    expect(deriveAgentActivityState(row, MAX_ATTEMPTS, NOW.getTime(), DECAY_MS)).toBe('sleeping');
+    expect(
+      deriveAgentActivityState(
+        { ...row, snapshotRecoveryFailedAt: minutesAgo(5) },
+        MAX_ATTEMPTS,
+        NOW.getTime(),
+        DECAY_MS
+      )
+    ).not.toBe('sleeping');
+  });
+});

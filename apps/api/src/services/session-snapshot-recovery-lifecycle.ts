@@ -3,10 +3,10 @@ import {
   eq,
   exists,
   gt,
+  gte,
   inArray,
   isNotNull,
   isNull,
-  lt,
   lte,
   not,
   notInArray,
@@ -18,15 +18,24 @@ import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
 import {
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
-  DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
   isRestorableSnapshot,
   sessionLifecycleError,
   type SessionSnapshotRecoveryClaim,
 } from './session-snapshot-artifacts';
+import {
+  sessionRecoveryAttemptDecayMs,
+  sessionRecoveryAttemptsAfterClaim,
+  sessionRecoveryBudgetAvailable,
+  sessionRecoveryBudgetAvailableSql,
+  sessionRecoveryBudgetCondition,
+  sessionRecoveryDecayCutoffIso,
+  sessionRecoveryMaxAttempts,
+} from './session-snapshot-recovery-budget';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -199,6 +208,23 @@ function sessionRecoveryClaimLeaseMs(env: Env): number {
   );
 }
 
+/** The in-memory half, for diagnosing why a claim was refused. */
+function budgetAvailable(
+  snapshot: { recoveryAttempts: number; recoveryFailedAt: string | null },
+  maxAttempts: number,
+  decayMs: number,
+  nowMs: number
+): boolean {
+  const failedAtMs = snapshot.recoveryFailedAt ? Date.parse(snapshot.recoveryFailedAt) : NaN;
+  return sessionRecoveryBudgetAvailable({
+    recoveryAttempts: snapshot.recoveryAttempts,
+    recoveryFailedAtMs: Number.isFinite(failedAtMs) ? failedAtMs : null,
+    maxAttempts,
+    decayMs,
+    nowMs,
+  });
+}
+
 export async function claimSessionSnapshotRecovery(
   db: Db,
   env: Env,
@@ -212,17 +238,39 @@ export async function claimSessionSnapshotRecovery(
 ): Promise<SessionSnapshotRecoveryClaim> {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
-  const maxAttempts = parsePositiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
+  const maxAttempts = sessionRecoveryMaxAttempts(env);
+  const decayMs = sessionRecoveryAttemptDecayMs(env);
+  const decayCutoff = sessionRecoveryDecayCutoffIso(env, now.getTime());
+  // Read before the claim clears the anchor, so the warn below can describe the
+  // burst that just decayed. Scoped to the same session+user as the claim.
+  const priorBurstSpent = await db
+    .select({
+      recoveryAttempts: schema.sessionSnapshots.recoveryAttempts,
+      recoveryFailedAt: schema.sessionSnapshots.recoveryFailedAt,
+    })
+    .from(schema.sessionSnapshots)
+    .where(
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
+        eq(schema.sessionSnapshots.userId, input.userId),
+        gte(schema.sessionSnapshots.recoveryAttempts, maxAttempts),
+        isNotNull(schema.sessionSnapshots.recoveryFailedAt),
+        lte(schema.sessionSnapshots.recoveryFailedAt, decayCutoff)
+      )
+    )
+    .get();
   const result = await db
     .update(schema.sessionSnapshots)
     .set({
       recoveryStatus: 'waking',
       recoveryTaskId: input.taskId,
-      recoveryAttempts: sql`${schema.sessionSnapshots.recoveryAttempts} + 1`,
+      // A claim taken under the decayed budget starts a NEW burst rather than
+      // continuing the spent one, so the cap still bounds `maxAttempts` failures
+      // per window. `recovery_failed_at` is cleared in the same statement: leaving
+      // it would make every later claim look decayed and remove the cap entirely.
+      recoveryAttempts: sessionRecoveryAttemptsAfterClaim(decayCutoff),
       recoveryError: null,
+      recoveryFailedAt: null,
       recoveryClaimedAt: nowIso,
       updatedAt: nowIso,
     })
@@ -233,7 +281,7 @@ export async function claimSessionSnapshotRecovery(
         restorableSnapshotCondition(),
         isNotNull(schema.sessionSnapshots.sleepingAt),
         gt(schema.sessionSnapshots.expiresAt, now.toISOString()),
-        lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts),
+        sessionRecoveryBudgetCondition(maxAttempts, decayCutoff),
         or(
           isNull(schema.sessionSnapshots.recoveryStatus),
           eq(schema.sessionSnapshots.recoveryStatus, 'failed')
@@ -243,6 +291,21 @@ export async function claimSessionSnapshotRecovery(
       )
     );
   if ((result.meta.changes ?? 0) > 0) {
+    // A restarted burst means this session has already failed `maxAttempts`
+    // wakes and is being given a fresh window. That is the intended behaviour,
+    // but a session doing it repeatedly is burning real provisioning attempts
+    // on something that may never restore, and nothing else surfaces it
+    // (`.claude/rules/47` operator visibility).
+    if (priorBurstSpent) {
+      log.warn('session_recovery.attempt_budget_burst_restarted', {
+        chatSessionId: input.chatSessionId,
+        taskId: input.taskId,
+        priorAttempts: priorBurstSpent.recoveryAttempts,
+        lastFailedAt: priorBurstSpent.recoveryFailedAt,
+        maxAttempts,
+        decayMs,
+      });
+    }
     return { status: 'claimed', taskId: input.taskId };
   }
 
@@ -254,6 +317,7 @@ export async function claimSessionSnapshotRecovery(
       recoveryStatus: schema.sessionSnapshots.recoveryStatus,
       recoveryTaskId: schema.sessionSnapshots.recoveryTaskId,
       recoveryAttempts: schema.sessionSnapshots.recoveryAttempts,
+      recoveryFailedAt: schema.sessionSnapshots.recoveryFailedAt,
       recoveryClaimedAt: schema.sessionSnapshots.recoveryClaimedAt,
     })
     .from(schema.sessionSnapshots)
@@ -293,14 +357,15 @@ export async function claimSessionSnapshotRecovery(
         );
       return { status: 'waking', taskId: snapshot.recoveryTaskId };
     }
-    if (snapshot.recoveryAttempts < maxAttempts) {
+    if (budgetAvailable(snapshot, maxAttempts, decayMs, now.getTime())) {
       const reclaimed = await db
         .update(schema.sessionSnapshots)
         .set({
           recoveryTaskId: input.taskId,
-          recoveryAttempts: sql`${schema.sessionSnapshots.recoveryAttempts} + 1`,
+          recoveryAttempts: sessionRecoveryAttemptsAfterClaim(decayCutoff),
           recoveryClaimedAt: nowIso,
           recoveryError: null,
+          recoveryFailedAt: null,
           updatedAt: nowIso,
         })
         .where(
@@ -312,7 +377,7 @@ export async function claimSessionSnapshotRecovery(
               isNull(schema.sessionSnapshots.recoveryClaimedAt),
               lte(schema.sessionSnapshots.recoveryClaimedAt, staleBefore)
             ),
-            lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts),
+            sessionRecoveryBudgetCondition(maxAttempts, decayCutoff),
             archiveMigrationFenceCondition(db, input.chatSessionId),
             sourceTaskGuardCondition(db, input.sourceTaskGuard)
           )
@@ -334,7 +399,7 @@ export async function claimSessionSnapshotRecovery(
       ? 'snapshot_expired'
       : !isRestorableSnapshot(snapshot.status, snapshot.degradation)
         ? 'snapshot_not_complete'
-        : snapshot.recoveryAttempts >= maxAttempts
+        : !budgetAvailable(snapshot, maxAttempts, decayMs, now.getTime())
           ? 'recovery_attempts_exhausted'
           : !(await archiveMigrationFenceIsClear(db, input.chatSessionId))
             ? 'archive_migration_fenced'
@@ -346,7 +411,10 @@ export async function claimSessionSnapshotRecovery(
 
 export async function hasRestorableSleepingSessionSnapshot(
   database: D1Database,
-  env: Pick<Env, 'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS'>,
+  env: Pick<
+    Env,
+    'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS' | 'SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS'
+  >,
   input: {
     projectId: string;
     workspaceId: string;
@@ -355,10 +423,7 @@ export async function hasRestorableSleepingSessionSnapshot(
   }
 ): Promise<boolean> {
   const now = input.now ?? new Date();
-  const maxAttempts = parsePositiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
+  const maxAttempts = sessionRecoveryMaxAttempts(env);
   const row = await database
     .prepare(
       `SELECT 1 AS found
@@ -369,14 +434,21 @@ export async function hasRestorableSleepingSessionSnapshot(
           AND sleeping_at IS NOT NULL
           AND sleep_status = 'sleeping'
           AND expires_at > ?
-          AND recovery_attempts < ?
+          AND ${sessionRecoveryBudgetAvailableSql('session_snapshots')}
           AND (
             (status = 'available' AND degradation = 'none')
             OR (status = 'degraded' AND degradation IS NOT NULL AND degradation != 'none')
           )
         LIMIT 1`
     )
-    .bind(input.chatSessionId, input.projectId, input.workspaceId, now.toISOString(), maxAttempts)
+    .bind(
+      input.chatSessionId,
+      input.projectId,
+      input.workspaceId,
+      now.toISOString(),
+      maxAttempts,
+      sessionRecoveryDecayCutoffIso(env, now.getTime())
+    )
     .first<{ found: number }>();
   return Boolean(row);
 }
@@ -506,6 +578,7 @@ export async function completeSessionSnapshotRecovery(
       sleepStoppingSince: null,
       sleepingAt: null,
       recoveryAttempts: 0,
+      recoveryFailedAt: null,
       restoredAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
@@ -544,6 +617,7 @@ export async function markSessionSnapshotAwakeInPlace(
       sleepError: null,
       sleepStoppingSince: null,
       recoveryAttempts: 0,
+      recoveryFailedAt: null,
       restoredAt: now,
       updatedAt: now,
     })
@@ -569,6 +643,13 @@ export async function failSessionSnapshotRecovery(
       recoveryStatus: 'failed',
       recoveryError: sessionLifecycleError(env, error),
       recoveryClaimedAt: null,
+      // The clean-failure timestamp the attempt budget decays from. Only a
+      // reported failure sets it; an attempt that never returns leaves it NULL
+      // and keeps its slot spent (`session-snapshot-recovery-budget.ts`).
+      // `failAndRestoreSessionRecoveryHandoff` is the OTHER writer of this
+      // status and stamps the same anchor; the pair is pinned by
+      // `session-snapshot-failed-writer-coverage.test.ts`.
+      recoveryFailedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
     .where(

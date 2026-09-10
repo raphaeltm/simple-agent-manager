@@ -1496,6 +1496,17 @@ export const sessionSnapshots = sqliteTable(
     recoveryAttempts: integer('recovery_attempts').notNull().default(0),
     recoveryError: text('recovery_error'),
     recoveryClaimedAt: text('recovery_claimed_at'),
+    /**
+     * When a wake attempt last reported failure, as a canonical
+     * `toISOString()` value — the decay predicate compares it lexicographically
+     * against another `toISOString()` cutoff, so a non-canonical string would
+     * silently misbehave. Written by both writers of `recovery_status='failed'`
+     * (`failSessionSnapshotRecovery` and `failAndRestoreSessionRecoveryHandoff`,
+     * pinned by `session-snapshot-failed-writer-coverage.test.ts`), and cleared
+     * by every path that resets `recoveryAttempts`. Drives the attempt-budget
+     * decay in `session-snapshot-recovery-budget.ts`.
+     */
+    recoveryFailedAt: text('recovery_failed_at'),
     sleepStatus: text('sleep_status'),
     sleepAfter: text('sleep_after'),
     sleepAttempts: integer('sleep_attempts').notNull().default(0),
@@ -3105,12 +3116,18 @@ export const projectDataStorageReliefPreflights = sqliteTable(
 export type ProjectDataStorageReliefPreflightRow =
   typeof projectDataStorageReliefPreflights.$inferSelect;
 
-export const projectDataArchiveUnusedReservations = sqliteTable('project_data_archive_unused_reservations', {
-  reservationId: text('reservation_id').primaryKey(),
-  windowStartedAt: integer('window_started_at').notNull(),
-  estimatedWrites: integer('estimated_writes').notNull(),
-  released: integer('released').notNull().default(0),
-}, table => ({ windowIdx: index('idx_archive_unused_reservation_window').on(table.windowStartedAt) }));
+export const projectDataArchiveUnusedReservations = sqliteTable(
+  'project_data_archive_unused_reservations',
+  {
+    reservationId: text('reservation_id').primaryKey(),
+    windowStartedAt: integer('window_started_at').notNull(),
+    estimatedWrites: integer('estimated_writes').notNull(),
+    released: integer('released').notNull().default(0),
+  },
+  (table) => ({
+    windowIdx: index('idx_archive_unused_reservation_window').on(table.windowStartedAt),
+  })
+);
 
 export const projectDataArchiveWriteBudget = sqliteTable('project_data_archive_write_budget', {
   id: text('id').primaryKey(),
@@ -3126,7 +3143,9 @@ export const projectDataArchiveMigrations = sqliteTable(
       .notNull()
       .references(() => projects.id, { onDelete: 'cascade' }),
     sessionId: text('session_id').notNull(),
-    storageFormat: text('storage_format', { enum: ['sqlite-v1', 'r2-gzip-v1'] }).notNull().default('sqlite-v1'),
+    storageFormat: text('storage_format', { enum: ['sqlite-v1', 'r2-gzip-v1'] })
+      .notNull()
+      .default('sqlite-v1'),
     state: text('state', {
       enum: [
         'candidate',

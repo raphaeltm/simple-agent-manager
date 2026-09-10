@@ -91,6 +91,7 @@ function seedSnapshot(
     status?: string;
     degradation?: string;
     recoveryAttempts?: number;
+    recoveryFailedAt?: string | null;
   } = {}
 ): void {
   sqlite
@@ -98,8 +99,8 @@ function seedSnapshot(
       `INSERT INTO session_snapshots (id, project_id, workspace_id, node_id, user_id, chat_session_id,
                                     runtime, status, degradation, manifest_r2_key, home_r2_key,
                                     expires_at, sleeping_at, sleep_status, recovery_attempts,
-                                    sleep_attempts, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest-key', 'home-key', ?, ?, ?, ?, 0, ?, ?)`
+                                    recovery_failed_at, sleep_attempts, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest-key', 'home-key', ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       'snapshot-1',
@@ -113,6 +114,7 @@ function seedSnapshot(
       overrides.sleepingAt === undefined ? iso(-9 * 60 * 1000) : overrides.sleepingAt,
       overrides.sleepStatus === undefined ? 'sleeping' : overrides.sleepStatus,
       overrides.recoveryAttempts ?? 0,
+      overrides.recoveryFailedAt ?? null,
       iso(-3_600_000),
       iso(0)
     );
@@ -288,6 +290,24 @@ describe('stuck-task liveness for a slept session', () => {
     });
   });
 
+  // The 2026-09-09 incident, through the REAL cron adapter: a spent budget whose
+  // last clean failure has aged out is still wakeable by the resumer, so the
+  // destroyer must not terminalize it (`.claude/rules/58`). Exercises the D1 read
+  // and the row->classifier mapping of `recovery_failed_at`, which the pure
+  // classifier test cannot. The undecayed row is the discriminating control.
+  it.each([
+    ['decayed', -60 * 60 * 1000, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', -60 * 1000, true, 'workspace_deleted'],
+  ])('cron adapter: %s spent budget', async (_label, failedAtOffsetMs, conclusive, reason) => {
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(failedAtOffsetMs) });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive,
+      reason,
+    });
+  });
+
   it('withholds a death verdict when the cron adapter snapshot read fails', async () => {
     // Rule 44 symmetry: the cron adapter has its own try/catch, so it needs its
     // own error-path proof rather than inheriting the DO adapter's.
@@ -405,6 +425,23 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
       live: false,
       conclusive: true,
       reason: 'workspace_deleted',
+    });
+  });
+
+  // `.claude/rules/61`: the DO destroyer is a separate entry point from the cron
+  // one and needs its own proof that the decayed budget reaches it.
+  it.each([
+    ['decayed', -60 * 60 * 1000, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', -60 * 1000, true, 'workspace_deleted'],
+  ])('DO adapter: %s spent budget', async (_label, failedAtOffsetMs, conclusive, reason) => {
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(failedAtOffsetMs) });
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(getLocalTaskRuntimeLiveness(sql, doEnv(), doTask)).resolves.toMatchObject({
+      live: false,
+      conclusive,
+      reason,
     });
   });
 

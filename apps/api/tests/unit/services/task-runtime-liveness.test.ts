@@ -13,6 +13,7 @@ const NOW = Date.parse('2026-08-06T12:00:00.000Z');
 const STALE_MS = 5 * 60 * 1000;
 /** Mirrors `DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`. */
 const MAX_RECOVERY_ATTEMPTS = 3;
+const RECOVERY_ATTEMPT_DECAY_MS = 15 * 60 * 1000;
 
 function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRuntimeLivenessSignals {
   return {
@@ -54,6 +55,7 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
     resumabilityProbeOutcome: 'not_run',
     sessionResumability: null,
     resumabilityMaxRecoveryAttempts: MAX_RECOVERY_ATTEMPTS,
+    resumabilityRecoveryAttemptDecayMs: RECOVERY_ATTEMPT_DECAY_MS,
     // Same back-compat proof for the supersession signals: `not_run` / `none`
     // must leave every pre-existing verdict in this file untouched.
     supersessionProbeOutcome: 'not_run',
@@ -576,6 +578,7 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
       status: 'available',
       degradation: 'none',
       recoveryAttempts: 0,
+      recoveryFailedAtMs: null,
       ...overrides,
     } satisfies SessionResumabilitySnapshot;
   }
@@ -677,6 +680,30 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
       conclusive: true,
       reason: 'workspace_deleted',
     });
+  });
+
+  // Through the REAL wiring: `classifyTaskRuntimeLiveness` reads both budget
+  // signals off `TaskRuntimeLivenessSignals` and hands them to
+  // `isSessionResumable`. The dedicated budget suite proves the primitive; this
+  // proves the struct -> call seam production actually uses (`.claude/rules/62`).
+  // Both cases sit one millisecond either side of the cutoff.
+  it.each([
+    ['decayed', -1, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', 1, true, 'workspace_deleted'],
+  ])('%s exhausted budget', (_label, cutoffOffsetMs, conclusive, reason) => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable({
+            recoveryAttempts: MAX_RECOVERY_ATTEMPTS,
+            recoveryFailedAtMs: base.nowMs - RECOVERY_ATTEMPT_DECAY_MS + cutoffOffsetMs,
+          }),
+        })
+      )
+    ).toMatchObject({ conclusive, reason });
   });
 
   it('still preserves on the last remaining wake attempt', () => {

@@ -6,11 +6,12 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { parsePositiveInt } from '../lib/route-helpers';
+import { isRestorableSnapshot } from './session-snapshot-artifacts';
 import {
-  DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-  isRestorableSnapshot,
-} from './session-snapshot-artifacts';
+  sessionRecoveryAttemptDecayMs,
+  sessionRecoveryBudgetAvailable,
+  sessionRecoveryMaxAttempts,
+} from './session-snapshot-recovery-budget';
 
 export const AGENT_ACTIVITY_ACTIVE_TASK_STATUSES = [
   'queued',
@@ -71,6 +72,7 @@ interface AgentActivitySqlRow {
   snapshotDegradation: string | null;
   snapshotExpiresAt: string | null;
   snapshotRecoveryAttempts: number | null;
+  snapshotRecoveryFailedAt: string | null;
 }
 
 export interface ListAgentActivityTasksOptions {
@@ -82,14 +84,12 @@ export interface ListAgentActivityTasksOptions {
   nowMs?: number;
 }
 
-type AgentActivityEnv = Pick<Env, 'DATABASE' | 'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS'>;
-
-function getMaxRecoveryAttempts(env: AgentActivityEnv): number {
-  return parsePositiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
-}
+type AgentActivityEnv = Pick<
+  Env,
+  | 'DATABASE'
+  | 'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS'
+  | 'SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS'
+>;
 
 type SleepingActivityFields = Pick<
   AgentActivitySqlRow,
@@ -99,17 +99,34 @@ type SleepingActivityFields = Pick<
   | 'snapshotDegradation'
   | 'snapshotExpiresAt'
   | 'snapshotRecoveryAttempts'
+  | 'snapshotRecoveryFailedAt'
 >;
 
 function isRestorableSleepingActivity(
   row: SleepingActivityFields,
   maxAttempts: number,
-  nowMs: number
+  nowMs: number,
+  decayMs: number
 ): boolean {
   if (row.snapshotSleepStatus !== 'sleeping') return false;
   if (!row.snapshotSleepingAt) return false;
   if (!isRestorableSnapshot(row.snapshotStatus, row.snapshotDegradation)) return false;
-  if ((row.snapshotRecoveryAttempts ?? 0) >= maxAttempts) return false;
+  // Same burst-budget rule the resumer applies, decay included, so a session the
+  // user can still wake is never displayed as no longer sleeping.
+  const failedAtMs = row.snapshotRecoveryFailedAt
+    ? Date.parse(row.snapshotRecoveryFailedAt)
+    : Number.NaN;
+  if (
+    !sessionRecoveryBudgetAvailable({
+      recoveryAttempts: row.snapshotRecoveryAttempts ?? 0,
+      recoveryFailedAtMs: Number.isFinite(failedAtMs) ? failedAtMs : null,
+      maxAttempts,
+      decayMs,
+      nowMs,
+    })
+  ) {
+    return false;
+  }
   if (!row.snapshotExpiresAt) return false;
   const expiresAtMs = Date.parse(row.snapshotExpiresAt);
   return Number.isFinite(expiresAtMs) && expiresAtMs > nowMs;
@@ -128,12 +145,14 @@ export function deriveAgentActivityState(
     | 'snapshotDegradation'
     | 'snapshotExpiresAt'
     | 'snapshotRecoveryAttempts'
+    | 'snapshotRecoveryFailedAt'
   >,
   maxAttempts: number,
-  nowMs: number
+  nowMs: number,
+  decayMs: number
 ): AgentActivityState {
   if (row.supersededByTaskId) return 'superseded';
-  if (isRestorableSleepingActivity(row, maxAttempts, nowMs)) {
+  if (isRestorableSleepingActivity(row, maxAttempts, nowMs, decayMs)) {
     return 'sleeping';
   }
   if (row.status === 'queued' || row.status === 'delegated') return 'working';
@@ -211,7 +230,8 @@ export async function listAgentActivityTasks(
       snapshot.status AS snapshotStatus,
       snapshot.degradation AS snapshotDegradation,
       snapshot.expires_at AS snapshotExpiresAt,
-      snapshot.recovery_attempts AS snapshotRecoveryAttempts
+      snapshot.recovery_attempts AS snapshotRecoveryAttempts,
+      snapshot.recovery_failed_at AS snapshotRecoveryFailedAt
     FROM tasks t
     INNER JOIN projects p ON p.id = t.project_id
     LEFT JOIN workspaces w
@@ -230,7 +250,8 @@ export async function listAgentActivityTasks(
     .bind(...binds)
     .all<AgentActivitySqlRow>();
   const rows = result.results ?? [];
-  const maxAttempts = getMaxRecoveryAttempts(env);
+  const maxAttempts = sessionRecoveryMaxAttempts(env);
+  const decayMs = sessionRecoveryAttemptDecayMs(env);
   const nowMs = options.nowMs ?? Date.now();
 
   return rows.map((row) => ({
@@ -248,6 +269,6 @@ export async function listAgentActivityTasks(
     priority: row.priority ?? 0,
     createdAt: row.createdAt,
     startedAt: row.startedAt,
-    agentActivityState: deriveAgentActivityState(row, maxAttempts, nowMs),
+    agentActivityState: deriveAgentActivityState(row, maxAttempts, nowMs, decayMs),
   }));
 }
