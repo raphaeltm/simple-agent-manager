@@ -539,6 +539,15 @@ func (h *SessionHost) ContainerWorkDir() string {
 	return h.config.ContainerWorkDir
 }
 
+// HasRuntimeAssetsProvider reports whether this host was wired to fetch resolved
+// project/profile/skill runtime assets. Standalone (cf-container) sessions have no
+// devcontainer to read /etc/sam/project-env from, so the provider is the only path
+// by which project env vars and runtime files reach the agent process — a nil
+// provider there means the session silently starts without them.
+func (h *SessionHost) HasRuntimeAssetsProvider() bool {
+	return h.config.RuntimeAssetsProvider != nil
+}
+
 // ViewerCount returns the number of active viewers.
 func (h *SessionHost) ViewerCount() int {
 	h.viewerMu.RLock()
