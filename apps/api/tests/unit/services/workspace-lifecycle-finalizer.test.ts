@@ -315,32 +315,28 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     expect(mocks.cleanupWorkspaceActivity).toHaveBeenCalledWith(env, PROJECT_ID, WORKSPACE_ID);
   });
 
-  it('preserves a slept session once its spent wake budget has decayed', async () => {
-    // The finalizer is a destroyer that mirrors the resumer through
-    // `restorableOrInFlightSleepSnapshotPredicateSql` — a THIRD copy of the
-    // budget rule, and the only one whose bind order changed from 5 to 6
-    // placeholders. Nothing else forces SQLite to evaluate the decay half of
-    // that OR in this file's binding order (`.claude/rules/58`, `/61`).
+  // The finalizer is a destroyer that mirrors the resumer through
+  // `restorableOrInFlightSleepSnapshotPredicateSql` — a THIRD copy of the budget
+  // rule, and the only one whose bind order changed from 5 to 6 placeholders.
+  // Nothing else forces SQLite to evaluate the decay half of that OR in this
+  // file's binding order (`.claude/rules/58`, `/61`).
+  it.each([
+    ['decayed', -60 * 60 * 1000, false],
+    ['undecayed', -60 * 1000, true],
+  ])('%s spent wake budget stops the session: %s', async (_label, offsetMs, stops) => {
     seedNode();
     seedWorkspace({ status: 'deleted' });
     seedAgentSession();
-    seedRestorableSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(-60 * 60 * 1000) });
+    seedRestorableSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(offsetMs) });
 
     await finalizeWorkspace();
 
-    expect(mocks.stopSession).not.toHaveBeenCalled();
+    if (stops) {
+      expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
+    } else {
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+    }
     expect(mocks.failSession).not.toHaveBeenCalled();
-  });
-
-  it('still stops a slept session whose spent budget has not decayed', async () => {
-    seedNode();
-    seedWorkspace({ status: 'deleted' });
-    seedAgentSession();
-    seedRestorableSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(-60 * 1000) });
-
-    await finalizeWorkspace();
-
-    expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
   });
 
   it('still stops a session with no snapshot row', async () => {

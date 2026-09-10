@@ -279,22 +279,25 @@ describe('agent activity derivation', () => {
     }
   });
 
-  it('still reports sleeping once a spent wake budget has decayed', async () => {
-    // Drives the real SQL projection, not `deriveAgentActivityState` directly:
-    // dropping `recovery_failed_at` from the SELECT would otherwise show a
-    // wakeable session as awake-idle with no test noticing (`.claude/rules/62`).
+  // Drives the real SQL projection, not `deriveAgentActivityState` directly:
+  // dropping `recovery_failed_at` from the SELECT would otherwise show a
+  // wakeable session as awake-idle with no test noticing (`.claude/rules/62`).
+  it.each([
+    ['decayed', '2026-08-30T10:00:00.000Z', 'sleeping'],
+    ['inside the decay window', '2026-08-30T11:59:00.000Z', 'awake-idle'],
+  ])('reports %s spent budget as %s', async (label, recoveryFailedAt, expected) => {
     const { sqlite, env } = createActivityDb();
     try {
       seedTask(sqlite, {
-        id: 'task-decayed',
-        chatSessionId: 'chat-decayed',
+        id: 'task-budget',
+        chatSessionId: 'chat-budget',
         executionStep: 'awaiting_followup',
       });
       seedSleepingSnapshot(sqlite, {
-        id: 'snapshot-decayed',
-        chatSessionId: 'chat-decayed',
+        id: 'snapshot-budget',
+        chatSessionId: 'chat-budget',
         recoveryAttempts: 3,
-        recoveryFailedAt: '2026-08-30T10:00:00.000Z',
+        recoveryFailedAt,
       });
 
       const rows = await listAgentActivityTasks(env, {
@@ -304,36 +307,7 @@ describe('agent activity derivation', () => {
       });
 
       expect(rows).toEqual([
-        expect.objectContaining({ id: 'task-decayed', agentActivityState: 'sleeping' }),
-      ]);
-    } finally {
-      sqlite.close();
-    }
-  });
-
-  it('does not report sleeping while a spent budget is still within its window', async () => {
-    const { sqlite, env } = createActivityDb();
-    try {
-      seedTask(sqlite, {
-        id: 'task-spent',
-        chatSessionId: 'chat-spent',
-        executionStep: 'awaiting_followup',
-      });
-      seedSleepingSnapshot(sqlite, {
-        id: 'snapshot-spent',
-        chatSessionId: 'chat-spent',
-        recoveryAttempts: 3,
-        recoveryFailedAt: '2026-08-30T11:59:00.000Z',
-      });
-
-      const rows = await listAgentActivityTasks(env, {
-        userId: 'user-1',
-        activeOnly: true,
-        nowMs: Date.parse('2026-08-30T12:00:00.000Z'),
-      });
-
-      expect(rows).toEqual([
-        expect.objectContaining({ id: 'task-spent', agentActivityState: 'awake-idle' }),
+        expect.objectContaining({ id: 'task-budget', agentActivityState: expected }),
       ]);
     } finally {
       sqlite.close();

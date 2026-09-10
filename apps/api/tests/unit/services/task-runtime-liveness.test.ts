@@ -682,12 +682,15 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
     });
   });
 
-  it('preserves an exhausted budget once its last clean failure has decayed', () => {
-    // Through the REAL wiring: `classifyTaskRuntimeLiveness` reads both budget
-    // signals off `TaskRuntimeLivenessSignals` and hands them to
-    // `isSessionResumable`. The dedicated budget suite proves the primitive;
-    // this proves the struct -> call seam production actually uses
-    // (`.claude/rules/62`).
+  // Through the REAL wiring: `classifyTaskRuntimeLiveness` reads both budget
+  // signals off `TaskRuntimeLivenessSignals` and hands them to
+  // `isSessionResumable`. The dedicated budget suite proves the primitive; this
+  // proves the struct -> call seam production actually uses (`.claude/rules/62`).
+  // Both cases sit one millisecond either side of the cutoff.
+  it.each([
+    ['decayed', -1, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', 1, true, 'workspace_deleted'],
+  ])('%s exhausted budget', (_label, cutoffOffsetMs, conclusive, reason) => {
     const base = signals();
     expect(
       classifyTaskRuntimeLiveness(
@@ -696,28 +699,11 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
           resumabilityProbeOutcome: 'ok',
           sessionResumability: resumable({
             recoveryAttempts: MAX_RECOVERY_ATTEMPTS,
-            recoveryFailedAtMs: base.nowMs - RECOVERY_ATTEMPT_DECAY_MS - 1,
+            recoveryFailedAtMs: base.nowMs - RECOVERY_ATTEMPT_DECAY_MS + cutoffOffsetMs,
           }),
         })
       )
-    ).toMatchObject({ conclusive: false, reason: 'workspace_deleted_snapshot_resumable' });
-  });
-
-  it('still terminalizes an exhausted budget inside the decay window', () => {
-    // The control, and the boundary: exactly at the cutoff is still spent.
-    const base = signals();
-    expect(
-      classifyTaskRuntimeLiveness(
-        signals({
-          workspace: sleptWorkspace(base),
-          resumabilityProbeOutcome: 'ok',
-          sessionResumability: resumable({
-            recoveryAttempts: MAX_RECOVERY_ATTEMPTS,
-            recoveryFailedAtMs: base.nowMs - RECOVERY_ATTEMPT_DECAY_MS + 1,
-          }),
-        })
-      )
-    ).toMatchObject({ conclusive: true, reason: 'workspace_deleted' });
+    ).toMatchObject({ conclusive, reason });
   });
 
   it('still preserves on the last remaining wake attempt', () => {

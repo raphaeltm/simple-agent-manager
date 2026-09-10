@@ -57,6 +57,21 @@ function db() {
   return drizzle(createSqliteD1(sqlite), { schema });
 }
 
+/** Wake this session the way `ensureSessionRecovery` does. */
+function wake(taskId: string, now: Date = NOW) {
+  return claimSessionSnapshotRecovery(db(), makeEnv(), {
+    chatSessionId: CHAT_SESSION_ID,
+    userId: USER_ID,
+    taskId,
+    now,
+  });
+}
+
+/** Report a wake failure the way the TaskRunner's recovery lifecycle does. */
+function reportFailure(taskId: string, error = TRANSIENT_PLACEMENT_ERROR) {
+  return failSessionSnapshotRecovery(db(), makeEnv(), CHAT_SESSION_ID, taskId, error);
+}
+
 function seedSleepingSnapshot(
   input: { recoveryAttempts?: number; recoveryFailedAt?: string | null } = {}
 ): void {
@@ -125,12 +140,7 @@ describe('wake attempt budget', () => {
     // The incident: three transient placement failures, the last one an hour ago.
     seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(60) });
 
-    const claim = await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-wake',
-      now: NOW,
-    });
+    const claim = await wake('task-wake');
 
     expect(claim).toEqual({ status: 'claimed', taskId: 'task-wake' });
   });
@@ -138,12 +148,7 @@ describe('wake attempt budget', () => {
   it('starts a NEW burst rather than continuing the spent one', async () => {
     seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(60) });
 
-    await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-wake',
-      now: NOW,
-    });
+    await wake('task-wake');
 
     const row = readSnapshot();
     // 1, not MAX_ATTEMPTS + 1: the cap must still bound the next burst.
@@ -156,12 +161,7 @@ describe('wake attempt budget', () => {
     // The control. Without this, the suite passes with the cap deleted outright.
     seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(5) });
 
-    const claim = await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-wake',
-      now: NOW,
-    });
+    const claim = await wake('task-wake');
 
     expect(claim).toEqual({ status: 'unavailable', reason: 'recovery_attempts_exhausted' });
     expect(readSnapshot().recovery_attempts).toBe(MAX_ATTEMPTS);
@@ -172,12 +172,7 @@ describe('wake attempt budget', () => {
     // on absence would launder a wedged claim into an unlimited retry.
     seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: null });
 
-    const claim = await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-wake',
-      now: NOW,
-    });
+    const claim = await wake('task-wake');
 
     expect(claim).toEqual({ status: 'unavailable', reason: 'recovery_attempts_exhausted' });
   });
@@ -185,12 +180,7 @@ describe('wake attempt budget', () => {
   it('leaves an unspent budget on the normal increment path', async () => {
     seedSleepingSnapshot({ recoveryAttempts: 1, recoveryFailedAt: minutesAgo(60) });
 
-    await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-wake',
-      now: NOW,
-    });
+    await wake('task-wake');
 
     // Decayed, so the burst restarts at 1 rather than continuing to 2.
     expect(readSnapshot().recovery_attempts).toBe(1);
@@ -200,21 +190,10 @@ describe('wake attempt budget', () => {
     // Drives the production writer rather than seeding the column, so the test
     // notices if `failSessionSnapshotRecovery` stops maintaining it.
     seedSleepingSnapshot({ recoveryAttempts: 0 });
-    await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-wake',
-      now: NOW,
-    });
+    await wake('task-wake');
     expect(readSnapshot().recovery_failed_at).toBeNull();
 
-    await failSessionSnapshotRecovery(
-      db(),
-      makeEnv(),
-      CHAT_SESSION_ID,
-      'task-wake',
-      TRANSIENT_PLACEMENT_ERROR
-    );
+    await reportFailure('task-wake');
 
     const row = readSnapshot();
     expect(row.recovery_status).toBe('failed');
@@ -232,30 +211,14 @@ describe('wake attempt budget', () => {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       const at = new Date(NOW.getTime() - (60 - attempt * 10) * 60 * 1000);
       vi.setSystemTime(at);
-      const claim = await claimSessionSnapshotRecovery(db(), makeEnv(), {
-        chatSessionId: CHAT_SESSION_ID,
-        userId: USER_ID,
-        taskId: `task-${attempt}`,
-        now: at,
-      });
+      const claim = await wake(`task-${attempt}`, at);
       expect(claim.status).toBe('claimed');
-      await failSessionSnapshotRecovery(
-        db(),
-        makeEnv(),
-        CHAT_SESSION_ID,
-        `task-${attempt}`,
-        TRANSIENT_PLACEMENT_ERROR
-      );
+      await reportFailure(`task-${attempt}`);
     }
 
     // The burst is spent: the fourth attempt, taken immediately, is refused.
     vi.setSystemTime(new Date(NOW.getTime() - 29 * 60 * 1000));
-    const immediately = await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-4',
-      now: new Date(NOW.getTime() - 29 * 60 * 1000),
-    });
+    const immediately = await wake('task-4', new Date(NOW.getTime() - 29 * 60 * 1000));
     expect(immediately).toEqual({
       status: 'unavailable',
       reason: 'recovery_attempts_exhausted',
@@ -263,12 +226,7 @@ describe('wake attempt budget', () => {
 
     // After the decay window the same session wakes again.
     vi.setSystemTime(NOW);
-    const afterWait = await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-5',
-      now: NOW,
-    });
+    const afterWait = await wake('task-5');
 
     expect(afterWait).toEqual({ status: 'claimed', taskId: 'task-5' });
   });
@@ -293,12 +251,7 @@ describe('stale-claim reclaim', () => {
     seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS });
     seedStaleWakingClaim(minutesAgo(60));
 
-    const claim = await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-reclaim',
-      now: NOW,
-    });
+    const claim = await wake('task-reclaim');
 
     expect(claim).toEqual({ status: 'claimed', taskId: 'task-reclaim' });
     const row = readSnapshot();
@@ -310,12 +263,7 @@ describe('stale-claim reclaim', () => {
     seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS });
     seedStaleWakingClaim(minutesAgo(5));
 
-    const claim = await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-reclaim',
-      now: NOW,
-    });
+    const claim = await wake('task-reclaim');
 
     expect(claim).not.toEqual({ status: 'claimed', taskId: 'task-reclaim' });
     expect(readSnapshot().recovery_attempts).toBe(MAX_ATTEMPTS);
@@ -331,19 +279,8 @@ describe('sibling resets clear the decay anchor', () => {
    */
   it('completeSessionSnapshotRecovery clears it alongside the count', async () => {
     seedSleepingSnapshot({ recoveryAttempts: 2, recoveryFailedAt: minutesAgo(60) });
-    await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-wake',
-      now: NOW,
-    });
-    await failSessionSnapshotRecovery(
-      db(),
-      makeEnv(),
-      CHAT_SESSION_ID,
-      'task-wake',
-      TRANSIENT_PLACEMENT_ERROR
-    );
+    await wake('task-wake');
+    await reportFailure('task-wake');
     // Re-open the claim the completion writer requires, then succeed.
     sqlite
       .prepare(`UPDATE session_snapshots SET recovery_status = 'waking' WHERE chat_session_id = ?`)
@@ -380,12 +317,7 @@ describe('every writer of the failed status maintains the decay anchor', () => {
   it('failAndRestoreSessionRecoveryHandoff records the anchor', async () => {
     seedSleepingSnapshot({ recoveryAttempts: 0 });
     seedRecoveryTask('task-kickoff');
-    await claimSessionSnapshotRecovery(db(), makeEnv(), {
-      chatSessionId: CHAT_SESSION_ID,
-      userId: USER_ID,
-      taskId: 'task-kickoff',
-      now: NOW,
-    });
+    await wake('task-kickoff');
     expect(readSnapshot().recovery_failed_at).toBeNull();
 
     await failAndRestoreSessionRecoveryHandoff(createSqliteD1(sqlite), {
@@ -408,12 +340,7 @@ describe('every writer of the failed status maintains the decay anchor', () => {
       const at = new Date(NOW.getTime() - (60 - attempt * 10) * 60 * 1000);
       vi.setSystemTime(at);
       seedRecoveryTask(`task-${attempt}`);
-      const claim = await claimSessionSnapshotRecovery(db(), makeEnv(), {
-        chatSessionId: CHAT_SESSION_ID,
-        userId: USER_ID,
-        taskId: `task-${attempt}`,
-        now: at,
-      });
+      const claim = await wake(`task-${attempt}`, at);
       expect(claim.status).toBe('claimed');
       await failAndRestoreSessionRecoveryHandoff(createSqliteD1(sqlite), {
         recoveryTaskId: `task-${attempt}`,
@@ -424,18 +351,32 @@ describe('every writer of the failed status maintains the decay anchor', () => {
     }
 
     vi.setSystemTime(NOW);
-    await expect(
-      claimSessionSnapshotRecovery(db(), makeEnv(), {
-        chatSessionId: CHAT_SESSION_ID,
-        userId: USER_ID,
-        taskId: 'task-4',
-        now: NOW,
-      })
-    ).resolves.toEqual({ status: 'claimed', taskId: 'task-4' });
+    await expect(wake('task-4')).resolves.toEqual({ status: 'claimed', taskId: 'task-4' });
   });
 });
 
 describe('consumers that mirror the budget', () => {
+  /** The destroyer's verdict for a spent budget whose failure is `agoMs` old. */
+  function destroyerSeesResumable(agoMs: number): boolean {
+    return isSessionResumable(
+      {
+        chatSessionId: CHAT_SESSION_ID,
+        projectId: PROJECT_ID,
+        workspaceId: WORKSPACE_ID,
+        sleepingAt: NOW.getTime() - 60 * 60 * 1000,
+        sleepStatus: 'sleeping',
+        expiresAtMs: NOW.getTime() + 60 * 60 * 1000,
+        status: 'available',
+        degradation: 'none',
+        recoveryAttempts: MAX_ATTEMPTS,
+        recoveryFailedAtMs: NOW.getTime() - agoMs,
+      },
+      PROJECT_ID,
+      WORKSPACE_ID,
+      { maxRecoveryAttempts: MAX_ATTEMPTS, recoveryAttemptDecayMs: DECAY_MS, nowMs: NOW.getTime() }
+    );
+  }
+
   it('hasRestorableSleepingSessionSnapshot sees a decayed budget as restorable', async () => {
     seedSleepingSnapshot({ recoveryAttempts: MAX_ATTEMPTS, recoveryFailedAt: minutesAgo(60) });
 
@@ -465,47 +406,11 @@ describe('consumers that mirror the budget', () => {
   it('the destroyer withholds a terminal verdict while the resumer would still wake', () => {
     // `.claude/rules/58`: a widened resumer with an un-widened classifier means the
     // sweep terminalizes tasks whose sessions are demonstrably restorable.
-    const resumable = isSessionResumable(
-      {
-        chatSessionId: CHAT_SESSION_ID,
-        projectId: PROJECT_ID,
-        workspaceId: WORKSPACE_ID,
-        sleepingAt: NOW.getTime() - 60 * 60 * 1000,
-        sleepStatus: 'sleeping',
-        expiresAtMs: NOW.getTime() + 60 * 60 * 1000,
-        status: 'available',
-        degradation: 'none',
-        recoveryAttempts: MAX_ATTEMPTS,
-        recoveryFailedAtMs: NOW.getTime() - 60 * 60 * 1000,
-      },
-      PROJECT_ID,
-      WORKSPACE_ID,
-      { maxRecoveryAttempts: MAX_ATTEMPTS, recoveryAttemptDecayMs: DECAY_MS, nowMs: NOW.getTime() }
-    );
-
-    expect(resumable).toBe(true);
+    expect(destroyerSeesResumable(60 * 60 * 1000)).toBe(true);
   });
 
   it('the destroyer still terminalizes an undecayed exhausted burst', () => {
-    const resumable = isSessionResumable(
-      {
-        chatSessionId: CHAT_SESSION_ID,
-        projectId: PROJECT_ID,
-        workspaceId: WORKSPACE_ID,
-        sleepingAt: NOW.getTime() - 60 * 60 * 1000,
-        sleepStatus: 'sleeping',
-        expiresAtMs: NOW.getTime() + 60 * 60 * 1000,
-        status: 'available',
-        degradation: 'none',
-        recoveryAttempts: MAX_ATTEMPTS,
-        recoveryFailedAtMs: NOW.getTime() - 60 * 1000,
-      },
-      PROJECT_ID,
-      WORKSPACE_ID,
-      { maxRecoveryAttempts: MAX_ATTEMPTS, recoveryAttemptDecayMs: DECAY_MS, nowMs: NOW.getTime() }
-    );
-
-    expect(resumable).toBe(false);
+    expect(destroyerSeesResumable(60 * 1000)).toBe(false);
   });
 
   it('agent activity reports a decayed-budget session as still sleeping', () => {
