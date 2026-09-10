@@ -2228,6 +2228,26 @@ describe('validateCloudInitVariables', () => {
       const config = generateCloudInit(baseVariables());
       expect(config).toContain('hostname: sam-test-node');
     });
+
+    it('pins the VM-agent download to the required deployment release', () => {
+      const release = '0123456789abcdef0123456789abcdef01234567';
+      const config = generateCloudInit(baseVariables({ vmAgentRequiredVersion: release }));
+
+      expect(config).toContain(`/api/agent/download?arch=\${ARCH}&release=${release}`);
+    });
+
+    it('keeps the legacy download URL when no required release is configured', () => {
+      const config = generateCloudInit(baseVariables());
+
+      expect(config).toContain('/api/agent/download?arch=\${ARCH}"');
+      expect(config).not.toContain('&release=');
+    });
+
+    it('rejects an unsafe VM-agent release before embedding it in shell', () => {
+      expect(() =>
+        generateCloudInit(baseVariables({ vmAgentRequiredVersion: '../../mutable-agent' }))
+      ).toThrow('vmAgentRequiredVersion');
+    });
   });
 
   // ---------------------------------------------------------------------------

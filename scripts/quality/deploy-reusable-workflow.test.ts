@@ -202,14 +202,12 @@ describe('deploy reusable workflow', () => {
 
   it('runs D1 migrations and integrity checks before serving new API Worker code', () => {
     const migrationsIndex = workflow.indexOf('- name: Run Database Migrations With Safety Gates');
+    const bootstrapApiIndex = workflow.indexOf('- name: Bootstrap API Worker');
     const deployApiIndex = workflow.indexOf('- name: Deploy API Worker');
-    const redeployAfterSecretsIndex = workflow.indexOf(
-      '- name: Re-deploy API Worker (after secrets)'
-    );
 
     expect(migrationsIndex).toBeGreaterThan(-1);
+    expect(bootstrapApiIndex).toBeGreaterThan(migrationsIndex);
     expect(deployApiIndex).toBeGreaterThan(migrationsIndex);
-    expect(redeployAfterSecretsIndex).toBeGreaterThan(deployApiIndex);
   });
 
   it('creates installation identity before config sync and skips mutation on dry runs', () => {
@@ -344,7 +342,7 @@ describe('deploy reusable workflow', () => {
   });
 
   it('allows only the intentionally gated Artifacts non-inheritance warning', () => {
-    for (const name of ['Deploy API Worker', 'Re-deploy API Worker \\(after secrets\\)']) {
+    for (const name of ['Bootstrap API Worker', 'Deploy API Worker']) {
       const block = stepBlock(name);
 
       expect(block).toContain('NON_ARTIFACTS_BINDING_WARNINGS=');
@@ -377,10 +375,26 @@ describe('deploy reusable workflow', () => {
     const buildIndex = workflow.indexOf('- name: Build VM Agent');
     const uploadIndex = workflow.indexOf('- name: Upload VM Agent Binaries');
     const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+    const upload = stepBlock('Upload VM Agent Binaries');
 
     expect(buildIndex).toBeGreaterThan(-1);
     expect(uploadIndex).toBeGreaterThan(buildIndex);
     expect(uploadIndex).toBeLessThan(deployIndex);
+    expect(upload).toContain('$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-amd64');
+    expect(upload).toContain('$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-arm64');
+    expect(upload).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
+    expect(upload).not.toContain('$R2_BUCKET/agents/vm-agent-linux-amd64');
+  });
+
+  it('publishes established Worker code only after the single secret revision', () => {
+    const bootstrap = stepBlock('Bootstrap API Worker');
+    const configureSecretsIndex = workflow.indexOf('- name: Configure Worker Secrets');
+    const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+
+    expect(bootstrap).toContain("steps.first_deploy.outputs.is_first == 'true'");
+    expect(configureSecretsIndex).toBeGreaterThan(-1);
+    expect(deployIndex).toBeGreaterThan(configureSecretsIndex);
+    expect(workflow.match(/      - name: Deploy API Worker\n/g)).toHaveLength(1);
   });
 
   it('forwards the cf-container clone/create tunables into the wrangler config sync env', () => {

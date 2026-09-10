@@ -871,19 +871,21 @@ jobs:
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
           # Wrangler v4: R2 commands default to local; --remote required for deployed R2.
-          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64 --remote
-          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64 --remote
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}
 
-      # Deploy API worker after D1 migrations so new code never serves against old schema.
-      # On first deploy this still runs before the tail worker because the API service binding is required.
-      - name: Deploy API Worker
-        if: ${{ inputs.dry_run != true }}
+      # A first installation needs an API service for the tail Worker's service binding.
+      # Established installations defer API code publication until after secrets so an
+      # active Instant container sees at most the secret revision plus the final revision.
+      - name: Bootstrap API Worker
+        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
         run: |
           OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
             echo "$OUTPUT"
@@ -906,7 +908,7 @@ jobs:
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
-      # Tail Worker must deploy AFTER API Worker (service binding dependency)
+      # The Tail Worker service binding requires the API Worker on first installation.
       - name: Deploy Tail Worker
         if: ${{ inputs.dry_run != true }}
         run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env "$DEPLOY_ENV"
@@ -1339,10 +1341,10 @@ jobs:
           WORKER_SECRET_BULK_MAX_OPS: ${{ vars.WORKER_SECRET_BULK_MAX_OPS }}
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
 
-      # Secret writes create fresh Worker deployments. Re-deploy once after all
-      # secrets are configured so routes serving the web app keep the current
-      # Worker asset bundle instead of regressing to a previous deployment.
-      - name: Re-deploy API Worker (after secrets)
+      # Secret writes create one fresh Worker deployment. Publish code once after all
+      # secrets are configured. On established installations this bounds API revisions
+      # to two, so the last Instant recovery attempt starts after the final revision.
+      - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}
         run: |
           OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {

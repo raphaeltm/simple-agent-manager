@@ -177,6 +177,7 @@ const ENV = {
   SESSION_SNAPSHOT_OPERATION_TIMEOUT: '12m30s',
   SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL: '3s',
   SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT: '750ms',
+  VM_AGENT_REQUIRED_VERSION: '0123456789abcdef0123456789abcdef01234567',
 } as unknown as Parameters<typeof provisionNode>[1];
 
 function observedHardware() {
@@ -428,6 +429,7 @@ describe('provisionNode backend DNS records', () => {
         sessionSnapshotOperationTimeout: '12m30s',
         sessionSnapshotProgressReportInterval: '3s',
         sessionSnapshotProgressReportTimeout: '750ms',
+        vmAgentRequiredVersion: '0123456789abcdef0123456789abcdef01234567',
       })
     );
   });

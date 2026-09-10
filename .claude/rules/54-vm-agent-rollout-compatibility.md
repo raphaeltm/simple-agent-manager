@@ -5,7 +5,7 @@ When a change affects VM-agent behavior required for scheduling new work, the ro
 Required pattern:
 
 1. Build vm-agent binaries with the deployment commit SHA as the agent version.
-2. Upload the matching binaries/version metadata before deploying Worker code that requires that version.
+2. Upload matching binaries under immutable, commit-addressed release keys before deploying Worker code that requires that version. Normal deploys must not overwrite the legacy mutable VM-agent keys.
 3. Generate `VM_AGENT_REQUIRED_VERSION` from the deployment commit SHA; do not hardcode rollout-specific SHAs or ask operators to maintain a manual required version.
 4. If a deployment intentionally skips agent artifacts (`skip_agent`), do not advance the required version.
 5. VM-agent `/ready` and heartbeat callbacks must report the build identity additively so old agents remain protocol-compatible.
@@ -17,7 +17,11 @@ Required pattern:
 11. A state machine waiting on a claimed node must distinguish missing/deleted state from "still booting" and terminalize promptly without returning the gone node to a reusable pool.
 12. Control-plane changes that stop callback storms MUST stand alone for already-deployed agents: terminal statuses and low-severity logging must be correct even if the old VM agent keeps retrying until it is replaced.
 13. VM-agent callback loops MUST treat terminal control-plane statuses (`401`, `403`, `404`, `410`) as stop signals, or otherwise use exponential backoff with a hard retry/time budget. Unbounded retries after a terminal resource response are not rollout-compatible.
+14. Cloud-init and generated install scripts must request the exact `VM_AGENT_REQUIRED_VERSION` release when it is configured. Unversioned downloads are a legacy/local fallback only.
+15. Established deployments must publish Worker revisions in an order that leaves an Instant recovery attempt after the final code update. First-install bootstrap revisions may run only when no prior Worker exists.
 
 Tests for scheduling-affecting VM-agent changes should include a stale-but-otherwise-better candidate losing to a compatible node, preferred/warm stale-node rejection, current fresh-node readiness, active stale-node preservation, idle stale-node retirement, and the pre-heartbeat interleaving where a recent bounded warm-node claim exists before any workspace row.
 
 Tests for callback-storm fixes should include old-agent-compatible control-plane assertions for terminal status/severity, plus new-agent assertions that heartbeat, ACP heartbeat, and message-outbox callbacks terminate or exhaust a bounded retry budget after terminal responses.
+
+Deployment tests should assert immutable R2 key construction from the verified deployment SHA, required-version propagation into the download URL, first-install-only bootstrap deployment, and final code publication after the single bulk secret revision.
