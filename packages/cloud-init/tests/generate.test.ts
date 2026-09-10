@@ -2233,13 +2233,13 @@ describe('validateCloudInitVariables', () => {
       const release = '0123456789abcdef0123456789abcdef01234567';
       const config = generateCloudInit(baseVariables({ vmAgentRequiredVersion: release }));
 
-      expect(config).toContain(`/api/agent/download?arch=\${ARCH}&release=${release}`);
+      expect(config).toContain('/api/agent/download?arch=${ARCH}&release=' + release);
     });
 
     it('keeps the legacy download URL when no required release is configured', () => {
       const config = generateCloudInit(baseVariables());
 
-      expect(config).toContain('/api/agent/download?arch=\${ARCH}"');
+      expect(config).toContain('/api/agent/download?arch=${ARCH}"');
       expect(config).not.toContain('&release=');
     });
 

@@ -43,9 +43,7 @@ describe('VM-agent artifact routes', () => {
 
     expect(response.status).toBe(200);
     expect(get).toHaveBeenCalledWith(`agents/releases/${RELEASE}/vm-agent-linux-amd64`);
-    expect(response.headers.get('Cache-Control')).toBe(
-      'public, max-age=31536000, immutable'
-    );
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 
   it('rejects malformed release identifiers before reading R2', async () => {
