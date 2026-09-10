@@ -34,7 +34,7 @@ function fixture() {
   createAllSchemaTables(sqlite, schema);
   const env = {
     DATABASE: createSqliteD1(sqlite),
-    VM_AGENT_REQUIRED_VERSION: 'current-agent',
+    VM_AGENT_REQUIRED_VERSION: '0123456789abcdef0123456789abcdef01234567',
     TRIAL_ANONYMOUS_USER_ID: 'user',
   } as Env;
   allocation.mockResolvedValue({
@@ -70,7 +70,7 @@ function fixture() {
        observed_hardware_source)
       VALUES ('node', 'user', 'native node', 'running', 'healthy', 'vm', 'managed',
               'workspace', 'workspace', 'hetzner', 'fsn1', 'large', 'native-sku',
-              'provider-runtime', 'current-agent', 8, 16384, 100, 'observed');
+              'provider-runtime', '0123456789abcdef0123456789abcdef01234567', 8, 16384, 100, 'observed');
   `);
   sqlite
     .prepare('UPDATE nodes SET last_heartbeat_at = ?, last_metrics = ?')

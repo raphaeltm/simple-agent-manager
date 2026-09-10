@@ -405,8 +405,15 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
   it('lets two different workspaces share the running node while the fresh workspace still awaits readiness', async () => {
     const f = await createMeteringFixture({ multiWorkspace: true });
     const node = f.f.sqlite.prepare('SELECT id FROM nodes').get() as { id: string };
-    f.f.sqlite.prepare(`UPDATE nodes SET agent_version='current-agent',health_status='healthy',last_heartbeat_at=?,last_metrics=? WHERE id=?`)
-      .run(new Date().toISOString(), JSON.stringify({ version: 1, cpuLoadAvg1: 0.1, memoryPercent: 5, diskPercent: 5 }), node.id);
+    f.f.sqlite
+      .prepare(
+        `UPDATE nodes SET agent_version='0123456789abcdef0123456789abcdef01234567',health_status='healthy',last_heartbeat_at=?,last_metrics=? WHERE id=?`
+      )
+      .run(
+        new Date().toISOString(),
+        JSON.stringify({ version: 1, cpuLoadAvg1: 0.1, memoryPercent: 5, diskPercent: 5 }),
+        node.id
+      );
     const responses = await Promise.all(['Second workspace', 'Third workspace'].map(name => f.app.request('/', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name,
         projectId: 'project-1', nodeId: node.id,
