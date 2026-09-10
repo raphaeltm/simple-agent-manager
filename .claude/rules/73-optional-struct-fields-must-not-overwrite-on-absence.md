@@ -93,6 +93,18 @@ The tells:
    compiler enumerate the call sites for you. A runtime `hasOpts` flag does not,
    and leaves the next caller free to reintroduce the bug.
 
+6. **Ask whether the overwritten field was the right signal in the first place.**
+   The overwrite is the trigger; the reason it was *damaging* is usually that some
+   consumer gates behaviour on a field that is merely **correlated** with the
+   property it actually cares about. `agent_ws.go` gated runtime-asset injection on
+   `runtime.Lightweight` ("skip the devcontainer build" — a per-workspace
+   provisioning choice that VM workspaces also use) when the question it was really
+   asking was `IsStandaloneMode()` ("is there a devcontainer to read
+   `/etc/sam/project-env` from?" — a per-process fact). Fixing only the overwrite
+   leaves that proxy in place, so the identical symptom returns the first time any
+   caller forgets to thread the correlated field. Fix both, and say in a comment why
+   the gate is what it is so nobody re-adds the conjunct.
+
 ## Required Tests
 
 - **One case per no-opts call site**, as a table: set the field, run the caller's
@@ -103,27 +115,59 @@ The tells:
   became a no-op.
 - **An explicit-override control**: the field must still be settable to its zero
   value on purpose, in both directions.
-- **The downstream consumer, not just the flag.** Assert the thing the flag gates
-  — here, that a standalone SessionHost built after the WebSocket upsert reports
-  `HasRuntimeAssetsProvider() == true`. A flag test alone would have passed if the
-  gate were later rewired to a different field.
+- **The downstream consumer, not just the flag — one test per consequence.**
+  Assert the thing the field actually gates, on **every** path that reads it. A flag
+  test alone would have passed if a gate were later rewired to a different field.
+  This PR's first cut asserted the cf-container consumer and skipped the VM
+  devcontainer-recovery consumer, which is half the incident.
+- **Do not claim a consumer is untestable without grepping for a seam.** The
+  skipped consumer above was justified in the PR as "needs Docker". It does not:
+  `prepareWorkspaceForRuntime` is a package-level function variable that five
+  existing tests already swap to capture `ProvisionState` without a container.
+  Before writing "untested gap", search the package for an existing hook, fake, or
+  `httptest` harness covering that path — the reviewer will, and an inaccurate
+  justification is worse than an acknowledged gap.
+- **Enter through the real trigger, not the call shape** (`.claude/rules/62`).
+  Calling the update helper with the same arguments production uses pins today's
+  call shape, not the path. If the handler can be driven — `newAgentWSTestServer` +
+  `dialAgentWS` stand up a real `httptest` server, real WebSocket dial and real auth
+  in this package — drive it, so a refactor that moves or re-argues the call cannot
+  leave a green test behind.
 - **A control on the other side of the gate** (`.claude/rules/61`): the VM path
   must NOT get the standalone provider, so "always wire it" cannot pass.
-- **Proven discriminating.** Restore the unguarded assignment alone — keeping the
-  new type so the build still succeeds — and confirm exactly the intended tests go
-  red while the controls stay green. Record which tests went red in the PR.
+- **Proven discriminating, once per fix.** If the PR makes both the overwrite fix
+  and the gate fix (requirement 6), revert them **separately**: reverting the
+  overwrite alone must redden the field tests while the consumer tests stay green
+  (that is the proof the gate fix is independently protective), and reverting both
+  must redden the consumer tests too (that is the reproduction of the original
+  incident). Keep the new types in place so each revert still compiles. Record which
+  tests went red for which revert in the PR.
 
 ## Quick Compliance Check
 
 - [ ] Every optional non-string field can express "not supplied"
 - [ ] No guard of the form `if opt.Flag { ... }` was used to fix an absence bug
 - [ ] Every caller is enumerated, including those passing no options
-- [ ] The whole update block was audited for other unguarded fields
+- [ ] The whole update block was audited for other unguarded fields, and any
+      remaining sentinel-gated struct field is named with why it is safe today
+- [ ] Every consumer that gates on the field was checked for "correlated proxy vs.
+      the property actually being asked about"
 - [ ] The struct's doc comment states what the zero value means
 - [ ] Per-call-site tests exist, each with a liveness assertion
 - [ ] An explicit-override control proves the field is still writable both ways
-- [ ] A test asserts the downstream consumer, plus a control for the other runtime
-- [ ] The pair was verified discriminating against the pre-fix assignment
+- [ ] A test per downstream consequence, plus a control for the other runtime
+- [ ] No "untestable" claim survives a grep for an existing seam in the package
+- [ ] Tests enter through the real handler where one can be driven
+- [ ] Each fix was reverted separately and the reddened tests recorded
+
+## Audit Result for `workspaceRuntimeOpts`
+
+`Lightweight` was the only `bool`. Every other field is a `string` using the
+zero-value convention safely, except `DevcontainerCache`, a struct gated on
+`opt.DevcontainerCache.Ref != ""`. That is safe **today** only because no caller
+needs to explicitly clear cache credentials via an update; the day one does,
+`DevcontainerCacheCredentials{}` will be indistinguishable from "not supplied" and
+this rule applies to it verbatim.
 
 ## References
 

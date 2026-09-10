@@ -54,8 +54,9 @@ type workspaceRuntimeOpts struct {
 	TaskID                 string
 }
 
-// lightweightOpt returns a tri-state override for workspaceRuntimeOpts.Lightweight.
-// Callers that do not intend to change the flag leave the field nil.
+// lightweightOpt returns an explicit override for workspaceRuntimeOpts.Lightweight.
+// "Not supplied" is expressed by omitting this call entirely, leaving the struct
+// field at its nil zero value.
 func lightweightOpt(v bool) *bool { return &v }
 
 func (s *Server) routedNodeID(r *http.Request) string {

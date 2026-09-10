@@ -176,6 +176,12 @@ type SessionHostConfig struct {
 
 	// RuntimeAssetsProvider fetches resolved project/profile/skill runtime assets
 	// for standalone sessions. It must not log or persist secret values.
+	//
+	// Set once at construction and never reassigned, which is what makes the
+	// unlocked read in HasRuntimeAssetsProvider safe. If this ever becomes
+	// mutable (e.g. a hot-reloadable provider), every reader must take h.mu —
+	// note consumePreviousSelectionOnSuccess already mutates two sibling fields
+	// of this struct under that lock.
 	RuntimeAssetsProvider RuntimeAssetsProvider
 }
 
