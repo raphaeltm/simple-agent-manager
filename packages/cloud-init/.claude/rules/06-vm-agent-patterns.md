@@ -1,0 +1,82 @@
+---
+paths:
+  - 'packages/cloud-init/**'
+  - 'packages/vm-agent/**'
+  - 'scripts/vm/**'
+---
+
+# VM Agent Technical Patterns
+
+## VM Agent Lifecycle Pattern
+
+When the VM agent needs to make critical HTTP calls to the control plane (e.g., `/request-shutdown`):
+
+1. **Make the call BEFORE local shutdown** — `srv.Stop()` tears down the HTTP server, PTY sessions, and idle detector. Network calls after this may fail.
+2. **Always use retry logic with backoff** — A single HTTP call is never reliable enough. Use 3 attempts with 5-second delays.
+3. **Log response bodies on failure** — Status codes alone are insufficient. Always read and log `resp.Body` on non-2xx responses.
+4. **Never rely solely on the VM to clean itself up** — The control plane MUST have a fallback mechanism.
+
+### Systemd Restart Gotchas
+
+- `Restart=always` restarts the service whenever it exits, regardless of `systemctl disable` or `systemctl mask`
+- `systemctl disable` only prevents boot-time auto-start, NOT runtime restarts
+- `systemctl mask` requires `daemon-reload` to take effect on a running service
+- **Solution**: Block forever with `select {}` after requesting shutdown. The VM will be deleted externally.
+
+## Defense-in-Depth for Async Operations
+
+When a remote system (VM) is responsible for triggering its own cleanup:
+
+1. **Primary path**: VM calls `/request-shutdown` directly after detecting idle timeout
+2. **Fallback path**: Control plane heartbeat handler checks idle deadline and initiates deletion server-side
+3. **Both paths must use the same deletion logic** — reuse `deleteServer()`, `deleteDNSRecord()`, `cleanupWorkspaceDNSRecords()`
+4. **Guard against duplicate execution** — Use DB status transitions (`running` -> `stopping`) as a lock.
+
+## High-Frequency Callback Signals
+
+When the VM agent converts high-frequency runtime or harness lifecycle signals
+into HTTP callbacks to the control plane, do not post one callback per edge.
+
+Required pattern:
+
+1. **Coalesce before crossing the network** — debounce bursts and send the latest
+   resolved state after a short quiet window.
+2. **Serialize callback sends per signal source** — one source must not have
+   multiple in-flight POSTs that can arrive out of order and overwrite each
+   other.
+3. **Read authoritative local state at send time** — edge handlers may record
+   intent, but they must not capture a status value that can become stale before
+   the POST lands.
+4. **Dedupe only after success** — failed POST attempts must not update the
+   "last successfully reported" state; periodic re-report loops remain the
+   reliability backstop.
+5. **Test cadence and ordering** — regression tests must prove bursts collapse,
+   turn-boundary stale reports are suppressed, and semantically new payloads
+   such as runtime-work lease changes still reach the control plane.
+
+## Modifying Cloud-Init
+
+1. Edit `packages/cloud-init/src/template.ts`
+2. Update variable wiring in `packages/cloud-init/src/generate.ts` when needed
+3. Test cloud-init generation through the workspace provisioning flow
+
+### Runcmd Interpreter Contract
+
+Cloud-init executes scalar `runcmd` entries through `/bin/sh`. On SAM's Ubuntu
+VM images, that is Dash rather than Bash.
+
+1. Keep scalar `runcmd` entries POSIX-compatible. Use `set -eu`; do not use
+   `pipefail`, process substitution, here-strings, Bash arrays, or other
+   Bash-only syntax.
+2. If a command genuinely requires Bash, invoke `/bin/bash` explicitly or write
+   a file with a `#!/bin/bash` shebang and call that file from `runcmd`.
+3. Tests for a changed command block must parse the rendered YAML, extract the
+   actual `runcmd` entry, and execute it under its declared interpreter with
+   harmless stubs for external side effects. String-presence assertions alone do
+   not prove the runtime shell contract.
+
+## System Git Config in Devcontainers
+
+When VM-agent bootstrap code needs to write system Git config inside a devcontainer, use the shared `configureSystemGit()` helper (`packages/vm-agent/internal/bootstrap/bootstrap.go:2126`) instead of invoking `git config --system` directly. Both `ensureGitCredentialHelper()` (credential helper setup) and `ensureGitIdentity()` (user.email / user.name) already route through this helper.
+
+Direct `git config --system` calls can fail provisioning when `/etc/gitconfig.lock` is left behind by a concurrent or interrupted config write (`isGitConfigLockError()` at `bootstrap.go:2205` detects this). The shared helper retries with backoff, checks for an active `git config` process before treating the lock as stale, and removes the lock only when safe. See the retained incident lesson in this rule.

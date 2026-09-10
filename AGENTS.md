@@ -4,16 +4,16 @@
 
 ## Agent Configuration Cross-Reference
 
-| What                 | Claude Code Location              | Codex Location                                     |
-| -------------------- | --------------------------------- | -------------------------------------------------- |
-| Project instructions | `CLAUDE.md`                       | `AGENTS.md` (this file)                            |
-| Modular rules        | `.claude/rules/*.md`              | Same files (shared)                                |
-| Subagents / skills   | `.claude/agents/*/`               | `.agents/skills/*/SKILL.md` + `agents/openai.yaml` |
-| Reference skills     | `.claude/skills/*/SKILL.md`       | `.agents/skills/*/SKILL.md`                        |
-| Slash commands       | `.claude/commands/*.md`           | `.codex/prompts/*.md`                              |
-| Project config       | `.claude/settings.json`           | `.codex/config.toml`                               |
-| Constitution         | `.specify/memory/constitution.md` | Same file                                          |
-| Feature specs        | `specs/`                          | Same directory                                     |
+| What                 | Claude Code Location                                       | Codex Location                                     |
+| -------------------- | ---------------------------------------------------------- | -------------------------------------------------- |
+| Project instructions | `CLAUDE.md`                                                | `AGENTS.md` (this file)                            |
+| Modular rules        | `.claude/rules/*.md` + path-scoped `.claude/rules/` copies | Same files (shared)                                |
+| Subagents / skills   | `.claude/agents/*/`                                        | `.agents/skills/*/SKILL.md` + `agents/openai.yaml` |
+| Reference skills     | `.claude/skills/*/SKILL.md`                                | `.agents/skills/*/SKILL.md`                        |
+| Slash commands       | `.claude/commands/*.md`                                    | `.codex/prompts/*.md`                              |
+| Project config       | `.claude/settings.json`                                    | `.codex/config.toml`                               |
+| Constitution         | `.specify/memory/constitution.md`                          | Same file                                          |
+| Feature specs        | `specs/`                                                   | Same directory                                     |
 
 ## Skills
 
@@ -44,7 +44,7 @@ Skills are invoked with `$skill-name` (Codex) or dispatched as subagents (Claude
 
 ## Operational Guardrails
 
-These are Codex-facing reminders for recurring SAM workflow failures. The durable source of truth remains `CLAUDE.md` and `.claude/rules/*.md`.
+These are Codex-facing reminders for recurring SAM workflow failures. The durable source of truth remains `CLAUDE.md`, compact root `.claude/rules/*.md`, and any path-scoped `.claude/rules/` files beside the code being changed.
 
 | Situation                                                                                                  | Do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
