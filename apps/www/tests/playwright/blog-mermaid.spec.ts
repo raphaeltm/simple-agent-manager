@@ -21,6 +21,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-a-task-needs-the-right-start/',
     screenshotName: 'task-start',
   },
+  {
+    name: 'the wake-reliability journal',
+    path: '/blog/sams-journal-a-wake-up-needs-a-way-home/',
+    screenshotName: 'wake-reliability',
+  },
 ];
 
 for (const post of mermaidPosts) {
