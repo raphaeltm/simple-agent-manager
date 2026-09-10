@@ -20,10 +20,12 @@ The emergency recovery deploy then exposed a second deployment-atomicity failure
 - The readiness checks in `task-runner/readiness.ts` behaved correctly. Removing version gating would hide the deployment split and could schedule incompatible agents.
 - Rule 54 requires artifact publication before the controller requirement, but a mutable object makes that order unsafe when any later deployment step fails.
 - The retained 2026-08-06 node-reaping post-mortem introduced exact rollout compatibility but did not test failure between artifact upload and Worker publication.
+- A commit-addressed key is not immutable if a same-commit retry rebuilds with a wall-clock timestamp and overwrites it. Builds must use commit-derived metadata, and publication must reuse only byte-identical existing objects or fail before Worker publication.
 
 ## Implementation checklist
 
 - [x] Publish VM-agent binaries under immutable release keys containing the exact deployment SHA; stop overwriting the legacy mutable keys in normal deploys.
+- [x] Make same-SHA builds deterministic and make release publication reuse byte-identical objects while rejecting digest-changing overwrites.
 - [x] Extend binary artifact routing so an explicitly requested, validated VM-agent release resolves to its immutable R2 prefix while legacy/unversioned callers retain the existing fallback.
 - [x] Pass `VM_AGENT_REQUIRED_VERSION` through node provisioning into cloud-init and include it in the download URL so the cache key and R2 object identity match the controller requirement.
 - [x] Make the generated install script request the live Worker's required release when configured.
@@ -36,6 +38,7 @@ The emergency recovery deploy then exposed a second deployment-atomicity failure
 ## Acceptance criteria
 
 - A deployment that uploads a new VM-agent release and then fails before Worker publication leaves the live Worker's download path serving its previously required compatible release.
+- Re-running a deployment for the same commit cannot replace the bytes behind an immutable release URL.
 - Successful deployments provision new VMs from an immutable R2 key derived from the same SHA stored in `VM_AGENT_REQUIRED_VERSION`.
 - The download URL changes across agent releases, so cached bytes cannot cross a version boundary.
 - Invalid or path-like release identifiers cannot influence R2 keys.

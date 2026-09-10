@@ -380,21 +380,26 @@ describe('deploy reusable workflow', () => {
     expect(buildIndex).toBeGreaterThan(-1);
     expect(uploadIndex).toBeGreaterThan(buildIndex);
     expect(uploadIndex).toBeLessThan(deployIndex);
-    expect(upload).toContain('$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-amd64');
-    expect(upload).toContain('$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-arm64');
+    expect(upload).toContain(
+      'OBJECT_PATH="$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-$ARCH"'
+    );
+    expect(upload).toContain('publish_agent_artifact amd64');
+    expect(upload).toContain('publish_agent_artifact arm64');
     expect(upload).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
     expect(upload).not.toContain('$R2_BUCKET/agents/vm-agent-linux-amd64');
   });
 
   it('publishes established Worker code only after the single secret revision', () => {
     const bootstrap = stepBlock('Bootstrap API Worker');
+    const tailConsumerRedeploy = stepBlock('Re-deploy API Worker \\(with tail_consumers\\)');
     const configureSecretsIndex = workflow.indexOf('- name: Configure Worker Secrets');
     const deployIndex = workflow.indexOf('- name: Deploy API Worker');
 
     expect(bootstrap).toContain("steps.first_deploy.outputs.is_first == 'true'");
+    expect(tailConsumerRedeploy).toContain("steps.first_deploy.outputs.is_first == 'true'");
     expect(configureSecretsIndex).toBeGreaterThan(-1);
     expect(deployIndex).toBeGreaterThan(configureSecretsIndex);
-    expect(workflow.match(/      - name: Deploy API Worker\n/g)).toHaveLength(1);
+    expect(workflow.match(/ {6}- name: Deploy API Worker\n/g)).toHaveLength(1);
   });
 
   it('forwards the cf-container clone/create tunables into the wrangler config sync env', () => {
@@ -528,13 +533,28 @@ describe('deploy reusable workflow', () => {
   });
 
   it('versions the R2 vm-agent binaries with the same commit SHA as the container binary', () => {
+    const containerBuild = stepBlock('Prepare Versioned VM Agent Container Artifact');
     const build = stepBlock('Build VM Agent');
 
     // Both the container-baked binary and the R2-uploaded binaries must report
     // the deploy commit SHA so a running agent can be correlated to its artifact.
+    expect(containerBuild).toContain('BUILD_DATE=$(git show -s --format=%cI "$DEPLOY_SHA")');
     expect(build).toContain('make -C packages/vm-agent build-all');
     expect(build).toContain('VERSION="$DEPLOY_SHA"');
+    expect(build).toContain('BUILD_DATE=$(git show -s --format=%cI "$DEPLOY_SHA")');
     expect(build).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
+  });
+
+  it('reuses identical same-SHA artifacts and refuses immutable-key overwrites', () => {
+    const upload = stepBlock('Upload VM Agent Binaries');
+
+    expect(upload).toContain('wrangler r2 object get "$OBJECT_PATH"');
+    expect(upload).toContain('SOURCE_SHA=$(sha256sum "$SOURCE_PATH"');
+    expect(upload).toContain('EXISTING_SHA=$(sha256sum "$EXISTING_PATH"');
+    expect(upload).toContain('if [ "$SOURCE_SHA" != "$EXISTING_SHA" ]');
+    expect(upload).toContain('Refusing to overwrite immutable VM-agent artifact');
+    expect(upload).toContain('The specified key does not exist.');
+    expect(upload).toContain('wrangler r2 object put "$OBJECT_PATH"');
   });
 
   it('continues deployment when workers.dev subdomain setup succeeds', () => {
