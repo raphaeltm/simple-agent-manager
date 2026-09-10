@@ -185,6 +185,7 @@ function seedRestorableSnapshot(
     sleepStatus?: string | null;
     sleepingAt?: string | null;
     recoveryAttempts?: number;
+    recoveryFailedAt?: string | null;
     sleepClaimedAt?: string | null;
     sleepStoppingSince?: string | null;
     updatedAt?: string;
@@ -196,8 +197,9 @@ function seedRestorableSnapshot(
       `INSERT INTO session_snapshots
         (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
          degradation, manifest_r2_key, home_r2_key, expires_at, sleeping_at, sleep_status,
-         sleep_claimed_at, sleep_stopping_since, recovery_attempts, sleep_attempts, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'vm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+         sleep_claimed_at, sleep_stopping_since, recovery_attempts, recovery_failed_at,
+         sleep_attempts, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'vm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       overrides.id ?? `snapshot-${chatSessionId}`,
@@ -216,6 +218,7 @@ function seedRestorableSnapshot(
       overrides.sleepClaimedAt ?? null,
       overrides.sleepStoppingSince ?? null,
       overrides.recoveryAttempts ?? 0,
+      overrides.recoveryFailedAt ?? null,
       iso(-60 * 60 * 1000),
       overrides.updatedAt ?? iso(-5 * 60 * 1000)
     );
@@ -310,6 +313,34 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     expect(mocks.stopSession).not.toHaveBeenCalled();
     expect(mocks.failSession).not.toHaveBeenCalled();
     expect(mocks.cleanupWorkspaceActivity).toHaveBeenCalledWith(env, PROJECT_ID, WORKSPACE_ID);
+  });
+
+  it('preserves a slept session once its spent wake budget has decayed', async () => {
+    // The finalizer is a destroyer that mirrors the resumer through
+    // `restorableOrInFlightSleepSnapshotPredicateSql` — a THIRD copy of the
+    // budget rule, and the only one whose bind order changed from 5 to 6
+    // placeholders. Nothing else forces SQLite to evaluate the decay half of
+    // that OR in this file's binding order (`.claude/rules/58`, `/61`).
+    seedNode();
+    seedWorkspace({ status: 'deleted' });
+    seedAgentSession();
+    seedRestorableSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(-60 * 60 * 1000) });
+
+    await finalizeWorkspace();
+
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.failSession).not.toHaveBeenCalled();
+  });
+
+  it('still stops a slept session whose spent budget has not decayed', async () => {
+    seedNode();
+    seedWorkspace({ status: 'deleted' });
+    seedAgentSession();
+    seedRestorableSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(-60 * 1000) });
+
+    await finalizeWorkspace();
+
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT_ID, CHAT_SESSION_ID);
   });
 
   it('still stops a session with no snapshot row', async () => {

@@ -111,6 +111,7 @@ function seedSleepingSnapshot(
     sleepStatus?: string | null;
     sleepingAt?: string | null;
     recoveryAttempts?: number;
+    recoveryFailedAt?: string | null;
     expiresAt?: string;
   }
 ): void {
@@ -119,8 +120,8 @@ function seedSleepingSnapshot(
       `INSERT INTO session_snapshots
          (id, project_id, workspace_id, user_id, chat_session_id, runtime, status,
           degradation, manifest_r2_key, expires_at, sleep_status, sleeping_at,
-          recovery_attempts, created_at, updated_at)
-       VALUES (?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest.json', ?, ?, ?, ?, ?, ?)`
+          recovery_attempts, recovery_failed_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest.json', ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       overrides.id,
@@ -133,6 +134,7 @@ function seedSleepingSnapshot(
       overrides.sleepStatus ?? 'sleeping',
       overrides.sleepingAt ?? '2026-08-30T00:00:00.000Z',
       overrides.recoveryAttempts ?? 0,
+      overrides.recoveryFailedAt ?? null,
       '2026-08-30T00:00:00.000Z',
       '2026-08-30T00:00:00.000Z'
     );
@@ -271,6 +273,67 @@ describe('agent activity derivation', () => {
           id: 'task-expired-snapshot',
           agentActivityState: 'awake-idle',
         }),
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('still reports sleeping once a spent wake budget has decayed', async () => {
+    // Drives the real SQL projection, not `deriveAgentActivityState` directly:
+    // dropping `recovery_failed_at` from the SELECT would otherwise show a
+    // wakeable session as awake-idle with no test noticing (`.claude/rules/62`).
+    const { sqlite, env } = createActivityDb();
+    try {
+      seedTask(sqlite, {
+        id: 'task-decayed',
+        chatSessionId: 'chat-decayed',
+        executionStep: 'awaiting_followup',
+      });
+      seedSleepingSnapshot(sqlite, {
+        id: 'snapshot-decayed',
+        chatSessionId: 'chat-decayed',
+        recoveryAttempts: 3,
+        recoveryFailedAt: '2026-08-30T10:00:00.000Z',
+      });
+
+      const rows = await listAgentActivityTasks(env, {
+        userId: 'user-1',
+        activeOnly: true,
+        nowMs: Date.parse('2026-08-30T12:00:00.000Z'),
+      });
+
+      expect(rows).toEqual([
+        expect.objectContaining({ id: 'task-decayed', agentActivityState: 'sleeping' }),
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('does not report sleeping while a spent budget is still within its window', async () => {
+    const { sqlite, env } = createActivityDb();
+    try {
+      seedTask(sqlite, {
+        id: 'task-spent',
+        chatSessionId: 'chat-spent',
+        executionStep: 'awaiting_followup',
+      });
+      seedSleepingSnapshot(sqlite, {
+        id: 'snapshot-spent',
+        chatSessionId: 'chat-spent',
+        recoveryAttempts: 3,
+        recoveryFailedAt: '2026-08-30T11:59:00.000Z',
+      });
+
+      const rows = await listAgentActivityTasks(env, {
+        userId: 'user-1',
+        activeOnly: true,
+        nowMs: Date.parse('2026-08-30T12:00:00.000Z'),
+      });
+
+      expect(rows).toEqual([
+        expect.objectContaining({ id: 'task-spent', agentActivityState: 'awake-idle' }),
       ]);
     } finally {
       sqlite.close();

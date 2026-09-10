@@ -1,3 +1,6 @@
+import { and, isNotNull, lt, lte, or, sql } from 'drizzle-orm';
+
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from './session-snapshot-artifacts';
@@ -78,4 +81,40 @@ export function sessionRecoveryBudgetAvailableSql(alias: string): string {
     ${alias}.recovery_attempts < ?
     OR (${alias}.recovery_failed_at IS NOT NULL AND ${alias}.recovery_failed_at <= ?)
   )`;
+}
+
+/**
+ * The drizzle half of {@link sessionRecoveryBudgetAvailableSql}, for callers
+ * composing the rule into a query-builder `where()` rather than a raw statement.
+ *
+ * Three forms of one rule is two forms more than anyone wants, but the call
+ * sites genuinely differ: raw `D1Database.prepare().bind()`, drizzle
+ * `.update().where()`, and an in-memory classifier. They live in this one file
+ * so a change to the rule is a single-file edit, and
+ * `session-snapshot-recovery-budget.test.ts` drives all three against the same
+ * boundary fixtures so they cannot silently diverge.
+ */
+export function sessionRecoveryBudgetCondition(maxAttempts: number, decayCutoff: string) {
+  return or(
+    lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts),
+    and(
+      isNotNull(schema.sessionSnapshots.recoveryFailedAt),
+      lte(schema.sessionSnapshots.recoveryFailedAt, decayCutoff)
+    )
+  );
+}
+
+/**
+ * `recovery_attempts` after a successful claim: 1 when the previous burst has
+ * decayed, otherwise one more than it was. Expressed as SQL so the read and the
+ * write are the same atomic statement — a TypeScript branch would race a
+ * concurrent claim.
+ */
+export function sessionRecoveryAttemptsAfterClaim(decayCutoff: string) {
+  return sql`CASE
+    WHEN ${schema.sessionSnapshots.recoveryFailedAt} IS NOT NULL
+     AND ${schema.sessionSnapshots.recoveryFailedAt} <= ${decayCutoff}
+    THEN 1
+    ELSE ${schema.sessionSnapshots.recoveryAttempts} + 1
+  END`;
 }

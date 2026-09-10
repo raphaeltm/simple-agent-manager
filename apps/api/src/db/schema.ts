@@ -1497,10 +1497,14 @@ export const sessionSnapshots = sqliteTable(
     recoveryError: text('recovery_error'),
     recoveryClaimedAt: text('recovery_claimed_at'),
     /**
-     * When a wake attempt last reported failure. Written only by
-     * `failSessionSnapshotRecovery`, cleared by every path that resets
-     * `recoveryAttempts`. Drives the attempt-budget decay in
-     * `session-snapshot-recovery-budget.ts`.
+     * When a wake attempt last reported failure, as a canonical
+     * `toISOString()` value — the decay predicate compares it lexicographically
+     * against another `toISOString()` cutoff, so a non-canonical string would
+     * silently misbehave. Written by both writers of `recovery_status='failed'`
+     * (`failSessionSnapshotRecovery` and `failAndRestoreSessionRecoveryHandoff`,
+     * pinned by `session-snapshot-failed-writer-coverage.test.ts`), and cleared
+     * by every path that resets `recoveryAttempts`. Drives the attempt-budget
+     * decay in `session-snapshot-recovery-budget.ts`.
      */
     recoveryFailedAt: text('recovery_failed_at'),
     sleepStatus: text('sleep_status'),

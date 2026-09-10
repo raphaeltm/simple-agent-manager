@@ -46,12 +46,21 @@ and the burst budget behaved as a lifetime cap.
 Make the budget a **decaying burst budget**: `maxAttempts` failures per
 `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` window (default 15 min) instead of
 `maxAttempts` ever. `session_snapshots.expires_at` (7 days) remains the absolute
-escape path, and wakes are triggered by prompt delivery, so retries stay bounded
-by user action rather than by a sweep.
+escape path. Wakes are triggered by prompt delivery rather than by a sweep, but
+that is not the same as "bounded by user action": a single queued prompt retries
+itself up to `PROMPT_DELIVERY_MAX_ATTEMPTS` (5) with backoff, which is exactly
+how one user action produced three attempts in 34 minutes in the incident. The
+worst case is therefore `maxAttempts` per decay window for as long as something
+keeps addressing the session — see "Known tradeoff" below.
 
-- New column `session_snapshots.recovery_failed_at`, written only by
-  `failSessionSnapshotRecovery`, cleared by every path that resets
-  `recovery_attempts`.
+- New column `session_snapshots.recovery_failed_at`, written by **both** writers
+  of `recovery_status='failed'` — `failSessionSnapshotRecovery` and
+  `failAndRestoreSessionRecoveryHandoff` (the raw-SQL batch reached from
+  `ensureSessionRecovery`'s generic catch) — and cleared by every path that
+  resets `recovery_attempts`. The first cut of this fix maintained only the
+  former; review caught it, and
+  `session-snapshot-failed-writer-coverage.test.ts` now scans the source so the
+  pair cannot drift apart again.
 - New module `session-snapshot-recovery-budget.ts` holds the single definition,
   in both TypeScript and SQL, so no consumer can drift.
 - A claim taken under decay restarts the count at 1 and clears the anchor, so the
@@ -83,7 +92,33 @@ Every mirror of `recovery_attempts < maxAttempts` moved with the resumer:
 - [x] Discriminating tests, verified red on a surgical revert
 - [x] Migration backfill test (`.claude/rules/71`)
 - [x] Process fix: `.claude/rules/61` gains the exogenous-failure class
+- [x] Second writer of `recovery_status='failed'` fixed + machine-checked scan
+- [x] Operator-visible warn when a spent burst is restarted
+- [x] Local specialist review findings addressed
 - [ ] CI green
+
+## Known tradeoff (tracked, not fixed here)
+
+The decay bounds retry RATE, not aggregate spend, and nothing in the wake path
+classifies WHY a wake failed. A snapshot that is genuinely unrestorable
+(corrupt manifest, incompatible agent build) is now retried on the same terms as
+a transient placement error: up to `maxAttempts` real provisioning attempts per
+decay window, for as long as something keeps addressing the session, until
+`expires_at`. That is strictly better than the incident behaviour — which
+destroyed access to _restorable_ sessions — but it is a real change in cost
+exposure, so it is stated rather than buried.
+
+Two things bound it today: `expires_at`, and the fact that automatic retries stop
+once a queued prompt exhausts its own 5 delivery attempts. A new
+`session_recovery.attempt_budget_burst_restarted` warn makes a session that keeps
+restarting bursts visible to operators (`.claude/rules/47` §9).
+
+Deliberately NOT fixed by adding a lifetime burst cap: that would re-create the
+stranding bug at a higher threshold, which is precisely what
+`.claude/rules/61` now warns against. The right fix is failure classification —
+charge the budget only for failures that implicate the snapshot
+(`.claude/rules/72`) — which is a larger change than this incident fix should
+carry. Tracked as idea `01M24EJBYD9HZMFPXSJV2KZ0W5`.
 
 ## Post-mortem
 

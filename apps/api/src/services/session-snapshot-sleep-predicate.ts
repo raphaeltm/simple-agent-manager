@@ -43,11 +43,6 @@ export function sessionSleepInFlightMaxAgeMs(env: SleepPredicateEnv): number {
   );
 }
 
-/** @deprecated Prefer `sessionRecoveryMaxAttempts`; kept as the local spelling. */
-export function snapshotRecoveryMaxAttempts(env: SleepPredicateEnv): number {
-  return sessionRecoveryMaxAttempts(env);
-}
-
 export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
     throw new Error('Invalid SQL alias for sleep snapshot predicate');

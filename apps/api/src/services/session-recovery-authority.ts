@@ -281,14 +281,20 @@ export async function failAndRestoreSessionRecoveryHandoff(
       ),
     database
       .prepare(
+        // `recovery_failed_at` is the anchor the wake attempt budget decays from
+        // (`session-snapshot-recovery-budget.ts`). This is the SECOND writer of
+        // `recovery_status = 'failed'`; omitting it here would leave the anchor
+        // NULL, which the budget predicate deliberately fails closed on, and a
+        // session that failed three kickoffs through this path would be stranded
+        // exactly as the 2026-09-09 incident stranded four.
         `UPDATE session_snapshots
             SET recovery_status = 'failed', recovery_error = ?,
-                recovery_claimed_at = NULL, updated_at = ?
+                recovery_claimed_at = NULL, recovery_failed_at = ?, updated_at = ?
           WHERE chat_session_id = ?
             AND recovery_task_id = ?
             AND recovery_status = 'waking'`
       )
-      .bind(input.error, now, input.chatSessionId, input.recoveryTaskId),
+      .bind(input.error, now, now, input.chatSessionId, input.recoveryTaskId),
     database
       .prepare(
         `INSERT INTO task_status_events

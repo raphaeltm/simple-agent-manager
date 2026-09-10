@@ -201,9 +201,7 @@ export function isSessionResumable(
   snapshot: SessionResumabilitySnapshot | null,
   projectId: string,
   workspaceId: string,
-  maxRecoveryAttempts: number,
-  nowMs: number,
-  recoveryAttemptDecayMs: number
+  budget: { maxRecoveryAttempts: number; recoveryAttemptDecayMs: number; nowMs: number }
 ): boolean {
   if (!snapshot) return false;
   // Defence in depth: the loader is already project+workspace scoped, so these
@@ -228,9 +226,9 @@ export function isSessionResumable(
     !sessionRecoveryBudgetAvailable({
       recoveryAttempts: snapshot.recoveryAttempts,
       recoveryFailedAtMs: snapshot.recoveryFailedAtMs,
-      maxAttempts: maxRecoveryAttempts,
-      decayMs: recoveryAttemptDecayMs,
-      nowMs,
+      maxAttempts: budget.maxRecoveryAttempts,
+      decayMs: budget.recoveryAttemptDecayMs,
+      nowMs: budget.nowMs,
     })
   ) {
     return false;
@@ -238,7 +236,7 @@ export function isSessionResumable(
   // An absent or unparseable expiry is treated as NOT resumable so a snapshot
   // can never make a task immortal (`.claude/rules/47` bounded escape path).
   if (snapshot.expiresAtMs === null) return false;
-  return snapshot.expiresAtMs > nowMs;
+  return snapshot.expiresAtMs > budget.nowMs;
 }
 
 /**
@@ -409,14 +407,11 @@ export function classifyTaskRuntimeLiveness(
       });
     }
     if (
-      isSessionResumable(
-        signals.sessionResumability,
-        signals.projectId,
-        workspace.id,
-        signals.resumabilityMaxRecoveryAttempts,
-        signals.nowMs,
-        signals.resumabilityRecoveryAttemptDecayMs
-      )
+      isSessionResumable(signals.sessionResumability, signals.projectId, workspace.id, {
+        maxRecoveryAttempts: signals.resumabilityMaxRecoveryAttempts,
+        recoveryAttemptDecayMs: signals.resumabilityRecoveryAttemptDecayMs,
+        nowMs: signals.nowMs,
+      })
     ) {
       return result(workspace, {
         live: false,

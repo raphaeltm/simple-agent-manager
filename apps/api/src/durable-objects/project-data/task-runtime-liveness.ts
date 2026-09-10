@@ -215,9 +215,7 @@ export async function getLocalTaskRuntimeLiveness(
         sessionResumability,
         task.projectId,
         workspace.id,
-        maxRecoveryAttempts,
-        nowMs,
-        recoveryAttemptDecayMs
+        { maxRecoveryAttempts, recoveryAttemptDecayMs, nowMs }
       );
     } catch (err) {
       resumabilityProbeOutcome = 'error';
