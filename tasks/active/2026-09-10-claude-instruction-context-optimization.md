@@ -11,6 +11,7 @@ Claude sessions in SAM are loading too much repository instruction context. In t
 - Root `.claude/rules` has 72 markdown files totaling about 9,100 lines. The repo's doc-sync validator describes these as auto-loaded Claude Code behavioral rules.
 - Several app/package `AGENTS.md` files already summarize scoped rules, but those files do not reduce Claude's root `.claude/rules` load.
 - Existing path-scoped `AGENTS.md` files cover `apps/api`, `apps/web`, `apps/www`, `apps/tail-worker`, `packages/shared`, `packages/providers`, `packages/cloud-init`, `packages/acp-client`, `packages/terminal`, `packages/ui`, and `packages/vm-agent`.
+- External best-practice check after initial PR creation: OpenAI Codex docs recommend short practical `AGENTS.md`, nested/local guidance, and skills for progressive disclosure; Anthropic docs recommend deliberate compaction/context management, avoiding context bloat, and keeping skill references shallow.
 
 ## Implementation Checklist
 
@@ -20,6 +21,7 @@ Claude sessions in SAM are loading too much repository instruction context. In t
 - [x] Leave a compact root routing index for scoped rules.
 - [x] Consolidate overlapping root rule guidance where practical.
 - [x] Update task and workflow state as changes land.
+- [x] Add explicit context-loading policy to Claude and Codex steering docs.
 - [x] Run focused validation for markdown links, moved references, and git cleanliness.
 
 ## Implementation Notes
@@ -38,4 +40,5 @@ Claude sessions in SAM are loading too much repository instruction context. In t
 - Root `.claude/rules` line count is materially reduced while preserving the moved rule files.
 - Path-scoped rules exist under the app/package directory they apply to.
 - Root instructions explain where to find scoped rules without loading all of them.
+- Claude and Codex steering docs explicitly direct agents to load scoped instructions, skills, and exact references instead of bulk-reading broad context.
 - No references point to missing files after the move.
