@@ -10,7 +10,7 @@ Use this file as a compact Codex routing layer. `CLAUDE.md` remains Claude Code'
 - Use root `.claude/rules/*.md` as routing stubs. Read scoped `.claude/rules/` only beside the app/package you are changing.
 - Prefer Codex skills for large references: `$changelog`, `$api-reference`, `$env-reference`, `$doc-sync-validator`, `$task-completion-validator`, and domain specialists.
 - Search narrowly before opening long task archives, specs, docs folders, or historical rules. Read the exact files needed for the current decision.
-- Measure instruction surface with `pnpm quality:agent-context-budget` when changing Codex/Claude steering docs or scoped rule layout.
+- Measure instruction surface with `pnpm quality:agent-context-budget` when changing Codex/Claude steering docs or scoped rule layout. For Codex, verify active instruction files from a target path with `codex --cd <path> ...` or session logs.
 - Keep new standing guidance concise. If it needs examples, incidents, or long checklists, put those behind a scoped rule, skill, or reference file and link to it.
 - For long `/do` work, keep `.do-state.md` and the PR body current so compaction does not erase phase, reviewer, or CodeRabbit state.
 

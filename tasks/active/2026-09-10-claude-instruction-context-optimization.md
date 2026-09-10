@@ -23,14 +23,18 @@ Claude sessions in SAM are loading too much repository instruction context. In t
 - [x] Update task and workflow state as changes land.
 - [x] Add explicit context-loading policy to Claude and Codex steering docs.
 - [x] Run focused validation for markdown links, moved references, and git cleanliness.
+- [x] Add a measurement command for startup and scoped-rule instruction surfaces.
+- [x] Update `/do` command and Codex do skill text to route through selective scoped-rule loading.
 
 ## Implementation Notes
 
-- Root `CLAUDE.md` plus direct root `.claude/rules/*.md` dropped from 9,419 lines before the change to 2,712 lines after consolidation.
+- Root `CLAUDE.md` plus direct root `.claude/rules/*.md` dropped from 9,419 lines before the change to 2,823 lines after consolidation and follow-up context-loading policy.
 - Added `apps/*/.claude/rules/` and `packages/*/.claude/rules/` scoped copies for UI, API/DO/Cloudflare, VM agent, provider, cloud-init, shared model catalog, ACP client, terminal, UI package, and CLI rules.
 - Preserved the full historic quality-gate body at `.agent-instructions/reference/rules/02-quality-gates-full.md` and replaced root `02-quality-gates.md` with a compact summary.
 - Preserved full staging/debugging/cross-boundary testing rules in `.agent-instructions/reference/rules/*-full.md` and replaced the root copies with compact summaries.
 - Added `.claude/rules/00-rule-routing.md` to explain scoped rule locations.
+- Added `pnpm quality:agent-context-budget`, which measures Codex startup docs, Claude root surface, root rule stubs, `apps/api/AGENTS.md`, and worst-case API scoped-rule bulk loads. Latest measurement: `apps/api/AGENTS.md` is ~417-477 estimated tokens; bulk-loading all API scoped rules is ~52.9k-60.4k estimated tokens.
+- Updated `.claude/commands/do.md` and `.agents/skills/do/SKILL.md` so `/do` tells agents to use `00-rule-routing.md` and only load scoped rules for changed paths.
 - Moved detailed recent-change content from root `CLAUDE.md` into `.claude/skills/changelog/SKILL.md`.
 - Validation: checked 365 markdown files for missing `.claude` markdown references; none found.
 
@@ -42,3 +46,5 @@ Claude sessions in SAM are loading too much repository instruction context. In t
 - Root instructions explain where to find scoped rules without loading all of them.
 - Claude and Codex steering docs explicitly direct agents to load scoped instructions, skills, and exact references instead of bulk-reading broad context.
 - No references point to missing files after the move.
+- Agent context-budget changes are measurable with `pnpm quality:agent-context-budget`.
+- `/do` no longer instructs agents to bulk-read `.claude/rules/`.
