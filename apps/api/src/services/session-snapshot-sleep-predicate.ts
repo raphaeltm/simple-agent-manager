@@ -1,13 +1,19 @@
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
-import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from './session-snapshot-artifacts';
+import {
+  sessionRecoveryBudgetAvailableSql,
+  sessionRecoveryDecayCutoffIso,
+  sessionRecoveryMaxAttempts,
+} from './session-snapshot-recovery-budget';
 
 export const DEFAULT_SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS = 30 * 60 * 1000;
 export const MAX_SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 type SleepPredicateEnv = Pick<
   Env,
-  'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS' | 'SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS'
+  | 'SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS'
+  | 'SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS'
+  | 'SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS'
 >;
 
 export interface SleepLifecyclePredicateResult {
@@ -37,11 +43,9 @@ export function sessionSleepInFlightMaxAgeMs(env: SleepPredicateEnv): number {
   );
 }
 
+/** @deprecated Prefer `sessionRecoveryMaxAttempts`; kept as the local spelling. */
 export function snapshotRecoveryMaxAttempts(env: SleepPredicateEnv): number {
-  return parsePositiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
+  return sessionRecoveryMaxAttempts(env);
 }
 
 export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'): string {
@@ -54,7 +58,7 @@ export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'
       ${s}.sleeping_at IS NOT NULL
       AND ${s}.sleep_status = 'sleeping'
       AND ${s}.expires_at > ?
-      AND ${s}.recovery_attempts < ?
+      AND ${sessionRecoveryBudgetAvailableSql(s)}
       AND (
         (${s}.status = 'available' AND ${s}.degradation = 'none')
         OR (${s}.status = 'degraded' AND ${s}.degradation IS NOT NULL AND ${s}.degradation != 'none')
@@ -91,10 +95,17 @@ export function restorableOrInFlightSleepSnapshotPredicateSql(alias = 'snapshot'
 export function sleepLifecyclePredicateBindings(
   env: SleepPredicateEnv,
   now: Date
-): [string, number, string, string, number] {
-  const maxAttempts = snapshotRecoveryMaxAttempts(env);
+): [string, number, string, string, string, number] {
+  const maxAttempts = sessionRecoveryMaxAttempts(env);
   const inFlightCeiling = new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString();
-  return [now.toISOString(), maxAttempts, inFlightCeiling, inFlightCeiling, maxAttempts];
+  return [
+    now.toISOString(),
+    maxAttempts,
+    sessionRecoveryDecayCutoffIso(env, now.getTime()),
+    inFlightCeiling,
+    inFlightCeiling,
+    maxAttempts,
+  ];
 }
 
 export async function findRestorableOrInFlightSleepSnapshot(

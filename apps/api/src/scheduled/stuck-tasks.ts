@@ -42,11 +42,13 @@ const DEFAULT_INSTANT_START_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 import type { TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
-import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
+import {
+  sessionRecoveryAttemptDecayMs,
+  sessionRecoveryMaxAttempts,
+} from '../services/session-snapshot-recovery-budget';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
@@ -489,10 +491,8 @@ export async function getTaskRuntimeLiveness(
   // dead, so the sweep pays one extra point lookup only when it is about to
   // terminalize a task (`.claude/rules/47`).
   const nowMs = Date.now();
-  const maxRecoveryAttempts = parsePositiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
+  const maxRecoveryAttempts = sessionRecoveryMaxAttempts(env);
+  const recoveryAttemptDecayMs = sessionRecoveryAttemptDecayMs(env);
   let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
   let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
   /** True when resumability alone already yields an inconclusive verdict. */
@@ -511,7 +511,8 @@ export async function getTaskRuntimeLiveness(
         task.project_id,
         workspace.id,
         maxRecoveryAttempts,
-        nowMs
+        nowMs,
+        recoveryAttemptDecayMs
       );
     } catch (err) {
       resumabilityProbeOutcome = 'error';
@@ -566,6 +567,7 @@ export async function getTaskRuntimeLiveness(
     resumabilityProbeOutcome,
     sessionResumability,
     resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
+    resumabilityRecoveryAttemptDecayMs: recoveryAttemptDecayMs,
   };
   let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
   if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {

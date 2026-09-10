@@ -355,6 +355,7 @@ async function markSessionSnapshotSleepingWithConfig(
       recoveryStatus: null,
       recoveryError: null,
       recoveryAttempts: 0,
+      recoveryFailedAt: null,
       sleepStatus: 'sleeping',
       sleepAfter: null,
       sleepError: warning,

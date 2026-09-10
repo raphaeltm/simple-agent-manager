@@ -10,7 +10,10 @@ import {
   getFreshHarnessWorkLeaseExpiry,
   parseHarnessWorkConfig,
 } from '../../services/session-idleness';
-import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../../services/session-snapshot-artifacts';
+import {
+  sessionRecoveryAttemptDecayMs,
+  sessionRecoveryMaxAttempts,
+} from '../../services/session-snapshot-recovery-budget';
 import {
   classifyTaskRuntimeLiveness,
   isSessionResumable,
@@ -191,10 +194,8 @@ export async function getLocalTaskRuntimeLiveness(
   // Only probed for a workspace that would otherwise be declared conclusively
   // dead, keeping this off the alarm's hot path (`.claude/rules/47`).
   const nowMs = Date.now();
-  const maxRecoveryAttempts = positiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
+  const maxRecoveryAttempts = sessionRecoveryMaxAttempts(env);
+  const recoveryAttemptDecayMs = sessionRecoveryAttemptDecayMs(env);
   let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
   let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
   /** True when resumability alone already yields an inconclusive verdict. */
@@ -215,7 +216,8 @@ export async function getLocalTaskRuntimeLiveness(
         task.projectId,
         workspace.id,
         maxRecoveryAttempts,
-        nowMs
+        nowMs,
+        recoveryAttemptDecayMs
       );
     } catch (err) {
       resumabilityProbeOutcome = 'error';
@@ -273,6 +275,7 @@ export async function getLocalTaskRuntimeLiveness(
     resumabilityProbeOutcome,
     sessionResumability,
     resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
+    resumabilityRecoveryAttemptDecayMs: recoveryAttemptDecayMs,
   };
   let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
   if (!workspaceChatMatches) return initialClassification;

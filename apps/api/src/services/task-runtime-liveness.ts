@@ -7,6 +7,7 @@ import {
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
 import { isRestorableSnapshot } from './session-snapshot-artifacts';
+import { sessionRecoveryBudgetAvailable } from './session-snapshot-recovery-budget';
 import type {
   RuntimeWorkspaceSnapshot,
   SessionResumabilitySnapshot,
@@ -201,7 +202,8 @@ export function isSessionResumable(
   projectId: string,
   workspaceId: string,
   maxRecoveryAttempts: number,
-  nowMs: number
+  nowMs: number,
+  recoveryAttemptDecayMs: number
 ): boolean {
   if (!snapshot) return false;
   // Defence in depth: the loader is already project+workspace scoped, so these
@@ -215,10 +217,24 @@ export function isSessionResumable(
   if (snapshot.sleepStatus !== RESUMABLE_SLEEP_STATUS) return false;
   // Mirrors `restorableSnapshotCondition()` in the claim's WHERE clause.
   if (!isRestorableSnapshot(snapshot.status, snapshot.degradation)) return false;
-  // Mirrors `recovery_attempts < maxAttempts`. Once wake attempts are spent the
-  // resumer refuses the claim, so preserving the task would strand it until the
-  // snapshot TTL — the second bounded escape (`.claude/rules/47`).
-  if (snapshot.recoveryAttempts >= maxRecoveryAttempts) return false;
+  // Mirrors the resumer's attempt budget exactly, decay included
+  // (`session-snapshot-recovery-budget.ts`). A budget that is merely spent is NOT
+  // conclusive: the resumer will release it once the last clean failure ages past
+  // the decay window, so declaring the task dead here would destroy a session the
+  // resumer can still wake (`.claude/rules/58`). Only a budget that is spent AND
+  // undecayed refuses the claim, at which point preserving the task would strand
+  // it until the snapshot TTL — the second bounded escape (`.claude/rules/47`).
+  if (
+    !sessionRecoveryBudgetAvailable({
+      recoveryAttempts: snapshot.recoveryAttempts,
+      recoveryFailedAtMs: snapshot.recoveryFailedAtMs,
+      maxAttempts: maxRecoveryAttempts,
+      decayMs: recoveryAttemptDecayMs,
+      nowMs,
+    })
+  ) {
+    return false;
+  }
   // An absent or unparseable expiry is treated as NOT resumable so a snapshot
   // can never make a task immortal (`.claude/rules/47` bounded escape path).
   if (snapshot.expiresAtMs === null) return false;
@@ -398,7 +414,8 @@ export function classifyTaskRuntimeLiveness(
         signals.projectId,
         workspace.id,
         signals.resumabilityMaxRecoveryAttempts,
-        signals.nowMs
+        signals.nowMs,
+        signals.resumabilityRecoveryAttemptDecayMs
       )
     ) {
       return result(workspace, {
@@ -725,7 +742,7 @@ export async function loadSessionResumabilitySnapshot(
   const row = await db
     .prepare(
       `SELECT chat_session_id, project_id, workspace_id, sleeping_at, sleep_status, expires_at,
-            status, degradation, recovery_attempts
+            status, degradation, recovery_attempts, recovery_failed_at
      FROM session_snapshots
      WHERE chat_session_id = ? AND project_id = ? AND workspace_id = ?
      LIMIT 1`
@@ -741,6 +758,7 @@ export async function loadSessionResumabilitySnapshot(
       status: string | null;
       degradation: string | null;
       recovery_attempts: number | null;
+      recovery_failed_at: string | null;
     }>();
   if (!row) return null;
 
@@ -756,5 +774,6 @@ export async function loadSessionResumabilitySnapshot(
     // NOT NULL DEFAULT 0 in schema; coalesce defensively so a null can never
     // read as "attempts remaining" via NaN comparison.
     recoveryAttempts: row.recovery_attempts ?? 0,
+    recoveryFailedAtMs: parseTimestamp(row.recovery_failed_at),
   };
 }
