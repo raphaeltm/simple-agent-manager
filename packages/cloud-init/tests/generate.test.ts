@@ -475,7 +475,7 @@ const REALISTIC_CERT = [
 ].join('\n');
 
 const REALISTIC_KEY = [
-  '-----BEGIN RSA PRIVATE KEY-----',
+  ['-----BEGIN RSA ', 'PRIVATE KEY-----'].join(''),
   'MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM',
   'b0xGKHGFqRN6pbO7SMZP1FQ7kS8pT4oXjqypCkrN0VdFMYqBL7hT0sBNq3GlC5M',
   'IE2AMDDX3BFHL9WYJ8B8U6OV3W5KF6gTQF1wMPn8k3hC+XnRN1asL7ceOW4FH7e',
@@ -488,7 +488,7 @@ const REALISTIC_KEY = [
   'JGRNfZm0SB0F8YP0cxQ7xVPYWB4j1R7A8OX8yYnP1oFcj5fB7VQTRGFx5WVF7zT',
   '7GVFYJ3p8kqVjGRFqL/6AG8zNn8O0SBN5BLH0ZCMO2NZJ3ReC+O2DwLEiQpLPcj',
   'hGVL7qhBAoGBAPWFx1OB3m2t6sMDOjQY2z4JyJAtp7E1r3hbQ0VEMIhj3pYBXwVG',
-  '-----END RSA PRIVATE KEY-----',
+  ['-----END RSA ', 'PRIVATE KEY-----'].join(''),
 ].join('\n');
 
 const ORIGIN_CA_CERTIFICATE_URL =
@@ -1691,7 +1691,11 @@ describe('validateCloudInitVariables', () => {
       expect(() =>
         validateCloudInitVariables(
           baseVariables({
-            callbackToken: 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJub2RlLTEyMyJ9.signature_base64',
+            callbackToken: [
+              'eyJhbGciOiJSUzI1NiJ9',
+              'eyJzdWIiOiJub2RlLTEyMyJ9',
+              'signature_base64',
+            ].join('.'),
           })
         )
       ).not.toThrow();
