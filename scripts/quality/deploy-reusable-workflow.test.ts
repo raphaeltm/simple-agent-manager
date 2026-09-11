@@ -135,7 +135,10 @@ function runWorkersDevSubdomainStep(httpCode: number): { output: string; status:
   }
 }
 
-function runVmAgentArtifactPublication(mode: 'identical' | 'mismatch' | 'missing' | 'error'): {
+function runVmAgentArtifactPublication(
+  mode: 'identical' | 'mismatch' | 'missing' | 'error',
+  legacyMode = mode
+): {
   output: string;
   puts: string[];
   status: number;
@@ -160,7 +163,11 @@ object_path="\${8:?}"
 file_path="\${10:?}"
 architecture="\${object_path##*-}"
 if [ "$operation" = "get" ]; then
-  case "$SAM_FAKE_R2_MODE" in
+  mode="$SAM_FAKE_R2_MODE"
+  if [[ "$object_path" != */agents/releases/* ]]; then
+    mode="$SAM_FAKE_R2_LEGACY_MODE"
+  fi
+  case "$mode" in
     identical) cp "$SAM_FAKE_SOURCE_DIR/vm-agent-linux-$architecture" "$file_path" ;;
     mismatch) printf 'different-bytes' > "$file_path" ;;
     missing) echo 'The specified key does not exist.' >&2; exit 1 ;;
@@ -188,6 +195,7 @@ exit 64
         GITHUB_WORKSPACE: workspace,
         RUNNER_TEMP: tmp,
         SAM_FAKE_R2_MODE: mode,
+        SAM_FAKE_R2_LEGACY_MODE: legacyMode,
         SAM_FAKE_SOURCE_DIR: sourceDir,
         SAM_FAKE_PUT_LOG: putLog,
       },
@@ -474,12 +482,22 @@ describe('deploy reusable workflow', () => {
   });
 
   it('publishes established Worker code only after the single secret revision', () => {
+    const firstDeploy = stepBlock('Check First Deploy Status');
     const bootstrap = stepBlock('Bootstrap API Worker');
     const tailConsumerRedeploy = stepBlock('Re-deploy API Worker \\(with tail_consumers\\)');
     const configureSecretsIndex = workflow.indexOf('- name: Configure Worker Secrets');
     const deployIndex = workflow.indexOf('- name: Deploy API Worker');
 
     expect(bootstrap).toContain("steps.first_deploy.outputs.is_first == 'true'");
+    expect(firstDeploy).toMatch(
+      /if \[ -f \.wrangler\/api-worker-first-deploy \]; then\s+echo "is_first=true"/
+    );
+    expect(firstDeploy).toMatch(
+      /if \[ -f \.wrangler\/tail-worker-first-deploy \]; then\s+echo "needs_tail_sync=true"/
+    );
+    expect(stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)')).toContain(
+      "steps.first_deploy.outputs.needs_tail_sync == 'true'"
+    );
     expect(tailConsumerRedeploy).toContain("steps.first_deploy.outputs.is_first == 'true'");
     expect(configureSecretsIndex).toBeGreaterThan(-1);
     expect(deployIndex).toBeGreaterThan(configureSecretsIndex);
@@ -670,7 +688,34 @@ describe('deploy reusable workflow', () => {
     expect(result.puts).toEqual([
       `test-assets/agents/releases/${'a'.repeat(40)}/vm-agent-linux-amd64`,
       `test-assets/agents/releases/${'a'.repeat(40)}/vm-agent-linux-arm64`,
+      'test-assets/agents/vm-agent-linux-amd64',
+      'test-assets/agents/vm-agent-linux-arm64',
     ]);
+  });
+
+  it('seeds missing legacy downloads when immutable artifacts already exist', () => {
+    const result = runVmAgentArtifactPublication('identical', 'missing');
+
+    expect(result.status).toBe(0);
+    expect(result.puts).toEqual([
+      'test-assets/agents/vm-agent-linux-amd64',
+      'test-assets/agents/vm-agent-linux-arm64',
+    ]);
+  });
+
+  it('preserves different existing legacy bytes for callers on the prior Worker', () => {
+    const result = runVmAgentArtifactPublication('identical', 'mismatch');
+
+    expect(result.status).toBe(0);
+    expect(result.puts).toEqual([]);
+    expect(result.output.match(/Preserving existing legacy VM-agent artifact/g)).toHaveLength(2);
+  });
+
+  it('refuses to initialize legacy downloads after an ambiguous read failure', () => {
+    const result = runVmAgentArtifactPublication('identical', 'error');
+
+    expect(result.status).toBe(1);
+    expect(result.puts).toEqual([]);
   });
 
   it('continues deployment when workers.dev subdomain setup succeeds', () => {
