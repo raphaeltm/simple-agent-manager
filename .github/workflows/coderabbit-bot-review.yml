@@ -6,27 +6,59 @@ on:
       - labeled
       - ready_for_review
       - reopened
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to request a CodeRabbit review for
+        required: true
+        type: number
 
 permissions: {}
 
 concurrency:
-  group: coderabbit-bot-review-${{ github.event.pull_request.number }}
+  group: coderabbit-review-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
   request-review:
     name: Request CodeRabbit review
     if: >-
-      github.event.pull_request.user.login == 'simple-agent-manager[bot]' &&
-      github.event.pull_request.draft == false &&
-      contains(github.event.pull_request.labels.*.name, 'coderabbit-review') &&
-      (github.event.action != 'labeled' || github.event.label.name == 'coderabbit-review')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.user.login == 'simple-agent-manager[bot]' &&
+       github.event.pull_request.draft == false &&
+       contains(github.event.pull_request.labels.*.name, 'coderabbit-review') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'coderabbit-review'))
     runs-on: ubuntu-24.04
-    permissions:
-      pull-requests: write
     steps:
-      - name: Ask CodeRabbit to review
+      - name: Resolve pull request
+        id: pr
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr comment "$PR_URL" --body '@coderabbitai review'
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            pr_number="$INPUT_PR_NUMBER"
+          else
+            pr_number="$EVENT_PR_NUMBER"
+          fi
+
+          gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json number,state --jq '
+            if .state != "OPEN" then error("PR is not open") else .number end
+          ' >/dev/null
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Ask CodeRabbit to review as Raphaël
+        env:
+          # Fine-grained PAT scoped to this repository. The PAT's human identity is
+          # intentional: CodeRabbit ignores review commands authored by GitHub Apps.
+          GH_TOKEN: ${{ secrets.CODERABBIT_REVIEW_PAT }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::CODERABBIT_REVIEW_PAT is not configured"
+            exit 1
+          fi
+
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body '@coderabbitai review'
