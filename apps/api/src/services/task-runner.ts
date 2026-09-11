@@ -282,7 +282,6 @@ async function cleanupAutoProvisionedNode(
   try {
     await nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs);
     log.info('task_run.cleanup.node_marked_warm', { nodeId, userId, warmTimeoutOverrideMs });
-    await wakeVmAdmissionWaiters(env, { userId, reason: 'node_marked_warm' });
   } catch (err) {
     log.error('task_run.cleanup.mark_idle_failed', {
       nodeId,
@@ -303,6 +302,17 @@ async function cleanupAutoProvisionedNode(
         stopError: stopErr instanceof Error ? stopErr.message : String(stopErr),
       });
     }
+    return;
+  }
+
+  try {
+    await wakeVmAdmissionWaiters(env, { userId, reason: 'node_marked_warm' });
+  } catch (err) {
+    log.warn('task_run.cleanup.admission_wake_failed', {
+      nodeId,
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
