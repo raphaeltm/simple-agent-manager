@@ -139,8 +139,9 @@ continents, each D1 round trip costs a wide-area hop, and a single API request i
 queries in sequence — which is where the latency of a request like `GET /api/projects/:id/tasks`
 came from, not from the database itself.
 
-Deployments therefore enable D1 **read replication** (`read_replication.mode = "auto"`, applied
-idempotently by `scripts/deploy/configure-d1-read-replication.sh`) and the Worker `fetch` handler
+Deployments therefore enable D1 **read replication** by default (`read_replication.mode = "auto"`,
+applied idempotently by `scripts/deploy/configure-d1-read-replication.sh`; an operator can set
+`D1_READ_REPLICATION_MODE=disabled` to remove replicas) and the Worker `fetch` handler
 runs every request against a single D1 **session** per database
 (`apps/api/src/lib/d1-session.ts`, `withRequestScopedD1Bindings`). The session is anchored
 `first-primary`: its first query goes to the primary, and every later query in that request may

@@ -183,11 +183,17 @@ test.describe('staging: request-scoped D1 sessions do not change what the API re
       data: { title },
       headers: { 'Content-Type': 'application/json' },
     });
-    expect(created.status(), await created.text()).toBe(201);
-    const task = (await created.json()) as { id: string; title: string };
-    expect(task.title).toBe(title);
-
+    /*
+     * Everything after the POST lives inside the cleanup guard, including the assertions on
+     * the create response itself. An assertion that throws before `finally` is entered leaks
+     * the row it just created into shared staging (`.claude/rules/13` — delete what you make).
+     */
+    let task: { id: string; title: string } | undefined;
     try {
+      expect(created.status(), await created.text()).toBe(201);
+      task = (await created.json()) as { id: string; title: string };
+      expect(task.title).toBe(title);
+
       const listed = await page.request.get(
         `${STAGING_API}/api/projects/${projectId}/tasks?limit=100`
       );
@@ -203,11 +209,15 @@ test.describe('staging: request-scoped D1 sessions do not change what the API re
       );
       expect(detail.status(), await detail.text()).toBe(200);
     } finally {
-      // Clean up the resource this verification created (`.claude/rules/13`).
-      const deleted = await page.request.delete(
-        `${STAGING_API}/api/projects/${projectId}/tasks/${task.id}`
-      );
-      expect([200, 204]).toContain(deleted.status());
+      // Clean up the resource this verification created (`.claude/rules/13`). Guarded: if the
+      // POST itself failed there is nothing to delete, and an unguarded delete would replace
+      // the real failure with a TypeError.
+      if (task) {
+        const deleted = await page.request.delete(
+          `${STAGING_API}/api/projects/${projectId}/tasks/${task.id}`
+        );
+        expect([200, 204]).toContain(deleted.status());
+      }
     }
   });
 

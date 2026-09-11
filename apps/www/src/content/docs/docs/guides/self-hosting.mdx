@@ -176,8 +176,8 @@ installations must add this policy before their next production deployment.
 | `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
 | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
 
-Each deploy enables D1 read replication (`read_replication.mode = "auto"`) on the main and
-observability databases, and the API Worker runs each request against a single D1 session so its
+By default, each deploy enables D1 read replication (`read_replication.mode = "auto"`) on the
+main and observability databases, and the API Worker runs each request against a single D1 session so its
 queries after the first can be served by a nearby replica instead of crossing to the primary
 region. This is safe by construction: the session is anchored `first-primary`, so a request never
 sees data older than its own start and cannot miss a write that completed before it began, and

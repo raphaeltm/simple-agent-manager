@@ -57,12 +57,16 @@ fi
 
 API_BASE="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database"
 
+# Bounded on both ends so a connection that opens but never answers cannot hang the deploy
+# until the workflow-level timeout. Applied to every Cloudflare call in this script.
+CURL_OPTIONS=(--silent --show-error --connect-timeout 10 --max-time 60)
+
 # Extract read_replication.mode from a Cloudflare API envelope without needing jq's presence
 # to be assumed; jq is available on GitHub runners and in the devcontainer.
 read_current_mode() {
   local database_id="$1"
   local response
-  response=$(curl -s -H "Authorization: Bearer ${CF_API_TOKEN}" "${API_BASE}/${database_id}")
+  response=$(curl "${CURL_OPTIONS[@]}" -H "Authorization: Bearer ${CF_API_TOKEN}" "${API_BASE}/${database_id}")
   if [[ "$(printf '%s' "$response" | jq -r '.success // false')" != "true" ]]; then
     # stderr, not stdout: this function runs inside a command substitution, so anything on
     # stdout is captured as the mode instead of surfacing as a deploy annotation.
@@ -99,7 +103,7 @@ for DATABASE_ID in ${D1_DATABASE_IDS}; do
   fi
 
   echo "D1 ${DATABASE_ID}: read replication '${CURRENT}' -> '${MODE}'"
-  STATUS=$(curl -s -o /tmp/d1-read-replication-response.json -w "%{http_code}" \
+  STATUS=$(curl "${CURL_OPTIONS[@]}" -o /tmp/d1-read-replication-response.json -w "%{http_code}" \
     -X PUT "${API_BASE}/${DATABASE_ID}" \
     -H "Authorization: Bearer ${CF_API_TOKEN}" \
     -H "Content-Type: application/json" \
