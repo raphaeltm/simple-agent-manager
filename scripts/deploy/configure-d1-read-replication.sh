@@ -38,20 +38,20 @@ NC='\033[0m'
 
 MODE="${D1_READ_REPLICATION_MODE:-auto}"
 
-if [ "$MODE" != "auto" ] && [ "$MODE" != "disabled" ]; then
-  echo "::error::D1_READ_REPLICATION_MODE must be 'auto' or 'disabled' (got '${MODE}')"
+if [[ "$MODE" != "auto" ]] && [[ "$MODE" != "disabled" ]]; then
+  echo "::error::D1_READ_REPLICATION_MODE must be 'auto' or 'disabled' (got '${MODE}')" >&2
   exit 1
 fi
 
 MISSING=""
 for VAR in CF_API_TOKEN CF_ACCOUNT_ID D1_DATABASE_IDS; do
-  if [ -z "${!VAR:-}" ]; then
+  if [[ -z "${!VAR:-}" ]]; then
     MISSING="$MISSING $VAR"
   fi
 done
 
-if [ -n "$MISSING" ]; then
-  echo "::error::D1 read replication configuration failed — missing required env vars:${MISSING}."
+if [[ -n "$MISSING" ]]; then
+  echo "::error::D1 read replication configuration failed — missing required env vars:${MISSING}." >&2
   exit 1
 fi
 
@@ -63,7 +63,7 @@ read_current_mode() {
   local database_id="$1"
   local response
   response=$(curl -s -H "Authorization: Bearer ${CF_API_TOKEN}" "${API_BASE}/${database_id}")
-  if [ "$(printf '%s' "$response" | jq -r '.success // false')" != "true" ]; then
+  if [[ "$(printf '%s' "$response" | jq -r '.success // false')" != "true" ]]; then
     # stderr, not stdout: this function runs inside a command substitution, so anything on
     # stdout is captured as the mode instead of surfacing as a deploy annotation.
     echo "::error::Failed to read D1 database ${database_id}: $(printf '%s' "$response" | jq -c '.errors // .' 2>/dev/null || printf '%s' "$response")" >&2
@@ -78,14 +78,14 @@ read_current_mode() {
 DATABASE_COUNT=0
 for DATABASE_ID in ${D1_DATABASE_IDS}; do
   if ! printf '%s' "$DATABASE_ID" | grep -Eq '^[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$'; then
-    echo "::error::Refusing to configure D1 read replication — '${DATABASE_ID}' is not a database UUID"
+    echo "::error::Refusing to configure D1 read replication — '${DATABASE_ID}' is not a database UUID" >&2
     exit 1
   fi
   DATABASE_COUNT=$((DATABASE_COUNT + 1))
 done
 
-if [ "$DATABASE_COUNT" -eq 0 ]; then
-  echo "::error::D1_DATABASE_IDS resolved to no database IDs"
+if [[ "$DATABASE_COUNT" -eq 0 ]]; then
+  echo "::error::D1_DATABASE_IDS resolved to no database IDs" >&2
   exit 1
 fi
 
@@ -93,7 +93,7 @@ CHANGED=0
 for DATABASE_ID in ${D1_DATABASE_IDS}; do
   CURRENT=$(read_current_mode "$DATABASE_ID")
 
-  if [ "$CURRENT" = "$MODE" ]; then
+  if [[ "$CURRENT" = "$MODE" ]]; then
     echo "D1 ${DATABASE_ID}: read replication already '${MODE}' — skipping"
     continue
   fi
@@ -108,8 +108,8 @@ for DATABASE_ID in ${D1_DATABASE_IDS}; do
   BODY=$(cat /tmp/d1-read-replication-response.json 2>/dev/null || echo "(empty)")
   rm -f /tmp/d1-read-replication-response.json
 
-  if [ "$STATUS" -lt 200 ] || [ "$STATUS" -ge 300 ]; then
-    echo "::error::Failed to set D1 read replication on ${DATABASE_ID} (HTTP ${STATUS})"
+  if [[ "$STATUS" -lt 200 ]] || [[ "$STATUS" -ge 300 ]]; then
+    echo "::error::Failed to set D1 read replication on ${DATABASE_ID} (HTTP ${STATUS})" >&2
     echo "Response: ${BODY}"
     exit 1
   fi
@@ -117,8 +117,8 @@ for DATABASE_ID in ${D1_DATABASE_IDS}; do
   # Verify the DEPLOYED value rather than trusting the write
   # (`.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`).
   APPLIED=$(printf '%s' "$BODY" | jq -r '.result.read_replication.mode // "unknown"')
-  if [ "$APPLIED" != "$MODE" ]; then
-    echo "::error::D1 ${DATABASE_ID} reported read replication '${APPLIED}' after requesting '${MODE}'"
+  if [[ "$APPLIED" != "$MODE" ]]; then
+    echo "::error::D1 ${DATABASE_ID} reported read replication '${APPLIED}' after requesting '${MODE}'" >&2
     exit 1
   fi
 
