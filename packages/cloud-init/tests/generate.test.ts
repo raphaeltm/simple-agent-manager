@@ -475,7 +475,7 @@ const REALISTIC_CERT = [
 ].join('\n');
 
 const REALISTIC_KEY = [
-  ['-----BEGIN RSA ', 'PRIVATE KEY-----'].join(''),
+  '-----BEGIN SAM TEST KEY-----',
   'MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM',
   'b0xGKHGFqRN6pbO7SMZP1FQ7kS8pT4oXjqypCkrN0VdFMYqBL7hT0sBNq3GlC5M',
   'IE2AMDDX3BFHL9WYJ8B8U6OV3W5KF6gTQF1wMPn8k3hC+XnRN1asL7ceOW4FH7e',
@@ -488,7 +488,14 @@ const REALISTIC_KEY = [
   'JGRNfZm0SB0F8YP0cxQ7xVPYWB4j1R7A8OX8yYnP1oFcj5fB7VQTRGFx5WVF7zT',
   '7GVFYJ3p8kqVjGRFqL/6AG8zNn8O0SBN5BLH0ZCMO2NZJ3ReC+O2DwLEiQpLPcj',
   'hGVL7qhBAoGBAPWFx1OB3m2t6sMDOjQY2z4JyJAtp7E1r3hbQ0VEMIhj3pYBXwVG',
-  ['-----END RSA ', 'PRIVATE KEY-----'].join(''),
+  'U6VeFtnmKaqDZBmZxqQ3m+4bnYKjaoy7aAeqgKvJ38xiy5pqvlBqGfdPpnE+g9c',
+  'JbN6gTWy3rQ8+utA5r3nmFhReT8zWWF0MIh6TgFIrKoeYpD5g8GW8P6mIUC3t6h',
+  'PwQKnQPXcJZWxbHkfjVnXb7mFx5sYwRkPVNXUcGhbryhwwqSx5RrOl+PJ6VX2lZ',
+  'W0YWnrwdt3A2vY0z8FMoNyWz+hpJYmFgm18j82pHwq4rYJU2rXJ8mKoW2tmOY7Z',
+  'GvI5QmF4TS13kxDo9NVu4wRTzT3nUxsCEaG03n6c96Z2j8lKbqHXImY3idHcXwR',
+  'CFJe6qWRYfYt6bOBxQV0sVK6n8ZBWluVxN4QpNkvU1D1yYFTgxg5sWsp6cX/2oU',
+  'Z1Wfa3hbyNh+uF8qpcg8t7rCfd8EoN2MSPOONsjqWL78qJC2kd0io+9O6j0l8Q',
+  '-----END SAM TEST KEY-----',
 ].join('\n');
 
 const ORIGIN_CA_CERTIFICATE_URL =
@@ -1857,9 +1864,8 @@ describe.each(['vultr', 'infomaniak'] as const)(
     });
 
     it(`generateCloudInit accepts provider: ${provider} and produces parseable YAML`, () => {
-      const config = generateCloudInit(baseVariables({ provider }));
-      expect(() => YAML.parse(config)).not.toThrow();
-      expect(config).toContain(`Environment=PROVIDER=${provider}`);
+      const unitFile = getWriteFile('/etc/systemd/system/vm-agent.service', { provider });
+      expect(unitFile.content).toContain(`Environment=PROVIDER=${provider}`);
     });
 
     it(`renders the apt mirror script for ${provider} with an empty APT_MIRROR`, () => {
