@@ -34,6 +34,10 @@ interface AgentReleaseRepo {
   directory: string;
   firstAgentCommit: string;
   latestAgentCommit: string;
+  /** Touches `packages/vm-agent/.claude/`, which cannot change the binary. */
+  agentDocsCommit: string;
+  /** Touches only `*_test.go`, which is never linked into a non-test build. */
+  agentTestOnlyCommit: string;
   /** HEAD. A Worker-only deploy is the case that used to evict the whole pool. */
   workerOnlyCommit: string;
 }
@@ -45,10 +49,21 @@ interface AgentReleaseRepo {
  */
 function createAgentReleaseRepo(): AgentReleaseRepo {
   const directory = mkdtempSync(join(tmpdir(), 'sam-agent-release-'));
+  try {
+    return buildAgentReleaseRepo(directory);
+  } catch (error) {
+    // Setup runs outside every caller's try/finally, so a throw here would leak
+    // the temp directory.
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function buildAgentReleaseRepo(directory: string): AgentReleaseRepo {
   const git = (...args: string[]): string =>
     execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
 
-  git('init');
+  git('-c', 'init.defaultBranch=main', 'init', '-q');
   git('config', 'user.email', 'test@example.com');
   git('config', 'user.name', 'SAM Test');
 
@@ -70,12 +85,44 @@ function createAgentReleaseRepo(): AgentReleaseRepo {
   git('commit', '-m', 'agent v2');
   const latestAgentCommit = git('rev-parse', 'HEAD');
 
+  // A rule/doc commit INSIDE packages/vm-agent. `.claude/rules/02` mandates a rule
+  // update on every bug fix and those rules are co-located with the agent, so this
+  // is the common case, not an edge case.
+  mkdirSync(join(directory, 'packages', 'vm-agent', '.claude', 'rules'), { recursive: true });
+  writeFileSync(
+    join(directory, 'packages', 'vm-agent', '.claude', 'rules', '54-rollout.md'),
+    '# rollout rule\n'
+  );
+  git('add', '.');
+  git('commit', '-m', 'docs inside the agent directory');
+  const agentDocsCommit = git('rev-parse', 'HEAD');
+
+  // Test files are never linked into a non-test Go build. Both a top-level and a
+  // NESTED file, because the two are matched by different pathspec patterns and a
+  // change to either would otherwise break silently.
+  writeFileSync(join(directory, 'packages', 'vm-agent', 'main_test.go'), 'package main // t1\n');
+  mkdirSync(join(directory, 'packages', 'vm-agent', 'internal', 'acp'), { recursive: true });
+  writeFileSync(
+    join(directory, 'packages', 'vm-agent', 'internal', 'acp', 'host_test.go'),
+    'package acp // t1\n'
+  );
+  git('add', '.');
+  git('commit', '-m', 'agent tests only');
+  const agentTestOnlyCommit = git('rev-parse', 'HEAD');
+
   writeFileSync(join(directory, 'apps', 'api', 'index.ts'), 'export const x = 1;\n');
   git('add', '.');
   git('commit', '-m', 'worker only');
   const workerOnlyCommit = git('rev-parse', 'HEAD');
 
-  return { directory, firstAgentCommit, latestAgentCommit, workerOnlyCommit };
+  return {
+    directory,
+    firstAgentCommit,
+    latestAgentCommit,
+    agentDocsCommit,
+    agentTestOnlyCommit,
+    workerOnlyCommit,
+  };
 }
 
 function runReleaseResolver(
@@ -391,6 +438,24 @@ describe('deploy reusable workflow', () => {
       }
     });
 
+    it.each([
+      ['a rule/doc commit inside the agent directory', 'agentDocsCommit' as const],
+      ['a test-only commit', 'agentTestOnlyCommit' as const],
+    ])('does not rotate the release for %s', (_label, key) => {
+      // Found in review, against this repo's own history: commit df8e03ee7 changed
+      // ONLY packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md
+      // and the prefix-only pathspec treated it as a new agent release, which would
+      // have evicted the whole pool for a documentation edit.
+      const repo = createAgentReleaseRepo();
+      try {
+        const result = runReleaseResolver(repo.directory, repo[key]);
+        expect(result.status).toBe(0);
+        expect(releaseFieldsFrom(result.stdout).release).toBe(repo.latestAgentCommit);
+      } finally {
+        rmSync(repo.directory, { recursive: true, force: true });
+      }
+    });
+
     it('rotates the release for a deploy that does touch the agent', () => {
       const repo = createAgentReleaseRepo();
       try {
@@ -432,6 +497,24 @@ describe('deploy reusable workflow', () => {
       } finally {
         rmSync(repo.directory, { recursive: true, force: true });
       }
+    });
+
+    it('has no go:embed that would pull an excluded path into the binary', () => {
+      // The exclusions in resolve-vm-agent-release.sh assert that `.claude/`,
+      // `AGENTS.md` and `*_test.go` cannot change the compiled binary. `_test.go`
+      // is a Go language guarantee; the other two are only true while nothing
+      // embeds them. If a `//go:embed` ever appears, re-check the exclusion list
+      // before this silently ships a stale binary under a current version.
+      const agentRoot = fileURLToPath(new URL('../../packages/vm-agent', import.meta.url));
+      // grep exits 1 on no matches, so spawnSync (not execFileSync, which throws).
+      const found = spawnSync('grep', ['-rn', '--include=*.go', 'go:embed', agentRoot], {
+        encoding: 'utf8',
+      });
+
+      // Guard the guard: status 2 means grep itself failed (bad path), which would
+      // otherwise look identical to "no embeds found".
+      expect(found.status, `grep failed: ${found.stderr}`).not.toBe(2);
+      expect(found.stdout.trim()).toBe('');
     });
 
     it('fails closed on a shallow clone instead of falling back to the deploy commit', () => {
@@ -477,7 +560,7 @@ describe('deploy reusable workflow', () => {
 
         const result = runReleaseResolver(directory, git('rev-parse', 'HEAD'));
         expect(result.status).not.toBe(0);
-        expect(result.stderr).toContain('no commit touching');
+        expect(result.stderr).toContain('no commit changing');
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }
@@ -518,6 +601,14 @@ describe('deploy reusable workflow', () => {
 
         expect(result.status).not.toBe(0);
         expect(readFileSync(outputPath, 'utf8')).not.toContain('agent_version=');
+        // Pin WHICH guard fired: a regression in the earlier deploy-SHA equality
+        // check produces an identical exit code and an identical absent
+        // agent_version, and would leave this test green while proving nothing
+        // about resolver-failure propagation.
+        expect(readFileSync(outputPath, 'utf8')).toContain(`value=${head}`);
+        expect(`${result.stdout}${result.stderr}`).toContain(
+          'Could not resolve the VM-agent release'
+        );
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }

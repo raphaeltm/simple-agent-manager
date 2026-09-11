@@ -9,7 +9,16 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GO_VERSION ?= $(shell $(GO) version 2>/dev/null | awk '{print $$3}' || echo "unknown")
 LDFLAGS_VERSION := -X github.com/workspace/vm-agent/internal/sysinfo.Version=$(VERSION) -X github.com/workspace/vm-agent/internal/sysinfo.BuildDate=$(BUILD_DATE) -X github.com/workspace/vm-agent/internal/sysinfo.GoVersionBuild=$(GO_VERSION)
-GOFLAGS := -ldflags="-s -w $(LDFLAGS_VERSION)"
+# -trimpath is load-bearing, not hygiene. The deploy publishes binaries under an
+# immutable release key and refuses to overwrite it when the bytes differ
+# (scripts/deploy/publish-vm-agent-artifacts.sh). Since the release key now tracks
+# agent CONTENT, consecutive deploys reuse one key and must rebuild byte-identically.
+# Without -trimpath Go embeds the absolute source directory in the binary, so the
+# same source built from two different checkout paths produces different bytes and
+# fails that check closed — blocking the whole deploy, since the upload step runs
+# before the Worker is published. Verified: identical source, two paths, divergent
+# SHA-256 without this flag; identical with it.
+GOFLAGS := -trimpath -ldflags="-s -w $(LDFLAGS_VERSION)"
 CONTAINER_ARTIFACT_DIR ?= ../../apps/api/container-artifacts
 
 # Platforms

@@ -24,6 +24,14 @@ suggestive rather than conclusive; the refusal reasons above are the direct evid
 This task fixes two of those causes. A third (`node is already creating a workspace`)
 is being fixed separately in task `01M27VF3557JK9BCS1EZD5QA6D`.
 
+**Refusal was only half of it.** `sweepIncompatibleVmAgentNodes`
+(`apps/api/src/scheduled/node-cleanup/node-phases.ts:440`) *destroys* idle nodes whose
+`agent_version != VM_AGENT_REQUIRED_VERSION`. So a deploy did not merely make the fleet
+unreusable — it marked every node stale and the cleanup sweep then tore down the idle
+ones. Production node rows cluster by agent SHA with each generation deleted shortly
+after the next deploy, which is why the warm pool could never survive a deploy and the
+workspaces-per-node ratio sat near 1.
+
 ### (A) Every deploy evicts the whole node pool, for a binary that usually did not change
 
 `VM_AGENT_REQUIRED_VERSION` is the **deployment commit SHA**
@@ -108,30 +116,38 @@ Three problems with that:
 
 ### A — agent version tracks agent content
 
-- [ ] A1. `deploy-sha` step resolves `agent_source_sha` = last commit touching
-      `packages/vm-agent` (`git rev-list -1 <deploy sha> -- packages/vm-agent`), and
-      `agent_version` becomes that value (still empty when `skip_agent`).
-- [ ] A2. Checkout uses `fetch-depth: 0` so the history needed for A1 exists.
-- [ ] A3. `Build VM Agent` and `Prepare Versioned VM Agent Container Artifact` pass the
+- [x] A1. `deploy-sha` step resolves the release = last commit changing the agent's
+      BUILD INPUTS, and `agent_version` becomes that value (still empty when
+      `skip_agent`). A plain `-- packages/vm-agent` pathspec is a directory PREFIX
+      match and is wrong: `packages/vm-agent/.claude/rules/` holds this repo's own
+      agent rules, and `.claude/rules/02` mandates a rule update on every bug fix.
+      Commit `df8e03ee7` changed only that doc file and the prefix pathspec already
+      resolved to it. The resolver excludes `.claude/`, `AGENTS.md` and `*_test.go`
+      (never linked into a non-test Go build), and excludes rather than includes so an
+      unrecognised new file type rotates the release — wasteful but safe.
+- [x] A2. Checkout uses `fetch-depth: 0` so the history needed for A1 exists.
+- [x] A3. `Build VM Agent` and `Prepare Versioned VM Agent Container Artifact` pass the
       agent source SHA as `VERSION` **and** derive `BUILD_DATE` from that same commit,
       so identical agent content rebuilds byte-identically under one release key.
-- [ ] A4. Fail closed: empty result, non-40-hex result, or a shallow repository aborts
+- [x] A4. Fail closed: empty result, non-40-hex result, or a shallow repository aborts
       the deploy instead of falling back to the deploy SHA.
-- [ ] A5. `publish-vm-agent-artifacts.sh` takes the release SHA under an accurate
+- [x] A5. `publish-vm-agent-artifacts.sh` takes the release SHA under an accurate
       variable name rather than `DEPLOY_SHA`.
-- [ ] A6. Update the env reference and `.claude/rules/54` wording that describes the
+- [x] A6. Update the env reference and `.claude/rules/54` wording that describes the
       required version as the deployment commit SHA.
 
 ### B — CPU is compressible; declared reservations are the authority
 
-- [ ] B1. Split `measuredAdmissionDiagnostic`'s pressure checks into non-compressible
+- [x] B1. Split `measuredAdmissionDiagnostic`'s pressure checks into non-compressible
       (memory, disk — unchanged hard veto) and compressible (CPU — veto only at
       saturation), with the rationale in a comment so it is not "tidied" back.
-- [ ] B2. `cpuThresholdPercent` keeps its name, env var and project column but becomes
-      the CPU **saturation** ceiling; default raised 50 -> `DEFAULT_WORKSPACE_ADMISSION_CPU_SATURATION_THRESHOLD_PERCENT` (90).
-- [ ] B3. Below saturation, `cpuBudgetMillis` (declared reservations) is the sole CPU
+- [x] B2. `cpuThresholdPercent` keeps its name, env var and project column but becomes
+      the CPU **saturation** ceiling; default raised 50 -> 85 in the existing shared
+      `DEFAULT_NODE_CPU_THRESHOLD_PERCENT` (no new constant — the API was duplicating
+      that one as an inline literal).
+- [x] B3. Below saturation, `cpuBudgetMillis` (declared reservations) is the sole CPU
       admission authority — verified by test, not by inspection.
-- [ ] B4. Placement diagnostics keep a distinguishable reason for the saturation case.
+- [x] B4. Placement diagnostics keep a distinguishable reason for the saturation case.
 
 ## Acceptance criteria
 
@@ -148,6 +164,80 @@ Three problems with that:
       budget reason rather than the pressure reason.
 - [ ] A node at/above the saturation ceiling is still rejected.
 - [ ] Memory and disk pressure vetoes are unchanged, each with a passing control.
+
+## Review findings and dispositions
+
+Four local specialist reviewers ran against the two commits. Everything below was
+independently re-verified before acting; two findings were wrong or mislocated and are
+recorded as such.
+
+**Fixed in this PR:**
+
+1. *(cloudflare-specialist, HIGH)* The pathspec was a directory prefix, so a doc-only
+   commit inside `packages/vm-agent/` counted as an agent release — already true for
+   `df8e03ee7`, and true for this PR's own rule-54 edit. Fixed by the exclusions in A1,
+   with a regression test per excluded kind and a `go:embed` contract test guarding the
+   assumption that excluded paths cannot reach the binary.
+2. *(cloudflare-specialist, HIGH)* `-trimpath` was absent, so identical source built
+   from different absolute paths produced different bytes. Harmless while every release
+   key was unique; now that keys are reused, it would fail the immutable-artifact check
+   closed and block the whole deploy. Added to `GOFLAGS`. The reviewer reproduced the
+   divergence with the pinned toolchain; not re-run locally because this workspace has
+   no Go toolchain, so CI is the confirmation.
+3. *(cloudflare-specialist, HIGH)* `packages/vm-agent/.claude/rules/54-...md` and the
+   `apps/api/src/env.ts` comment still described the required version as the deployment
+   commit SHA. Both updated; rule 54 also gains the forced-rotation and
+   byte-reproducibility notes.
+4. *(architecture-reviewer, HIGH)* A THIRD stale copy of the thresholds, at
+   `workspace-placement.ts` `legacyWorkspaceAdmissionPolicy` — literal 50/50 backing the
+   numeric overload of `reserveWorkspacePlacement`, which is the final atomic
+   reservation that rule 69 names as the correctness boundary. No production caller uses
+   that overload today, but it is exported and exercised by worker tests. Now reads the
+   shared constants.
+5. *(architecture-reviewer, MEDIUM-HIGH; test-engineer)* The ceiling landed at 85 rather
+   than 90, with the reasoning written into the constant: the input is a one-minute
+   trailing load average up to `metricsTtlMs` stale, `cpuMillis` is never enforced as a
+   cgroup limit so this ceiling is the only backstop against under-declaration, and
+   sustained saturation has previously starved the vm-agent heartbeat
+   (`tasks/backlog/2026-08-25-build-concurrency-backpressure.md`).
+6. *(test-engineer, HIGH)* `@simple-agent-manager/shared` resolves to a COMPILED dist and
+   `apps/api`'s own `test` script has no build step, so running vitest directly against a
+   stale dist evaluated the old ceiling and every new test passed for the wrong reason.
+   A test now asserts the resolver's value equals the imported constant, turning that
+   silence into a visible mismatch.
+7. *(test-engineer, MEDIUM)* The step-abort test could have passed on a regression in the
+   unrelated deploy-SHA equality guard; it now pins the resolver's own error and that
+   `value=` was already emitted.
+8. *(test-engineer, MEDIUM)* Added the oversubscription case: with
+   `nodeCpuShareBudgetPercent: 200` the ceiling must remain a backstop underneath the
+   widened budget.
+9. *(architecture-reviewer, LOW; test-engineer, LOW)* Added the under-declaration test,
+   fixture cleanup on setup failure, and quiet `git init`.
+
+**Verified and rejected:**
+
+- *(architecture-reviewer, MEDIUM-HIGH)* "No OS-level scheduling protection for the
+  vm-agent process" — the grep was scoped to `packages/vm-agent`. The protection exists
+  in `packages/cloud-init/src/template.ts`: `sam-infra.slice`, `MemoryMin`,
+  `OOMScoreAdjust=-900`. The conclusion still holds for CPU specifically, and the detail
+  strengthens the design rather than weakening it: the platform already reserves the
+  non-compressible resource and deliberately sets no CPU controls. Cited in the constant.
+- *(architecture-reviewer, MEDIUM)* "Existing projects stranded on old semantics" —
+  measured, not argued: `SELECT COUNT(*) ... FROM projects` on production D1 returns
+  **0 of 40** projects with any `node_cpu_threshold_percent` or
+  `node_memory_threshold_percent` override. Nobody is stranded.
+
+**Tracked, not fixed here:**
+
+- SAM idea `01M27ZBDV1HRDYJMASDGHCAZR3` — `deployment-provisioning.ts` reads the same
+  `TASK_RUN_NODE_CPU_THRESHOLD_PERCENT` env var with a different default and compares a
+  raw load average against a percent, so its veto is effectively dead. Fixing the unit
+  mix would make an inert veto live inside a workspace-scheduling PR. Documented at the
+  call site.
+- SAM idea `01M27Z5BE2P6CFPPQ3575J8Z6W` — anonymous trials share a sentinel `userId` and
+  inherit this default with no project scaling, so raising the ceiling lets them pack
+  closer to `maxCoTenants`. Density for unauthenticated tenants is a spend/product
+  decision, and the right knob is `maxCoTenants`/`exclusiveNode`, not a CPU threshold.
 
 ## Deliberately out of scope
 
