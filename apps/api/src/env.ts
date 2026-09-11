@@ -1316,7 +1316,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CF_CONTAINER_VM_AGENT_PORT?: string; // vm-agent standalone HTTP port inside the raw container (default: 8080)
   CF_CONTAINER_PORT_READY_TIMEOUT_MS?: string; // Max time to wait for vm-agent port readiness (default: 30000)
   CF_CONTAINER_WAKE_TIMEOUT_MS?: string; // Max time for launch + restore before forwarding a wake request (default: 120000)
-  CF_CONTAINER_RECOVERY_MAX_ATTEMPTS?: string; // Max snapshot restore attempts before terminal reconciliation (default: 2)
+  CF_CONTAINER_RECOVERY_MAX_ATTEMPTS?: string; // Max snapshot restore attempts before terminal reconciliation (default/minimum: 2)
   INSTANT_STALE_CALLBACK_MARGIN_MS?: string; // Freshness margin for rejecting destructive callbacks from superseded Instant containers (default: 60000)
   CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS?: string; // Max time for the synchronous standalone create-workspace request incl. clone (default: 120000)
   CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS?: string; // Max time for the ProjectData RPC that checks harness work lease before sleep (default: 5000)

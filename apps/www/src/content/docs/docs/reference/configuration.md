@@ -156,6 +156,8 @@ The variables below tune the **Instant** (Cloudflare Container) runtime — how 
 | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000`         | Budget for the synchronous instant-session create-workspace request, which includes the repository clone inside the container.                                                             |
 | `CF_CONTAINER_CLONE_FILTER`                | `blob:none`      | Git partial-clone filter forwarded to instant containers as `STANDALONE_CLONE_FILTER`. Set `off` to force full clones.                                                                     |
 
+`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS` has a deployment-safety minimum of `2`; smaller positive values resolve to `2`.
+
 ### Persistent session snapshots and sleep
 
 Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of the agent's home directory and the repository work in progress. A complete snapshot is required before SAM tears down VM compute. None of these limits are surfaced in the UI, so operators should set expectations deliberately — see [What gets restored](/docs/guides/instant-sessions/#what-gets-restored).
@@ -857,7 +859,7 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | ---------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `NODE_AGENT_READY_TIMEOUT_MS`                  | `900000` (15 min)    | Wait for VM agent to report ready                                                                                                                                                                            |
 | `NODE_AGENT_READY_POLL_INTERVAL_MS`            | `5000`               | Poll interval for agent readiness                                                                                                                                                                            |
-| `VM_AGENT_REQUIRED_VERSION`                    | _(deploy-generated)_ | Required vm-agent build for reusable VM nodes. Official deploys derive this from the Git commit SHA after publishing matching binaries; leave unset only for local/manual development or skip-agent deploys. |
+| `VM_AGENT_REQUIRED_VERSION`                    | _(deploy-generated)_ | Required vm-agent build for reusable VM nodes. Official deploys derive this from the Git commit SHA after publishing binaries under an immutable release key; cloud-init requests that exact release. Leave unset only for local/manual development or skip-agent deploys. |
 | `TASK_RUNNER_STEP_MAX_RETRIES`                 | `3`                  | Max retries per TaskRunner step before failing the task                                                                                                                                                      |
 | `TASK_RUNNER_RETRY_BASE_DELAY_MS`              | `5000`               | Base delay for TaskRunner retry backoff                                                                                                                                                                      |
 | `TASK_RUNNER_RETRY_MAX_DELAY_MS`               | `60000`              | Maximum delay for TaskRunner retry backoff                                                                                                                                                                   |

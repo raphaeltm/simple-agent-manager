@@ -18,7 +18,7 @@
 
 import { execSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
@@ -48,10 +48,26 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
   '../../apps/tail-worker/wrangler.toml'
 );
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
-const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
 const SETUP_TOKEN_BYTES = 24;
 const DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES = 6;
 const DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES = 3;
+
+/** API bootstrap and Tail binding repair have independent deployment requirements. */
+export function writeDeploymentMarkers(
+  deployedMigrationTag: string | null,
+  hasTailWorker: boolean,
+  stateDirectory = DEPLOY_STATE_DIR
+): void {
+  mkdirSync(stateDirectory, { recursive: true });
+  for (const [filename, needed] of [
+    ['api-worker-first-deploy', deployedMigrationTag === null],
+    ['tail-worker-first-deploy', !hasTailWorker],
+  ] as const) {
+    const path = resolve(stateDirectory, filename);
+    if (needed) writeFileSync(path, 'true', 'utf-8');
+    else rmSync(path, { force: true });
+  }
+}
 
 const CONTAINER_MAX_INSTANCE_CONFIG = {
   SandboxDO: {
@@ -1040,9 +1056,7 @@ async function main(): Promise<void> {
   const hasTailWorker = await checkTailWorkerExists(outputs.cloudflareAccountId, tailWorkerName);
   console.log(`  Tail worker "${tailWorkerName}" exists: ${hasTailWorker}`);
   if (!hasTailWorker) {
-    console.log(
-      `  tail_consumers will be OMITTED (first deploy — will re-add after tail worker is deployed)`
-    );
+    console.log(`  tail_consumers will be OMITTED until the tail worker is deployed`);
   }
 
   // Auto-detect whether this deployment can use Cloudflare Artifacts (probes the
@@ -1084,13 +1098,9 @@ async function main(): Promise<void> {
   // Generate env section for tail worker
   syncTailWorkerConfig(stack, outputs.cloudflareAccountId, envKey);
 
-  // Write first-deploy marker for the workflow to detect
-  if (!hasTailWorker) {
-    mkdirSync(DEPLOY_STATE_DIR, { recursive: true });
-    writeFileSync(FIRST_DEPLOY_MARKER, 'true', 'utf-8');
-    console.log(`\nFirst-deploy marker written to ${FIRST_DEPLOY_MARKER}`);
-    console.log('The deploy workflow will re-sync and re-deploy after the tail worker is created.');
-  }
+  // The migration probe returns null only for a confirmed absent API Worker.
+  // A missing Tail Worker must never trigger extra code revisions on a live API.
+  writeDeploymentMarkers(deployedMigrationTag, hasTailWorker);
 
   console.log('\nSync complete.');
 }

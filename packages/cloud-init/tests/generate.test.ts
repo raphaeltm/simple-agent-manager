@@ -2228,6 +2228,89 @@ describe('validateCloudInitVariables', () => {
       const config = generateCloudInit(baseVariables());
       expect(config).toContain('hostname: sam-test-node');
     });
+
+    it('pins the VM-agent download to the required deployment release', () => {
+      const release = '0123456789abcdef0123456789abcdef01234567';
+      const config = generateCloudInit(baseVariables({ vmAgentRequiredVersion: release }));
+      const parsed = YAML.parse(config) as { runcmd: unknown[] };
+      const downloadCommand = parsed.runcmd.find(
+        (entry): entry is string =>
+          typeof entry === 'string' && entry.includes('/api/agent/download?arch=${ARCH}')
+      );
+      if (!downloadCommand) {
+        throw new Error('missing vm-agent download command');
+      }
+
+      expect(downloadCommand).toContain('/api/agent/download?arch=${ARCH}&release=' + release);
+    });
+
+    it('keeps the legacy download URL when no required release is configured', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config) as { runcmd: unknown[] };
+      const downloadCommand = parsed.runcmd.find(
+        (entry): entry is string =>
+          typeof entry === 'string' && entry.includes('/api/agent/download?arch=${ARCH}')
+      );
+      if (!downloadCommand) {
+        throw new Error('missing vm-agent download command');
+      }
+
+      expect(downloadCommand).toContain('/api/agent/download?arch=${ARCH}"');
+      expect(downloadCommand).not.toContain('&release=');
+    });
+
+    it('stops before chmod when the VM-agent download fails', () => {
+      const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-download-'));
+      const binDir = join(scratchDir, 'bin');
+      const commandLog = join(scratchDir, 'commands.log');
+      const scriptPath = join(scratchDir, 'download.sh');
+      mkdirSync(binDir, { recursive: true });
+
+      for (const [name, body] of [
+        ['logger', 'exit 0'],
+        ['curl', 'exit 7'],
+        ['chmod', 'exit 0'],
+        ['stat', 'printf "%s\\n" "123"'],
+        ['uname', 'printf "%s\\n" "x86_64"'],
+      ] as const) {
+        writeFakeExecutable(join(binDir, name), fakeBootstrapCommandScript(name, body));
+      }
+
+      try {
+        const config = generateCloudInit(baseVariables());
+        const parsed = YAML.parse(config) as { runcmd: unknown[] };
+        const downloadCommand = parsed.runcmd.find(
+          (entry): entry is string =>
+            typeof entry === 'string' && entry.includes('Downloading vm-agent')
+        );
+        if (!downloadCommand) {
+          throw new Error('missing vm-agent download command');
+        }
+        writeFileSync(scriptPath, `#!/bin/sh\n${downloadCommand}\n`, { mode: 0o755 });
+
+        const result = spawnSync('/bin/sh', [scriptPath], {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            COMMAND_LOG: commandLog,
+            PATH: `${binDir}:${process.env.PATH ?? ''}`,
+          },
+        });
+        const calls = commandLogLines(commandLog);
+
+        expect(result.status).toBe(7);
+        expect(calls).toContain('logger -t sam-boot vm-agent download failed status=7');
+        expect(calls).not.toContain('chmod +x /usr/local/bin/vm-agent');
+      } finally {
+        rmSync(scratchDir, { force: true, recursive: true });
+      }
+    });
+
+    it('rejects an unsafe VM-agent release before embedding it in shell', () => {
+      expect(() =>
+        generateCloudInit(baseVariables({ vmAgentRequiredVersion: '../../mutable-agent' }))
+      ).toThrow('vmAgentRequiredVersion');
+    });
   });
 
   // ---------------------------------------------------------------------------

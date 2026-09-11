@@ -249,11 +249,16 @@ The workflow:
 1. Validates configuration
 2. Provisions infrastructure via Pulumi (D1, KV, R2, DNS), including private VM diagnostic evidence, ProjectData archived tool payloads, one-day temporary uploads, and thirty-day TTS cache objects (`infra/resources/storage.ts:r2BucketLifecycle`)
 3. Runs database migrations
-4. Deploys API Worker and Web UI
-5. Builds and uploads VM Agent binaries
-6. Runs health check
+4. Builds the VM Agent reproducibly and publishes both architectures under immutable keys containing the deployment commit SHA
+5. On a fresh installation only, bootstraps the API Worker and its Tail Worker binding
+6. Deploys the Web UI, applies API Worker secrets in one bulk revision, and publishes the final API Worker code
+7. Runs health checks
 
-Before deploying the API Worker, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
+On an established installation, the workflow skips the bootstrap Worker revisions. It publishes the immutable VM Agent artifacts before the API Worker can require them, applies secrets in one bulk revision, and then publishes code once. Re-running the same commit reuses an existing artifact only when its digest matches and fails before Worker publication if the bytes differ.
+
+The artifact publisher also initializes missing legacy binaries for unversioned downloads, including later `skip_agent` deployments on a fresh installation. Existing legacy binaries are preserved unchanged so a partial deployment cannot replace bytes still needed by the live Worker.
+
+Before publishing final API Worker code, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
 
 Pulumi also creates or updates the assets bucket lifecycle resource on every deploy.
 The defaults are `sessionSnapshotTtlDays=7`, `diagnosticIncidentTtlDays=7`,

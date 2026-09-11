@@ -100,7 +100,7 @@ function makeContext(envOverrides: Record<string, string> = {}): TaskRunnerConte
     env: {
       DATABASE: createSqliteD1(sqlite),
       COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
-      VM_AGENT_REQUIRED_VERSION: 'current-agent',
+      VM_AGENT_REQUIRED_VERSION: '0123456789abcdef0123456789abcdef01234567',
       ...envOverrides,
     },
     ctx: {
@@ -325,7 +325,7 @@ describe('agent readiness through persisted heartbeat records', () => {
       seedNode('existing');
       sqlite
         .prepare(
-          `UPDATE nodes SET health_status = 'healthy', agent_version = 'current-agent',
+          `UPDATE nodes SET health_status = 'healthy', agent_version = '0123456789abcdef0123456789abcdef01234567',
       last_heartbeat_at = ?, agent_ready_at = ? WHERE id = 'existing'`
         )
         .run(new Date(NOW + offset).toISOString(), new Date(NOW - 10_000).toISOString());

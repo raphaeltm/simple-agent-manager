@@ -96,7 +96,7 @@ export function fixture(scope: Scope = 'user', existingDatabase?: Database.Datab
     DATABASE: createSqliteD1(sqlite),
     BASE_DOMAIN: 'sammy.party',
     COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
-    VM_AGENT_REQUIRED_VERSION: 'current-agent',
+    VM_AGENT_REQUIRED_VERSION: '0123456789abcdef0123456789abcdef01234567',
     TASK_RUNNER: {
       idFromName: (id: string) => id,
       get: () => ({ start, ensureStarted: async () => false }),
@@ -152,7 +152,7 @@ export async function seedHost(f: Fixture, start: StartTaskInput, id = 'host', u
     providerInstanceId: `provider-${id}`,
     nodeRole: 'workspace',
     nodeClass: 'managed',
-    agentVersion: 'current-agent',
+    agentVersion: '0123456789abcdef0123456789abcdef01234567',
     healthStatus: 'healthy',
     observedProviderInstanceType: snapshot.providerInstanceType,
     observedProviderInstanceVcpuCount: snapshot.providerInstanceVcpuCount,

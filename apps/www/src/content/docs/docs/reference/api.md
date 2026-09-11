@@ -427,7 +427,7 @@ JSON Web Key Set for JWT verification by VM Agents.
 
 ### `GET /api/agent/download`
 
-Download the VM Agent binary. Query params: `os` (linux), `arch` (amd64, arm64).
+Download the VM Agent binary. Query params: `os` (linux), `arch` (amd64, arm64), and an optional `release` containing exactly 40 lowercase hexadecimal characters. Invalid releases return `400 INVALID_VERSION` before R2 is read. Official deployments use `release` so a new VM downloads the immutable binary selected by the live control plane; versioned responses use a one-year immutable cache policy. The unversioned URL retains its one-hour cache policy for legacy, local, manual, and intentional `skip_agent` deployments.
 
 Used by cloud-init during VM (BYOC) provisioning. The Cloudflare Container instant-session runtime does **not** call this endpoint — its vm-agent binary is baked into the container image at deploy time.
 

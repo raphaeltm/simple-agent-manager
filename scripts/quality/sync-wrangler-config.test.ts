@@ -7,6 +7,7 @@ import {
   generateApiWorkerEnv,
   listEnvironmentVarOverrides,
   resolveArtifactsBindingEnabled,
+  writeDeploymentMarkers,
 } from '../deploy/sync-wrangler-config.js';
 import type { PulumiOutputs, WranglerToml } from '../deploy/types.js';
 
@@ -47,6 +48,33 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it.each([
+    { migrationTag: null, tailExists: false, bootstrap: true, tailSync: true },
+    { migrationTag: null, tailExists: true, bootstrap: true, tailSync: false },
+    { migrationTag: 'v1', tailExists: false, bootstrap: false, tailSync: true },
+    { migrationTag: 'v1', tailExists: true, bootstrap: false, tailSync: false },
+  ])('separates API bootstrap from Tail repair: %j', (state) => {
+    const directory = mkdtempSync(join(tmpdir(), 'sam-deploy-markers-'));
+    try {
+      // Prior failed runs must not leave bootstrap markers for an existing API.
+      writeDeploymentMarkers(null, false, directory);
+      writeDeploymentMarkers(state.migrationTag, state.tailExists, directory);
+      expect(existsSync(join(directory, 'api-worker-first-deploy'))).toBe(state.bootstrap);
+      expect(existsSync(join(directory, 'tail-worker-first-deploy'))).toBe(state.tailSync);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('omits an empty VM-agent release from the generated Worker configuration', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('VM_AGENT_REQUIRED_VERSION', '');
+
+    const vars = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
+
+    expect(vars).not.toHaveProperty('VM_AGENT_REQUIRED_VERSION');
+  });
+
   it('passes deployment image-resolution limits into generated deployments', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS', '1000');
@@ -746,3 +774,6 @@ describe('ensureTomlMap', () => {
     );
   });
 });
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';

@@ -344,6 +344,7 @@ export async function provisionNode(
       dockerDnsServers: env.DOCKER_DNS_SERVERS,
       originCaCertificateUrl: `https://api.${env.BASE_DOMAIN}/api/nodes/${node.id}/origin-ca-certificate`,
       vmAgentPort: env.VM_AGENT_PORT,
+      vmAgentRequiredVersion: env.VM_AGENT_REQUIRED_VERSION?.trim(),
       vmAgentMemoryReserveMb: String(resolveEffectiveNodeHostMemoryReserveMb(env)),
       samInfraSliceMemoryMinMb: env.SAM_INFRA_SLICE_MEMORY_MIN_MB,
       dockerMemoryMinMb: env.DOCKER_MEMORY_MIN_MB,

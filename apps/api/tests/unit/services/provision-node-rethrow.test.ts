@@ -1,7 +1,12 @@
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
+import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
+import { agentRoutes } from '../../../src/routes/agent';
 import { provisionNode } from '../../../src/services/nodes';
+
+const REQUIRED_AGENT_RELEASE = '0123456789abcdef0123456789abcdef01234567';
 
 const { logError, logInfo, persistError, deleteNodeResourcesStrict } = vi.hoisted(() => ({
   logError: vi.fn(),
@@ -112,11 +117,19 @@ vi.mock('../../../src/services/jwt', () => ({
   signNodeCallbackToken: vi.fn().mockResolvedValue('callback-token'),
 }));
 
-const generateCloudInit = vi.fn(() => 'cloud-init-yaml');
-vi.mock('@simple-agent-manager/cloud-init', () => ({
-  generateCloudInit: (...args: unknown[]) => generateCloudInit(...args),
-  validateCloudInitSize: () => true,
-}));
+let useRealCloudInit = false;
+const generateCloudInit = vi.fn();
+vi.mock('@simple-agent-manager/cloud-init', async (load) => {
+  const actual = await load<typeof import('@simple-agent-manager/cloud-init')>();
+  return {
+    ...actual,
+    generateCloudInit: (variables: Parameters<typeof actual.generateCloudInit>[0]) => {
+      generateCloudInit(variables);
+      return useRealCloudInit ? actual.generateCloudInit(variables) : 'cloud-init-yaml';
+    },
+    validateCloudInitSize: () => true,
+  };
+});
 
 const createNodeBackendDNSRecord = vi.fn();
 vi.mock('../../../src/services/dns', () => ({
@@ -177,6 +190,7 @@ const ENV = {
   SESSION_SNAPSHOT_OPERATION_TIMEOUT: '12m30s',
   SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL: '3s',
   SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT: '750ms',
+  VM_AGENT_REQUIRED_VERSION: REQUIRED_AGENT_RELEASE,
 } as unknown as Parameters<typeof provisionNode>[1];
 
 function observedHardware() {
@@ -251,6 +265,7 @@ beforeEach(() => {
   nodeRows.length = 0;
   updateBarrier = undefined;
   nextWriteChanges = [];
+  useRealCloudInit = false;
   vi.clearAllMocks();
   nodeRows.push({
     id: 'node-1',
@@ -312,7 +327,8 @@ describe('provisionNode backend DNS records', () => {
     }
   );
 
-  it('forwards task context into cloud-init and sends that generated payload to the provider', async () => {
+  it('carries the required release through real cloud-init and resolves it to the matching R2 key', async () => {
+    useRealCloudInit = true;
     const taskContext = {
       projectId: 'project-context',
       chatSessionId: 'chat-context',
@@ -322,7 +338,37 @@ describe('provisionNode backend DNS records', () => {
     await provisionNode('node-1', ENV, taskContext);
 
     expect(generateCloudInit).toHaveBeenCalledWith(expect.objectContaining(taskContext));
-    expect(createVM).toHaveBeenCalledWith(expect.objectContaining({ userData: 'cloud-init-yaml' }));
+    expect(createVM).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userData: expect.stringContaining(
+          `/api/agent/download?arch=\${ARCH}&release=${REQUIRED_AGENT_RELEASE}`
+        ),
+      })
+    );
+
+    const bytes = new TextEncoder().encode('agent');
+    const get = vi.fn().mockResolvedValue({
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(bytes);
+          controller.close();
+        },
+      }),
+      size: bytes.byteLength,
+    } as unknown as R2ObjectBody);
+    const app = new Hono<{ Bindings: Env }>();
+    app.route('/api/agent', agentRoutes);
+
+    const response = await app.request(
+      `/api/agent/download?arch=amd64&release=${REQUIRED_AGENT_RELEASE}`,
+      undefined,
+      { R2: { get } as unknown as R2Bucket } as Env
+    );
+
+    expect(response.status).toBe(200);
+    expect(get).toHaveBeenCalledWith(
+      `agents/releases/${REQUIRED_AGENT_RELEASE}/vm-agent-linux-amd64`
+    );
   });
 
   it.each([false, true])(
@@ -428,6 +474,7 @@ describe('provisionNode backend DNS records', () => {
         sessionSnapshotOperationTimeout: '12m30s',
         sessionSnapshotProgressReportInterval: '3s',
         sessionSnapshotProgressReportTimeout: '750ms',
+        vmAgentRequiredVersion: REQUIRED_AGENT_RELEASE,
       })
     );
   });

@@ -5,6 +5,9 @@ import { CLOUD_INIT_TEMPLATE } from './template';
 /** Alphanumeric, hyphens, underscores (IDs like nodeId, projectId, etc.) */
 const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
+/** Full lowercase Git commit SHA used for immutable VM-agent releases. */
+const VM_AGENT_RELEASE_RE = /^[0-9a-f]{40}$/;
+
 /** Valid hostname: alphanumeric, hyphens, dots */
 const SAFE_HOSTNAME_RE = /^[a-zA-Z0-9.-]+$/;
 
@@ -84,6 +87,15 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
         `vmAgentPort: must be numeric 1-65535 (got ${JSON.stringify(variables.vmAgentPort)})`
       );
     }
+  }
+  if (
+    variables.vmAgentRequiredVersion !== undefined &&
+    variables.vmAgentRequiredVersion !== '' &&
+    !VM_AGENT_RELEASE_RE.test(variables.vmAgentRequiredVersion)
+  ) {
+    errors.push(
+      `vmAgentRequiredVersion: must be a full lowercase Git commit SHA (got ${JSON.stringify(variables.vmAgentRequiredVersion)})`
+    );
   }
   if (variables.cfIpFetchTimeout !== undefined && variables.cfIpFetchTimeout !== '') {
     const timeout = Number(variables.cfIpFetchTimeout);
@@ -417,6 +429,8 @@ export interface CloudInitVariables {
   originCaCertificateUrl?: string;
   /** VM agent port override (default: 8443 with TLS, 8080 without) */
   vmAgentPort?: string;
+  /** Immutable VM-agent release selected by the control-plane deployment. */
+  vmAgentRequiredVersion?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
   /** Enable opportunistic devcontainer image caching via GHCR (default: false) */
@@ -507,6 +521,9 @@ export function generateCloudInit(
     '{{ node_id }}': variables.nodeId,
     '{{ hostname }}': variables.hostname,
     '{{ control_plane_url }}': variables.controlPlaneUrl,
+    '{{ vm_agent_release_query }}': variables.vmAgentRequiredVersion
+      ? '&release=' + variables.vmAgentRequiredVersion
+      : '',
     '{{ jwks_url }}': variables.jwksUrl,
     '{{ callback_token }}': variables.callbackToken,
     '{{ log_journal_max_use }}': variables.logJournalMaxUse ?? '500M',
