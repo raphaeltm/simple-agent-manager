@@ -128,54 +128,7 @@ func TestConfiguredWorkspaceBuildQueueDepth(t *testing.T) {
 }
 
 func TestNewServerUsesConfiguredWorkspaceBuildQueueDepth(t *testing.T) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("generate RSA key: %v", err)
-	}
-	jwks := buildWorkspaceCreateJWKS(privateKey.Public().(*rsa.PublicKey))
-	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(jwks)
-	}))
-	t.Cleanup(jwksServer.Close)
-
-	dir := t.TempDir()
-	cfg := &config.Config{
-		NodeID:                   "node-queue-depth",
-		ControlPlaneURL:          "http://localhost:8787",
-		JWKSEndpoint:             jwksServer.URL,
-		JWTIssuer:                "test-issuer",
-		JWTAudience:              "test-audience",
-		CookieName:               "vm_session",
-		SessionTTL:               time.Hour,
-		SessionCleanupInterval:   time.Hour,
-		SessionMaxCount:          10,
-		DefaultShell:             "/bin/sh",
-		DefaultRows:              24,
-		DefaultCols:              80,
-		WorkspaceDir:             dir,
-		PersistenceDBPath:        filepath.Join(dir, "persistence.db"),
-		ErrorReportDBPath:        filepath.Join(dir, "errors.db"),
-		ErrorReportSpoolDir:      filepath.Join(dir, "error-spool"),
-		EventStoreDBPath:         filepath.Join(dir, "events.db"),
-		MetricsDBPath:            filepath.Join(dir, "metrics.db"),
-		MetricsInterval:          time.Hour,
-		HTTPCallbackTimeout:      time.Second,
-		WorkspaceBuildQueueDepth: 2,
-	}
-
-	srv, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		if srv.resourceMonitor != nil {
-			_ = srv.resourceMonitor.Close()
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = srv.Stop(ctx)
-	})
+	srv := newWorkspaceBuildQueueDepthTestServer(t, "node-queue-depth", 2)
 
 	if got := cap(srv.buildQueue); got != 2 {
 		t.Fatalf("cap(buildQueue)=%d, want 2", got)
@@ -183,6 +136,24 @@ func TestNewServerUsesConfiguredWorkspaceBuildQueueDepth(t *testing.T) {
 }
 
 func TestNewServerUsesDefaultWorkspaceBuildQueueDepthAboveMax(t *testing.T) {
+	srv := newWorkspaceBuildQueueDepthTestServer(
+		t,
+		"node-queue-depth-above-max",
+		config.MaxWorkspaceBuildQueueDepth+1,
+	)
+
+	if got := cap(srv.buildQueue); got != config.DefaultWorkspaceBuildQueueDepth {
+		t.Fatalf("cap(buildQueue)=%d, want %d", got, config.DefaultWorkspaceBuildQueueDepth)
+	}
+}
+
+func newWorkspaceBuildQueueDepthTestServer(
+	t *testing.T,
+	nodeID string,
+	workspaceBuildQueueDepth int,
+) *Server {
+	t.Helper()
+
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("generate RSA key: %v", err)
@@ -196,7 +167,7 @@ func TestNewServerUsesDefaultWorkspaceBuildQueueDepthAboveMax(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := &config.Config{
-		NodeID:                   "node-queue-depth-above-max",
+		NodeID:                   nodeID,
 		ControlPlaneURL:          "http://localhost:8787",
 		JWKSEndpoint:             jwksServer.URL,
 		JWTIssuer:                "test-issuer",
@@ -216,7 +187,7 @@ func TestNewServerUsesDefaultWorkspaceBuildQueueDepthAboveMax(t *testing.T) {
 		MetricsDBPath:            filepath.Join(dir, "metrics.db"),
 		MetricsInterval:          time.Hour,
 		HTTPCallbackTimeout:      time.Second,
-		WorkspaceBuildQueueDepth: config.MaxWorkspaceBuildQueueDepth + 1,
+		WorkspaceBuildQueueDepth: workspaceBuildQueueDepth,
 	}
 
 	srv, err := New(cfg)
@@ -232,9 +203,7 @@ func TestNewServerUsesDefaultWorkspaceBuildQueueDepthAboveMax(t *testing.T) {
 		_ = srv.Stop(ctx)
 	})
 
-	if got := cap(srv.buildQueue); got != config.DefaultWorkspaceBuildQueueDepth {
-		t.Fatalf("cap(buildQueue)=%d, want %d", got, config.DefaultWorkspaceBuildQueueDepth)
-	}
+	return srv
 }
 
 func TestBuildQueueAllowsConfiguredParallelBuilds(t *testing.T) {
