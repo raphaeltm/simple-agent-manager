@@ -1,7 +1,7 @@
 import {
+  type CredentialProvider,
   DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
   LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
-  type CredentialProvider,
 } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
