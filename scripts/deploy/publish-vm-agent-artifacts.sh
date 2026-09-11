@@ -9,8 +9,12 @@ set -euo pipefail
 
 publish_agent_artifact() {
   local architecture="$1"
+  local legacy="${2:-false}"
   local source_path="$GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-$architecture"
   local object_path="$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-$architecture"
+  if [ "$legacy" = true ]; then
+    object_path="$R2_BUCKET/agents/vm-agent-linux-$architecture"
+  fi
   local existing_path="$RUNNER_TEMP/vm-agent-linux-$architecture.existing"
   local get_output
   local source_sha
@@ -18,6 +22,13 @@ publish_agent_artifact() {
 
   # Wrangler v4: R2 commands default to local; --remote is required.
   if get_output=$(pnpm --filter @simple-agent-manager/api exec wrangler r2 object get "$object_path" --file "$existing_path" --remote 2>&1); then
+    # Existing legacy callers may still require these exact bytes during a
+    # partial deploy. Seed a fresh installation once, never advance this key.
+    if [ "$legacy" = true ]; then
+      rm -f "$existing_path"
+      echo "Preserving existing legacy VM-agent artifact $object_path"
+      return 0
+    fi
     source_sha=$(sha256sum "$source_path" | cut -d' ' -f1)
     existing_sha=$(sha256sum "$existing_path" | cut -d' ' -f1)
     rm -f "$existing_path"
@@ -41,3 +52,7 @@ publish_agent_artifact() {
 
 publish_agent_artifact amd64
 publish_agent_artifact arm64
+# skip_agent and unpinned development callers retain the legacy download path.
+# New installations need it initialized too; established installations keep it.
+publish_agent_artifact amd64 true
+publish_agent_artifact arm64 true

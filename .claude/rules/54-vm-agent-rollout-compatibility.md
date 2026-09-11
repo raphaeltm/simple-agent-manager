@@ -5,7 +5,7 @@ When a change affects VM-agent behavior required for scheduling new work, the ro
 Required pattern:
 
 1. Build vm-agent binaries with the deployment commit SHA as the agent version.
-2. Build matching binaries reproducibly and upload them under immutable, commit-addressed release keys before deploying Worker code that requires that version. A same-commit retry must reuse byte-identical objects and fail on a digest mismatch. Normal deploys must not overwrite the legacy mutable VM-agent keys.
+2. Build matching binaries reproducibly and upload them under immutable, commit-addressed release keys before deploying Worker code that requires that version. A same-commit retry must reuse byte-identical objects and fail on a digest mismatch. Initialize missing legacy VM-agent keys for fresh installations, but never overwrite existing legacy bytes.
 3. Generate `VM_AGENT_REQUIRED_VERSION` from the deployment commit SHA; do not hardcode rollout-specific SHAs or ask operators to maintain a manual required version.
 4. If a deployment intentionally skips agent artifacts (`skip_agent`), leave the required version unset and use the retained unversioned legacy object. Use this only for Worker changes that remain compatible with the previously published VM agent.
 5. VM-agent `/ready` and heartbeat callbacks must report the build identity additively so old agents remain protocol-compatible.
