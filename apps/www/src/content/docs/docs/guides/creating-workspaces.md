@@ -131,8 +131,11 @@ cannot hold the work.
 
 :::note
 Older projects, profiles, and tasks may still carry a legacy `small` / `medium` / `large` label.
-It still works — SAM translates it into concrete requirements — but it is shown as _Legacy_ in the
-resource editor with a link to clear it. Prefer explicit vCPU, memory, and disk values.
+It still works — SAM translates it into compatibility workload requirements — but it is shown as
+_Legacy_ in the resource editor with a link to clear it. Prefer explicit vCPU, memory, and disk
+values. Legacy labels are packing slices, not provider hardware: the current adapter targets three
+`small` workloads on the smallest eligible node, and two `medium` or `large` workloads on their
+matching default class.
 :::
 
 :::note

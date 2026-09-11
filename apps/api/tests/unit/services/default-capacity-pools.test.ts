@@ -5,6 +5,7 @@ import {
   getDefaultLocationForProvider,
   getLocationsForProvider,
   type ProviderInstanceOffering,
+  resolveResourceReservation,
 } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle as drizzleD1 } from 'drizzle-orm/d1';
@@ -5680,7 +5681,40 @@ describe('capacity pool review findings', () => {
  * rejected rather than silently matched.
  */
 describe('workload-role eligibility contract', () => {
-  async function seedRoleCapablePool() {
+  function rolePoolOffering(input: {
+    providerInstanceType: string;
+    displayName: string;
+    machineSize: 'small' | 'medium' | 'large';
+    vcpu: number;
+    memoryMb: number;
+    diskGb: number;
+  }) {
+    return liveHetznerOffering({
+      location: getDefaultLocationForProvider('hetzner'),
+      providerInstanceType: input.providerInstanceType,
+      displayName: input.displayName,
+      machineSize: input.machineSize,
+      vcpu: input.vcpu,
+      ramGb: input.memoryMb / 1024,
+      memoryGb: input.memoryMb / 1024,
+      memoryMb: input.memoryMb,
+      storageGb: input.diskGb,
+      diskGb: input.diskGb,
+    });
+  }
+
+  async function seedRoleCapablePool(
+    offerings = [
+      rolePoolOffering({
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+        machineSize: 'small',
+        vcpu: 2,
+        memoryMb: 4096,
+        diskGb: 40,
+      }),
+    ]
+  ) {
     createDb();
     seedUserCredential({ id: 'user-hetzner' });
     const db = poolDb();
@@ -5688,14 +5722,7 @@ describe('workload-role eligibility contract', () => {
       userId: 'user-1',
       includeInstallation: false,
       candidatePublishBatchSize: 1000,
-      offeringResolver: async () => [
-        liveHetznerOffering({
-          location: getDefaultLocationForProvider('hetzner'),
-          providerInstanceType: 'cx23',
-          displayName: 'CX23',
-          machineSize: 'small',
-        }),
-      ],
+      offeringResolver: async () => offerings,
     });
     return db;
   }
@@ -5758,6 +5785,74 @@ describe('workload-role eligibility contract', () => {
     expect(buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates).toHaveLength(
       1
     );
+  });
+
+  it('selects the smallest eligible default candidate for legacy v2 reservations after host reserve', async () => {
+    const db = await seedRoleCapablePool([
+      rolePoolOffering({
+        providerInstanceType: 'cx23',
+        displayName: 'CX23',
+        machineSize: 'small',
+        vcpu: 2,
+        memoryMb: 4096,
+        diskGb: 40,
+      }),
+      rolePoolOffering({
+        providerInstanceType: 'cx33',
+        displayName: 'CX33',
+        machineSize: 'medium',
+        vcpu: 4,
+        memoryMb: 8192,
+        diskGb: 80,
+      }),
+      rolePoolOffering({
+        providerInstanceType: 'cx43',
+        displayName: 'CX43',
+        machineSize: 'large',
+        vcpu: 8,
+        memoryMb: 16_384,
+        diskGb: 160,
+      }),
+    ]);
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      ensure: false,
+      workloadRoles: 'all',
+    });
+    const placement = hetznerTaskStartPlacement();
+
+    placement.resolvedReservation = resolveResourceReservation(
+      {},
+      {},
+      { legacyVmSizes: { task: 'small' } }
+    );
+    expect(
+      buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates.map(
+        (candidate) => candidate.providerInstanceType
+      )
+    ).toEqual(['cx23', 'cx33', 'cx43']);
+
+    placement.resolvedReservation = resolveResourceReservation(
+      {},
+      {},
+      { legacyVmSizes: { task: 'medium' } }
+    );
+    expect(
+      buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates.map(
+        (candidate) => candidate.providerInstanceType
+      )
+    ).toEqual(['cx33', 'cx43']);
+
+    placement.resolvedReservation = resolveResourceReservation(
+      {},
+      {},
+      { legacyVmSizes: { task: 'large' } }
+    );
+    expect(
+      buildCapacityPoolSelection(summary!, placement, 'workspace')?.candidates.map(
+        (candidate) => candidate.providerInstanceType
+      )
+    ).toEqual(['cx43']);
   });
 
   it('still selects the workspace candidate for a workspace-role placement', async () => {
