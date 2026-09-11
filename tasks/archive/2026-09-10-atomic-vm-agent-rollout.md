@@ -35,7 +35,7 @@ The emergency recovery deploy then exposed a second deployment-atomicity failure
 - [x] Enforce the two-attempt minimum required by the established deployment revision sequence.
 - [x] Add discriminating tests for release-key routing, invalid release input, legacy fallback, cloud-init propagation, node-provisioning propagation, and deployment workflow ordering/key construction.
 - [x] Update rollout guidance and public documentation to record the immutable artifact contract and partial-deploy behavior.
-- [ ] Prove the change locally, then deploy to staging and start a real VM-backed session whose node reports the exact staging-required version.
+- [x] Prove the change locally, then deploy to staging and start a real VM-backed session whose node reports the exact staging-required version.
 
 ## Acceptance criteria
 
@@ -78,3 +78,16 @@ Version-aware readiness correctly rejected incompatible nodes, but workflow test
 ### Process fix
 
 Rule 54 and workflow contract tests now require commit-addressed artifact keys, exact required-version propagation, first-install-only bootstrap publication, and a single final code publication after bulk secrets on established installations.
+
+## Final validation — 2026-09-11
+
+- Final runtime head: `4109232d5283a3a64fcaa46231058da92e5b8785`; the subsequent archive commit changes only this task record.
+- Lint (13 tasks), typecheck (19 tasks), all package tests, and build (9 tasks) passed. Full API: 711 files / 9,637 tests; web: 308 files / 3,744 tests. Repository quality scripts: 44 files / 584 tests. The independently completed API run supplied API results after the sequential runner's duplicate API invocation was cancelled.
+- Cloudflare/security and completion/test/environment/documentation/constitution reviewers passed; both release-publication and API/Tail existence findings were fixed and independently reviewed.
+- Staging deployment [34567457487](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34567457487) and its smoke tests passed. Existing-install API bootstrap was skipped.
+- Fresh Hetzner VM `01M27H2FNED1RRT330585XXEN7` reported the exact required runtime head. Heartbeat was observed at 06:06:37 UTC; readiness passed at 06:07:34 UTC. Workspace `01M27H9WHKH0FMJSWRN5BZ6JD4` started the agent, ran `uname -m` and `pwd`, and returned `ATOMIC_VM_READY` in authenticated browser chat. More than 90 WebSocket frames arrived without browser page errors. Node system-info succeeded over the authenticated control-plane proxy.
+- Both architecture binaries returned HTTP 200 with immutable cache headers; generated install script selected the same release. Invalid release returned 400; absent valid release returned 404.
+- An active Instant diagnostics loop streamed through deployment with increasing uptime and no observed interruption/reset. Forced recovery was not exercised; automated tests validate the recovery minimum and revision ordering.
+- Authenticated dashboard, project chat and settings were exercised with Playwright. Persisted observability noise check passed; telemetry endpoint was unavailable (403).
+- Cleanup confirmed: the fresh VM and active Instant node were deleted successfully; the earlier sleeping Instant node was already deleted. D1 returned no remaining owned canary workspaces and no active owned canary nodes. The active Instant session's initial stop returned 500 and workspace cleanup was pending; explicit node deletion succeeded, and retrying session stop returned 200. All three sessions were stopped.
+- Task-completion validator approved archival after cleanup evidence. PR/CI/CodeRabbit and production rollout remain release obligations tracked by the shipping session.
