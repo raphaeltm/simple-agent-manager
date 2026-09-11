@@ -518,6 +518,26 @@ describe('deploy reusable workflow', () => {
       });
     });
 
+    it('builds the agent with the flags a reused release key requires', () => {
+      // Structural check on build configuration, not behaviour. The release key
+      // is now content-addressed, so consecutive deploys reuse one key and
+      // publish-vm-agent-artifacts.sh refuses a byte mismatch — which takes the
+      // whole deploy down, since the upload runs before the Worker is published.
+      // Staging run 34597495795 is the proof that this is not theoretical.
+      const makefile = readFileSync(
+        fileURLToPath(new URL('../../packages/vm-agent/Makefile', import.meta.url)),
+        'utf8'
+      );
+      const goflags = makefile.match(/^GOFLAGS :=.*$/m)?.[0] ?? '';
+
+      expect(goflags).toBeTruthy();
+      // Without it, Go embeds the absolute source directory.
+      expect(goflags).toContain('-trimpath');
+      // Without it, Go stamps vcs.revision — the DEPLOY commit, which the whole
+      // point of a content-addressed release is that it differs.
+      expect(goflags).toContain('-buildvcs=false');
+    });
+
     it('has no go:embed that would pull an excluded path into the binary', () => {
       // The exclusions in resolve-vm-agent-release.sh assert that `.claude/`,
       // `AGENTS.md` and `*_test.go` cannot change the compiled binary. `_test.go`

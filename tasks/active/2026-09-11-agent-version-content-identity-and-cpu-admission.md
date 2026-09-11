@@ -256,8 +256,39 @@ a genuine build input, while the three commits after it changed only tests and s
 correctly did not rotate it. Under the old scheme each of those would have been its
 own required version, and each would have evicted the pool.
 
-Deploy #2 — the property under test is "two consecutive deploys agree", which a single
-deploy cannot show. Results recorded below.
+Deploy #2 — run `34597495795`, head `bf25fc7bd` (task file only, no agent build inputs).
+**FAILED at `Upload VM Agent Binaries`**, and the failure is the point of running it:
+
+```
+Refusing to overwrite immutable VM-agent artifact
+  sam-staging-assets/agents/releases/c14b292c885e.../vm-agent-linux-amd64
+  existing sha256 = d43a36984ffff445fec2f142b291237720c2e887ac564ae36b8ad1291f2f0b50
+  built    sha256 = 5798b56e44f7f17847df80cb8f02016e4ca1aa997eb6efcfd16cd2c7bd290807
+```
+
+Identical source, identical `VERSION` and `BUILD_DATE`, `-trimpath` already on — and
+the bytes still differed. Root cause: `go build` defaults to `-buildvcs=auto` and stamps
+`vcs.revision` / `vcs.time` / `vcs.modified` into the binary. `vcs.revision` is the
+**deploy** commit, which under a content-addressed release is by design different on
+every deploy. `-trimpath` does not suppress it.
+
+This is the cloudflare-specialist review's HIGH #2 materialising in production
+conditions: before this PR every release key was unique so the refusal branch was
+effectively dead, and content-addressing made it live on the very next deploy.
+
+Fix: `-buildvcs=false` in `GOFLAGS`. The stamp is also actively misleading under
+content-keyed releases — it names whichever deploy happened to compile the binary
+rather than the release it belongs to, while `sysinfo.Version` already carries the
+identity we want. A structural contract test pins both `-trimpath` and
+`-buildvcs=false`, proven discriminating by removing each.
+
+Considered and rejected in the same change: pinning `CGO_ENABLED=0`. The amd64 and
+arm64 builds do get different cgo treatment (native builds enable cgo when a C
+toolchain is present; cross-compiles disable it), but cgo cannot explain this failure —
+both deploys ran on the same runner image — and disabling it switches the agent to the
+pure-Go DNS resolver, an unverified behavioural change. Tracked rather than bundled.
+
+Deploy #3 verifies the fix end to end. Results recorded below.
 
 ## Deliberately out of scope
 

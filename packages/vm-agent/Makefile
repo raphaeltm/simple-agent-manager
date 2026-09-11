@@ -18,7 +18,16 @@ LDFLAGS_VERSION := -X github.com/workspace/vm-agent/internal/sysinfo.Version=$(V
 # fails that check closed — blocking the whole deploy, since the upload step runs
 # before the Worker is published. Verified: identical source, two paths, divergent
 # SHA-256 without this flag; identical with it.
-GOFLAGS := -trimpath -ldflags="-s -w $(LDFLAGS_VERSION)"
+# -buildvcs=false is the reproducibility fix. Go stamps vcs.revision/vcs.time/
+# vcs.modified into the binary by default (-buildvcs=auto), and vcs.revision is
+# the DEPLOY commit — which by design now differs from the release. Staging
+# deploy 34597495795 proved it: identical source, identical VERSION and
+# BUILD_DATE, -trimpath on, and the upload step still refused the immutable key
+# with existing sha256 d43a3698... vs built 5798b56e.... The stamp is also
+# actively misleading under content-keyed releases, since it names whichever
+# deploy happened to compile the binary rather than the release it belongs to;
+# sysinfo.Version carries the identity we actually want.
+GOFLAGS := -trimpath -buildvcs=false -ldflags="-s -w $(LDFLAGS_VERSION)"
 CONTAINER_ARTIFACT_DIR ?= ../../apps/api/container-artifacts
 
 # Platforms
