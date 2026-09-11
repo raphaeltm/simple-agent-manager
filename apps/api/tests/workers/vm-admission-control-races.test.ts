@@ -1772,6 +1772,65 @@ describe('VM admission control D1 races', () => {
     expect(repeatedDeadlineMs).toBeLessThan(Date.now() + 90_000);
   });
 
+  it('starts a new busy-build budget when the admission reason changes', async () => {
+    const taskId = 'task-vm-admission-busy-build-reason-transition';
+    await seedQueuedTask(taskId);
+    const identity = admission(taskId, {
+      scopeKey: `${SCOPE_KEY}:busy-build-reason-transition`,
+      providerDomainKey: `${PROVIDER_DOMAIN}:busy-build-reason-transition`,
+    });
+
+    const providerWait = await waitForVmAdmissionCapacity(
+      env,
+      identity,
+      'provider_account_capacity'
+    );
+    expect(providerWait.kind).toBe('waiting');
+
+    await env.DATABASE.prepare(
+      `UPDATE vm_task_admissions
+       SET reason = 'provider_account_capacity',
+           enqueued_at = ?,
+           wait_deadline_at = ?
+       WHERE task_id = ?`
+    )
+      .bind(
+        new Date(Date.now() - 10 * 60_000).toISOString(),
+        new Date(Date.now() + 60 * 60_000).toISOString(),
+        taskId
+      )
+      .run();
+
+    const beforeBusyWait = Date.now();
+    const firstBusyWait = await waitForVmAdmissionCapacity(
+      env,
+      identity,
+      'compatible_node_building_workspace',
+      null,
+      null,
+      { waitTimeoutMs: 90_000 }
+    );
+    expect(firstBusyWait.kind).toBe('waiting');
+    if (firstBusyWait.kind !== 'waiting') throw new Error('expected first busy-build wait');
+    expect(Date.parse(firstBusyWait.waitDeadlineAt)).toBeGreaterThanOrEqual(
+      beforeBusyWait + 89_000
+    );
+    expect(Date.parse(firstBusyWait.waitDeadlineAt)).toBeLessThan(Date.now() + 120_000);
+
+    const secondBusyWait = await waitForVmAdmissionCapacity(
+      env,
+      identity,
+      'compatible_node_building_workspace',
+      null,
+      null,
+      { waitTimeoutMs: 90_000 }
+    );
+
+    expect(secondBusyWait.kind).toBe('waiting');
+    if (secondBusyWait.kind !== 'waiting') throw new Error('expected repeated busy-build wait');
+    expect(Date.parse(secondBusyWait.waitDeadlineAt)).toBe(Date.parse(firstBusyWait.waitDeadlineAt));
+  });
+
   it('uses the busy-build wait budget instead of the provider-capacity ceiling', async () => {
     const taskId = 'task-vm-admission-busy-build-deadline';
     await seedQueuedTask(taskId);

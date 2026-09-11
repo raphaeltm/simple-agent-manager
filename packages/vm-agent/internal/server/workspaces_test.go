@@ -112,6 +112,11 @@ func TestConfiguredWorkspaceBuildQueueDepth(t *testing.T) {
 		{name: "nil config", cfg: nil, want: config.DefaultWorkspaceBuildQueueDepth},
 		{name: "zero config", cfg: &config.Config{}, want: config.DefaultWorkspaceBuildQueueDepth},
 		{name: "configured", cfg: &config.Config{WorkspaceBuildQueueDepth: 3}, want: 3},
+		{
+			name: "above max config",
+			cfg:  &config.Config{WorkspaceBuildQueueDepth: config.MaxWorkspaceBuildQueueDepth + 1},
+			want: config.DefaultWorkspaceBuildQueueDepth,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -174,6 +179,61 @@ func TestNewServerUsesConfiguredWorkspaceBuildQueueDepth(t *testing.T) {
 
 	if got := cap(srv.buildQueue); got != 2 {
 		t.Fatalf("cap(buildQueue)=%d, want 2", got)
+	}
+}
+
+func TestNewServerUsesDefaultWorkspaceBuildQueueDepthAboveMax(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	jwks := buildWorkspaceCreateJWKS(privateKey.Public().(*rsa.PublicKey))
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwks)
+	}))
+	t.Cleanup(jwksServer.Close)
+
+	dir := t.TempDir()
+	cfg := &config.Config{
+		NodeID:                   "node-queue-depth-above-max",
+		ControlPlaneURL:          "http://localhost:8787",
+		JWKSEndpoint:             jwksServer.URL,
+		JWTIssuer:                "test-issuer",
+		JWTAudience:              "test-audience",
+		CookieName:               "vm_session",
+		SessionTTL:               time.Hour,
+		SessionCleanupInterval:   time.Hour,
+		SessionMaxCount:          10,
+		DefaultShell:             "/bin/sh",
+		DefaultRows:              24,
+		DefaultCols:              80,
+		WorkspaceDir:             dir,
+		PersistenceDBPath:        filepath.Join(dir, "persistence.db"),
+		ErrorReportDBPath:        filepath.Join(dir, "errors.db"),
+		ErrorReportSpoolDir:      filepath.Join(dir, "error-spool"),
+		EventStoreDBPath:         filepath.Join(dir, "events.db"),
+		MetricsDBPath:            filepath.Join(dir, "metrics.db"),
+		MetricsInterval:          time.Hour,
+		HTTPCallbackTimeout:      time.Second,
+		WorkspaceBuildQueueDepth: config.MaxWorkspaceBuildQueueDepth + 1,
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		if srv.resourceMonitor != nil {
+			_ = srv.resourceMonitor.Close()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Stop(ctx)
+	})
+
+	if got := cap(srv.buildQueue); got != config.DefaultWorkspaceBuildQueueDepth {
+		t.Fatalf("cap(buildQueue)=%d, want %d", got, config.DefaultWorkspaceBuildQueueDepth)
 	}
 }
 

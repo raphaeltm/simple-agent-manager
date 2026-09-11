@@ -140,7 +140,9 @@ type cachedWorktreeList struct {
 }
 
 func configuredWorkspaceBuildQueueDepth(cfg *config.Config) int {
-	if cfg == nil || cfg.WorkspaceBuildQueueDepth < 1 {
+	if cfg == nil ||
+		cfg.WorkspaceBuildQueueDepth < 1 ||
+		cfg.WorkspaceBuildQueueDepth > config.MaxWorkspaceBuildQueueDepth {
 		return config.DefaultWorkspaceBuildQueueDepth
 	}
 	return cfg.WorkspaceBuildQueueDepth

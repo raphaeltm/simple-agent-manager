@@ -594,7 +594,7 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 ### Workspace Builds
 
-- `WORKSPACE_BUILD_QUEUE_DEPTH` — Concurrent devcontainer build slots per workspace VM (default: `1`). Generated cloud-init passes this from the Worker env to newly provisioned VM Agent systemd services.
+- `WORKSPACE_BUILD_QUEUE_DEPTH` — Concurrent devcontainer build slots per workspace VM (default: `1`, supported range: `1` through `16`). Generated cloud-init passes this from the Worker env to newly provisioned VM Agent systemd services. Invalid values do not enable additional build slots and fall back to the default one-slot behavior.
 
 ### Git Operations
 
