@@ -65,7 +65,8 @@
     "quality:govulncheck-diff": "tsx scripts/quality/check-go-vulnerability-diff.ts",
     "quality:gitleaks:current": "tsx scripts/quality/run-gitleaks.ts --mode=current-tree",
     "quality:gitleaks:pr": "tsx scripts/quality/run-gitleaks.ts --mode=pr-range",
-    "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries"
+    "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries",
+    "quality:agent-context-budget": "tsx scripts/quality/check-agent-context-budget.ts"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
