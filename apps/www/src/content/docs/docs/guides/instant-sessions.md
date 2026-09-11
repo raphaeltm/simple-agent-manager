@@ -191,7 +191,7 @@ Launching an Instant session takes several steps. SAM does the bookkeeping up fr
 | Completed task sleep intent                        | Immediate   | task-completion lifecycle                   |
 | How long active work can hold sleep off            | 2 hours     | `CF_CONTAINER_ACTIVE_WORK_MAX_MS`           |
 | Max wake + restore time                            | 2 minutes   | `CF_CONTAINER_WAKE_TIMEOUT_MS`              |
-| Snapshot restore attempts before the session fails | 2           | `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`        |
+| Snapshot restore attempts before the session fails | 2 (minimum) | `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`        |
 | Replacement-VM wake attempts                       | 3           | `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`    |
 | Start budget (includes repo clone)                 | 2 minutes   | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS`  |
 | Repository clone filter                            | `blob:none` | `CF_CONTAINER_CLONE_FILTER`                 |

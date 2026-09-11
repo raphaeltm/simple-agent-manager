@@ -1,7 +1,16 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +22,10 @@ const syncWranglerConfig = readFileSync(
   new URL('../deploy/sync-wrangler-config.ts', import.meta.url),
   'utf8'
 );
+const publishVmAgentArtifactsPath = fileURLToPath(
+  new URL('../deploy/publish-vm-agent-artifacts.sh', import.meta.url)
+);
+const publishVmAgentArtifacts = readFileSync(publishVmAgentArtifactsPath, 'utf8');
 
 function stepBlock(stepName: string): string {
   const pattern = new RegExp(
@@ -116,6 +129,76 @@ function runWorkersDevSubdomainStep(httpCode: number): { output: string; status:
     return {
       output: `${execError.stdout?.toString() ?? ''}${execError.stderr?.toString() ?? ''}`,
       status: execError.status ?? 1,
+    };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+function runVmAgentArtifactPublication(mode: 'identical' | 'mismatch' | 'missing' | 'error'): {
+  output: string;
+  puts: string[];
+  status: number;
+} {
+  const tmp = mkdtempSync(join(tmpdir(), 'sam-agent-artifact-test-'));
+  const fakeBin = join(tmp, 'bin');
+  const workspace = join(tmp, 'workspace');
+  const sourceDir = join(workspace, 'packages', 'vm-agent', 'bin');
+  const putLog = join(tmp, 'puts.log');
+  mkdirSync(fakeBin, { recursive: true });
+  mkdirSync(sourceDir, { recursive: true });
+  writeFileSync(join(sourceDir, 'vm-agent-linux-amd64'), 'amd64-release');
+  writeFileSync(join(sourceDir, 'vm-agent-linux-arm64'), 'arm64-release');
+
+  const pnpmPath = join(fakeBin, 'pnpm');
+  writeFileSync(
+    pnpmPath,
+    `#!/usr/bin/env bash
+set -euo pipefail
+operation="\${7:?}"
+object_path="\${8:?}"
+file_path="\${10:?}"
+architecture="\${object_path##*-}"
+if [ "$operation" = "get" ]; then
+  case "$SAM_FAKE_R2_MODE" in
+    identical) cp "$SAM_FAKE_SOURCE_DIR/vm-agent-linux-$architecture" "$file_path" ;;
+    mismatch) printf 'different-bytes' > "$file_path" ;;
+    missing) echo 'The specified key does not exist.' >&2; exit 1 ;;
+    error) echo 'R2 request failed before receiving a response' >&2; exit 1 ;;
+  esac
+  exit 0
+fi
+if [ "$operation" = "put" ]; then
+  printf '%s\n' "$object_path" >> "$SAM_FAKE_PUT_LOG"
+  exit 0
+fi
+exit 64
+`
+  );
+  chmodSync(pnpmPath, 0o755);
+
+  try {
+    const result = spawnSync('bash', [publishVmAgentArtifactsPath], {
+      cwd: new URL('../..', import.meta.url),
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+        R2_BUCKET: 'test-assets',
+        DEPLOY_SHA: 'a'.repeat(40),
+        GITHUB_WORKSPACE: workspace,
+        RUNNER_TEMP: tmp,
+        SAM_FAKE_R2_MODE: mode,
+        SAM_FAKE_SOURCE_DIR: sourceDir,
+        SAM_FAKE_PUT_LOG: putLog,
+      },
+      encoding: 'utf8',
+    });
+    return {
+      output: `${result.stdout}${result.stderr}`,
+      puts: existsSync(putLog)
+        ? readFileSync(putLog, 'utf8').trim().split('\n').filter(Boolean)
+        : [],
+      status: result.status ?? 1,
     };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -380,11 +463,12 @@ describe('deploy reusable workflow', () => {
     expect(buildIndex).toBeGreaterThan(-1);
     expect(uploadIndex).toBeGreaterThan(buildIndex);
     expect(uploadIndex).toBeLessThan(deployIndex);
-    expect(upload).toContain(
-      'OBJECT_PATH="$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-$ARCH"'
+    expect(upload).toContain('bash ../scripts/deploy/publish-vm-agent-artifacts.sh');
+    expect(publishVmAgentArtifacts).toContain(
+      'local object_path="$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-$architecture"'
     );
-    expect(upload).toContain('publish_agent_artifact amd64');
-    expect(upload).toContain('publish_agent_artifact arm64');
+    expect(publishVmAgentArtifacts).toContain('publish_agent_artifact amd64');
+    expect(publishVmAgentArtifacts).toContain('publish_agent_artifact arm64');
     expect(upload).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
     expect(upload).not.toContain('$R2_BUCKET/agents/vm-agent-linux-amd64');
   });
@@ -546,15 +630,47 @@ describe('deploy reusable workflow', () => {
   });
 
   it('reuses identical same-SHA artifacts and refuses immutable-key overwrites', () => {
-    const upload = stepBlock('Upload VM Agent Binaries');
+    expect(publishVmAgentArtifacts).toContain('wrangler r2 object get "$object_path"');
+    expect(publishVmAgentArtifacts).toContain('source_sha=$(sha256sum "$source_path"');
+    expect(publishVmAgentArtifacts).toContain('existing_sha=$(sha256sum "$existing_path"');
+    expect(publishVmAgentArtifacts).toContain('if [ "$source_sha" != "$existing_sha" ]');
+    expect(publishVmAgentArtifacts).toContain('Refusing to overwrite immutable VM-agent artifact');
+    expect(publishVmAgentArtifacts).toContain('The specified key does not exist.');
+    expect(publishVmAgentArtifacts).toContain('wrangler r2 object put "$object_path"');
+  });
 
-    expect(upload).toContain('wrangler r2 object get "$OBJECT_PATH"');
-    expect(upload).toContain('SOURCE_SHA=$(sha256sum "$SOURCE_PATH"');
-    expect(upload).toContain('EXISTING_SHA=$(sha256sum "$EXISTING_PATH"');
-    expect(upload).toContain('if [ "$SOURCE_SHA" != "$EXISTING_SHA" ]');
-    expect(upload).toContain('Refusing to overwrite immutable VM-agent artifact');
-    expect(upload).toContain('The specified key does not exist.');
-    expect(upload).toContain('wrangler r2 object put "$OBJECT_PATH"');
+  it('behaviorally reuses byte-identical immutable artifacts without a PUT', () => {
+    const result = runVmAgentArtifactPublication('identical');
+
+    expect(result.status).toBe(0);
+    expect(result.puts).toEqual([]);
+    expect(result.output.match(/Reusing identical immutable VM-agent artifact/g)).toHaveLength(2);
+  });
+
+  it('behaviorally rejects a digest mismatch without overwriting R2', () => {
+    const result = runVmAgentArtifactPublication('mismatch');
+
+    expect(result.status).toBe(1);
+    expect(result.puts).toEqual([]);
+    expect(result.output).toContain('Refusing to overwrite immutable VM-agent artifact');
+  });
+
+  it('behaviorally fails closed on an unexpected R2 read error', () => {
+    const result = runVmAgentArtifactPublication('error');
+
+    expect(result.status).toBe(1);
+    expect(result.puts).toEqual([]);
+    expect(result.output).toContain('Could not verify whether immutable VM-agent artifact exists');
+  });
+
+  it('behaviorally uploads both architectures only after confirmed absence', () => {
+    const result = runVmAgentArtifactPublication('missing');
+
+    expect(result.status).toBe(0);
+    expect(result.puts).toEqual([
+      `test-assets/agents/releases/${'a'.repeat(40)}/vm-agent-linux-amd64`,
+      `test-assets/agents/releases/${'a'.repeat(40)}/vm-agent-linux-arm64`,
+    ]);
   });
 
   it('continues deployment when workers.dev subdomain setup succeeds', () => {

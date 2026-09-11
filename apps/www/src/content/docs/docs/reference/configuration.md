@@ -156,6 +156,8 @@ The variables below tune the **Instant** (Cloudflare Container) runtime — how 
 | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000`         | Budget for the synchronous instant-session create-workspace request, which includes the repository clone inside the container.                                                             |
 | `CF_CONTAINER_CLONE_FILTER`                | `blob:none`      | Git partial-clone filter forwarded to instant containers as `STANDALONE_CLONE_FILTER`. Set `off` to force full clones.                                                                     |
 
+`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS` has a deployment-safety minimum of `2`; smaller positive values resolve to `2`.
+
 ### Persistent session snapshots and sleep
 
 Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of the agent's home directory and the repository work in progress. A complete snapshot is required before SAM tears down VM compute. None of these limits are surfaced in the UI, so operators should set expectations deliberately — see [What gets restored](/docs/guides/instant-sessions/#what-gets-restored).

@@ -18,7 +18,7 @@ Required pattern:
 12. Control-plane changes that stop callback storms MUST stand alone for already-deployed agents: terminal statuses and low-severity logging must be correct even if the old VM agent keeps retrying until it is replaced.
 13. VM-agent callback loops MUST treat terminal control-plane statuses (`401`, `403`, `404`, `410`) as stop signals, or otherwise use exponential backoff with a hard retry/time budget. Unbounded retries after a terminal resource response are not rollout-compatible.
 14. Cloud-init and generated install scripts must request the exact `VM_AGENT_REQUIRED_VERSION` release when it is configured. Unversioned downloads are reserved for legacy/local/manual installs and intentional `skip_agent` deployments.
-15. Established deployments must publish Worker revisions in an order that leaves an Instant recovery attempt after the final code update. First-install bootstrap revisions may run only when no prior Worker exists.
+15. Established deployments must publish Worker revisions in an order that leaves an Instant recovery attempt after the final code update. The Instant recovery budget must enforce the minimum required by that revision count. First-install bootstrap revisions may run only when no prior Worker exists.
 
 Tests for scheduling-affecting VM-agent changes should include a stale-but-otherwise-better candidate losing to a compatible node, preferred/warm stale-node rejection, current fresh-node readiness, active stale-node preservation, idle stale-node retirement, and the pre-heartbeat interleaving where a recent bounded warm-node claim exists before any workspace row.
 

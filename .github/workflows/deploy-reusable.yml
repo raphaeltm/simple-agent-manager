@@ -870,37 +870,7 @@ jobs:
         working-directory: infra
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
-          publish_agent_artifact() {
-            ARCH="$1"
-            SOURCE_PATH="$GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-$ARCH"
-            OBJECT_PATH="$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-$ARCH"
-            EXISTING_PATH="$RUNNER_TEMP/vm-agent-linux-$ARCH.existing"
-
-            # Wrangler v4: R2 commands default to local; --remote is required.
-            if GET_OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler r2 object get "$OBJECT_PATH" --file "$EXISTING_PATH" --remote 2>&1); then
-              SOURCE_SHA=$(sha256sum "$SOURCE_PATH" | cut -d' ' -f1)
-              EXISTING_SHA=$(sha256sum "$EXISTING_PATH" | cut -d' ' -f1)
-              rm -f "$EXISTING_PATH"
-              if [ "$SOURCE_SHA" != "$EXISTING_SHA" ]; then
-                echo "::error::Refusing to overwrite immutable VM-agent artifact $OBJECT_PATH (existing sha256=$EXISTING_SHA, built sha256=$SOURCE_SHA)"
-                return 1
-              fi
-              echo "Reusing identical immutable VM-agent artifact $OBJECT_PATH"
-              return 0
-            fi
-
-            rm -f "$EXISTING_PATH"
-            if ! echo "$GET_OUTPUT" | grep -q "The specified key does not exist."; then
-              echo "$GET_OUTPUT"
-              echo "::error::Could not verify whether immutable VM-agent artifact exists: $OBJECT_PATH"
-              return 1
-            fi
-
-            pnpm --filter @simple-agent-manager/api exec wrangler r2 object put "$OBJECT_PATH" --file "$SOURCE_PATH" --remote
-          }
-
-          publish_agent_artifact amd64
-          publish_agent_artifact arm64
+          R2_BUCKET="$R2_BUCKET" bash ../scripts/deploy/publish-vm-agent-artifacts.sh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

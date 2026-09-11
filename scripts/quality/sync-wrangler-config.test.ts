@@ -47,6 +47,15 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it('omits an empty VM-agent release from the generated Worker configuration', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('VM_AGENT_REQUIRED_VERSION', '');
+
+    const vars = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
+
+    expect(vars).not.toHaveProperty('VM_AGENT_REQUIRED_VERSION');
+  });
+
   it('passes deployment image-resolution limits into generated deployments', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS', '1000');

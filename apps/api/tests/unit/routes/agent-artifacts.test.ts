@@ -93,4 +93,17 @@ describe('VM-agent artifact routes', () => {
     expect(response.status).toBe(200);
     expect(await response.text()).not.toContain('&release=');
   });
+
+  it('rejects an invalid configured release before rendering the install script', async () => {
+    const response = await buildApp().request(
+      '/api/agent/install-script',
+      { headers: { host: 'api.example.com' } },
+      envWithR2(vi.fn(), { VM_AGENT_REQUIRED_VERSION: '../../mutable' })
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: 'INVALID_VM_AGENT_REQUIRED_VERSION',
+    });
+  });
 });

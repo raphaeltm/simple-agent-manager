@@ -21,6 +21,7 @@ The emergency recovery deploy then exposed a second deployment-atomicity failure
 - Rule 54 requires artifact publication before the controller requirement, but a mutable object makes that order unsafe when any later deployment step fails.
 - The retained 2026-08-06 node-reaping post-mortem introduced exact rollout compatibility but did not test failure between artifact upload and Worker publication.
 - A commit-addressed key is not immutable if a same-commit retry rebuilds with a wall-clock timestamp and overwrites it. Builds must use commit-derived metadata, and publication must reuse only byte-identical existing objects or fail before Worker publication.
+- The established deploy sequence relies on two active Instant recovery launches, so `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS=1` would undercut the rollout guarantee unless the runtime enforces a two-attempt minimum.
 
 ## Implementation checklist
 
@@ -31,6 +32,7 @@ The emergency recovery deploy then exposed a second deployment-atomicity failure
 - [x] Make the generated install script request the live Worker's required release when configured.
 - [x] Return immutable cache semantics for version-addressed binaries and retain bounded cache semantics for legacy mutable downloads.
 - [x] Reorder established-installation Worker secret/code publication so recovery has a surviving attempt after the final Worker revision, while retaining first-install bootstrap behavior.
+- [x] Enforce the two-attempt minimum required by the established deployment revision sequence.
 - [x] Add discriminating tests for release-key routing, invalid release input, legacy fallback, cloud-init propagation, node-provisioning propagation, and deployment workflow ordering/key construction.
 - [x] Update rollout guidance and public documentation to record the immutable artifact contract and partial-deploy behavior.
 - [ ] Prove the change locally, then deploy to staging and start a real VM-backed session whose node reports the exact staging-required version.
@@ -45,6 +47,7 @@ The emergency recovery deploy then exposed a second deployment-atomicity failure
 - `skip_agent` and legacy/manual development deployments with no required version retain the existing unversioned fallback behavior.
 - Readiness version gates remain enabled and unchanged.
 - An established deployment cannot consume every Instant recovery attempt solely through its own Worker revision sequence; first-install deployment still configures secrets and publishes a usable Worker.
+- Runtime configuration cannot reduce the active Instant recovery budget below the deployment-safe two-attempt minimum.
 - Focused unit and workflow-contract tests, the full quality suite, Cloudflare specialist review, task completion validation, and a real staging VM startup all pass.
 
 ## References
