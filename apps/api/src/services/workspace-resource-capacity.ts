@@ -1,5 +1,7 @@
 import {
   DEFAULT_MAX_WORKSPACES_PER_NODE,
+  DEFAULT_NODE_CPU_THRESHOLD_PERCENT,
+  DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT,
   type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
 
@@ -150,13 +152,16 @@ export function resolveWorkspaceAdmissionPolicy(
     ),
     cpuThresholdPercent: boundedInt(
       scaling?.nodeCpuThresholdPercent,
-      parseEnvInt(env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT, 50),
+      parseEnvInt(env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT, DEFAULT_NODE_CPU_THRESHOLD_PERCENT),
       1,
       1_000
     ),
     memoryThresholdPercent: boundedInt(
       scaling?.nodeMemoryThresholdPercent,
-      parseEnvInt(env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT, 50),
+      parseEnvInt(
+        env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+        DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT
+      ),
       1,
       100
     ),
@@ -520,6 +525,26 @@ export function usableMemoryMb(memoryMb: number, policy: WorkspaceAdmissionPolic
   return Math.max(0, memoryMb - policy.hostMemoryReserveMb);
 }
 
+/**
+ * Live-telemetry admission checks, split by whether the resource is compressible.
+ *
+ * Memory and disk are NON-COMPRESSIBLE. Oversubscribing them gets processes
+ * OOM-killed and wedges the node, and no amount of declared accounting makes a
+ * full disk usable, so measured pressure stays a hard veto for both.
+ *
+ * CPU is COMPRESSIBLE: the kernel time-slices it, so oversubscription makes work
+ * slower rather than broken. It is also already accounted for — every co-tenant's
+ * committed CPU is subtracted from `cpuBudgetMillis` against its declared
+ * reservation by the caller, which refuses the request on its own when the budget
+ * does not fit. Vetoing a second time on instantaneous CPU therefore double-counts
+ * a co-tenant's own reserved burst, and refuses precisely the hosts that are doing
+ * the work we want to pack onto. Below saturation the declared reservation is the
+ * sole CPU authority; `cpuThresholdPercent` survives only as a saturation ceiling.
+ *
+ * Do NOT restore a "node is busy" CPU veto here. At the previous 50% default, one
+ * busy core on a 2-vCPU host refused every co-tenant, so only idle nodes were ever
+ * admissible and production provisioned close to one VM per agent.
+ */
 function measuredAdmissionDiagnostic(
   metrics: WorkspaceAdmissionMetrics | null,
   policy: WorkspaceAdmissionPolicy,
@@ -529,6 +554,8 @@ function measuredAdmissionDiagnostic(
   if (metrics.unsupportedVersion) return 'node resource telemetry version is unsupported';
   if (metrics.malformed) return 'node resource telemetry is malformed';
   if (!metrics.fresh) return 'node telemetry is stale';
+  // Saturation still needs a reading to evaluate, so absent CPU telemetry keeps
+  // failing closed exactly as before.
   if (metrics.cpuPercent === null && !allowUnknownCpuPressure) {
     return 'node has no CPU pressure telemetry';
   }
@@ -536,7 +563,7 @@ function measuredAdmissionDiagnostic(
   if (metrics.diskPercent === null) return 'node has no disk pressure telemetry';
   if (metrics.creatingWorkspaces > 0) return 'node is already creating a workspace';
   if (metrics.cpuPercent !== null && metrics.cpuPercent >= policy.cpuThresholdPercent) {
-    return 'CPU pressure threshold reached';
+    return 'CPU saturation ceiling reached';
   }
   if (metrics.memoryPercent >= policy.memoryThresholdPercent) {
     return 'memory pressure threshold reached';

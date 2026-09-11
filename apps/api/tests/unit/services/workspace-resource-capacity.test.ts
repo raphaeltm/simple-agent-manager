@@ -11,6 +11,7 @@ import {
   normalizeLoadAverageToCpuPercent,
   parseResolvedResourceReservation,
   parseWorkspaceAdmissionMetrics,
+  resolveWorkspaceAdmissionPolicy,
   type WorkspaceAdmissionPolicy,
 } from '../../../src/services/workspace-resource-capacity';
 
@@ -147,7 +148,7 @@ describe('workspace resource capacity accounting', () => {
     };
 
     for (const [metrics, reason] of [
-      [{ cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }, 'CPU pressure threshold reached'],
+      [{ cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }, 'CPU saturation ceiling reached'],
       [
         { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 },
         'memory pressure threshold reached',
@@ -413,5 +414,105 @@ describe('workspace resource capacity', () => {
         policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
       )
     ).toBe(false);
+  });
+});
+
+describe('live CPU is a saturation ceiling, not an admission authority', () => {
+  // Production sets none of these, so the resolved defaults are what actually
+  // decide admission there. Reaching the defaults through the real resolver is
+  // the only way to observe the incident (.claude/rules/62).
+  const productionEnv = {} as Parameters<typeof resolveWorkspaceAdmissionPolicy>[0];
+
+  /** `cpuLoadAvg1 / vcpu * 100`, so 2.4 over 4 vCPU is 60%. */
+  function hostAt(cpuPercent: number, overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'occupied',
+      providerInstanceId: 'server-occupied',
+      observedProviderInstanceVcpuCount: 4,
+      observedProviderInstanceMemoryMb: 8192,
+      observedProviderInstanceDiskGb: 80,
+      observedHardwareSource: 'observed',
+      lastHeartbeatAt: new Date().toISOString(),
+      lastMetrics: JSON.stringify({
+        cpuLoadAvg1: (cpuPercent / 100) * 4,
+        memoryPercent: 10,
+        diskPercent: 10,
+        ...overrides,
+      }),
+    };
+  }
+
+  const oneCoTenant = () =>
+    usage({ activeCount: 1, cpuMillis: 1000, memoryMb: 1024, diskMb: 1024, minMaxCoTenants: 4 });
+
+  it('admits a busy-but-unsaturated host whose declared budget still fits', () => {
+    // The incident: at the previous 50% default this host was refused and the
+    // scheduler bought another VM, even though 3000 of its 4000 declared
+    // milliCPU were free. Fails against pre-fix code.
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(60),
+      oneCoTenant(),
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+
+    expect(result.reasons).toEqual([]);
+    expect(result.admitted).toBe(true);
+  });
+
+  it('still refuses the same host when the declared budget does not fit', () => {
+    // Control: admission did not simply get weaker. The declared reservation is
+    // now the sole CPU authority below saturation, so it must still bite.
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(60),
+      oneCoTenant(),
+      reservation({ cpuMillis: 3500 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('CPU share budget would be exceeded');
+    expect(result.reasons).not.toContain('CPU saturation ceiling reached');
+  });
+
+  it('still refuses a genuinely saturated host', () => {
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(96),
+      oneCoTenant(),
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('CPU saturation ceiling reached');
+  });
+
+  it.each([
+    ['memory', { memoryPercent: 99 }, 'memory pressure threshold reached'],
+    ['disk', { diskPercent: 99 }, 'disk pressure threshold reached'],
+  ])('keeps the non-compressible %s veto at the same pressure', (_label, overrides, reason) => {
+    // Memory and disk oversubscription gets processes OOM-killed and wedges the
+    // node, so neither may follow CPU up to a saturation-only ceiling.
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(10, overrides),
+      oneCoTenant(),
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain(reason);
+  });
+
+  it('lets a project override tighten the ceiling back down', () => {
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(60),
+      oneCoTenant(),
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv, { nodeCpuThresholdPercent: 50 })
+    );
+
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('CPU saturation ceiling reached');
   });
 });

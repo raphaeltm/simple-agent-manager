@@ -39,7 +39,18 @@ export const MIN_MAX_WORKSPACES_PER_NODE = 1;
 export const MAX_MAX_WORKSPACES_PER_NODE = 10;
 
 /** Default CPU threshold (%). Override per-project or via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
-export const DEFAULT_NODE_CPU_THRESHOLD_PERCENT = 50;
+/**
+ * Live CPU is a SATURATION ceiling, not a "this node is busy" mark.
+ *
+ * CPU is compressible — the kernel time-slices it, so oversubscription makes work
+ * slower rather than broken — and each workspace's committed CPU is already
+ * subtracted from the node's declared reservation budget. Refusing admission at
+ * 50% therefore double-counted a co-tenant's own reserved burst and refused
+ * exactly the nodes that were doing useful work: on a 2-vCPU host one busy core
+ * is 50%, so in production only idle nodes were ever admissible and almost every
+ * agent got a VM of its own. Keep this at a level that means "saturated".
+ */
+export const DEFAULT_NODE_CPU_THRESHOLD_PERCENT = 90;
 export const MIN_NODE_CPU_THRESHOLD_PERCENT = 10;
 export const MAX_NODE_CPU_THRESHOLD_PERCENT = 95;
 
