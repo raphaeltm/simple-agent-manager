@@ -166,6 +166,94 @@ describe('D1 Sessions API on workerd', () => {
     expect(rows.results.map((row) => row.id)).toEqual([first, second]);
   });
 
+  /*
+   * Concurrency is the DOMINANT pattern this facade now sits under, not an edge case:
+   * `Promise.all` around D1/drizzle calls appears in ~32 files under `apps/api/src`, including
+   * `resolvePlatformConfig`'s 14-way fan-out on the auth preamble and the two independent
+   * read pairs this PR made concurrent (`requireActiveProjectMembership`,
+   * `computeBlockedSet`/`resolveTaskAgentProfileHints`). All of those now share ONE
+   * `D1DatabaseSession` per request, so "does a session behave correctly when queries are
+   * dispatched concurrently rather than sequentially?" has to be proven, not assumed —
+   * especially on the real runtime, since a node harness has no session at all
+   * (`.claude/rules/69`).
+   */
+  it('serves a concurrent burst correctly as the session\'s FIRST queries', async () => {
+    const scoped = createRequestScopedD1(testEnv.DATABASE);
+
+    // No bookmark exists yet, so every one of these is a "first" query for the session.
+    const rows = await Promise.all([
+      scoped.prepare('SELECT 1 AS n').first<{ n: number }>(),
+      scoped.prepare('SELECT 2 AS n').first<{ n: number }>(),
+      scoped.prepare('SELECT 3 AS n').first<{ n: number }>(),
+      scoped.prepare('SELECT id FROM users WHERE id = ?').bind(USER_ID).first<{ id: string }>(),
+    ]);
+
+    expect(rows.slice(0, 3).map((row) => (row as { n: number }).n)).toEqual([1, 2, 3]);
+    expect(rows[3]).toEqual({ id: USER_ID });
+  });
+
+  it('a write is visible to reads dispatched concurrently after it', async () => {
+    const scoped = createRequestScopedD1(testEnv.DATABASE);
+    const id = `${RUN}-concurrent-1`;
+
+    await scoped
+      .prepare(
+        `INSERT INTO users (id, email, name, email_verified, role, status, created_at, updated_at)
+         VALUES (?, ?, 'concurrent', 1, 'user', 'active', ?, ?)`
+      )
+      .bind(id, `${id}@example.com`, NOW, NOW)
+      .run();
+
+    // Both reads are dispatched before either resolves — the shape `Promise.all` produces.
+    const [byId, counted] = await Promise.all([
+      scoped.prepare('SELECT name FROM users WHERE id = ?').bind(id).first<{ name: string }>(),
+      scoped
+        .prepare('SELECT COUNT(*) AS n FROM users WHERE id = ?')
+        .bind(id)
+        .first<{ n: number }>(),
+    ]);
+
+    expect(byId).toEqual({ name: 'concurrent' });
+    expect(counted?.n).toBe(1);
+  });
+
+  it('interleaves concurrent prepare() and batch() on one session', async () => {
+    const scoped = createRequestScopedD1(testEnv.DATABASE);
+
+    const [single, batched] = await Promise.all([
+      scoped.prepare('SELECT id FROM users WHERE id = ?').bind(USER_ID).first<{ id: string }>(),
+      scoped.batch<{ id: string }>([
+        scoped.prepare('SELECT id FROM users WHERE id = ?').bind(USER_ID),
+        scoped.prepare('SELECT id FROM users WHERE id = ?').bind(OTHER_USER_ID),
+      ]),
+    ]);
+
+    expect(single).toEqual({ id: USER_ID });
+    expect(batched.map((result) => result.results[0]?.id)).toEqual([USER_ID, OTHER_USER_ID]);
+  });
+
+  it('opens exactly one session for a concurrent burst', async () => {
+    let sessionCount = 0;
+    const counting = {
+      ...testEnv.DATABASE,
+      withSession: (anchor?: string) => {
+        sessionCount += 1;
+        return testEnv.DATABASE.withSession(anchor);
+      },
+    } as unknown as D1Database;
+
+    const scoped = createRequestScopedD1(counting);
+    await Promise.all([
+      scoped.prepare('SELECT 1 AS n').first(),
+      scoped.prepare('SELECT 2 AS n').first(),
+      scoped.prepare('SELECT 3 AS n').first(),
+    ]);
+
+    // The lazy `session ??= …` must not race into three sessions when three callers reach it
+    // in the same synchronous turn.
+    expect(sessionCount).toBe(1);
+  });
+
   it('withRequestScopedD1Bindings keeps every other binding usable', async () => {
     const scoped = withRequestScopedD1Bindings(testEnv);
 
