@@ -171,6 +171,7 @@ ${extraBody}
 }
 
 function runRenderedBootstrapRuncmd(options: {
+  curlFails?: boolean;
   totalMb: number;
   reserveMb?: string;
   minMb?: string;
@@ -190,7 +191,7 @@ function runRenderedBootstrapRuncmd(options: {
     ['logger', 'exit 0'],
     ['chage', 'exit 0'],
     ['chmod', 'exit 0'],
-    ['curl', 'exit 0'],
+    ['curl', options.curlFails ? 'exit 7' : 'exit 0'],
     ['date', 'printf "%s\\n" "2026-09-07"'],
     ['mkdir', 'exit 0'],
     ['stat', 'printf "%s\\n" "123"'],
@@ -821,6 +822,22 @@ describe('generateCloudInit', () => {
       expect(calls).not.toContain('systemctl start vm-agent');
       expect(calls).not.toContain('logger -t sam-boot ALL PHASES COMPLETE');
     });
+
+    it('rendered bootstrap stops before chmod when vm-agent download fails', () => {
+      const { calls, result } = runRenderedBootstrapRuncmd({
+        curlFails: true,
+        minMb: '512',
+        reserveMb: '0',
+        totalMb: 1023,
+      });
+
+      expect(result.status).toBe(7);
+      expect(calls).toContain('logger -t sam-boot vm-agent download failed status=7');
+      expect(calls).not.toContain('chmod +x /usr/local/bin/vm-agent');
+      expect(calls).not.toContain('systemctl start vm-agent');
+      expect(calls).not.toContain('logger -t sam-boot ALL PHASES COMPLETE');
+    });
+
 
     it('configure script preserves explicit zero reserve as disabled mode', () => {
       const { calls, conf, result } = runConfigureDockerMemoryScript({
@@ -2232,15 +2249,31 @@ describe('validateCloudInitVariables', () => {
     it('pins the VM-agent download to the required deployment release', () => {
       const release = '0123456789abcdef0123456789abcdef01234567';
       const config = generateCloudInit(baseVariables({ vmAgentRequiredVersion: release }));
+      const parsed = YAML.parse(config) as { runcmd: unknown[] };
+      const downloadCommand = parsed.runcmd.find(
+        (entry): entry is string =>
+          typeof entry === 'string' && entry.includes('/api/agent/download?arch=${ARCH}')
+      );
+      if (!downloadCommand) {
+        throw new Error('missing vm-agent download command');
+      }
 
-      expect(config).toContain('/api/agent/download?arch=${ARCH}&release=' + release);
+      expect(downloadCommand).toContain('/api/agent/download?arch=${ARCH}&release=' + release);
     });
 
     it('keeps the legacy download URL when no required release is configured', () => {
       const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config) as { runcmd: unknown[] };
+      const downloadCommand = parsed.runcmd.find(
+        (entry): entry is string =>
+          typeof entry === 'string' && entry.includes('/api/agent/download?arch=${ARCH}')
+      );
+      if (!downloadCommand) {
+        throw new Error('missing vm-agent download command');
+      }
 
-      expect(config).toContain('/api/agent/download?arch=${ARCH}"');
-      expect(config).not.toContain('&release=');
+      expect(downloadCommand).toContain('/api/agent/download?arch=${ARCH}"');
+      expect(downloadCommand).not.toContain('&release=');
     });
 
     it('rejects an unsafe VM-agent release before embedding it in shell', () => {

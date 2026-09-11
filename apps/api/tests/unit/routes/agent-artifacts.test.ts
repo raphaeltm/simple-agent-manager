@@ -2,12 +2,14 @@ import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { handleAppError } from '../../../src/middleware/app-error-handler';
 import { agentRoutes } from '../../../src/routes/agent';
 
 const RELEASE = '0123456789abcdef0123456789abcdef01234567';
 
 function buildApp() {
   const app = new Hono<{ Bindings: Env }>();
+  app.onError(handleAppError);
   app.route('/api/agent', agentRoutes);
   return app;
 }

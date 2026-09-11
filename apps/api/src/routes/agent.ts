@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { AppError } from '../middleware/error';
 import { registerBinaryArtifactRoutes } from './binary-artifacts';
 
 const agentRoutes = new Hono<{ Bindings: Env }>();
@@ -42,12 +43,10 @@ agentRoutes.get('/install-script', async (c) => {
     : 'https://api.workspaces.example.com';
   const requiredRelease = c.env.VM_AGENT_REQUIRED_VERSION?.trim();
   if (requiredRelease && !VM_AGENT_RELEASE_RE.test(requiredRelease)) {
-    return c.json(
-      {
-        error: 'INVALID_VM_AGENT_REQUIRED_VERSION',
-        message: 'Configured VM agent release is invalid',
-      },
-      503
+    throw new AppError(
+      503,
+      'INVALID_VM_AGENT_REQUIRED_VERSION',
+      'Configured VM agent release is invalid'
     );
   }
   const releaseQuery = requiredRelease ? `&release=${requiredRelease}` : '';

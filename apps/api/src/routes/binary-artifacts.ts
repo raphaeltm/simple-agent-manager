@@ -3,6 +3,7 @@ import type { GenericSchema } from 'valibot';
 
 import type { Env } from '../env';
 import { parseWithSchema } from '../lib/runtime-validation';
+import { AppError } from '../middleware/error';
 
 type ArtifactRoutes = Hono<{ Bindings: Env }>;
 
@@ -61,12 +62,10 @@ export function registerBinaryArtifactRoutes(
       ? c.req.query(options.versionedStorage.queryParameter)
       : undefined;
     if (version !== undefined && !options.versionedStorage?.isValidVersion(version)) {
-      return c.json(
-        {
-          error: 'INVALID_VERSION',
-          message: `Invalid ${options.versionedStorage?.queryParameter ?? 'version'}`,
-        },
-        400
+      throw new AppError(
+        400,
+        'INVALID_VERSION',
+        `Invalid ${options.versionedStorage?.queryParameter ?? 'version'}`
       );
     }
 

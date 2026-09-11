@@ -66,7 +66,17 @@ runcmd:
       aarch64) ARCH="arm64" ;;
     esac
     logger -t sam-boot "Downloading vm-agent for arch=$ARCH"
-    curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}{{ vm_agent_release_query }}" 2>&1 | logger -t sam-boot
+    curl_output=$(mktemp)
+    if curl -fLo /usr/local/bin/vm-agent "{{ control_plane_url }}/api/agent/download?arch=\${ARCH}{{ vm_agent_release_query }}" >"$curl_output" 2>&1; then
+      cat "$curl_output" | logger -t sam-boot
+      rm -f "$curl_output"
+    else
+      curl_status=$?
+      cat "$curl_output" | logger -t sam-boot
+      rm -f "$curl_output"
+      logger -t sam-boot "vm-agent download failed status=$curl_status"
+      exit "$curl_status"
+    fi
     chmod +x /usr/local/bin/vm-agent
     logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
   - 'logger -t sam-boot "PHASE END: vm-agent-download"'

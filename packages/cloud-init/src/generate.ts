@@ -522,7 +522,7 @@ export function generateCloudInit(
     '{{ hostname }}': variables.hostname,
     '{{ control_plane_url }}': variables.controlPlaneUrl,
     '{{ vm_agent_release_query }}': variables.vmAgentRequiredVersion
-      ? `&release=${variables.vmAgentRequiredVersion}`
+      ? '&release=' + variables.vmAgentRequiredVersion
       : '',
     '{{ jwks_url }}': variables.jwksUrl,
     '{{ callback_token }}': variables.callbackToken,
