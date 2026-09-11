@@ -409,6 +409,16 @@ crudRoutes.delete('/:taskId', requireAuth(), requireApproved(), async (c) => {
     throw errors.conflict('Cannot delete task while other tasks depend on it');
   }
 
+  await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
+    status: 'cancelled',
+    errorMessage: task.errorMessage,
+    requiredUserId: userId,
+    projectId,
+    failureLogEvent: 'task.delete_cleanup_failed',
+    logContext: { projectId, source: 'tasks.delete' },
+    destructiveSessionEnd: true,
+  });
+
   // project_id is defence-in-depth (rule 11), matching the other mutations in this file.
   await db
     .delete(schema.tasks)
