@@ -1,4 +1,8 @@
-import type { CredentialProvider } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
+  LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
+  type CredentialProvider,
+} from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -138,7 +142,7 @@ function requestProjectDefaults(
 function expectSafePlacementSettings(body: Record<string, any>) {
   expect(body.placementSettings).toMatchObject({
     version: 1,
-    legacyWorkloadAdapterVersion: 1,
+    legacyWorkloadAdapterVersion: LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
     source: {
       legacyWorkloadMapping: 'default',
       platformDefaults: 'default',
@@ -146,13 +150,7 @@ function expectSafePlacementSettings(body: Record<string, any>) {
     },
     resourceDefaults: {
       legacyWorkloadMapping: {
-        small: {
-          minVcpu: 1,
-          minMemoryGb: 2,
-          minDiskGb: 20,
-          exclusiveNode: false,
-          maxCoTenants: 4,
-        },
+        small: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small,
       },
       platformDefaults: {
         minVcpu: 2,
