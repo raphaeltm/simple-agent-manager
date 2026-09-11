@@ -413,8 +413,9 @@ interface PlatformConfigCacheEntry {
 
 /**
  * Module-scoped cache — Workers re-use the isolate across requests within an instance, so this
- * gives the intended "last value for up to TTL" behaviour. Mirrors the established pattern in
- * `services/trial/kill-switch.ts`.
+ * gives the intended "last value for up to TTL" behaviour. `services/trial/kill-switch.ts` uses
+ * the same module-scope shape but does NOT key on its binding; do not copy that half of it when
+ * adding a cache over a binding whose identity can vary per request (see `database` below).
  */
 let platformConfigCache: PlatformConfigCacheEntry | null = null;
 

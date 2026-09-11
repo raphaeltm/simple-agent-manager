@@ -736,6 +736,13 @@ jobs:
           set -euo pipefail
           PRIMARY_D1_ID=$(cd infra && pulumi stack output d1DatabaseId)
           OBSERVABILITY_D1_ID=$(cd infra && pulumi stack output observabilityD1DatabaseId)
+          # Guard each output individually. Word-splitting in the script's loop would silently
+          # drop an empty token, so a single missing output would configure one database and
+          # still report success ("silence is not success", .claude/rules/53).
+          if [ -z "$PRIMARY_D1_ID" ] || [ -z "$OBSERVABILITY_D1_ID" ]; then
+            echo "::error::Pulumi did not resolve both D1 database IDs (primary='${PRIMARY_D1_ID}', observability='${OBSERVABILITY_D1_ID}')"
+            exit 1
+          fi
           D1_DATABASE_IDS="${PRIMARY_D1_ID} ${OBSERVABILITY_D1_ID}"
           export D1_DATABASE_IDS
           bash scripts/deploy/configure-d1-read-replication.sh

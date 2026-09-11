@@ -120,39 +120,44 @@ export function projectMemberRolesWithCapability(
 /**
  * Runs on every project-scoped request.
  *
- * These two lookups have no data dependency on each other, so collapsing them into one
- * `db.batch()` was considered and deliberately NOT done. Before request-scoped D1 sessions
- * it would have saved a full ~140 ms trans-Atlantic round trip; now that `lib/d1-session.ts`
- * anchors each request `first-primary`, only the request's FIRST query crosses to the
- * primary — and that is the auth preamble, not this. The second of these selects is served
- * by a nearby replica, so batching would save roughly 10 ms while requiring seven unrelated
- * authorization test doubles to grow batch support, including one whose D1-level double
- * shares a single statement object across every `prepare()` and therefore cannot
- * distinguish batched statements at all. Not a trade worth making.
+ * The two lookups have no data dependency on each other, so they go out CONCURRENTLY rather
+ * than one after the other — the request waits for the slower of the two instead of their sum.
+ *
+ * `db.batch()` would be one statement rather than two concurrent ones, and was tried first,
+ * but it is not worth its cost here: `lib/d1-session.ts` anchors each request `first-primary`,
+ * so by the time this runs the session is already open (the auth preamble issued the request's
+ * first query) and BOTH of these are replica-eligible. Batching would therefore save the
+ * overhead of one extra hop between two already-cheap reads, while forcing seven unrelated
+ * authorization test doubles to grow `batch` support — including one whose D1-level double
+ * shares a single statement object across every `prepare()` and so cannot distinguish batched
+ * statements at all. `Promise.all` gets the concurrency without any of that.
+ *
+ * Both guards are unchanged and still evaluated on the rows that come back: a missing or
+ * mismatched project, and a missing / non-active / wrong-tenant membership, both still surface
+ * as `notFound('Project')`. Order matters for the error a caller sees — the project assertion
+ * is evaluated first, exactly as when these ran sequentially.
  */
 async function requireActiveProjectMembership(
   db: AppDb,
   projectId: string,
   userId: string
 ): Promise<{ project: schema.Project; membership: schema.ProjectMember }> {
-  const projectRows = await db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.id, projectId))
-    .limit(1);
-  const project = assertProject(projectRows[0], projectId, 'Project');
-
-  const memberRows = await db
-    .select()
-    .from(schema.projectMembers)
-    .where(
-      and(
-        eq(schema.projectMembers.projectId, projectId),
-        eq(schema.projectMembers.userId, userId),
-        eq(schema.projectMembers.status, 'active')
+  const [projectRows, memberRows] = await Promise.all([
+    db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1),
+    db
+      .select()
+      .from(schema.projectMembers)
+      .where(
+        and(
+          eq(schema.projectMembers.projectId, projectId),
+          eq(schema.projectMembers.userId, userId),
+          eq(schema.projectMembers.status, 'active')
+        )
       )
-    )
-    .limit(1);
+      .limit(1),
+  ]);
+
+  const project = assertProject(projectRows[0], projectId, 'Project');
   const membership = assertActiveMembership(memberRows[0], projectId, userId);
 
   return { project, membership };

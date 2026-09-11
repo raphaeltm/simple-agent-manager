@@ -315,9 +315,16 @@ describe('requireOwnedWorkspace', () => {
  * against a real SQL engine with an owner-path control beside every refusal — a stub whose
  * `.where()` ignores its arguments passes identically with the predicate deleted.
  *
- * It matters more now that these lookups run inside a request-scoped D1 session: the second
- * select is served by a replica anchored at the first query's bookmark rather than by the
- * primary, so the predicates need coverage that does not depend on which instance answered.
+ * It matters more now that these lookups run inside a request-scoped D1 session: they are
+ * issued concurrently and served by a replica anchored at the first query's bookmark rather
+ * than by the primary, so the predicates need coverage that does not depend on which instance
+ * answered.
+ *
+ * These run against the raw `createSqliteD1` adapter, which proves the PREDICATES. The same
+ * guard driven through the real session-wrapped binding — `SELF.fetch` against the actual
+ * exported Worker, non-member 404 with an owner 200 control — lives in
+ * `tests/workers/d1-request-session.test.ts`. Keep both: this file has the richer
+ * cross-project/suspended-membership matrix, that one has the real runtime.
  */
 describe('requireActiveProjectMembership against a real SQL engine', () => {
   const NOW = '2026-09-11T00:00:00.000Z';

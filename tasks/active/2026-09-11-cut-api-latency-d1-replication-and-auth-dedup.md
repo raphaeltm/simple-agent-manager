@@ -155,7 +155,7 @@ Recorded as a follow-up with measurements rather than guessed at.
 Kill switch: `D1_SESSION_MODE` ∈ {`first-primary`, `disabled`}, default `first-primary`,
 so an operator can turn sessions off without a code change.
 
-### A3 — batching the membership pair: considered, implemented, deliberately reverted
+### A3 — the membership pair: concurrent, not batched
 
 `requireActiveProjectMembership` issues a project `select` then a membership `select` with
 no data dependency, so batching them into one `db.batch()` looked like a free round trip.
@@ -171,10 +171,21 @@ out not to be "cheap and safe"**:
   binding level with a single shared statement object across every `prepare()`, so it
   cannot distinguish batched statements at all without rewriting its double.
 
-Rewriting a 241-test authorization suite to buy ~10 ms is a bad trade. The decision and the
-arithmetic live in a comment on the function so the next reader does not re-derive them. The
-real-SQL-engine tests added for these predicates are kept — they are worth having either
-way, and they now cover predicates whose second query is replica-served.
+Rewriting a 241-test authorization suite to buy ~10 ms is a bad trade.
+
+**But the concurrency was still worth taking.** The performance review pointed out that
+`Promise.all` gets the same overlap without `db.batch()` — the request waits for the slower of
+the two reads instead of their sum — and costs nothing in test churn, because every one of
+those doubles already resolves `.limit()` to a promise. That is what shipped. All 14 test files
+that the `db.batch()` attempt broke pass unchanged (348 tests). The decision and the arithmetic
+live in a comment on the function so the next reader does not re-derive them.
+
+The same one-line treatment was applied to the worst route's other obviously-independent pair:
+`computeBlockedSet` and `resolveTaskAgentProfileHints` in `routes/tasks/crud.ts` read different
+tables and neither consumes the other's result.
+
+The real-SQL-engine tests added for these predicates are kept — they are worth having either
+way, and they now cover predicates whose reads are replica-served.
 
 ### B — one auth pass per request, by memoisation
 
@@ -276,12 +287,45 @@ primary and advances the session bookmark.
   `run:` interpolation (`.claude/rules/02` workflow input trust boundaries), and the step
   runs before `Deploy API Worker` (pinned by a workflow-ordering test).
 
+## Review round (Phase 5)
+
+Nine local reviewers. No CRITICAL, one HIGH (security-auditor: staging verification not yet
+done — that is Phase 6, not a code defect). Everything actionable was fixed on the branch:
+
+| Reviewer | Fixed |
+|---|---|
+| constitution-validator | An unrecognised `D1_SESSION_MODE` was discarded silently — an operator typing `Disabled` would have got sessions ENABLED with no trail. Now warns once per isolate, with two tests. |
+| doc-sync-validator + env-validator | `reference/configuration.md` has its own copies of both variable tables and was missed; a stale "13 D1 queries" (actually 14); a permission callout that did not match the document's own `Account → X → Edit` convention; no CLAUDE.md Recent Changes entry. |
+| architecture-reviewer | `env.ts` gave a reader of `drizzle(c.env.DATABASE)` no way to discover the session facade; `PlatformConfigCacheEntry`'s comment predated per-request facades; the env-clone cost was unquantified; the deploy-var-vs-KV-switch trade-off was implicit; a test name left over from the reverted batch attempt. |
+| performance-reviewer | The "3-19 sequential round trips" figure does not reconcile with measurement for `/tasks` and `/sessions/:sid` (traced 10-12 and 16-17 against ~19 and ~20 implied) — the docstring now states which counts ARE reconciled and calls the other two a lower bound. Also: `Promise.all` instead of `db.batch()` (see A3), and `computeBlockedSet`/`resolveTaskAgentProfileHints` concurrently. |
+| security-auditor | "strictly no staleness" overstated the guarantee: `first-primary` does not promise that a write landing *during* a request is visible to that request's later queries. Reworded in the code and both docs. Also: guard each `pulumi stack output` individually, and cross-reference the session-facade counterpart from `project-auth.test.ts`. |
+| task-completion-validator | The bookmark deferral now has a real backlog file (`tasks/backlog/2026-09-11-bookmark-anchored-d1-reads.md`) rather than only prose. |
+
+A correction the performance review supplied, worth carrying into the PR narrative:
+**`GET /api/projects` was never double-mounted.** `crudRoutes` is composed into `projectsRoutes`
+via `projectsRoutes.route('/', crudRoutes)`, so auth already ran once there. Change B benefits
+the separately-mounted sub-routers (`/tasks`, `/sessions`, `/library`, …), not `/api/projects`.
+
+## Follow-ups raised by review (not in this PR)
+
+- **`GET /api/projects/:id/sessions/:sid` is a fully sequential six-step chain** and remains
+  ~2x over rule 60's read-GET budget even after this change. `getMessages`, the task-embed
+  lookup and `resolveChatAgentState`'s first hop are independent once `session` resolves.
+  Highest-latency route measured (2793 ms p50 / 5060 ms max).
+- **`enrichSessionsWithCreators` re-fetches the caller's own profile** from D1 when they authored
+  the session, although `c.get('auth').user` already holds it.
+- Bookmark-anchored reads — `tasks/backlog/2026-09-11-bookmark-anchored-d1-reads.md`.
+
 ## Discrimination proofs (rule 62)
 
 | Reverted | Tests that went red | Controls that stayed green |
 |---|---|---|
 | `requireAuth` / `requireApproved` memoisation | 4 in `auth-single-pass.test.ts` (both once-per-request cases, cross-request reset, approval re-read) | PREMISE, single-registration, 401 unauthenticated, 403 suspended |
 | `resolveD1BindingIdentity` in `platform-config-core` | 2 in `platform-config-cache.test.ts` (facade cache hit, facade/raw shared entry) | the other 20, incl. cold-isolate 14-query budget |
+
+The warn-once log for an unrecognised `D1_SESSION_MODE` is covered by two tests in
+`d1-session.test.ts` with a liveness assertion beside the absence case (the "does not warn"
+test ends by forcing a warn, so a mis-wired spy cannot make it pass).
 
 ## Acceptance criteria
 

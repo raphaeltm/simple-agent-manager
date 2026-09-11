@@ -146,8 +146,11 @@ runs every request against a single D1 **session** per database
 `first-primary`: its first query goes to the primary, and every later query in that request may
 be served by any replica that has caught up to the bookmark the first query returned. A request
 therefore pays one long round trip instead of one per query, while still observing a snapshot at
-least as fresh as its own start — and writes in a session always go to the primary and are
-visible to later reads in the same session.
+least as fresh as its own start — so no write that completed before the request began can be
+missed, and writes in a session always go to the primary and are visible to later reads in the
+same session. (It does not promise that a write landing *during* the request is visible to that
+request's later queries; that is the ordinary two-non-atomic-reads race, unchanged by this and
+now with a shorter window.)
 
 Scheduled cron sweeps and Durable Objects deliberately keep the unsessioned binding, so
 reaper, resumer and terminal-verdict paths read exactly what they read before. `D1_SESSION_MODE`

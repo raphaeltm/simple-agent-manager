@@ -2,9 +2,16 @@
  * Request-scoped D1 Sessions API binding.
  *
  * SAM's D1 primaries live in North America (`sam-prod` WNAM/DFW) while its Workers and
- * Durable Objects run in Europe, so every D1 round trip from the Worker costs ~140 ms.
- * Hot routes issue 3-19 *sequential* round trips, which is where 98% of their wall time
- * went (`GET /api/projects/:id/tasks` measured 2618 ms p50 with 44 ms CPU).
+ * Durable Objects run in Europe, so every D1 round trip from the Worker costs ~138 ms. Hot
+ * routes issue those round trips *sequentially*, which is where 98% of their wall time went
+ * (`GET /api/projects/:id/tasks` measured 2618 ms p50 against 44 ms CPU).
+ *
+ * The per-route counts that ARE reconciled with measurement: `GET /api/auth/me` traces to 2
+ * queries and measured 296 ms against an 18 ms network floor (2 x 139 ms); `GET /api/projects`
+ * traces to 5 and measured 707 ms (5 x 138 ms). `/tasks` and `/sessions/:sid` measure higher
+ * than a static trace of their handlers accounts for (2618 ms and 2793 ms imply ~19 and ~20
+ * hops against traced counts of 10-12 and 16-17), so treat those two counts as a lower bound,
+ * not a measurement — the residual may be cold-isolate config reads or larger real pages.
  *
  * D1's Sessions API fixes the tail of that: the first query of a session goes to the
  * primary and every later query in the same session may be served by any replica that has
@@ -13,13 +20,22 @@
  *
  * ## Why `first-primary` and not a bookmark
  *
- * `first-primary` anchors the session at the primary's state *at request start*, so a
- * request observes a snapshot at least as fresh as its own beginning — strictly no
- * staleness relative to today's behaviour, for any writer. Anchoring on a caller-supplied
- * bookmark would also remove that first round trip, but it lets a read be served by a
- * replica that has not yet seen another actor's write. In SAM almost every write a user
- * is waiting on is made by an *agent*, not by that user's own browser, so that is a
- * user-visible bounded staleness window and a product decision, not an optimisation.
+ * `first-primary` anchors the session at the primary's state *at request start*: every query
+ * in the request is served at or after the bookmark the first (primary) query returned. So a
+ * request never sees data older than its own beginning, and no write that completed before
+ * the request started can be missed — which is the property that makes this no weaker than
+ * today for any writer.
+ *
+ * Be precise about what it does NOT promise: a write that lands on the primary *between*
+ * query 1 and query N of the SAME request is not guaranteed visible to query N. That is the
+ * ordinary two-non-atomic-reads race, it existed before this change, and its wall-clock window
+ * is now SMALLER (the later reads are local instead of two trans-Atlantic hops) — but do not
+ * build a security-sensitive check on an assumption of absolute intra-request consistency.
+ *
+ * Anchoring on a caller-supplied bookmark would also remove that first round trip, but it lets
+ * a read be served by a replica that has not yet seen another actor's write. In SAM almost
+ * every write a user is waiting on is made by an *agent*, not by that user's own browser, so
+ * that is a user-visible bounded staleness window and a product decision, not an optimisation.
  *
  * ## What is deliberately NOT session-scoped
  *
