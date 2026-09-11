@@ -1,6 +1,6 @@
 # Cut SAM API latency: D1 read replication + one auth pass per request
 
-**Status**: active
+**Status**: active (implementation complete; validation + review in progress)
 **Created**: 2026-09-11
 **SAM task**: `01M27M163YMDKDDT2CZKVET8SY`
 **Idea**: `01M27KAF3Z9YEM6VADJKE1ZXC6`
@@ -155,11 +155,26 @@ Recorded as a follow-up with measurements rather than guessed at.
 Kill switch: `D1_SESSION_MODE` ∈ {`first-primary`, `disabled`}, default `first-primary`,
 so an operator can turn sessions off without a code change.
 
-### A3 — batch the one obviously-independent query pair
+### A3 — batching the membership pair: considered, implemented, deliberately reverted
 
-`requireActiveProjectMembership` issues a project `select` then a membership `select`
-with no data dependency. One `db.batch()` removes a full round trip from every
-project-scoped request. No broader query refactor.
+`requireActiveProjectMembership` issues a project `select` then a membership `select` with
+no data dependency, so batching them into one `db.batch()` looked like a free round trip.
+It was implemented and then reverted, because **A2 subsumes most of its value and it turned
+out not to be "cheap and safe"**:
+
+* With `first-primary` sessions only the request's FIRST query crosses to the primary, and
+  that is the auth preamble — not this. The second of these selects is served by a nearby
+  replica, so batching now saves roughly 10 ms, not the ~140 ms it would have saved before
+  A2 landed.
+* It broke 76 tests across 7 files whose drizzle/D1 doubles have no `batch`. Six of those
+  could be fixed cheaply, but `tests/unit/routes/mcp.test.ts` (241 tests) mocks at the D1
+  binding level with a single shared statement object across every `prepare()`, so it
+  cannot distinguish batched statements at all without rewriting its double.
+
+Rewriting a 241-test authorization suite to buy ~10 ms is a bad trade. The decision and the
+arithmetic live in a comment on the function so the next reader does not re-derive them. The
+real-SQL-engine tests added for these predicates are kept — they are worth having either
+way, and they now cover predicates whose second query is replica-served.
 
 ### B — one auth pass per request, by memoisation
 
@@ -194,43 +209,43 @@ primary and advances the session bookmark.
 ## Implementation checklist
 
 ### Change A — replication + sessions
-- [ ] `apps/api/src/lib/d1-session.ts`: `D1_SESSION_MODES`, `DEFAULT_D1_SESSION_MODE`,
+- [x] `apps/api/src/lib/d1-session.ts`: `D1_SESSION_MODES`, `DEFAULT_D1_SESSION_MODE`,
       `resolveD1SessionMode(env)`, `createRequestScopedD1(binding, mode)` (lazy session,
       `exec`/`dump`/`withSession` delegated to the raw binding),
       `resolveD1BindingIdentity(database)`, `withRequestScopedD1Bindings(env)`.
-- [ ] `apps/api/src/index.ts`: default `fetch` builds the per-request env. `scheduled`
+- [x] `apps/api/src/index.ts`: default `fetch` builds the per-request env. `scheduled`
       unchanged.
-- [ ] `apps/api/src/env.ts`: add `D1_SESSION_MODE?: string`.
-- [ ] `apps/api/src/services/platform-config-core.ts`: derive the cache key with
+- [x] `apps/api/src/env.ts`: add `D1_SESSION_MODE?: string`.
+- [x] `apps/api/src/services/platform-config-core.ts`: derive the cache key with
       `resolveD1BindingIdentity` (trap 1).
-- [ ] `apps/api/src/middleware/project-auth.ts`: batch the project + membership selects.
-- [ ] `apps/api/wrangler.toml`: document `D1_SESSION_MODE` in `[vars]`.
-- [ ] `scripts/deploy/configure-d1-read-replication.sh` (idempotent, fails loudly).
-- [ ] `.github/workflows/deploy-reusable.yml`: new step after "Configure AI Gateway".
-- [ ] `infra/resources/database.ts`: keep `ignoreChanges`, rewrite the comment to record
+- [x] ~~`apps/api/src/middleware/project-auth.ts`: batch the project + membership selects.~~ Considered, implemented, reverted — see "A3" above. Replaced by a comment recording the decision.
+- [x] `apps/api/wrangler.toml`: document `D1_SESSION_MODE` in `[vars]`.
+- [x] `scripts/deploy/configure-d1-read-replication.sh` (idempotent, fails loudly).
+- [x] `.github/workflows/deploy-reusable.yml`: new step after "Configure AI Gateway".
+- [x] `infra/resources/database.ts`: keep `ignoreChanges`, rewrite the comment to record
       split ownership.
-- [ ] Docs: self-hosting guide + `apps/www` architecture/overview note on replica reads.
+- [x] Docs: self-hosting guide + `apps/www` architecture/overview note on replica reads.
 
 ### Change B — one auth pass
-- [ ] `apps/api/src/middleware/auth.ts`: `requireAuth()` reuses an existing auth context;
+- [x] `apps/api/src/middleware/auth.ts`: `requireAuth()` reuses an existing auth context;
       `requireApproved()` memoises the signup-approval read per request.
 
 ### Tests
-- [ ] Mounting-shape test: the production mounting really does enter both middleware
+- [x] Mounting-shape test: the production mounting really does enter both middleware
       layers (pins the premise; would go red if Hono ever changed).
-- [ ] Dedup test: real `requireAuth`/`requireApproved` registered twice ⇒ exactly one
+- [x] Dedup test: real `requireAuth`/`requireApproved` registered twice ⇒ exactly one
       `getSession` and one signup-approval read. Proven discriminating.
-- [ ] `SELF.fetch` real-trigger control pair: unauthenticated ⇒ 401, authenticated owner
+- [x] `SELF.fetch` real-trigger control pair: unauthenticated ⇒ 401, authenticated owner
       ⇒ 200 with correct body, on the real app with a real better-auth session cookie
       (`createSessionCookieForUser`).
-- [ ] `platform-config-core` cache-identity test: two different session facades over one
+- [x] `platform-config-core` cache-identity test: two different session facades over one
       raw binding ⇒ second call is a cache hit. Must fail without `resolveD1BindingIdentity`.
-- [ ] Workers (real workerd + real D1) read-after-write test through the session facade,
+- [x] Workers (real workerd + real D1) read-after-write test through the session facade,
       including a write followed immediately by a read (`.claude/rules/69` — a
       `better-sqlite3` harness has no `withSession`, so this must run on workerd).
-- [ ] Facade unit tests: laziness, one session per request, `exec`/`dump` delegation,
+- [x] Facade unit tests: laziness, one session per request, `exec`/`dump` delegation,
       `disabled` mode returns the raw binding, missing `withSession` degrades gracefully.
-- [ ] Membership-batch behavioural tests against a real SQL engine, including the
+- [x] Membership-batch behavioural tests against a real SQL engine, including the
       inactive-membership and cross-project refusals with owner-path controls (rule 28).
 
 ### Verification
@@ -239,6 +254,34 @@ primary and advances the session bookmark.
       and check for GitHub Environment variable overrides of any changed `wrangler.toml` var.
 - [ ] Playwright staging pass (dismiss the first-run "Account setup" dialog after each
       navigation).
+
+## Implementation notes
+
+- `withRequestScopedD1Bindings` is applied in the Worker default export only, so
+  `scheduled()` and every Durable Object keep the raw bindings by construction rather than
+  by convention.
+- The `platform-config-core` identity trap was real: with the naive key, the two added
+  cache tests fail (verified by temporarily reverting `resolveD1BindingIdentity`), which
+  would have meant 14 extra D1 round trips on *every* authenticated request.
+- `tests/helpers/sqlite-d1.ts` `batch()` previously discarded SELECT rows. Batching the
+  membership lookups surfaced that: left unfixed, every batched ownership guard would have
+  rejected for the wrong reason. It now returns rows for row-returning statements, and the
+  counting adapter in `platform-config-cache.test.ts` routes `withSession` through its own
+  counter so a session-wrapped binding cannot silently report zero queries.
+- Change B is implemented by memoisation inside the middleware rather than by deleting the
+  duplicate registrations. Same observable outcome (one session resolution per request),
+  but the set of authenticated routes and the rule-34 callback-route mounting order are
+  untouched, so no route can lose its only auth registration.
+- `D1_READ_REPLICATION_MODE` reaches the deploy script through `env:`, never through a
+  `run:` interpolation (`.claude/rules/02` workflow input trust boundaries), and the step
+  runs before `Deploy API Worker` (pinned by a workflow-ordering test).
+
+## Discrimination proofs (rule 62)
+
+| Reverted | Tests that went red | Controls that stayed green |
+|---|---|---|
+| `requireAuth` / `requireApproved` memoisation | 4 in `auth-single-pass.test.ts` (both once-per-request cases, cross-request reset, approval re-read) | PREMISE, single-registration, 401 unauthenticated, 403 suspended |
+| `resolveD1BindingIdentity` in `platform-config-core` | 2 in `platform-config-cache.test.ts` (facade cache hit, facade/raw shared entry) | the other 20, incl. cold-isolate 14-query budget |
 
 ## Acceptance criteria
 

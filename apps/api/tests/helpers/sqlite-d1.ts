@@ -68,10 +68,10 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
     const runSync = () => {
       const statement = sqlite.prepare(sql);
       // D1's `batch()` returns a populated `results` array for row-returning statements, and
-      // drizzle's D1 driver reads `result.results` straight back out of each batch entry. A
-      // batch adapter that always reported `results: []` would silently turn every batched
-      // SELECT into "no rows" — which is exactly the kind of infidelity `.claude/rules/28`
-      // bans, since an ownership guard fed an empty result set rejects for the wrong reason.
+      // drizzle's D1 driver reads `result.results` straight back out of each batch entry.
+      // Reporting `results: []` unconditionally would silently turn every batched SELECT into
+      // "no rows" — the kind of infidelity `.claude/rules/28` bans, since a guard fed an empty
+      // result set rejects for the wrong reason.
       if (statement.reader) {
         return {
           success: true,
@@ -153,22 +153,29 @@ export function createSqliteD1WithBindLimit(
     prepare(sql: string): D1PreparedStatement;
   };
 
+  const prepare = (sql: string) => {
+    const statement = database.prepare(sql);
+    return {
+      ...statement,
+      bind: (...params: unknown[]) => {
+        if (params.length > maxBoundParameters) {
+          throw new Error(
+            `D1 bind parameter limit exceeded: ${params.length} > ${maxBoundParameters}`
+          );
+        }
+        return statement.bind(...params);
+      },
+    };
+  };
+
   return {
     ...database,
-    prepare: (sql: string) => {
-      const statement = database.prepare(sql);
-      return {
-        ...statement,
-        bind: (...params: unknown[]) => {
-          if (params.length > maxBoundParameters) {
-            throw new Error(
-              `D1 bind parameter limit exceeded: ${params.length} > ${maxBoundParameters}`
-            );
-          }
-          return statement.bind(...params);
-        },
-      };
-    },
+    prepare,
+    // A session must not be an escape hatch from the very limit this wrapper exists to
+    // enforce: inheriting `createSqliteD1`'s `withSession` through the spread would hand
+    // back the unlimited `prepare` and silently pass statements this helper is meant to
+    // reject.
+    withSession: () => ({ prepare, batch: database.batch, getBookmark: () => null }),
   } as unknown as D1Database;
 }
 

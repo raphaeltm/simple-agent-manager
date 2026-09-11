@@ -49,8 +49,8 @@ vi.mock('../../../src/services/signup-approval', async (importOriginal) => {
 });
 
 import type { Env } from '../../../src/env';
-import { getUserId, requireApproved, requireAuth } from '../../../src/middleware/auth';
 import { handleAppError } from '../../../src/middleware/app-error-handler';
+import { getUserId, requireApproved, requireAuth } from '../../../src/middleware/auth';
 
 const ACTIVE_SESSION = {
   user: {

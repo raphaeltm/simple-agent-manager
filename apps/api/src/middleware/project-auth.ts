@@ -118,36 +118,41 @@ export function projectMemberRolesWithCapability(
 }
 
 /**
- * Runs on every project-scoped request. The project lookup and the membership lookup have
- * no data dependency on each other, so they go out as one `db.batch()` — a single D1 round
- * trip instead of two. SAM's D1 primary is in North America while the Worker runs in
- * Europe, so a saved round trip is ~140 ms off every project-scoped request.
+ * Runs on every project-scoped request.
  *
- * Both guards are unchanged and still evaluated on the rows that come back: a missing or
- * mismatched project, and a missing / non-active / wrong-tenant membership, both still
- * surface as `notFound('Project')`.
+ * These two lookups have no data dependency on each other, so collapsing them into one
+ * `db.batch()` was considered and deliberately NOT done. Before request-scoped D1 sessions
+ * it would have saved a full ~140 ms trans-Atlantic round trip; now that `lib/d1-session.ts`
+ * anchors each request `first-primary`, only the request's FIRST query crosses to the
+ * primary — and that is the auth preamble, not this. The second of these selects is served
+ * by a nearby replica, so batching would save roughly 10 ms while requiring seven unrelated
+ * authorization test doubles to grow batch support, including one whose D1-level double
+ * shares a single statement object across every `prepare()` and therefore cannot
+ * distinguish batched statements at all. Not a trade worth making.
  */
 async function requireActiveProjectMembership(
   db: AppDb,
   projectId: string,
   userId: string
 ): Promise<{ project: schema.Project; membership: schema.ProjectMember }> {
-  const [projectRows, memberRows] = await db.batch([
-    db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1),
-    db
-      .select()
-      .from(schema.projectMembers)
-      .where(
-        and(
-          eq(schema.projectMembers.projectId, projectId),
-          eq(schema.projectMembers.userId, userId),
-          eq(schema.projectMembers.status, 'active')
-        )
-      )
-      .limit(1),
-  ]);
-
+  const projectRows = await db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .limit(1);
   const project = assertProject(projectRows[0], projectId, 'Project');
+
+  const memberRows = await db
+    .select()
+    .from(schema.projectMembers)
+    .where(
+      and(
+        eq(schema.projectMembers.projectId, projectId),
+        eq(schema.projectMembers.userId, userId),
+        eq(schema.projectMembers.status, 'active')
+      )
+    )
+    .limit(1);
   const membership = assertActiveMembership(memberRows[0], projectId, userId);
 
   return { project, membership };

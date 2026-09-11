@@ -11,7 +11,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { AppDb } from '../../../src/middleware/project-auth';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import {
   createOwnerProjectMembership,
   requireOwnedProject,
@@ -19,6 +18,7 @@ import {
   requireProjectAccess,
   requireProjectCapability,
 } from '../../../src/middleware/project-auth';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 /**
  * Row-injecting stub. Its ONLY job is the defence-in-depth cases: handing the guards a row
@@ -27,29 +27,24 @@ import {
  * filters — see the real-SQL-engine block at the bottom of this file for that
  * (`.claude/rules/28`).
  *
- * Each `select()` returns its own chain so a `db.batch([a, b])` keeps per-query table
- * identity; `limit()` yields a thenable that also carries its rows for the batch path.
+ * Each `select()` gets its own chain so two queries built before either is awaited keep
+ * their own table identity.
  */
 function makeDb(dataByTable: Map<unknown, unknown[]>): AppDb {
   const makeChain = () => {
     let currentTable: unknown = null;
-    const rows = () => dataByTable.get(currentTable) ?? [];
     const chain = {
       from: (table: unknown) => {
         currentTable = table;
         return chain;
       },
       where: () => chain,
-      limit: () => Object.assign(Promise.resolve(rows()), { __rows: rows }),
+      limit: () => Promise.resolve(dataByTable.get(currentTable) ?? []),
     };
     return chain;
   };
 
-  return {
-    select: () => makeChain(),
-    batch: async (queries: Array<{ __rows?: () => unknown[] }>) =>
-      queries.map((query) => (typeof query.__rows === 'function' ? query.__rows() : [])),
-  } as unknown as AppDb;
+  return { select: () => makeChain() } as unknown as AppDb;
 }
 
 function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
@@ -320,9 +315,9 @@ describe('requireOwnedWorkspace', () => {
  * against a real SQL engine with an owner-path control beside every refusal — a stub whose
  * `.where()` ignores its arguments passes identically with the predicate deleted.
  *
- * This block also covers the `db.batch()` round-trip introduced to collapse the project and
- * membership lookups into one D1 call: a batch adapter that dropped SELECT rows would make
- * every case here fail as `notFound`, so the owner controls are what keep that honest.
+ * It matters more now that these lookups run inside a request-scoped D1 session: the second
+ * select is served by a replica anchored at the first query's bookmark rather than by the
+ * primary, so the predicates need coverage that does not depend on which instance answered.
  */
 describe('requireActiveProjectMembership against a real SQL engine', () => {
   const NOW = '2026-09-11T00:00:00.000Z';

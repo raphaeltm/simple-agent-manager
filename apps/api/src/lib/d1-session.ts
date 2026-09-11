@@ -137,6 +137,10 @@ export function withRequestScopedD1Bindings<T extends D1SessionBindings & D1Sess
   env: T
 ): T {
   const mode = resolveD1SessionMode(env);
+  if (mode === 'disabled') {
+    return env;
+  }
+
   const scoped: Partial<D1SessionBindings> = {};
   if (supportsSessions(env.DATABASE)) {
     scoped.DATABASE = createRequestScopedD1(env.DATABASE, mode);
@@ -145,9 +149,9 @@ export function withRequestScopedD1Bindings<T extends D1SessionBindings & D1Sess
     scoped.OBSERVABILITY_DATABASE = createRequestScopedD1(env.OBSERVABILITY_DATABASE, mode);
   }
 
-  // Nothing to scope (sessions disabled, or a runtime/test harness without `withSession`):
-  // hand back the original object so no needless clone reaches the request.
-  if (mode === 'disabled' || Object.keys(scoped).length === 0) {
+  // Nothing to scope — a runtime or test harness without `withSession`. Hand back the
+  // original object so no needless clone reaches the request.
+  if (Object.keys(scoped).length === 0) {
     return env;
   }
 
