@@ -316,6 +316,14 @@ function runVerifyWorkloadCgroupScript(options?: {
   dockerPid?: string;
   dockerFails?: boolean;
   systemctlFails?: boolean;
+  /** cgroup value the script reads back. */
+  infraCpuWeight?: string | null;
+  /** cgroup value the script reads back. */
+  workloadCpuWeight?: string;
+  /** value baked into the generated script as the expectation. */
+  configuredInfraCpuWeight?: string;
+  /** value baked into the generated script as the expectation. */
+  configuredWorkloadCpuWeight?: string;
 }) {
   const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-cgroup-'));
   const binDir = join(scratchDir, 'bin');
@@ -358,6 +366,20 @@ function runVerifyWorkloadCgroupScript(options?: {
     'memory.min',
     options?.infraMemoryMin ?? expectedMinBytes
   );
+  if (options?.infraCpuWeight !== null) {
+    writeCgroupFile(
+      cgroupRoot,
+      '/sam.slice/sam-infra.slice',
+      'cpu.weight',
+      options?.infraCpuWeight ?? '1000'
+    );
+  }
+  writeCgroupFile(
+    cgroupRoot,
+    '/sam.slice/sam-workload.slice',
+    'cpu.weight',
+    options?.workloadCpuWeight ?? '100'
+  );
   writeFakeExecutable(join(binDir, 'docker'), fakeVerifyDockerScript());
   writeFakeExecutable(join(binDir, 'systemctl'), fakeVerifySystemctlScript());
   writeFileSync(
@@ -366,6 +388,8 @@ function runVerifyWorkloadCgroupScript(options?: {
       vmAgentMemoryReserveMb: reserveMb,
       samInfraSliceMemoryMinMb: infraMinMb,
       dockerMemoryMinMb: options?.minMb ?? '512',
+      samInfraSliceCpuWeight: options?.configuredInfraCpuWeight,
+      samWorkloadSliceCpuWeight: options?.configuredWorkloadCpuWeight,
     }).content,
     { mode: 0o755 }
   );
@@ -940,6 +964,48 @@ describe('generateCloudInit', () => {
       }
     });
 
+    it('still verifies CPU weights when the memory reserve is disabled', () => {
+      // The CPU assertions sit BEFORE the memory-reserve early return on purpose.
+      // If they sat after it, setting the reserve to 0 would silently disable
+      // them too — a guard whose falsifying case is unreachable in one supported
+      // configuration (.claude/rules/69).
+      const { result } = runVerifyWorkloadCgroupScript({
+        infraCpuWeight: '50',
+        infraMemoryMin: '0',
+        memoryMax: 'max',
+        reserveMb: '0',
+        samMemoryMin: '0',
+        workloadCpuWeight: '100',
+        workloadEffectiveMemoryMax: 'infinity',
+        workloadMemoryMax: 'infinity',
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('sam-infra.slice cgroup cpu.weight expected 1000, got 50');
+    });
+
+    it('refuses a boot where the agent slice does not outrank the workload slice', () => {
+      // Equal weights load fine as systemd units, so nothing else would notice:
+      // the agent would simply compete on equal footing again, which is the
+      // condition this change exists to remove.
+      const { result } = runVerifyWorkloadCgroupScript({
+        configuredInfraCpuWeight: '100',
+        configuredWorkloadCpuWeight: '100',
+        infraCpuWeight: '100',
+        workloadCpuWeight: '100',
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('does not outrank workload');
+    });
+
+    it('refuses a boot where the agent slice has no CPU weight at all', () => {
+      const { result } = runVerifyWorkloadCgroupScript({ infraCpuWeight: null });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('missing cgroup cpu.weight');
+    });
+
     it('acknowledges explicit disabled mode without claiming memory protection', () => {
       const { result } = runVerifyWorkloadCgroupScript({
         infraMemoryMin: '0',
@@ -952,7 +1018,7 @@ describe('generateCloudInit', () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(
-        'SAM workload MemoryMax reserve disabled; verified cgroup ancestry only'
+        'SAM workload MemoryMax reserve disabled; verified cgroup ancestry and CPU weights only'
       );
     });
 
