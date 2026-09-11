@@ -44,5 +44,5 @@ while remaining accurate about the technology involved.
   recovery protection, and lower-noise capacity reconciliation.
 - [x] A Mermaid diagram clarifies the multi-system release path and renders in
   the blog pipeline.
-- [ ] Narrow marketing-site validation passes and the post is merged through a
-  PR.
+- [x] Narrow marketing-site validation passes.
+- [ ] The post is merged through a PR.
