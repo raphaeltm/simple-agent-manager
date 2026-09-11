@@ -47,15 +47,19 @@ interface AgentReleaseRepo {
  * Worker-only commits. The defect this guards against is only visible across
  * more than one commit, so a single-commit fixture cannot observe it.
  */
-function createAgentReleaseRepo(): AgentReleaseRepo {
+/**
+ * Run `body` against a throwaway agent-history repo, cleaning up unconditionally.
+ *
+ * Every caller previously repeated create/try/finally-rmSync, which both
+ * duplicated the cleanup contract six times and left the temp directory behind
+ * when setup itself threw (setup runs outside the caller's `try`).
+ */
+function withAgentReleaseRepo<T>(body: (repo: AgentReleaseRepo) => T): T {
   const directory = mkdtempSync(join(tmpdir(), 'sam-agent-release-'));
   try {
-    return buildAgentReleaseRepo(directory);
-  } catch (error) {
-    // Setup runs outside every caller's try/finally, so a throw here would leak
-    // the temp directory.
+    return body(buildAgentReleaseRepo(directory));
+  } finally {
     rmSync(directory, { recursive: true, force: true });
-    throw error;
   }
 }
 
@@ -423,8 +427,7 @@ describe('deploy reusable workflow', () => {
 
   describe('VM-agent release identity', () => {
     it('keeps the release stable across a deploy that does not touch the agent', () => {
-      const repo = createAgentReleaseRepo();
-      try {
+      withAgentReleaseRepo((repo) => {
         // The incident: every deploy rotated VM_AGENT_REQUIRED_VERSION, and
         // isNodeAgentVersionCompatible compares for exact equality, so a
         // Worker-only deploy made every running node ineligible for reuse.
@@ -433,9 +436,7 @@ describe('deploy reusable workflow', () => {
         const fields = releaseFieldsFrom(workerOnly.stdout);
         expect(fields.release).toBe(repo.latestAgentCommit);
         expect(fields.release).not.toBe(repo.workerOnlyCommit);
-      } finally {
-        rmSync(repo.directory, { recursive: true, force: true });
-      }
+      });
     });
 
     it.each([
@@ -446,19 +447,15 @@ describe('deploy reusable workflow', () => {
       // ONLY packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md
       // and the prefix-only pathspec treated it as a new agent release, which would
       // have evicted the whole pool for a documentation edit.
-      const repo = createAgentReleaseRepo();
-      try {
+      withAgentReleaseRepo((repo) => {
         const result = runReleaseResolver(repo.directory, repo[key]);
         expect(result.status).toBe(0);
         expect(releaseFieldsFrom(result.stdout).release).toBe(repo.latestAgentCommit);
-      } finally {
-        rmSync(repo.directory, { recursive: true, force: true });
-      }
+      });
     });
 
     it('rotates the release for a deploy that does touch the agent', () => {
-      const repo = createAgentReleaseRepo();
-      try {
+      withAgentReleaseRepo((repo) => {
         // Discriminating control: without this the suite would pass with the
         // release pinned to a constant.
         const older = runReleaseResolver(repo.directory, repo.firstAgentCommit);
@@ -469,14 +466,11 @@ describe('deploy reusable workflow', () => {
         expect(newer.status).toBe(0);
         expect(releaseFieldsFrom(newer.stdout).release).toBe(repo.latestAgentCommit);
         expect(repo.firstAgentCommit).not.toBe(repo.latestAgentCommit);
-      } finally {
-        rmSync(repo.directory, { recursive: true, force: true });
-      }
+      });
     });
 
     it('emits a build date from the release commit so identical agents rebuild identically', () => {
-      const repo = createAgentReleaseRepo();
-      try {
+      withAgentReleaseRepo((repo) => {
         // publish-vm-agent-artifacts.sh refuses to overwrite an immutable release
         // key whose bytes differ, and BUILD_DATE is baked into the binary. Two
         // deploys of one agent release must therefore agree on the build date.
@@ -494,9 +488,7 @@ describe('deploy reusable workflow', () => {
             encoding: 'utf8',
           }).trim()
         );
-      } finally {
-        rmSync(repo.directory, { recursive: true, force: true });
-      }
+      });
     });
 
     it('has no go:embed that would pull an excluded path into the binary', () => {
@@ -518,28 +510,28 @@ describe('deploy reusable workflow', () => {
     });
 
     it('fails closed on a shallow clone instead of falling back to the deploy commit', () => {
-      const repo = createAgentReleaseRepo();
-      const shallow = mkdtempSync(join(tmpdir(), 'sam-agent-release-shallow-'));
-      try {
-        // A shallow clone answers `rev-list -1 -- <path>` with the shallow
-        // boundary, silently reproducing the per-deploy rotation.
-        execFileSync('git', ['clone', '--depth', '1', `file://${repo.directory}`, shallow]);
-        writeFileSync(
-          join(shallow, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
-          readFileSync(resolveVmAgentReleasePath, 'utf8')
-        );
-        const head = execFileSync('git', ['rev-parse', 'HEAD'], {
-          cwd: shallow,
-          encoding: 'utf8',
-        }).trim();
+      withAgentReleaseRepo((repo) => {
+        const shallow = mkdtempSync(join(tmpdir(), 'sam-agent-release-shallow-'));
+        try {
+          // A shallow clone answers `rev-list -1 -- <path>` with the shallow
+          // boundary, silently reproducing the per-deploy rotation.
+          execFileSync('git', ['clone', '--depth', '1', `file://${repo.directory}`, shallow]);
+          writeFileSync(
+            join(shallow, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+            readFileSync(resolveVmAgentReleasePath, 'utf8')
+          );
+          const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: shallow,
+            encoding: 'utf8',
+          }).trim();
 
-        const result = runReleaseResolver(shallow, head);
-        expect(result.status).not.toBe(0);
-        expect(result.stderr).toContain('shallow');
-      } finally {
-        rmSync(shallow, { recursive: true, force: true });
-        rmSync(repo.directory, { recursive: true, force: true });
-      }
+          const result = runReleaseResolver(shallow, head);
+          expect(result.status).not.toBe(0);
+          expect(result.stderr).toContain('shallow');
+        } finally {
+          rmSync(shallow, { recursive: true, force: true });
+        }
+      });
     });
 
     it('fails closed when no commit in history touched the agent', () => {
@@ -615,9 +607,8 @@ describe('deploy reusable workflow', () => {
     });
 
     it('resolves the release through the real deploy step, and still blanks it for skip_agent', () => {
-      const repo = createAgentReleaseRepo();
       const script = stepRunScript('Resolve and Verify Deployment SHA');
-      try {
+      withAgentReleaseRepo((repo) => {
         const outputPath = join(repo.directory, 'step-output.txt');
         const normal = spawnSync('bash', ['-c', script], {
           cwd: repo.directory,
@@ -652,9 +643,7 @@ describe('deploy reusable workflow', () => {
         // release is still emitted for the container artifact, which always runs.
         expect(skippedFields.agent_version).toBe('');
         expect(skippedFields.release).toBe(repo.latestAgentCommit);
-      } finally {
-        rmSync(repo.directory, { recursive: true, force: true });
-      }
+      });
     });
   });
 
