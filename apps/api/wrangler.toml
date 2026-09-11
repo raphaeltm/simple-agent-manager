@@ -21,6 +21,13 @@ cpu_ms = 30000
 [vars]
 BASE_DOMAIN = "workspaces.example.com"
 VERSION = "0.1.0"
+# D1 Sessions API anchor for the Worker fetch handler. "first-primary" routes the first query
+# of each request to the primary and lets the rest be served by any replica caught up to that
+# bookmark: one trans-Atlantic round trip per request instead of N, with every query in the
+# request served at or after the primary's state at request start. It does NOT promise that a
+# write landing mid-request is visible to the rest of that request — see the precise statement
+# in apps/api/src/lib/d1-session.ts. Set to "disabled" to send every query at the primary.
+D1_SESSION_MODE = "first-primary"
 CRON_SWEEPS_ENABLED_KV_KEY = "control-loops:cron-enabled"
 DO_ALARMS_ENABLED_KV_KEY = "control-loops:alarms-enabled"
 CONTROL_LOOP_KILL_SWITCH_CACHE_MS = "30000"

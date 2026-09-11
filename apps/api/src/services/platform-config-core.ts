@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { encrypt } from './encryption';
@@ -397,8 +398,12 @@ interface PlatformConfigCacheEntry {
   /**
    * The binding this entry was resolved from. A cached value is only ever served back to the
    * same `D1Database` object, so a config resolved from one datastore can never be handed to a
-   * caller holding a different one (production isolates have exactly one binding; test suites
-   * build a fresh in-memory D1 per case).
+   * caller holding a different one (test suites build a fresh in-memory D1 per case).
+   *
+   * This is the STABLE per-isolate binding, not whatever `env.DATABASE` happens to be: on the
+   * Worker `fetch` path every request carries its own D1 session facade (`lib/d1-session.ts`),
+   * so `resolvePlatformConfig` stores and compares `resolveD1BindingIdentity(env.DATABASE)`.
+   * Keying on the facade would miss this cache on every request and pay the 14-query read.
    */
   database: D1Database;
   config: ResolvedPlatformConfig;
@@ -408,8 +413,9 @@ interface PlatformConfigCacheEntry {
 
 /**
  * Module-scoped cache — Workers re-use the isolate across requests within an instance, so this
- * gives the intended "last value for up to TTL" behaviour. Mirrors the established pattern in
- * `services/trial/kill-switch.ts`.
+ * gives the intended "last value for up to TTL" behaviour. `services/trial/kill-switch.ts` uses
+ * the same module-scope shape but does NOT key on its binding; do not copy that half of it when
+ * adding a cache over a binding whose identity can vary per request (see `database` below).
  */
 let platformConfigCache: PlatformConfigCacheEntry | null = null;
 
@@ -486,7 +492,14 @@ export async function resolvePlatformConfig(
   // database-less env share one entry. Such an env also resolves purely from `env` values
   // (`readSetting` / `resolveSecret` short-circuit when there is no `prepare`), so there is
   // nothing to save by caching it.
-  const database = isCacheableBinding(env.DATABASE) ? env.DATABASE : null;
+  //
+  // The key MUST be the stable per-isolate binding, not `env.DATABASE` itself: the Worker
+  // `fetch` entry point hands every request a fresh request-scoped D1 session facade
+  // (`lib/d1-session.ts`), and keying on the facade would miss this cache on EVERY request
+  // and pay the 14-round-trip read below each time. `resolveD1BindingIdentity` unwraps the
+  // facade; it returns a raw binding unchanged. Reads still go through `env.DATABASE`, so a
+  // cache miss is served by the caller's session.
+  const database = isCacheableBinding(env.DATABASE) ? resolveD1BindingIdentity(env.DATABASE) : null;
 
   const cached = platformConfigCache;
   if (database && cached && cached.database === database && now < cached.expiresAt) {

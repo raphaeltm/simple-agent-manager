@@ -516,6 +516,7 @@ function getApiWorkerVars(
     VM_INCIDENT_R2_PREFIX: outputs.diagnosticIncidentPrefix,
     VM_INCIDENT_RETENTION_DAYS: String(outputs.diagnosticIncidentTtlDays),
     ...getOptionalProcessEnvVars(topLevel.vars, [
+      'D1_SESSION_MODE',
       'REQUIRE_APPROVAL',
       'CRON_SWEEPS_ENABLED_KV_KEY',
       'DO_ALARMS_ENABLED_KV_KEY',
