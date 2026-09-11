@@ -17,6 +17,8 @@
  * (`.claude/rules/34`). `tests/workers/d1-request-session.test.ts` carries the matching
  * real-trigger control pair through the actual app.
  */
+import { readFileSync } from 'node:fs';
+
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -104,6 +106,48 @@ function buildApp(layerLog: string[]): Hono<{ Bindings: Env }> {
 }
 
 const env = { BASE_DOMAIN: 'example.test' } as unknown as Env;
+
+/**
+ * `buildApp` above MIRRORS the production mounting rather than importing those routers
+ * (importing them pulls in most of the app, and `vi.mock` cannot reach `SELF`'s module graph
+ * under `vitest-pool-workers`, so the count cannot be taken through the real worker).
+ *
+ * A mirror is only worth anything while it stays faithful. This pins the three registration
+ * shapes it assumes, so a PR that changes how any of those routers registers auth fails HERE
+ * instead of leaving this suite asserting "exactly once" about a fictional app. Structural
+ * verification of route configuration, which is the narrow case `.claude/rules/02` permits for
+ * a source-contract assertion — the behavioural proof is the `SELF.fetch` control pair in
+ * `tests/workers/d1-request-session.test.ts`.
+ */
+describe('the mirrored mounting still matches the real routers', () => {
+  const read = (relative: string) =>
+    readFileSync(new URL(`../../../src/routes/${relative}`, import.meta.url), 'utf8');
+
+  it('projectsRoutes registers auth as a wildcard middleware', () => {
+    expect(read('projects/index.ts')).toContain(
+      "projectsRoutes.use('/*', requireAuth(), requireApproved())"
+    );
+  });
+
+  it('tasks/crud.ts registers auth per handler on the list route', () => {
+    expect(read('tasks/crud.ts')).toContain(
+      "crudRoutes.get('/', requireAuth(), requireApproved(), async (c) =>"
+    );
+  });
+
+  it('chat.ts registers auth as its own wildcard middleware', () => {
+    expect(read('chat.ts')).toContain("chatRoutes.use('/*', requireAuth(), requireApproved())");
+  });
+
+  it('index.ts mounts the sub-routers UNDER the projectsRoutes wildcard path', () => {
+    // This is what makes `/api/projects/*` also match `/api/projects/:projectId/tasks`, which
+    // is the whole reason the auth stack ran twice.
+    const index = readFileSync(new URL('../../../src/index.ts', import.meta.url), 'utf8');
+    expect(index).toContain("app.route('/api/projects', projectsRoutes)");
+    expect(index).toContain("app.route('/api/projects/:projectId/tasks', tasksRoutes)");
+    expect(index).toContain("app.route('/api/projects/:projectId/sessions', chatRoutes)");
+  });
+});
 
 describe('auth middleware runs once per request', () => {
   let layerLog: string[];

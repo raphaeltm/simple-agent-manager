@@ -181,7 +181,9 @@ observability databases, and the API Worker runs each request against a single D
 queries after the first can be served by a nearby replica instead of crossing to the primary
 region. This is safe by construction: the session is anchored `first-primary`, so a request never
 sees data older than its own start and cannot miss a write that completed before it began, and
-queries that do not open a session always go to the primary. Scheduled sweeps and Durable Objects keep the unsessioned binding. Set
+queries that do not open a session always go to the primary. (It does not promise that a write
+landing *during* a request is visible to that request's later queries — that is the ordinary
+two-non-atomic-reads race, unchanged by replication and now with a shorter window.) Scheduled sweeps and Durable Objects keep the unsessioned binding. Set
 `D1_READ_REPLICATION_MODE=disabled` to remove the replicas (Cloudflare takes up to 24 hours to
 stop routing to them) or `D1_SESSION_MODE=disabled` to keep the replicas but route every Worker
 query at the primary. Replication needs no extra API-token permission beyond the

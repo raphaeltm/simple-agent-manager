@@ -113,12 +113,14 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
     ...bound(sql, []),
   });
 
+  const batch = async (statements: ExecutableStatement[]) =>
+    sqlite.transaction((items: ExecutableStatement[]) => items.map((item) => item.runSync()))(
+      statements
+    );
+
   const database = {
     prepare: statement,
-    batch: async (statements: ExecutableStatement[]) =>
-      sqlite.transaction((items: ExecutableStatement[]) => items.map((item) => item.runSync()))(
-        statements
-      ),
+    batch,
     exec: async (sql: string) => {
       sqlite.exec(sql);
       return { count: 0, duration: 0 };
@@ -130,15 +132,11 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
      * query is trivially "consistent". Replica routing, bookmark propagation and
      * read-after-write across a real session must be proven on workerd
      * (`tests/workers/`), per `.claude/rules/69`.
+     *
+     * Shares `prepare`/`batch` with the binding by reference rather than re-implementing
+     * them, so a session can never drift from what the binding itself does.
      */
-    withSession: () => ({
-      prepare: statement,
-      batch: async (statements: ExecutableStatement[]) =>
-        sqlite.transaction((items: ExecutableStatement[]) => items.map((item) => item.runSync()))(
-          statements
-        ),
-      getBookmark: () => null,
-    }),
+    withSession: () => ({ prepare: statement, batch, getBookmark: () => null }),
   };
 
   return database as unknown as D1Database;

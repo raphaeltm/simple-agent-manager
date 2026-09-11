@@ -43,6 +43,14 @@
  * every Durable Object keep the raw binding, so reapers, resumers and terminal-verdict
  * paths (`.claude/rules/47`, `/53`, `/58`, `/66`) read exactly what they read today.
  *
+ * One case worth naming rather than leaving implicit: `ctx.waitUntil()` work started by a
+ * request continues to hold THAT request's facade after the response is sent, so it reads at
+ * or after that request's bookmark, not at the raw binding. That is deliberate and safe — a
+ * bookmark is a lower bound, the deferred work belongs to the request that started it, and a
+ * D1 session is a bookmark holder rather than a connection with a lifetime. It is not a
+ * separate routing tier, but do not read the list above as "anything after the response uses
+ * the raw binding".
+ *
  * ## Binding identity
  *
  * `resolvePlatformConfig` keys its per-isolate cache on the D1 binding *object identity*.

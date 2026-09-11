@@ -575,8 +575,10 @@ describe('platform config cache survives request-scoped D1 session facades', () 
 
     counter.reset();
     const scoped = withRequestScopedD1Bindings(env as unknown as D1SessionEnv) as Env;
-    await resolvePlatformConfig(scoped);
+    const second = await resolvePlatformConfig(scoped);
 
+    // Value first: "zero queries" is also satisfied by a cache that hands back undefined.
+    expect(second.github.clientId.value).toBe('env-gh-client');
     expect(counter.platformConfigReads()).toHaveLength(0);
   });
 

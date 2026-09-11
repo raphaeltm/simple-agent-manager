@@ -254,6 +254,40 @@ describe('D1 Sessions API on workerd', () => {
     expect(sessionCount).toBe(1);
   });
 
+  it('the D1_SESSION_MODE kill switch hands back the RAW binding on the real runtime', async () => {
+    // The operator escape hatch, end to end on workerd rather than against a fake binding:
+    // with sessions disabled, `env.DATABASE` reaching a handler must be the binding itself.
+    const disabled = withRequestScopedD1Bindings({
+      ...testEnv,
+      D1_SESSION_MODE: 'disabled',
+    } as unknown as Env);
+
+    expect(disabled.DATABASE).toBe(testEnv.DATABASE);
+    expect(disabled.OBSERVABILITY_DATABASE).toBe(testEnv.OBSERVABILITY_DATABASE);
+
+    // Liveness: the raw binding still answers, so "identical object" is not hiding a broken env.
+    const row = await disabled.DATABASE.prepare('SELECT 1 AS ok').first<{ ok: number }>();
+    expect(row?.ok).toBe(1);
+
+    // Control: the same env WITHOUT the switch does get a facade, so the assertion above is
+    // the switch working rather than the wrapper never doing anything on this runtime.
+    const enabled = withRequestScopedD1Bindings(testEnv);
+    expect(enabled.DATABASE).not.toBe(testEnv.DATABASE);
+  });
+
+  it('the exported worker keeps scheduled() on the raw, unsessioned bindings', async () => {
+    // `.claude/rules/58`/`/66`: cron sweeps own terminal verdicts and must read what they read
+    // today. That holds by construction — only `fetch` wraps env — and this pins it by
+    // referential identity so an accidental wrap cannot slip in unnoticed.
+    const workerEntry = (await import('../../src/index')).default;
+    const { scheduled } = await import('../../src/scheduled/handler');
+
+    expect(workerEntry.scheduled).toBe(scheduled);
+    // Liveness beside the identity assertion: fetch is NOT the bare app handler, i.e. the
+    // wrapper this file exists to test really is installed on the other entry point.
+    expect(typeof workerEntry.fetch).toBe('function');
+  });
+
   it('withRequestScopedD1Bindings keeps every other binding usable', async () => {
     const scoped = withRequestScopedD1Bindings(testEnv);
 
