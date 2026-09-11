@@ -40,10 +40,7 @@ type CloudInitWriteFile = {
   permissions?: string;
 };
 
-function getWriteFile(
-  path: string,
-  overrides?: Partial<CloudInitVariables>
-): CloudInitWriteFile {
+function getWriteFile(path: string, overrides?: Partial<CloudInitVariables>): CloudInitWriteFile {
   const config = generateCloudInit(baseVariables(overrides), { validateSize: false });
   const parsed = YAML.parse(config.replace(/^#cloud-config\n/, '')) as {
     write_files: CloudInitWriteFile[];
@@ -338,7 +335,8 @@ function runVerifyWorkloadCgroupScript(options?: {
   writeFileSync(join(scratchDir, 'meminfo'), `MemTotal:        ${totalMb * 1024} kB\n`);
   writeFileSync(
     join(procRoot, pid, 'cgroup'),
-    options?.procCgroupContent ?? `0::${options?.cgroupPath ?? '/sam.slice/sam-workload.slice/docker-abc.scope'}\n`
+    options?.procCgroupContent ??
+      `0::${options?.cgroupPath ?? '/sam.slice/sam-workload.slice/docker-abc.scope'}\n`
   );
   if (options?.memoryMax !== null) {
     writeCgroupFile(
@@ -506,6 +504,66 @@ describe('indentForYamlBlock', () => {
     const input = 'line1\nline2\n';
     const result = indentForYamlBlock(input, 6);
     expect(result).toBe('line1\n      line2\n      ');
+  });
+});
+
+describe('slice CPU shares', () => {
+  // Memory already had a reservation for the vm-agent because starvation there
+  // KILLS it. CPU had none, so a workspace saturating the box could delay the
+  // heartbeat until the control plane declared the node dead — the failure mode
+  // recorded in tasks/backlog/2026-08-25-build-concurrency-backpressure.md.
+  function sliceDirectives(path: string, overrides?: Partial<CloudInitVariables>): string {
+    return getWriteFile(path, overrides).content;
+  }
+
+  it('gives the vm-agent slice a larger CPU share than the workload slice', () => {
+    const infra = sliceDirectives('/etc/systemd/system/sam-infra.slice');
+    const workload = sliceDirectives('/etc/systemd/system/sam-workload.slice');
+
+    expect(infra).toContain('CPUAccounting=yes');
+    expect(infra).toContain('CPUWeight=1000');
+    expect(workload).toContain('CPUAccounting=yes');
+    expect(workload).toContain('CPUWeight=100');
+
+    // The ordering is the whole point; assert it rather than the literals alone,
+    // so a future default change cannot silently invert it.
+    const weightOf = (content: string): number => Number(/^CPUWeight=(\d+)$/m.exec(content)?.[1]);
+    expect(weightOf(infra)).toBeGreaterThan(weightOf(workload));
+  });
+
+  it('leaves the existing memory reservation untouched', () => {
+    // Control: the CPU change must not disturb the protection that already works.
+    const infra = sliceDirectives('/etc/systemd/system/sam-infra.slice');
+    expect(infra).toContain('MemoryAccounting=yes');
+    expect(infra).toContain('MemoryMin=256M');
+  });
+
+  it('honours configured weights', () => {
+    expect(
+      sliceDirectives('/etc/systemd/system/sam-infra.slice', { samInfraSliceCpuWeight: '4000' })
+    ).toContain('CPUWeight=4000');
+    expect(
+      sliceDirectives('/etc/systemd/system/sam-workload.slice', {
+        samWorkloadSliceCpuWeight: '50',
+      })
+    ).toContain('CPUWeight=50');
+  });
+
+  it.each([
+    ['below the cgroup v2 range', '0'],
+    ['above the cgroup v2 range', '10001'],
+    ['not a number', 'high'],
+  ])('fails closed on a weight %s', (_label, value) => {
+    // An invalid CPUWeight makes the unit fail to load, which would take the
+    // whole slice hierarchy — including the memory reservation — down with it.
+    expect(() =>
+      generateCloudInit(baseVariables({ samInfraSliceCpuWeight: value }), { validateSize: false })
+    ).toThrow(/samInfraSliceCpuWeight/);
+    expect(() =>
+      generateCloudInit(baseVariables({ samWorkloadSliceCpuWeight: value }), {
+        validateSize: false,
+      })
+    ).toThrow(/samWorkloadSliceCpuWeight/);
   });
 });
 

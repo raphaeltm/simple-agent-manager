@@ -218,6 +218,18 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       );
     }
   }
+  for (const [field, raw] of [
+    ['samInfraSliceCpuWeight', variables.samInfraSliceCpuWeight],
+    ['samWorkloadSliceCpuWeight', variables.samWorkloadSliceCpuWeight],
+  ] as const) {
+    if (raw === undefined || raw === '') continue;
+    const weight = Number(raw);
+    // systemd/cgroup v2 accepts 1-10000 for CPUWeight; anything else makes the
+    // unit fail to load, which would take the whole slice hierarchy down.
+    if (!NUMERIC_RE.test(raw) || weight < 1 || weight > 10000) {
+      errors.push(`${field}: must be numeric 1-10000 (got ${JSON.stringify(raw)})`);
+    }
+  }
   if (variables.dockerMemoryMinMb !== undefined && variables.dockerMemoryMinMb !== '') {
     const minimum = Number(variables.dockerMemoryMinMb);
     if (!NUMERIC_RE.test(variables.dockerMemoryMinMb) || minimum < 1 || minimum > 65536) {
@@ -443,6 +455,10 @@ export interface CloudInitVariables {
   vmAgentMemoryReserveMb?: string;
   /** Minimum memory protection for VM agent/system services in MB (default: 256). */
   samInfraSliceMemoryMinMb?: string;
+  /** systemd CPUWeight for the vm-agent slice (cgroup v2 range 1-10000). */
+  samInfraSliceCpuWeight?: string;
+  /** systemd CPUWeight for the Docker workload slice (cgroup v2 range 1-10000). */
+  samWorkloadSliceCpuWeight?: string;
   /** Minimum Docker MemoryMax value retained when reserve is enabled (default: 512). */
   dockerMemoryMinMb?: string;
   /** Bounded Docker stats timeout for heartbeat workspace metrics (default: 2s). */
@@ -547,6 +563,14 @@ export function generateCloudInit(
     '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
     '{{ vm_agent_memory_reserve_mb }}': variables.vmAgentMemoryReserveMb ?? '512',
     '{{ sam_infra_slice_memory_min_mb }}': variables.samInfraSliceMemoryMinMb ?? '256',
+    // The vm-agent shares the CPU with workload containers. Memory already has a
+    // reservation (MemoryMin above) because starvation there KILLS the agent;
+    // CPU had none, so a busy workspace could delay the heartbeat until the
+    // control plane declared the node dead. CFS weights are proportional and
+    // only apply under contention, so this costs nothing on an idle box: the
+    // agent's demand is tiny, it simply stops queueing behind builds.
+    '{{ sam_infra_slice_cpu_weight }}': variables.samInfraSliceCpuWeight ?? '1000',
+    '{{ sam_workload_slice_cpu_weight }}': variables.samWorkloadSliceCpuWeight ?? '100',
     '{{ docker_memory_min_mb }}': variables.dockerMemoryMinMb ?? '512',
     '{{ heartbeat_docker_stats_timeout }}': variables.heartbeatDockerStatsTimeout ?? '2s',
     '{{ heartbeat_workspace_metrics_max_containers }}':

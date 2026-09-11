@@ -259,6 +259,8 @@ write_files:
       [Slice]
       MemoryAccounting=yes
       MemoryMin={{ sam_infra_slice_memory_min_mb }}M
+      CPUAccounting=yes
+      CPUWeight={{ sam_infra_slice_cpu_weight }}
 
   - path: /etc/systemd/system/sam-workload.slice
     permissions: '0644'
@@ -269,6 +271,8 @@ write_files:
 
       [Slice]
       MemoryAccounting=yes
+      CPUAccounting=yes
+      CPUWeight={{ sam_workload_slice_cpu_weight }}
 
   - path: /usr/local/sbin/sam-configure-docker-memory.sh
     permissions: '0755'

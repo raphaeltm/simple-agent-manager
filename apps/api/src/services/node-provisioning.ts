@@ -347,6 +347,8 @@ export async function provisionNode(
       vmAgentRequiredVersion: env.VM_AGENT_REQUIRED_VERSION?.trim(),
       vmAgentMemoryReserveMb: String(resolveEffectiveNodeHostMemoryReserveMb(env)),
       samInfraSliceMemoryMinMb: env.SAM_INFRA_SLICE_MEMORY_MIN_MB,
+      samInfraSliceCpuWeight: env.SAM_INFRA_SLICE_CPU_WEIGHT,
+      samWorkloadSliceCpuWeight: env.SAM_WORKLOAD_SLICE_CPU_WEIGHT,
       dockerMemoryMinMb: env.DOCKER_MEMORY_MIN_MB,
       heartbeatDockerStatsTimeout: env.HEARTBEAT_DOCKER_STATS_TIMEOUT,
       heartbeatWorkspaceMetricsMaxContainers: env.HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS,

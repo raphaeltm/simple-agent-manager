@@ -957,6 +957,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   VM_AGENT_PORT?: string; // "8443" (default) or custom port
   VM_AGENT_MEMORY_RESERVE_MB?: string; // Optional Docker workload-slice MemoryMax reserve for VM-agent reachability headroom
   SAM_INFRA_SLICE_MEMORY_MIN_MB?: string; // systemd MemoryMin for vm-agent/system services slice
+  SAM_INFRA_SLICE_CPU_WEIGHT?: string; // systemd CPUWeight for the vm-agent slice (1-10000, default 1000)
+  SAM_WORKLOAD_SLICE_CPU_WEIGHT?: string; // systemd CPUWeight for the Docker workload slice (1-10000, default 100)
   DOCKER_MEMORY_MIN_MB?: string; // Minimum Docker MemoryMax retained when VM_AGENT_MEMORY_RESERVE_MB is enabled
   HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES?: string; // Max bytes read from heartbeat Docker metric commands
   HEARTBEAT_DOCKER_STATS_TIMEOUT?: string; // VM-agent heartbeat Docker stats timeout (default: 2s)

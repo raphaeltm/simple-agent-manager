@@ -314,7 +314,9 @@ A node accepts additional work only if **all** of these hold:
 - Live CPU is treated differently from memory and disk. CPU is shared out by the kernel, so a busy
   machine runs work more slowly rather than breaking, and each workspace's CPU is already reserved
   from the machine's budget above. Measured CPU therefore only blocks placement once the machine is
-  **saturated** (90% by default); below that, the reservations decide.
+  **saturated** (85% by default); below that, the reservations decide. SAM also gives its own agent
+  a larger share of the CPU than the workspace containers get, so a busy machine slows the work down
+  without making the machine look unreachable.
 
 If a node's real hardware is unknown, or a busy node's telemetry is missing, malformed, or stale,
 SAM refuses it rather than guessing. A machine SAM cannot measure is never given work.

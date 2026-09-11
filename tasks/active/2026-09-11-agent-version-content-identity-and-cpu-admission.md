@@ -334,6 +334,41 @@ All staging resources created for this verification were deleted: nodes
 `sleeping` workspaces from 2026-09-04 with already-deleted nodes predate this work and
 were left alone.)
 
+## (C) The vm-agent gets a CPU share, not just a memory reservation
+
+Added on the user's instruction after he recognised the memory half as his own prior work.
+
+`/etc/docker/daemon.json` already sets `"cgroup-parent": "sam-workload.slice"`, so every
+workspace container is parented under it while the agent runs in `sam-infra.slice` with
+`MemoryMin` and `OOMScoreAdjust=-900`. That protection was **memory only** — grep for
+`CPUWeight` / `CPUQuota` / `CPUAccounting` across the whole template returned nothing —
+so under CPU contention the agent competed with workload containers on equal CFS footing
+and its heartbeat could be delayed until the control plane declared the node dead
+(`tasks/backlog/2026-08-25-build-concurrency-backpressure.md`).
+
+Both slices now carry `CPUAccounting=yes` and a `CPUWeight`: `sam-infra.slice` 1000,
+`sam-workload.slice` 100 (the cgroup v2 default). CFS weights are proportional and apply
+only under contention, so an idle machine is unaffected; the agent simply stops queueing
+behind builds. Both weights are env-configurable (`SAM_INFRA_SLICE_CPU_WEIGHT`,
+`SAM_WORKLOAD_SLICE_CPU_WEIGHT`) and validated to the cgroup v2 range 1-10000 at cloud-init
+generation — an out-of-range value makes the unit fail to load, which would take the slice
+hierarchy and its memory reservation down with it, so generation fails closed instead.
+
+This is why (B) could settle at a saturation ceiling at all: the heartbeat-starvation risk
+was the main argument for keeping the number low.
+
+## Decisions taken with the user
+
+- **Per-pool admission thresholds: dropped.** The ceiling is normalised per core
+  (`loadavg / vcpu`), so "nearly saturated" means the same thing on a 2-core and a 16-core
+  machine. At the old 50% the default was wrong for larger machines and per-pool tuning
+  would have helped; at 85% there is no size where it is obviously wrong. Revisit only if a
+  concrete pool wants a different number.
+- **Legacy vm-size reservations: rework to one third of the machine minus the host reserve
+  (three per machine), in a separate PR.** See idea `01M28CM31AW1VHE29PWZ9YWH16`. Kept out
+  of this PR because it changes placement for every workspace that does not declare its own
+  requirements and deserves its own verification.
+
 ## Deliberately out of scope
 
 - Per-`capacity_pools` admission threshold columns (see research). Raised with the user
