@@ -730,6 +730,7 @@ function manyLiveOfferings(count: number): ProviderInstanceOffering[] {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   globalThis.fetch = originalFetch;
   // The provider catalog cache is per-isolate module state; leaking it across cases would
   // let one test's inventory answer another test's refresh.
@@ -779,19 +780,26 @@ describe('default capacity pool creation', () => {
     const db = createDb();
     seedUserCredential({ id: 'user-hetzner' });
     const initial = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
-      userId: 'user-1', ensure: true,
+      userId: 'user-1',
+      ensure: true,
     });
     const poolId = initial!.pool.id;
     const sourceId = initial!.sources[0]!.id;
     sqlite!.prepare('DELETE FROM capacity_pool_candidates WHERE pool_id = ?').run(poolId);
-    sqlite!.prepare(`INSERT INTO capacity_pool_candidates
+    sqlite!
+      .prepare(
+        `INSERT INTO capacity_pool_candidates
       (id, pool_id, capacity_source_id, provider, location, workload_role, runtime, machine_class, machine_size)
       VALUES ('old-abstract', ?, ?, 'hetzner', 'fsn1', 'workspace', 'vm', 'shared-vm', 'small')`
-    ).run(poolId, sourceId);
+      )
+      .run(poolId, sourceId);
     sqlite!.prepare("UPDATE capacity_sources SET status = 'disabled' WHERE id = ?").run(sourceId);
     const offeringResolver = vi.fn(async () => []);
     const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
-      userId: 'user-1', ensure: true, initializeOnly: true, offeringResolver,
+      userId: 'user-1',
+      ensure: true,
+      initializeOnly: true,
+      offeringResolver,
     });
     expect(summary?.pool.id).toBe(poolId);
     expect(summary?.sources[0]?.status).toBe('disabled');
@@ -980,6 +988,7 @@ describe('default capacity pool creation', () => {
       const env = {
         ...catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
         CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE: '8',
+        CAPACITY_POOL_SCHEDULED_RECONCILIATION_INTERVAL_MS: '0',
       } as Env;
 
       await reconcileCapacityPoolsForCredentialMutation(env, { scope: 'user', userId: 'user-1' });
@@ -1016,6 +1025,66 @@ describe('default capacity pool creation', () => {
       ).toEqual([{ status: 'active', count: 26 }]);
     }
   );
+
+  it('throttles scheduled reconciliation to the configured interval without blocking manual ensure', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
+    const db = createDb();
+    const encrypted = await encrypt('vultr-token-for-scheduled-throttle', TEST_ENCRYPTION_KEY);
+    seedComposableCloudCredential({
+      credentialId: 'cc-scheduled-throttle-cred',
+      configurationId: 'cc-scheduled-throttle-cfg',
+      attachmentId: 'cc-scheduled-throttle-att',
+      provider: 'vultr',
+      encryptedToken: encrypted.ciphertext,
+      iv: encrypted.iv,
+      updatedAt: '2030-01-01T00:00:00.000Z',
+    });
+    const env = catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)) as Env;
+
+    const first = await runScheduledCapacityPoolReconciliation(env);
+
+    expect(first).toMatchObject({
+      skipped: false,
+      skipReason: null,
+      usersEnsured: 1,
+      projectsEnsured: 0,
+      nextEligibleAt: '2030-01-02T00:00:00.000Z',
+    });
+    expect(getCount('capacity_pool_candidates')).toBeGreaterThan(0);
+    const candidatesAfterFirst = getCount('capacity_pool_candidates');
+
+    vi.setSystemTime(new Date('2030-01-01T12:00:00.000Z'));
+    const second = await runScheduledCapacityPoolReconciliation(env);
+
+    expect(second).toEqual({
+      installationEnsured: false,
+      usersEnsured: 0,
+      projectsEnsured: 0,
+      skipped: true,
+      skipReason: 'recently-ran',
+      nextEligibleAt: '2030-01-02T00:00:00.000Z',
+    });
+    expect(getCount('capacity_pool_candidates')).toBe(candidatesAfterFirst);
+
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      projectId: 'project-1',
+      includeInstallation: false,
+      env,
+    });
+
+    vi.setSystemTime(new Date('2030-01-02T00:00:00.000Z'));
+    const third = await runScheduledCapacityPoolReconciliation(env);
+
+    expect(third).toMatchObject({
+      skipped: false,
+      skipReason: null,
+      usersEnsured: 1,
+      projectsEnsured: 0,
+      nextEligibleAt: '2030-01-03T00:00:00.000Z',
+    });
+  });
 
   it('keeps project backfill cursor scans bounded by covering indexes', () => {
     createDb();

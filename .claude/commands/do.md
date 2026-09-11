@@ -44,8 +44,9 @@ Also create `.do-state.md` in the repo root (gitignored) as a complementary exte
 
 2. **Research the codebase.** Before writing anything:
    - Search and read to find all relevant code paths
-   - Read related public docs in `apps/www/src/content/docs/docs/`, plus `specs/` and `.claude/rules/`
-   - **Review relevant post-mortems** in the incident lessons retained in `.claude/rules/` and relevant `tasks/archive/` records. Search for post-mortems that touch the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections. These contain hard-won lessons about what goes wrong in this codebase — ignoring them risks repeating the exact same mistakes. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is almost certainly a relevant post-mortem.
+   - Read related public docs in `apps/www/src/content/docs/docs/` and `specs/` only for affected behavior.
+   - Read `.claude/rules/00-rule-routing.md`, then load only the root rules and scoped `.claude/rules/` files that match the directories you will modify. Do not bulk-load an app/package scoped rule directory.
+   - **Review relevant post-mortems** by searching root rule stubs, matching scoped rule files, and relevant `tasks/archive/` records for the same subsystems, patterns, or failure modes as your task. Read at least the "What broke", "Root cause", and "Process fix" sections when a relevant incident lesson is found. If your task involves staging verification, credential handling, data flow across boundaries, or UI-to-backend paths, there is usually a relevant post-mortem.
    - Use web search for external library/API docs if needed
    - Identify existing patterns, conventions, and test approaches in the affected areas
 
@@ -70,15 +71,18 @@ Also create `.do-state.md` in the repo root (gitignored) as a complementary exte
 ## Phase 2: Worktree Setup
 
 1. **Create a feature branch and worktree:**
+
    ```
    git worktree add ../sam-<short-name> -b <branch-name>
    ```
+
    - Branch naming: use a descriptive kebab-case name
    - Worktree location: `../sam-<short-name>` (sibling to the main repo directory)
 
 2. **Move the task file** from `tasks/backlog/` to `tasks/active/` in the worktree and commit.
 
 3. **Install dependencies** in the worktree:
+
    ```
    cd ../sam-<short-name> && pnpm install
    ```
@@ -94,13 +98,14 @@ Execute the checklist from the task file. Follow these rules:
 1. **Work through checklist items sequentially**, checking each off in the task file as you complete it.
 
 2. **Follow project conventions:**
-   - Obey all rules in `.claude/rules/`
+   - Obey loaded root rules plus scoped rules selected through `.claude/rules/00-rule-routing.md` for the changed paths. If a file edit enters a new app/package, load that path's matching scoped rules before continuing.
    - Respect build order: `shared` -> `providers` -> `cloud-init` -> `api` / `web`
    - Update documentation in the same commit as code changes
    - Write tests that prove the feature works
    - No hardcoded values (constitution Principle XI)
 
 3. **Push frequently.** After every meaningful unit of work:
+
    ```
    git add <specific-files>
    git commit -m "<type>: <description>"
@@ -113,7 +118,6 @@ Execute the checklist from the task file. Follow these rules:
    - `pnpm test` after adding/modifying tests
 
 5. **Playwright visual audit (MANDATORY for UI changes).** If this PR touches any files in `apps/web/`, `packages/ui/`, or `packages/terminal/`, you MUST run a local Playwright visual audit before proceeding to Phase 4. See `.claude/rules/17-ui-visual-testing.md` for full requirements.
-
    - Use mock data covering: normal data, long text (200+ char titles), empty states, many items (30+), error states
    - Capture screenshots at both mobile (375x667) and desktop (1280x800) viewports
    - Store screenshots in `.codex/tmp/playwright-screenshots/`
@@ -131,9 +135,11 @@ Execute the checklist from the task file. Follow these rules:
 Before creating the PR, ensure everything is solid:
 
 1. **Run the full quality suite:**
+
    ```
    pnpm lint && pnpm typecheck && pnpm test && pnpm build
    ```
+
    Fix any failures before proceeding.
 
 2. **Verify documentation sync** — grep for references to anything you changed and update stale docs.
@@ -148,17 +154,17 @@ Before creating the PR, ensure everything is solid:
 
 Run local subagent review based on what the PR touches. **Always include** the task-completion-validator in addition to domain-specific local reviewers. Do **not** create SAM child tasks for routine `/do` Phase 5 review; SAM child tasks are only for explicit user-requested SAM subtasks or visible delegated SAM work:
 
-| PR touches | Skill | What it checks |
-|------------|-------|----------------|
-| **Always** | `$task-completion-validator` | Planned vs. actual work — research gaps, unwired UI, missing tests |
-| Go code (`packages/vm-agent/`) | `$go-specialist` | Concurrency, resource leaks, Go idioms |
-| TypeScript API (`apps/api/`) | `$cloudflare-specialist` | D1, KV, Workers patterns |
-| UI code (`apps/web/`, `packages/ui/`) | `$ui-ux-specialist` | Accessibility, layout, interactions |
-| Auth, credentials, tokens | `$security-auditor` | Credential safety, OWASP, JWT |
-| Environment variables | `$env-validator` | GH_ vs GITHUB_, deployment mapping |
-| Documentation changes | `$doc-sync-validator` | Docs match code reality |
-| Business logic, config | `$constitution-validator` | No hardcoded values |
-| Tests added/changed | `$test-engineer` | Coverage, realism, TDD compliance |
+| PR touches                            | Skill                        | What it checks                                                     |
+| ------------------------------------- | ---------------------------- | ------------------------------------------------------------------ |
+| **Always**                            | `$task-completion-validator` | Planned vs. actual work — research gaps, unwired UI, missing tests |
+| Go code (`packages/vm-agent/`)        | `$go-specialist`             | Concurrency, resource leaks, Go idioms                             |
+| TypeScript API (`apps/api/`)          | `$cloudflare-specialist`     | D1, KV, Workers patterns                                           |
+| UI code (`apps/web/`, `packages/ui/`) | `$ui-ux-specialist`          | Accessibility, layout, interactions                                |
+| Auth, credentials, tokens             | `$security-auditor`          | Credential safety, OWASP, JWT                                      |
+| Environment variables                 | `$env-validator`             | GH* vs GITHUB*, deployment mapping                                 |
+| Documentation changes                 | `$doc-sync-validator`        | Docs match code reality                                            |
+| Business logic, config                | `$constitution-validator`    | No hardcoded values                                                |
+| Tests added/changed                   | `$test-engineer`             | Coverage, realism, TDD compliance                                  |
 
 Address every bug or correctness issue raised. Push fixes and re-run quality checks.
 
@@ -167,6 +173,7 @@ Address every bug or correctness issue raised. Push fixes and re-run quality che
 **Update todo list and `.do-state.md`**: When starting local reviewers, immediately add each one to the "Phase 5: Review Tracker" section with status `PENDING`. Update each reviewer's status as results arrive. **Phase 5 CANNOT be marked complete until every local reviewer shows `PASS` or `ADDRESSED`.** If any reviewer is still `PENDING`, you are NOT done with Phase 5 — wait for it.
 
 **Reviewer tracking is merge-blocking (see `.claude/rules/25-review-merge-gate.md`):**
+
 1. When you create the PR in Phase 7, you MUST copy the review tracker into the PR description's "Specialist Review Evidence" section — one row per reviewer with their status and outcome.
 2. If ANY reviewer is still `PENDING` or `FAILED` at PR creation time, you MUST add the `needs-human-review` label and MUST NOT merge. The human will decide when to proceed.
 3. Filing findings as backlog tasks does NOT count as "addressed" for CRITICAL/HIGH severity. Fix them or get human approval to defer.
@@ -185,30 +192,38 @@ If this PR includes **any code changes** (not just docs/tasks), deploy to stagin
 ### 6a. Standard Verification (All Code Changes)
 
 1. **Check for existing staging deployments** before triggering your own:
+
    ```bash
    gh run list --workflow=deploy-staging.yml --status=in_progress --status=queued --json databaseId,status,createdAt,headBranch
    ```
+
    If there are active or queued runs, wait at least **5 minutes** from the most recent run's `createdAt` before triggering yours.
 
 2. **Deploy to staging:**
+
    ```bash
    gh workflow run deploy-staging.yml --ref <your-branch-name>
    ```
+
    Then watch for completion:
+
    ```bash
    sleep 5
    gh run list --workflow=deploy-staging.yml --branch=<your-branch-name> --limit=1 --json databaseId,status
    gh run watch <run-id>
    ```
+
    If the deployment fails, inspect logs with `gh run view <run-id> --log-failed`, fix the issue, and re-trigger.
 
 3. **Open the live app** using Playwright — navigate to `app.sammy.party` (staging).
 
 4. **Authenticate** using the smoke test token via token-login API:
+
    ```
    POST https://api.sammy.party/api/auth/token-login
    Body: { "token": "<SAM_PLAYWRIGHT_PRIMARY_USER env var>" }
    ```
+
    Do this inside Playwright so the browser context receives the session cookie, then navigate that browser to `https://app.sammy.party`. Do not exchange the staging smoke/API token against `SAM_API_URL`; these tokens correctly fail against production.
    If the env var is not set, ask the human for credentials.
 
@@ -237,7 +252,7 @@ If the PR touches **any** of: `packages/cloud-init/`, `packages/vm-agent/`, `scr
 
 ### No Self-Exemptions
 
-**Fixing a broken gate does not exempt you from the gate.** If staging is currently broken by the bug you are fixing, deploy your fix branch to staging and verify it *fixes* the broken state. "This is the fix for the thing the gate tests" is the **strongest** reason to run the gate, not a reason to skip it.
+**Fixing a broken gate does not exempt you from the gate.** If staging is currently broken by the bug you are fixing, deploy your fix branch to staging and verify it _fixes_ the broken state. "This is the fix for the thing the gate tests" is the **strongest** reason to run the gate, not a reason to skip it.
 
 ### If You Already Created the PR Without Completing Phase 6
 
@@ -252,6 +267,7 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
    - Body: use the PR template from `.github/pull_request_template.md`
 
 2. **Push and wait for CI.** Check GitHub Actions:
+
    ```
    gh pr checks <pr-number> --watch
    ```
@@ -259,6 +275,7 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 3. **If CI fails:** inspect logs, fix issues, commit, push, repeat.
 
 4. **Once CI is fully green and every non-CodeRabbit gate is satisfied**, request CodeRabbit review by applying the opt-in label:
+
    ```
    gh pr edit <pr-number> --add-label coderabbit-review
    ```
@@ -273,11 +290,13 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
    **If CodeRabbit is unavailable, does not respond, or its feedback state cannot be inspected, the PR is not self-mergeable. Add `needs-human-review`, document the blocker, and do NOT merge.**
 
 6. **Once CI is fully green and the CodeRabbit loop is complete**, merge the PR:
+
    ```
    gh pr merge <pr-number> --squash --delete-branch
    ```
 
 7. **Clean up the worktree:**
+
    ```
    cd /workspaces/simple-agent-manager
    git worktree remove ../sam-<short-name>
@@ -293,12 +312,14 @@ You made a mistake. Close the PR, complete staging verification, then re-open. D
 After merging to main, you MUST monitor the production deployment to completion. **Do NOT consider the task done until the deploy succeeds or you have alerted the user about a failure.**
 
 1. **Wait for the Deploy Production workflow to start** (usually within 30 seconds of merge):
+
    ```bash
    sleep 10
    gh run list --workflow=deploy.yml --branch=main --limit=1 --json databaseId,status,conclusion,createdAt
    ```
 
 2. **Watch it to completion:**
+
    ```bash
    gh run watch <run-id>
    ```

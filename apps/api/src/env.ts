@@ -316,6 +316,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE?: string; // Optional max user/project scopes reconciled by one unscoped capacity-pool backfill call
   CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE?: string; // Optional candidate rows published per source per pass before the durable cursor resumes the rest
   CAPACITY_POOL_CATALOG_CACHE_TTL_MS?: string; // Optional per-isolate credential-scoped provider catalog cache TTL
+  CAPACITY_POOL_SCHEDULED_RECONCILIATION_INTERVAL_MS?: string; // Optional minimum interval between scheduled capacity-pool reconciliation runs (default 24h)
   CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON?: string; // Optional legacy-size workload slice mapping; platform_settings overrides it
   CAPACITY_POOL_PLATFORM_DEFAULTS_JSON?: string; // Optional platform resource defaults for capacity-aware reservation; platform_settings overrides it
   CAPACITY_POOL_SELECTION_SETTINGS_JSON?: string; // Optional capacity-pool ranking/cohort settings; platform_settings overrides it
