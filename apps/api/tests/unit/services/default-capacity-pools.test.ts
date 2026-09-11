@@ -4543,7 +4543,7 @@ describe('default capacity pool creation', () => {
 
     expect(identicalSource.source_generation).toBeGreaterThan(firstSource.source_generation);
     expect(identicalSource.authority_generation).toBe(firstSource.authority_generation);
-    expect(identicalCatalog.catalog_generation).toBeGreaterThan(firstCatalog.catalog_generation);
+    expect(identicalCatalog.catalog_generation).toBe(firstCatalog.catalog_generation);
     expect(identicalCatalog.authority_generation).toBe(firstCatalog.authority_generation);
     expect(identicalSnapshot?.selectionSettingsVersion).toBe(
       firstSnapshot?.selectionSettingsVersion
@@ -5207,19 +5207,21 @@ describe('capacity pool review findings', () => {
           pass === 0 ? 'migration-pending' : 'configured-ready'
         );
         expect(getCount('capacity_pool_candidates')).toBe(pass === 0 ? 200 : 270);
-        // Keep doing bounded, generation-fenced timestamp refreshes after completion.
+        // Initial bounded publication still writes 200 then 70 rows. Later identical refreshes
+        // remain ready without rewriting candidate rows just to advance refresh timestamps.
+        const expectedCandidateRefreshWrites = pass === 0 ? 200 : pass === 1 ? 70 : 0;
         expect(
           getCount(
             'capacity_pool_candidates',
             'catalog_generation = (SELECT source_generation FROM capacity_sources LIMIT 1)'
           )
-        ).toBe(pass % 2 === 0 ? 200 : 70);
+        ).toBe(expectedCandidateRefreshWrites);
         expect(
           getCount(
             'capacity_pool_candidates',
             `provider_instance_catalog_last_seen_at = '${refreshedAt}'`
           )
-        ).toBe(pass % 2 === 0 ? 200 : 70);
+        ).toBe(expectedCandidateRefreshWrites);
         if (pass === 1) stableRevision = result.user?.pool.revision;
         if (pass > 1) expect(result.user?.pool.revision).toBe(stableRevision);
       }
