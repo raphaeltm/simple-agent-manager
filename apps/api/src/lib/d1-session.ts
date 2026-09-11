@@ -127,7 +127,7 @@ export function __resetD1SessionModeWarningsForTest(): void {
 /**
  * Facade -> underlying binding. A WeakMap rather than a property on the facade so the
  * mapping cannot be forged by an arbitrary object and does not widen the `D1Database`
- * shape that 503 `drizzle(env.DATABASE, …)` call sites see.
+ * shape that the 496 `drizzle(...DATABASE)` call sites in `apps/api/src` see.
  */
 const sessionOrigins = new WeakMap<D1Database, D1Database>();
 

@@ -132,9 +132,10 @@ it cannot be disproven from the TypeScript SDK types alone.
 ### A2 — request-scoped D1 session anchored `first-primary`, at one integration point
 
 `export default { fetch }` in `apps/api/src/index.ts` builds a per-request `env` whose
-`DATABASE` / `OBSERVABILITY_DATABASE` are session-backed facades. All 503
-`drizzle(env.DATABASE, …)` call sites inherit it with no call-site churn (drizzle's D1
-driver only uses `prepare`/`batch`, both of which `D1DatabaseSession` provides).
+`DATABASE` / `OBSERVABILITY_DATABASE` are session-backed facades. All 496
+`drizzle(...DATABASE)` call sites in `apps/api/src` inherit it with no call-site churn
+(drizzle's D1 driver only uses `prepare`/`batch`, both of which `D1DatabaseSession`
+provides).
 
 **`first-primary`, not a bookmark.** With `first-primary` the first query goes to the
 primary and every later query in the request is constrained to at least that bookmark,
