@@ -293,7 +293,46 @@ Deploy #3 — run `34598476664`, succeeded. Deployed `VM_AGENT_REQUIRED_VERSION`
 (a real build input). Node `01M287TS0MH56N68Z2SEQ9RGRQ` booted under it: `running`,
 `healthy`, heartbeat 12:44:46Z, reporting `agent_version=e5b3dc2c0011...`.
 
-Deploy #4 — the retry of the check that failed as #2. Results recorded below.
+Deploy #4 — run `34600571592`, head `2c473070d` (task file only). **Succeeded**, and the
+upload step now reports what deploy #2 refused:
+
+```
+Reusing identical immutable VM-agent artifact .../releases/e5b3dc2c0011.../vm-agent-linux-amd64
+Reusing identical immutable VM-agent artifact .../releases/e5b3dc2c0011.../vm-agent-linux-arm64
+```
+
+Deployed `VM_AGENT_REQUIRED_VERSION` unchanged at `e5b3dc2c0011...` across #3 and #4, so
+every node on that release stays compatible — `isNodeAgentVersionCompatible` is string
+equality, so version stability across a Worker-only deploy IS node-reuse eligibility.
+
+### What staging did NOT prove, and why
+
+A co-tenancy demonstration was attempted and did not produce co-tenancy: two `small`
+workspaces created back to back landed on separate cx23s. Investigated rather than
+assumed — the cause is neither change in this PR:
+
+- Node CPU was 31% (`cpuLoadAvg1` 0.62 / 2 vCPU), admitted under both the old 50% gate
+  and the new 85% ceiling. CPU was not the refusal.
+- Memory was: each workspace declared 2048 MB, and 2 x 2048 = 4096 exceeds the
+  4096 - 512 = 3584 MB usable after the host reserve. Correct behaviour, and precisely
+  the declared-reservation authority this PR promotes.
+
+That led to a third finding, tracked as idea `01M28CM31AW1VHE29PWZ9YWH16`:
+`DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS` declares **exactly the machine class the
+same vmSize provisions**, so two legacy-sized workspaces exceed usable memory by exactly
+the 512 MB host reserve at every size. They can never co-tenant, and the `maxCoTenants`
+values beside them are decorative. Workspaces with profile-declared requirements do pack
+(production node `01M27R4E6D...` carried two). Out of scope here, but it is likely the
+largest remaining cause of one-node-per-agent for anything using the direct
+workspace-create route, which has no `resourceRequirements` field at all.
+
+### Cleanup
+
+All staging resources created for this verification were deleted: nodes
+`01M285S1SV...`, `01M287TS0M...`, `01M28C2ETN...`, `01M28CDCTP...` and workspaces
+`01M28C2F8D...`, `01M28CDD9E...`. Staging live node count verified back to 0. (Two
+`sleeping` workspaces from 2026-09-04 with already-deleted nodes predate this work and
+were left alone.)
 
 ## Deliberately out of scope
 
