@@ -242,6 +242,50 @@ describe('pool publication real SQL interleavings', () => {
     ).toEqual({ migration_state: 'pending' });
   });
 
+  it('does not rewrite unchanged candidates when only the refresh generation advances', async () => {
+    const { sqlite, db } = fixture();
+    await publish(db);
+    const before = sqlite
+      .prepare(
+        `
+        SELECT catalog_generation, updated_at
+        FROM capacity_pool_candidates
+        ORDER BY id
+      `
+      )
+      .all();
+
+    sqlite.exec("UPDATE capacity_sources SET source_generation=2 WHERE id='source'");
+    const refreshed = await ensureCandidatesForSource(
+      db,
+      'pool',
+      'source',
+      'hetzner',
+      [offering()],
+      {
+        sourceGeneration: 2,
+        sourceAuthorityGeneration: 1,
+      }
+    );
+
+    expect(refreshed).toMatchObject({
+      publishedCandidates: 2,
+      publicationComplete: true,
+      markedMissing: true,
+    });
+    expect(
+      sqlite
+        .prepare(
+          `
+          SELECT catalog_generation, updated_at
+          FROM capacity_pool_candidates
+          ORDER BY id
+        `
+        )
+        .all()
+    ).toEqual(before);
+  });
+
   it('does not count generation-rejected writes as published progress', async () => {
     const { sqlite, database } = fixture();
     const store = cursorStore();
