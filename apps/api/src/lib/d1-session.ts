@@ -40,6 +40,12 @@ import { log } from './logger';
 /**
  * Operator kill switch. `first-primary` is the only session anchor SAM uses; `disabled`
  * hands back the raw binding so replica routing can be turned off without a code change.
+ *
+ * Deliberately a deploy-time var rather than a KV switch like `CRON_SWEEPS_ENABLED_KV_KEY`:
+ * this gates how EVERY request talks to D1, so a KV read to decide it would sit at the very
+ * top of the path this module exists to shorten. The fast mitigation for this switch is the
+ * `wrangler rollback` that `.claude/rules/55` already documents as the second resort — it is
+ * more general and needs no per-request read.
  */
 export const D1_SESSION_MODES = ['first-primary', 'disabled'] as const;
 export type D1SessionMode = (typeof D1_SESSION_MODES)[number];
@@ -171,6 +177,11 @@ export interface D1SessionBindings {
  * properties (verified against workerd — D1, KV and Durable Object namespaces all survive
  * `{...env}` with identical `Object.keys`), and nothing in `apps/api/src` iterates
  * Worker-env keys. The clone is what keeps the session per request instead of per isolate.
+ *
+ * Cost, since this runs on every request (`.claude/rules/60`): one spread of the ~300 own
+ * keys production `env` carries (~288 `[vars]` plus ~20 bindings), copying references only.
+ * Against a route measured at 44 ms CPU / 2618 ms wall, that is not a meaningful addition —
+ * but it IS per request, so do not grow this function into anything that allocates per key.
  */
 export function withRequestScopedD1Bindings<T extends D1SessionBindings & D1SessionModeEnv>(
   env: T

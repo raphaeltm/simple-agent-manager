@@ -385,7 +385,7 @@ describe('requireActiveProjectMembership against a real SQL engine', () => {
     });
   });
 
-  it('enforces role capabilities on rows read back through the batch', async () => {
+  it('enforces role capabilities on rows the predicates actually returned', async () => {
     const { db } = seed();
     await expect(
       requireProjectCapability(db, PROJECT_A, 'viewer-a', 'project:read')

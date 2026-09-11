@@ -398,8 +398,12 @@ interface PlatformConfigCacheEntry {
   /**
    * The binding this entry was resolved from. A cached value is only ever served back to the
    * same `D1Database` object, so a config resolved from one datastore can never be handed to a
-   * caller holding a different one (production isolates have exactly one binding; test suites
-   * build a fresh in-memory D1 per case).
+   * caller holding a different one (test suites build a fresh in-memory D1 per case).
+   *
+   * This is the STABLE per-isolate binding, not whatever `env.DATABASE` happens to be: on the
+   * Worker `fetch` path every request carries its own D1 session facade (`lib/d1-session.ts`),
+   * so `resolvePlatformConfig` stores and compares `resolveD1BindingIdentity(env.DATABASE)`.
+   * Keying on the facade would miss this cache on every request and pay the 14-query read.
    */
   database: D1Database;
   config: ResolvedPlatformConfig;

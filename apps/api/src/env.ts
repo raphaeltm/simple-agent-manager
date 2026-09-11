@@ -6,7 +6,12 @@ import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
 export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
-  // D1 Database
+  // D1 Database.
+  // On the Worker `fetch` path this is NOT the raw binding: `index.ts`'s default export hands
+  // each request a D1 Sessions API facade (see lib/d1-session.ts), so every query in one
+  // request shares a session and only the first crosses to the primary region. `scheduled()`
+  // and Durable Objects receive the raw binding. Anything keyed on binding IDENTITY must go
+  // through `resolveD1BindingIdentity`.
   DATABASE: D1Database;
   // KV for sessions
   KV: KVNamespace;
@@ -49,6 +54,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)
+  // Also session-scoped on the `fetch` path — see the note on DATABASE above.
   OBSERVABILITY_DATABASE: D1Database;
   // Durable Objects
   PROJECT_DATA: DurableObjectNamespace;
