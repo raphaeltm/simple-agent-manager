@@ -182,7 +182,7 @@ export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
     }
 
     // Read the approval setting at most once per request, for the same reason `requireAuth`
-    // resolves the session at most once: this middleware is registered twice on every
+    // resolves the session at most once: this middleware is entered four times on every
     // project sub-route. The memo is on the request context, so it expires with the request
     // and cannot keep a de-approved account alive past the next one. The gate itself is
     // still evaluated on every pass.

@@ -4,11 +4,14 @@
  * `projectsRoutes` registers `use('/*', requireAuth(), requireApproved())`, which Hono
  * compiles to a middleware at `/api/projects/*`. That pattern ALSO matches the separately
  * mounted `/api/projects/:projectId/{tasks,sessions,library,…}` routers, and those register
- * auth again — so the whole auth stack ran twice on every project sub-route request. Each
+ * auth again — so the whole auth stack ran repeatedly on every project sub-route request.
+ * Measured against the real routers it is entered FOUR times, not the two a reading of the
+ * mounting suggests, because routers composed inside `projectsRoutes` register auth of their
+ * own as well. Each
  * pass costs a `getSession` (2 sequential D1 queries) plus a signup-approval read, and
  * SAM's D1 primary is ~140 ms away from the Worker.
  *
- * The first test pins the PREMISE (both layers really are entered — this is not something
+ * The first test pins the PREMISE (the layers really are entered — this is not something
  * to take from Hono's docs), the rest pin the FIX.
  *
  * The fix is memoisation inside the middleware rather than deleting the duplicate
@@ -17,16 +20,50 @@
  * (`.claude/rules/34`). `tests/workers/d1-request-session.test.ts` carries the matching
  * real-trigger control pair through the actual app.
  */
-import { readFileSync } from 'node:fs';
-
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const probe = vi.hoisted(() => ({
   getSessionCalls: 0,
   approvalReads: 0,
+  /* How many times each middleware was ENTERED — memoisation lives inside, so these keep
+   * counting registrations while `getSessionCalls` counts actual D1 work. */
+  authLayerEntries: 0,
+  approvedLayerEntries: 0,
   session: null as unknown,
 }));
+
+/*
+ * Wrap the two middleware factories so entry is observable without changing behaviour. The
+ * real `requireAuth()`/`requireApproved()` closures are what actually run; this only counts
+ * how many times production routing enters them.
+ */
+vi.mock('../../../src/middleware/auth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/middleware/auth')>();
+  return {
+    ...actual,
+    requireAuth: () => {
+      const middleware = actual.requireAuth();
+      return async (
+        c: Parameters<typeof middleware>[0],
+        next: Parameters<typeof middleware>[1]
+      ) => {
+        probe.authLayerEntries += 1;
+        return middleware(c, next);
+      };
+    },
+    requireApproved: () => {
+      const middleware = actual.requireApproved();
+      return async (
+        c: Parameters<typeof middleware>[0],
+        next: Parameters<typeof middleware>[1]
+      ) => {
+        probe.approvedLayerEntries += 1;
+        return middleware(c, next);
+      };
+    },
+  };
+});
 
 vi.mock('../../../src/auth', () => ({
   createAuth: async () => ({
@@ -108,44 +145,84 @@ function buildApp(layerLog: string[]): Hono<{ Bindings: Env }> {
 const env = { BASE_DOMAIN: 'example.test' } as unknown as Env;
 
 /**
- * `buildApp` above MIRRORS the production mounting rather than importing those routers
- * (importing them pulls in most of the app, and `vi.mock` cannot reach `SELF`'s module graph
- * under `vitest-pool-workers`, so the count cannot be taken through the real worker).
+ * `buildApp` above MIRRORS the production mounting so the layer trace is observable. A mirror
+ * is only worth anything while it stays faithful, so this block drops the mirror entirely and
+ * drives the REAL routers — `projectsRoutes`, `tasksRoutes` and `chatRoutes` — mounted exactly
+ * as `src/index.ts` mounts them.
  *
- * A mirror is only worth anything while it stays faithful. This pins the three registration
- * shapes it assumes, so a PR that changes how any of those routers registers auth fails HERE
- * instead of leaving this suite asserting "exactly once" about a fictional app. Structural
- * verification of route configuration, which is the narrow case `.claude/rules/02` permits for
- * a source-contract assertion — the behavioural proof is the `SELF.fetch` control pair in
- * `tests/workers/d1-request-session.test.ts`.
+ * An earlier cut of this asserted the registration shapes by reading the router sources and
+ * matching substrings. That is the source-contract pattern `.claude/rules/02` bans (CI's
+ * `quality:source-contract-tests` rejects it), and it was worse than this on the merits: it
+ * pinned the SPELLING of three lines, so reformatting would have failed it while a genuine
+ * routing change made through a different expression would have sailed past. Importing the
+ * real routers turned out to be cheap — the assumption that it "pulls in most of the app" was
+ * never measured, and is wrong.
  */
-describe('the mirrored mounting still matches the real routers', () => {
-  const read = (relative: string) =>
-    readFileSync(new URL(`../../../src/routes/${relative}`, import.meta.url), 'utf8');
+describe('the REAL production routers, mounted as index.ts mounts them', () => {
+  /** `src/index.ts:816-819`, the three mounts that produce the overlap. */
+  async function buildRealApp(): Promise<Hono<{ Bindings: Env }>> {
+    const [{ projectsRoutes }, { tasksRoutes }, { chatRoutes }] = await Promise.all([
+      import('../../../src/routes/projects/index'),
+      import('../../../src/routes/tasks'),
+      import('../../../src/routes/chat'),
+    ]);
 
-  it('projectsRoutes registers auth as a wildcard middleware', () => {
-    expect(read('projects/index.ts')).toContain(
-      "projectsRoutes.use('/*', requireAuth(), requireApproved())"
-    );
+    const app = new Hono<{ Bindings: Env }>();
+    app.onError(handleAppError);
+    app.route('/api/projects', projectsRoutes);
+    app.route('/api/projects/:projectId/tasks', tasksRoutes);
+    app.route('/api/projects/:projectId/sessions', chatRoutes);
+    return app;
+  }
+
+  beforeEach(() => {
+    probe.getSessionCalls = 0;
+    probe.approvalReads = 0;
+    probe.authLayerEntries = 0;
+    probe.approvedLayerEntries = 0;
+    probe.session = ACTIVE_SESSION;
   });
 
-  it('tasks/crud.ts registers auth per handler on the list route', () => {
-    expect(read('tasks/crud.ts')).toContain(
-      "crudRoutes.get('/', requireAuth(), requireApproved(), async (c) =>"
-    );
+  it('PREMISE: a project sub-route enters the auth stack FOUR times', async () => {
+    const app = await buildRealApp();
+    await app.request('http://api.example.test/api/projects/p1/tasks', {}, env);
+
+    // This is the defect, observed through production routing rather than asserted from
+    // Hono's docs or from a mirror. If it ever reads 1, the duplication has gone away by
+    // some other means and the memoisation below has stopped being load-bearing.
+    // FOUR, not two. The hand-written mirror above models two layers, which is what a
+    // reading of the mounting suggests; production actually enters the stack four times
+    // because routers composed INSIDE projectsRoutes register auth of their own on top of
+    // its `use('/*')` and the sub-router's. This number is the reason the mirror could not
+    // be trusted to stand in for the real thing.
+    expect(probe.authLayerEntries).toBe(4);
+    expect(probe.approvedLayerEntries).toBe(4);
   });
 
-  it('chat.ts registers auth as its own wildcard middleware', () => {
-    expect(read('chat.ts')).toContain("chatRoutes.use('/*', requireAuth(), requireApproved())");
+  it('THE FIX: those two layers resolve the session exactly once', async () => {
+    const app = await buildRealApp();
+    await app.request('http://api.example.test/api/projects/p1/tasks', {}, env);
+
+    expect(probe.getSessionCalls).toBe(1);
+    expect(probe.approvalReads).toBe(1);
   });
 
-  it('index.ts mounts the sub-routers UNDER the projectsRoutes wildcard path', () => {
-    // This is what makes `/api/projects/*` also match `/api/projects/:projectId/tasks`, which
-    // is the whole reason the auth stack ran twice.
-    const index = readFileSync(new URL('../../../src/index.ts', import.meta.url), 'utf8');
-    expect(index).toContain("app.route('/api/projects', projectsRoutes)");
-    expect(index).toContain("app.route('/api/projects/:projectId/tasks', tasksRoutes)");
-    expect(index).toContain("app.route('/api/projects/:projectId/sessions', chatRoutes)");
+  it('and the same holds for the chat sub-router, which registers auth as a wildcard', async () => {
+    const app = await buildRealApp();
+    await app.request('http://api.example.test/api/projects/p1/sessions/s1', {}, env);
+
+    expect(probe.authLayerEntries).toBe(4);
+    expect(probe.getSessionCalls).toBe(1);
+  });
+
+  it('CONTROL: a bare /api/projects route enters ONE layer and still resolves once', async () => {
+    // Without this, "exactly once" would also pass on an app whose sub-router mounting was
+    // broken outright — the count would be 1 because only one layer ever ran.
+    const app = await buildRealApp();
+    await app.request('http://api.example.test/api/projects', {}, env);
+
+    expect(probe.authLayerEntries).toBe(1);
+    expect(probe.getSessionCalls).toBe(1);
   });
 });
 
@@ -161,7 +238,7 @@ describe('auth middleware runs once per request', () => {
     app = buildApp(layerLog);
   });
 
-  it('PREMISE: the production mounting enters BOTH auth layers on a project sub-route', async () => {
+  it('PREMISE: the mirrored mounting enters both of ITS auth layers', async () => {
     const res = await app.request('http://api.example.test/api/projects/p1/tasks', {}, env);
 
     expect(res.status).toBe(200);

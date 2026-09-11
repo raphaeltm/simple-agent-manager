@@ -14,7 +14,8 @@ Two independent causes:
 1. **D1 lives in Dallas; Workers and Durable Objects run in Europe.** Every D1 round
    trip from the Worker costs ~140 ms, and the hot routes issue 3–19 *sequential*
    round trips.
-2. **The auth stack runs twice on every project sub-route.** `projectsRoutes` registers
+2. **The auth stack runs four times on every project sub-route** (measured against the real
+   routers; a reading of the mounting suggests two). `projectsRoutes` registers
    `use('/*', requireAuth(), requireApproved())` at `/api/projects/*`, which also matches
    the separately mounted `/api/projects/:projectId/{tasks,sessions,…}` routers — and
    those register auth again.
