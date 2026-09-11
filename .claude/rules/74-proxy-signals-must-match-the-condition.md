@@ -31,10 +31,11 @@ gates were refusing hosts that had room, and both were proxy mismatches:
 
 2. **Admission vetoed on instantaneous CPU at 50%.** The condition is "committed
    capacity is exhausted"; the proxy was "the box is busy right now". Committed
-   capacity was *already* accounted for by the declared-reservation budget, so the
+   capacity was _already_ accounted for by the declared-reservation budget, so the
    live check double-counted a co-tenant's own reserved burst. Worse, CPU is high
    precisely when a node is doing the work you want to pack onto: on a 2-vCPU host
-   one busy core is 50%, so only idle nodes were ever admissible.
+   one busy core is 50%, so hosts at or above the threshold were rejected even when
+   declared capacity remained.
 
 Neither gate is wrong in isolation and both had passing tests. The system property
 — "an existing node with capacity gets reused" — was asserted nowhere, and the
@@ -55,7 +56,7 @@ Tells:
 - The proxy is rotated by a process that has nothing to do with the condition
   (a deploy, a heartbeat, an unrelated config edit).
 - Two independent accounting systems for one resource, where the newer, more
-  precise one does not displace the older one — it is merely *also* consulted, and
+  precise one does not displace the older one — it is merely _also_ consulted, and
   whichever is stricter silently wins.
 - A comment justifying the proxy on the grounds that it is "always at least as
   safe". Over-refusing is not safe; it has a cost, and here the cost was paid in

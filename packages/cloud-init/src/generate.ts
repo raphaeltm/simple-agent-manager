@@ -522,6 +522,10 @@ export interface GenerateCloudInitOptions {
   validateSize?: boolean;
 }
 
+function defaultWhenBlank(value: string | undefined, fallback: string): string {
+  return value === undefined || value === '' ? fallback : value;
+}
+
 /**
  * Generate cloud-init configuration from template with variables.
  */
@@ -569,8 +573,11 @@ export function generateCloudInit(
     // control plane declared the node dead. CFS weights are proportional and
     // only apply under contention, so this costs nothing on an idle box: the
     // agent's demand is tiny, it simply stops queueing behind builds.
-    '{{ sam_infra_slice_cpu_weight }}': variables.samInfraSliceCpuWeight ?? '1000',
-    '{{ sam_workload_slice_cpu_weight }}': variables.samWorkloadSliceCpuWeight ?? '100',
+    '{{ sam_infra_slice_cpu_weight }}': defaultWhenBlank(variables.samInfraSliceCpuWeight, '1000'),
+    '{{ sam_workload_slice_cpu_weight }}': defaultWhenBlank(
+      variables.samWorkloadSliceCpuWeight,
+      '100'
+    ),
     '{{ docker_memory_min_mb }}': variables.dockerMemoryMinMb ?? '512',
     '{{ heartbeat_docker_stats_timeout }}': variables.heartbeatDockerStatsTimeout ?? '2s',
     '{{ heartbeat_workspace_metrics_max_containers }}':
