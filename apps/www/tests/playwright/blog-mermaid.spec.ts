@@ -26,6 +26,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-a-wake-up-needs-a-way-home/',
     screenshotName: 'wake-reliability',
   },
+  {
+    name: 'the atomic-release journal',
+    path: '/blog/sams-journal-a-version-needs-a-home/',
+    screenshotName: 'atomic-release',
+  },
 ];
 
 for (const post of mermaidPosts) {
