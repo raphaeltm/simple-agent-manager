@@ -1,0 +1,32 @@
+name: CodeRabbit Bot PR Review
+
+on:
+  pull_request_target:
+    types:
+      - labeled
+      - ready_for_review
+      - reopened
+
+permissions: {}
+
+concurrency:
+  group: coderabbit-bot-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  request-review:
+    name: Request CodeRabbit review
+    if: >-
+      github.event.pull_request.user.login == 'simple-agent-manager[bot]' &&
+      github.event.pull_request.draft == false &&
+      contains(github.event.pull_request.labels.*.name, 'coderabbit-review') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'coderabbit-review')
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Ask CodeRabbit to review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr comment "$PR_URL" --body '@coderabbitai review'
