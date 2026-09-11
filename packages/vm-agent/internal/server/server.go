@@ -139,6 +139,13 @@ type cachedWorktreeList struct {
 	expiresAt time.Time
 }
 
+func configuredWorkspaceBuildQueueDepth(cfg *config.Config) int {
+	if cfg == nil || cfg.WorkspaceBuildQueueDepth < 1 {
+		return config.DefaultWorkspaceBuildQueueDepth
+	}
+	return cfg.WorkspaceBuildQueueDepth
+}
+
 func (s *Server) controlPlaneHTTPClient(timeout time.Duration) *http.Client {
 	if timeout <= 0 && s.config != nil {
 		timeout = s.config.HTTPCallbackTimeout
@@ -531,7 +538,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ptyManager:          ptyManager,
 		sysInfoCollector:    sysInfoCollector,
 		workspaces:          make(map[string]*WorkspaceRuntime),
-		buildQueue:          make(chan struct{}, 1),
+		buildQueue:          make(chan struct{}, configuredWorkspaceBuildQueueDepth(cfg)),
 		nodeEvents:          make([]EventRecord, 0, 512),
 		workspaceEvents:     make(map[string][]EventRecord),
 		eventStore:          evStore,

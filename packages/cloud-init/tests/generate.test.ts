@@ -1780,6 +1780,13 @@ describe('validateCloudInitVariables', () => {
         )
       ).not.toThrow();
     });
+
+    it('renders configured workspace build queue depth into the VM Agent service', () => {
+      const unitFile = getWriteFile('/etc/systemd/system/vm-agent.service', {
+        workspaceBuildQueueDepth: '2',
+      });
+      expect(unitFile.content).toContain('Environment=WORKSPACE_BUILD_QUEUE_DEPTH=2');
+    });
   });
 
   describe('rejects shell metacharacters', () => {
@@ -2600,6 +2607,30 @@ describe('validateCloudInitVariables — devcontainer cache flag', () => {
       )
     ).toThrow('devcontainerCacheEnabled');
   });
+
+  it('rejects invalid workspace build queue depth', () => {
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          workspaceBuildQueueDepth: '0',
+        })
+      )
+    ).toThrow('workspaceBuildQueueDepth');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          workspaceBuildQueueDepth: '17',
+        })
+      )
+    ).toThrow('workspaceBuildQueueDepth');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          workspaceBuildQueueDepth: '2; systemctl stop vm-agent',
+        })
+      )
+    ).toThrow('workspaceBuildQueueDepth');
+  });
 });
 
 describe('regex injection prevention ($-pattern in replacement values)', () => {
@@ -3173,6 +3204,7 @@ describe('cloud-init supports the digitalocean provider', () => {
 describe('VM error reporter environment', () => {
   it('renders safe defaults and deploy-time overrides into the VM Agent service', () => {
     const defaults = generateCloudInit(baseVariables(), { validateSize: false });
+    expect(defaults).toContain('Environment=WORKSPACE_BUILD_QUEUE_DEPTH=1');
     expect(defaults).toContain('Environment=ERROR_REPORT_FLUSH_INTERVAL=30s');
     expect(defaults).toContain('Environment=ERROR_REPORT_MAX_BATCH_BYTES=32768');
     expect(defaults).toContain(
