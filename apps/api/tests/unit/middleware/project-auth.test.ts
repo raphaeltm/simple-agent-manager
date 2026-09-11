@@ -5,10 +5,13 @@
  * mismatched rows directly so a weakened query or bad stub cannot bypass the
  * explicit defense-in-depth checks.
  */
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { AppDb } from '../../../src/middleware/project-auth';
+import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import {
   createOwnerProjectMembership,
   requireOwnedProject,
@@ -17,18 +20,35 @@ import {
   requireProjectCapability,
 } from '../../../src/middleware/project-auth';
 
+/**
+ * Row-injecting stub. Its ONLY job is the defence-in-depth cases: handing the guards a row
+ * that a correct WHERE clause would never return, so the explicit post-query assertions are
+ * proven to reject it. It deliberately ignores predicates, so it can NOT prove the SQL
+ * filters — see the real-SQL-engine block at the bottom of this file for that
+ * (`.claude/rules/28`).
+ *
+ * Each `select()` returns its own chain so a `db.batch([a, b])` keeps per-query table
+ * identity; `limit()` yields a thenable that also carries its rows for the batch path.
+ */
 function makeDb(dataByTable: Map<unknown, unknown[]>): AppDb {
-  let currentTable: unknown = null;
-  const chain = {
-    from: (table: unknown) => {
-      currentTable = table;
-      return chain;
-    },
-    where: () => chain,
-    limit: () => Promise.resolve(dataByTable.get(currentTable) ?? []),
+  const makeChain = () => {
+    let currentTable: unknown = null;
+    const rows = () => dataByTable.get(currentTable) ?? [];
+    const chain = {
+      from: (table: unknown) => {
+        currentTable = table;
+        return chain;
+      },
+      where: () => chain,
+      limit: () => Object.assign(Promise.resolve(rows()), { __rows: rows }),
+    };
+    return chain;
   };
+
   return {
-    select: () => chain,
+    select: () => makeChain(),
+    batch: async (queries: Array<{ __rows?: () => unknown[] }>) =>
+      queries.map((query) => (typeof query.__rows === 'function' ? query.__rows() : [])),
   } as unknown as AppDb;
 }
 
@@ -292,5 +312,94 @@ describe('requireOwnedWorkspace', () => {
     await expect(requireOwnedWorkspace(db, 'w1', 'u1')).rejects.toMatchObject({
       statusCode: 404,
     });
+  });
+});
+
+/**
+ * The guards above are SQL predicates, so `.claude/rules/28` requires them to be exercised
+ * against a real SQL engine with an owner-path control beside every refusal — a stub whose
+ * `.where()` ignores its arguments passes identically with the predicate deleted.
+ *
+ * This block also covers the `db.batch()` round-trip introduced to collapse the project and
+ * membership lookups into one D1 call: a batch adapter that dropped SELECT rows would make
+ * every case here fail as `notFound`, so the owner controls are what keep that honest.
+ */
+describe('requireActiveProjectMembership against a real SQL engine', () => {
+  const NOW = '2026-09-11T00:00:00.000Z';
+  const PROJECT_A = 'proj-a';
+  const PROJECT_B = 'proj-b';
+
+  function seed(): { db: AppDb; sqlite: Database.Database } {
+    const sqlite = new Database(':memory:');
+    createSchemaTables(sqlite, [schema.projects, schema.projectMembers]);
+    sqlite
+      .prepare('INSERT INTO projects (id, user_id, name) VALUES (?, ?, ?), (?, ?, ?)')
+      .run(PROJECT_A, 'owner-a', 'Project A', PROJECT_B, 'owner-b', 'Project B');
+    const insertMember = sqlite.prepare(
+      `INSERT INTO project_members (project_id, user_id, role, status, invited_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`
+    );
+    insertMember.run(PROJECT_A, 'owner-a', 'owner', 'active', NOW, NOW);
+    insertMember.run(PROJECT_A, 'viewer-a', 'viewer', 'active', NOW, NOW);
+    insertMember.run(PROJECT_A, 'suspended-a', 'maintainer', 'suspended', NOW, NOW);
+    insertMember.run(PROJECT_B, 'owner-b', 'owner', 'active', NOW, NOW);
+    return { db: drizzle(createSqliteD1(sqlite), { schema }) as unknown as AppDb, sqlite };
+  }
+
+  it('returns the project for an active member (owner-path control)', async () => {
+    const { db } = seed();
+    await expect(requireProjectAccess(db, PROJECT_A, 'viewer-a')).resolves.toMatchObject({
+      id: PROJECT_A,
+      userId: 'owner-a',
+    });
+  });
+
+  it('refuses a member of a DIFFERENT project addressed at this project', async () => {
+    const { db } = seed();
+    await expect(requireProjectAccess(db, PROJECT_A, 'owner-b')).rejects.toMatchObject({
+      statusCode: 404,
+      error: 'NOT_FOUND',
+    });
+    // Owner control beside the refusal: the same fixture still admits project B's owner.
+    await expect(requireProjectAccess(db, PROJECT_B, 'owner-b')).resolves.toMatchObject({
+      id: PROJECT_B,
+    });
+  });
+
+  it('refuses a suspended membership and does NOT fall through to the project row', async () => {
+    const { db } = seed();
+    await expect(requireProjectAccess(db, PROJECT_A, 'suspended-a')).rejects.toMatchObject({
+      statusCode: 404,
+    });
+    await expect(requireProjectAccess(db, PROJECT_A, 'owner-a')).resolves.toMatchObject({
+      id: PROJECT_A,
+    });
+  });
+
+  it('refuses a user with no membership row at all', async () => {
+    const { db } = seed();
+    await expect(requireProjectAccess(db, PROJECT_A, 'stranger')).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
+
+  it('refuses when the project id does not exist, even for a real user', async () => {
+    const { db } = seed();
+    await expect(requireProjectAccess(db, 'proj-missing', 'owner-a')).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
+
+  it('enforces role capabilities on rows read back through the batch', async () => {
+    const { db } = seed();
+    await expect(
+      requireProjectCapability(db, PROJECT_A, 'viewer-a', 'project:read')
+    ).resolves.toMatchObject({ id: PROJECT_A });
+    await expect(
+      requireProjectCapability(db, PROJECT_A, 'viewer-a', 'task:write')
+    ).rejects.toMatchObject({ statusCode: 403, error: 'FORBIDDEN' });
+    await expect(
+      requireProjectCapability(db, PROJECT_A, 'owner-a', 'task:write')
+    ).resolves.toMatchObject({ id: PROJECT_A });
   });
 });

@@ -117,29 +117,37 @@ export function projectMemberRolesWithCapability(
   return PROJECT_MEMBER_ROLES.filter((role) => ROLE_CAPABILITIES[role].has(capability));
 }
 
+/**
+ * Runs on every project-scoped request. The project lookup and the membership lookup have
+ * no data dependency on each other, so they go out as one `db.batch()` — a single D1 round
+ * trip instead of two. SAM's D1 primary is in North America while the Worker runs in
+ * Europe, so a saved round trip is ~140 ms off every project-scoped request.
+ *
+ * Both guards are unchanged and still evaluated on the rows that come back: a missing or
+ * mismatched project, and a missing / non-active / wrong-tenant membership, both still
+ * surface as `notFound('Project')`.
+ */
 async function requireActiveProjectMembership(
   db: AppDb,
   projectId: string,
   userId: string
 ): Promise<{ project: schema.Project; membership: schema.ProjectMember }> {
-  const projectRows = await db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.id, projectId))
-    .limit(1);
-  const project = assertProject(projectRows[0], projectId, 'Project');
-
-  const memberRows = await db
-    .select()
-    .from(schema.projectMembers)
-    .where(
-      and(
-        eq(schema.projectMembers.projectId, projectId),
-        eq(schema.projectMembers.userId, userId),
-        eq(schema.projectMembers.status, 'active')
+  const [projectRows, memberRows] = await db.batch([
+    db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1),
+    db
+      .select()
+      .from(schema.projectMembers)
+      .where(
+        and(
+          eq(schema.projectMembers.projectId, projectId),
+          eq(schema.projectMembers.userId, userId),
+          eq(schema.projectMembers.status, 'active')
+        )
       )
-    )
-    .limit(1);
+      .limit(1),
+  ]);
+
+  const project = assertProject(projectRows[0], projectId, 'Project');
   const membership = assertActiveMembership(memberRows[0], projectId, userId);
 
   return { project, membership };

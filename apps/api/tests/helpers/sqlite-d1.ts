@@ -66,7 +66,20 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
 
   const bound = (sql: string, params: unknown[]): ExecutableStatement & Record<string, unknown> => {
     const runSync = () => {
-      const info = sqlite.prepare(sql).run(...normalize(params));
+      const statement = sqlite.prepare(sql);
+      // D1's `batch()` returns a populated `results` array for row-returning statements, and
+      // drizzle's D1 driver reads `result.results` straight back out of each batch entry. A
+      // batch adapter that always reported `results: []` would silently turn every batched
+      // SELECT into "no rows" — which is exactly the kind of infidelity `.claude/rules/28`
+      // bans, since an ownership guard fed an empty result set rejects for the wrong reason.
+      if (statement.reader) {
+        return {
+          success: true,
+          results: statement.all(...normalize(params)),
+          meta: { changes: 0, last_row_id: 0 },
+        };
+      }
+      const info = statement.run(...normalize(params));
       return {
         success: true,
         results: [],
@@ -100,7 +113,7 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
     ...bound(sql, []),
   });
 
-  return {
+  const database = {
     prepare: statement,
     batch: async (statements: ExecutableStatement[]) =>
       sqlite.transaction((items: ExecutableStatement[]) => items.map((item) => item.runSync()))(
@@ -111,7 +124,24 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
       return { count: 0, duration: 0 };
     },
     dump: async () => new ArrayBuffer(0),
-  } as unknown as D1Database;
+    /**
+     * Shape-fidelity shim for the Sessions API so `lib/d1-session.ts` can be exercised in
+     * node-environment tests. It is NOT a replica simulator: there is one engine, so every
+     * query is trivially "consistent". Replica routing, bookmark propagation and
+     * read-after-write across a real session must be proven on workerd
+     * (`tests/workers/`), per `.claude/rules/69`.
+     */
+    withSession: () => ({
+      prepare: statement,
+      batch: async (statements: ExecutableStatement[]) =>
+        sqlite.transaction((items: ExecutableStatement[]) => items.map((item) => item.runSync()))(
+          statements
+        ),
+      getBookmark: () => null,
+    }),
+  };
+
+  return database as unknown as D1Database;
 }
 
 /** D1 adapter wrapper that fails when one statement exceeds Cloudflare's bind parameter limit. */

@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAuth } from '../../../src/auth';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { withRequestScopedD1Bindings } from '../../../src/lib/d1-session';
 import { encrypt, generateEncryptionKey } from '../../../src/services/encryption';
 import {
   __resetPlatformConfigCacheForTest,
@@ -61,6 +62,9 @@ interface QueryCounter {
 }
 
 type AnyStatement = Record<string, unknown>;
+
+/** Minimal shape `withRequestScopedD1Bindings` needs from a test env. */
+type D1SessionEnv = { DATABASE: D1Database; OBSERVABILITY_DATABASE?: D1Database };
 
 /**
  * Wraps the shared `createSqliteD1` boundary adapter — a real SQL engine, drift-proof against
@@ -110,10 +114,21 @@ function createCountingD1(sqlite: Database.Database): { db: D1Database; counter:
     return wrapped;
   }
 
+  const prepare = (sql: string) =>
+    wrapStatement(sql, (inner.prepare as (s: string) => AnyStatement)(sql));
+
   const db = {
     ...inner,
-    prepare: (sql: string) =>
-      wrapStatement(sql, (inner.prepare as (s: string) => AnyStatement)(sql)),
+    prepare,
+    // The Sessions API must route through the SAME counter. Inheriting `createSqliteD1`'s
+    // `withSession` via the spread would hand back the inner, UNCOUNTED `prepare`, so a
+    // session-wrapped binding would silently report zero queries and every budget assertion
+    // below would pass for the wrong reason.
+    withSession: () => ({
+      prepare,
+      batch: inner.batch,
+      getBookmark: () => null,
+    }),
   } as unknown as D1Database;
 
   const counter: QueryCounter = {
@@ -520,5 +535,76 @@ describe('platform config selectors', () => {
     const second = await resolvePlatformConfig(env);
     expect(second.github.clientSecret.value).toBe('runtime-gh-secret');
     expect(counter.platformConfigReads()).toHaveLength(0);
+  });
+});
+
+/**
+ * The per-isolate cache is keyed on the D1 binding OBJECT. The Worker `fetch` entry point now
+ * hands every request a fresh request-scoped D1 session facade (`lib/d1-session.ts`), so if the
+ * key were `env.DATABASE` itself the cache would miss on EVERY request and pay the 14-query
+ * read below each time — turning a latency fix into a 14-round-trip regression on every
+ * authenticated request. `resolvePlatformConfig` therefore keys on
+ * `resolveD1BindingIdentity(env.DATABASE)`.
+ */
+describe('platform config cache survives request-scoped D1 session facades', () => {
+  it('hits the cache across two requests that each get their own session facade', async () => {
+    const { env, counter } = createEnv();
+
+    const firstRequestEnv = withRequestScopedD1Bindings(env as unknown as D1SessionEnv) as Env;
+    const secondRequestEnv = withRequestScopedD1Bindings(env as unknown as D1SessionEnv) as Env;
+    // Liveness: these really are distinct facades, not the same object handed back twice.
+    expect(firstRequestEnv.DATABASE).not.toBe(secondRequestEnv.DATABASE);
+    expect(firstRequestEnv.DATABASE).not.toBe(env.DATABASE);
+
+    const first = await resolvePlatformConfig(firstRequestEnv);
+    expect(first.github.clientId.value).toBe('env-gh-client');
+    expect(counter.platformConfigReads()).toHaveLength(QUERIES_PER_RESOLVE);
+
+    counter.reset();
+    const second = await resolvePlatformConfig(secondRequestEnv);
+
+    expect(second.github.clientId.value).toBe('env-gh-client');
+    expect(counter.platformConfigReads()).toHaveLength(0);
+  });
+
+  it('a facade and the raw binding share one cache entry', async () => {
+    const { env, counter } = createEnv();
+
+    await resolvePlatformConfig(env);
+    expect(counter.platformConfigReads()).toHaveLength(QUERIES_PER_RESOLVE);
+
+    counter.reset();
+    const scoped = withRequestScopedD1Bindings(env as unknown as D1SessionEnv) as Env;
+    await resolvePlatformConfig(scoped);
+
+    expect(counter.platformConfigReads()).toHaveLength(0);
+  });
+
+  it('still reads through the session facade on a cold miss', async () => {
+    const { env, counter } = createEnv();
+    const scoped = withRequestScopedD1Bindings(env as unknown as D1SessionEnv) as Env;
+
+    const config = await resolvePlatformConfig(scoped);
+
+    // The counting adapter only records statements issued through its own `prepare`, and the
+    // facade routes `prepare` through the session — so a non-zero count here also proves the
+    // session path reaches the same engine.
+    expect(config.github.clientId.value).toBe('env-gh-client');
+    expect(counter.platformConfigReads()).toHaveLength(QUERIES_PER_RESOLVE);
+  });
+
+  it('does not share a cache entry across two DIFFERENT databases', async () => {
+    const { env: envA } = createEnv();
+    const { env: envB, counter: counterB } = createEnv({ GITHUB_CLIENT_ID: 'other-gh-client' });
+
+    await resolvePlatformConfig(withRequestScopedD1Bindings(envA as unknown as D1SessionEnv) as Env);
+    counterB.reset();
+
+    const b = await resolvePlatformConfig(
+      withRequestScopedD1Bindings(envB as unknown as D1SessionEnv) as Env
+    );
+
+    expect(b.github.clientId.value).toBe('other-gh-client');
+    expect(counterB.platformConfigReads()).toHaveLength(QUERIES_PER_RESOLVE);
   });
 });

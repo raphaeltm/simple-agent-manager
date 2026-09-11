@@ -188,6 +188,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PAGES_PROJECT_NAME?: string;
   // Pages project name for proxying www.* requests (marketing site)
   WWW_PAGES_PROJECT_NAME?: string;
+  // D1 Sessions API anchor for the Worker fetch handler: 'first-primary' (default) or
+  // 'disabled' to route every query straight at the primary. See lib/d1-session.ts.
+  D1_SESSION_MODE?: string;
   // User approval / invite-only mode
   REQUIRE_APPROVAL?: string;
   // Smoke test auth tokens (CI authentication — only set in staging/test environments)

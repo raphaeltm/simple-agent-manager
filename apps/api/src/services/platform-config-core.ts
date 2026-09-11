@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { encrypt } from './encryption';
@@ -486,7 +487,14 @@ export async function resolvePlatformConfig(
   // database-less env share one entry. Such an env also resolves purely from `env` values
   // (`readSetting` / `resolveSecret` short-circuit when there is no `prepare`), so there is
   // nothing to save by caching it.
-  const database = isCacheableBinding(env.DATABASE) ? env.DATABASE : null;
+  //
+  // The key MUST be the stable per-isolate binding, not `env.DATABASE` itself: the Worker
+  // `fetch` entry point hands every request a fresh request-scoped D1 session facade
+  // (`lib/d1-session.ts`), and keying on the facade would miss this cache on EVERY request
+  // and pay the 14-round-trip read below each time. `resolveD1BindingIdentity` unwraps the
+  // facade; it returns a raw binding unchanged. Reads still go through `env.DATABASE`, so a
+  // cache miss is served by the caller's session.
+  const database = isCacheableBinding(env.DATABASE) ? resolveD1BindingIdentity(env.DATABASE) : null;
 
   const cached = platformConfigCache;
   if (database && cached && cached.database === database && now < cached.expiresAt) {
