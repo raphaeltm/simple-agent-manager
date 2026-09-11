@@ -129,6 +129,33 @@ function buildAgentReleaseRepo(directory: string): AgentReleaseRepo {
   };
 }
 
+/**
+ * A repo whose history contains the resolver but no VM-agent build inputs, so the
+ * release cannot resolve. Shared by the script-level and step-level fail-closed
+ * tests, which otherwise duplicate the whole fixture.
+ */
+function withRepoLackingAgentHistory<T>(body: (directory: string, head: string) => T): T {
+  const directory = mkdtempSync(join(tmpdir(), 'sam-agent-release-empty-'));
+  try {
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
+    git('-c', 'init.defaultBranch=main', 'init', '-q');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'SAM Test');
+    mkdirSync(join(directory, 'scripts', 'deploy'), { recursive: true });
+    writeFileSync(
+      join(directory, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+      readFileSync(resolveVmAgentReleasePath, 'utf8')
+    );
+    git('add', '.');
+    git('commit', '-m', 'no agent build inputs');
+
+    return body(directory, git('rev-parse', 'HEAD'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function runReleaseResolver(
   directory: string,
   deploySha: string
@@ -534,50 +561,20 @@ describe('deploy reusable workflow', () => {
       });
     });
 
-    it('fails closed when no commit in history touched the agent', () => {
-      const directory = mkdtempSync(join(tmpdir(), 'sam-agent-release-empty-'));
-      try {
-        const git = (...args: string[]): string =>
-          execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
-        git('init');
-        git('config', 'user.email', 'test@example.com');
-        git('config', 'user.name', 'SAM Test');
-        mkdirSync(join(directory, 'scripts', 'deploy'), { recursive: true });
-        writeFileSync(
-          join(directory, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
-          readFileSync(resolveVmAgentReleasePath, 'utf8')
-        );
-        git('add', '.');
-        git('commit', '-m', 'no agent');
-
-        const result = runReleaseResolver(directory, git('rev-parse', 'HEAD'));
+    it('fails closed when no commit in history changed the agent build inputs', () => {
+      withRepoLackingAgentHistory((directory, head) => {
+        const result = runReleaseResolver(directory, head);
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain('no commit changing');
-      } finally {
-        rmSync(directory, { recursive: true, force: true });
-      }
+      });
     });
 
     it('aborts the deploy step when the release cannot be resolved', () => {
       // The resolver is invoked from the step, so the step — not just the script
       // — must fail. A step that swallowed the error would fall through with an
       // empty agent_version and silently disable rollout gating.
-      const directory = mkdtempSync(join(tmpdir(), 'sam-agent-release-step-fail-'));
       const script = stepRunScript('Resolve and Verify Deployment SHA');
-      try {
-        const git = (...args: string[]): string =>
-          execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
-        git('init');
-        git('config', 'user.email', 'test@example.com');
-        git('config', 'user.name', 'SAM Test');
-        mkdirSync(join(directory, 'scripts', 'deploy'), { recursive: true });
-        writeFileSync(
-          join(directory, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
-          readFileSync(resolveVmAgentReleasePath, 'utf8')
-        );
-        git('add', '.');
-        git('commit', '-m', 'no agent in history');
-        const head = git('rev-parse', 'HEAD');
+      withRepoLackingAgentHistory((directory, head) => {
         const outputPath = join(directory, 'output.txt');
 
         const result = spawnSync('bash', ['-c', script], {
@@ -601,9 +598,7 @@ describe('deploy reusable workflow', () => {
         expect(`${result.stdout}${result.stderr}`).toContain(
           'Could not resolve the VM-agent release'
         );
-      } finally {
-        rmSync(directory, { recursive: true, force: true });
-      }
+      });
     });
 
     it('resolves the release through the real deploy step, and still blanks it for skip_agent', () => {
