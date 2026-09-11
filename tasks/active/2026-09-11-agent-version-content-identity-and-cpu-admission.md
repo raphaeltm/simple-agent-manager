@@ -288,7 +288,12 @@ toolchain is present; cross-compiles disable it), but cgo cannot explain this fa
 both deploys ran on the same runner image — and disabling it switches the agent to the
 pure-Go DNS resolver, an unverified behavioural change. Tracked rather than bundled.
 
-Deploy #3 verifies the fix end to end. Results recorded below.
+Deploy #3 — run `34598476664`, succeeded. Deployed `VM_AGENT_REQUIRED_VERSION` moved to
+`e5b3dc2c00118634f2b2891ad5678c0bb0a490b5`, correctly rotated by the Makefile change
+(a real build input). Node `01M287TS0MH56N68Z2SEQ9RGRQ` booted under it: `running`,
+`healthy`, heartbeat 12:44:46Z, reporting `agent_version=e5b3dc2c0011...`.
+
+Deploy #4 — the retry of the check that failed as #2. Results recorded below.
 
 ## Deliberately out of scope
 
