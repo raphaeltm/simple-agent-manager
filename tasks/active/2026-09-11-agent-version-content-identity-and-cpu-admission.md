@@ -239,6 +239,26 @@ recorded as such.
   closer to `maxCoTenants`. Density for unauthenticated tenants is a spend/product
   decision, and the right knob is `maxCoTenants`/`exclusiveNode`, not a CPU threshold.
 
+## Staging verification
+
+Deploy #1 — run `34595315390`, branch head `0cebaacef`, succeeded 12:05:06Z.
+
+| Check | Result |
+| --- | --- |
+| Deployed `VM_AGENT_REQUIRED_VERSION` on `sam-api-staging` (read from the Worker's `plain_text` bindings, per `.claude/rules/70`) | `c14b292c885e55d799acbfd88fbd80a74e8bfb0e` — the release, **not** the branch head `0cebaacef` |
+| R2 artifacts at the content-keyed path | `agents/releases/c14b292c88.../vm-agent-linux-amd64` (16 142 601 B) and `-arm64` (15 007 906 B) |
+| Real VM `01M285S1SVQQS5VWEVQV7JW0B7` (hetzner/fsn1/small) | `running`, `health_status=healthy`, heartbeat 12:08:46Z |
+| That VM's reported `agent_version` | `c14b292c885e55d799acbfd88fbd80a74e8bfb0e` — matches the required version exactly |
+
+The release pinning to `c14b292c8` rather than the branch head is itself the fix
+demonstrating itself: `c14b292c8` added `-trimpath` to `packages/vm-agent/Makefile`,
+a genuine build input, while the three commits after it changed only tests and so
+correctly did not rotate it. Under the old scheme each of those would have been its
+own required version, and each would have evicted the pool.
+
+Deploy #2 — the property under test is "two consecutive deploys agree", which a single
+deploy cannot show. Results recorded below.
+
 ## Deliberately out of scope
 
 - Per-`capacity_pools` admission threshold columns (see research). Raised with the user
