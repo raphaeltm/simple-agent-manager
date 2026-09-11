@@ -35,6 +35,8 @@
  * anything on binding identity MUST resolve through {@link resolveD1BindingIdentity}.
  */
 
+import { log } from './logger';
+
 /**
  * Operator kill switch. `first-primary` is the only session anchor SAM uses; `disabled`
  * hands back the raw binding so replica routing can be turned off without a code change.
@@ -48,11 +50,48 @@ export interface D1SessionModeEnv {
   D1_SESSION_MODE?: string;
 }
 
+/**
+ * Values already warned about in this isolate. `resolveD1SessionMode` runs on every request,
+ * so an unrecognised value must not produce one log line per request.
+ */
+const warnedSessionModes = new Set<string>();
+
+/**
+ * Resolve the session anchor, falling back to {@link DEFAULT_D1_SESSION_MODE}.
+ *
+ * An unrecognised value falls back rather than throwing, unlike the deploy-time sibling
+ * `scripts/deploy/configure-d1-read-replication.sh`, which exits non-zero on a bad
+ * `D1_READ_REPLICATION_MODE`. The asymmetry is deliberate: that one runs once per deploy and
+ * failing loudly costs a deploy, while this one runs on every request, so throwing on a typo
+ * would take the whole API down. This is an availability brake, and availability brakes fail
+ * open here — the same reasoning `.claude/rules/55` records for the cron/alarm kill switches.
+ *
+ * Falling back silently would still be wrong, though: an operator who types `Disabled` or
+ * `off` would get sessions ENABLED, the opposite of their intent, with no trail. So the
+ * rejected value is logged once per isolate.
+ */
 export function resolveD1SessionMode(env: D1SessionModeEnv | undefined): D1SessionMode {
   const configured = env?.D1_SESSION_MODE?.trim();
-  return D1_SESSION_MODES.includes(configured as D1SessionMode)
-    ? (configured as D1SessionMode)
-    : DEFAULT_D1_SESSION_MODE;
+  if (!configured) {
+    return DEFAULT_D1_SESSION_MODE;
+  }
+  if (D1_SESSION_MODES.includes(configured as D1SessionMode)) {
+    return configured as D1SessionMode;
+  }
+  if (!warnedSessionModes.has(configured)) {
+    warnedSessionModes.add(configured);
+    log.warn('d1_session.unrecognized_mode', {
+      configured,
+      supported: [...D1_SESSION_MODES],
+      fallback: DEFAULT_D1_SESSION_MODE,
+    });
+  }
+  return DEFAULT_D1_SESSION_MODE;
+}
+
+/** Test seam: drop the per-isolate warn-once memo. */
+export function __resetD1SessionModeWarningsForTest(): void {
+  warnedSessionModes.clear();
 }
 
 /**

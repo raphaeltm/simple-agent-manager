@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  __resetD1SessionModeWarningsForTest,
   createRequestScopedD1,
   D1_SESSION_MODES,
   DEFAULT_D1_SESSION_MODE,
@@ -16,6 +17,7 @@ import {
   resolveD1SessionMode,
   withRequestScopedD1Bindings,
 } from '../../../src/lib/d1-session';
+import { log } from '../../../src/lib/logger';
 
 interface FakeSession {
   prepare: ReturnType<typeof vi.fn>;
@@ -58,6 +60,11 @@ function asD1(binding: unknown): D1Database {
 }
 
 describe('resolveD1SessionMode', () => {
+  beforeEach(() => {
+    __resetD1SessionModeWarningsForTest();
+    vi.restoreAllMocks();
+  });
+
   it('defaults to first-primary', () => {
     expect(DEFAULT_D1_SESSION_MODE).toBe('first-primary');
     expect(resolveD1SessionMode(undefined)).toBe('first-primary');
@@ -73,6 +80,37 @@ describe('resolveD1SessionMode', () => {
     // cross-actor staleness window. Anything unrecognised falls back to the safe default.
     expect(resolveD1SessionMode({ D1_SESSION_MODE: 'first-unconstrained' })).toBe('first-primary');
     expect(resolveD1SessionMode({ D1_SESSION_MODE: '' })).toBe('first-primary');
+  });
+
+  it('logs a rejected value once per isolate instead of discarding it silently', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+
+    // A capitalised value is the realistic operator typo: it means "disabled" and would
+    // otherwise silently leave sessions ENABLED, the opposite of the intent.
+    expect(resolveD1SessionMode({ D1_SESSION_MODE: 'Disabled' })).toBe('first-primary');
+    expect(resolveD1SessionMode({ D1_SESSION_MODE: 'Disabled' })).toBe('first-primary');
+    expect(resolveD1SessionMode({ D1_SESSION_MODE: 'off' })).toBe('first-primary');
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenNthCalledWith(1, 'd1_session.unrecognized_mode', {
+      configured: 'Disabled',
+      supported: ['first-primary', 'disabled'],
+      fallback: 'first-primary',
+    });
+    expect(warn.mock.calls[1]?.[1]).toMatchObject({ configured: 'off' });
+  });
+
+  it('does not warn for a recognised value or for an unset one', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => undefined);
+
+    expect(resolveD1SessionMode({ D1_SESSION_MODE: 'disabled' })).toBe('disabled');
+    expect(resolveD1SessionMode({})).toBe('first-primary');
+    expect(resolveD1SessionMode(undefined)).toBe('first-primary');
+
+    expect(warn).not.toHaveBeenCalled();
+    // Liveness beside the absence assertion: the spy is wired to the module the code uses.
+    expect(resolveD1SessionMode({ D1_SESSION_MODE: 'nonsense' })).toBe('first-primary');
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });
 
