@@ -131,6 +131,30 @@ SAM uses a hybrid storage model: **D1** for cross-project queries and **Durable 
 
 D1 stores platform-level data that needs to be queried across projects (e.g., "show all my ideas" on the dashboard).
 
+#### Read replication and request-scoped sessions
+
+A D1 database has one writable primary, pinned to the region it was created in, while the API
+Worker runs at whichever Cloudflare edge location the user reaches. When those are on different
+continents, each D1 round trip costs a wide-area hop, and a single API request issues several
+queries in sequence — which is where the latency of a request like `GET /api/projects/:id/tasks`
+came from, not from the database itself.
+
+Deployments therefore enable D1 **read replication** (`read_replication.mode = "auto"`, applied
+idempotently by `scripts/deploy/configure-d1-read-replication.sh`) and the Worker `fetch` handler
+runs every request against a single D1 **session** per database
+(`apps/api/src/lib/d1-session.ts`, `withRequestScopedD1Bindings`). The session is anchored
+`first-primary`: its first query goes to the primary, and every later query in that request may
+be served by any replica that has caught up to the bookmark the first query returned. A request
+therefore pays one long round trip instead of one per query, while still observing a snapshot at
+least as fresh as its own start — and writes in a session always go to the primary and are
+visible to later reads in the same session.
+
+Scheduled cron sweeps and Durable Objects deliberately keep the unsessioned binding, so
+reaper, resumer and terminal-verdict paths read exactly what they read before. `D1_SESSION_MODE`
+(`first-primary` by default, `disabled` to opt out) is the operator kill switch. Queries that do
+not open a session are always served by the primary, so enabling replication alone changes
+nothing.
+
 Before a deploy applies D1 migrations, SAM records per-table counts and a time-travel recovery timestamp. Post-migration comparison runs only for databases whose `d1_migrations` ledger advanced. Business tables use zero decrease tolerance; code-reviewed retention/expiry tables use a configurable percentage limit (50% by default), preserving catastrophic-wipe detection without treating routine telemetry churn as migration damage. Configuration may narrow that reviewed table set but cannot add arbitrary tables to it.
 
 ### Durable Objects (Per-Project Data)

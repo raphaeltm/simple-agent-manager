@@ -294,6 +294,33 @@ describe('deploy reusable workflow', () => {
     }
   });
 
+  it('configures D1 read replication from Pulumi outputs, without interpolating into run:', () => {
+    const step = stepBlock('Configure D1 Read Replication');
+
+    expect(step).toContain('bash scripts/deploy/configure-d1-read-replication.sh');
+    expect(step).toContain('CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}');
+    expect(step).toContain('CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}');
+    // Operator override travels through `env:`, never through `run:` — GitHub expands
+    // expressions before the shell parses the script (`.claude/rules/02`, workflow input
+    // trust boundaries).
+    expect(step).toContain('D1_READ_REPLICATION_MODE: ${{ vars.D1_READ_REPLICATION_MODE }}');
+
+    const script = stepRunScript('Configure D1 Read Replication');
+    expect(script).not.toMatch(/\$\{\{/);
+    expect(script).toContain('set -euo pipefail');
+    expect(script).toContain('pulumi stack output d1DatabaseId');
+    expect(script).toContain('pulumi stack output observabilityD1DatabaseId');
+  });
+
+  it('runs D1 read replication before the API Worker that opens D1 sessions', () => {
+    const replicationIndex = workflow.indexOf('- name: Configure D1 Read Replication');
+    const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+
+    expect(replicationIndex).toBeGreaterThan(-1);
+    expect(deployIndex).toBeGreaterThan(-1);
+    expect(replicationIndex).toBeLessThan(deployIndex);
+  });
+
   it('passes documented frontend limits and timing overrides into the web build', () => {
     const build = stepBlock('Build Applications');
 

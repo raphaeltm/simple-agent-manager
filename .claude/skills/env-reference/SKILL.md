@@ -16,6 +16,8 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `RESOURCE_PREFIX`                                  | No (default: `sam`)                                                |
 | Variable | `PULUMI_STATE_BUCKET`                              | No (default: `sam-pulumi-state`)                                   |
 | Variable | `CF_CONTAINER_ENABLED`                             | No (default: `true`; set `false` to force VM runtime)              |
+| Variable | `D1_READ_REPLICATION_MODE`                         | No (default: `auto`; `disabled` removes read replicas)             |
+| Variable | `D1_SESSION_MODE`                                  | No (default: `first-primary`; `disabled` pins reads to primary)    |
 | Variable | `D1_MIGRATION_CHURNING_TABLES`                     | No (may narrow the reviewed built-in retention/expiry table list)  |
 | Variable | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | No (default: `50`; range: 0–100)                                   |
 | Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
