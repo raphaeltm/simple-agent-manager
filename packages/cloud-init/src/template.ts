@@ -260,6 +260,8 @@ write_files:
       [Slice]
       MemoryAccounting=yes
       MemoryMin={{ sam_infra_slice_memory_min_mb }}M
+      CPUAccounting=yes
+      CPUWeight={{ sam_infra_slice_cpu_weight }}
 
   - path: /etc/systemd/system/sam-workload.slice
     permissions: '0644'
@@ -270,6 +272,8 @@ write_files:
 
       [Slice]
       MemoryAccounting=yes
+      CPUAccounting=yes
+      CPUWeight={{ sam_workload_slice_cpu_weight }}
 
   - path: /usr/local/sbin/sam-configure-docker-memory.sh
     permissions: '0755'
@@ -332,6 +336,8 @@ write_files:
       RESERVE_MB="{{ vm_agent_memory_reserve_mb }}"
       INFRA_MIN_MB="{{ sam_infra_slice_memory_min_mb }}"
       MIN_DOCKER_MB="{{ docker_memory_min_mb }}"
+      INFRA_CPU_WEIGHT_EXPECTED="{{ sam_infra_slice_cpu_weight }}"
+      WORKLOAD_CPU_WEIGHT_EXPECTED="{{ sam_workload_slice_cpu_weight }}"
       PROC_ROOT="\${SAM_PROC_ROOT:-/proc}"
       CGROUP_ROOT="\${SAM_CGROUP_ROOT:-/sys/fs/cgroup}"
       PROC_MEMINFO="\${SAM_PROC_MEMINFO:-/proc/meminfo}"
@@ -426,16 +432,46 @@ write_files:
         fi
       }
 
+      require_int_equal() {
+        name="$1"
+        actual="$2"
+        expected="$3"
+        case "$actual" in
+          ''|*[!0-9]*)
+            echo "$name is not an integer: $actual" >&2
+            exit 67
+            ;;
+        esac
+        if [ "$actual" != "$expected" ]; then
+          echo "$name expected $expected, got $actual" >&2
+          exit 67
+        fi
+      }
+
       prop_value() {
         props="$1"
         key="$2"
         printf '%s\\n' "$props" | awk -F= -v key="$key" '$1 == key { print $2; found = 1; exit } END { if (!found) exit 1 }'
       }
 
+      # CPU weights are verified BEFORE the memory-reserve early return on
+      # purpose: disabling the memory reserve must not silently disable the CPU
+      # check too. Memory starvation kills the agent and CPU starvation only
+      # delays its heartbeat, but a delayed heartbeat is what gets a healthy node
+      # declared dead, so both are load-bearing.
+      INFRA_CPU_WEIGHT="$(read_cgroup_value cpu.weight /sam.slice/sam-infra.slice)"
+      WORKLOAD_CPU_WEIGHT="$(read_cgroup_value cpu.weight "$WORKLOAD_CGROUP")"
+      require_int_equal "sam-infra.slice cgroup cpu.weight" "$INFRA_CPU_WEIGHT" "$INFRA_CPU_WEIGHT_EXPECTED"
+      require_int_equal "sam-workload.slice cgroup cpu.weight" "$WORKLOAD_CPU_WEIGHT" "$WORKLOAD_CPU_WEIGHT_EXPECTED"
+      if [ "$INFRA_CPU_WEIGHT" -le "$WORKLOAD_CPU_WEIGHT" ]; then
+        echo "vm-agent slice cpu.weight $INFRA_CPU_WEIGHT does not outrank workload $WORKLOAD_CPU_WEIGHT" >&2
+        exit 67
+      fi
+
       if [ "$RESERVE_MB" = "0" ]; then
-        echo "SAM workload MemoryMax reserve disabled; verified cgroup ancestry only"
+        echo "SAM workload MemoryMax reserve disabled; verified cgroup ancestry and CPU weights only"
         systemctl show sam.slice sam-infra.slice sam-workload.slice \
-          -p MemoryMin -p MemoryMax -p EffectiveMemoryMax --no-pager
+          -p MemoryMin -p MemoryMax -p EffectiveMemoryMax -p CPUWeight --no-pager
         echo "$CGROUP"
         exit 0
       fi

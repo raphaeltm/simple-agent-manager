@@ -1,4 +1,5 @@
 import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
+import { DEFAULT_NODE_CPU_THRESHOLD_PERCENT } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -11,6 +12,7 @@ import {
   normalizeLoadAverageToCpuPercent,
   parseResolvedResourceReservation,
   parseWorkspaceAdmissionMetrics,
+  resolveWorkspaceAdmissionPolicy,
   WORKSPACE_BUSY_BUILD_QUEUE_REASON,
   type WorkspaceAdmissionPolicy,
 } from '../../../src/services/workspace-resource-capacity';
@@ -148,7 +150,7 @@ describe('workspace resource capacity accounting', () => {
     };
 
     for (const [metrics, reason] of [
-      [{ cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }, 'CPU pressure threshold reached'],
+      [{ cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10 }, 'CPU saturation ceiling reached'],
       [
         { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 },
         'memory pressure threshold reached',
@@ -168,7 +170,7 @@ describe('workspace resource capacity accounting', () => {
       // `creatingWorkspaces === 0`.
       [
         { cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
-        'CPU pressure threshold reached',
+        'CPU saturation ceiling reached',
       ],
     ] as const) {
       const result = evaluateWorkspaceReservationCapacity(
@@ -428,5 +430,197 @@ describe('workspace resource capacity', () => {
         policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
       )
     ).toBe(false);
+  });
+});
+
+describe('live CPU is a saturation ceiling, not an admission authority', () => {
+  // Production sets none of these, so the resolved defaults are what actually
+  // decide admission there. Reaching the defaults through the real resolver is
+  // the only way to observe the incident (.claude/rules/62).
+  const productionEnv = {} as Parameters<typeof resolveWorkspaceAdmissionPolicy>[0];
+
+  it('resolves the shared default, so a stale build cannot hide a regression here', () => {
+    // `@simple-agent-manager/shared` resolves to its COMPILED dist, and this
+    // package's `test` script has no build step of its own — only the root
+    // turbo pipeline builds shared first. Without this assertion, running
+    // vitest against a stale dist silently evaluates the OLD ceiling and every
+    // test below passes for the wrong reason.
+    expect(resolveWorkspaceAdmissionPolicy(productionEnv).cpuThresholdPercent).toBe(
+      DEFAULT_NODE_CPU_THRESHOLD_PERCENT
+    );
+    // And the ceiling must actually mean "saturated" — a value low enough to
+    // refuse one busy core on a 2-vCPU host is the bug, not the fix.
+    expect(DEFAULT_NODE_CPU_THRESHOLD_PERCENT).toBeGreaterThan(50);
+  });
+
+  /** `cpuLoadAvg1 / vcpu * 100`, so 2.4 over 4 vCPU is 60%. */
+  function hostAt(cpuPercent: number, overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'occupied',
+      providerInstanceId: 'server-occupied',
+      observedProviderInstanceVcpuCount: 4,
+      observedProviderInstanceMemoryMb: 8192,
+      observedProviderInstanceDiskGb: 80,
+      observedHardwareSource: 'observed',
+      lastHeartbeatAt: new Date().toISOString(),
+      lastMetrics: JSON.stringify({
+        cpuLoadAvg1: (cpuPercent / 100) * 4,
+        memoryPercent: 10,
+        diskPercent: 10,
+        ...overrides,
+      }),
+    };
+  }
+
+  const oneCoTenant = () =>
+    usage({ activeCount: 1, cpuMillis: 1000, memoryMb: 1024, diskMb: 1024, minMaxCoTenants: 4 });
+
+  it('admits a busy-but-unsaturated host whose declared budget still fits', () => {
+    // The incident: at the previous 50% default this host was refused and the
+    // scheduler bought another VM, even though 3000 of its 4000 declared
+    // milliCPU were free. Fails against pre-fix code.
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(60),
+      oneCoTenant(),
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+
+    expect(result.reasons).toEqual([]);
+    expect(result.admitted).toBe(true);
+  });
+
+  it('still refuses the same host when the declared budget does not fit', () => {
+    // Control: admission did not simply get weaker. The declared reservation is
+    // now the sole CPU authority below saturation, so it must still bite.
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(60),
+      oneCoTenant(),
+      reservation({ cpuMillis: 3500 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('CPU share budget would be exceeded');
+    expect(result.reasons).not.toContain('CPU saturation ceiling reached');
+  });
+
+  it('still refuses a genuinely saturated host', () => {
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(96),
+      oneCoTenant(),
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('CPU saturation ceiling reached');
+  });
+
+  it.each([
+    ['memory', { memoryPercent: 99 }, 'memory pressure threshold reached'],
+    ['disk', { diskPercent: 99 }, 'disk pressure threshold reached'],
+  ])('keeps the non-compressible %s veto at the same pressure', (_label, overrides, reason) => {
+    // Memory and disk oversubscription gets processes OOM-killed and wedges the
+    // node, so neither may follow CPU up to a saturation-only ceiling.
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(10, overrides),
+      oneCoTenant(),
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain(reason);
+  });
+
+  it('is the only backstop when a co-tenant under-declares, and it holds', () => {
+    // `cpuMillis` is admission-time bookkeeping: nothing in packages/vm-agent
+    // turns it into a cgroup quota or `docker run --cpus`. So a co-tenant that
+    // declared almost nothing while really burning the box is invisible to the
+    // budget check, and this ceiling is all that is left. Below it we admit on
+    // purpose (that is the compressible-resource tradeoff); at it we must not.
+    const underDeclared = usage({
+      activeCount: 1,
+      cpuMillis: 100,
+      memoryMb: 256,
+      diskMb: 1024,
+      minMaxCoTenants: 4,
+    });
+
+    const belowCeiling = evaluateWorkspaceReservationCapacity(
+      hostAt(80),
+      underDeclared,
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+    expect(belowCeiling.admitted).toBe(true);
+
+    const atCeiling = evaluateWorkspaceReservationCapacity(
+      hostAt(88),
+      underDeclared,
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv)
+    );
+    expect(atCeiling.admitted).toBe(false);
+    expect(atCeiling.reasons).toContain('CPU saturation ceiling reached');
+    // The budget never objected in either case — proving the ceiling, not the
+    // reservation accounting, is what refused the second host.
+    expect(atCeiling.reasons).not.toContain('CPU share budget would be exceeded');
+  });
+
+  it('remains a backstop when the CPU share budget is oversubscribed', () => {
+    // Raising `cpuShareBudgetPercent` above 100 is the lever an operator pulls to
+    // pack harder, and it widens the declared-reservation authority this change
+    // makes primary. The ceiling has to stay a backstop underneath it
+    // (`.claude/rules/74` requirement 3), not become co-equal and disappear.
+    const oversubscribed = { nodeCpuShareBudgetPercent: 200 };
+    const crowded = usage({
+      activeCount: 1,
+      cpuMillis: 3000,
+      memoryMb: 1024,
+      diskMb: 1024,
+      minMaxCoTenants: 4,
+    });
+
+    // 3000 + 2000 exceeds a 100% budget (4000 millis) but fits a 200% one.
+    expect(
+      evaluateWorkspaceReservationCapacity(
+        hostAt(60),
+        crowded,
+        reservation({ cpuMillis: 2000 }),
+        resolveWorkspaceAdmissionPolicy(productionEnv, oversubscribed)
+      ).admitted
+    ).toBe(true);
+    expect(
+      evaluateWorkspaceReservationCapacity(
+        hostAt(60),
+        crowded,
+        reservation({ cpuMillis: 2000 }),
+        resolveWorkspaceAdmissionPolicy(productionEnv)
+      ).reasons
+    ).toContain('CPU share budget would be exceeded');
+
+    // Same oversubscribed budget, saturated host: still refused.
+    const saturated = evaluateWorkspaceReservationCapacity(
+      hostAt(96),
+      crowded,
+      reservation({ cpuMillis: 2000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv, oversubscribed)
+    );
+    expect(saturated.admitted).toBe(false);
+    expect(saturated.reasons).toContain('CPU saturation ceiling reached');
+  });
+
+  it('lets a project override tighten the ceiling back down', () => {
+    const result = evaluateWorkspaceReservationCapacity(
+      hostAt(60),
+      oneCoTenant(),
+      reservation({ cpuMillis: 1000 }),
+      resolveWorkspaceAdmissionPolicy(productionEnv, { nodeCpuThresholdPercent: 50 })
+    );
+
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain('CPU saturation ceiling reached');
   });
 });

@@ -129,6 +129,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.target_commit_sha || github.sha }}
+          # resolve-vm-agent-release.sh needs real history to find the last commit
+          # that changed packages/vm-agent, and fails closed on a shallow clone.
+          # blob:none keeps the commit and tree graph that a path-limited rev-list
+          # walks while leaving blob transfer at working-tree size, so the full
+          # history costs little more than the previous depth-1 clone.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Resolve and Verify Deployment SHA
         id: deploy-sha
@@ -142,10 +149,27 @@ jobs:
             exit 1
           fi
           echo "value=$ACTUAL_DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+          # The VM-agent release tracks agent CONTENT, not the deployment commit:
+          # a Worker-only deploy must not make every running node ineligible for
+          # reuse. `release` and `build_date` come from the same commit so an
+          # unchanged agent rebuilds byte-identically under one immutable key.
+          # Explicit rather than relying on the runner's default `bash -e`, so the
+          # step aborts identically however it is invoked. A silent fallback to
+          # the deployment commit would restore the bug this resolver removes.
+          if ! AGENT_RELEASE_OUTPUT=$(bash scripts/deploy/resolve-vm-agent-release.sh "$ACTUAL_DEPLOY_SHA"); then
+            echo "::error::Could not resolve the VM-agent release for $ACTUAL_DEPLOY_SHA"
+            exit 1
+          fi
+          printf '%s\n' "$AGENT_RELEASE_OUTPUT" >> "$GITHUB_OUTPUT"
+          AGENT_RELEASE=$(printf '%s\n' "$AGENT_RELEASE_OUTPUT" | sed -n 's/^release=//p')
+          if [ -z "$AGENT_RELEASE" ]; then
+            echo "::error::VM-agent release resolver returned no release line"
+            exit 1
+          fi
           if [ "$SKIP_AGENT" = "true" ]; then
             echo "agent_version=" >> "$GITHUB_OUTPUT"
           else
-            echo "agent_version=$ACTUAL_DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+            echo "agent_version=$AGENT_RELEASE" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup pnpm
@@ -838,16 +862,19 @@ jobs:
 
       - name: Prepare Versioned VM Agent Container Artifact
         if: ${{ inputs.dry_run != true }}
+        # The container-baked binary must report the same version as the R2
+        # release, so both take VERSION/BUILD_DATE from the VM-agent release
+        # commit rather than from the deployment commit.
         run: |
-          BUILD_DATE=$(git show -s --format=%cI "$DEPLOY_SHA")
-          make -C packages/vm-agent prepare-container VERSION="$DEPLOY_SHA" BUILD_DATE="$BUILD_DATE"
+          make -C packages/vm-agent prepare-container VERSION="$VM_AGENT_RELEASE" BUILD_DATE="$VM_AGENT_BUILD_DATE"
           cat apps/api/container-artifacts/vm-agent-version.json
           echo "### CF Container runtime artifact" >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat apps/api/container-artifacts/vm-agent-version.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
         env:
-          DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}
+          VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}
+          VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}
 
       - name: Run Database Migrations With Safety Gates
         if: ${{ inputs.dry_run != true }}
@@ -893,13 +920,15 @@ jobs:
       # not drained for binaries this deployment intentionally did not publish.
       - name: Build VM Agent
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
-        # Pin VERSION to the deploy commit so R2 binaries report the same
-        # version string as the container-baked binary (prepare-container above).
+        # Pin VERSION to the VM-agent release commit so R2 binaries report the
+        # same version string as the container-baked binary (prepare-container
+        # above), and so unchanged agent source rebuilds byte-identically under
+        # the immutable release key that publish-vm-agent-artifacts.sh enforces.
         run: |
-          BUILD_DATE=$(git show -s --format=%cI "$DEPLOY_SHA")
-          make -C packages/vm-agent build-all VERSION="$DEPLOY_SHA" BUILD_DATE="$BUILD_DATE"
+          make -C packages/vm-agent build-all VERSION="$VM_AGENT_RELEASE" BUILD_DATE="$VM_AGENT_BUILD_DATE"
         env:
-          DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}
+          VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}
+          VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}
 
       - name: Upload VM Agent Binaries
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
@@ -913,7 +942,7 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}
+          VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}
 
       # A first installation needs an API service for the tail Worker's service binding.
       # Established installations defer API code publication until after secrets so an

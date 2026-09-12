@@ -26,6 +26,158 @@ const publishVmAgentArtifactsPath = fileURLToPath(
   new URL('../deploy/publish-vm-agent-artifacts.sh', import.meta.url)
 );
 const publishVmAgentArtifacts = readFileSync(publishVmAgentArtifactsPath, 'utf8');
+const resolveVmAgentReleasePath = fileURLToPath(
+  new URL('../deploy/resolve-vm-agent-release.sh', import.meta.url)
+);
+
+interface AgentReleaseRepo {
+  directory: string;
+  firstAgentCommit: string;
+  latestAgentCommit: string;
+  /** Touches `packages/vm-agent/.claude/`, which cannot change the binary. */
+  agentDocsCommit: string;
+  /** Touches only `*_test.go`, which is never linked into a non-test build. */
+  agentTestOnlyCommit: string;
+  /** HEAD. A Worker-only deploy is the case that used to evict the whole pool. */
+  workerOnlyCommit: string;
+}
+
+/**
+ * Build a real repository whose history interleaves VM-agent commits with
+ * Worker-only commits. The defect this guards against is only visible across
+ * more than one commit, so a single-commit fixture cannot observe it.
+ */
+/**
+ * Run `body` against a throwaway agent-history repo, cleaning up unconditionally.
+ *
+ * Every caller previously repeated create/try/finally-rmSync, which both
+ * duplicated the cleanup contract six times and left the temp directory behind
+ * when setup itself threw (setup runs outside the caller's `try`).
+ */
+function withAgentReleaseRepo<T>(body: (repo: AgentReleaseRepo) => T): T {
+  const directory = mkdtempSync(join(tmpdir(), 'sam-agent-release-'));
+  try {
+    return body(buildAgentReleaseRepo(directory));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function buildAgentReleaseRepo(directory: string): AgentReleaseRepo {
+  const git = (...args: string[]): string =>
+    execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
+
+  git('-c', 'init.defaultBranch=main', 'init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'SAM Test');
+
+  mkdirSync(join(directory, 'scripts', 'deploy'), { recursive: true });
+  writeFileSync(
+    join(directory, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+    readFileSync(resolveVmAgentReleasePath, 'utf8')
+  );
+  mkdirSync(join(directory, 'packages', 'vm-agent'), { recursive: true });
+  mkdirSync(join(directory, 'apps', 'api'), { recursive: true });
+
+  writeFileSync(join(directory, 'packages', 'vm-agent', 'main.go'), 'package main // v1\n');
+  git('add', '.');
+  git('commit', '-m', 'agent v1');
+  const firstAgentCommit = git('rev-parse', 'HEAD');
+
+  writeFileSync(join(directory, 'packages', 'vm-agent', 'main.go'), 'package main // v2\n');
+  git('add', '.');
+  git('commit', '-m', 'agent v2');
+  const latestAgentCommit = git('rev-parse', 'HEAD');
+
+  // A rule/doc commit INSIDE packages/vm-agent. `.claude/rules/02` mandates a rule
+  // update on every bug fix and those rules are co-located with the agent, so this
+  // is the common case, not an edge case.
+  mkdirSync(join(directory, 'packages', 'vm-agent', '.claude', 'rules'), { recursive: true });
+  writeFileSync(
+    join(directory, 'packages', 'vm-agent', '.claude', 'rules', '54-rollout.md'),
+    '# rollout rule\n'
+  );
+  git('add', '.');
+  git('commit', '-m', 'docs inside the agent directory');
+  const agentDocsCommit = git('rev-parse', 'HEAD');
+
+  // Test files are never linked into a non-test Go build. Both a top-level and a
+  // NESTED file, because the two are matched by different pathspec patterns and a
+  // change to either would otherwise break silently.
+  writeFileSync(join(directory, 'packages', 'vm-agent', 'main_test.go'), 'package main // t1\n');
+  mkdirSync(join(directory, 'packages', 'vm-agent', 'internal', 'acp'), { recursive: true });
+  writeFileSync(
+    join(directory, 'packages', 'vm-agent', 'internal', 'acp', 'host_test.go'),
+    'package acp // t1\n'
+  );
+  git('add', '.');
+  git('commit', '-m', 'agent tests only');
+  const agentTestOnlyCommit = git('rev-parse', 'HEAD');
+
+  writeFileSync(join(directory, 'apps', 'api', 'index.ts'), 'export const x = 1;\n');
+  git('add', '.');
+  git('commit', '-m', 'worker only');
+  const workerOnlyCommit = git('rev-parse', 'HEAD');
+
+  return {
+    directory,
+    firstAgentCommit,
+    latestAgentCommit,
+    agentDocsCommit,
+    agentTestOnlyCommit,
+    workerOnlyCommit,
+  };
+}
+
+/**
+ * A repo whose history contains the resolver but no VM-agent build inputs, so the
+ * release cannot resolve. Shared by the script-level and step-level fail-closed
+ * tests, which otherwise duplicate the whole fixture.
+ */
+function withRepoLackingAgentHistory<T>(body: (directory: string, head: string) => T): T {
+  const directory = mkdtempSync(join(tmpdir(), 'sam-agent-release-empty-'));
+  try {
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
+    git('-c', 'init.defaultBranch=main', 'init', '-q');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'user.name', 'SAM Test');
+    mkdirSync(join(directory, 'scripts', 'deploy'), { recursive: true });
+    writeFileSync(
+      join(directory, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+      readFileSync(resolveVmAgentReleasePath, 'utf8')
+    );
+    git('add', '.');
+    git('commit', '-m', 'no agent build inputs');
+
+    return body(directory, git('rev-parse', 'HEAD'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function runReleaseResolver(
+  directory: string,
+  deploySha: string
+): { status: number; stdout: string; stderr: string } {
+  const result = spawnSync('bash', ['scripts/deploy/resolve-vm-agent-release.sh', deploySha], {
+    cwd: directory,
+    encoding: 'utf8',
+  });
+  return { status: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
+}
+
+function releaseFieldsFrom(stdout: string): Record<string, string> {
+  return Object.fromEntries(
+    stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const index = line.indexOf('=');
+        return [line.slice(0, index), line.slice(index + 1)];
+      })
+  );
+}
 
 function stepBlock(stepName: string): string {
   const pattern = new RegExp(
@@ -191,7 +343,7 @@ exit 64
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
         R2_BUCKET: 'test-assets',
-        DEPLOY_SHA: 'a'.repeat(40),
+        VM_AGENT_RELEASE: 'a'.repeat(40),
         GITHUB_WORKSPACE: workspace,
         RUNNER_TEMP: tmp,
         SAM_FAKE_R2_MODE: mode,
@@ -237,7 +389,16 @@ describe('deploy reusable workflow', () => {
       execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: tmp });
       execFileSync('git', ['config', 'user.name', 'SAM Test'], { cwd: tmp });
       writeFileSync(join(tmp, 'file.txt'), 'verified deployment\n');
-      execFileSync('git', ['add', 'file.txt'], { cwd: tmp });
+      // The step resolves the VM-agent release, so the fixture needs both the
+      // resolver and an agent commit for it to find.
+      mkdirSync(join(tmp, 'scripts', 'deploy'), { recursive: true });
+      writeFileSync(
+        join(tmp, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+        readFileSync(resolveVmAgentReleasePath, 'utf8')
+      );
+      mkdirSync(join(tmp, 'packages', 'vm-agent'), { recursive: true });
+      writeFileSync(join(tmp, 'packages', 'vm-agent', 'main.go'), 'package main\n');
+      execFileSync('git', ['add', '.'], { cwd: tmp });
       execFileSync('git', ['commit', '-m', 'test commit'], { cwd: tmp });
       const head = execFileSync('git', ['rev-parse', 'HEAD'], {
         cwd: tmp,
@@ -289,6 +450,216 @@ describe('deploy reusable workflow', () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  describe('VM-agent release identity', () => {
+    it('keeps the release stable across a deploy that does not touch the agent', () => {
+      withAgentReleaseRepo((repo) => {
+        // The incident: every deploy rotated VM_AGENT_REQUIRED_VERSION, and
+        // isNodeAgentVersionCompatible compares for exact equality, so a
+        // Worker-only deploy made every running node ineligible for reuse.
+        const workerOnly = runReleaseResolver(repo.directory, repo.workerOnlyCommit);
+        expect(workerOnly.status).toBe(0);
+        const fields = releaseFieldsFrom(workerOnly.stdout);
+        expect(fields.release).toBe(repo.latestAgentCommit);
+        expect(fields.release).not.toBe(repo.workerOnlyCommit);
+      });
+    });
+
+    it.each([
+      ['a rule/doc commit inside the agent directory', 'agentDocsCommit' as const],
+      ['a test-only commit', 'agentTestOnlyCommit' as const],
+    ])('does not rotate the release for %s', (_label, key) => {
+      // Found in review, against this repo's own history: commit df8e03ee7 changed
+      // ONLY packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md
+      // and the prefix-only pathspec treated it as a new agent release, which would
+      // have evicted the whole pool for a documentation edit.
+      withAgentReleaseRepo((repo) => {
+        const result = runReleaseResolver(repo.directory, repo[key]);
+        expect(result.status).toBe(0);
+        expect(releaseFieldsFrom(result.stdout).release).toBe(repo.latestAgentCommit);
+      });
+    });
+
+    it('rotates the release for a deploy that does touch the agent', () => {
+      withAgentReleaseRepo((repo) => {
+        // Discriminating control: without this the suite would pass with the
+        // release pinned to a constant.
+        const older = runReleaseResolver(repo.directory, repo.firstAgentCommit);
+        expect(older.status).toBe(0);
+        expect(releaseFieldsFrom(older.stdout).release).toBe(repo.firstAgentCommit);
+
+        const newer = runReleaseResolver(repo.directory, repo.latestAgentCommit);
+        expect(newer.status).toBe(0);
+        expect(releaseFieldsFrom(newer.stdout).release).toBe(repo.latestAgentCommit);
+        expect(repo.firstAgentCommit).not.toBe(repo.latestAgentCommit);
+      });
+    });
+
+    it('emits a build date from the release commit so identical agents rebuild identically', () => {
+      withAgentReleaseRepo((repo) => {
+        // publish-vm-agent-artifacts.sh refuses to overwrite an immutable release
+        // key whose bytes differ, and BUILD_DATE is baked into the binary. Two
+        // deploys of one agent release must therefore agree on the build date.
+        const first = releaseFieldsFrom(
+          runReleaseResolver(repo.directory, repo.workerOnlyCommit).stdout
+        );
+        const second = releaseFieldsFrom(
+          runReleaseResolver(repo.directory, repo.latestAgentCommit).stdout
+        );
+        expect(first.release).toBe(second.release);
+        expect(first.build_date).toBe(second.build_date);
+        expect(first.build_date).toBe(
+          execFileSync('git', ['show', '-s', '--format=%cI', repo.latestAgentCommit], {
+            cwd: repo.directory,
+            encoding: 'utf8',
+          }).trim()
+        );
+      });
+    });
+
+    it('builds the agent with the flags a reused release key requires', () => {
+      // Structural check on build configuration, not behaviour. The release key
+      // is now content-addressed, so consecutive deploys reuse one key and
+      // publish-vm-agent-artifacts.sh refuses a byte mismatch — which takes the
+      // whole deploy down, since the upload runs before the Worker is published.
+      // Staging run 34597495795 is the proof that this is not theoretical.
+      const makefile = readFileSync(
+        fileURLToPath(new URL('../../packages/vm-agent/Makefile', import.meta.url)),
+        'utf8'
+      );
+      const goflags = makefile.match(/^GOFLAGS :=.*$/m)?.[0] ?? '';
+
+      expect(goflags).toBeTruthy();
+      // Without it, Go embeds the absolute source directory.
+      expect(goflags).toContain('-trimpath');
+      // Without it, Go stamps vcs.revision — the DEPLOY commit, which the whole
+      // point of a content-addressed release is that it differs.
+      expect(goflags).toContain('-buildvcs=false');
+    });
+
+    it('has no go:embed that would pull an excluded path into the binary', () => {
+      // The exclusions in resolve-vm-agent-release.sh assert that `.claude/`,
+      // `AGENTS.md` and `*_test.go` cannot change the compiled binary. `_test.go`
+      // is a Go language guarantee; the other two are only true while nothing
+      // embeds them. If a `//go:embed` ever appears, re-check the exclusion list
+      // before this silently ships a stale binary under a current version.
+      const agentRoot = fileURLToPath(new URL('../../packages/vm-agent', import.meta.url));
+      // grep exits 1 on no matches, so spawnSync (not execFileSync, which throws).
+      const found = spawnSync('grep', ['-rn', '--include=*.go', 'go:embed', agentRoot], {
+        encoding: 'utf8',
+      });
+
+      // Guard the guard: status 2 means grep itself failed (bad path), which would
+      // otherwise look identical to "no embeds found".
+      expect(found.status, `grep failed: ${found.stderr}`).not.toBe(2);
+      expect(found.stdout.trim()).toBe('');
+    });
+
+    it('fails closed on a shallow clone instead of falling back to the deploy commit', () => {
+      withAgentReleaseRepo((repo) => {
+        const shallow = mkdtempSync(join(tmpdir(), 'sam-agent-release-shallow-'));
+        try {
+          // A shallow clone answers `rev-list -1 -- <path>` with the shallow
+          // boundary, silently reproducing the per-deploy rotation.
+          execFileSync('git', ['clone', '--depth', '1', `file://${repo.directory}`, shallow]);
+          writeFileSync(
+            join(shallow, 'scripts', 'deploy', 'resolve-vm-agent-release.sh'),
+            readFileSync(resolveVmAgentReleasePath, 'utf8')
+          );
+          const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: shallow,
+            encoding: 'utf8',
+          }).trim();
+
+          const result = runReleaseResolver(shallow, head);
+          expect(result.status).not.toBe(0);
+          expect(result.stderr).toContain('shallow');
+        } finally {
+          rmSync(shallow, { recursive: true, force: true });
+        }
+      });
+    });
+
+    it('fails closed when no commit in history changed the agent build inputs', () => {
+      withRepoLackingAgentHistory((directory, head) => {
+        const result = runReleaseResolver(directory, head);
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('no commit changing');
+      });
+    });
+
+    it('aborts the deploy step when the release cannot be resolved', () => {
+      // The resolver is invoked from the step, so the step — not just the script
+      // — must fail. A step that swallowed the error would fall through with an
+      // empty agent_version and silently disable rollout gating.
+      const script = stepRunScript('Resolve and Verify Deployment SHA');
+      withRepoLackingAgentHistory((directory, head) => {
+        const outputPath = join(directory, 'output.txt');
+
+        const result = spawnSync('bash', ['-c', script], {
+          cwd: directory,
+          env: {
+            ...process.env,
+            EXPECTED_DEPLOY_SHA: head,
+            SKIP_AGENT: 'false',
+            GITHUB_OUTPUT: outputPath,
+          },
+          encoding: 'utf8',
+        });
+
+        expect(result.status).not.toBe(0);
+        expect(readFileSync(outputPath, 'utf8')).not.toContain('agent_version=');
+        // Pin WHICH guard fired: a regression in the earlier deploy-SHA equality
+        // check produces an identical exit code and an identical absent
+        // agent_version, and would leave this test green while proving nothing
+        // about resolver-failure propagation.
+        expect(readFileSync(outputPath, 'utf8')).toContain(`value=${head}`);
+        expect(`${result.stdout}${result.stderr}`).toContain(
+          'Could not resolve the VM-agent release'
+        );
+      });
+    });
+
+    it('resolves the release through the real deploy step, and still blanks it for skip_agent', () => {
+      const script = stepRunScript('Resolve and Verify Deployment SHA');
+      withAgentReleaseRepo((repo) => {
+        const outputPath = join(repo.directory, 'step-output.txt');
+        const normal = spawnSync('bash', ['-c', script], {
+          cwd: repo.directory,
+          env: {
+            ...process.env,
+            EXPECTED_DEPLOY_SHA: repo.workerOnlyCommit,
+            SKIP_AGENT: 'false',
+            GITHUB_OUTPUT: outputPath,
+          },
+          encoding: 'utf8',
+        });
+        expect(normal.status).toBe(0);
+        const emitted = releaseFieldsFrom(readFileSync(outputPath, 'utf8'));
+        expect(emitted.value).toBe(repo.workerOnlyCommit);
+        expect(emitted.release).toBe(repo.latestAgentCommit);
+        expect(emitted.agent_version).toBe(repo.latestAgentCommit);
+
+        const skippedPath = join(repo.directory, 'skip-output.txt');
+        const skipped = spawnSync('bash', ['-c', script], {
+          cwd: repo.directory,
+          env: {
+            ...process.env,
+            EXPECTED_DEPLOY_SHA: repo.workerOnlyCommit,
+            SKIP_AGENT: 'true',
+            GITHUB_OUTPUT: skippedPath,
+          },
+          encoding: 'utf8',
+        });
+        expect(skipped.status).toBe(0);
+        const skippedFields = releaseFieldsFrom(readFileSync(skippedPath, 'utf8'));
+        // skip_agent publishes no binaries, so gating stays disabled — but the
+        // release is still emitted for the container artifact, which always runs.
+        expect(skippedFields.agent_version).toBe('');
+        expect(skippedFields.release).toBe(repo.latestAgentCommit);
+      });
+    });
   });
 
   it('runs D1 migrations and integrity checks before serving new API Worker code', () => {
@@ -477,8 +848,9 @@ describe('deploy reusable workflow', () => {
     const goSetupIndex = workflow.indexOf('- name: Setup Go for Container Runtime');
 
     expect(prepare).toContain('make -C packages/vm-agent prepare-container');
-    expect(prepare).toContain('VERSION="$DEPLOY_SHA"');
-    expect(prepare).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
+    expect(prepare).toContain('VERSION="$VM_AGENT_RELEASE"');
+    expect(prepare).toContain('VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}');
+    expect(prepare).toContain('VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}');
     expect(prepare).toContain('vm-agent-version.json');
     expect(prepare).not.toContain('secrets.');
     expect(prepareIndex).toBeGreaterThan(-1);
@@ -500,11 +872,11 @@ describe('deploy reusable workflow', () => {
     expect(uploadIndex).toBeLessThan(deployIndex);
     expect(upload).toContain('bash ../scripts/deploy/publish-vm-agent-artifacts.sh');
     expect(publishVmAgentArtifacts).toContain(
-      'local object_path="$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-$architecture"'
+      'local object_path="$R2_BUCKET/agents/releases/$VM_AGENT_RELEASE/vm-agent-linux-$architecture"'
     );
     expect(publishVmAgentArtifacts).toContain('publish_agent_artifact amd64');
     expect(publishVmAgentArtifacts).toContain('publish_agent_artifact arm64');
-    expect(upload).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
+    expect(upload).toContain('VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}');
     expect(upload).not.toContain('$R2_BUCKET/agents/vm-agent-linux-amd64');
   });
 
@@ -661,17 +1033,23 @@ describe('deploy reusable workflow', () => {
     }
   });
 
-  it('versions the R2 vm-agent binaries with the same commit SHA as the container binary', () => {
+  it('versions the R2 vm-agent binaries with the same release commit as the container binary', () => {
     const containerBuild = stepBlock('Prepare Versioned VM Agent Container Artifact');
     const build = stepBlock('Build VM Agent');
 
-    // Both the container-baked binary and the R2-uploaded binaries must report
-    // the deploy commit SHA so a running agent can be correlated to its artifact.
-    expect(containerBuild).toContain('BUILD_DATE=$(git show -s --format=%cI "$DEPLOY_SHA")');
+    // Both the container-baked binary and the R2-uploaded binaries must report the
+    // VM-agent release commit so a running agent can be correlated to its artifact.
+    // BUILD_DATE comes from that same commit: it is baked into the binary, so taking
+    // it from the deployment commit would give two deploys of identical agent source
+    // different bytes under one immutable release key.
+    for (const block of [containerBuild, build]) {
+      expect(block).toContain('VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}');
+      expect(block).toContain('VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}');
+      expect(block).toContain('BUILD_DATE="$VM_AGENT_BUILD_DATE"');
+      expect(block).not.toContain('$DEPLOY_SHA');
+    }
     expect(build).toContain('make -C packages/vm-agent build-all');
-    expect(build).toContain('VERSION="$DEPLOY_SHA"');
-    expect(build).toContain('BUILD_DATE=$(git show -s --format=%cI "$DEPLOY_SHA")');
-    expect(build).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
+    expect(build).toContain('VERSION="$VM_AGENT_RELEASE"');
   });
 
   it('reuses identical same-SHA artifacts and refuses immutable-key overwrites', () => {
