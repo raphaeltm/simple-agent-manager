@@ -31,6 +31,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-a-version-needs-a-home/',
     screenshotName: 'atomic-release',
   },
+  {
+    name: 'the reusable-machine journal',
+    path: '/blog/sams-journal-a-busy-machine-can-still-help/',
+    screenshotName: 'reusable-machine',
+  },
 ];
 
 for (const post of mermaidPosts) {
