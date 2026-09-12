@@ -70,6 +70,12 @@ const DIRECT_SYNC_ENV_MAPPINGS = {
   RESOURCE_PREFIX: 'RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}',
 } as const;
 
+const ARCHIVE_SWEEP_AFFORDABILITY_ENV_VARS = [
+  'PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT',
+  'PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH',
+  'PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS',
+] as const;
+
 const DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS = [
   'DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS',
   'DEPLOYMENT_IMAGE_RESOLVE_TOTAL_TIMEOUT_MS',
@@ -655,6 +661,38 @@ describe('deploy reusable workflow', () => {
 
     for (const name of DEPLOYMENT_IMAGE_RESOLVE_ENV_VARS) {
       expect(optionalWorkerVars).toContain(name);
+      for (const sync of syncBlocks) {
+        expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+      }
+    }
+  });
+
+  /**
+   * A Worker var the code reads but the sync path does not forward is unoverridable in
+   * production, silently: the GitHub Environment variable is accepted, the deploy is green,
+   * and the deployed value is still the checked-in one. These three govern the archive
+   * sweep's candidate ceiling, its fall-through depth and its stall alert — exactly the
+   * knobs an operator reaches for when the sweep is misbehaving.
+   *
+   * They must ALSO exist in the top-level `[vars]`, because `listEnvironmentVarOverrides`
+   * only logs an override for a name it can compare against a checked-in value. Without
+   * that, an override of one of these would ship with no line in the deploy log — the
+   * `.claude/rules/70` failure mode verbatim.
+   */
+  it('forwards the archive sweep affordability tunables into every wrangler config sync env', () => {
+    const optionalWorkerVars = extractOptionalWorkerEnvVars();
+    const syncBlocks = [
+      stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)'),
+      stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)'),
+    ];
+    const wranglerToml = readFileSync(
+      new URL('../../apps/api/wrangler.toml', import.meta.url),
+      'utf8'
+    );
+
+    for (const name of ARCHIVE_SWEEP_AFFORDABILITY_ENV_VARS) {
+      expect(optionalWorkerVars).toContain(name);
+      expect(wranglerToml).toMatch(new RegExp(`^${name} = "`, 'm'));
       for (const sync of syncBlocks) {
         expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
       }

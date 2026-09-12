@@ -178,6 +178,17 @@ PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "4"
 # allowance, largest-first selection re-picked the same unaffordable 4994-message session
 # every hour from 2026-09-08 to 2026-09-12 and reclaimed nothing.
 PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "2000"
+# Assumed percentage by which a session's write estimate exceeds its message_count (archived
+# tool payloads, grouped rows and FTS units). Reserved as headroom when the per-candidate
+# selection ceiling is derived from _DAILY_WRITE_BUDGET; 100 means "units may be up to 2x
+# message_count", the conservative side of the 1.9x measured in production on 2026-09-08.
+PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT = "100"
+# Spare candidates read beyond the tick's session slots, so a session the write budget refuses
+# can descend to a smaller one rather than ending the tick with nothing migrated.
+PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH = "8"
+# Consecutive sweeps that may migrate nothing because EVERY candidate cost more than the whole
+# daily allowance before the cadence row reports `partial` instead of `succeeded`.
+PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS = "3"
 PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS = "604800000"
 PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS = "604800000"
 # Failed journals wait this long before a sweep retries them, so three faults poison a row over
