@@ -490,8 +490,10 @@ Byte-identical `capacity` and `coTenantCount`; opposite `outcome`. The node neve
 The only variable between the two records is which branch's deploy set
 `VM_AGENT_REQUIRED_VERSION`. Staging held one node throughout, carrying two workspaces.
 
-One more number, taken while the second workspace was building on the shared node:
-`cpuLoadAvg1` **1.97** on 2 vCPU — 98.5% — alongside `creatingWorkspaces: 1`. So an ordinary
+One more number, and the timestamps matter because a second reading below gives a very
+different figure for the same node. At **07:40:11Z**, while workspace C's devcontainer build
+was underway on the shared node, it reported `cpuLoadAvg1` **1.97** on 2 vCPU — 98.5% —
+alongside `creatingWorkspaces: 1`. So an ordinary
 devcontainer build saturates a small node outright. Two readings follow from that. It is far
 past the old 50% default, which is the PR's argument made concrete: under that gate a node
 was "too busy" for the whole duration of any co-tenant's build, which is precisely when a
@@ -508,9 +510,16 @@ the ordinary case and agree on the extreme, which is the intended shape.
   rests on the production evidence in the summary — `nodes` rows clustering by agent SHA
   with each generation deleted shortly after the next deploy — and on the fact that a stable
   required version removes the sweep's precondition entirely rather than changing the sweep.
-- **(B), the CPU saturation ceiling, was not the deciding factor.** Node
-  `01M2A6W120TQ...` reported `cpuLoadAvg1` 0.01 across the window — 0.5% of two vCPU — so
-  the reuse above is admitted identically under the old 50% gate and the new 85% ceiling.
+- **(B), the CPU saturation ceiling, was not the deciding factor** — but the reading this
+  rests on is bracketing, not a measurement at the decision instant, and the two figures in
+  this file must not be read as contradicting each other. The last telemetry before the
+  placement was `cpuLoadAvg1` **0.01** at **07:22:23Z** (0.5% of two vCPU), with workspace A
+  idle since 07:11:37Z. The 98.5% figure recorded above is from **07:40:11Z**, after the
+  07:37:31Z admission decision, once workspace C's devcontainer build had started — the
+  build is what produced it. No reading exists at 07:37:31Z itself, so "the node was below
+  the ceiling when it was admitted" is an inference from the 07:22:23Z reading plus the fact
+  that nothing had started on the node in between, not a direct observation. On that basis
+  the reuse is admitted identically under the old 50% gate and the new 85% ceiling.
   (B)'s divergence case is covered by the unit tests in the discrimination table, not by
   this staging run. Contriving load on a staging VM to move the reading past 50% would have
   demonstrated the same predicate the tests already pin, at the cost of a longer hold on the
@@ -630,6 +639,30 @@ was the main argument for keeping the number low.
 
 ## Deliberately out of scope
 
+- **`selection_settings_version` is not re-validated on the node-reuse path.** Recorded in
+  research but never resolved into a checklist item or a deferral until the
+  task-completion-validator caught the omission on 2026-09-12. Verified then:
+  `assertNodeAllocationPlanCurrent` (`node-allocation-validation.ts:192-193`) is the only
+  reader, and it is called from `node-provisioning.ts:264,411,482` and
+  `workspace-create.ts:277` — never from `durable-objects/task-runner/`. The reuse path's
+  guard, `buildPlacementAuthoritySqlPredicate` (`placement-authority.ts:165-169`), binds
+  `capacity_pool_id`, `capacity_pool_revision`, `capacity_source_id` and
+  `capacity_source_generation`, and `selection_settings_version` is none of those — a real
+  staging placement record shows `selectionSettingsVersion: 2498716407` against
+  `sourceGeneration: 3386508414`, so they move independently.
+
+  Deferred to idea `01M2ANSDWH6N2FM94XMTWAYVH2`, not fixed here, and the reason is
+  load-bearing rather than scheduling: the naive fix — adding the column to the authority
+  predicate — would make **every** selection-settings edit evict every node in the pool.
+  That is the exact over-firing-guard shape `.claude/rules/74` was written for in this same
+  PR, and it contradicts the explicit direction that "a capacity_pool revision bump from an
+  unrelated policy edit must not make every existing node non-reusable". The fix has to
+  separate settings changes that genuinely invalidate a placement from those that only
+  affect future selection, which is design work with its own tests.
+
+  Worth stating plainly that **this PR enlarges the exposure**: nodes now survive deploys
+  and are reused more, so a staleness window that used to be closed incidentally by the
+  deploy-driven fleet rotation several times a day is now genuinely open.
 - Per-`capacity_pools` admission threshold columns (see research). Raised with the user
   in-conversation; needs a migration plus an API and UI update path, and a
   platform-scoped-only version would duplicate `TASK_RUN_NODE_*`.
