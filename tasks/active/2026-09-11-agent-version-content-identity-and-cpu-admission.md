@@ -399,7 +399,20 @@ resolved release did not. Succeeded 07:35Z.
 | Resolved release | `e5b3dc2c00118634f2b2891ad5678c0bb0a490b5` — the same release as #3, #4 and #5, across four deploys with four different heads |
 | `Upload VM Agent Binaries` | `Reusing identical immutable VM-agent artifact .../releases/e5b3dc2c0011.../vm-agent-linux-amd64` and `-arm64` — a third byte-identical rebuild under one immutable key |
 | Deployed `VM_AGENT_REQUIRED_VERSION` (read from the Worker's `plain_text` bindings, per `.claude/rules/70`) | `e5b3dc2c0011...` — unchanged across the deploy |
-| Node `01M2A6W120TQ...`, provisioned BETWEEN #5 and #6 | still `running` / `healthy` after the deploy, still reporting `e5b3dc2c0011...`, heartbeat 07:34:24Z |
+| Node `01M2A6W120TQ...`, provisioned BETWEEN #5 and #6 | still reporting `e5b3dc2c0011...` after the deploy, so still version-COMPATIBLE with the newly deployed required version — which is the reuse precondition. Its continued existence is **not** evidence; see below. |
+
+**What the node's survival does and does not show.** Flagged by the PR #2065 agent
+reviewing this evidence, and they are right — the point applies to deploy #6 as much as to
+their own deploy. `sweepIncompatibleVmAgentNodes` (`node-cleanup/node-phases.ts:440`)
+destroys only **idle** incompatible nodes, and `01M2A6W120TQ...` carried a running
+workspace continuously from 07:11:37Z until I deleted it at 07:41Z — `warm_since` stayed
+NULL throughout. So the node would have survived every deploy in this window whatever the
+required version did. "It was still running afterwards" is a green result produced by a
+path this change does not control, which is exactly the non-discriminating shape
+`.claude/rules/62` exists to catch. It is recorded here as context, not as proof.
+
+What IS discriminating is the placement outcome, because `isNodeAgentVersionCompatible` is
+consulted by `node-selection.ts:523` on the reuse path and nowhere else in this window:
 
 Then the payoff. A task submitted at 07:37:31Z through the **task-runner placement path**
 — `node-selection.ts` -> `isNodeAgentVersionCompatible`, the code the bug lived in — did
@@ -442,6 +455,13 @@ the ordinary case and agree on the extreme, which is the intended shape.
 
 ### What deploy #6 did NOT prove
 
+- **The teardown half of the bug was never exercised on staging.** The PR's summary
+  describes two effects: placement refusing an incompatible host, and
+  `sweepIncompatibleVmAgentNodes` *destroying* the idle ones. Only the first was reproduced
+  here, because the node under test was never idle while incompatible. The teardown half
+  rests on the production evidence in the summary — `nodes` rows clustering by agent SHA
+  with each generation deleted shortly after the next deploy — and on the fact that a stable
+  required version removes the sweep's precondition entirely rather than changing the sweep.
 - **(B), the CPU saturation ceiling, was not the deciding factor.** Node
   `01M2A6W120TQ...` reported `cpuLoadAvg1` 0.01 across the window — 0.5% of two vCPU — so
   the reuse above is admitted identically under the old 50% gate and the new 85% ceiling.
