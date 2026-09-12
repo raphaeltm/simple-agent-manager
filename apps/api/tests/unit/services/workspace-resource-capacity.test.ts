@@ -1,4 +1,7 @@
-import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
+import {
+  type ResolvedResourceReservation,
+  resolveResourceReservation,
+} from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -48,6 +51,38 @@ function policy(overrides: Partial<WorkspaceAdmissionPolicy> = {}): WorkspaceAdm
 
 function usage(overrides: Partial<ActiveWorkspaceReservationUsage> = {}) {
   return { ...emptyUsage(), ...overrides };
+}
+
+function legacyReservation(vmSize: 'small' | 'medium' | 'large'): ResolvedResourceReservation {
+  return resolveResourceReservation({}, {}, { legacyVmSizes: { task: vmSize } });
+}
+
+function aggregateCopies(
+  request: ResolvedResourceReservation,
+  activeCount: number
+): ActiveWorkspaceReservationUsage {
+  return usage({
+    activeCount,
+    cpuMillis: request.cpuMillis * activeCount,
+    memoryMb: request.memoryMb * activeCount,
+    diskMb: request.diskMb * activeCount,
+    minMaxCoTenants: request.maxCoTenants,
+  });
+}
+
+function observedCapacityNode(overrides: {
+  id: string;
+  vcpuCount: number;
+  memoryMb: number;
+  diskGb: number;
+}) {
+  return {
+    ...observedNode,
+    id: overrides.id,
+    observedProviderInstanceVcpuCount: overrides.vcpuCount,
+    observedProviderInstanceMemoryMb: overrides.memoryMb,
+    observedProviderInstanceDiskGb: overrides.diskGb,
+  };
 }
 
 describe('workspace resource capacity accounting', () => {
@@ -409,6 +444,97 @@ describe('workspace resource capacity', () => {
         policy({ maxWorkspaces: 10, hostMemoryReserveMb: 0 })
       )
     ).toBe(false);
+  });
+
+  it('admits the approved legacy v2 density targets and rejects the next tenant', () => {
+    const cases = [
+      {
+        name: 'small',
+        request: legacyReservation('small'),
+        node: observedCapacityNode({
+          id: 'cx23-small-density',
+          vcpuCount: 2,
+          memoryMb: 4096,
+          diskGb: 40,
+        }),
+        fitExisting: 2,
+      },
+      {
+        name: 'medium',
+        request: legacyReservation('medium'),
+        node: observedCapacityNode({
+          id: 'cx33-medium-density',
+          vcpuCount: 4,
+          memoryMb: 8192,
+          diskGb: 80,
+        }),
+        fitExisting: 1,
+      },
+      {
+        name: 'large',
+        request: legacyReservation('large'),
+        node: observedCapacityNode({
+          id: 'cx43-large-density',
+          vcpuCount: 8,
+          memoryMb: 16_384,
+          diskGb: 160,
+        }),
+        fitExisting: 1,
+      },
+    ] as const;
+
+    for (const { name, request, node, fitExisting } of cases) {
+      const fitting = evaluateWorkspaceReservationCapacity(
+        node,
+        aggregateCopies(request, fitExisting),
+        request,
+        policy({ maxWorkspaces: 3, hostMemoryReserveMb: 512 })
+      );
+      expect(fitting.admitted, `${name} fitting tenant`).toBe(true);
+
+      const overflowing = evaluateWorkspaceReservationCapacity(
+        node,
+        aggregateCopies(request, fitExisting + 1),
+        request,
+        policy({ maxWorkspaces: 3, hostMemoryReserveMb: 512 })
+      );
+      expect(overflowing.admitted, `${name} overflowing tenant`).toBe(false);
+      expect(overflowing.reasons.length, `${name} overflow reasons`).toBeGreaterThan(0);
+    }
+  });
+
+  it('excludes legacy v2 medium and large from lower memory classes after host reserve', () => {
+    const small = legacyReservation('small');
+    const medium = legacyReservation('medium');
+    const large = legacyReservation('large');
+    const defaultPolicy = policy({ maxWorkspaces: 3, hostMemoryReserveMb: 512 });
+
+    expect(
+      evaluateWorkspaceReservationCapacity(
+        observedCapacityNode({ id: 'cx23-admits-small', vcpuCount: 2, memoryMb: 4096, diskGb: 40 }),
+        emptyUsage(),
+        small,
+        defaultPolicy
+      ).admitted
+    ).toBe(true);
+
+    const mediumOnSmall = evaluateWorkspaceReservationCapacity(
+      observedCapacityNode({ id: 'cx23-rejects-medium', vcpuCount: 2, memoryMb: 4096, diskGb: 40 }),
+      emptyUsage(),
+      medium,
+      defaultPolicy
+    );
+    expect(mediumOnSmall.admitted).toBe(false);
+    expect(mediumOnSmall.reasons).toContain('memory budget would be exceeded after host reserve');
+
+    const largeOnMedium = evaluateWorkspaceReservationCapacity(
+      observedCapacityNode({ id: 'cx33-rejects-large', vcpuCount: 4, memoryMb: 8192, diskGb: 80 }),
+      emptyUsage(),
+      large,
+      defaultPolicy
+    );
+    expect(largeOnMedium.admitted).toBe(false);
+    expect(largeOnMedium.reasons).toContain('memory budget would be exceeded after host reserve');
   });
 
   it('treats missing disk capacity conservatively once a node is occupied', () => {

@@ -182,7 +182,7 @@ queries after the first can be served by a nearby replica instead of crossing to
 region. This is safe by construction: the session is anchored `first-primary`, so a request never
 sees data older than its own start and cannot miss a write that completed before it began, and
 queries that do not open a session always go to the primary. (It does not promise that a write
-landing *during* a request is visible to that request's later queries — that is the ordinary
+landing _during_ a request is visible to that request's later queries — that is the ordinary
 two-non-atomic-reads race, unchanged by replication and now with a shorter window.) Scheduled sweeps and Durable Objects keep the unsessioned binding. Set
 `D1_READ_REPLICATION_MODE=disabled` to remove the replicas (Cloudflare takes up to 24 hours to
 stop routing to them) or `D1_SESSION_MODE=disabled` to keep the replicas but route every Worker
@@ -394,9 +394,11 @@ VMs are billed to the cloud provider credential SAM uses for the node. In a typi
 
 When Infrastructure Compute Pools are enabled, the editor uses the provider-native catalog for the
 project, user, or platform credential in scope. The small/medium/large prices below remain useful as
-legacy preset examples, but pool editing is based on concrete provider instance types. Exact native
+legacy provider examples, but pool editing is based on concrete provider instance types. Deprecated
+legacy size labels are translated into workload slices for compatibility; they do not choose a
+provider SKU directly, and changing one does not rewrite the native provider payload. Exact native
 offerings carry their own storage/image/architecture request details where the provider API supports
-them; changing a deprecated legacy size label does not change the native provider payload. After a VM
+them. After a VM
 is created, the provider package returns provider-reported server type and resource fields as
 provenance-labeled observed hardware and leaves omitted resource fields unknown
 (`packages/providers/src/native-vm-config.ts`). Persisting those observations into node-pool

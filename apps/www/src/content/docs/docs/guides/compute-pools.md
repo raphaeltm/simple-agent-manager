@@ -274,9 +274,12 @@ lets the chat show the original request alongside the machine that was chosen.
 
 :::note
 Older projects may still carry a legacy `small` / `medium` / `large` default. It still works —
-SAM translates it into concrete requirements — but it is shown as _Legacy_ in the resource editor
-with a link to clear it. Prefer explicit vCPU/memory/disk values: a legacy size is a label, not a
-statement about how much hardware the workload needs.
+SAM translates it into compatibility workload requirements — but it is shown as _Legacy_ in the
+resource editor with a link to clear it. Prefer explicit vCPU/memory/disk values: a legacy size is
+a label, not a statement about provider hardware. With the current compatibility adapter, `small`
+means a roughly third-node workload slice (625 mCPU, 1152 MiB memory, 13 GiB disk, up to 3
+co-tenants), while `medium` and `large` are two-per-node slices sized to stay off the class below
+them after the default 512 MiB host memory reserve.
 :::
 
 ## How a machine actually gets chosen

@@ -1,3 +1,4 @@
+import { DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 import type {
@@ -180,7 +181,7 @@ describe('placement resolver parity', () => {
     });
     expect(placement.resolvedReservation).toMatchObject({
       cpuMillis: 4000,
-      memoryMb: 2048,
+      memoryMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minMemoryGb * 1024,
       source: 'task',
       sourceId: 'task-submit-1',
     });
@@ -411,7 +412,7 @@ describe('placement resolver parity', () => {
       },
     });
     expect(placement.resolvedReservation).toMatchObject({
-      cpuMillis: 1000,
+      cpuMillis: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minVcpu * 1000,
       diskMb: 100 * 1024,
       source: 'trigger',
       sourceId: 'trigger-1',
