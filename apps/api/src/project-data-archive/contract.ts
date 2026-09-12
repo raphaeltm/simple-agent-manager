@@ -122,6 +122,23 @@ export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS = 10;
 export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET = 20_000;
 export const PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET = 5_000_000;
 /**
+ * Extra candidates an unscoped sweep reads beyond the sessions it may fence, so that a
+ * candidate the daily write budget refuses has a smaller one to descend to within the same
+ * tick. Without this the deployed `1 x 1` selection returned exactly one candidate, and a
+ * single unaffordable session ended every tick with nothing migrated — for four days
+ * (`.claude/rules/65`).
+ */
+export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_FALLTHROUGH_DEPTH = 8;
+export const PROJECT_DATA_ARCHIVE_MAX_SWEEP_FALLTHROUGH_DEPTH = 200;
+/**
+ * Consecutive sweeps that may journal nothing solely because every candidate they
+ * considered cost more than the entire daily write allowance, before the cadence row stops
+ * reporting `succeeded`. An exhausted daily pool is deliberately NOT counted: it is normal
+ * backpressure on most ticks of a day. See `ArchiveWriteRefusalReason`.
+ */
+export const PROJECT_DATA_ARCHIVE_DEFAULT_BUDGET_STALL_ALERT_SWEEPS = 3;
+export const PROJECT_DATA_ARCHIVE_MAX_BUDGET_STALL_ALERT_SWEEPS = 1_000;
+/**
  * Rows read per statement while streaming a session's terminal-version hash.
  * Bounds Durable Object memory by page size instead of session size.
  */

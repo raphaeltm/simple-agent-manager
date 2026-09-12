@@ -149,7 +149,12 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = "1"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
 # Compact format stays off until the staged rollout and production mutation approval.
 PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
-PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "250000"
+# Matches the GitHub `production` Environment override set 2026-09-08 to bound DO SQLite
+# write cost. Keeping the checked-in value equal to the deployed one means the affordability
+# ceiling every selector derives from it is the same on staging, on self-hosts and in
+# production, rather than only in the environment that carries the override
+# (.claude/rules/70). Do NOT raise this without an explicit cost decision.
+PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "100000"
 PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "32"
 PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS = "10000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
@@ -163,8 +168,16 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "3600000"
 PROJECT_DATA_ARCHIVE_SHARD_COUNT = "128"
 PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
-PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "1"
-PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "5000"
+# Above 1 so one candidate the daily write budget refuses cannot consume a whole tick. The
+# real throughput bound is _DAILY_WRITE_BUDGET; this only caps `migrating` fences per tick.
+PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "4"
+# Cumulative message_count of NEW candidates one tick may journal. Kept below the
+# affordability ceiling the code derives from _DAILY_WRITE_BUDGET (100000 and factor 32 give
+# 3093 write units, ~1546 messages at the default 100% overhead allowance) so the shipped
+# config is coherent on its own, independent of that derivation. At 5000 against a 100000
+# allowance, largest-first selection re-picked the same unaffordable 4994-message session
+# every hour from 2026-09-08 to 2026-09-12 and reclaimed nothing.
+PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "2000"
 PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS = "604800000"
 PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS = "604800000"
 # Failed journals wait this long before a sweep retries them, so three faults poison a row over

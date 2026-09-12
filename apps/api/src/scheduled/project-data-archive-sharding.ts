@@ -20,12 +20,16 @@ import {
   PROJECT_DATA_ARCHIVE_DEFAULT_R2_PREFIX,
   PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS,
   PROJECT_DATA_ARCHIVE_DEFAULT_SHARD_COUNT,
+  PROJECT_DATA_ARCHIVE_DEFAULT_BUDGET_STALL_ALERT_SWEEPS,
+  PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_FALLTHROUGH_DEPTH,
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_PROJECTS,
   PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS,
   PROJECT_DATA_ARCHIVE_DEFAULT_WALL_TIME_MS,
   PROJECT_DATA_ARCHIVE_JOURNAL_STATES,
   PROJECT_DATA_ARCHIVE_MAX_CHUNK_BYTES,
+  PROJECT_DATA_ARCHIVE_MAX_BUDGET_STALL_ALERT_SWEEPS,
+  PROJECT_DATA_ARCHIVE_MAX_SWEEP_FALLTHROUGH_DEPTH,
   PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET,
   PROJECT_DATA_ARCHIVE_PRECOPY_REFUSED_ERROR_CODE,
   PROJECT_DATA_ARCHIVE_ROUTING_SCHEMA_VERSION,
@@ -35,7 +39,17 @@ import {
   type ProjectDataArchiveSourcePrepareRefusal,
   type ProjectDataArchiveTableName,
 } from '../project-data-archive/contract';
-import { archiveWriteBudgetConfig, type ArchiveWriteReservation, releaseUnusedArchiveReservation,reserveArchiveWrites } from '../project-data-archive/write-budget';
+import {
+  archiveAffordableMessageCeiling,
+  archiveAffordableWriteUnits,
+  ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT,
+  ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT,
+  archiveWriteBudgetConfig,
+  type ArchiveWriteRefusalReason,
+  type ArchiveWriteReservation,
+  releaseUnusedArchiveReservation,
+  reserveArchiveWrites,
+} from '../project-data-archive/write-budget';
 import { getProjectDataArchiveRolloutWarningConfig } from '../services/project-data-archive-rollout-controls';
 import {
   archiveShardProjectDataOwner,
@@ -107,10 +121,34 @@ type ArchiveCoordinatorConfig = {
   globalSweepIntervalMs: number;
   shardCount: number;
   sweepProjects: number;
-  /** Hard ceiling on sessions (in-flight plus new) one tick may process. */
+  /**
+   * Hard ceiling on sessions (in-flight plus new) one tick may FENCE and process. A
+   * candidate the write budget refuses is never fenced, so it does not consume a slot.
+   */
   sweepSessions: number;
   /** Cumulative `message_count` of NEW candidates one tick may journal; largest first. */
   sweepMessageBudget: number;
+  /**
+   * Per-candidate `message_count` ceiling, the smaller of `sweepMessageBudget` and the
+   * ceiling derived from the daily write allowance. Derived rather than configured so a
+   * selector can never offer a candidate the write budget must refuse forever — see
+   * `archiveAffordableWriteUnits`.
+   */
+  sweepMessageCeiling: number;
+  /** Largest per-session write estimate the daily allowance can admit, in estimate units. */
+  affordableWriteUnits: number;
+  /** Assumed non-`chat_messages` share of a session's write estimate, as a percentage. */
+  sweepUnitOverheadPercent: number;
+  /**
+   * Consecutive sweeps that may journal nothing solely because every candidate exceeded the
+   * whole daily allowance before the cadence row stops reporting `succeeded`.
+   */
+  budgetStallAlertSweeps: number;
+  /**
+   * Extra candidates the unscoped sweep reads beyond its session slots, so a refusal has
+   * somewhere smaller to descend to instead of ending the tick (`.claude/rules/65`).
+   */
+  sweepFallthroughDepth: number;
   sessionGraceMs: number;
   /**
    * Rule-47 expiring marker: how long a `frozen`/`precopy_refused` journal keeps its session out
@@ -193,6 +231,7 @@ type ProjectDataArchiveGlobalSweepCadenceRow = {
   lease_owner: string | null;
   lease_expires_at: number | null;
   run_count: number;
+  consecutive_budget_stalls: number;
   updated_at: number;
 };
 
@@ -210,10 +249,28 @@ export type ProjectDataArchiveGlobalSweepCadenceState = {
   leaseOwner: string | null;
   leaseExpiresAt: number | null;
   runCount: number;
+  /**
+   * Consecutive sweeps that journaled nothing because every candidate cost more than the
+   * whole daily write allowance. Non-zero means the sweep is stuck, not idle.
+   */
+  consecutiveBudgetStalls: number;
 };
 
 export type ProjectDataArchiveShardingStats = {
+  /** Total write-budget refusals, whatever their cause. Sum of the two fields below. */
   budgetDeferred?: number;
+  /**
+   * Refusals where the session's estimate exceeded the ENTIRE daily allowance. Waiting
+   * cannot clear these; only a smaller candidate or a config change can. A tick that
+   * journals nothing and reports only this is the deadlock signature.
+   */
+  budgetUnaffordable?: number;
+  /** Refusals because the day's pool is already spent. Normal backpressure; not an alert. */
+  budgetWindowExhausted?: number;
+  /** The per-candidate `message_count` ceiling this tick selected with. */
+  messageCeiling?: number;
+  /** Largest per-session write estimate the current allowance can admit, in units. */
+  affordableWriteUnits?: number;
   enabled: boolean;
   skipped: boolean;
   skipReason: string | null;
@@ -390,9 +447,68 @@ function envInt(value: string | undefined, fallback: number, min: number, max: n
   return fallback;
 }
 
+/**
+ * The per-candidate `message_count` ceiling a selector may offer.
+ *
+ * Two independently configured ceilings that must agree WILL drift: on 2026-09-08 the
+ * production daily write budget was lowered to 100000 through a GitHub Environment
+ * override while `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` stayed at the checked-in 5000,
+ * and largest-first selection then picked the same 4994-message session every hour for four
+ * days, each time estimating ~160,808 writes against a 100,000 allowance. Deriving the
+ * selection ceiling from the allowance makes that state unreachable regardless of how the
+ * two vars are configured.
+ *
+ * The derived half is a heuristic (it assumes `sweepUnitOverheadPercent` for the tool
+ * payload, grouped and FTS units `message_count` does not report), so it bounds the
+ * *expected* cost, not the actual one. A candidate whose real overhead is higher is still
+ * refused by `reserveArchiveWrites`; the fall-through in `processArchiveMigrationBatch` is
+ * what keeps that refusal from wasting the tick.
+ */
+function resolveSweepAffordability(
+  env: Env,
+  sweepMessageBudget: number,
+  overheadPercent: number
+): { sweepMessageCeiling: number; affordableWriteUnits: number } {
+  const { allowance, factor } = archiveWriteBudgetConfig(env);
+  return {
+    sweepMessageCeiling: Math.min(
+      sweepMessageBudget,
+      archiveAffordableMessageCeiling(allowance, factor, overheadPercent)
+    ),
+    affordableWriteUnits: archiveAffordableWriteUnits(allowance, factor),
+  };
+}
+
 function resolveConfig(env: Env): ArchiveCoordinatorConfig {
+  const sweepMessageBudget = envInt(
+    env.PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET,
+    PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
+    1,
+    PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET
+  );
+  const sweepUnitOverheadPercent = envInt(
+    env.PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT,
+    ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT,
+    0,
+    ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT
+  );
   return {
     enabled: env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED === 'true',
+    sweepMessageBudget,
+    sweepUnitOverheadPercent,
+    ...resolveSweepAffordability(env, sweepMessageBudget, sweepUnitOverheadPercent),
+    sweepFallthroughDepth: envInt(
+      env.PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH,
+      PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_FALLTHROUGH_DEPTH,
+      0,
+      PROJECT_DATA_ARCHIVE_MAX_SWEEP_FALLTHROUGH_DEPTH
+    ),
+    budgetStallAlertSweeps: envInt(
+      env.PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS,
+      PROJECT_DATA_ARCHIVE_DEFAULT_BUDGET_STALL_ALERT_SWEEPS,
+      1,
+      PROJECT_DATA_ARCHIVE_MAX_BUDGET_STALL_ALERT_SWEEPS
+    ),
     globalSweepIntervalMs: envInt(
       env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS,
       PROJECT_DATA_ARCHIVE_DEFAULT_GLOBAL_SWEEP_INTERVAL_MS,
@@ -416,12 +532,6 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
       PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_SESSIONS,
       1,
       50
-    ),
-    sweepMessageBudget: envInt(
-      env.PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET,
-      PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_MESSAGE_BUDGET,
-      1,
-      PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET
     ),
     sessionGraceMs: envInt(
       env.PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS,
@@ -493,6 +603,7 @@ function emptyCadenceState(
     leaseOwner: null,
     leaseExpiresAt: null,
     runCount: 0,
+    consecutiveBudgetStalls: 0,
   };
 }
 
@@ -517,6 +628,7 @@ function cadenceStateFromRow(
     leaseOwner: row.lease_owner,
     leaseExpiresAt: row.lease_expires_at,
     runCount: row.run_count,
+    consecutiveBudgetStalls: row.consecutive_budget_stalls ?? 0,
   };
 }
 
@@ -539,7 +651,43 @@ function emptyStats(
     poisoned: 0,
     chunksCopied: 0,
     rowsCopied: 0,
+    budgetDeferred: 0,
+    budgetUnaffordable: 0,
+    budgetWindowExhausted: 0,
+    messageCeiling: config.sweepMessageCeiling,
+    affordableWriteUnits: config.affordableWriteUnits,
   } satisfies ProjectDataArchiveShardingStats;
+}
+
+/**
+ * A refusal is counted in the total AND in its own category. Collapsing the two into one
+ * number is what made the deadlock invisible: an exhausted daily pool is expected on most
+ * ticks, so an alert keyed on the total would fire constantly and be ignored, while the
+ * genuinely stuck case looked identical to it (.claude/rules/72).
+ */
+function recordBudgetRefusal(
+  stats: ProjectDataArchiveShardingStats,
+  reason: ArchiveWriteRefusalReason
+): void {
+  stats.budgetDeferred = (stats.budgetDeferred ?? 0) + 1;
+  if (reason === 'window_exhausted')
+    stats.budgetWindowExhausted = (stats.budgetWindowExhausted ?? 0) + 1;
+  else stats.budgetUnaffordable = (stats.budgetUnaffordable ?? 0) + 1;
+}
+
+/**
+ * The deadlock signature: the tick did work-finding correctly, journaled nothing, and every
+ * refusal it saw was "this session costs more than the whole allowance". A spent daily pool
+ * would have produced at least one `window_exhausted`, so requiring zero of those keeps
+ * normal end-of-day backpressure out of the alert.
+ */
+function sweepStalledOnUnaffordableCandidates(stats: ProjectDataArchiveShardingStats): boolean {
+  return (
+    stats.migrated === 0 &&
+    stats.recoveredCrashGaps === 0 &&
+    (stats.budgetUnaffordable ?? 0) > 0 &&
+    (stats.budgetWindowExhausted ?? 0) === 0
+  );
 }
 
 function globalSweepCadenceLeaseMs(config: ArchiveCoordinatorConfig): number {
@@ -563,7 +711,7 @@ async function readGlobalSweepCadenceRow(
   return env.DATABASE.prepare(
     `SELECT sweep_name, last_started_at, last_completed_at, next_eligible_at,
             last_status, last_skip_reason, last_error, lease_owner, lease_expires_at,
-            run_count, updated_at
+            run_count, consecutive_budget_stalls, updated_at
      FROM project_data_archive_global_sweep_cadence
      WHERE sweep_name = ?`
   )
@@ -680,13 +828,39 @@ async function finishGlobalSweepCadence(
   error: unknown = null
 ): Promise<void> {
   const completedAt = Date.now();
-  const lastError = globalSweepCadenceLastError(stats, status, error);
+  // A stall is counted first so the escalation can read the resulting streak. `stalled`
+  // resets the streak to 0 on any tick that made progress OR that only ran out of daily
+  // pool, so an alert always describes a CURRENT run of stuck ticks (`.claude/rules/61`:
+  // a per-cycle counter that never resets becomes a lifetime counter).
+  const stalled = sweepStalledOnUnaffordableCandidates(stats);
+  const consecutiveStalls = stalled
+    ? ((await readGlobalSweepCadenceRow(env).catch(() => null))?.consecutive_budget_stalls ?? 0) + 1
+    : 0;
+  const stallAlert = stalled && consecutiveStalls >= config.budgetStallAlertSweeps;
+  const effectiveStatus = stallAlert && status === 'succeeded' ? 'partial' : status;
+  const lastError = globalSweepCadenceLastError(
+    stats,
+    effectiveStatus,
+    error,
+    stallAlert ? budgetStallLastError(config, stats, consecutiveStalls) : null
+  );
+  if (stallAlert) {
+    log.error('project_data_archive_sweep_budget_stalled', {
+      consecutiveStalls,
+      threshold: config.budgetStallAlertSweeps,
+      selected: stats.selected,
+      budgetUnaffordable: stats.budgetUnaffordable ?? 0,
+      messageCeiling: config.sweepMessageCeiling,
+      affordableWriteUnits: config.affordableWriteUnits,
+    });
+  }
   const result = await env.DATABASE.prepare(
     `UPDATE project_data_archive_global_sweep_cadence
      SET last_completed_at = ?,
          last_status = ?,
          last_skip_reason = NULL,
          last_error = ?,
+         consecutive_budget_stalls = ?,
          lease_owner = NULL,
          lease_expires_at = NULL,
          updated_at = ?
@@ -695,8 +869,9 @@ async function finishGlobalSweepCadence(
   )
     .bind(
       completedAt,
-      status,
+      effectiveStatus,
       lastError,
+      consecutiveStalls,
       completedAt,
       PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME,
       leaseOwner
@@ -705,7 +880,7 @@ async function finishGlobalSweepCadence(
   if ((result.meta.changes ?? 0) === 0) {
     log.warn('project_data_archive_global_sweep_cadence_finish_miss', {
       leaseOwner,
-      status,
+      status: effectiveStatus,
     });
   }
   const row = await readGlobalSweepCadenceRow(env).catch(() => null);
@@ -1066,21 +1241,63 @@ function precopyRefusalExclusionBinds(
  * are the unit of work, so `message_count` from `session_summaries` is the size proxy the
  * coordinator can see without touching a Durable Object.
  */
-function applyMessageBudget(candidates: CandidateRow[], budget: number, strict = false): CandidateRow[] {
-  const kept: CandidateRow[] = [];
+/**
+ * Greedy cumulative `message_count` packer, as a stateful admitter.
+ *
+ * One implementation, two consumers (`.claude/rules/24`, `.claude/rules/59`): the scoped
+ * canary's up-front `selected` disclosure, and the authoritative journaling loop in
+ * `processArchiveMigrationBatch`. The loop needs the stateful form because the cumulative
+ * budget bounds bytes MOVED, so it may only count candidates that were actually journaled —
+ * a candidate the write budget refused moved nothing and must leave the budget untouched.
+ */
+function createMessageBudgetPacker(budget: number, strict: boolean) {
   let used = 0;
-  for (const candidate of candidates) {
-    const size = Math.max(0, Number(candidate.message_count) || 0);
-    if (used + size > budget && (strict || kept.length > 0)) {
-      if (strict) continue;
-      break;
-    }
-    kept.push(candidate);
-    used += size;
-  }
-  return kept;
+  let kept = 0;
+  let closed = false;
+  return {
+    /**
+     * Returns a `commit` callback when the candidate fits, or `null` when it does not.
+     *
+     * The budget is charged only when `commit` runs, so a candidate admitted here and then
+     * refused downstream (by the daily write budget, or by a lost journal race) leaves the
+     * budget untouched — it moved no rows, so it must not be billed for any.
+     */
+    admit(candidate: CandidateRow): (() => void) | null {
+      if (closed) return null;
+      const size = Math.max(0, Number(candidate.message_count) || 0);
+      if (used + size > budget && (strict || kept > 0)) {
+        // Non-strict keeps the historical `break`: stop at the first overflow rather than
+        // descending past it. Strict descends, which is what makes fall-through possible.
+        if (!strict) closed = true;
+        return null;
+      }
+      return () => {
+        used += size;
+        kept++;
+      };
+    },
+  };
 }
 
+function applyMessageBudget(candidates: CandidateRow[], budget: number, strict = false): CandidateRow[] {
+  const packer = createMessageBudgetPacker(budget, strict);
+  return candidates.filter((candidate) => {
+    const commit = packer.admit(candidate);
+    commit?.();
+    return commit !== null;
+  });
+}
+
+/**
+ * Eligible candidates for the unscoped sweep, ordered largest-first under the derived
+ * affordability ceiling.
+ *
+ * `limit` is the number of sessions the tick may FENCE; the query deliberately reads
+ * `sweepFallthroughDepth` rows beyond it. A candidate the write budget refuses is never
+ * fenced and must not cost the tick a slot, so the caller needs spare candidates below the
+ * refused one to descend to. Reading exactly `limit` rows is what turned a single
+ * unaffordable session into a four-day standstill in production.
+ */
 async function selectCandidates(
   env: Env,
   config: ArchiveCoordinatorConfig,
@@ -1115,11 +1332,11 @@ async function selectCandidates(
      LIMIT ?`
   )
     .bind(
-      ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageBudget] : []),
+      ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageCeiling] : []),
       cutoff,
       nowIso,
       ...precopyRefusalExclusionBinds(config, now),
-      Math.min(limit, config.sweepProjects * config.sweepSessions)
+      Math.min(limit, config.sweepProjects * config.sweepSessions) + config.sweepFallthroughDepth
     )
     .all<CandidateRow>();
   return rows.results ?? [];
@@ -1139,6 +1356,10 @@ async function selectScopedCandidates(
   // An operator who names the session is asking for exactly that session; the refusal marker
   // exists to stop the unscoped sweep from re-consuming a slot, not to block that request.
   const refusalPredicate = scope.sessionId ? '' : PRECOPY_REFUSAL_EXCLUSION_SQL;
+  // Same principle for the affordability ceiling: it exists so the unscoped sweep cannot
+  // keep choosing a candidate the write budget must refuse. A named session is an explicit
+  // operator request, and `reserveArchiveWrites` still has the final say on its cost.
+  const messageCeiling = scope.sessionId ? config.sweepMessageBudget : config.sweepMessageCeiling;
   const rows = await env.DATABASE.prepare(
     `SELECT ss.project_id, ss.id AS session_id, ss.message_count
      FROM session_summaries ss
@@ -1168,7 +1389,7 @@ async function selectScopedCandidates(
     .bind(
       scope.projectId,
       ...(scope.sessionId ? [scope.sessionId] : []),
-      ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageBudget] : []),
+      ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [messageCeiling] : []),
       cutoff,
       nowIso,
       ...(scope.sessionId ? [] : precopyRefusalExclusionBinds(config, now)),
@@ -1294,6 +1515,11 @@ type ArchiveMigrationWork = {
    * the next cadence-gated sweep).
    */
   pending: CandidateRow[];
+  /**
+   * How many of `pending` the tick may actually journal. `pending` is deliberately longer
+   * than this so a write-budget refusal can descend to a smaller candidate.
+   */
+  pendingSlots: number;
 };
 
 async function selectMigrationWork(
@@ -1304,13 +1530,12 @@ async function selectMigrationWork(
 ): Promise<ArchiveMigrationWork> {
   const reclaimable = await selectReclaimableMigrations(env, config, config.sweepSessions, now);
   const remaining = config.sweepSessions - reclaimable.length;
-  if (remaining <= 0) return { migrations: reclaimable, pending: [] };
-  const pending = applyMessageBudget(
-    await selectCandidates(env, config, nowDate, remaining),
-    config.sweepMessageBudget,
-    env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
-  );
-  return { migrations: reclaimable, pending };
+  if (remaining <= 0) return { migrations: reclaimable, pending: [], pendingSlots: 0 };
+  // Not pre-packed by `sweepMessageBudget`: that budget bounds bytes MOVED, and applying it
+  // here would discard the very candidates a refusal needs to fall through to. The
+  // journaling loop applies it to the candidates it actually fences.
+  const pending = await selectCandidates(env, config, nowDate, remaining);
+  return { migrations: reclaimable, pending, pendingSlots: remaining };
 }
 
 async function selectScopedMigrationWork(
@@ -1336,8 +1561,12 @@ async function selectScopedMigrationWork(
     source: 'existing_migration',
   }));
   const remaining = config.sweepSessions - reclaimable.length;
-  if (remaining <= 0) return { migrations: reclaimable, pending: [], selected };
+  if (remaining <= 0)
+    return { migrations: reclaimable, pending: [], pendingSlots: 0, selected };
 
+  // The scoped canary reports `selected` up front, so it packs here rather than reading
+  // spare fall-through candidates. Re-packing the same list inside the journaling loop is
+  // idempotent (a packed list never overflows its own budget), so the two agree.
   const candidates = applyMessageBudget(
     await selectScopedCandidates(env, config, nowDate, scope, remaining),
     config.sweepMessageBudget,
@@ -1352,8 +1581,8 @@ async function selectScopedMigrationWork(
       source: 'eligible_session' as const,
     }))
   );
-  if (dryRun) return { migrations: reclaimable, pending: [], selected };
-  return { migrations: reclaimable, pending: candidates, selected };
+  if (dryRun) return { migrations: reclaimable, pending: [], pendingSlots: 0, selected };
+  return { migrations: reclaimable, pending: candidates, pendingSlots: remaining, selected };
 }
 
 async function claimMigrationLease(
@@ -1409,13 +1638,37 @@ function assertLeasePresent(migration: MigrationRow): asserts migration is Claim
 function globalSweepCadenceLastError(
   stats: ProjectDataArchiveShardingStats,
   status: Exclude<ProjectDataArchiveGlobalSweepCadenceStatus, 'never' | 'running'>,
-  error: unknown
+  error: unknown,
+  budgetStallDetail: string | null = null
 ): string | null {
   if (status === 'partial') {
+    // Budget stalls need the actionable text, not the failure counts, because the counts
+    // are all zero in a stall — that is precisely why it used to look like a success.
+    if (budgetStallDetail) return budgetStallDetail;
     return `completed with failed=${stats.failed}, poisoned=${stats.poisoned}`;
   }
   if (error) return errorMessage(error);
   return null;
+}
+
+/**
+ * Names the recovery action, not the symptom (`.claude/rules/72`). An operator reading this
+ * needs to know that nothing will improve on its own and which two knobs disagree.
+ */
+function budgetStallLastError(
+  config: ArchiveCoordinatorConfig,
+  stats: ProjectDataArchiveShardingStats,
+  consecutiveStalls: number
+): string {
+  return (
+    `archive sweep stalled: ${consecutiveStalls} consecutive sweeps migrated nothing because ` +
+    `every candidate's write estimate exceeded the whole daily allowance ` +
+    `(unaffordable=${stats.budgetUnaffordable ?? 0}, selected=${stats.selected}, ` +
+    `messageCeiling=${config.sweepMessageCeiling}, affordableWriteUnits=${config.affordableWriteUnits}). ` +
+    `Waiting will not clear this. Lower PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET or ` +
+    `PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT, or raise ` +
+    `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET — and verify the DEPLOYED value, not the diff.`
+  );
 }
 
 async function assertLeaseStillHeld(env: Env, migration: ClaimedMigrationRow): Promise<void> {
@@ -3114,6 +3367,12 @@ async function processArchiveMigrationBatch(input: {
   migrations: MigrationRow[];
   /** Eligible sessions journaled one at a time, each immediately before it is processed. */
   pending?: CandidateRow[];
+  /**
+   * How many of `pending` may be journaled. `pending` may be longer, holding smaller
+   * candidates for a write-budget refusal to descend to. Defaults to the whole list so an
+   * un-over-fetched caller keeps its previous behaviour.
+   */
+  pendingSlots?: number;
   onJournaled?: (candidate: CandidateRow, migration: MigrationRow) => void;
   now: number;
   startedAt: number;
@@ -3123,15 +3382,28 @@ async function processArchiveMigrationBatch(input: {
 }): Promise<void> {
   const reserve = async (projectId: string, sessionId: string): Promise<ArchiveWriteReservation | null> => {
     const { allowance, factor } = archiveWriteBudgetConfig(input.env);
+    // The estimate's own cap is the affordable UNIT count, not the message ceiling: any
+    // session whose real row inventory exceeds what the allowance can pay for is
+    // unaffordable regardless of how `session_summaries.message_count` reported it, and the
+    // estimator short-circuits such a session instead of counting further. This is the
+    // backstop for D1 <-> Durable Object count drift.
+    const estimateCap = Math.max(1, archiveAffordableWriteUnits(allowance, factor));
     const source = await ensureOwnerStub(input.env, projectId, projectId);
-    const estimatedWrites = await source.archiveSourceEstimateWrites(sessionId, factor, input.config.sweepMessageBudget);
-    if (!await reserveArchiveWrites(input.env.DATABASE, estimatedWrites, allowance, input.now)) {
-      input.stats.budgetDeferred = (input.stats.budgetDeferred ?? 0) + 1;
-      log.info('project_data_archive_write_budget_deferred', { projectId, sessionId, estimatedWrites, allowance });
+    const estimatedWrites = await source.archiveSourceEstimateWrites(sessionId, factor, estimateCap);
+    const outcome = await reserveArchiveWrites(input.env.DATABASE, estimatedWrites, allowance, input.now);
+    if (!outcome.reserved) {
+      recordBudgetRefusal(input.stats, outcome.reason);
+      // `exceeds_allowance` is NOT a deferral: waiting cannot make this session affordable.
+      // It is logged at warn so it is distinguishable in Workers Observability from the
+      // routine exhaustion of a day's pool (.claude/rules/72).
+      const detail = { projectId, sessionId, estimatedWrites, allowance, reason: outcome.reason };
+      if (outcome.reason === 'window_exhausted')
+        log.info('project_data_archive_write_budget_deferred', detail);
+      else log.warn('project_data_archive_write_budget_unaffordable', detail);
       return null;
     }
     log.info('project_data_archive_write_budget_reserved', { projectId, sessionId, estimatedWrites, allowance });
-    return { reservationId: crypto.randomUUID(), estimatedWrites, factor, maxMessages: input.config.sweepMessageBudget };
+    return { reservationId: crypto.randomUUID(), estimatedWrites, factor, maxMessages: estimateCap };
   };
   const releaseUnused = async (reservation?: ArchiveWriteReservation) => {
     if (!reservation?.reservationId) return;
@@ -3190,8 +3462,25 @@ async function processArchiveMigrationBatch(input: {
   // Fence-then-process, one session at a time: the wall-time check runs BEFORE the journal
   // row (and its `migrating` location fence) is created, so a tick never leaves sessions it
   // did not reach fenced until the next cadence-gated sweep.
-  for (const candidate of input.pending ?? []) {
+  //
+  // Both per-tick bounds are applied HERE rather than to the candidate list, because both
+  // describe work the tick actually performs: `pendingSlots` counts `migrating` fences
+  // opened, and the message budget counts rows moved. A candidate the write budget refuses
+  // opened no fence and moved no rows, so it consumes neither — it simply falls through to
+  // the next, smaller candidate. Refusing without descending is what left production
+  // re-picking one unaffordable session every hour for four days.
+  const pending = input.pending ?? [];
+  const slots = input.pendingSlots ?? pending.length;
+  const packer = createMessageBudgetPacker(
+    input.config.sweepMessageBudget,
+    input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
+  );
+  let journaled = 0;
+  for (const candidate of pending) {
+    if (journaled >= slots) break;
     if (outOfTime()) return;
+    const commitMessageBudget = packer.admit(candidate);
+    if (!commitMessageBudget) continue;
     const reservation = input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
       ? await reserve(candidate.project_id, candidate.session_id) : undefined;
     if (reservation === null) continue;
@@ -3200,6 +3489,8 @@ async function processArchiveMigrationBatch(input: {
       await releaseUnused(reservation);
       continue;
     }
+    commitMessageBudget();
+    journaled++;
     input.onJournaled?.(candidate, migration);
     await processOne(migration, reservation);
   }
