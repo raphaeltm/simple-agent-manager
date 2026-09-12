@@ -161,6 +161,15 @@ describe('workspace resource capacity accounting', () => {
         { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10, creatingWorkspaces: 1 },
         'memory pressure threshold reached',
       ],
+      // A saturated host stays a HARD refusal even while building: busy-build must not
+      // absorb CPU saturation and turn a refusal into a deferral (the scheduler would
+      // then wait on a host that is already saturated). Deleting the CPU branch is caught
+      // by the first row; only this row catches the CPU branch being made conditional on
+      // `creatingWorkspaces === 0`.
+      [
+        { cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
+        'CPU pressure threshold reached',
+      ],
     ] as const) {
       const result = evaluateWorkspaceReservationCapacity(
         { ...baseNode, lastMetrics: JSON.stringify(metrics) },
