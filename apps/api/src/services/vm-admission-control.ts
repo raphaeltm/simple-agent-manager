@@ -101,7 +101,7 @@ async function getAdmission(env: Env, taskId: string): Promise<VmTaskAdmissionRo
     `
       SELECT task_id, project_id, user_id, provider, credential_domain_key, provider_domain_key,
         scope_key, requested_vm_size, requested_vm_location, state, reason, inflight_node_id,
-        fencing_token, attempt_count, next_retry_at, wait_deadline_at
+        fencing_token, attempt_count, next_retry_at, wait_deadline_at, enqueued_at
       FROM vm_task_admissions
       WHERE task_id = ?
       LIMIT 1
@@ -160,14 +160,25 @@ export async function waitForVmAdmissionCapacity(
   input: VmTaskAdmissionIdentity,
   reason: VmAdmissionReason,
   suggestedRetryAt?: string | null,
-  providerInfo?: VmProviderCapacityInfo | null
+  providerInfo?: VmProviderCapacityInfo | null,
+  options?: { waitTimeoutMs?: number | null }
 ): Promise<VmAdmissionWait | VmAdmissionExpired> {
   await ensureVmTaskAdmission(env, input);
   const config = getVmAdmissionConfig(env);
   const existing = await getAdmission(env, input.taskId);
   const nowMs = Date.now();
   const now = toIso(nowMs);
-  const deadlineAt = existing?.wait_deadline_at ?? toIso(nowMs + config.waitTimeoutMs);
+  const existingReasonMatches = existing?.reason === reason;
+  const defaultDeadlineMs = existingReasonMatches
+    ? (parseIsoMs(existing?.wait_deadline_at) ?? nowMs + config.waitTimeoutMs)
+    : nowMs + config.waitTimeoutMs;
+  const customWaitTimeoutMs =
+    options?.waitTimeoutMs && options.waitTimeoutMs > 0 ? Math.floor(options.waitTimeoutMs) : null;
+  const enqueuedMs = existingReasonMatches ? (parseIsoMs(existing?.enqueued_at) ?? nowMs) : nowMs;
+  const deadlineAt =
+    customWaitTimeoutMs === null
+      ? toIso(defaultDeadlineMs)
+      : toIso(Math.min(defaultDeadlineMs, enqueuedMs + customWaitTimeoutMs));
   const deadlineMs = parseIsoMs(deadlineAt) ?? nowMs;
 
   if (deadlineMs <= nowMs) {
@@ -202,6 +213,7 @@ export async function waitForVmAdmissionCapacity(
         attempt_count = attempt_count + 1,
         next_retry_at = ?,
         wait_deadline_at = ?,
+        enqueued_at = ?,
         provider_category = ?,
         provider_code = ?,
         provider_status_code = ?,
@@ -215,6 +227,7 @@ export async function waitForVmAdmissionCapacity(
       reason,
       boundedRetryAt,
       deadlineAt,
+      toIso(enqueuedMs),
       providerInfo?.providerCategory ?? null,
       providerInfo?.providerCode ?? null,
       providerInfo?.providerStatusCode ?? null,
@@ -294,7 +307,12 @@ export async function tryAcquireVmProvisioningLease(
   await ensureVmTaskAdmission(env, input);
   const config = getVmAdmissionConfig(env);
   if (config.mode === 'off' || config.mode === 'shadow') {
-    await markProvisioningGranted(env, input, 0, config.mode === 'shadow' ? 'admission_shadow' : 'admission_created');
+    await markProvisioningGranted(
+      env,
+      input,
+      0,
+      config.mode === 'shadow' ? 'admission_shadow' : 'admission_created'
+    );
     return { kind: 'granted', scopeKey: input.scopeKey, fencingToken: 0 };
   }
 
@@ -666,6 +684,9 @@ export async function cancelVmTaskAdmission(
     );
   }
   if (admission?.scope_key) {
-    await wakeVmAdmissionWaiters(env, { scopeKey: admission.scope_key, reason: 'admission_cancelled' });
+    await wakeVmAdmissionWaiters(env, {
+      scopeKey: admission.scope_key,
+      reason: 'admission_cancelled',
+    });
   }
 }

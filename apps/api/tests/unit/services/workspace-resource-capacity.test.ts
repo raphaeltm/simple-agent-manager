@@ -11,6 +11,7 @@ import {
   normalizeLoadAverageToCpuPercent,
   parseResolvedResourceReservation,
   parseWorkspaceAdmissionMetrics,
+  WORKSPACE_BUSY_BUILD_QUEUE_REASON,
   type WorkspaceAdmissionPolicy,
 } from '../../../src/services/workspace-resource-capacity';
 
@@ -154,7 +155,20 @@ describe('workspace resource capacity accounting', () => {
       ],
       [
         { cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
-        'node is already creating a workspace',
+        WORKSPACE_BUSY_BUILD_QUEUE_REASON,
+      ],
+      [
+        { cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10, creatingWorkspaces: 1 },
+        'memory pressure threshold reached',
+      ],
+      // A saturated host stays a HARD refusal even while building: busy-build must not
+      // absorb CPU saturation and turn a refusal into a deferral (the scheduler would
+      // then wait on a host that is already saturated). Deleting the CPU branch is caught
+      // by the first row; only this row catches the CPU branch being made conditional on
+      // `creatingWorkspaces === 0`.
+      [
+        { cpuLoadAvg1: 8, memoryPercent: 10, diskPercent: 10, creatingWorkspaces: 1 },
+        'CPU pressure threshold reached',
       ],
     ] as const) {
       const result = evaluateWorkspaceReservationCapacity(
@@ -165,6 +179,7 @@ describe('workspace resource capacity accounting', () => {
       );
       expect(result.admitted).toBe(false);
       expect(result.reasons).toContain(reason);
+      expect(result.deferrable).toBe(reason === WORKSPACE_BUSY_BUILD_QUEUE_REASON);
       expect(result.reasons).not.toContain('CPU share budget would be exceeded');
       expect(result.reasons).not.toContain('memory budget would be exceeded after host reserve');
     }
