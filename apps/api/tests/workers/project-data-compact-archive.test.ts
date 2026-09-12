@@ -393,17 +393,41 @@ describe('compact R2 archive rollout', () => {
     const results = await Promise.all(
       Array.from({ length: 10 }, () => reserveArchiveWrites(env.DATABASE, 3000, 10_000, now))
     );
-    expect(results.filter(Boolean)).toHaveLength(3);
-    expect(await reserveArchiveWrites(env.DATABASE, 1001, 10_000, now)).toBe(false);
-    expect(await reserveArchiveWrites(env.DATABASE, 1000, 10_000, now)).toBe(true);
-    expect(await reserveArchiveWrites(env.DATABASE, 1, 10_000, now)).toBe(false);
+    expect(results.filter((result) => result.reserved)).toHaveLength(3);
+    // Every refusal below is a SPENT POOL, not an unaffordable session: each estimate is
+    // within the 10,000 allowance and only loses to what the window already holds. The
+    // caller's recovery for these is to wait for the next UTC window.
+    expect(await reserveArchiveWrites(env.DATABASE, 1001, 10_000, now)).toEqual({
+      reserved: false,
+      reason: 'window_exhausted',
+    });
+    expect(await reserveArchiveWrites(env.DATABASE, 1000, 10_000, now)).toEqual({ reserved: true });
+    expect(await reserveArchiveWrites(env.DATABASE, 1, 10_000, now)).toEqual({
+      reserved: false,
+      reason: 'window_exhausted',
+    });
+    // A fresh window with an empty pool, so the ONLY thing refusing this is the estimate
+    // exceeding the whole allowance. Waiting can never clear it, and conflating it with the
+    // spent-pool case above is what made the four-day production deadlock report `succeeded`.
     expect(
       await reserveArchiveWrites(env.DATABASE, 10001, 10_000, now + ARCHIVE_BUDGET_WINDOW_MS)
-    ).toBe(false);
+    ).toEqual({ reserved: false, reason: 'exceeds_allowance' });
     expect(
       await reserveArchiveWrites(env.DATABASE, 10_000, 10_000, now + ARCHIVE_BUDGET_WINDOW_MS)
-    ).toBe(true);
-    expect(await reserveArchiveWrites(env.DATABASE, 1, 10_000, now)).toBe(false);
+    ).toEqual({ reserved: true });
+    expect(await reserveArchiveWrites(env.DATABASE, 1, 10_000, now)).toEqual({
+      reserved: false,
+      reason: 'window_exhausted',
+    });
+    // A non-positive or non-integer estimate is an estimator defect, not budget pressure.
+    expect(await reserveArchiveWrites(env.DATABASE, 0, 10_000, now)).toEqual({
+      reserved: false,
+      reason: 'invalid_estimate',
+    });
+    expect(await reserveArchiveWrites(env.DATABASE, 1.5, 10_000, now)).toEqual({
+      reserved: false,
+      reason: 'invalid_estimate',
+    });
   });
 });
 
@@ -666,7 +690,9 @@ describe('compact coordinator restart and contention', () => {
     ).first();
     expect(budget?.reserved_writes).toBe(estimate);
     const receipt = crypto.randomUUID();
-    expect(await reserveArchiveWrites(env.DATABASE, 1000, 100000, nowDate.getTime())).toBe(true);
+    expect(await reserveArchiveWrites(env.DATABASE, 1000, 100000, nowDate.getTime())).toEqual({
+      reserved: true,
+    });
     await releaseUnusedArchiveReservation(env.DATABASE, receipt, 1000, nowDate.getTime());
     await releaseUnusedArchiveReservation(env.DATABASE, receipt, 1000, nowDate.getTime());
     expect(
@@ -683,7 +709,7 @@ describe('compact coordinator restart and contention', () => {
         100000,
         nowDate.getTime() + ARCHIVE_BUDGET_WINDOW_MS
       )
-    ).toBe(true);
+    ).toEqual({ reserved: true });
     await releaseUnusedArchiveReservation(
       env.DATABASE,
       crypto.randomUUID(),

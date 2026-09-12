@@ -3047,6 +3047,13 @@ export const projectDataArchiveGlobalSweepCadence = sqliteTable(
     leaseOwner: text('lease_owner'),
     leaseExpiresAt: integer('lease_expires_at'),
     runCount: integer('run_count').notNull().default(0),
+    /**
+     * Consecutive sweeps that journaled nothing because EVERY candidate they considered cost
+     * more than the whole daily write allowance. Non-zero means the sweep is stuck rather than
+     * idle; at `PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS` it flips `lastStatus` to
+     * `partial`. Added by migration `0156`.
+     */
+    consecutiveBudgetStalls: integer('consecutive_budget_stalls').notNull().default(0),
     updatedAt: integer('updated_at').notNull(),
   },
   (table) => ({

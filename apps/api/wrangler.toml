@@ -149,7 +149,12 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = "1"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
 # Compact format stays off until the staged rollout and production mutation approval.
 PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
-PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "250000"
+# Matches the GitHub `production` Environment override set 2026-09-08 to bound DO SQLite
+# write cost. Keeping the checked-in value equal to the deployed one means the affordability
+# ceiling every selector derives from it is the same on staging, on self-hosts and in
+# production, rather than only in the environment that carries the override
+# (.claude/rules/70). Do NOT raise this without an explicit cost decision.
+PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "100000"
 PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "32"
 PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS = "10000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
@@ -163,8 +168,30 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "3600000"
 PROJECT_DATA_ARCHIVE_SHARD_COUNT = "128"
 PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
-PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "1"
-PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "5000"
+# Only `migrating` fences per tick; the real throughput bound is _DAILY_WRITE_BUDGET. Kept low
+# because each fenced session costs ~3 D1 writes plus an unbounded chunk copy, and the tick's
+# wall-time gate is only checked BETWEEN candidates. A refused candidate opens no fence and
+# consumes no slot, so this no longer has to be raised to survive an unaffordable candidate --
+# _SWEEP_FALLTHROUGH_DEPTH does that far more cheaply.
+PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "2"
+# Cumulative message_count of NEW candidates one tick may journal. Kept below the
+# affordability ceiling the code derives from _DAILY_WRITE_BUDGET (100000 and factor 32 give
+# 3093 write units, ~1546 messages at the default 100% overhead allowance) so the shipped
+# config is coherent on its own, independent of that derivation. At 5000 against a 100000
+# allowance, largest-first selection re-picked the same unaffordable 4994-message session
+# every hour from 2026-09-08 to 2026-09-12 and reclaimed nothing.
+PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "2000"
+# Assumed percentage by which a session's write estimate exceeds its message_count (archived
+# tool payloads, grouped rows and FTS units). Reserved as headroom when the per-candidate
+# selection ceiling is derived from _DAILY_WRITE_BUDGET; 100 means "units may be up to 2x
+# message_count", the conservative side of the 1.9x measured in production on 2026-09-08.
+PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT = "100"
+# Spare candidates read beyond the tick's session slots, so a session the write budget refuses
+# can descend to a smaller one rather than ending the tick with nothing migrated.
+PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH = "4"
+# Consecutive sweeps that may migrate nothing because EVERY candidate cost more than the whole
+# daily allowance before the cadence row reports `partial` instead of `succeeded`.
+PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS = "3"
 PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS = "604800000"
 PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS = "604800000"
 # Failed journals wait this long before a sweep retries them, so three faults poison a row over
