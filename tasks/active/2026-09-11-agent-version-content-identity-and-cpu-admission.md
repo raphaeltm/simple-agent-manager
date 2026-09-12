@@ -151,19 +151,19 @@ Three problems with that:
 
 ## Acceptance criteria
 
-- [ ] A deploy whose diff does not touch `packages/vm-agent/` produces the same
+- [x] A deploy whose diff does not touch `packages/vm-agent/` produces the same
       `VM_AGENT_REQUIRED_VERSION` as the previous deploy, so existing nodes stay
       reusable. Proven by a workflow contract test and a resolver unit test.
-- [ ] A deploy that does touch `packages/vm-agent/` rotates the version.
-- [ ] A shallow clone or an unresolvable agent SHA fails the deploy.
-- [ ] `VERSION` and `BUILD_DATE` derive from the same commit, so a rebuild of unchanged
+- [x] A deploy that does touch `packages/vm-agent/` rotates the version.
+- [x] A shallow clone or an unresolvable agent SHA fails the deploy.
+- [x] `VERSION` and `BUILD_DATE` derive from the same commit, so a rebuild of unchanged
       agent content cannot trip the immutable-artifact byte check.
-- [ ] A node at 60% live CPU with declared headroom for the request is **admitted**.
+- [x] A node at 60% live CPU with declared headroom for the request is **admitted**.
       Fails against pre-fix code.
-- [ ] A node at 60% live CPU **without** declared headroom is still rejected, for the
+- [x] A node at 60% live CPU **without** declared headroom is still rejected, for the
       budget reason rather than the pressure reason.
-- [ ] A node at/above the saturation ceiling is still rejected.
-- [ ] Memory and disk pressure vetoes are unchanged, each with a passing control.
+- [x] A node at/above the saturation ceiling is still rejected.
+- [x] Memory and disk pressure vetoes are unchanged, each with a passing control.
 
 ## Review findings and dispositions
 
@@ -221,7 +221,10 @@ recorded as such.
   in `packages/cloud-init/src/template.ts`: `sam-infra.slice`, `MemoryMin`,
   `OOMScoreAdjust=-900`. The conclusion still holds for CPU specifically, and the detail
   strengthens the design rather than weakening it: the platform already reserves the
-  non-compressible resource and deliberately sets no CPU controls. Cited in the constant.
+  non-compressible resource. Cited in the constant. **Superseded 2026-09-11 by (C) in this
+  same PR**, which added `CPUWeight=1000` / `100` to the two slices — so the reviewer's
+  underlying concern was real and is now fixed, and the constant's comment was updated on
+  2026-09-12 because it still claimed the platform sets no CPU controls at all.
 - *(architecture-reviewer, MEDIUM)* "Existing projects stranded on old semantics" —
   measured, not argued: `SELECT COUNT(*) ... FROM projects` on production D1 returns
   **0 of 40** projects with any `node_cpu_threshold_percent` or
@@ -305,6 +308,158 @@ Deployed `VM_AGENT_REQUIRED_VERSION` unchanged at `e5b3dc2c0011...` across #3 an
 every node on that release stays compatible — `isNodeAgentVersionCompatible` is string
 equality, so version stability across a Worker-only deploy IS node-reuse eligibility.
 
+Deploy #5 — run `34637814489`, head `0bfe1f362`, the first deploy carrying (C). Succeeded.
+Release resolved to `e5b3dc2c0011...` again and the upload step reported
+`Reusing identical immutable VM-agent artifact` for both arches a second time, so three
+consecutive deploys (#3, #4, #5) agree on one release and two of them rebuilt the agent
+byte-identically from unchanged source.
+
+### 2026-09-12: the real-VM gate for (C), and a live demonstration of the bug
+
+(C) changes `packages/cloud-init`, which `.claude/rules/22` makes a hard merge gate: a real
+VM must boot and heartbeat. Deploys #1-#5 all predate (C) reaching a booted machine, so this
+was the outstanding gap.
+
+Workspace `01M2A6W1GTMQXH8SVA82J9A8GP` was created at 07:03:48Z against the deploy-#5 Worker
+(`VM_AGENT_REQUIRED_VERSION=e5b3dc2c0011...`, read from the Worker's `plain_text` bindings
+per `.claude/rules/70`, not from the diff).
+
+| Check | Result |
+| --- | --- |
+| Node `01M2A6W120TQVD4E3EJ1CBGQ5K` (hetzner/nbg1/cx23) | created 07:03:53Z, first heartbeat 07:06:23Z (2m30s), `status=running`, `health_status=healthy` |
+| That node's reported `agent_version` | `e5b3dc2c00118634f2b2891ad5678c0bb0a490b5` — the release, not the deployed head `0bfe1f362` |
+| Workspace reached `running` | 07:11:37Z, 7m49s end to end including node provisioning |
+| Workspace subdomain | `https://ws-01M2A6W1GTMQXH8SVA82J9A8GP.sammy.party` answers over valid TLS (`ssl_verify_result=0`), 401 unauthenticated |
+| Playwright, desktop 1280x800 + mobile 375x667 | node card renders Running / Healthy with its workspace; `scrollWidth - innerWidth == 0` on both pages |
+
+The slice hierarchy from (C) loaded on the real machine. From the node's own debug package:
+
+```
+systemd[1]: Created slice sam.slice - SAM managed services and workload hierarchy.
+systemd[1]: Created slice sam-infra.slice - SAM infrastructure services.
+systemd[1]: Created slice sam-workload.slice - SAM Docker workload containers.
+sam-headroom[1721]: Configured sam-workload.slice MemoryMax=3308M with reserve=512M
+
+systemctl status vm-agent:
+  CGroup: /sam.slice/sam-infra.slice/vm-agent.service
+```
+
+That is the discriminating check for (C), because `vm-agent.service` declares
+`Slice=sam-infra.slice`: systemd refuses to load a slice whose `CPUWeight` is outside
+1-10000, and a slice that fails to load takes the service with it. A healthy heartbeat from
+inside `/sam.slice/sam-infra.slice` therefore proves both weights parsed and both units
+loaded. cloud-init's own write log pins the rendered content further:
+
+```
+Writing to /etc/systemd/system/sam.slice          - wb: [644] 129 bytes
+Writing to /etc/systemd/system/sam-infra.slice    - wb: [644] 146 bytes
+Writing to /etc/systemd/system/sam-workload.slice - wb: [644] 133 bytes
+```
+
+129 / 146 / 133 are byte-exact for the post-(C) rendering with `MemoryMin=256M`,
+`CPUWeight=1000` and `CPUWeight=100`. Without the two added lines the same units render at
+129 / 113 / 101, so the 33- and 32-byte deltas are the change itself. `sam.slice` is
+untouched by (C) and matches at 129 either way, which is the control.
+
+Note honestly what this does **not** show: byte length is not byte content, so the exact
+weights are pinned by the generator unit tests rather than read back off the host. There is
+no SSH path to a staging VM from this workspace, and the on-VM
+`sam-verify-workload-cgroup.sh` cannot supply it either — see the correction below.
+
+**Then PR #2065 demonstrated the bug for us, live.** Its staging deploy (run `34679579887`,
+a branch that does not contain this PR) completed at 07:15:40Z and set the deployed
+`VM_AGENT_REQUIRED_VERSION` to `b95e39ca83bbf90295f137ad3a6b940491c74a94` — its own deploy
+commit, the pre-fix behaviour. Node `01M2A6W120TQ...` did not change in any way; it was
+still `running` / `healthy` and still reporting `e5b3dc2c0011...`. A placement at 07:16:31Z
+recorded, in `nodes.placement_explanation_json`:
+
+```json
+"hosts": [{
+  "nodeId": "01M2A6W120TQVD4E3EJ1CBGQ5K",
+  "outcome": "rejected",
+  "reasons": ["Host agent version is incompatible"],
+  "capacity": {"cpuMillis": 2000, "memoryMb": 3584, "diskMb": 40960, "evidence": "observed"},
+  "coTenantCount": 1,
+  "provider": "hetzner", "location": "nbg1", "providerInstanceType": "cx23"
+}]
+```
+
+A healthy 13-minute-old host with 3584 MB of observed usable memory and 2000 mCPU, refused
+on version alone, and a fresh cx33 provisioned beside it. Nothing about the node changed —
+only an unrelated branch's deploy SHA did. That is the production signature from the PR
+summary (15 of 32 refusals), reproduced end to end on staging by accident.
+
+### Deploy #6: the cross-deploy assertion, closed
+
+Deploy #6 — run `34680418699`, head `7cea66a8a`. The head moved from `0bfe1f362`; the
+resolved release did not. Succeeded 07:35Z.
+
+| Check | Result |
+| --- | --- |
+| Resolved release | `e5b3dc2c00118634f2b2891ad5678c0bb0a490b5` — the same release as #3, #4 and #5, across four deploys with four different heads |
+| `Upload VM Agent Binaries` | `Reusing identical immutable VM-agent artifact .../releases/e5b3dc2c0011.../vm-agent-linux-amd64` and `-arm64` — a third byte-identical rebuild under one immutable key |
+| Deployed `VM_AGENT_REQUIRED_VERSION` (read from the Worker's `plain_text` bindings, per `.claude/rules/70`) | `e5b3dc2c0011...` — unchanged across the deploy |
+| Node `01M2A6W120TQ...`, provisioned BETWEEN #5 and #6 | still `running` / `healthy` after the deploy, still reporting `e5b3dc2c0011...`, heartbeat 07:34:24Z |
+
+Then the payoff. A task submitted at 07:37:31Z through the **task-runner placement path**
+— `node-selection.ts` -> `isNodeAgentVersionCompatible`, the code the bug lived in — did
+not provision anything. It reused the node:
+
+```json
+"selectedNodeId": "01M2A6W120TQVD4E3EJ1CBGQ5K",
+"hosts": [{
+  "nodeId": "01M2A6W120TQVD4E3EJ1CBGQ5K",
+  "outcome": "selected",
+  "reasons": [],
+  "capacity": {"cpuMillis": 2000, "memoryMb": 3584, "diskMb": 40960, "evidence": "observed"},
+  "coTenantCount": 1,
+  "projectedUtilizationPercent": 100
+}]
+```
+
+Put that beside the 07:16:31Z record from the same node, twenty-one minutes earlier, under
+a deploy from a branch without this PR:
+
+```json
+{"nodeId": "01M2A6W120TQVD4E3EJ1CBGQ5K", "outcome": "rejected",
+ "reasons": ["Host agent version is incompatible"],
+ "capacity": {"cpuMillis": 2000, "memoryMb": 3584, "diskMb": 40960, "evidence": "observed"},
+ "coTenantCount": 1}
+```
+
+Byte-identical `capacity` and `coTenantCount`; opposite `outcome`. The node never changed.
+The only variable between the two records is which branch's deploy set
+`VM_AGENT_REQUIRED_VERSION`. Staging held one node throughout, carrying two workspaces.
+
+One more number, taken while the second workspace was building on the shared node:
+`cpuLoadAvg1` **1.97** on 2 vCPU — 98.5% — alongside `creatingWorkspaces: 1`. So an ordinary
+devcontainer build saturates a small node outright. Two readings follow from that. It is far
+past the old 50% default, which is the PR's argument made concrete: under that gate a node
+was "too busy" for the whole duration of any co-tenant's build, which is precisely when a
+warm host is most worth reusing. And it is past the new 85% ceiling too, where the ceiling
+correctly refuses — 98.5% is genuine saturation, not "busy". The two thresholds differ on
+the ordinary case and agree on the extreme, which is the intended shape.
+
+### What deploy #6 did NOT prove
+
+- **(B), the CPU saturation ceiling, was not the deciding factor.** Node
+  `01M2A6W120TQ...` reported `cpuLoadAvg1` 0.01 across the window — 0.5% of two vCPU — so
+  the reuse above is admitted identically under the old 50% gate and the new 85% ceiling.
+  (B)'s divergence case is covered by the unit tests in the discrimination table, not by
+  this staging run. Contriving load on a staging VM to move the reading past 50% would have
+  demonstrated the same predicate the tests already pin, at the cost of a longer hold on the
+  shared staging slot.
+- **The exact `CPUWeight` values were not read back off the host.** There is no SSH path to
+  a staging VM from an agent workspace, and `sam-verify-workload-cgroup.sh` cannot supply
+  one — see the accuracy note in (C). The evidence is systemd accepting both units plus the
+  byte-exact rendered sizes; the values themselves are pinned by the generator unit tests.
+- **Only the task-runner path reuses nodes at all.** `POST /api/workspaces`
+  (`workspace-create.ts:118`) sets `nodeId = body.nodeId` and provisions unconditionally
+  when the caller does not supply one — there is no capacity-based selection on that route.
+  The first attempt at this demonstration went through it and provisioned a second cx23 for
+  that reason, not for any refusal. Unrelated to this PR, recorded on idea
+  `01M28CM31AW1VHE29PWZ9YWH16`.
+
 ### What staging did NOT prove, and why
 
 A co-tenancy demonstration was attempted and did not produce co-tenancy: two `small`
@@ -323,16 +478,40 @@ same vmSize provisions**, so two legacy-sized workspaces exceed usable memory by
 the 512 MB host reserve at every size. They can never co-tenant, and the `maxCoTenants`
 values beside them are decorative. Workspaces with profile-declared requirements do pack
 (production node `01M27R4E6D...` carried two). Out of scope here, but it is likely the
-largest remaining cause of one-node-per-agent for anything using the direct
-workspace-create route, which has no `resourceRequirements` field at all.
+largest remaining cause of one-node-per-agent for any caller that does not declare
+requirements. Corrected on 2026-09-12: the direct workspace-create route **does** accept
+`resourceRequirements` (`apps/api/src/schemas/workspaces.ts:19`, threaded through
+`workspace-create.ts:113-186`); a live staging `POST /api/workspaces` with
+`{"minVcpu":1,"minMemoryGb":1,"minDiskGb":10,"maxCoTenants":3}` came back with
+`resolvedReservationJson.memoryMb = 1024`. The defect is the default a caller inherits
+when it omits the field, not a missing field. Idea `01M28CM31AW1VHE29PWZ9YWH16` has been
+corrected accordingly.
 
 ### Cleanup
 
-All staging resources created for this verification were deleted: nodes
-`01M285S1SV...`, `01M287TS0M...`, `01M28C2ETN...`, `01M28CDCTP...` and workspaces
-`01M28C2F8D...`, `01M28CDD9E...`. Staging live node count verified back to 0. (Two
-`sleeping` workspaces from 2026-09-04 with already-deleted nodes predate this work and
-were left alone.)
+2026-09-11: nodes `01M285S1SV...`, `01M287TS0M...`, `01M28C2ETN...`, `01M28CDCTP...` and
+workspaces `01M28C2F8D...`, `01M28CDD9E...` deleted; staging live node count verified back
+to 0. (Two `sleeping` workspaces from 2026-09-04 with already-deleted nodes predate this
+work and were left alone.)
+
+2026-09-12: nodes `01M2A6W120TQ...`, `01M2A7KMF5GB...`, `01M2A8P78D9H...` and workspaces
+`01M2A6W1GTMQ...`, `01M2A7KMZ8EM...`, `01M2A8P7T5QR...`, `01M2A8SMGZNE...` deleted at
+07:40-07:41Z. Staging re-verified at 0 live nodes and 0 live workspaces (excluding the two
+2026-09-04 `sleeping` rows). Production held 4 running nodes throughout, so the shared
+10-server Hetzner account peaked at 6 of 10 and this verification never ran above 2 staging
+VMs.
+
+**A cleanup mistake worth recording.** At 07:17:5xZ, while deleting my own node
+`01M2A7KMF5GB5K93C6Y9W0SPZT`, I also deleted `01M2A7K648V09XX8RCRGSAT2ZZ` after seeing it
+had no workspace attached and assuming it was a leftover from my own placement attempt. It
+belonged to the PR #2065 agent's task `01M2A7JYYDG2F0RB0Q5NRQC68R`, which then failed with
+`Provisioned node ... disappeared during node_agent_ready`. Reported to that agent with the
+full timeline so they would not mis-attribute it to a platform sweep. The lesson, for
+anyone verifying on shared staging: **a node with no workspace is not evidence that the
+node is yours.** The task-runner creates the node first and attaches the workspace later,
+so a 30-second-old unattached node is the normal appearance of somebody else's in-flight
+provisioning. Check `tasks` and `workspaces` for the node id, or track the ids you created,
+before deleting anything.
 
 ## (C) The vm-agent gets a CPU share, not just a memory reservation
 
@@ -353,6 +532,18 @@ behind builds. Both weights are env-configurable (`SAM_INFRA_SLICE_CPU_WEIGHT`,
 `SAM_WORKLOAD_SLICE_CPU_WEIGHT`) and validated to the cgroup v2 range 1-10000 at cloud-init
 generation — an out-of-range value makes the unit fail to load, which would take the slice
 hierarchy and its memory reservation down with it, so generation fails closed instead.
+
+Accuracy note (2026-09-12): commit `99441c601`'s message says "make every VM self-verify
+its CPU weights at boot". That overstates it. The assertions live in
+`/usr/local/sbin/sam-verify-workload-cgroup.sh`, which takes a mandatory
+`<container-id-or-name>` and is invoked by nothing — a repo-wide grep across `*.go`,
+`*.ts` and `*.sh` finds only the `write_files` entry and three generator tests. It is an
+operator diagnostic, and it was equally unreachable before this PR, so this is not a
+regression introduced here. Tracked as idea `01M2A7TZ0VDNM7M408KK19FA70`. What IS
+discriminating on a real VM: `vm-agent.service` declares `Slice=sam-infra.slice`, systemd
+refuses to load a slice whose `CPUWeight` falls outside 1-10000, and a slice that fails to
+load takes its service with it — so a heartbeat from inside
+`/sam.slice/sam-infra.slice/vm-agent.service` proves both units loaded.
 
 This is why (B) could settle at a saturation ceiling at all: the heartbeat-starvation risk
 was the main argument for keeping the number low.

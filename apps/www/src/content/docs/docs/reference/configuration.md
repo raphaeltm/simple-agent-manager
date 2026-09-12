@@ -1265,6 +1265,8 @@ lifecycle bookkeeping.
 | `VM_AGENT_MEMORY_RESERVE_MB`                   | `512`   | Optional Docker workload-slice memory reserve for VM-agent reachability headroom |
 | `SAM_INFRA_SLICE_MEMORY_MIN_MB`                | `256`   | systemd `MemoryMin` for the VM-agent/system-services slice                       |
 | `DOCKER_MEMORY_MIN_MB`                         | `512`   | Minimum Docker `MemoryMax` retained when `VM_AGENT_MEMORY_RESERVE_MB` is enabled |
+| `SAM_INFRA_SLICE_CPU_WEIGHT`                   | `1000`  | systemd `CPUWeight` for the VM-agent slice (cgroup v2 range 1–10000)             |
+| `SAM_WORKLOAD_SLICE_CPU_WEIGHT`                | `100`   | systemd `CPUWeight` for the Docker workload slice (cgroup v2 default)            |
 | `HEARTBEAT_DOCKER_STATS_TIMEOUT`               | `2s`    | VM-agent timeout for heartbeat Docker stats used by workspace memory telemetry   |
 | `HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS`   | `8`     | Maximum workspace containers measured by one heartbeat                           |
 | `HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES` | `65536` | Maximum bytes read from each heartbeat Docker metric command                     |

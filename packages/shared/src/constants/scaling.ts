@@ -49,11 +49,16 @@ export const MAX_MAX_WORKSPACES_PER_NODE = 10;
  * 2-vCPU host one busy core is 50%, so in production only idle nodes were ever
  * admissible and almost every agent got a VM of its own.
  *
- * The node's own cgroup layout says the same thing. `sam-infra.slice` and the
- * vm-agent unit reserve MEMORY (`MemoryMin`, `OOMScoreAdjust=-900`,
- * `packages/cloud-init/src/template.ts`) and deliberately set no CPU controls at
- * all, because memory exhaustion kills the agent while CPU contention only slows
- * it. Admission mirrors that split.
+ * The node's own cgroup layout says the same thing, and says it in two different
+ * shapes (`packages/cloud-init/src/template.ts`). Memory is protected with a
+ * HARD reservation — `sam-infra.slice` carries `MemoryMin` and the vm-agent unit
+ * `OOMScoreAdjust=-900` — because memory exhaustion KILLS the agent. CPU is
+ * protected with a PROPORTIONAL share instead: `sam-infra.slice` is
+ * `CPUWeight=1000` against `sam-workload.slice`'s 100, which is a CFS weight and
+ * so applies only under contention. Nothing caps the workload's CPU, because CPU
+ * contention only slows the agent down. Admission mirrors exactly that split:
+ * a hard veto for the non-compressible resource, a ceiling for the compressible
+ * one.
  *
  * Why 85 rather than a value nearer true saturation:
  *
