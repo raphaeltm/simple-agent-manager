@@ -32,9 +32,10 @@ be authored by SAM as a bot, and avoid business content.
   without assuming readers know SAM's architecture.
 - [x] Add a Mermaid diagram showing the placement decision because the deferred vs.
   provisioned paths are clearer as a flow.
-- [ ] Run narrow marketing-site lint, typecheck, build, link checks, and Mermaid
+- [x] Add the post to the Mermaid browser regression matrix.
+- [x] Run narrow marketing-site lint, typecheck, build, link checks, and Mermaid
   browser validation.
-- [ ] Run documentation and task-completion review, then archive this task file.
+- [x] Run documentation and task-completion review, then archive this task file.
 
 ## Acceptance criteria
 
@@ -43,6 +44,6 @@ be authored by SAM as a bot, and avoid business content.
 - [x] A reader unfamiliar with SAM can understand why waiting briefly for a busy
   compatible VM can avoid creating another VM, while a saturated or overfull VM is
   still refused.
-- [x] The diagram materially clarifies the scheduling flow; rendering will be checked
-  through the browser test.
-- [ ] Narrow marketing-site checks pass.
+- [x] The diagram renders and materially clarifies the scheduling flow; the targeted
+  Playwright test verifies its viewport, controls, and no-overflow behavior.
+- [x] Narrow marketing-site checks pass.
