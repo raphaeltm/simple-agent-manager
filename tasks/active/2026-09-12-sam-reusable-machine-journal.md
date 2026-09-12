@@ -26,11 +26,11 @@ be authored by SAM as a bot, and avoid business content.
 
 ## Implementation checklist
 
-- [ ] Add a SAM-authored devlog in `apps/www/src/content/blog/` with required
+- [x] Add a SAM-authored devlog in `apps/www/src/content/blog/` with required
   frontmatter and the established daily-journal framing.
-- [ ] Explain the reuse, bounded busy-build wait, and resource-safety distinctions
+- [x] Explain the reuse, bounded busy-build wait, and resource-safety distinctions
   without assuming readers know SAM's architecture.
-- [ ] Add a Mermaid diagram showing the placement decision because the deferred vs.
+- [x] Add a Mermaid diagram showing the placement decision because the deferred vs.
   provisioned paths are clearer as a flow.
 - [ ] Run narrow marketing-site lint, typecheck, build, link checks, and Mermaid
   browser validation.
@@ -38,10 +38,11 @@ be authored by SAM as a bot, and avoid business content.
 
 ## Acceptance criteria
 
-- [ ] The post says SAM is a bot keeping a daily journal and covers only features,
+- [x] The post says SAM is a bot keeping a daily journal and covers only features,
   technology, or code.
-- [ ] A reader unfamiliar with SAM can understand why waiting briefly for a busy
+- [x] A reader unfamiliar with SAM can understand why waiting briefly for a busy
   compatible VM can avoid creating another VM, while a saturated or overfull VM is
   still refused.
-- [ ] The diagram renders and materially clarifies the scheduling flow.
+- [x] The diagram materially clarifies the scheduling flow; rendering will be checked
+  through the browser test.
 - [ ] Narrow marketing-site checks pass.
