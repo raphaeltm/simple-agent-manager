@@ -128,7 +128,7 @@ export const PROJECT_DATA_ARCHIVE_MAX_SWEEP_MESSAGE_BUDGET = 5_000_000;
  * single unaffordable session ended every tick with nothing migrated — for four days
  * (`.claude/rules/65`).
  */
-export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_FALLTHROUGH_DEPTH = 8;
+export const PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_FALLTHROUGH_DEPTH = 4;
 export const PROJECT_DATA_ARCHIVE_MAX_SWEEP_FALLTHROUGH_DEPTH = 200;
 /**
  * Consecutive sweeps that may journal nothing solely because every candidate they

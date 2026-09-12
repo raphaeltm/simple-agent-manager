@@ -18,6 +18,17 @@ export const ARCHIVE_WRITE_FIXED_RESERVATION = 1_000;
  */
 export const ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT = 100;
 export const ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT = 10_000;
+/**
+ * Hard ceiling on the row inventory `estimateArchiveWrites` will count before giving up.
+ *
+ * The affordable unit count is the natural cap — anything larger cannot be paid for — but it
+ * scales linearly with `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET`, which has no maximum. An
+ * operator raising the allowance to clear a backlog would otherwise also raise the `LIMIT` on
+ * three COUNT subqueries that run once per candidate, once per tick, inside a Durable Object
+ * whose memory ceiling is the thing that reset it twice on 2026-09-05. A session above this
+ * many units needs an explicitly sized migration plan, not a bigger scan.
+ */
+export const ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS = 100_000;
 const FTS_BYTES_PER_UNIT = 512;
 const DEFAULT_UNUSED_RESERVATION_RETENTION_MS = 7 * ARCHIVE_BUDGET_WINDOW_MS;
 const DEFAULT_UNUSED_RESERVATION_CLEANUP_LIMIT = 100;

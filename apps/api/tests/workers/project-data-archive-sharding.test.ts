@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
+import { ARCHIVE_WRITE_FIXED_RESERVATION } from '../../src/project-data-archive/write-budget';
 import {
   abandonProjectDataArchiveMigration,
   copyBackProjectDataArchiveMigration,
@@ -899,7 +900,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     // factor 1 keeps write units and estimate arithmetic legible, and 0% assumed overhead
     // makes the derived ceiling exactly the affordable unit count.
     const allowance = largestAffordable.estimate;
-    const affordableWriteUnits = allowance - 1000;
+    const affordableWriteUnits = allowance - ARCHIVE_WRITE_FIXED_RESERVATION;
 
     // Fixture preconditions: the mix must actually straddle the boundary. Without these the
     // test could stop testing anything if the grouping rule or FTS unit size changed, and
@@ -973,7 +974,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     await isolateSweepFixture(projectId);
 
     const allowance = light.estimate;
-    const affordableWriteUnits = allowance - 1000;
+    const affordableWriteUnits = allowance - ARCHIVE_WRITE_FIXED_RESERVATION;
 
     // Preconditions: the heavy session must sort FIRST, must PASS the derived ceiling (so the
     // ceiling cannot be what skips it), and must still be unaffordable.
@@ -1035,8 +1036,8 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     // An allowance that admits the session by message_count but never by cost. The derived
     // ceiling cannot exclude it, so every tick reaches `reserve()` and is refused with
     // `exceeds_allowance` — the deadlock signature.
-    const allowance = 1000 + 100;
-    expect(allowance - 1000).toBeGreaterThanOrEqual(heavy.messageCount);
+    const allowance = ARCHIVE_WRITE_FIXED_RESERVATION + 100;
+    expect(allowance - ARCHIVE_WRITE_FIXED_RESERVATION).toBeGreaterThanOrEqual(heavy.messageCount);
     expect(heavy.estimate).toBeGreaterThan(allowance);
 
     const stallEnv = {
@@ -1099,6 +1100,190 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     );
   });
 
+  /**
+   * The over-fetch must widen what the tick can CHOOSE from, never what it may DO.
+   *
+   * `sweepSessions` bounds how many sessions a tick fences `migrating`, which is the bound
+   * that keeps one tick's copy work inside its wall-time budget. Reading spare candidates for
+   * fall-through must not quietly turn that into "everything we read" — the first cut of this
+   * change computed the slot count and then forgot to pass it, so the bound fell back to the
+   * whole over-fetched list and was enforced only incidentally by the message budget.
+   */
+  it('journals at most sweepSessions candidates even when the over-fetch returns more affordable ones', async () => {
+    await clearArchiveCadence();
+    const { projectId, source } = await newArchiveProject('archive-slot-bound');
+
+    const seeded = [];
+    for (let index = 0; index < 6; index++) {
+      seeded.push(await seedTerminalSession(source, `slot-${index}`, 10));
+    }
+    await isolateSweepFixture(projectId);
+
+    // Nothing else may bind: the allowance affords every candidate many times over and the
+    // cumulative message budget is far above their total, so `sweepSessions` is the only
+    // thing that can stop the loop. Without that, this test cannot attribute the result.
+    const totalMessages = seeded.reduce((sum, entry) => sum + entry.messageCount, 0);
+    const allowance = 1_000_000;
+    expect(seeded).toHaveLength(6);
+    expect(totalMessages).toBeLessThan(5_000);
+    for (const entry of seeded) expect(entry.estimate).toBeLessThan(allowance / 6);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2',
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000',
+        PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+        PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+        PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '5',
+        // Generous, so a slow fixture cannot mask the slot bound by running out of time.
+        PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '30000',
+      },
+      async () => {
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
+        expect(stats).toMatchObject({ skipped: false, migrated: 2, failed: 0 });
+
+        const archived = [];
+        for (const entry of seeded) {
+          const location = await readLocation(projectId, entry.sessionId);
+          if (location?.location_state === 'archive_shard') archived.push(entry.sessionId);
+        }
+        // Exactly two fences opened, and the other four are untouched and still readable in
+        // root — the liveness half, so "2" cannot be satisfied by the sweep half-failing.
+        expect(archived).toHaveLength(2);
+        expect(6 - archived.length).toBe(4);
+        for (const entry of seeded) {
+          if (archived.includes(entry.sessionId)) continue;
+          expect(await source.getMessageCount(entry.sessionId)).toBe(entry.messageCount);
+        }
+      }
+    );
+  });
+
+  /**
+   * A refused candidate moved no rows, so it must not spend any of the tick's cumulative
+   * message budget either.
+   *
+   * This is the half of the packer that a "did it migrate?" assertion cannot see: committing
+   * the budget on admission rather than on success still migrates SOMETHING, just fewer
+   * things, and every other test in this file has at most one candidate that can succeed —
+   * so all of them stay green with the invariant broken. The discriminating shape is a large
+   * refused candidate followed by smaller ones whose CUMULATIVE size only fits if the refused
+   * one was not counted.
+   */
+  it('does not charge the cumulative message budget for a candidate the write budget refused', async () => {
+    await clearArchiveCadence();
+    const { projectId, source } = await newArchiveProject('archive-packer-commit');
+
+    // Sorts first (highest message_count) and is far too expensive to reserve, because its
+    // grouped FTS bytes dominate the estimate rather than its row count.
+    const refused = await seedTerminalSession(source, 'refused', 21, 128 * 1024);
+    const small = [
+      await seedTerminalSession(source, 'small-a', 10),
+      await seedTerminalSession(source, 'small-b', 10),
+      await seedTerminalSession(source, 'small-c', 10),
+    ];
+    await isolateSweepFixture(projectId);
+
+    const allowance = ARCHIVE_WRITE_FIXED_RESERVATION + 3_000;
+    const smallTotalMessages = small.reduce((sum, entry) => sum + entry.messageCount, 0);
+    const smallTotalEstimate = small.reduce((sum, entry) => sum + entry.estimate, 0);
+    // Cumulative budget that fits all three small sessions, but NOT the refused one plus even
+    // a single small one. Without commit-on-success, the refused candidate eats 21 of the 35
+    // and only one small session can follow.
+    const messageBudget = smallTotalMessages + 5;
+
+    expect(refused.messageCount).toBeGreaterThan(small[0]!.messageCount);
+    expect(refused.estimate).toBeGreaterThan(allowance);
+    expect(smallTotalEstimate).toBeLessThanOrEqual(allowance);
+    expect(refused.messageCount + small[0]!.messageCount).toBeLessThanOrEqual(messageBudget);
+    expect(refused.messageCount + smallTotalMessages).toBeGreaterThan(messageBudget);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '3',
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: String(messageBudget),
+        PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+        PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+        PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '5',
+        PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '30000',
+      },
+      async () => {
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
+        expect(stats).toMatchObject({ skipped: false, migrated: 3, failed: 0 });
+        expect(stats.budgetUnaffordable).toBe(1);
+
+        for (const entry of small) {
+          expect(await readLocation(projectId, entry.sessionId)).toMatchObject({
+            location_state: 'archive_shard',
+          });
+        }
+        expect(await readLocation(projectId, refused.sessionId)).toBeNull();
+      }
+    );
+  });
+
+  /**
+   * The derived ceiling protects the UNSCOPED sweep from choosing a candidate it can never
+   * reserve. An operator naming a session is not that case — they are asking for exactly that
+   * session, and `reserveArchiveWrites` still has the final say on its cost. Both halves need
+   * proving: without the control, "the bypass works" is also satisfied by the ceiling never
+   * being applied to the scoped path at all.
+   */
+  it('lets an operator-named session bypass the derived ceiling, but not a project-wide canary', async () => {
+    const { projectId, source } = await newArchiveProject('archive-scoped-bypass');
+    const oversized = await seedTerminalSession(source, 'oversized', 400);
+    await isolateSweepFixture(projectId);
+
+    const allowance = ARCHIVE_WRITE_FIXED_RESERVATION + 300;
+    const sweepMessageBudget = 5_000;
+    // Straddle: above the derived ceiling, below the static message budget. If the two were
+    // still one number this fixture could not exist.
+    expect(oversized.messageCount).toBeGreaterThan(allowance - ARCHIVE_WRITE_FIXED_RESERVATION);
+    expect(oversized.messageCount).toBeLessThan(sweepMessageBudget);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: String(sweepMessageBudget),
+        PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+        PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+      },
+      async () => {
+        const named = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId: oversized.sessionId,
+          dryRun: true,
+          nowDate: new Date(Date.now() + 60_000),
+        });
+        expect(named.selected.map((entry) => entry.sessionId)).toEqual([oversized.sessionId]);
+
+        // Control: the same project, no session named. The ceiling applies and the session is
+        // not offered — the sweep's own protection, reachable through the canary too.
+        const projectWide = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          dryRun: true,
+          nowDate: new Date(Date.now() + 60_000),
+        });
+        expect(projectWide.selected).toEqual([]);
+      }
+    );
+  });
+
   it('does not count an exhausted daily pool as a stall', async () => {
     await clearArchiveCadence();
     const { projectId, source } = await newArchiveProject('archive-pool-spent');
@@ -1113,7 +1298,7 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
     const allowance = first.estimate;
     expect(first.estimate + second.estimate).toBeGreaterThan(allowance);
     expect(second.estimate).toBeLessThanOrEqual(allowance);
-    expect(allowance - 1000).toBeGreaterThanOrEqual(first.messageCount);
+    expect(allowance - ARCHIVE_WRITE_FIXED_RESERVATION).toBeGreaterThanOrEqual(first.messageCount);
 
     await withArchiveEnv(
       {
