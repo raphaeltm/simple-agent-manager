@@ -411,6 +411,36 @@ required version did. "It was still running afterwards" is a green result produc
 path this change does not control, which is exactly the non-discriminating shape
 `.claude/rules/62` exists to catch. It is recorded here as context, not as proof.
 
+There is also a second, independent argument that does not borrow the foreign deploy at all,
+put this way by the PR #2065 agent: **pre-fix, deploy #6 would itself have refused this node.**
+The old workflow set `agent_version=$ACTUAL_DEPLOY_SHA`, #6's head was `7cea66a8a`, the node
+reported `e5b3dc2c0011...`, and `isNodeAgentVersionCompatible` is string equality — so under
+the previous scheme #6 would have made its own predecessor's node ineligible. It did not. That
+is a counterfactual, but it is backed by an observed instance of exactly that mechanism: the
+foreign deploy set the required version to its own head `b95e39ca8` and produced the 07:16:31Z
+refusal. So the evidence survives a reader who discounts the foreign-deploy control arm as
+circumstantial.
+
+**The obvious objection to that control arm, and why it does not hold.** The 07:16:31Z
+rejection was recorded against PR #2065's build, which also edits
+`measuredAdmissionDiagnostic` — so the two arms could in principle differ by more than the
+release resolution. They do not, on four counts, and the #2065 agent raised this rather than
+letting it pass:
+
+1. `isNodeAgentVersionCompatible` (`apps/api/src/services/node-agent-compatibility.ts`) is
+   unchanged by both PRs — `git diff origin/main...` is empty for it on either branch.
+2. This PR does not touch `apps/api/src/durable-objects/task-runner/` at all. It changes the
+   *input* to that predicate, at deploy time, and nothing else on this path.
+3. The exclusion short-circuits **before** `evaluateWorkspaceReservationCapacity` is called —
+   `node-selection.ts:522-543` here, `reusableNodeExclusion` in `node-placement-candidate.ts:52`
+   on their branch — so `measuredAdmissionDiagnostic`, the one function both PRs edit, is not
+   on the rejection path at all.
+4. Their relocation preserved the condition, the string and the ordering of all three
+   exclusion reasons.
+
+So across the two arms the placement predicate was byte-identical and only
+`VM_AGENT_REQUIRED_VERSION` differed — which is precisely the variable this PR controls.
+
 What IS discriminating is the placement outcome, because `isNodeAgentVersionCompatible` is
 consulted by `node-selection.ts:523` on the reuse path and nowhere else in this window:
 
@@ -439,6 +469,18 @@ a deploy from a branch without this PR:
  "capacity": {"cpuMillis": 2000, "memoryMb": 3584, "diskMb": 40960, "evidence": "observed"},
  "coTenantCount": 1}
 ```
+
+**That reuse cleared the CPU budget exactly, not comfortably.** `cpuShareBudgetPercent`
+defaults to 100, so `cpuBudgetMillis = floor(2 * 1000 * 100/100)` = 2000. Workspace A had
+reserved 1000 and workspace B requested 1000, giving 2000 against a budget of 2000 — admitted
+only because `evaluateWorkspaceReservationCapacity` rejects on strict `>`. The diagnostic says
+so in the quoted block: `"projectedUtilizationPercent": 100`. One milli more on either
+workspace and the placement would have come back a hard `CPU share budget would be exceeded`
+rejection, which is a capacity outcome that looks nothing like an agent-version outcome in the
+data but reads identically as "the fix did not work" if you only check whether it placed.
+Anyone reproducing this must use the same declared block; the margin was zero. Raised by the
+PR #2065 agent after they lost time to the same trap on memory (two `medium` reservations
+overshoot a cx33 by exactly the host reserve), and confirmed here on CPU.
 
 Byte-identical `capacity` and `coTenantCount`; opposite `outcome`. The node never changed.
 The only variable between the two records is which branch's deploy set
