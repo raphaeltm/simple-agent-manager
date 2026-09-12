@@ -1074,8 +1074,28 @@ describe('generateCloudInit', () => {
         (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca-key.pem'
       );
       expect(keyEntry).toBeUndefined();
-      expect(JSON.stringify(parsed)).not.toContain(REALISTIC_PEM_BLOCK);
-      expect(JSON.stringify(parsed)).not.toContain(REALISTIC_CERT);
+      // Assert on parsed values, never JSON.stringify(parsed): stringify escapes
+      // real newlines as the two characters "\n", so a multiline PEM literal can
+      // never match there and the assertion would pass even when the block IS
+      // embedded in the generated document.
+      const writeFileContents = (parsed.write_files as CloudInitWriteFile[]).map(
+        (file) => file.content ?? ''
+      );
+      const runcmdEntries = ((parsed.runcmd ?? []) as unknown[]).filter(
+        (entry): entry is string => typeof entry === 'string'
+      );
+      for (const content of [...writeFileContents, ...runcmdEntries]) {
+        expect(content).not.toContain(REALISTIC_PEM_BLOCK);
+        expect(content).not.toContain(REALISTIC_CERT);
+        expect(content).not.toContain('-----BEGIN CERTIFICATE-----');
+        expect(content).not.toContain('PRIVATE KEY-----');
+      }
+      // Liveness for the absence assertions above (rule 62): they must not be
+      // satisfied by an empty or unwired document. The TLS bootstrap is still
+      // wired to the runtime-fetched certificate path.
+      expect(
+        writeFileContents.some((content) => content.includes('/etc/sam/tls/origin-ca.pem'))
+      ).toBe(true);
     });
 
     it('generated YAML is valid and parseable with certificate bootstrap', () => {
