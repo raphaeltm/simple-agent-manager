@@ -4,6 +4,20 @@ export const ARCHIVE_BUDGET_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const ARCHIVE_DEFAULT_DAILY_WRITE_BUDGET = 250_000;
 export const ARCHIVE_DEFAULT_WRITE_FACTOR = 32;
 export const ARCHIVE_WRITE_FIXED_RESERVATION = 1_000;
+/**
+ * Percentage by which a session's write estimate exceeds its
+ * `session_summaries.message_count`. The estimate counts archived tool payloads, grouped
+ * rows and FTS units on top of the raw `chat_messages` rows that `message_count` reports,
+ * so any candidate ceiling derived from `message_count` must leave room for them.
+ *
+ * 100 (i.e. units <= 2x message_count) is the conservative side of the only production
+ * measurement available: the single compact migration published on 2026-09-08 reserved
+ * 2216 writes for a 20-message session, which is 38 units, or 1.9x. This is a scheduling
+ * heuristic, not a guarantee — a candidate whose real overhead exceeds it is still refused
+ * by `reserveArchiveWrites` and the sweep descends to the next candidate.
+ */
+export const ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT = 100;
+export const ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT = 10_000;
 const FTS_BYTES_PER_UNIT = 512;
 const DEFAULT_UNUSED_RESERVATION_RETENTION_MS = 7 * ARCHIVE_BUDGET_WINDOW_MS;
 const DEFAULT_UNUSED_RESERVATION_CLEANUP_LIMIT = 100;
@@ -38,6 +52,65 @@ export type ArchiveWriteReservation = {
   factor: number;
   maxMessages: number;
 };
+
+/**
+ * Largest per-session write estimate the allowance can EVER admit, in estimate units
+ * (`estimateArchiveWrites` charges `ARCHIVE_WRITE_FIXED_RESERVATION + factor * units`).
+ *
+ * This is the ceiling every candidate selector must respect. Selecting above it produces a
+ * candidate `reserveArchiveWrites` refuses on every attempt for as long as the allowance
+ * stands — which, with a largest-first selector, is a permanent deadlock rather than a
+ * deferral. Deriving both ceilings from this one function is what keeps them from drifting
+ * apart the way `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` drifted from
+ * `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` on 2026-09-08.
+ */
+export function archiveAffordableWriteUnits(allowance: number, factor: number): number {
+  if (!Number.isFinite(allowance) || !Number.isFinite(factor)) return 0;
+  return Math.max(
+    0,
+    Math.floor((allowance - ARCHIVE_WRITE_FIXED_RESERVATION) / Math.max(1, factor))
+  );
+}
+
+/**
+ * Largest `session_summaries.message_count` a candidate may carry and still be expected to
+ * fit under the allowance, once `overheadPercent` worth of tool-payload, grouped and FTS
+ * units are allowed for on top of the raw message rows.
+ *
+ * Returns 0 when the allowance cannot afford any session at all, which correctly selects
+ * nothing rather than fencing a candidate that can never be reserved.
+ */
+export function archiveAffordableMessageCeiling(
+  allowance: number,
+  factor: number,
+  overheadPercent: number = ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT
+): number {
+  const units = archiveAffordableWriteUnits(allowance, factor);
+  const overhead = Number.isFinite(overheadPercent) ? Math.max(0, overheadPercent) : 0;
+  return Math.floor(units / (1 + overhead / 100));
+}
+
+/**
+ * Why a reservation was refused. The two refusals are NOT interchangeable and a caller
+ * that collapses them cannot choose a recovery action (`.claude/rules/72`):
+ *
+ * - `exceeds_allowance` — this session costs more than the entire daily pool, so no amount
+ *   of waiting helps. Recovery: descend to a smaller candidate, and lower the selection
+ *   ceiling (or raise the allowance) if every candidate is refused this way.
+ * - `window_exhausted` — today's pool is spent. Recovery: nothing; the next UTC window
+ *   refills it. This is normal backpressure and happens on most ticks of a day once the
+ *   budget has been consumed, so it must never raise an alert.
+ * - `invalid_estimate` — the estimate is not a usable positive integer. Recovery: treat as
+ *   a defect in the estimator or its inputs.
+ */
+export type ArchiveWriteRefusalReason =
+  | 'invalid_estimate'
+  | 'exceeds_allowance'
+  | 'window_exhausted';
+
+export type ArchiveWriteReservationOutcome =
+  | { reserved: true }
+  | { reserved: false; reason: ArchiveWriteRefusalReason };
 
 /** Indexed, session-scoped, capped inventory. Includes FTS text size as well as row count.
  * This is a conservative scheduling estimate, NOT a Cloudflare invoice ceiling.
@@ -86,9 +159,14 @@ export async function reserveArchiveWrites(
   estimatedWrites: number,
   allowance: number,
   now: number
-): Promise<boolean> {
-  if (!Number.isSafeInteger(estimatedWrites) || estimatedWrites <= 0 || estimatedWrites > allowance)
-    return false;
+): Promise<ArchiveWriteReservationOutcome> {
+  if (!Number.isSafeInteger(estimatedWrites) || estimatedWrites <= 0)
+    return { reserved: false, reason: 'invalid_estimate' };
+  // Returning before the upsert is deliberate — an estimate above the whole allowance can
+  // never be satisfied, so charging the window for it would be wrong. It does mean this
+  // branch never rolls the window forward, which is why the caller must be able to tell
+  // this refusal apart from an exhausted pool and descend instead of ending the tick.
+  if (estimatedWrites > allowance) return { reserved: false, reason: 'exceeds_allowance' };
   const window = Math.floor(now / ARCHIVE_BUDGET_WINDOW_MS) * ARCHIVE_BUDGET_WINDOW_MS;
   const row = await db
     .prepare(
@@ -104,7 +182,7 @@ export async function reserveArchiveWrites(
     )
     .bind(window, estimatedWrites, allowance)
     .first();
-  return row !== null;
+  return row !== null ? { reserved: true } : { reserved: false, reason: 'window_exhausted' };
 }
 
 /** Call ONLY after a definite journal/lease loss, before any archive RPC began.

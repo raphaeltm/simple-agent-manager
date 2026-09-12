@@ -677,6 +677,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS?: string;
   PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET?: string;
+  PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT?: string; // Assumed non-chat_messages share of a session's write estimate; the selection ceiling reserves this much headroom below the affordable write units (default: 100)
+  PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH?: string; // Extra candidates read beyond the tick's session slots so a write-budget refusal can descend to a smaller session (default: 8)
+  PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS?: string; // Consecutive sweeps that may migrate nothing because every candidate exceeded the whole daily allowance before the cadence row stops reporting succeeded (default: 3)
   PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS?: string;
   PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS?: string; // Retry window for sessions the root object refused at prepare before any copy (default: 604800000)
   PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS?: string; // Minimum age of a failed archive journal before an unscoped sweep reclaims it (default: 3600000)
