@@ -344,11 +344,15 @@ systemctl status vm-agent:
   CGroup: /sam.slice/sam-infra.slice/vm-agent.service
 ```
 
-That is the discriminating check for (C), because `vm-agent.service` declares
-`Slice=sam-infra.slice`: systemd refuses to load a slice whose `CPUWeight` is outside
-1-10000, and a slice that fails to load takes the service with it. A healthy heartbeat from
-inside `/sam.slice/sam-infra.slice` therefore proves both weights parsed and both units
-loaded. cloud-init's own write log pins the rendered content further:
+Each piece of that proves a different thing, and they should not be run together — a
+distinction CodeRabbit caught me eliding. `vm-agent.service` declares
+`Slice=sam-infra.slice`, and systemd refuses to load a slice whose `CPUWeight` falls outside
+1-10000, so a healthy heartbeat proves **`sam-infra.slice` loaded and its `CPUWeight=1000`
+parsed** — and nothing more. The agent does not run in `sam-workload.slice`, so its
+heartbeat says nothing about whether that unit loaded or whether `CPUWeight=100` parsed.
+That comes from the `Created slice` records above, which systemd emits per unit and which
+name all three. Exact values are pinned by the generator tests, not by either of these.
+cloud-init's own write log pins the rendered content further:
 
 ```
 Writing to /etc/systemd/system/sam.slice          - wb: [644] 129 bytes
@@ -605,7 +609,9 @@ regression introduced here. Tracked as idea `01M2A7TZ0VDNM7M408KK19FA70`. What I
 discriminating on a real VM: `vm-agent.service` declares `Slice=sam-infra.slice`, systemd
 refuses to load a slice whose `CPUWeight` falls outside 1-10000, and a slice that fails to
 load takes its service with it — so a heartbeat from inside
-`/sam.slice/sam-infra.slice/vm-agent.service` proves both units loaded.
+`/sam.slice/sam-infra.slice/vm-agent.service` proves `sam-infra.slice` loaded with a valid
+weight. It does NOT cover `sam-workload.slice`, which the agent does not run in; the
+per-unit `Created slice` journald records are what evidence that one.
 
 This is why (B) could settle at a saturation ceiling at all: the heartbeat-starvation risk
 was the main argument for keeping the number low.
