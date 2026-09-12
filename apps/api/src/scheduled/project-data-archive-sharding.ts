@@ -41,6 +41,7 @@ import {
 } from '../project-data-archive/contract';
 import {
   ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT,
+  ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS,
   ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT,
   archiveAffordableMessageCeiling,
   archiveAffordableWriteUnits,
@@ -492,11 +493,13 @@ function resolveConfig(env: Env): ArchiveCoordinatorConfig {
     0,
     ARCHIVE_MAX_SWEEP_UNIT_OVERHEAD_PERCENT
   );
+  const affordability = resolveSweepAffordability(env, sweepMessageBudget, sweepUnitOverheadPercent);
   return {
     enabled: env.PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED === 'true',
     sweepMessageBudget,
     sweepUnitOverheadPercent,
-    ...resolveSweepAffordability(env, sweepMessageBudget, sweepUnitOverheadPercent),
+    sweepMessageCeiling: affordability.sweepMessageCeiling,
+    affordableWriteUnits: affordability.affordableWriteUnits,
     sweepFallthroughDepth: envInt(
       env.PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH,
       PROJECT_DATA_ARCHIVE_DEFAULT_SWEEP_FALLTHROUGH_DEPTH,
@@ -828,25 +831,59 @@ async function finishGlobalSweepCadence(
   error: unknown = null
 ): Promise<void> {
   const completedAt = Date.now();
-  // A stall is counted first so the escalation can read the resulting streak. `stalled`
-  // resets the streak to 0 on any tick that made progress OR that only ran out of daily
-  // pool, so an alert always describes a CURRENT run of stuck ticks (`.claude/rules/61`:
+  // `stalled` resets the streak to 0 on any tick that made progress OR that only ran out of
+  // daily pool, so an alert always describes a CURRENT run of stuck ticks (`.claude/rules/61`:
   // a per-cycle counter that never resets becomes a lifetime counter).
   const stalled = sweepStalledOnUnaffordableCandidates(stats);
-  const consecutiveStalls = stalled
-    ? ((await readGlobalSweepCadenceRow(env).catch(() => null))?.consecutive_budget_stalls ?? 0) + 1
-    : 0;
-  const stallAlert = stalled && consecutiveStalls >= config.budgetStallAlertSweeps;
-  const effectiveStatus = stallAlert && status === 'succeeded' ? 'partial' : status;
-  const lastError = globalSweepCadenceLastError(
-    stats,
-    effectiveStatus,
-    error,
-    stallAlert ? budgetStallLastError(config, stats, consecutiveStalls) : null
-  );
-  if (stallAlert) {
+  // The increment, the threshold comparison and the status escalation all happen inside this
+  // one statement, reading the stored counter rather than a value fetched beforehand. A
+  // read-then-write would have to decide what to do when the read fails, and every available
+  // answer is wrong: defaulting to 0 silently restarts a streak in progress, which is exactly
+  // the condition — a sweep under stress — the counter exists to survive.
+  const stallDetail = budgetStallLastError(config, stats);
+  const nonStallError = globalSweepCadenceLastError(stats, status, error);
+  const updated = await env.DATABASE.prepare(
+    `UPDATE project_data_archive_global_sweep_cadence
+     SET last_completed_at = ?,
+         consecutive_budget_stalls = CASE WHEN ?
+           THEN consecutive_budget_stalls + 1 ELSE 0 END,
+         last_status = CASE WHEN ? AND ? = 'succeeded'
+           AND consecutive_budget_stalls + 1 >= ? THEN 'partial' ELSE ? END,
+         last_skip_reason = NULL,
+         last_error = CASE WHEN ? AND ? = 'succeeded'
+           AND consecutive_budget_stalls + 1 >= ? THEN ? ELSE ? END,
+         lease_owner = NULL,
+         lease_expires_at = NULL,
+         updated_at = ?
+     WHERE sweep_name = ?
+       AND lease_owner = ?
+     RETURNING consecutive_budget_stalls, last_status`
+  )
+    .bind(
+      completedAt,
+      stalled ? 1 : 0,
+      stalled ? 1 : 0,
+      status,
+      config.budgetStallAlertSweeps,
+      status,
+      stalled ? 1 : 0,
+      status,
+      config.budgetStallAlertSweeps,
+      stallDetail,
+      nonStallError,
+      completedAt,
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME,
+      leaseOwner
+    )
+    .first<{ consecutive_budget_stalls: number; last_status: string }>();
+  if (!updated) {
+    log.warn('project_data_archive_global_sweep_cadence_finish_miss', {
+      leaseOwner,
+      status,
+    });
+  } else if (updated.last_status === 'partial' && stalled) {
     log.error('project_data_archive_sweep_budget_stalled', {
-      consecutiveStalls,
+      consecutiveStalls: updated.consecutive_budget_stalls,
       threshold: config.budgetStallAlertSweeps,
       selected: stats.selected,
       budgetUnaffordable: stats.budgetUnaffordable ?? 0,
@@ -854,37 +891,8 @@ async function finishGlobalSweepCadence(
       affordableWriteUnits: config.affordableWriteUnits,
     });
   }
-  const result = await env.DATABASE.prepare(
-    `UPDATE project_data_archive_global_sweep_cadence
-     SET last_completed_at = ?,
-         last_status = ?,
-         last_skip_reason = NULL,
-         last_error = ?,
-         consecutive_budget_stalls = ?,
-         lease_owner = NULL,
-         lease_expires_at = NULL,
-         updated_at = ?
-     WHERE sweep_name = ?
-       AND lease_owner = ?`
-  )
-    .bind(
-      completedAt,
-      effectiveStatus,
-      lastError,
-      consecutiveStalls,
-      completedAt,
-      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_CADENCE_NAME,
-      leaseOwner
-    )
-    .run();
-  if ((result.meta.changes ?? 0) === 0) {
-    log.warn('project_data_archive_global_sweep_cadence_finish_miss', {
-      leaseOwner,
-      status: effectiveStatus,
-    });
-  }
-  const row = await readGlobalSweepCadenceRow(env).catch(() => null);
-  stats.cadence = cadenceStateFromRow(config, row, completedAt, true);
+  const finalRow = await readGlobalSweepCadenceRow(env).catch(() => null);
+  stats.cadence = cadenceStateFromRow(config, finalRow, completedAt, true);
 }
 
 function scopedConfig(
@@ -1638,13 +1646,9 @@ function assertLeasePresent(migration: MigrationRow): asserts migration is Claim
 function globalSweepCadenceLastError(
   stats: ProjectDataArchiveShardingStats,
   status: Exclude<ProjectDataArchiveGlobalSweepCadenceStatus, 'never' | 'running'>,
-  error: unknown,
-  budgetStallDetail: string | null = null
+  error: unknown
 ): string | null {
   if (status === 'partial') {
-    // Budget stalls need the actionable text, not the failure counts, because the counts
-    // are all zero in a stall — that is precisely why it used to look like a success.
-    if (budgetStallDetail) return budgetStallDetail;
     return `completed with failed=${stats.failed}, poisoned=${stats.poisoned}`;
   }
   if (error) return errorMessage(error);
@@ -1657,12 +1661,14 @@ function globalSweepCadenceLastError(
  */
 function budgetStallLastError(
   config: ArchiveCoordinatorConfig,
-  stats: ProjectDataArchiveShardingStats,
-  consecutiveStalls: number
+  stats: ProjectDataArchiveShardingStats
 ): string {
+  // The streak length is deliberately NOT interpolated: it lives in this row's own
+  // `consecutive_budget_stalls` column, and keeping it out lets the whole cadence write stay
+  // one atomic statement that reads the counter it is incrementing.
   return (
-    `archive sweep stalled: ${consecutiveStalls} consecutive sweeps migrated nothing because ` +
-    `every candidate's write estimate exceeded the whole daily allowance ` +
+    `archive sweep stalled: see consecutive_budget_stalls — every candidate's write estimate ` +
+    `exceeded the whole daily allowance ` +
     `(unaffordable=${stats.budgetUnaffordable ?? 0}, selected=${stats.selected}, ` +
     `messageCeiling=${config.sweepMessageCeiling}, affordableWriteUnits=${config.affordableWriteUnits}). ` +
     `Waiting will not clear this. Lower PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET or ` +
@@ -3368,11 +3374,15 @@ async function processArchiveMigrationBatch(input: {
   /** Eligible sessions journaled one at a time, each immediately before it is processed. */
   pending?: CandidateRow[];
   /**
-   * How many of `pending` may be journaled. `pending` may be longer, holding smaller
-   * candidates for a write-budget refusal to descend to. Defaults to the whole list so an
-   * un-over-fetched caller keeps its previous behaviour.
+   * How many of `pending` may be journaled. `pending` is deliberately longer, holding
+   * smaller candidates for a write-budget refusal to descend to.
+   *
+   * Required, with no default: an optional slot count silently falling back to
+   * `pending.length` reads as correct and is invisible at small fixture sizes — the first
+   * cut of this change computed it, forgot to pass it, and every test still passed because
+   * no fixture had more affordable candidates than slots (`.claude/rules/73`).
    */
-  pendingSlots?: number;
+  pendingSlots: number;
   onJournaled?: (candidate: CandidateRow, migration: MigrationRow) => void;
   now: number;
   startedAt: number;
@@ -3380,6 +3390,18 @@ async function processArchiveMigrationBatch(input: {
   markFailedErrorEvent: string;
   candidateFailedEvent: string;
 }): Promise<void> {
+  // `ensureOwnerStub` costs a Durable Object round trip per call, and the fall-through can now
+  // ask about many candidates in one tick — most of them in the same project, since selection
+  // is global and one project dominates the backlog. The DO memoises `ensureProjectId`
+  // internally, so the repeat calls bought nothing but network hops.
+  const ensuredOwners = new Map<string, Promise<DurableObjectStub<ProjectData>>>();
+  const sourceStub = (projectId: string): Promise<DurableObjectStub<ProjectData>> => {
+    const existing = ensuredOwners.get(projectId);
+    if (existing) return existing;
+    const pending = ensureOwnerStub(input.env, projectId, projectId);
+    ensuredOwners.set(projectId, pending);
+    return pending;
+  };
   const reserve = async (projectId: string, sessionId: string): Promise<ArchiveWriteReservation | null> => {
     const { allowance, factor } = archiveWriteBudgetConfig(input.env);
     // The estimate's own cap is the affordable UNIT count, not the message ceiling: any
@@ -3387,8 +3409,16 @@ async function processArchiveMigrationBatch(input: {
     // unaffordable regardless of how `session_summaries.message_count` reported it, and the
     // estimator short-circuits such a session instead of counting further. This is the
     // backstop for D1 <-> Durable Object count drift.
-    const estimateCap = Math.max(1, archiveAffordableWriteUnits(allowance, factor));
-    const source = await ensureOwnerStub(input.env, projectId, projectId);
+    // Floored at 1, not 0: `estimateArchiveWrites` binds `maxMessages + 1` as a SQL LIMIT, and
+    // a degenerate allowance that affords nothing would otherwise send `LIMIT 1` worth of
+    // counting into the DO to answer a question already settled. 1 keeps the query valid and
+    // still short-circuits to MAX_SAFE_INTEGER for any session with a single row. Capped
+    // above so the scan cannot grow with an unbounded allowance.
+    const estimateCap = Math.min(
+      ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS,
+      Math.max(1, archiveAffordableWriteUnits(allowance, factor))
+    );
+    const source = await sourceStub(projectId);
     const estimatedWrites = await source.archiveSourceEstimateWrites(sessionId, factor, estimateCap);
     const outcome = await reserveArchiveWrites(input.env.DATABASE, estimatedWrites, allowance, input.now);
     if (!outcome.reserved) {
@@ -3470,7 +3500,7 @@ async function processArchiveMigrationBatch(input: {
   // the next, smaller candidate. Refusing without descending is what left production
   // re-picking one unaffordable session every hour for four days.
   const pending = input.pending ?? [];
-  const slots = input.pendingSlots ?? pending.length;
+  const slots = input.pendingSlots;
   const packer = createMessageBudgetPacker(
     input.config.sweepMessageBudget,
     input.env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true'
@@ -3521,13 +3551,19 @@ export async function runProjectDataArchiveSharding(
     stats.recoveredCrashGaps = crashGapRecovery.recovered;
     stats.failed += crashGapRecovery.failed;
     const work = await selectMigrationWork(env, config, nowDate, now);
-    stats.selected = work.migrations.length + work.pending.length;
+    // Only what the tick could actually journal. The fall-through padding exists to be
+    // skipped past, so counting it would inflate the figure `budgetStallLastError` reports.
+    stats.selected = work.migrations.length + Math.min(work.pending.length, work.pendingSlots);
     await processArchiveMigrationBatch({
       env,
       config,
       archiveR2,
       migrations: work.migrations,
       pending: work.pending,
+      // `pending` is longer than the tick may journal: the extra rows exist only so a
+      // write-budget refusal has somewhere smaller to descend to. Without this the session
+      // slot bound would silently become "everything we read".
+      pendingSlots: work.pendingSlots,
       now,
       startedAt,
       stats,
@@ -3631,6 +3667,7 @@ export async function runScopedProjectDataArchiveCanary(
     archiveR2,
     migrations: work.migrations,
     pending: work.pending,
+    pendingSlots: work.pendingSlots,
     onJournaled: (candidate, migration) => {
       const entry = work.selected.find(
         (item) =>

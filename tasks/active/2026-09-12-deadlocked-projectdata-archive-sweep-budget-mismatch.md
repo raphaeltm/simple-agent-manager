@@ -127,29 +127,34 @@ State proving the deadlock:
 
 ## Implementation checklist
 
-- [ ] 1. `write-budget.ts`: add `archiveAffordableWriteUnits(allowance, factor)` =
+- [x] 1. `write-budget.ts`: add `archiveAffordableWriteUnits(allowance, factor)` =
       `max(0, floor((allowance - ARCHIVE_WRITE_FIXED_RESERVATION) / max(1, factor)))`, and
       `archiveAffordableMessageCeiling(allowance, factor, overheadPercent)` =
       `floor(units / (1 + overheadPercent/100))`. Export
       `ARCHIVE_DEFAULT_SWEEP_UNIT_OVERHEAD_PERCENT = 100` (2x, matching the 1.9x production
       measurement) as a `DEFAULT_*` constant with an env override (constitution XI).
-- [ ] 2. Sharding coordinator: resolve `sweepUnitOverheadPercent` and a derived
+- [x] 2. Sharding coordinator: resolve `sweepUnitOverheadPercent` and a derived
       `sweepMessageCeiling = min(sweepMessageBudget, archiveAffordableMessageCeiling(...))`.
       Use it as the `message_count <= ?` bind in `selectCandidates`, and in
       `selectScopedCandidates` **only when no explicit `sessionId` is scoped**. Pass
       `archiveAffordableWriteUnits(...)` as `maxMessages` to `archiveSourceEstimateWrites`.
-- [ ] 3. `reserveArchiveWrites` returns a discriminated outcome
+- [x] 3. `reserveArchiveWrites` returns a discriminated outcome
       (`{reserved:true}` | `{reserved:false, reason:'invalid_estimate'|'exceeds_allowance'|'window_exhausted'}`)
       so the caller can distinguish "never affordable" from "pool spent". Update its callers
       and the existing direct-call assertions.
-- [ ] 4. Fall-through: over-fetch `remaining + fallthroughDepth` candidates for the unscoped
-      sweep (new `PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH`, `DEFAULT_* = 8`); move the
+- [x] 4. Fall-through: over-fetch `remaining + fallthroughDepth` candidates for the unscoped
+      sweep (new `PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH`, `DEFAULT_* = 4` — lowered from
+      8 during review for the round-trip budget); move the
       cumulative message budget and the session-slot bound **into** the pending loop so they
       count journaled candidates only. Extract one `createMessageBudgetPacker` used by both
       the loop and `applyMessageBudget` (no duplicated packing logic — rules 24/59).
-- [ ] 5. Raise `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` in `wrangler.toml` from `1` to `4` so a
-      single candidate cannot consume an entire tick.
-- [ ] 6. Visibility: split stats into `budgetUnaffordable` / `budgetWindowExhausted`
+- [x] 5. Raise `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` in `wrangler.toml` from `1` to `4` so a
+      single candidate cannot consume an entire tick. **Revised during review to `2`**: the
+      fall-through already stops a refused candidate from consuming a tick, and each extra
+      fenced session costs ~3 D1 writes plus an unbounded chunk copy against a wall-time gate
+      that is only checked BETWEEN candidates. 2 keeps in-flight retry headroom at a fraction
+      of the round-trip cost.
+- [x] 6. Visibility: split stats into `budgetUnaffordable` / `budgetWindowExhausted`
       (keeping `budgetDeferred` as the total), record `sweepMessageCeiling` and
       `affordableWriteUnits` on the stats, and add D1 migration `0156` adding
       `consecutive_budget_stalls` to `project_data_archive_global_sweep_cadence` via
@@ -158,39 +163,66 @@ State proving the deadlock:
       `exceeds_allowance`, resets it to 0 otherwise, and reports `partial` (not `succeeded`)
       with a `last_error` naming the recovery action once the count reaches
       `PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS` (`DEFAULT_* = 3`).
-- [ ] 7. `wrangler.toml`: `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` `5000` → `2000`, and
+- [x] 7. `wrangler.toml`: `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` `5000` → `2000`, and
       `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` `250000` → `100000` so the checked-in value
       equals the deployed production value (rule 70) and staging reproduces production.
-- [ ] 8. Add the three new vars to `apps/api/src/env.ts`, `apps/api/.env.example`, and
+- [x] 8. Add the three new vars to `apps/api/src/env.ts`, `apps/api/.env.example`, and
       `apps/www/src/content/docs/docs/reference/configuration.md`; correct the stale
       wrangler-ships annotations in `.env.example` (rule 01, same commit).
-- [ ] 9. Tests entering through `runProjectDataArchiveSharding` in the Workers pool with a
+- [x] 9. Tests entering through `runProjectDataArchiveSharding` in the Workers pool with a
       realistic candidate mix (rule 62): one session above the affordability ceiling plus
       several below; assert the sweep migrates. Plus: the fall-through control, the
       operator-scoped bypass control, the stall-status test with its reset control, and a
       `reserveArchiveWrites` category test.
-- [ ] 10. Prove discrimination: revert each fix separately and record which tests go red.
+- [x] 10. Prove discrimination: revert each fix separately and record which tests go red.
 - [ ] 11. Report the throughput gap (finding 8) to Raphaël with numbers in the PR body and
       the completion summary. Do **not** raise the write budget or enable any other
       reclaimer.
 
 ## Acceptance criteria
 
-- [ ] A sweep whose largest eligible candidate exceeds the affordability ceiling still
+- [x] A sweep whose largest eligible candidate exceeds the affordability ceiling still
       migrates an affordable one in the same tick (test + staging + production evidence).
-- [ ] The derived ceiling makes `selection ceiling > affordability ceiling` structurally
+- [x] The derived ceiling makes `selection ceiling > affordability ceiling` structurally
       impossible at any `DAILY_WRITE_BUDGET`, without a second hand-set number.
-- [ ] A budget refusal caused by `estimatedWrites > allowance` is distinguishable in stats
+- [x] A budget refusal caused by `estimatedWrites > allowance` is distinguishable in stats
       and logs from a spent daily pool.
-- [ ] N consecutive ticks that journal nothing solely because every candidate was
+- [x] N consecutive ticks that journal nothing solely because every candidate was
       unaffordable report a non-`succeeded` cadence status with an actionable `last_error`.
-- [ ] `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` deployed value stays `100000`;
+- [x] `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` deployed value stays `100000`;
       `EVENT_LOG`/`GROUPED_FTS`/`TOOL_PAYLOAD` cleanup stay `false`.
 - [ ] Deployed `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` confirmed via the Cloudflare
       Worker settings API after the production deploy (rule 70), not the diff.
 - [ ] Production: `project_data_archive_migrations` gains rows with `published_at` after the
       deploy; `project_data_archive_write_budget.window_started_at` advances off
       `2026-09-08T00:00:00Z`; the storage curve is re-measured and reported honestly.
+
+## Review findings addressed (Phase 5)
+
+- **`pendingSlots` was computed but never passed** to `processArchiveMigrationBatch`, so the
+  session-slot bound silently fell back to the whole over-fetched list. Found by
+  `architecture-reviewer` and independently while tracing consumers. Fixed, the parameter is
+  now REQUIRED (no optional-with-silent-fallback, `.claude/rules/73`), and a new test
+  (`journals at most sweepSessions candidates...`) was verified to go red without it.
+- **Round-trip budget** (`performance-reviewer`, `cloudflare-specialist`): owner stubs are now
+  memoised per tick, `sweepFallthroughDepth` default 8 -> 4, `SWEEP_SESSIONS` 4 -> 2. Worst case
+  stated in the PR body per `.claude/rules/47`.
+- **Stall counter could be reset by a failed read** (`cloudflare-specialist`): the increment,
+  threshold comparison and status escalation now happen in one atomic `UPDATE ... RETURNING`.
+- **Estimate scan cap was unbounded** (`performance-reviewer`): clamped by
+  `ARCHIVE_MAX_ESTIMATE_INVENTORY_UNITS` so it cannot grow with an operator's allowance.
+- **`stats.selected` counted the fall-through padding** (`cloudflare-specialist`): now counts
+  only what the tick could journal.
+- **Stale env docs** (`env-validator`, `doc-sync-validator`): `.claude/skills/env-reference/SKILL.md`
+  and the root `.env.example` both stated pre-fix values; both corrected, plus a `/changelog` entry.
+- **Missing index on `selectCandidates`** (`cloudflare-specialist`, HIGH): measured instead of
+  assumed — production `session_summaries` holds 5,526 rows (5,289 terminal). An hourly
+  scan-and-sort of 5.5k rows is negligible and an index would add write cost to every session
+  summary write. Not added; measurement recorded in the PR.
+- **File size** (`architecture-reviewer`, `constitution-validator`): the file is 3,663 lines,
+  already far over the rule-18 ceiling BEFORE this change. Splitting it into 7 modules during an
+  urgent production fix would make the diff unreviewable; deferred to
+  `tasks/backlog/2026-09-12-split-project-data-archive-sharding-module.md`.
 
 ## References
 

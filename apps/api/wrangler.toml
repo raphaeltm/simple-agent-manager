@@ -168,9 +168,12 @@ PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "3600000"
 PROJECT_DATA_ARCHIVE_SHARD_COUNT = "128"
 PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
-# Above 1 so one candidate the daily write budget refuses cannot consume a whole tick. The
-# real throughput bound is _DAILY_WRITE_BUDGET; this only caps `migrating` fences per tick.
-PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "4"
+# Only `migrating` fences per tick; the real throughput bound is _DAILY_WRITE_BUDGET. Kept low
+# because each fenced session costs ~3 D1 writes plus an unbounded chunk copy, and the tick's
+# wall-time gate is only checked BETWEEN candidates. A refused candidate opens no fence and
+# consumes no slot, so this no longer has to be raised to survive an unaffordable candidate --
+# _SWEEP_FALLTHROUGH_DEPTH does that far more cheaply.
+PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "2"
 # Cumulative message_count of NEW candidates one tick may journal. Kept below the
 # affordability ceiling the code derives from _DAILY_WRITE_BUDGET (100000 and factor 32 give
 # 3093 write units, ~1546 messages at the default 100% overhead allowance) so the shipped
@@ -185,7 +188,7 @@ PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "2000"
 PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT = "100"
 # Spare candidates read beyond the tick's session slots, so a session the write budget refuses
 # can descend to a smaller one rather than ending the tick with nothing migrated.
-PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH = "8"
+PROJECT_DATA_ARCHIVE_SWEEP_FALLTHROUGH_DEPTH = "4"
 # Consecutive sweeps that may migrate nothing because EVERY candidate cost more than the whole
 # daily allowance before the cadence row reports `partial` instead of `succeeded`.
 PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS = "3"
