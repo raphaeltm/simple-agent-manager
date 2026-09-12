@@ -6,9 +6,17 @@ If you run specialist local subagents during Phase 5 of the `/do` workflow, **ev
 
 ## Rule: CodeRabbit Must Agree Before Agent Merge
 
-For `/do` workflow PRs, once CI and every non-CodeRabbit gate are green, the agent MUST apply the `coderabbit-review` label with `gh pr edit <pr-number> --add-label coderabbit-review`. The PR is not merge-ready until all CodeRabbit feedback is implemented or explicitly reviewed and closed/resolved, and the latest CodeRabbit review has no unresolved feedback.
+For `/do` workflow PRs, once CI and every non-CodeRabbit gate are green, the agent MUST apply the `coderabbit-review` label with `gh pr edit <pr-number> --add-label coderabbit-review`. The label invokes `.github/workflows/coderabbit-bot-review.yml`, which posts the CodeRabbit command through the repository's human-scoped `CODERABBIT_REVIEW_PAT`. The PR is not merge-ready until all CodeRabbit feedback is implemented or explicitly reviewed and closed/resolved, and the latest CodeRabbit review has no unresolved feedback.
 
-This is an iterative gate: keep the `coderabbit-review` label on the PR so CodeRabbit performs incremental reviews for subsequent commits, then repeat until the agent and CodeRabbit agree there is no unresolved feedback. Do not use `@coderabbitai review` comments as the trigger for SAM bot-authored PRs. If CodeRabbit is unavailable, does not respond, or the agent cannot inspect whether feedback remains unresolved, add `needs-human-review` and do not self-merge.
+If the label-triggered workflow did not run, needs to be retried, or a fresh explicit review is required after fixes, agents MAY dispatch the same trusted workflow directly:
+
+```bash
+gh workflow run coderabbit-bot-review.yml --ref main -f pr_number=<pr-number>
+```
+
+Always dispatch the workflow from `main`; do not execute a workflow definition from the PR branch. Agents MUST NOT post `@coderabbitai review` directly with their own GitHub App token: CodeRabbit ignores bot-authored review commands. The workflow is the human-identity bridge.
+
+This is an iterative gate: keep the `coderabbit-review` label on the PR so CodeRabbit can perform incremental reviews for subsequent commits, and manually dispatch the workflow when an explicit fresh review is needed. Repeat until the agent and CodeRabbit agree there is no unresolved feedback. If CodeRabbit is unavailable, does not respond, or the agent cannot inspect whether feedback remains unresolved, add `needs-human-review` and do not self-merge.
 
 ### Why This Rule Exists
 

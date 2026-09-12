@@ -33,6 +33,7 @@ import * as schema from './db/schema';
 import type { Env } from './env';
 import { applyCacheHeaders } from './lib/cache-headers';
 import { resolveCredentialedCorsOrigin } from './lib/cors-origin';
+import { withRequestScopedD1Bindings } from './lib/d1-session';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
@@ -907,4 +908,15 @@ app.notFound((c) => {
 });
 
 // Export HTTP and scheduled Worker entry points.
-export default { fetch: app.fetch, scheduled };
+//
+// `fetch` runs the whole request against a single request-scoped D1 session per database
+// (`lib/d1-session.ts`), so one request pays one trans-Atlantic round trip to the primary
+// instead of one per query. `scheduled` deliberately keeps the raw bindings: cron sweeps
+// own terminal verdicts and must read exactly what they read today
+// (`.claude/rules/53`, `/58`, `/66`). Durable Objects are constructed by the runtime with
+// the real env and are likewise unaffected.
+export default {
+  fetch: (request: Request, env: Env, ctx: ExecutionContext) =>
+    app.fetch(request, withRequestScopedD1Bindings(env), ctx),
+  scheduled,
+};

@@ -15,11 +15,16 @@ import {
 } from '../../services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
+  getVmAdmissionConfig,
+  waitForVmAdmissionCapacity,
+} from '../../services/vm-admission-control';
+import {
   resolveEffectiveNodeHostMemoryReserveMb,
   trustedWorkspaceNodeCapacityColumnsSql,
 } from '../../services/workspace-resource-capacity';
+import { buildAdmissionIdentity, scheduleAdmissionWait } from './node-provisioning-admission';
 import {
-  findNodeWithCapacity,
+  findReusableNodePlacement,
   getTaskReservation,
   hasReusableNodeReservationCapacity,
   nodeSatisfiesTaskResources,
@@ -32,6 +37,8 @@ import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export { handleNodeAgentReady } from './node-agent-ready-step';
 export { verifyNodeAgentHealthy } from './node-selection';
+
+const BUSY_BUILD_ADMISSION_REASON = 'compatible_node_building_workspace';
 
 // =========================================================================
 // Step Handlers
@@ -190,8 +197,9 @@ export async function handleNodeSelection(
   }
 
   // Try existing running nodes with capacity
-  const existingNode = await findNodeWithCapacity(state, rc);
-  if (existingNode) {
+  const existingPlacement = await findReusableNodePlacement(state, rc);
+  if (existingPlacement?.kind === 'selected') {
+    const existingNode = existingPlacement.selection;
     if (await verifyNodeAgentHealthy(existingNode.nodeId, rc)) {
       state.stepResults.nodeId = existingNode.nodeId;
       state.stepResults.capacityPlacementSnapshot = existingNode.capacityPlacementSnapshot;
@@ -204,6 +212,33 @@ export async function handleNodeSelection(
       taskId: state.taskId,
       nodeId: existingNode.nodeId,
     });
+  }
+  if (existingPlacement?.kind === 'deferrable') {
+    const admissionIdentity = await buildAdmissionIdentity(state, rc);
+    if (admissionIdentity) {
+      const waitResult = await waitForVmAdmissionCapacity(
+        rc.env,
+        admissionIdentity,
+        BUSY_BUILD_ADMISSION_REASON,
+        null,
+        null,
+        { waitTimeoutMs: getVmAdmissionConfig(rc.env).busyBuildWaitTimeoutMs }
+      );
+      if (waitResult.kind === 'expired') {
+        await persistPlacementDiagnostics(state, rc, {
+          selectedNodeId: null,
+          queue: {
+            state: 'expired',
+            reason: BUSY_BUILD_ADMISSION_REASON,
+            waitDeadlineAt: waitResult.waitDeadlineAt,
+          },
+        });
+        await rc.advanceToStep(state, 'node_provisioning');
+        return;
+      }
+      await scheduleAdmissionWait(state, rc, waitResult);
+      return;
+    }
   }
 
   // No node found — need to provision

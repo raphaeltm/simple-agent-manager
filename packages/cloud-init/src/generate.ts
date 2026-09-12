@@ -14,6 +14,9 @@ const SAFE_HOSTNAME_RE = /^[a-zA-Z0-9.-]+$/;
 /** Numeric positive integer */
 const NUMERIC_RE = /^[0-9]+$/;
 
+/** Highest workspace build queue depth accepted in cloud-init variables. */
+const WORKSPACE_BUILD_QUEUE_DEPTH_MAX = 16;
+
 /** journald size values: digits + optional K/M/G/T suffix */
 const JOURNALD_SIZE_RE = /^[0-9]+[KMGT]?$/;
 
@@ -173,6 +176,21 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     if (!BOOLEAN_RE.test(variables.devcontainerCacheEnabled)) {
       errors.push(
         `devcontainerCacheEnabled: must be "true" or "false" (got ${JSON.stringify(variables.devcontainerCacheEnabled)})`
+      );
+    }
+  }
+  if (
+    variables.workspaceBuildQueueDepth !== undefined &&
+    variables.workspaceBuildQueueDepth !== ''
+  ) {
+    const depth = Number(variables.workspaceBuildQueueDepth);
+    if (
+      !NUMERIC_RE.test(variables.workspaceBuildQueueDepth) ||
+      depth < 1 ||
+      depth > WORKSPACE_BUILD_QUEUE_DEPTH_MAX
+    ) {
+      errors.push(
+        `workspaceBuildQueueDepth: must be numeric 1-${WORKSPACE_BUILD_QUEUE_DEPTH_MAX} (got ${JSON.stringify(variables.workspaceBuildQueueDepth)})`
       );
     }
   }
@@ -447,6 +465,8 @@ export interface CloudInitVariables {
   cfIpFetchTimeout?: string;
   /** Enable opportunistic devcontainer image caching via GHCR (default: false) */
   devcontainerCacheEnabled?: string;
+  /** Concurrent devcontainer build slots on a workspace VM (default: 1). */
+  workspaceBuildQueueDepth?: string;
   /** Swap file size in MB (default: 2048). Set to "0" to disable swap. */
   swapSizeMb?: string;
   /** Swap swappiness value 0-100 (default: 60). Only relevant when swap is enabled. */
@@ -563,6 +583,7 @@ export function generateCloudInit(
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
     '{{ provider }}': variables.provider ?? '',
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',
+    '{{ workspace_build_queue_depth }}': variables.workspaceBuildQueueDepth ?? '1',
     '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',
     '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
     '{{ vm_agent_memory_reserve_mb }}': variables.vmAgentMemoryReserveMb ?? '512',

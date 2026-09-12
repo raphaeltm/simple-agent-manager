@@ -15,6 +15,7 @@ export const DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT = 90;
 export const DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS = 180_000;
 export const DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT = 40;
 export const DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT = 60;
+export const WORKSPACE_BUSY_BUILD_QUEUE_REASON = 'node build queue is busy';
 export const RESOURCE_REQUIREMENTS_SOURCE_SQL =
   "'task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'";
 const D1_BIND_LIMIT = D1_MAX_BOUND_PARAMETERS;
@@ -54,6 +55,7 @@ export interface ActiveWorkspaceReservationUsage {
 
 export interface WorkspaceReservationCapacityResult {
   admitted: boolean;
+  deferrable: boolean;
   reasons: string[];
 }
 
@@ -492,7 +494,11 @@ export function evaluateWorkspaceReservationCapacity(
     reasons.push('disk reservation budget would be exceeded');
   }
 
-  return { admitted: reasons.length === 0, reasons };
+  return {
+    admitted: reasons.length === 0,
+    deferrable: reasons.length === 1 && reasons[0] === WORKSPACE_BUSY_BUILD_QUEUE_REASON,
+    reasons,
+  };
 }
 
 export function hasWorkspaceReservationCapacity(
@@ -561,7 +567,6 @@ function measuredAdmissionDiagnostic(
   }
   if (metrics.memoryPercent === null) return 'node has no memory pressure telemetry';
   if (metrics.diskPercent === null) return 'node has no disk pressure telemetry';
-  if (metrics.creatingWorkspaces > 0) return 'node is already creating a workspace';
   if (metrics.cpuPercent !== null && metrics.cpuPercent >= policy.cpuThresholdPercent) {
     return 'CPU saturation ceiling reached';
   }
@@ -571,6 +576,7 @@ function measuredAdmissionDiagnostic(
   if (metrics.diskPercent >= policy.diskPressureThresholdPercent) {
     return 'disk pressure threshold reached';
   }
+  if (metrics.creatingWorkspaces > 0) return WORKSPACE_BUSY_BUILD_QUEUE_REASON;
   return null;
 }
 

@@ -103,6 +103,138 @@ func TestBuildQueueSerializesConcurrentBuilds(t *testing.T) {
 	s.releaseBuildSlot("ws-second")
 }
 
+func TestConfiguredWorkspaceBuildQueueDepth(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *config.Config
+		want int
+	}{
+		{name: "nil config", cfg: nil, want: config.DefaultWorkspaceBuildQueueDepth},
+		{name: "zero config", cfg: &config.Config{}, want: config.DefaultWorkspaceBuildQueueDepth},
+		{name: "configured", cfg: &config.Config{WorkspaceBuildQueueDepth: 3}, want: 3},
+		{
+			name: "above max config",
+			cfg:  &config.Config{WorkspaceBuildQueueDepth: config.MaxWorkspaceBuildQueueDepth + 1},
+			want: config.DefaultWorkspaceBuildQueueDepth,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := configuredWorkspaceBuildQueueDepth(tt.cfg); got != tt.want {
+				t.Fatalf("configuredWorkspaceBuildQueueDepth()=%d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewServerUsesConfiguredWorkspaceBuildQueueDepth(t *testing.T) {
+	srv := newWorkspaceBuildQueueDepthTestServer(t, "node-queue-depth", 2)
+
+	if got := cap(srv.buildQueue); got != 2 {
+		t.Fatalf("cap(buildQueue)=%d, want 2", got)
+	}
+}
+
+func TestNewServerUsesDefaultWorkspaceBuildQueueDepthAboveMax(t *testing.T) {
+	srv := newWorkspaceBuildQueueDepthTestServer(
+		t,
+		"node-queue-depth-above-max",
+		config.MaxWorkspaceBuildQueueDepth+1,
+	)
+
+	if got := cap(srv.buildQueue); got != config.DefaultWorkspaceBuildQueueDepth {
+		t.Fatalf("cap(buildQueue)=%d, want %d", got, config.DefaultWorkspaceBuildQueueDepth)
+	}
+}
+
+func newWorkspaceBuildQueueDepthTestServer(
+	t *testing.T,
+	nodeID string,
+	workspaceBuildQueueDepth int,
+) *Server {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate RSA key: %v", err)
+	}
+	jwks := buildWorkspaceCreateJWKS(privateKey.Public().(*rsa.PublicKey))
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(jwks)
+	}))
+	t.Cleanup(jwksServer.Close)
+
+	dir := t.TempDir()
+	cfg := &config.Config{
+		NodeID:                   nodeID,
+		ControlPlaneURL:          "http://localhost:8787",
+		JWKSEndpoint:             jwksServer.URL,
+		JWTIssuer:                "test-issuer",
+		JWTAudience:              "test-audience",
+		CookieName:               "vm_session",
+		SessionTTL:               time.Hour,
+		SessionCleanupInterval:   time.Hour,
+		SessionMaxCount:          10,
+		DefaultShell:             "/bin/sh",
+		DefaultRows:              24,
+		DefaultCols:              80,
+		WorkspaceDir:             dir,
+		PersistenceDBPath:        filepath.Join(dir, "persistence.db"),
+		ErrorReportDBPath:        filepath.Join(dir, "errors.db"),
+		ErrorReportSpoolDir:      filepath.Join(dir, "error-spool"),
+		EventStoreDBPath:         filepath.Join(dir, "events.db"),
+		MetricsDBPath:            filepath.Join(dir, "metrics.db"),
+		MetricsInterval:          time.Hour,
+		HTTPCallbackTimeout:      time.Second,
+		WorkspaceBuildQueueDepth: workspaceBuildQueueDepth,
+	}
+
+	srv, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		if srv.resourceMonitor != nil {
+			_ = srv.resourceMonitor.Close()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = srv.Stop(ctx)
+	})
+
+	return srv
+}
+
+func TestBuildQueueAllowsConfiguredParallelBuilds(t *testing.T) {
+	s := &Server{buildQueue: make(chan struct{}, 2)}
+
+	s.acquireBuildSlot("ws-first")
+	s.acquireBuildSlot("ws-second")
+
+	thirdAcquired := make(chan struct{})
+	go func() {
+		s.acquireBuildSlot("ws-third")
+		close(thirdAcquired)
+	}()
+
+	select {
+	case <-thirdAcquired:
+		t.Fatal("third build acquired slot before a configured slot was released")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	s.releaseBuildSlot("ws-first")
+	select {
+	case <-thirdAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("third build did not acquire slot after a configured slot was released")
+	}
+
+	s.releaseBuildSlot("ws-second")
+	s.releaseBuildSlot("ws-third")
+}
+
 func TestNotifyWorkspaceBuildStartedAllowsZeroCallbackTimeout(t *testing.T) {
 	requestSeen := make(chan struct{}, 1)
 	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -170,9 +170,24 @@ installations must add this policy before their next production deployment.
 | `PREVIEW_URL_TTL_SECONDS`                          | Optional lifetime for signed interactive-preview URLs                                                                                               | `300`                                    |
 | `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource prefix                                                                                                           | `sa379a6`                                |
 | `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime.                                             | `false`                                  |
+| `D1_READ_REPLICATION_MODE`                         | Optional D1 read-replication mode applied on every deploy. Defaults to `auto`; set `disabled` to remove replicas.                                   | `disabled`                               |
+| `D1_SESSION_MODE`                                  | Optional Worker D1 Sessions anchor. Defaults to `first-primary`; set `disabled` to send every query to the primary.                                 | `disabled`                               |
 | `D1_RESTORE_RECOVERY_WINDOW_DAYS`                  | Optional D1 restore window for accounts with narrower retention. Defaults to `30`; range `1`–`30`.                                                  | `7`                                      |
 | `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
 | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
+
+By default, each deploy enables D1 read replication (`read_replication.mode = "auto"`) on the
+main and observability databases, and the API Worker runs each request against a single D1 session so its
+queries after the first can be served by a nearby replica instead of crossing to the primary
+region. This is safe by construction: the session is anchored `first-primary`, so a request never
+sees data older than its own start and cannot miss a write that completed before it began, and
+queries that do not open a session always go to the primary. (It does not promise that a write
+landing *during* a request is visible to that request's later queries — that is the ordinary
+two-non-atomic-reads race, unchanged by replication and now with a shorter window.) Scheduled sweeps and Durable Objects keep the unsessioned binding. Set
+`D1_READ_REPLICATION_MODE=disabled` to remove the replicas (Cloudflare takes up to 24 hours to
+stop routing to them) or `D1_SESSION_MODE=disabled` to keep the replicas but route every Worker
+query at the primary. Replication needs no extra API-token permission beyond the
+**Account → Cloudflare Workers: D1 → Edit** grant the deploy token already requires.
 
 The reviewed default churning selectors are `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 

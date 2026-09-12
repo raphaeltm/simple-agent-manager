@@ -32,7 +32,7 @@ import { PLACEMENT_STRATEGY_HOST_ORDERING, type PlacementHostSignals } from './p
 /** A host that was considered, with the capacity gate's verdict on it. */
 export interface PlacementHostDiagnosticInput {
   signals: PlacementHostSignals;
-  outcome: 'selected' | 'rejected';
+  outcome: 'selected' | 'deferred' | 'rejected';
   reasons?: string[];
   provider?: string | null;
   location?: string | null;

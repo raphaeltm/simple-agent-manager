@@ -267,9 +267,7 @@ async function cleanupAutoProvisionedNode(
     .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
   const activeWorkspaces = workspaces.filter(
-    (ws) =>
-      ws.id !== excludeWorkspaceId &&
-      (ws.status === 'running' || ws.status === 'creating' || ws.status === 'recovery')
+    (ws) => ws.id !== excludeWorkspaceId && isActiveWorkspaceForNodeCleanup(ws.status)
   );
 
   if (activeWorkspaces.length > 0) {
@@ -279,10 +277,34 @@ async function cleanupAutoProvisionedNode(
 
   // No active workspaces — mark node as warm for reuse.
   // The NodeLifecycle DO will schedule an alarm for eventual teardown.
+  const markedIdle = await markNodeIdleForReuse(env, nodeId, userId, warmTimeoutOverrideMs);
+  if (!markedIdle) return;
+
+  try {
+    await wakeVmAdmissionWaiters(env, { userId, reason: 'node_marked_warm' });
+  } catch (err) {
+    log.warn('task_run.cleanup.admission_wake_failed', {
+      nodeId,
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+function isActiveWorkspaceForNodeCleanup(status: string): boolean {
+  return status === 'running' || status === 'creating' || status === 'recovery';
+}
+
+async function markNodeIdleForReuse(
+  env: Env,
+  nodeId: string,
+  userId: string,
+  warmTimeoutOverrideMs?: number | null
+): Promise<boolean> {
   try {
     await nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs);
     log.info('task_run.cleanup.node_marked_warm', { nodeId, userId, warmTimeoutOverrideMs });
-    await wakeVmAdmissionWaiters(env, { userId, reason: 'node_marked_warm' });
+    return true;
   } catch (err) {
     log.error('task_run.cleanup.mark_idle_failed', {
       nodeId,
@@ -303,6 +325,7 @@ async function cleanupAutoProvisionedNode(
         stopError: stopErr instanceof Error ? stopErr.message : String(stopErr),
       });
     }
+    return false;
   }
 }
 

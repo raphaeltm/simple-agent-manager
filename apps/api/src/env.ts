@@ -6,7 +6,12 @@ import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
 export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
-  // D1 Database
+  // D1 Database.
+  // On the Worker `fetch` path this is NOT the raw binding: `index.ts`'s default export hands
+  // each request a D1 Sessions API facade (see lib/d1-session.ts), so every query in one
+  // request shares a session and only the first crosses to the primary region. `scheduled()`
+  // and Durable Objects receive the raw binding. Anything keyed on binding IDENTITY must go
+  // through `resolveD1BindingIdentity`.
   DATABASE: D1Database;
   // KV for sessions
   KV: KVNamespace;
@@ -49,6 +54,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)
+  // Also session-scoped on the `fetch` path — see the note on DATABASE above.
   OBSERVABILITY_DATABASE: D1Database;
   // Durable Objects
   PROJECT_DATA: DurableObjectNamespace;
@@ -188,6 +194,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PAGES_PROJECT_NAME?: string;
   // Pages project name for proxying www.* requests (marketing site)
   WWW_PAGES_PROJECT_NAME?: string;
+  // D1 Sessions API anchor for the Worker fetch handler: 'first-primary' (default) or
+  // 'disabled' to route every query straight at the primary. See lib/d1-session.ts.
+  D1_SESSION_MODE?: string;
   // User approval / invite-only mode
   REQUIRE_APPROVAL?: string;
   // Smoke test auth tokens (CI authentication — only set in staging/test environments)
@@ -325,6 +334,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   VM_ADMISSION_RETRY_MIN_MS?: string;
   VM_ADMISSION_RETRY_MAX_MS?: string;
   VM_ADMISSION_WAIT_TIMEOUT_MS?: string;
+  VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS?: string;
+  WORKSPACE_BUILD_QUEUE_DEPTH?: string;
   VM_ADMISSION_PROVIDER_COOLDOWN_MS?: string;
   VM_ADMISSION_WAKE_BATCH_SIZE?: string;
   VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH?: string;

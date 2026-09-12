@@ -400,6 +400,7 @@ jobs:
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
           VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}
+          D1_SESSION_MODE: ${{ vars.D1_SESSION_MODE }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           CRON_SWEEPS_ENABLED_KV_KEY: ${{ vars.CRON_SWEEPS_ENABLED_KV_KEY }}
           DO_ALARMS_ENABLED_KV_KEY: ${{ vars.DO_ALARMS_ENABLED_KV_KEY }}
@@ -740,6 +741,36 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           AI_GATEWAY_ID: ${{ steps.deploy_resources.outputs.ai_gateway }}
 
+      # D1 primaries are pinned to the region they were created in, while Workers run at the
+      # edge. Read replication lets the Sessions API in apps/api/src/lib/d1-session.ts serve a
+      # request's queries from a nearby replica instead of crossing to the primary each time.
+      # Idempotent, and a no-op for queries that do not open a session — see the script header
+      # for why this is a deploy step rather than a Pulumi property.
+      - name: Configure D1 Read Replication
+        if: ${{ inputs.dry_run != true }}
+        env:
+          # AWS_* for Pulumi R2 backend (pulumi stack output)
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          D1_READ_REPLICATION_MODE: ${{ vars.D1_READ_REPLICATION_MODE }}
+        run: |
+          set -euo pipefail
+          PRIMARY_D1_ID=$(cd infra && pulumi stack output d1DatabaseId)
+          OBSERVABILITY_D1_ID=$(cd infra && pulumi stack output observabilityD1DatabaseId)
+          # Guard each output individually. Word-splitting in the script's loop would silently
+          # drop an empty token, so a single missing output would configure one database and
+          # still report success ("silence is not success", .claude/rules/53).
+          if [ -z "$PRIMARY_D1_ID" ] || [ -z "$OBSERVABILITY_D1_ID" ]; then
+            echo "::error::Pulumi did not resolve both D1 database IDs (primary='${PRIMARY_D1_ID}', observability='${OBSERVABILITY_D1_ID}')"
+            exit 1
+          fi
+          D1_DATABASE_IDS="${PRIMARY_D1_ID} ${OBSERVABILITY_D1_ID}"
+          export D1_DATABASE_IDS
+          bash scripts/deploy/configure-d1-read-replication.sh
+
       - name: Check First Deploy Status
         id: first_deploy
         if: ${{ inputs.dry_run != true }}
@@ -965,6 +996,7 @@ jobs:
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
           RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
           VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}
+          D1_SESSION_MODE: ${{ vars.D1_SESSION_MODE }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           CRON_SWEEPS_ENABLED_KV_KEY: ${{ vars.CRON_SWEEPS_ENABLED_KV_KEY }}
           DO_ALARMS_ENABLED_KV_KEY: ${{ vars.DO_ALARMS_ENABLED_KV_KEY }}

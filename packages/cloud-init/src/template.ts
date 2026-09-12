@@ -190,6 +190,7 @@ write_files:
       Environment=TLS_KEY_PATH={{ tls_key_path }}
       Environment=PROVIDER={{ provider }}
       Environment=DEVCONTAINER_CACHE_ENABLED={{ devcontainer_cache_enabled }}
+      Environment=WORKSPACE_BUILD_QUEUE_DEPTH={{ workspace_build_queue_depth }}
       Environment=ROLE={{ role }}
       Environment=NODE_ROLE={{ role }}
       Environment=ENVIRONMENT_ID={{ environment_id }}

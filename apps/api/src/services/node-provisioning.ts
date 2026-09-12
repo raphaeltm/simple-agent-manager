@@ -354,6 +354,7 @@ export async function provisionNode(
       heartbeatWorkspaceMetricsMaxContainers: env.HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS,
       heartbeatWorkspaceMetricsMaxOutputBytes: env.HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES,
       devcontainerCacheEnabled: env.DEVCONTAINER_CACHE_ENABLED,
+      workspaceBuildQueueDepth: env.WORKSPACE_BUILD_QUEUE_DEPTH,
       swapSizeMb: env.SWAP_SIZE_MB,
       swapSwappiness: env.SWAP_SWAPPINESS,
       role: isDeploymentNode ? 'deployment' : undefined,
