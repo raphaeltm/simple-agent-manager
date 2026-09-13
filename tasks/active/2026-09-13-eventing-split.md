@@ -81,7 +81,7 @@ The following primary file lists partition every changed path exactly once. The 
 | 2. Same-chat durable wake and mailbox integration, OFF                     |            27 |                         6 |                       33 |
 | 3. Durable source outbox and GitHub/generic producers                      |            23 |                         6 |                       29 |
 | 4. Credential-limit telemetry and proxy accounting                         |            46 |                         0 |                       46 |
-| 5. Reserved submissions, schedules, watches, live trigger-path integration |            81 |                         3 |                       84 |
+| 5. Reserved submissions, schedules, watches, live trigger-path integration |            81 |                         4 |                       85 |
 | 6. Channels, member subscriptions, API/MCP surfaces                        |            24 |                         6 |                       30 |
 | 7. Events UI, remaining docs, and integration evidence                     |            67 |                         0 |                       67 |
 
@@ -411,9 +411,12 @@ apps/api/tests/workers/trigger-execution-cleanup.test.ts
 scripts/quality/node-pool-boundary/inventory-data.ts
 ```
 
+Schedule MCP dependency: `routes/mcp/project-schedule-tools.ts` imports `channelCallerContext` from `services/project-event-channels.ts`. Piece 5 must carry that caller-context helper and its required imports only; leave channel API/storage functions to piece 6.
+
 Additional shared-file hunk touches (included in footprint):
 
 ```text
+apps/api/src/services/project-event-channels.ts
 apps/api/src/durable-objects/project-data/prompt-delivery-runner.ts
 apps/api/src/durable-objects/project-data/sessions.ts
 apps/api/src/services/session-recovery.ts
