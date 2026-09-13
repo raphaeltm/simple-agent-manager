@@ -2,11 +2,8 @@
  * Message materialization — grouping streaming tokens and FTS5 indexing.
  */
 
-/**
- * Roles whose consecutive tokens are concatenated into a single grouped message.
- * Non-groupable roles (user, system, plan) pass through as individual messages.
- */
 import { log } from '../../lib/logger';
+import { groupTextTokens, TEXT_SEARCH_GROUPABLE_ROLES } from './message-grouping';
 import {
   parseCount,
   parseMaterializationCheck,
@@ -14,8 +11,6 @@ import {
   parseRowid,
   parseSessionId,
 } from './row-schemas';
-
-const GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);
 
 /**
  * Materialize grouped messages for a stopped session.
@@ -55,21 +50,11 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
     return;
   }
 
-  // Group consecutive same-role tokens
-  const grouped: Array<{ id: string; role: string; content: string; createdAt: number }> = [];
-  for (const token of tokens) {
-    const last = grouped[grouped.length - 1];
-    if (last && last.role === token.role && GROUPABLE_ROLES.has(token.role)) {
-      last.content += token.content;
-    } else {
-      grouped.push({
-        id: token.id,
-        role: token.role,
-        content: token.content,
-        createdAt: token.createdAt,
-      });
-    }
-  }
+  // Group consecutive same-role tokens. This index only ever yields text, so it
+  // uses the wider role set that folds a tool call's textual result into the
+  // surrounding prose — unlike the transcript read path, which must keep tool
+  // rows separate to preserve their per-call ids (see message-grouping.ts).
+  const grouped = groupTextTokens(tokens, TEXT_SEARCH_GROUPABLE_ROLES);
 
   // Insert grouped messages and sync FTS5 index
   for (const msg of grouped) {

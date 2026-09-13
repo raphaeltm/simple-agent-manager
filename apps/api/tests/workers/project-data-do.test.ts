@@ -1305,18 +1305,55 @@ describe('ProjectData Durable Object', () => {
       await stub.persistMessageBatch(sessionId, messages);
       const { messages: stored } = await stub.getMessages(sessionId);
 
-      expect(stored).toHaveLength(6);
-      // Messages must be in sequence order despite identical timestamps
-      expect(stored[0]!.content).toBe('Hello');
-      expect(stored[1]!.content).toBe(' world');
-      expect(stored[2]!.content).toBe('!');
-      expect(stored[3]!.content).toBe(' How');
-      expect(stored[4]!.content).toBe(' are');
-      expect(stored[5]!.content).toBe(' you?');
-
-      // Verify sequence numbers are returned
+      // The six deltas are one turn, so they are written and served as one row.
+      // The CONCATENATION ORDER is the ordering assertion: the timestamps are
+      // identical, so only the sequence tiebreaker can produce this string — a
+      // broken tiebreaker scrambles it rather than merely reordering rows.
+      expect(stored).toHaveLength(1);
+      expect(stored[0]!.content).toBe('Hello world! How are you?');
       expect(stored[0]!.sequence).toBe(1);
-      expect(stored[5]!.sequence).toBe(6);
+    });
+
+    it('preserves row order when timestamps collide across non-groupable roles', async () => {
+      const stub = getStub('project-batch-ordering-roles');
+      const sessionId = await stub.createSession(null, null);
+
+      // Control for the test above: roles that never merge must still come back
+      // in sequence order, so the ordering guarantee is proven independently of
+      // delta coalescing.
+      const sameTimestamp = new Date().toISOString();
+      const messages = [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user' as const,
+          content: 'first',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 1,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: 'second',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 2,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user' as const,
+          content: 'third',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 3,
+        },
+      ];
+
+      await stub.persistMessageBatch(sessionId, messages);
+      const { messages: stored } = await stub.getMessages(sessionId);
+
+      expect(stored.map((m) => m.content)).toEqual(['first', 'second', 'third']);
+      expect(stored.map((m) => m.sequence)).toEqual([1, 2, 3]);
     });
 
     it('auto-assigns sequence when not provided by client', async () => {

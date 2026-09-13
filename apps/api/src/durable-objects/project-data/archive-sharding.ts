@@ -2450,7 +2450,8 @@ export function archiveSourceReadMessages(
     roles,
     compact,
     order,
-    compactOptions
+    compactOptions,
+    messages.resolveMessageGroupingOptions(sql, env, input.sessionId)
   );
 }
 
@@ -2565,9 +2566,18 @@ export async function archiveTargetReadMessages(
     );
   }
   const compactOptions = compact ? messages.resolveCompactMessageOptions(env) : undefined;
+  const grouping = messages.resolveMessageGroupingOptions(sql, env, input.sessionId);
   if (compactArchive.isCompactArchive(sql, input.sessionId)) {
     const rows = await compactArchive.compactRawPage(sql, env, input.sessionId, { ...options, limit: limit + 1 });
-    return messages.formatMessageRows(rows, input.sessionId, limit, compact, order, compactOptions);
+    return messages.formatMessageRows(
+      rows,
+      input.sessionId,
+      limit,
+      compact,
+      order,
+      compactOptions,
+      grouping
+    );
   }
   return messages.getMessages(
     sql,
@@ -2578,7 +2588,8 @@ export async function archiveTargetReadMessages(
     roles,
     compact,
     order,
-    compactOptions
+    compactOptions,
+    grouping
   );
 }
 

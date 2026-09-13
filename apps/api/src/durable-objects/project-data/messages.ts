@@ -8,6 +8,12 @@ import {
   type ProjectDataArchiveSourceIntentState,
 } from '../../project-data-archive/contract';
 import {
+  type ChatMessageRowGroupingOptions,
+  coalesceStreamingDeltaBatch,
+  groupChatMessageRows,
+  resolveMessageGroupingConfig,
+} from './message-grouping';
+import {
   insertNewMessage,
   nextSequence,
   resolveDuplicateMessage,
@@ -162,6 +168,26 @@ export function persistMessageBatch(
     throw new Error(`Session ${sessionId} is stopped and cannot accept messages`);
   }
 
+  // Fold this flush's streaming deltas into whole turns BEFORE anything is
+  // written. The browser receives this batch as one `messages.batch` broadcast
+  // either way, so the live cadence is unchanged; the transcript just stops
+  // storing one row per token. Merging must happen here rather than by appending
+  // to an already-written row — `project-data-message-text-invariant.test.ts`
+  // pins that no path may rewrite or delete `chat_messages.content`.
+  const groupingConfig = resolveMessageGroupingConfig(env);
+  const coalesced = groupingConfig.coalescingEnabled
+    ? coalesceStreamingDeltaBatch(messages, groupingConfig.maxGroupChars)
+    : { messages: [...messages], absorbed: 0 };
+  if (coalesced.absorbed > 0) {
+    log.debug('messages.batch_deltas_coalesced', {
+      sessionId,
+      received: messages.length,
+      written: coalesced.messages.length,
+      absorbed: coalesced.absorbed,
+    });
+  }
+  const batch = coalesced.messages;
+
   const maxMessages = resolveMaxMessagesPerSession(env);
   const startingCount = parseMessageCount(session, 'messages.batch_count');
   let persisted = 0;
@@ -183,7 +209,7 @@ export function persistMessageBatch(
   // DB queries when the same user content appears multiple times in one batch.
   const seenUserContent = new Set<string>();
 
-  for (const msg of messages) {
+  for (const msg of batch) {
     const origin = msg.origin ?? null;
     const existing = sql
       .exec('SELECT id FROM chat_messages WHERE id = ?', msg.messageId)
@@ -278,7 +304,7 @@ export function persistMessageBatch(
     );
 
     if (!session.topic) {
-      const firstUserMsg = messages.find(
+      const firstUserMsg = batch.find(
         (m) => m.role === 'user' && (m.origin ?? null) !== 'system'
       );
       if (firstUserMsg) {
@@ -303,7 +329,7 @@ export function persistMessageBatch(
   }
 
   const remainingCapacity = Math.max(0, maxMessages - startingCount - persisted);
-  if (limitReached && persisted === 0 && duplicates === 0 && messages.length > 0) {
+  if (limitReached && persisted === 0 && duplicates === 0 && batch.length > 0) {
     throw new SessionMessageLimitExceededError(maxMessages);
   }
 
@@ -336,6 +362,63 @@ export function estimateRowBytes(row: Record<string, unknown>): number {
   return size;
 }
 
+/**
+ * Message ids in this session that a comment thread anchors on.
+ *
+ * `comment_threads.message_id` is a foreign key into `chat_messages`, and the
+ * conversation resolves a thread by finding that id among the rows it was served.
+ * An anchored row therefore has to stay its own message rather than being folded
+ * into a group that carries a different id, or the comment silently disappears.
+ *
+ * Comment threads are rare, the table is indexed on `session_id`, and this runs
+ * inside the same DO RPC as the message read — so it costs one local SQLite
+ * lookup, not a round trip.
+ */
+function readCommentAnchoredMessageIds(
+  sql: SqlStorage,
+  sessionId: string
+): ReadonlySet<string> | undefined {
+  let rows: Record<string, unknown>[];
+  try {
+    rows = sql
+      .exec(
+        'SELECT DISTINCT message_id FROM comment_threads WHERE session_id = ? AND message_id IS NOT NULL',
+        sessionId
+      )
+      .toArray();
+  } catch (e) {
+    // An archive shard or a pre-migration object may not have the table yet.
+    // Losing the anchor set only costs grouping precision, never correctness of
+    // the transcript itself, so degrade to "no anchors" rather than failing the read.
+    if (e instanceof Error && /no such table/i.test(e.message)) return undefined;
+    throw e;
+  }
+  if (rows.length === 0) return undefined;
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (typeof row.message_id === 'string') ids.add(row.message_id);
+  }
+  return ids.size > 0 ? ids : undefined;
+}
+
+/**
+ * Resolve the read-path grouping options for a session, or `null` when grouping
+ * is switched off. Returns `null` (not an empty object) so callers cannot
+ * accidentally group with default options when the operator disabled it.
+ */
+export function resolveMessageGroupingOptions(
+  sql: SqlStorage,
+  env: Env,
+  sessionId: string
+): ChatMessageRowGroupingOptions | null {
+  const config = resolveMessageGroupingConfig(env);
+  if (!config.readGroupingEnabled) return null;
+  return {
+    maxGroupChars: config.maxGroupChars,
+    anchoredMessageIds: readCommentAnchoredMessageIds(sql, sessionId),
+  };
+}
+
 export function getMessages(
   sql: SqlStorage,
   sessionId: string,
@@ -345,7 +428,8 @@ export function getMessages(
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc',
-  compactOptions?: CompactMessageOptions
+  compactOptions?: CompactMessageOptions,
+  grouping?: ChatMessageRowGroupingOptions | null
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let query =
     'SELECT id, session_id, role, content, tool_metadata, created_at, sequence, origin FROM chat_messages WHERE session_id = ?';
@@ -372,7 +456,7 @@ export function getMessages(
   params.push(limit + 1);
 
   const rows = sql.exec(query, ...params).toArray();
-  return formatMessageRows(rows, sessionId, limit, compact, order, compactOptions);
+  return formatMessageRows(rows, sessionId, limit, compact, order, compactOptions, grouping);
 }
 
 function parseListedMessage(
@@ -394,7 +478,8 @@ function parseListedMessage(
 
 export function formatMessageRows(
   rows: Record<string, unknown>[], sessionId: string, limit: number,
-  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
+  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions,
+  grouping?: ChatMessageRowGroupingOptions | null
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;
@@ -424,8 +509,16 @@ export function formatMessageRows(
 
   const trimmedRows = candidateRows.slice(0, safeCount);
 
-  const orderedRows = trimmedRows;
-  if (order === 'desc') orderedRows.reverse();
+  // The query runs DESC for `order: 'desc'` so the RPC guard above trims the
+  // OLDEST rows; both orders are chronological from here on.
+  const chronologicalRows = trimmedRows;
+  if (order === 'desc') chronologicalRows.reverse();
+
+  // Group AFTER the limit and the RPC guard, so both keep measuring the real
+  // rows read, and BEFORE parsing, so a grouped turn is parsed once instead of
+  // once per streamed token. `hasMore` and the `before` cursor are unaffected:
+  // a group carries its first row's `created_at`.
+  const orderedRows = grouping ? groupChatMessageRows(chronologicalRows, grouping) : chronologicalRows;
   const messages: Record<string, unknown>[] = [];
   let skipped = 0;
 

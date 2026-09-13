@@ -621,7 +621,8 @@ export class ProjectData extends DurableObject<Env> {
       roles,
       compact,
       order,
-      compactOptions
+      compactOptions,
+      messages.resolveMessageGroupingOptions(this.sql, this.env, sessionId)
     );
   }
 

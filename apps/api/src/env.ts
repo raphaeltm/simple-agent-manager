@@ -588,6 +588,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_COMMENT_LIST_MAX_BYTES?: string; // Max estimated content bytes for the project-wide comment inbox (default: 4000000)
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string; // Max document-card rawOutput bytes preserved in compact message metadata (default: 16384)
   PROJECT_DATA_TOOL_METADATA_MAX_BYTES?: string;
+  PROJECT_DATA_MESSAGE_GROUPING_ENABLED?: string; // Merge contiguous streaming-delta rows when serving a transcript read (default: true)
+  PROJECT_DATA_MESSAGE_COALESCING_ENABLED?: string; // Merge the streaming deltas of one VM-agent flush before insert (default: true)
+  PROJECT_DATA_MESSAGE_GROUP_MAX_CHARS?: string; // Ceiling on the content of a single merged message row (default: 262144)
+  TASK_FINAL_ASSISTANT_MESSAGE_SCAN_ROWS?: string; // Assistant rows scanned from the session tail to recover the final turn (default: 200)
+  TASK_FINAL_ASSISTANT_MESSAGE_MAX_CHARS?: string; // Characters of the final assistant turn surfaced on a task (default: 2000)
   PROJECT_DATA_STORAGE_TELEMETRY_ENABLED?: string;
   PROJECT_DATA_STORAGE_LIMIT_BYTES?: string;
   PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS?: string;

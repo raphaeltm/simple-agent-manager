@@ -3,6 +3,10 @@
  *
  * Also exports TokenRow and groupTokensIntoMessages for use by tests and other modules.
  */
+import {
+  groupTextTokens,
+  TEXT_SEARCH_GROUPABLE_ROLES,
+} from '../../durable-objects/project-data/message-grouping';
 import type { Env } from '../../env';
 import * as projectDataService from '../../services/project-data';
 import {
@@ -52,10 +56,6 @@ export async function handleListSessions(
   });
 }
 
-// Roles whose consecutive tokens should be concatenated into a single logical message.
-// Mirrors the frontend groupMessages() in ProjectMessageView.tsx.
-const GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);
-
 export interface TokenRow {
   id: string;
   role: string;
@@ -64,23 +64,16 @@ export interface TokenRow {
 }
 
 /**
- * Groups consecutive same-role streaming tokens into logical messages.
- * Each row in chat_messages is an individual streaming chunk ("token").
- * This function concatenates consecutive tokens with the same groupable role
- * (assistant, tool, thinking) into a single message, using the first token's
- * id and createdAt. Non-groupable roles (user, system, plan) pass through as-is.
+ * Groups consecutive same-role streaming tokens into logical messages for agent
+ * readers, using the first token's id and createdAt.
+ *
+ * The transcript read path already merges assistant/thinking runs, so in practice
+ * this now only folds tool runs — which agents want as inline text and which the
+ * browser must keep separate (see `message-grouping.ts` for why the two role sets
+ * differ). It stays idempotent over already-grouped input.
  */
 export function groupTokensIntoMessages(tokens: TokenRow[]): TokenRow[] {
-  const grouped: TokenRow[] = [];
-  for (const token of tokens) {
-    const last = grouped[grouped.length - 1];
-    if (last && last.role === token.role && GROUPABLE_ROLES.has(token.role)) {
-      last.content += token.content;
-    } else {
-      grouped.push({ ...token });
-    }
-  }
-  return grouped;
+  return groupTextTokens(tokens, TEXT_SEARCH_GROUPABLE_ROLES);
 }
 
 export async function handleGetSessionMessages(
