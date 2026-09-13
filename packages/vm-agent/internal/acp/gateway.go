@@ -212,6 +212,10 @@ type GatewayConfig struct {
 	ActivityReportTimeout time.Duration
 	// CredentialSyncTimeout bounds auth-file sync-back during shutdown.
 	CredentialSyncTimeout time.Duration
+
+	// RestartAttemptTimeout bounds a single agent restart attempt performed by
+	// the process monitor. Zero uses DefaultACPRestartAttemptTimeout.
+	RestartAttemptTimeout time.Duration
 	// RecoveryWatchdogTimeout bounds crash recovery after a prompt disconnect.
 	// Zero uses DefaultRecoveryWatchdogTimeout.
 	RecoveryWatchdogTimeout time.Duration

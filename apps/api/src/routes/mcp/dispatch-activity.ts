@@ -2,6 +2,7 @@ import type { TaskMode } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import type { McpTokenData } from './_helpers';
 
 export async function recordDispatchActivityEvent(input: {
@@ -46,6 +47,23 @@ export async function recordDispatchActivityEvent(input: {
   } catch (err) {
     log.warn('mcp.dispatch_task.activity_event_failed', {
       taskId: input.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Mission recomputation remains best effort after dispatch activity publication. */
+export async function recomputeDispatchMissionSchedulerState(
+  env: Env,
+  resolvedMissionId: string,
+  taskId: string
+): Promise<void> {
+  try {
+    await recomputeMissionSchedulerStates(env.DATABASE, resolvedMissionId);
+  } catch (err) {
+    log.warn('mcp.dispatch_task.scheduler_state_recompute_failed', {
+      taskId,
+      missionId: resolvedMissionId,
       error: err instanceof Error ? err.message : String(err),
     });
   }

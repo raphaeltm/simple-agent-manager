@@ -663,28 +663,129 @@ describe('node resource deletion services', () => {
     );
   });
 
-  it('fails closed when a legacy node lacks an exact provider-account binding', async () => {
-    nodeRows.push(
-      managedPoolNode({
-        id: 'legacy-node',
-        status: 'destroying',
+  // --- Placement-binding disjuncts -------------------------------------------------------------
+  // Migration 0142 added `placement_credential_fingerprint` and left every pre-existing node
+  // NULL, with no backfill path. Several distinct binding states reach the strict teardown gate
+  // and each needs its own case (rule 69). The original suite tested only the first row below and
+  // asserted the merged behaviour as correct, which is how the version-only state — the one 0142
+  // actually creates — shipped undeletable with a green suite.
+  it.each([
+    [
+      'no placement credential binding at all',
+      {
         capacityPoolId: null,
         placementCredentialSource: null,
         placementCredentialReference: null,
         placementCredentialVersion: null,
         placementCredentialFingerprint: null,
-      })
+      },
+      'placementCredentialSource, placementCredentialReference',
+    ],
+    [
+      // A null binding can mean EITHER an invalid source OR an absent reference. The
+      // diagnostic must name only the one that actually failed, or it sends an operator
+      // to the wrong column (caught by CodeRabbit on this PR).
+      'a valid source but no reference',
+      { placementCredentialReference: null },
+      'placementCredentialReference',
+    ],
+    [
+      'a reference but an unrecognised source',
+      { placementCredentialSource: 'nonsense' },
+      'placementCredentialSource',
+    ],
+    [
+      'a reference but no generation proof of either kind',
+      { placementCredentialVersion: null, placementCredentialFingerprint: null },
+      'placementCredentialFingerprint and placementCredentialVersion',
+    ],
+    [
+      'full proof but no cloud provider',
+      { cloudProvider: null },
+      'cloudProvider',
+    ],
+  ])('fails closed for a node with %s', async (_label, overrides, expectedMissing) => {
+    nodeRows.push(managedPoolNode({ id: 'gated-node', status: 'destroying', ...overrides }));
+
+    const error = await deleteNodeResourcesStrict('gated-node', 'user-1', ENV).catch(
+      (err: unknown) => err as Error
     );
 
-    await expect(deleteNodeResourcesStrict('legacy-node', 'user-1', ENV)).rejects.toThrow(
-      /exact provider credential binding is missing/
-    );
-
+    expect(error.message).toContain('exact provider credential binding is missing');
+    // The diagnostic names exactly which prerequisites are absent, and ONLY those (rule 49).
+    // Matching the parenthesised list in full is what makes this discriminating: a substring
+    // check would let the old conflated "source+reference" text satisfy a reference-only case.
+    expect(error.message).toContain(`(${expectedMissing})`);
+    // ...without echoing the reference. It is an ID rather than a secret, but strict teardown
+    // deliberately keeps it out of logs and error strings.
+    expect(error.message).not.toContain('credentials:project-cloud-1');
     expect(createProviderForUser).not.toHaveBeenCalled();
     expect(providerGetVM).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).not.toHaveBeenCalled();
     expect(updateCalls).toEqual([]);
+  });
+
+
+  // THE PRODUCTION INCIDENT (node 01M1RKXS5YT0AEAD84872MNN2E). A node provisioned before
+  // migration 0142 carries source + reference + version but never a fingerprint. Requiring a
+  // fingerprint made it permanently undeletable: 71 hourly teardown failures, no operator
+  // override, and the row pinned at status='destroying' in the UI forever.
+  it('destroys a pre-0142 node whose binding carries a version but no fingerprint', async () => {
+    nodeRows.push(
+      managedPoolNode({
+        id: 'pre-0142-node',
+        status: 'destroying',
+        placementCredentialFingerprint: null,
+      })
+    );
+
+    const result = await deleteNodeResourcesStrict('pre-0142-node', 'user-1', ENV);
+
+    expect(result.providerVm).toBe('deleted');
+    expect(result.runtimeTerminationConfirmedAt).toEqual(expect.any(String));
+    expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
+    // The resolver receives the version-only binding and is left to enforce the fence itself.
+    expect(createProviderForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      'pool-owner-1',
+      'test-key',
+      ENV,
+      'hetzner',
+      'project-1',
+      expect.objectContaining({
+        credentialReference: 'credentials:project-cloud-1',
+        credentialVersion: 1787875200000,
+        credentialFingerprint: null,
+      })
+    );
+    expect(
+      updateCalls.some((call) => typeof call.runtimeTerminationConfirmedAt === 'string')
+    ).toBe(true);
+  });
+
+  it('still refuses a version-only binding whose credential row has since rotated', async () => {
+    nodeRows.push(
+      managedPoolNode({
+        id: 'pre-0142-rotated',
+        status: 'destroying',
+        placementCredentialFingerprint: null,
+      })
+    );
+    // The exact resolver rejects the stale version snapshot: every ciphertext write to
+    // `credentials` bumps `updated_at`, so a rotated row can no longer match.
+    // Deliberately not `...Once`: an unconsumed one-shot survives `vi.clearAllMocks()` and
+    // would leak into the next test whenever this one short-circuits earlier than expected.
+    createProviderForUser.mockImplementation(async () => null);
+
+    await expect(deleteNodeResourcesStrict('pre-0142-rotated', 'user-1', ENV)).rejects.toThrow(
+      /credentials missing/
+    );
+
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(
+      updateCalls.some((call) => typeof call.runtimeTerminationConfirmedAt === 'string')
+    ).toBe(false);
   });
 
   it('does not use a rotated current account even when its instance ID collides', async () => {

@@ -1,3 +1,4 @@
+import type { SafeEffectiveCapacityPoolSummary } from '@simple-agent-manager/shared';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
   createNode: vi.fn(),
   getProviderCatalog: vi.fn(),
+  fetchUserDefaultCapacityPools: vi.fn(),
 }));
 
 // `useQueryScope()` reads the authenticated identity, and every migrated query
@@ -27,6 +29,10 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 
 vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu" />,
+}));
+
+vi.mock('../../../src/lib/api/capacity-pools', () => ({
+  fetchUserDefaultCapacityPools: mocks.fetchUserDefaultCapacityPools,
 }));
 
 import { nodeQueryKeys } from '../../../src/lib/query-options';
@@ -71,6 +77,17 @@ describe('Nodes page', () => {
       updatedAt: '2026-01-02T00:00:00.000Z',
     });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
+    // An installation-funded user has no personal credential catalog. Creation
+    // uses the safe native offerings from the authoritative effective pool.
+    const effectiveSummary: SafeEffectiveCapacityPoolSummary = {
+      scope: 'installation', state: 'configured-ready', strategy: 'pack',
+      exhaustionPolicy: 'fail', availableCandidateCount: 2,
+      nativeOfferings: [
+        { provider: 'hetzner', location: 'nbg1', providerInstanceType: 'cx23', displayName: 'CX23', vcpu: 2, memoryMb: 4096, diskGb: 40, price: '€4/month' },
+        { provider: 'hetzner', location: 'nbg1', providerInstanceType: 'cx43', displayName: 'CX43', vcpu: 8, memoryMb: 16384, diskGb: 160, price: '€16/month' },
+      ],
+    };
+    mocks.fetchUserDefaultCapacityPools.mockResolvedValue({ effectiveSummary });
   });
 
   it('renders node list', async () => {
@@ -105,14 +122,21 @@ describe('Nodes page', () => {
     // Click "Create Node" to open the form (header button toggles to "Cancel")
     fireEvent.click(screen.getByRole('button', { name: /create node/i }));
 
-    // The form is now visible; click the "Create Node" submit button inside it
-    fireEvent.click(screen.getByRole('button', { name: /create node/i }));
+    const offering = await screen.findByLabelText('Native offering');
+    const submit = screen.getByRole('button', { name: /create node/i });
+    expect(submit).toBeDisabled();
+    expect(mocks.createNode).not.toHaveBeenCalled();
+    fireEvent.change(offering, { target: { value: 'cx43' } });
+    expect(screen.getByLabelText('Selected offering resources')).toHaveTextContent('8 vCPU · 16 GB memory · 160 GB disk');
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
 
     await waitFor(() => {
       expect(mocks.createNode).toHaveBeenCalledTimes(1);
       expect(mocks.createNode).toHaveBeenCalledWith({
         name: expect.stringMatching(/^node-[0-9]{14}$/),
-        vmSize: 'medium',
+        provider: 'hetzner',
+        providerInstanceType: 'cx43',
         vmLocation: 'nbg1',
       });
     });

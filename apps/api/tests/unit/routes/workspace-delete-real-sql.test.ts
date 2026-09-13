@@ -307,6 +307,37 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
     expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
   });
 
+  it.each(['error', 'stopping'] as const)('deletes a proof-bearing %s placeholder without VM I/O', async (status) => {
+    sqlite.prepare(`UPDATE workspaces SET node_id = NULL, status = ?,
+      runtime_deletion_confirmed_at = datetime('now'), runtime_deletion_proof = 'workspace_never_started'
+      WHERE id = ?`).run(status, WORKSPACE_ID);
+    const response = await requestDelete();
+    expect(response.status).toBe(200);
+    expect(workspaceStatus()).toBeNull();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mocks.claimWorkspaceDeletionAttempt).not.toHaveBeenCalled();
+    expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+  });
+
+  it('fences a proof-bearing placeholder whose ownership changes before finalization', async () => {
+    sqlite.prepare("INSERT INTO users (id, email) VALUES ('new-owner', 'new-owner@example.test')").run();
+    sqlite.prepare(`UPDATE workspaces SET node_id = NULL, status = 'error',
+      runtime_deletion_confirmed_at = datetime('now'), runtime_deletion_proof = 'workspace_never_started'
+      WHERE id = ?`).run(WORKSPACE_ID);
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    let snapshots = 0;
+    env.DATABASE.prepare = (query: string) => {
+      if (query.includes('SELECT w.id AS workspaceId') && ++snapshots === 2) {
+        sqlite.prepare("UPDATE workspaces SET user_id = 'new-owner' WHERE id = ?").run(WORKSPACE_ID);
+      }
+      return prepare(query);
+    };
+    const response = await requestDelete();
+    expect(response.status).toBe(409);
+    expect(workspaceStatus()).toBe('error');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it('resumes lifecycle closure and hard deletion for an already-proven tombstone', async () => {
     sqlite
       .prepare(

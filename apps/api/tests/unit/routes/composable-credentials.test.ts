@@ -6,8 +6,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { ccRoutes } from '../../../src/routes/composable-credentials';
+import { reconcileCapacityPoolsForCredentialMutation } from '../../../src/services/capacity-pool-credential-lifecycle';
 
 vi.mock('drizzle-orm/d1');
+vi.mock('../../../src/services/capacity-pool-credential-lifecycle', () => ({
+  reconcileCapacityPoolsForCredentialMutation: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => unknown) => next()),
   requireApproved: () => vi.fn((_c: unknown, next: () => unknown) => next()),
@@ -18,6 +23,7 @@ interface MockDB {
   select: ReturnType<typeof vi.fn>;
   from: ReturnType<typeof vi.fn>;
   where: ReturnType<typeof vi.fn>;
+  innerJoin: ReturnType<typeof vi.fn>;
   limit: ReturnType<typeof vi.fn>;
   update: ReturnType<typeof vi.fn>;
   set: ReturnType<typeof vi.fn>;
@@ -30,6 +36,7 @@ function makeMockDB(): MockDB {
   db.select = vi.fn().mockReturnValue(db);
   db.from = vi.fn().mockReturnValue(db);
   db.where = vi.fn().mockReturnValue(db);
+  db.innerJoin = vi.fn().mockReturnValue(db);
   db.limit = vi.fn().mockReturnValue(db);
   db.update = vi.fn().mockReturnValue(db);
   db.set = vi.fn().mockReturnValue(db);
@@ -58,6 +65,7 @@ describe('composable credentials routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(reconcileCapacityPoolsForCredentialMutation).mockResolvedValue(undefined);
     app = makeApp();
     mockDB = makeMockDB();
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
@@ -99,6 +107,7 @@ describe('composable credentials routes', () => {
   });
 
   it('deletes configurations using the decoded ID scoped to the current owner', async () => {
+    mockDB.where.mockResolvedValueOnce([{ projectId: 'project-1' }]);
     const rawId = 'cfg/delete+equals=/id';
 
     const res = await app.request(
@@ -109,6 +118,11 @@ describe('composable credentials routes', () => {
 
     expect(res.status).toBe(200);
     expect(mockDB.delete).toHaveBeenCalled();
+    expect(reconcileCapacityPoolsForCredentialMutation).toHaveBeenCalledWith(env, {
+      scope: 'user',
+      userId: 'test-user-id',
+      projectIds: ['project-1'],
+    });
     const whereCalls = inspect(mockDB.where.mock.calls, { depth: 8 });
     expect(whereCalls).toContain(rawId);
     expect(whereCalls).toContain('test-user-id');

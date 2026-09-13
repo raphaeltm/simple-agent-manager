@@ -451,6 +451,7 @@ describe('Project default provider — TaskRunner DO', () => {
     'index.ts',
     'types.ts',
     'node-steps.ts',
+    'node-provisioning-step.ts',
     'workspace-steps.ts',
     'agent-session-step.ts',
     'state-machine.ts',

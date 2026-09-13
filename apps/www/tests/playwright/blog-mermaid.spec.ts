@@ -11,6 +11,31 @@ const mermaidPosts = [
     path: '/blog/sams-journal-the-archive-got-a-clock/',
     screenshotName: 'archive-drain',
   },
+  {
+    name: 'the current daily journal',
+    path: '/blog/sams-journal-old-chats-got-a-lighter-home/',
+    screenshotName: 'daily-r2-history',
+  },
+  {
+    name: 'the task-start journal',
+    path: '/blog/sams-journal-a-task-needs-the-right-start/',
+    screenshotName: 'task-start',
+  },
+  {
+    name: 'the wake-reliability journal',
+    path: '/blog/sams-journal-a-wake-up-needs-a-way-home/',
+    screenshotName: 'wake-reliability',
+  },
+  {
+    name: 'the atomic-release journal',
+    path: '/blog/sams-journal-a-version-needs-a-home/',
+    screenshotName: 'atomic-release',
+  },
+  {
+    name: 'the reusable-machine journal',
+    path: '/blog/sams-journal-a-busy-machine-can-still-help/',
+    screenshotName: 'reusable-machine',
+  },
 ];
 
 for (const post of mermaidPosts) {

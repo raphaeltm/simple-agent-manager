@@ -373,7 +373,7 @@ describe('Project event source outbox durability on migrated D1', () => {
     });
   });
 
-  it('captures credential limit intents only for matching 0146 identity on migrated D1', async () => {
+  it('captures credential limit intents only for matching 0158 identity on migrated D1', async () => {
     const { projectId } = await seedProjectGraph('credential-capture');
     const observedAt = NOW.getTime();
     const credentialEvent = eventInput(projectId, 'credential-capture', {

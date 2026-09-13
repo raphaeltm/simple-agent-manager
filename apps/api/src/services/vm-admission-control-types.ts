@@ -6,6 +6,7 @@ import type {
   VMSize,
 } from '@simple-agent-manager/shared';
 import {
+  DEFAULT_VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS,
   DEFAULT_VM_ADMISSION_CONTROL_MODE,
   DEFAULT_VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH,
   DEFAULT_VM_ADMISSION_LEASE_TTL_MS,
@@ -37,6 +38,7 @@ export type VmAdmissionReason =
   | 'admission_created'
   | 'admission_shadow'
   | 'compatible_node_provisioning'
+  | 'compatible_node_building_workspace'
   | 'provider_account_capacity'
   | 'provider_transient_capacity'
   | 'user_node_limit'
@@ -56,6 +58,7 @@ export interface VmAdmissionConfig {
   retryMinMs: number;
   retryMaxMs: number;
   waitTimeoutMs: number;
+  busyBuildWaitTimeoutMs: number;
   providerCooldownMs: number;
   wakeBatchSize: number;
   diagnosticMessageMaxLength: number;
@@ -124,6 +127,7 @@ export interface VmTaskAdmissionRow {
   attempt_count: number;
   next_retry_at: string | null;
   wait_deadline_at: string | null;
+  enqueued_at: string | null;
 }
 
 export interface VmProvisioningLeaseRow {
@@ -184,15 +188,16 @@ export function getVmAdmissionConfig(env: Env): VmAdmissionConfig {
   );
   return {
     mode: parseAdmissionMode(env.VM_ADMISSION_CONTROL_MODE),
-    leaseTtlMs: parsePositiveInt(
-      env.VM_ADMISSION_LEASE_TTL_MS,
-      DEFAULT_VM_ADMISSION_LEASE_TTL_MS
-    ),
+    leaseTtlMs: parsePositiveInt(env.VM_ADMISSION_LEASE_TTL_MS, DEFAULT_VM_ADMISSION_LEASE_TTL_MS),
     retryMinMs,
     retryMaxMs,
     waitTimeoutMs: parsePositiveInt(
       env.VM_ADMISSION_WAIT_TIMEOUT_MS,
       DEFAULT_VM_ADMISSION_WAIT_TIMEOUT_MS
+    ),
+    busyBuildWaitTimeoutMs: parsePositiveInt(
+      env.VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS,
+      DEFAULT_VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS
     ),
     providerCooldownMs: parsePositiveInt(
       env.VM_ADMISSION_PROVIDER_COOLDOWN_MS,
@@ -240,7 +245,10 @@ export async function first<T>(
   query: string,
   binds: unknown[] = []
 ): Promise<T | null> {
-  const row = await database.prepare(query).bind(...binds).first<T>();
+  const row = await database
+    .prepare(query)
+    .bind(...binds)
+    .first<T>();
   return row ?? null;
 }
 

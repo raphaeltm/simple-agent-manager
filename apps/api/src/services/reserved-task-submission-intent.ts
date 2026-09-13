@@ -33,7 +33,14 @@ import type {
   ReservedTaskSubmissionResult,
   ResolvedReservedTaskSubmissionDependencies,
 } from './reserved-task-submission-contracts';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
+import { resolveSkillProfile } from './skills';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  ResourceRequirementsValidationError,
+} from './resource-requirements-input';
 import { type startTaskRunnerDO } from './task-runner-do';
 import {
   assertReservedTaskCreatorAuthority,
@@ -196,6 +203,7 @@ export async function submissionFingerprint(input: ReservedTaskSubmissionInput):
       skillId: input.skillId,
       taskMode: input.taskMode,
       vmSizeOverride: input.vmSizeOverride,
+      resourceRequirementsJson: input.resourceRequirementsJson ?? null,
       source: input.source,
     })
   );
@@ -308,6 +316,7 @@ async function resolvePlacementForInput(
       profile: ResolvedProfile;
       placement: TaskStartPlacement;
       resolution: TaskStartPlacementWithCredential;
+      resourceRequirementLayers: ReturnType<typeof collectStoredResourceRequirementLayers>;
     }
   | {
       reason: 'profile_unavailable' | 'placement_unavailable' | 'credentials_unavailable';
@@ -333,12 +342,18 @@ async function resolvePlacementForInput(
       message: error instanceof Error ? error.message : String(error),
     };
   }
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    profile?.resourceRequirementsJson
-  );
-
   let placement: TaskStartPlacement;
+  let resourceRequirementLayers: ReturnType<typeof collectStoredResourceRequirementLayers>;
   try {
+    resourceRequirementLayers = collectStoredResourceRequirementLayers({
+      trigger: input.source.kind === 'trigger' ? input.resourceRequirementsJson : null,
+      task: input.source.kind !== 'trigger' ? input.resourceRequirementsJson : null,
+      skill: profile?.skillId ? profile.resourceRequirementsJson : null,
+      agentProfile:
+        profile?.agentProfileResourceRequirementsJson ??
+        (profile?.skillId ? null : profile?.resourceRequirementsJson),
+      project: project.resourceRequirementsJson,
+    });
     placement = resolveTaskStartPlacement({
       entryPoint: 'trigger-submit',
       taskId: input.identities.taskId,
@@ -354,12 +369,13 @@ async function resolvePlacementForInput(
       },
       credentialProjectPolicy: 'current-project',
       taskModeDefault: 'workspace-profile',
-      resourceRequirements: {
-        skill: skillResourceRequirements,
-      },
+      resourceRequirements: resourceRequirementLayers,
     });
   } catch (err) {
-    if (err instanceof PlacementResolutionError) {
+    if (
+      err instanceof PlacementResolutionError ||
+      err instanceof ResourceRequirementsValidationError
+    ) {
       return { reason: 'placement_unavailable', message: err.message };
     }
     throw err;
@@ -383,7 +399,7 @@ async function resolvePlacementForInput(
     };
   }
 
-  return { profile, placement, resolution: placementResolution };
+  return { profile, placement, resolution: placementResolution, resourceRequirementLayers };
 }
 
 export async function prepareNewSubmission(
@@ -446,7 +462,7 @@ export async function prepareNewSubmission(
     if (!(error instanceof TaskRunnerStartGuardRevokedError)) throw error;
     return reservedTaskSubmissionConflict(input, 'authority_unavailable', error.message);
   }
-  const { placement, profile, resolution } = resolved;
+  const { placement, profile, resolution, resourceRequirementLayers } = resolved;
   const task = {
     taskId: input.identities.taskId,
     projectId: input.projectId,
@@ -464,7 +480,13 @@ export async function prepareNewSubmission(
     skillHint: input.skillId,
     requestedVmSize: placement.vmSize,
     requestedVmSizeSource: placement.vmSizeSource,
-    resourceRequirementsJson: profile?.resourceRequirementsJson ?? null,
+    resourceRequirementsJson: firstResourceRequirementLayerJson(resourceRequirementLayers),
+    resourceRequirementPlanJson: createPersistedTaskResourcePlanJson({
+      layers: resourceRequirementLayers,
+      resolvedReservation: placement.resolvedReservation,
+      requestedVmSize: placement.vmSize,
+      requestedVmSizeSource: placement.vmSizeSource,
+    }),
     resourceRequirementsSource: placement.resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(placement.resolvedReservation),
     credentialAttributionUserId: resolution.credentialAttributionUserId,
@@ -506,6 +528,7 @@ export async function prepareNewSubmission(
     opencodeBaseUrl: null,
     systemPromptAppend: profile?.systemPromptAppend ?? null,
     agentProfileHint: profile?.profileId ?? null,
+    resourceRequirements: firstResourceRequirementLayer(resourceRequirementLayers) ?? undefined,
     projectScaling: {
       taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
       maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
@@ -698,6 +721,7 @@ export function startInputFromSnapshot(snapshot: AcceptedSnapshot): TaskRunnerSt
     opencodeBaseUrl: runner.opencodeBaseUrl,
     systemPromptAppend: runner.systemPromptAppend,
     agentProfileHint: runner.agentProfileHint,
+    resourceRequirements: runner.resourceRequirements,
     projectScaling: runner.projectScaling,
     resolvedReservation: runner.resolvedReservation,
     capacityPoolSelection: runner.capacityPoolSelection,

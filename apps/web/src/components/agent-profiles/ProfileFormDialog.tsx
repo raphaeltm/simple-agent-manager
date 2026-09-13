@@ -5,9 +5,7 @@ import type {
   CreateAgentProfileRequest,
   GitHubCliPermissionLevel,
   GitHubCliPolicy,
-  ProviderCatalog,
   UpdateAgentProfileRequest,
-  VMSize,
 } from '@simple-agent-manager/shared';
 import {
   AGENT_CATALOG,
@@ -21,13 +19,18 @@ import {
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
 import { type FC, type ReactNode, useEffect, useState } from 'react';
 
-import { getProject, getProviderCatalog } from '../../lib/api';
 import { ModelSelect } from '../ModelSelect';
 import {
-  formatProviderCatalogContext,
-  formatVmSizeOption,
-  selectProviderCatalog,
-} from '../vm/format-vm-size';
+  deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
+  hasAnyResourceValue,
+  hasValidationErrors,
+  type ResourceRequirementsFormState,
+  ResourceRequirementsInput,
+  type ResourceValidationErrors,
+  serializeResourceRequirements,
+  validateResourceState,
+} from '../resource-requirements';
 import { ProfileRuntimeSection } from './ProfileRuntimeSection';
 
 /** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
@@ -65,13 +68,6 @@ const EFFORT_LABELS: Record<AgentEffort, string> = {
   xhigh: 'Extra high',
   max: 'Max',
 };
-
-const VM_SIZES = [
-  { value: '', label: 'Default' },
-  { value: 'small', label: 'Small' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'large', label: 'Large' },
-] as const;
 
 const RUNTIMES = [
   { value: '', label: 'Auto' },
@@ -249,12 +245,22 @@ function runtimeSummary(runtime: string): string | false {
 
 function infraSummary(
   vmSize: string,
+  resourceReqs: ResourceRequirementsFormState,
   workspaceProfile: string,
   taskMode: string,
   runtime: string
 ): string {
+  let resourcePart = '';
+  if (hasAnyResourceValue(resourceReqs)) {
+    const parts: string[] = [];
+    if (resourceReqs.minVcpu) parts.push(`${resourceReqs.minVcpu} vCPU`);
+    if (resourceReqs.minMemoryGb) parts.push(`${resourceReqs.minMemoryGb} GB`);
+    resourcePart = parts.join(', ') || 'Custom resources';
+  } else if (vmSize) {
+    resourcePart = `${vmSize} (legacy)`;
+  }
   return joinOrDefault(
-    [runtimeSummary(runtime), vmSize && `${vmSize} VM`, workspaceProfile, taskMode],
+    [runtimeSummary(runtime), resourcePart, workspaceProfile, taskMode],
     ' · '
   );
 }
@@ -283,14 +289,14 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   const [timeoutMinutes, setTimeoutMinutes] = useState('');
   const [runtime, setRuntime] = useState('');
   const [vmSizeOverride, setVmSizeOverride] = useState('');
+  const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
+    ...EMPTY_RESOURCE_STATE,
+  });
   const [workspaceProfile, setWorkspaceProfile] = useState('');
   const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
   const [taskMode, setTaskMode] = useState('');
   const [githubCliPolicy, setGithubCliPolicy] =
     useState<GitHubCliPolicy>(DEFAULT_GITHUB_CLI_POLICY);
-  const [catalogs, setCatalogs] = useState<ProviderCatalog[]>([]);
-  const [projectProvider, setProjectProvider] = useState<string | null>(null);
-  const [projectLocation, setProjectLocation] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -309,6 +315,11 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setTimeoutMinutes(profile.timeoutMinutes != null ? String(profile.timeoutMinutes) : '');
       setRuntime(profileRuntime);
       setVmSizeOverride(profileRuntime === 'cf-container' ? '' : (profile.vmSizeOverride ?? ''));
+      setResourceReqs(
+        profileRuntime === 'cf-container'
+          ? { ...EMPTY_RESOURCE_STATE }
+          : deserializeResourceRequirements(profile.resourceRequirementsJson)
+      );
       setWorkspaceProfile(
         profileRuntime === 'cf-container' ? 'lightweight' : (profile.workspaceProfile ?? '')
       );
@@ -329,6 +340,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setTimeoutMinutes('');
       setRuntime('');
       setVmSizeOverride('');
+      setResourceReqs({ ...EMPTY_RESOURCE_STATE });
       setWorkspaceProfile('');
       setDevcontainerConfigName('');
       setTaskMode('');
@@ -337,44 +349,24 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     setError(null);
   }, [isOpen, profile]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    let cancelled = false;
-    Promise.all([getProviderCatalog(), getProject(projectId)])
-      .then(([catalogResponse, project]) => {
-        if (cancelled) return;
-        setCatalogs(Array.isArray(catalogResponse.catalogs) ? catalogResponse.catalogs : []);
-        setProjectProvider(project.defaultProvider ?? null);
-        setProjectLocation(project.defaultLocation ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setCatalogs([]);
-          setProjectProvider(null);
-          setProjectLocation(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, projectId]);
-
-  const effectiveProvider = profile?.provider ?? projectProvider;
-  const activeCatalog = selectProviderCatalog(catalogs, effectiveProvider);
-  const effectiveLocation =
-    profile?.vmLocation ?? projectLocation ?? activeCatalog?.defaultLocation ?? null;
-  const providerContext = formatProviderCatalogContext(activeCatalog, effectiveLocation);
   const effortOptions = getSupportedEffortsForAgent(agentType).map((value) => ({
     value,
     label: EFFORT_LABELS[value],
   }));
 
+  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
+
   const handleSubmit = async () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
       setError('Profile name is required');
+      return;
+    }
+
+    const resErrors = validateResourceState(resourceReqs);
+    setResourceErrors(resErrors);
+    if (hasValidationErrors(resErrors)) {
+      setError('Fix resource requirement errors before saving');
       return;
     }
 
@@ -393,6 +385,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         timeoutMinutes: timeoutMinutes ? parseInt(timeoutMinutes, 10) : null,
         runtime: runtime ? (runtime as AgentProfileRuntime) : null,
         vmSizeOverride: vmSizeOverride || null,
+        resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
         workspaceProfile: workspaceProfile || null,
         devcontainerConfigName:
           workspaceProfile !== 'lightweight' ? devcontainerConfigName.trim() || null : null,
@@ -425,10 +418,16 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     setRuntime(value);
     if (value === 'cf-container') {
       setVmSizeOverride('');
+      setResourceReqs({ ...EMPTY_RESOURCE_STATE });
       setWorkspaceProfile('lightweight');
       setDevcontainerConfigName('');
       setTaskMode('conversation');
     }
+  };
+
+  const handleResourceReqsChange = (next: ResourceRequirementsFormState) => {
+    setResourceReqs(next);
+    setResourceErrors({});
   };
 
   const isInstantRuntime = runtime === 'cf-container';
@@ -629,7 +628,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
         <Section
           title="Infrastructure"
-          summary={infraSummary(vmSizeOverride, workspaceProfile, taskMode, runtime)}
+          summary={infraSummary(vmSizeOverride, resourceReqs, workspaceProfile, taskMode, runtime)}
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <SelectField
@@ -640,26 +639,19 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               disabled={saving}
             />
 
-            <SelectField
-              label={
-                <>
-                  VM Size
-                  {providerContext && <span className="font-normal ml-1">({providerContext})</span>}
-                </>
-              }
-              value={vmSizeOverride}
-              onChange={setVmSizeOverride}
-              options={VM_SIZES.map((vs) => ({
-                value: vs.value,
-                label: vs.value
-                  ? formatVmSizeOption(
-                      vs.value as VMSize,
-                      activeCatalog?.sizes[vs.value as VMSize] ?? null
-                    )
-                  : vs.label,
-              }))}
-              disabled={saving || isInstantRuntime}
-            />
+            {!isInstantRuntime && (
+              <div className="sm:col-span-2">
+                <ResourceRequirementsInput
+                  value={resourceReqs}
+                  onChange={handleResourceReqsChange}
+                  onClearLegacy={() => setVmSizeOverride('')}
+                  disabled={saving}
+                  legacyVmSize={vmSizeOverride}
+                  inheritLabel="default"
+                  errors={resourceErrors}
+                />
+              </div>
+            )}
 
             <SelectField
               label="Workspace Profile"

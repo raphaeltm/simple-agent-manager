@@ -472,7 +472,7 @@ async function setupProjectPoolMocks(page: Page) {
 async function expectStressedDefaultPool(page: Page, heading: string, scope: PoolScope) {
   const summary = capacitySummary(scope);
   const excludedCount = summary.candidates.length - summary.activeCandidateCount;
-  await expect(page.getByRole('heading', { name: heading })).toBeVisible();
+  await expect(page.getByRole('heading', { name: heading })).toBeVisible({ timeout: 20_000 });
   await expect(
     page.getByText(
       new RegExp(`${summary.activeCandidateCount} allowed · ${excludedCount} not selected/removed`)
@@ -646,6 +646,10 @@ function escapeRegExp(value: string): string {
 }
 
 test.describe('Default capacity pool scope surfaces', () => {
+  // Each scope exercises filters, membership edits, persistence, and multiple
+  // screenshots; the shared single-screen timeout is too short for this flow.
+  test.setTimeout(120_000);
+
   test('project settings surface renders stressed project default pool without overflow', async ({
     page,
   }, testInfo) => {

@@ -71,6 +71,7 @@ var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 
 // Server is the HTTP server for the VM Agent.
 type Server struct {
+	systemProvisioning    *systemProvisioningBarrier
 	config                *config.Config
 	httpServer            *http.Server
 	jwtValidator          *auth.JWTValidator
@@ -90,9 +91,11 @@ type Server struct {
 	acpConfig             acp.GatewayConfig
 	sessionHostMu         sync.Mutex
 	sessionHosts          map[string]*acp.SessionHost
-	sessionMcpServers     map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
-	sessionProfileOvr     map[string]profileOverrides     // hostKey → model/permissionMode/effort overrides from agent profiles
-	sessionTaskCtx        map[string]taskCallbackContext  // hostKey → task callback ownership context
+	sessionRestores       map[string]*sessionRestoreAttempt // guarded by sessionHostMu
+	sessionCreations      map[string]chan struct{}          // guarded by sessionHostMu
+	sessionMcpServers     map[string][]acp.McpServerEntry   // hostKey → MCP servers for ACP injection
+	sessionProfileOvr     map[string]profileOverrides       // hostKey → model/permissionMode/effort overrides from agent profiles
+	sessionTaskCtx        map[string]taskCallbackContext    // hostKey → task callback ownership context
 	store                 *persistence.Store
 	executionRuntimeID    string
 	errorReporter         *errorreport.Reporter
@@ -134,6 +137,15 @@ type Server struct {
 type cachedWorktreeList struct {
 	worktrees []WorktreeInfo
 	expiresAt time.Time
+}
+
+func configuredWorkspaceBuildQueueDepth(cfg *config.Config) int {
+	if cfg == nil ||
+		cfg.WorkspaceBuildQueueDepth < 1 ||
+		cfg.WorkspaceBuildQueueDepth > config.MaxWorkspaceBuildQueueDepth {
+		return config.DefaultWorkspaceBuildQueueDepth
+	}
+	return cfg.WorkspaceBuildQueueDepth
 }
 
 func (s *Server) controlPlaneHTTPClient(timeout time.Duration) *http.Client {
@@ -431,6 +443,7 @@ func New(cfg *config.Config) (*Server, error) {
 		TerminalActivityReportBackoff:    cfg.ACPTerminalActivityReportBackoff,
 		ActivityReportTimeout:            cfg.ACPActivityReportTimeout,
 		CredentialSyncTimeout:            cfg.ACPCredentialSyncTimeout,
+		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
 		SAMEnvFallback:                   cfg.BuildSAMEnvFallback(),
@@ -527,7 +540,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ptyManager:          ptyManager,
 		sysInfoCollector:    sysInfoCollector,
 		workspaces:          make(map[string]*WorkspaceRuntime),
-		buildQueue:          make(chan struct{}, 1),
+		buildQueue:          make(chan struct{}, configuredWorkspaceBuildQueueDepth(cfg)),
 		nodeEvents:          make([]EventRecord, 0, 512),
 		workspaceEvents:     make(map[string][]EventRecord),
 		eventStore:          evStore,

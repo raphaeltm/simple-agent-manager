@@ -61,6 +61,7 @@ Multiple cloud providers and UX improvements:
 - Voice input and text-to-speech playback.
 - Conversation forking.
 - Warm node pooling for fast workspace reuse.
+- Provider-native [compute pools](/docs/guides/compute-pools/) with per-pool placement strategy and exhaustion policy.
 - Custom devcontainer support.
 - File browsing, upload, and download.
 - Usage visibility for compute and SAM-managed AI.
@@ -109,6 +110,6 @@ Shared project collaboration:
 
 - VS Code Remote integration.
 - Collaborative editing.
-- Workspace snapshots and restore.
+- Longer-lived workspace snapshots and restore controls.
 - GPU instances for AI workloads.
 - Kubernetes-based workspaces.

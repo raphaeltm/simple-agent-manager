@@ -53,8 +53,15 @@ export function defaultCapacitySourceId(seed: DefaultCapacitySourceReference): s
   return `cap-source-default:${seed.scope}:unknown`;
 }
 
-export function externalCapacitySourceCredentialId(externalSourceRef: string): string {
-  return `cap-source-external-credential:${encodeURIComponent(externalSourceRef)}`;
+export function externalCapacitySourceCredentialId(
+  externalSourceRef: string,
+  credentialVersion?: number | null
+): string {
+  const versionSuffix =
+    typeof credentialVersion === 'number' && Number.isSafeInteger(credentialVersion)
+      ? `:${credentialVersion}`
+      : '';
+  return `cap-source-external-credential:${encodeURIComponent(externalSourceRef)}${versionSuffix}`;
 }
 
 export function defaultCandidateId(

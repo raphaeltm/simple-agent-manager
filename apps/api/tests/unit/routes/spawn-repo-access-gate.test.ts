@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
   updateSessionTopic: vi.fn(),
   resolveCredentialSource: vi.fn(),
+  resolveCanonicalVmAllocationPlan: vi.fn(),
   generateTaskTitle: vi.fn(),
   getTaskTitleConfig: vi.fn(),
   truncateTitle: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
+  projectMemberRolesWithCapability: vi.fn(() => ['owner', 'admin', 'maintainer']),
   requireProjectAccess: mocks.requireProjectAccess,
   requireProjectCapability: mocks.requireProjectCapability,
 }));
@@ -75,6 +77,10 @@ vi.mock('../../../src/services/project-data', () => ({
 }));
 vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
+}));
+vi.mock('../../../src/services/canonical-vm-allocation', () => ({
+  placementProjectDefaultsFromRow: vi.fn((project: unknown) => project),
+  resolveCanonicalVmAllocationPlan: mocks.resolveCanonicalVmAllocationPlan,
 }));
 vi.mock('../../../src/services/placement-resolver', async (importActual) => {
   const actual = await importActual<typeof import('../../../src/services/placement-resolver')>();
@@ -192,6 +198,35 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     mocks.resolveCredentialSource.mockResolvedValue({
       credentialSource: 'user',
       providerName: 'hetzner',
+    });
+    mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue({
+      placement: {
+        resolvedReservation: {
+          cpuMillis: 1000,
+          memoryMb: 1024,
+          diskMb: 1024,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+          source: 'task',
+          sourceId: 'direct-workspace-test',
+          version: 1,
+        },
+        vmSizeSource: 'task',
+      },
+      credential: { credentialSource: 'user', providerName: 'hetzner' },
+      quotaCredentialSource: 'user',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
+      effectiveProvider: 'hetzner',
+      vmSize: 'medium',
+      vmLocation: 'nbg1',
+      providerInstanceType: 'cx22',
+      providerInstanceBootDiskSizeGb: null,
+      providerInstanceImage: null,
+      providerInstanceArchitecture: null,
+      capacityPoolSelection: null,
+      capacityPlacementSnapshot: null,
     });
     mocks.resolveTaskStartPlacementCredentialAttributionFromPlacement.mockResolvedValue({
       placement: expect.anything(),

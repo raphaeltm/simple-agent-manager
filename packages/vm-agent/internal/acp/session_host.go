@@ -184,6 +184,12 @@ type SessionHostConfig struct {
 
 	// RuntimeAssetsProvider fetches resolved project/profile/skill runtime assets
 	// for standalone sessions. It must not log or persist secret values.
+	//
+	// Set once at construction and never reassigned, which is what makes the
+	// unlocked read in HasRuntimeAssetsProvider safe. If this ever becomes
+	// mutable (e.g. a hot-reloadable provider), every reader must take h.mu —
+	// note consumePreviousSelectionOnSuccess already mutates two sibling fields
+	// of this struct under that lock.
 	RuntimeAssetsProvider RuntimeAssetsProvider
 }
 
@@ -563,6 +569,15 @@ func (h *SessionHost) ContainerWorkDir() string {
 	return h.config.ContainerWorkDir
 }
 
+// HasRuntimeAssetsProvider reports whether this host was wired to fetch resolved
+// project/profile/skill runtime assets. Standalone (cf-container) sessions have no
+// devcontainer to read /etc/sam/project-env from, so the provider is the only path
+// by which project env vars and runtime files reach the agent process — a nil
+// provider there means the session silently starts without them.
+func (h *SessionHost) HasRuntimeAssetsProvider() bool {
+	return h.config.RuntimeAssetsProvider != nil
+}
+
 // ViewerCount returns the number of active viewers.
 func (h *SessionHost) ViewerCount() int {
 	h.viewerMu.RLock()
@@ -594,7 +609,7 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	// Register the viewer BEFORE starting the write pump goroutine to
 	// close the TOCTOU window between the status check above and the
 	// goroutine launch. If the session transitions to stopped after our
-	// check, the goroutine will exit via h.ctx.Done().
+	// check, the goroutine will exit via lifecycleContext().Done().
 	h.viewerMu.Lock()
 	h.viewers[id] = viewer
 	if h.suspendTimer != nil {

@@ -18,6 +18,19 @@ import (
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
+func TestWorkspaceRuntimeReportsAdmissionMetricsStatuses(t *testing.T) {
+	for _, status := range []string{"running", "creating", "recovery"} {
+		if !workspaceRuntimeReportsAdmissionMetrics(status) {
+			t.Fatalf("status %q should report admission metrics", status)
+		}
+	}
+	for _, status := range []string{"", "stopped", "error"} {
+		if workspaceRuntimeReportsAdmissionMetrics(status) {
+			t.Fatalf("status %q should not report admission metrics", status)
+		}
+	}
+}
+
 // newTestErrorReporter creates a minimal error reporter for tests.
 func newTestErrorReporter() *errorreport.Reporter {
 	return errorreport.New("http://localhost", "test", "test", errorreport.Config{})
@@ -201,6 +214,55 @@ func TestNodeReadyAndHeartbeatReportAgentVersion(t *testing.T) {
 	}
 	if got := seen["/api/nodes/node-version/heartbeat"]; got != "test-build-sha" {
 		t.Fatalf("heartbeat agentVersion = %q, want test-build-sha", got)
+	}
+}
+
+func TestNodeHeartbeatBuildQueueDepthRolloutCompatible(t *testing.T) {
+	var payload map[string]any
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/nodes/node-build-queue/heartbeat" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode heartbeat payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(heartbeatResponse{
+			Status:          "running",
+			LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
+			HealthStatus:    "healthy",
+		})
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL:          ts.URL,
+		NodeID:                   "node-build-queue",
+		CallbackToken:            "callback-token",
+		HeartbeatInterval:        time.Minute,
+		WorkspaceBuildQueueDepth: 3,
+	}
+	s := &Server{
+		config:        cfg,
+		callbackToken: cfg.CallbackToken,
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-creating": {ID: "ws-creating", Status: "creating", ProvisioningActive: true},
+		},
+		errorReporter: newTestErrorReporter(),
+		done:          make(chan struct{}),
+	}
+
+	s.sendNodeHeartbeat()
+	if payload == nil {
+		t.Fatal("heartbeat payload was not captured")
+	}
+	if _, ok := payload["workspaceBuildQueueDepth"]; ok {
+		t.Fatal("heartbeat should not require a new build-queue-depth field for rollout compatibility")
+	}
+	if got, ok := payload["creatingWorkspaces"].(float64); !ok || got != 1 {
+		t.Fatalf("creatingWorkspaces = %v (%T), want 1", payload["creatingWorkspaces"], payload["creatingWorkspaces"])
 	}
 }
 

@@ -21,6 +21,13 @@ cpu_ms = 30000
 [vars]
 BASE_DOMAIN = "workspaces.example.com"
 VERSION = "0.1.0"
+# D1 Sessions API anchor for the Worker fetch handler. "first-primary" routes the first query
+# of each request to the primary and lets the rest be served by any replica caught up to that
+# bookmark: one trans-Atlantic round trip per request instead of N, with every query in the
+# request served at or after the primary's state at request start. It does NOT promise that a
+# write landing mid-request is visible to the rest of that request — see the precise statement
+# in apps/api/src/lib/d1-session.ts. Set to "disabled" to send every query at the primary.
+D1_SESSION_MODE = "first-primary"
 CRON_SWEEPS_ENABLED_KV_KEY = "control-loops:cron-enabled"
 DO_ALARMS_ENABLED_KV_KEY = "control-loops:alarms-enabled"
 CONTROL_LOOP_KILL_SWITCH_CACHE_MS = "30000"
@@ -140,18 +147,24 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS = "5000"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO = "0.98"
 PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = "1"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
+# Compact format stays off until the staged rollout and production mutation approval.
+PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
+PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "250000"
+PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "32"
+PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS = "10000"
+PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
+PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT = "100"
 PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED = "true"
-# 15 minutes, not the daily code fallback: one tick moves one non-trivial session (the
-# wall-time break fires between candidates), and the SAM root object needs ~3,350 backlog
-# sessions plus 4-233 newly terminal sessions/day drained. Idle ticks cost two D1 statements;
-# the per-tick copy work is bounded by PROJECT_DATA_ARCHIVE_WALL_TIME_MS, _SWEEP_SESSIONS and
+# One hour, not the daily code fallback: this keeps automatic root relief moving while
+# firebreaking the DO SQLite write cost seen during the 2026-09-08 billing spike check.
+# Per-tick copy work is bounded by PROJECT_DATA_ARCHIVE_WALL_TIME_MS, _SWEEP_SESSIONS and
 # _SWEEP_MESSAGE_BUDGET. Load review: tasks/archive/2026-09-06-archive-drain-enable-unfence-and-throughput.md
 # and the archive-sharding notes in apps/www/src/content/docs/docs/reference/configuration.md.
-PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "900000"
+PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS = "3600000"
 PROJECT_DATA_ARCHIVE_SHARD_COUNT = "128"
 PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
-PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "10"
-PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "20000"
+PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "1"
+PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "5000"
 PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS = "604800000"
 PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS = "604800000"
 # Failed journals wait this long before a sweep retries them, so three faults poison a row over
@@ -161,9 +174,9 @@ PROJECT_DATA_ARCHIVE_CHUNK_ROWS = "500"
 PROJECT_DATA_ARCHIVE_CHUNK_BYTES = "16777216"
 PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS = "500"
 PROJECT_DATA_ARCHIVE_LEASE_MS = "300000"
-# Soft budget checked between candidates; 30 s lets a tick drain several small sessions once
-# the largest-first order reaches the long tail (code fallback stays 5 s).
-PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "30000"
+# Soft budget checked between candidates; 10 s allows one ordinary candidate while limiting
+# tail draining in a single cron tick (code fallback stays 5 s).
+PROJECT_DATA_ARCHIVE_WALL_TIME_MS = "10000"
 PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT = "25"
 PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX = "100"
 PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_DEFAULT = "5"
@@ -230,7 +243,7 @@ PROJECT_EVENT_SOURCE_OUTBOX_RETRY_MAX_MS = "1800000"
 PROJECT_EVENT_SOURCE_OUTBOX_PROCESSING_LEASE_MS = "60000"
 PROJECT_EVENT_RETENTION_INTERVAL_MS = "86400000"
 PROJECT_EVENT_RETENTION_MIN_ALARM_DELAY_MS = "60000"
-PROJECT_EVENT_WAKE_ENABLED = "true"
+PROJECT_EVENT_WAKE_ENABLED = "false"
 PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS = "1000"
 PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS = "5000"
 PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS = "300000"
@@ -306,7 +319,9 @@ ERROR_REPORT_STORED_ERROR_MAX_BYTES = "512"
 ERROR_REPORT_COLLECTOR_CONCURRENCY = "1"
 VM_AGENT_PROTOCOL = "https"
 VM_AGENT_PORT = "8443"
+VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS = "1200000"
 DEVCONTAINER_CACHE_ENABLED = "true"
+WORKSPACE_BUILD_QUEUE_DEPTH = "1"
 DEVCONTAINER_CACHE_REGISTRY_HOST = "registry.cloudflare.com"
 DEVCONTAINER_CACHE_REPOSITORY_PREFIX = "sam-"
 DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES = "120"

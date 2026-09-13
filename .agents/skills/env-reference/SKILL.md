@@ -34,3 +34,5 @@ The reference covers:
   - System info (Docker timeout, cache TTL)
 
 Also see `apps/api/.env.example` for the full list.
+
+Compact archive controls are documented in the full reference: `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED`, `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET`, `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` , `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS`, `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS` and `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT`. The daily allowance is an admission estimate; preserve normal-account headroom and use measured SQL counters when tuning it.

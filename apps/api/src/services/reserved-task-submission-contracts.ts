@@ -3,6 +3,7 @@ import type {
   CredentialProvider,
   CredentialSource,
   ResourceRequirementsSource,
+  ResourceRequirements,
   TaskActorType,
   TaskMode,
   TaskTerminalStatus,
@@ -55,6 +56,7 @@ export interface ReservedTaskSubmissionInput {
   skillId: string | null;
   taskMode: TaskMode;
   vmSizeOverride: string | null;
+  resourceRequirementsJson?: string | null;
   source: ReservedTaskSubmissionSourceProvenance;
 }
 
@@ -178,6 +180,7 @@ export interface TaskInsertValues {
   requestedVmSize: VMSize;
   requestedVmSizeSource: ResourceRequirementsSource;
   resourceRequirementsJson: string | null;
+  resourceRequirementPlanJson: string;
   resourceRequirementsSource: ResourceRequirementsSource;
   resolvedReservationJson: string;
   credentialAttributionUserId: string;
@@ -220,6 +223,7 @@ export interface TaskRunnerStartSnapshot {
   opencodeBaseUrl: null;
   systemPromptAppend: string | null;
   agentProfileHint: string | null;
+  resourceRequirements?: ResourceRequirements;
   projectScaling: {
     taskExecutionTimeoutMs: number | null;
     maxWorkspacesPerNode: number | null;

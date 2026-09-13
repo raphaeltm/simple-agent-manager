@@ -8,7 +8,14 @@ import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-ma
 import { Bot, Clock, Cpu, Gauge, Key, Server, Settings2, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
-import { fetchComputeUsage, fetchUserAiBudget, fetchUserAiUsage, fetchUserQuotaStatus, updateUserAiBudget } from '../lib/api';
+import { HardwareDetails } from '../components/hardware/HardwareDetails';
+import {
+  fetchComputeUsage,
+  fetchUserAiBudget,
+  fetchUserAiUsage,
+  fetchUserQuotaStatus,
+  updateUserAiBudget,
+} from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -87,9 +94,7 @@ function AiUsageSection() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <SectionHeading>LLM Usage</SectionHeading>
-          <Body className="text-fg-muted text-sm">
-            SAM-managed AI Gateway traffic only
-          </Body>
+          <Body className="text-fg-muted text-sm">SAM-managed AI Gateway traffic only</Body>
         </div>
         <div className="flex gap-1 flex-wrap">
           {AI_PERIODS.map((opt) => (
@@ -127,8 +132,8 @@ function AiUsageSection() {
           <Bot className="w-10 h-10 mx-auto mb-3 text-fg-muted" aria-hidden="true" />
           <Body className="text-fg-muted font-medium">No LLM usage yet</Body>
           <Body className="text-fg-muted text-sm mt-1">
-            Usage from SAM-managed AI Gateway requests will appear here.
-            Direct BYOK or non-Gateway usage is not tracked.
+            Usage from SAM-managed AI Gateway requests will appear here. Direct BYOK or non-Gateway
+            usage is not tracked.
           </Body>
         </Card>
       )}
@@ -138,19 +143,27 @@ function AiUsageSection() {
           {/* KPI Cards */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Card className="p-3 text-center">
-              <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatCost(data.totalCostUsd)}</p>
+              <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+                {formatCost(data.totalCostUsd)}
+              </p>
               <p className="sam-type-caption text-fg-muted m-0">Total Cost</p>
             </Card>
             <Card className="p-3 text-center">
-              <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{data.totalRequests.toLocaleString()}</p>
+              <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+                {data.totalRequests.toLocaleString()}
+              </p>
               <p className="sam-type-caption text-fg-muted m-0">Requests</p>
             </Card>
             <Card className="p-3 text-center">
-              <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatTokens(data.totalInputTokens)}</p>
+              <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+                {formatTokens(data.totalInputTokens)}
+              </p>
               <p className="sam-type-caption text-fg-muted m-0">Input Tokens</p>
             </Card>
             <Card className="p-3 text-center">
-              <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatTokens(data.totalOutputTokens)}</p>
+              <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+                {formatTokens(data.totalOutputTokens)}
+              </p>
               <p className="sam-type-caption text-fg-muted m-0">Output Tokens</p>
             </Card>
           </div>
@@ -173,8 +186,17 @@ function AiUsageSection() {
                       <span>{m.requests.toLocaleString()} req</span>
                       <span>{formatTokens(m.inputTokens)} in</span>
                       <span>{formatTokens(m.outputTokens)} out</span>
-                      {m.cachedRequests > 0 && <span className="text-accent-fg">{m.cachedRequests} cached</span>}
-                      {m.errorRequests > 0 && <span className="text-danger-fg" title={`${m.errorRequests} error requests`}>{m.errorRequests} err</span>}
+                      {m.cachedRequests > 0 && (
+                        <span className="text-accent-fg">{m.cachedRequests} cached</span>
+                      )}
+                      {m.errorRequests > 0 && (
+                        <span
+                          className="text-danger-fg"
+                          title={`${m.errorRequests} error requests`}
+                        >
+                          {m.errorRequests} err
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -194,7 +216,10 @@ function AiUsageSection() {
                       <span className="text-xs text-fg-muted tabular-nums w-20 flex-shrink-0">
                         {d.date.slice(5)}
                       </span>
-                      <div className="flex-1 min-w-0 h-4 bg-surface-hover rounded overflow-hidden" role="presentation">
+                      <div
+                        className="flex-1 min-w-0 h-4 bg-surface-hover rounded overflow-hidden"
+                        role="presentation"
+                      >
                         <div
                           className="h-full bg-accent-emphasis rounded"
                           style={{ width: `${Math.max(1, (d.costUsd / maxCost) * 100)}%` }}
@@ -219,7 +244,17 @@ function AiUsageSection() {
 // Budget Utilization Bar
 // ---------------------------------------------------------------------------
 
-function BudgetBar({ label, used, limit, unit }: { label: string; used: number; limit: number; unit: string }) {
+function BudgetBar({
+  label,
+  used,
+  limit,
+  unit,
+}: {
+  label: string;
+  used: number;
+  limit: number;
+  unit: string;
+}) {
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
   const barColor = pct >= 100 ? 'bg-danger' : pct >= 80 ? 'bg-warning' : 'bg-accent-emphasis';
 
@@ -228,10 +263,18 @@ function BudgetBar({ label, used, limit, unit }: { label: string; used: number; 
       <div className="flex justify-between text-sm">
         <span className="text-fg-muted">{label}</span>
         <span className="tabular-nums font-medium">
-          {unit === '$' ? formatCost(used) : formatTokens(used)} / {unit === '$' ? formatCost(limit) : formatTokens(limit)}
+          {unit === '$' ? formatCost(used) : formatTokens(used)} /{' '}
+          {unit === '$' ? formatCost(limit) : formatTokens(limit)}
         </span>
       </div>
-      <div className="w-full h-2 bg-surface-hover rounded-full overflow-hidden" role="meter" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label={label}>
+      <div
+        className="w-full h-2 bg-surface-hover rounded-full overflow-hidden"
+        role="meter"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+      >
         <div
           className={`h-full ${barColor} rounded-full transition-all`}
           style={{ width: `${Math.max(pct > 0 ? 1 : 0, pct)}%` }}
@@ -372,12 +415,20 @@ function BudgetSettingsSection() {
             />
           )}
           {budget.exceeded && (
-            <div className="flex items-start gap-2 p-3 bg-danger-tint rounded-md border border-danger/30" role="alert" aria-live="assertive">
-              <ShieldAlert className="w-4 h-4 text-danger flex-shrink-0 mt-0.5" aria-hidden="true" />
+            <div
+              className="flex items-start gap-2 p-3 bg-danger-tint rounded-md border border-danger/30"
+              role="alert"
+              aria-live="assertive"
+            >
+              <ShieldAlert
+                className="w-4 h-4 text-danger flex-shrink-0 mt-0.5"
+                aria-hidden="true"
+              />
               <div>
                 <Body className="text-danger text-sm font-medium m-0">Budget Exceeded</Body>
                 <Body className="text-fg-muted text-sm mt-1 m-0">
-                  AI proxy requests will be rejected (429) until the limit resets. Daily limits reset at midnight UTC.
+                  AI proxy requests will be rejected (429) until the limit resets. Daily limits
+                  reset at midnight UTC.
                 </Body>
               </div>
             </div>
@@ -410,7 +461,9 @@ function BudgetSettingsSection() {
                 step="1000"
                 value={dailyInput}
                 onChange={(e) => setDailyInput(e.target.value)}
-                placeholder={budget?.effectiveLimits.dailyInputTokenLimit.toLocaleString() ?? '500,000'}
+                placeholder={
+                  budget?.effectiveLimits.dailyInputTokenLimit.toLocaleString() ?? '500,000'
+                }
                 className="w-full px-3 py-2.5 min-h-[44px] rounded-md text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
               />
             </div>
@@ -426,7 +479,9 @@ function BudgetSettingsSection() {
                 step="1000"
                 value={dailyOutput}
                 onChange={(e) => setDailyOutput(e.target.value)}
-                placeholder={budget?.effectiveLimits.dailyOutputTokenLimit.toLocaleString() ?? '200,000'}
+                placeholder={
+                  budget?.effectiveLimits.dailyOutputTokenLimit.toLocaleString() ?? '200,000'
+                }
                 className="w-full px-3 py-2.5 min-h-[44px] rounded-md text-fg-primary text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-accent-primary"
               />
             </div>
@@ -526,7 +581,13 @@ function QuotaProgressBar({ quota }: { quota: UserQuotaStatusResponse }) {
   const used = quota.currentUsage;
   const pct = Math.min(100, limit > 0 ? (used / limit) * 100 : 0);
   const exceeded = pct >= 100;
-  const barColor = exceeded ? 'bg-error' : pct >= 90 ? 'bg-error' : pct >= 75 ? 'bg-warning' : 'bg-success';
+  const barColor = exceeded
+    ? 'bg-error'
+    : pct >= 90
+      ? 'bg-error'
+      : pct >= 75
+        ? 'bg-warning'
+        : 'bg-success';
 
   return (
     <Card className="p-4">
@@ -578,10 +639,7 @@ export function SettingsComputeUsage() {
   const loadUsage = useCallback(async () => {
     try {
       setError(null);
-      const [usageRes, quotaRes] = await Promise.all([
-        fetchComputeUsage(),
-        fetchUserQuotaStatus(),
-      ]);
+      const [usageRes, quotaRes] = await Promise.all([fetchComputeUsage(), fetchUserQuotaStatus()]);
       setData(usageRes);
       setQuota(quotaRes);
     } catch (err) {
@@ -640,24 +698,32 @@ export function SettingsComputeUsage() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Card className="p-3 text-center">
             <Cpu className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
-            <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatHours(period.totalNodeHours ?? 0)}</p>
+            <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+              {formatHours(period.totalNodeHours ?? 0)}
+            </p>
             <p className="sam-type-caption text-fg-muted m-0">Node-hrs</p>
           </Card>
           <Card className="p-3 text-center">
             <Server className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
-            <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatHours(period.totalVcpuHours)}</p>
+            <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+              {formatHours(period.totalVcpuHours)}
+            </p>
             <p className="sam-type-caption text-fg-muted m-0">vCPU-hrs</p>
           </Card>
           <Card className="p-3 text-center">
             <Key className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
-            <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatHours(period.platformVcpuHours)}</p>
+            <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+              {formatHours(period.platformVcpuHours)}
+            </p>
             <p className="sam-type-caption text-fg-muted m-0">Platform vCPU</p>
           </Card>
           <Card className="p-3 text-center">
             <span className="block w-5 h-5 mx-auto mb-1" aria-hidden="true">
               <span className="w-2 h-2 rounded-full bg-success block mx-auto mt-1.5" />
             </span>
-            <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{activeNodeCount}</p>
+            <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+              {activeNodeCount}
+            </p>
             <p className="sam-type-caption text-fg-muted m-0">Active Now</p>
           </Card>
         </div>
@@ -672,7 +738,10 @@ export function SettingsComputeUsage() {
                   className="flex flex-col gap-1 py-3 border-b border-border-default last:border-0 min-w-0 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="w-2 h-2 rounded-full bg-success flex-shrink-0" aria-label="Running" />
+                    <span
+                      className="w-2 h-2 rounded-full bg-success flex-shrink-0"
+                      aria-label="Running"
+                    />
                     <span
                       className="font-mono sam-type-caption text-fg-primary truncate min-w-0 flex-1"
                       title={session.nodeId ?? session.workspaceId}
@@ -681,13 +750,15 @@ export function SettingsComputeUsage() {
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-4 sm:pl-0">
-                    <span className="sam-type-caption text-fg-muted">
-                      {session.providerInstanceType ?? `${session.vmSize ?? session.serverType} compatibility hint`} ({session.providerInstanceVcpuCount ?? session.vcpuCount} vCPU)
+                    <HardwareDetails hardware={session} />
+                    <span className="sam-type-caption text-fg-muted capitalize">
+                      {session.credentialSource}
                     </span>
-                    <span className="sam-type-caption text-fg-muted capitalize">{session.credentialSource}</span>
                     <span className="flex items-center gap-1 sam-type-caption text-fg-muted">
                       <Clock className="w-3 h-3 flex-shrink-0" aria-hidden="true" />
-                      <span className="tabular-nums">{formatDuration(session.createdAt ?? session.startedAt)}</span>
+                      <span className="tabular-nums">
+                        {formatDuration(session.createdAt ?? session.startedAt)}
+                      </span>
                     </span>
                   </div>
                 </div>

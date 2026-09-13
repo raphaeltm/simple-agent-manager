@@ -1,3 +1,4 @@
+import type { ProviderRequestContext } from '@simple-agent-manager/providers';
 import { type CredentialProvider, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -7,9 +8,15 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { deleteDNSRecord } from './dns';
+import { getTimeoutMs } from './fetch-timeout';
 import { persistError } from './observability';
 import {
+  hasExactProviderCredentialGenerationProof,
+  isExactCredentialSource,
+} from './provider-credential-exact';
+import {
   createProviderForUser,
+  type ExactProviderCredentialBinding,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
 import { destroyVmAgentContainer } from './vm-agent-container';
@@ -121,6 +128,36 @@ function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
   return { targetProvider, attributionUserId, attributionProjectId, exactCredential };
 }
 
+/**
+ * Name the absent prerequisites without echoing their values. Credential references are
+ * IDs rather than secrets, but strict teardown deliberately keeps them out of logs and
+ * error strings, so this reports which fields are missing and never what they contain.
+ */
+function describeMissingExactBinding(
+  node: NodeRow,
+  targetProvider: CredentialProvider | undefined,
+  exactCredential: ExactProviderCredentialBinding | null
+): string {
+  const missing: string[] = [];
+  if (!targetProvider) missing.push('cloudProvider');
+  if (!exactCredential) {
+    // A null binding means the snapshot was rejected, which happens for either an invalid
+    // source OR an absent reference. Report only the field that actually failed — reading
+    // the raw columns rather than inferring from the null. Collapsing two distinct absent
+    // states into one label is the exact defect this whole change exists to fix, and it
+    // would send an operator looking at the wrong column.
+    if (!isExactCredentialSource(node.placementCredentialSource)) {
+      missing.push('placementCredentialSource');
+    }
+    if (!node.placementCredentialReference) missing.push('placementCredentialReference');
+  } else if (!hasExactProviderCredentialGenerationProof(exactCredential)) {
+    // A non-null binding always carries a truthy reference, so the only remaining
+    // absence at this point is the generation proof.
+    missing.push('placementCredentialFingerprint and placementCredentialVersion');
+  }
+  return missing.join(', ');
+}
+
 async function requireStrictNodeProvider(
   db: NodeDb,
   node: NodeRow,
@@ -129,9 +166,15 @@ async function requireStrictNodeProvider(
 ): Promise<ProviderForUserResult> {
   const { targetProvider, attributionUserId, attributionProjectId, exactCredential } =
     getStrictNodeCredentialContext(node, userId);
-  if (!targetProvider || !exactCredential?.credentialFingerprint) {
+  // A fingerprint is the preferred generation proof, but requiring it outright strands every
+  // node provisioned before migration 0142 — that column is backfill-proof, so those rows can
+  // never satisfy it. `hasExactProviderCredentialGenerationProof` also accepts the weaker
+  // version snapshot those nodes were placed with; `exactCredentialGenerationMatches` still
+  // refuses a rotated credential on either path, so this stays fail-closed.
+  if (!targetProvider || !hasExactProviderCredentialGenerationProof(exactCredential)) {
     throw new Error(
-      `Cannot strictly delete node ${node.id}: exact provider credential binding is missing`
+      `Cannot strictly delete node ${node.id}: exact provider credential binding is missing ` +
+        `(${describeMissingExactBinding(node, targetProvider, exactCredential)})`
     );
   }
   const providerResult = await createProviderForUser(
@@ -201,7 +244,8 @@ async function deleteStrictProviderInstance(
   db: NodeDb,
   node: NodeRow,
   userId: string,
-  env: Env
+  env: Env,
+  requestContext?: ProviderRequestContext
 ): Promise<StrictNodeDeletionResult['providerVm']> {
   if (!node.providerInstanceId) {
     throw new Error(
@@ -212,7 +256,8 @@ async function deleteStrictProviderInstance(
   const providerResult = await resolveStrictNodeProvider(db, node, userId, env);
 
   await requireSameNodeIncarnation(db, node, 'provider delete');
-  await providerResult.provider.deleteVM(node.providerInstanceId);
+  if (requestContext) await providerResult.provider.deleteVM(node.providerInstanceId, requestContext);
+  else await providerResult.provider.deleteVM(node.providerInstanceId);
   return 'deleted';
 }
 
@@ -245,11 +290,22 @@ async function persistStrictDnsCleanupError(
   );
 }
 
-async function deleteStrictNodeDnsRecord(node: NodeRow, userId: string, env: Env): Promise<void> {
+async function deleteStrictNodeDnsRecord(
+  node: NodeRow, userId: string, env: Env, requestDeadlineMs?: number, signal?: AbortSignal
+): Promise<void> {
   if (!node.backendDnsRecordId) return;
 
   try {
-    await deleteDNSRecord(node.backendDnsRecordId, env);
+    const remainingMs = requestDeadlineMs === undefined ? undefined : requestDeadlineMs - Date.now();
+    if (remainingMs !== undefined && remainingMs <= 0) {
+      throw new Error('Stopped node cleanup DNS deadline exceeded');
+    }
+    const dnsEnv = remainingMs === undefined ? env : {
+      ...env,
+      CF_API_TIMEOUT_MS: String(Math.min(getTimeoutMs(env.CF_API_TIMEOUT_MS), remainingMs)),
+    };
+    if (signal) await deleteDNSRecord(node.backendDnsRecordId, dnsEnv, signal);
+    else await deleteDNSRecord(node.backendDnsRecordId, dnsEnv);
   } catch (err) {
     log.error('node_delete.strict_dns_cleanup_failed', { nodeId: node.id, ...serializeError(err) });
     try {
@@ -324,7 +380,12 @@ async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promi
 }
 
 async function claimManagedNodeDeletion(db: NodeDb, node: NodeRow): Promise<NodeRow> {
-  if (node.runtimeTerminationConfirmedAt || node.status === 'destroying') {
+  // Absence proof must also fence lifecycle changes: claim teardown before
+  // consuming proof on any node that has not already entered terminal cleanup.
+  if (
+    (node.runtimeTerminationConfirmedAt && node.status === 'deleted') ||
+    node.status === 'destroying'
+  ) {
     return await requireSameNodeIncarnation(db, node, 'managed deletion claim');
   }
 
@@ -353,7 +414,12 @@ export async function deleteNodeResourcesStrict(
   nodeId: string,
   userId: string,
   env: Env,
-  options: { cleanupDns?: boolean; expectedRuntime?: StrictNodeRuntimeIdentity } = {}
+  options: {
+    cleanupDns?: boolean;
+    expectedRuntime?: StrictNodeRuntimeIdentity;
+    providerRequestContext?: ProviderRequestContext;
+    requestDeadlineMs?: number;
+  } = {}
 ): Promise<StrictNodeDeletionResult> {
   const db = drizzle(env.DATABASE, { schema });
   const initialNode = await requireStrictNode(db, nodeId, userId);
@@ -391,7 +457,9 @@ export async function deleteNodeResourcesStrict(
     await requireSameNodeIncarnation(db, node, 'container teardown');
     await destroyVmAgentContainer(env, node.id);
     const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
-    if (options.cleanupDns !== false) await deleteStrictNodeDnsRecord(node, userId, env);
+    if (options.cleanupDns !== false) {
+      await deleteStrictNodeDnsRecord(node, userId, env, options.requestDeadlineMs, options.providerRequestContext?.signal);
+    }
     return {
       providerVm: 'no-instance',
       runtimeTerminationConfirmedAt,
@@ -400,9 +468,11 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
-  const providerVm = await deleteStrictProviderInstance(db, node, userId, env);
+  const providerVm = await deleteStrictProviderInstance(db, node, userId, env, options.providerRequestContext);
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
-  if (options.cleanupDns !== false) await deleteStrictNodeDnsRecord(node, userId, env);
+  if (options.cleanupDns !== false) {
+    await deleteStrictNodeDnsRecord(node, userId, env, options.requestDeadlineMs, options.providerRequestContext?.signal);
+  }
   return {
     providerVm,
     runtimeTerminationConfirmedAt,

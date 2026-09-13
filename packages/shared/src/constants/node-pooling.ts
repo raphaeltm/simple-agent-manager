@@ -66,6 +66,10 @@ export const DEFAULT_NODE_CLEANUP_SWEEP_LIMIT = 25;
 /** Backoff after a node cleanup candidate fails permanently or transiently. */
 export const DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS = 60 * 60 * 1000; // 1 hour
 
+/** Wall-time and per-candidate network budgets for stopped VM handoff cleanup. */
+export const DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS = 20_000;
+export const DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS = 5_000;
+
 /**
  * Default maximum workspace candidates processed per cleanup phase per sweep (rule 47).
  * Override via WORKSPACE_CLEANUP_SWEEP_LIMIT env var.

@@ -14,7 +14,9 @@ describe('skill submit path source contracts', () => {
     expect(submit).toContain('resolveSkillProfile');
     expect(submit).toContain('body.skillId');
     expect(submit).toContain('resolveTaskStartPlacement');
-    expect(submit).toContain('skill: skillResourceRequirements');
+    expect(submit).toContain(
+      'skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null'
+    );
     expect(placementResolver).toContain('skillId: profile?.skillId ?? undefined');
     expect(submit).toContain('skillId: resolvedProfile?.skillId ?? null');
     expect(submit).toContain('skillHint: body.skillId ?? null');

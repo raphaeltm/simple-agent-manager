@@ -152,6 +152,40 @@
       "digests": [
         "1c07295d3aedeb8f1aaa6f5e33e7d9150bdd0171741d258ee02cc59809aae0c9"
       ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Exact same multiline PEM and JWT-format test fixture bytes already reviewed in baseline groups 2 and 5; this migration shifts their source lines to 465 and 1778. No new credential material.",
+      "owner": "security",
+      "reviewedAt": "2026-09-07T00:00:00.000Z",
+      "expiresAt": "2026-11-07T00:00:00.000Z",
+      "digests": [
+        "dc186025a0e5e102c61c192aab5544c8425b93e14724e6e5ad042fe65d4bba80",
+        "701d49d3e8182123b445be468554df8a9b83fe1296afe49529f6cc116f8bc635"
+      ]
+    },
+    {
+      "classification": "documented-example",
+      "reason": "Plain node-pool checklist prose describing queue, fallback, empty pool and migration states; scanner interprets nearby credentials wording as an assignment. This exact documentation match contains no credential.",
+      "owner": "security",
+      "reviewedAt": "2026-09-07T00:00:00.000Z",
+      "expiresAt": "2026-11-07T00:00:00.000Z",
+      "digests": [
+        "52ee45617044d0ed1ca6a15604fd3616a73547be6f1482fe2bc5396f646ba6ef",
+        "9677b1effbe286eaf5f4a5217b92e8956d54f96d8550b6956ebda0446285d24b",
+        "ea76926e3b78a97aaca8b3118d8b9a4e982176adaeb449e32b533d33612638bb",
+        "fc13213a7e686f94eade6a39d1470ed7923c2562f996f85d71f82f3cf83bb8ba"
+      ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Exact intermediate PR-range formatting of the callback scope test RSA fixture; normalized PEM bytes match the fixture already present on main. Independent local security review confirmed no live credential material.",
+      "owner": "security",
+      "reviewedAt": "2026-09-07T00:00:00.000Z",
+      "expiresAt": "2026-11-07T00:00:00.000Z",
+      "digests": [
+        "41c0f6b3fbd4c3ca9c7c1f107da6099134aaf3088bc9392d407391ade48b4317"
+      ]
     }
   ]
 }

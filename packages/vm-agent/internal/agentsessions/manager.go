@@ -16,19 +16,25 @@ const (
 	StatusError     Status = "error"
 )
 
+// creationIdentity is immutable request provenance, separate from mutable display state.
+type creationIdentity struct {
+	Label, ProjectID, ChatSessionID string
+}
+
 type Session struct {
-	ID           string     `json:"id"`
-	WorkspaceID  string     `json:"workspaceId"`
-	Status       Status     `json:"status"`
-	Label        string     `json:"label,omitempty"`
-	AgentType    string     `json:"agentType,omitempty"`
-	AcpSessionID string     `json:"acpSessionId,omitempty"`
-	LastPrompt   string     `json:"lastPrompt,omitempty"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
-	StoppedAt    *time.Time `json:"stoppedAt,omitempty"`
-	SuspendedAt  *time.Time `json:"suspendedAt,omitempty"`
-	Error        string     `json:"errorMessage,omitempty"`
+	creationIdentity *creationIdentity
+	ID               string     `json:"id"`
+	WorkspaceID      string     `json:"workspaceId"`
+	Status           Status     `json:"status"`
+	Label            string     `json:"label,omitempty"`
+	AgentType        string     `json:"agentType,omitempty"`
+	AcpSessionID     string     `json:"acpSessionId,omitempty"`
+	LastPrompt       string     `json:"lastPrompt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+	StoppedAt        *time.Time `json:"stoppedAt,omitempty"`
+	SuspendedAt      *time.Time `json:"suspendedAt,omitempty"`
+	Error            string     `json:"errorMessage,omitempty"`
 }
 
 type Manager struct {
@@ -45,6 +51,23 @@ func NewManager() *Manager {
 }
 
 func (m *Manager) Create(workspaceID, sessionID, label, idempotencyKey string) (Session, bool, error) {
+	return m.create(workspaceID, sessionID, label, idempotencyKey, nil, false)
+}
+
+// CreateRouted converges same-process retries with matching original routing.
+// Legacy/reloaded sessions without that provenance fail closed.
+func (m *Manager) CreateRouted(workspaceID, sessionID, label, idempotencyKey, projectID, chatSessionID string) (Session, bool, error) {
+	return m.create(workspaceID, sessionID, label, idempotencyKey, &creationIdentity{label, projectID, chatSessionID}, false)
+}
+
+// CreateRoutedOnEmptyWorkspace atomically admits a fresh standalone restore,
+// excluding concurrent normal session creation and other restore claims.
+func (m *Manager) CreateRoutedOnEmptyWorkspace(workspaceID, sessionID, projectID, chatSessionID string) (Session, bool, error) {
+	identity := &creationIdentity{"Restored session", projectID, chatSessionID}
+	return m.create(workspaceID, sessionID, identity.Label, "", identity, true)
+}
+
+func (m *Manager) create(workspaceID, sessionID, label, idempotencyKey string, identity *creationIdentity, requireEmpty bool) (Session, bool, error) {
 	if workspaceID == "" {
 		return Session{}, false, fmt.Errorf("workspace ID is required")
 	}
@@ -59,6 +82,9 @@ func (m *Manager) Create(workspaceID, sessionID, label, idempotencyKey string) (
 		if existingID, ok := m.idempotency[m.idempotencyKey(workspaceID, idempotencyKey)]; ok {
 			if ws, ok := m.workspaceSessions[workspaceID]; ok {
 				if session, ok := ws[existingID]; ok {
+					if identity != nil && (session.ID != sessionID || !session.matchesCreation(identity)) {
+						return Session{}, false, fmt.Errorf("session creation identity or state conflicts")
+					}
 					return session, true, nil
 				}
 			}
@@ -69,18 +95,25 @@ func (m *Manager) Create(workspaceID, sessionID, label, idempotencyKey string) (
 		m.workspaceSessions[workspaceID] = make(map[string]Session)
 	}
 
-	if _, exists := m.workspaceSessions[workspaceID][sessionID]; exists {
+	if existing, exists := m.workspaceSessions[workspaceID][sessionID]; exists {
+		if identity != nil && existing.matchesCreation(identity) {
+			return existing, true, nil
+		}
 		return Session{}, false, fmt.Errorf("session already exists: %s", sessionID)
 	}
 
+	if requireEmpty && len(m.workspaceSessions[workspaceID]) != 0 {
+		return Session{}, false, fmt.Errorf("standalone restore requires an empty workspace session registry")
+	}
 	now := time.Now().UTC()
 	session := Session{
-		ID:          sessionID,
-		WorkspaceID: workspaceID,
-		Status:      StatusRunning,
-		Label:       label,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		creationIdentity: identity,
+		ID:               sessionID,
+		WorkspaceID:      workspaceID,
+		Status:           StatusRunning,
+		Label:            label,
+		CreatedAt:        now,
+		UpdatedAt:        now,
 	}
 	m.workspaceSessions[workspaceID][sessionID] = session
 	if idempotencyKey != "" {
@@ -308,4 +341,14 @@ func (m *Manager) RemoveWorkspace(workspaceID string) {
 
 func (m *Manager) idempotencyKey(workspaceID, key string) string {
 	return workspaceID + ":" + key
+}
+
+func (s Session) matchesCreation(identity *creationIdentity) bool {
+	return s.Status == StatusRunning && s.creationIdentity != nil && *s.creationIdentity == *identity
+}
+
+// MatchesRouting requires same-process provenance; a persisted tab cannot prove
+// that snapshot reapplication is safe after restart.
+func (s Session) MatchesRouting(projectID, chatSessionID string) bool {
+	return s.Status == StatusRunning && s.creationIdentity != nil && s.creationIdentity.ProjectID == projectID && s.creationIdentity.ChatSessionID == chatSessionID
 }

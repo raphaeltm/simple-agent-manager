@@ -52,6 +52,8 @@ export interface TransitionTaskToTerminalOptions {
   actorType?: TaskActorType;
   actorId?: string | null;
   stopWorkspace?: boolean;
+  /** Preserve a specific failure phase when startup never reached the runner. */
+  executionStep?: string | null;
   /**
    * Attention/reconciliation terminalization happens after a task is already
    * actively running. If a legacy row missed `started_at`, set it at the same
@@ -181,7 +183,7 @@ export async function transitionTaskToTerminal(
   const updateTask = env.DATABASE.prepare(
     `UPDATE tasks
      SET status = ?,
-         execution_step = NULL,
+         execution_step = ?,
          error_message = ?,
          started_at = CASE WHEN ? = 1 THEN COALESCE(started_at, ?) ELSE started_at END,
          completed_at = ?,
@@ -219,6 +221,7 @@ export async function transitionTaskToTerminal(
        )`
   ).bind(
     options.status,
+    options.executionStep ?? null,
     errorMessage,
     options.fillMissingStartedAt === false ? 0 : 1,
     now,

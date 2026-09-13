@@ -1,4 +1,5 @@
 import type { CredentialAttributionCheck } from './project';
+import type { ResourceRequirements } from './resource';
 import type { TaskMode } from './task';
 
 // =============================================================================
@@ -29,7 +30,14 @@ export const TRIGGER_SKIP_REASONS = [
 export type TriggerSkipReason = (typeof TRIGGER_SKIP_REASONS)[number];
 
 /** Sources that can create a task. */
-export const TRIGGERED_BY_VALUES = ['user', 'cron', 'webhook', 'github', 'incident', 'mcp'] as const;
+export const TRIGGERED_BY_VALUES = [
+  'user',
+  'cron',
+  'webhook',
+  'github',
+  'incident',
+  'mcp',
+] as const;
 export type TriggeredBy = (typeof TRIGGERED_BY_VALUES)[number];
 
 // =============================================================================
@@ -52,6 +60,7 @@ export interface Trigger {
   skillId: string | null;
   taskMode: TaskMode;
   vmSizeOverride: string | null;
+  resourceRequirementsJson?: string | null;
   maxConcurrent: number;
   lastTriggeredAt: string | null;
   triggerCount: number;
@@ -96,6 +105,8 @@ export interface CreateTriggerRequest {
   skillId?: string;
   taskMode?: TaskMode;
   vmSizeOverride?: string;
+  resourceRequirements?: ResourceRequirements | null;
+  resourceRequirementsJson?: string | null;
   maxConcurrent?: number;
   githubConfig?: {
     eventType: GitHubTriggerEventType;
@@ -116,6 +127,8 @@ export interface UpdateTriggerRequest {
   skillId?: string | null;
   taskMode?: TaskMode;
   vmSizeOverride?: string | null;
+  resourceRequirements?: ResourceRequirements | null;
+  resourceRequirementsJson?: string | null;
   maxConcurrent?: number;
   githubConfig?: {
     eventType: GitHubTriggerEventType;

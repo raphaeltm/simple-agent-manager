@@ -1,6 +1,7 @@
 import {
   MAX_ORCHESTRATOR_WAIT_CHILDREN,
   TASK_TERMINAL_STATUSES,
+  type VmPromptDeliveryCapabilities,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
@@ -19,6 +20,7 @@ import {
 } from './project-events-wake-delivery';
 import {
   applyPromptDeliveryResult,
+  markPromptDeliverySubmitting,
   type PromptDeliveryClaim,
   type PromptDeliveryResult,
 } from './prompt-delivery';
@@ -331,6 +333,8 @@ export async function runPromptDeliveryClaim(
       allowLegacyVm: config.legacyVmCompatEnabled,
       requestTimeoutMs: config.backgroundTimeoutMs,
       beforeSideEffect: validateDeliveryTarget,
+      beforeSubmit: (capabilities: VmPromptDeliveryCapabilities) =>
+        markPromptDeliverySubmitting(sql, claim, capabilities),
       sourceTaskGuard,
     };
     result =

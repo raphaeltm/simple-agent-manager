@@ -34,6 +34,12 @@ export interface AuthContext {
 declare module 'hono' {
   interface ContextVariableMap {
     auth: AuthContext;
+    /**
+     * Per-request memo of `isSignupApprovalRequired`. Request-scoped only — never an
+     * isolate cache, so an admin flipping approval still takes effect on the very next
+     * request (`.claude/rules/02` "Unconditional Account-Denial Gates").
+     */
+    signupApprovalRequired: boolean;
   }
 }
 
@@ -97,22 +103,39 @@ function buildAuthContext(session: AuthSession): AuthContext {
  * Authentication middleware.
  * Validates session and adds user info to context.
  * Throws 401 if not authenticated.
+ *
+ * Resolves the session AT MOST ONCE per request. `projectsRoutes` registers
+ * `use('/*', requireAuth(), requireApproved())` at `/api/projects/*`, which also matches
+ * the separately mounted `/api/projects/:projectId/{tasks,sessions,library,…}` routers —
+ * and those register auth again. Both layers really do run (pinned by
+ * `tests/unit/middleware/auth-single-pass.test.ts`), which cost a second
+ * `getSession` (2 sequential D1 queries) plus a second approval read on every
+ * project sub-route request.
+ *
+ * Reuse is safe because `c.set('auth', …)` has exactly two writers — this function and
+ * `optionalAuth` below — and both write only AFTER `assertUserNotSuspended` has passed for
+ * the same request headers. The alternative fix, deleting the redundant registrations, was
+ * rejected: a route that loses its ONLY auth registration is a security hole, and the
+ * mounting order here is what keeps VM-agent callback routes on callback-JWT auth
+ * (`.claude/rules/34`). Memoising leaves the set of authenticated routes byte-identical.
  */
 export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const auth = await createAuth(c.env);
-    const session = await auth.api.getSession({
-      headers: c.req.raw.headers,
-      query: { disableCookieCache: true },
-    });
+    if (!c.get('auth')) {
+      const auth = await createAuth(c.env);
+      const session = await auth.api.getSession({
+        headers: c.req.raw.headers,
+        query: { disableCookieCache: true },
+      });
 
-    if (!session?.user) {
-      throw errors.unauthorized('Authentication required');
+      if (!session?.user) {
+        throw errors.unauthorized('Authentication required');
+      }
+
+      const authContext = buildAuthContext(session);
+      assertUserNotSuspended(authContext.user);
+      c.set('auth', authContext);
     }
-
-    const authContext = buildAuthContext(session);
-    assertUserNotSuspended(authContext.user);
-    c.set('auth', authContext);
 
     await next();
   };
@@ -158,7 +181,18 @@ export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
       throw errors.unauthorized('Authentication required');
     }
 
-    assertUserAllowedBySignupApproval(await isSignupApprovalRequired(c.env), auth.user);
+    // Read the approval setting at most once per request, for the same reason `requireAuth`
+    // resolves the session at most once: this middleware is entered four times on every
+    // project sub-route. The memo is on the request context, so it expires with the request
+    // and cannot keep a de-approved account alive past the next one. The gate itself is
+    // still evaluated on every pass.
+    let required = c.get('signupApprovalRequired');
+    if (required === undefined) {
+      required = await isSignupApprovalRequired(c.env);
+      c.set('signupApprovalRequired', required);
+    }
+
+    assertUserAllowedBySignupApproval(required, auth.user);
     await next();
   };
 }

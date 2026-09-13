@@ -16,6 +16,8 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `RESOURCE_PREFIX`                                  | No (default: `sam`)                                                |
 | Variable | `PULUMI_STATE_BUCKET`                              | No (default: `sam-pulumi-state`)                                   |
 | Variable | `CF_CONTAINER_ENABLED`                             | No (default: `true`; set `false` to force VM runtime)              |
+| Variable | `D1_READ_REPLICATION_MODE`                         | No (default: `auto`; `disabled` removes read replicas)             |
+| Variable | `D1_SESSION_MODE`                                  | No (default: `first-primary`; `disabled` pins reads to primary)    |
 | Variable | `D1_MIGRATION_CHURNING_TABLES`                     | No (may narrow the reviewed built-in retention/expiry table list)  |
 | Variable | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | No (default: `50`; range: 0–100)                                   |
 | Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
@@ -77,7 +79,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `CF_CONTAINER_VM_AGENT_PORT` — vm-agent standalone HTTP port inside the raw container (default: `8080`)
 - `CF_CONTAINER_PORT_READY_TIMEOUT_MS` — Max wait for vm-agent port readiness (default: `30000`)
 - `CF_CONTAINER_WAKE_TIMEOUT_MS` — Max wait for launch, snapshot restore, and request readiness (default: `120000`)
-- `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS` — Max restore attempts before terminal status reconciliation (default: `2`)
+- `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS` — Max restore attempts before terminal status reconciliation (default and deployment-safety minimum: `2`)
 - `INSTANT_STALE_CALLBACK_MARGIN_MS` — Freshness margin for rejecting destructive callbacks from superseded Instant containers (default: `60000`)
 - `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` — Synchronous workspace creation and clone budget (default: `120000`)
 - `CF_CONTAINER_CLONE_FILTER` — Git partial-clone filter (default: `blob:none`; `off` disables partial clone)
@@ -159,6 +161,8 @@ Activity coalescing and binding caches are per Worker isolate. Delayed flushes c
 - `NODE_WORKSPACE_IDLE_TIMEOUT_MS` — Last-workspace-activity window before an auto-provisioned workspace-role node with no active workspaces is destroy-eligible (default: `1800000`; parsed by `buildCleanupConfig()` and enforced by `claimNodeForCleanup()` in `apps/api/src/scheduled/node-cleanup/shared.ts`)
 - `NODE_ORPHAN_IDLE_TIMEOUT_MS` — Legacy alias for `NODE_WORKSPACE_IDLE_TIMEOUT_MS` when the primary variable is unset (resolved by `buildCleanupConfig()` in `apps/api/src/scheduled/node-cleanup/shared.ts`)
 - `NODE_CLEANUP_FAILURE_BACKOFF_MS` — Failed cleanup-candidate exclusion window (default: `3600000`)
+- `NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS` — Wall-clock budget for the stopped-node handoff phase; unstarted candidates remain eligible for the next sweep (default: `20000`)
+- `NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS` — Per-candidate provider/DNS deadline during stopped-node handoff, capped by remaining sweep time; provider failures enter cleanup backoff (default: `5000`)
 - `IDLE_CLEANUP_MAX_RESIDENCE_MS` — Maximum ProjectData idle-cleanup schedule residence before preserved/error outcomes stop re-arming and surface attention (default: `7200000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
@@ -261,12 +265,18 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS` — Minimum terminal-session age before automatic event-log cleanup may delete its activity/ACP event history (default: `7`)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS` — Delay before the next terminal event-log cleanup alarm batch when more candidates remain (default: `86400000`, daily)
 - `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED` — Production-disabled switch for exact archive read routing (default: disabled)
+- `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` — Write new archives as compact SQLite + compressed R2; existing formats remain readable. Default: `false`.
+- `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` — Installation-wide daily estimated SQL write allowance for compact migration attempts; 0 pauses admission. Default: `250000`.
+- `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` — Conservative SQL write estimate per row/512 bytes of grouped FTS text; includes source deletion. Default: `32`.
+- `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS` — R2 I/O deadline shared across each compact read/export/seal operation, or one chunk write, in milliseconds. Default: `10000`.
+- `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS` — Unused reservation receipt retention; minimum one UTC budget day. Default: `604800000` (7 days).
+- `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT` — Maximum expired receipts removed per unused release; zero disables cleanup. Default: `100`.
 - `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` — Separate production-disabled switch for the unscoped scheduled archive-sharding sweep; enabling exact routing alone does not run global migration (default: disabled)
-- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 15 minutes because one tick moves one non-trivial session (default: `86400000`, shipped: `900000`)
+- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 1 hour after the 2026-09-08 billing firebreak (default: `86400000`, shipped: `3600000`)
 - `PROJECT_DATA_ARCHIVE_SHARD_COUNT` — Deterministic archive-shard fanout used when assigning terminal sessions to ProjectData archive Durable Objects (default: `128`)
 - `PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS` — Maximum projects selected by one archive-sharding cron pass (default: `1`)
-- `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` — Hard ceiling on sessions (in-flight plus new candidates) one archive-sharding pass may process (default: `10`)
-- `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` — Cumulative `session_summaries.message_count` of NEW candidates one pass may journal; candidates are selected largest first and a single session above the budget is still selected alone (default: `20000`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` — Hard ceiling on sessions (in-flight plus new candidates) one archive-sharding pass may process (default: `10`, shipped: `1`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` — Cumulative `session_summaries.message_count` of NEW candidates one pass may journal; candidates are selected largest first and a single session above the budget is still selected alone (default: `20000`, shipped: `5000`)
 - `PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS` — Minimum terminal-session age before archive-sharding may consider a session (default: `604800000`)
 - `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` — How long a session the root object refused at prepare (a pre-copy eligibility invariant such as `active_session_state`, recorded as a `frozen`/`precopy_refused` journal with the location returned to `root`) stays out of unscoped sweep selection; an operator canary that names the session bypasses it; values below `60000` fall back to the default so a stray value cannot disable the anti-thrash window (default: `604800000`)
 - `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` — Minimum age of a `failed` archive journal before an unscoped sweep reclaims it, so `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` spans hours rather than consecutive cadence ticks; `0` disables the delay and a session-scoped canary bypasses it (default: `3600000`)
@@ -274,7 +284,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_DATA_ARCHIVE_CHUNK_BYTES` — Maximum bytes exported in one archive chunk, clamped below Cloudflare's 32MiB RPC ceiling (default: `16777216`)
 - `PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS` — Rows read per statement while streaming a session's terminal-version hash and grouped-row loops inside the ProjectData DO; bounds object memory by page size instead of session size (default: `500`)
 - `PROJECT_DATA_ARCHIVE_LEASE_MS` — D1 CAS journal lease duration for archive-sharding work (default: `300000`)
-- `PROJECT_DATA_ARCHIVE_WALL_TIME_MS` — Soft wall-clock budget for one archive-sharding cron pass, checked between candidates (a single large session may run past it). Code fallback 5 s; the checked-in `wrangler.toml` ships 30 s (default: `5000`, shipped: `30000`)
+- `PROJECT_DATA_ARCHIVE_WALL_TIME_MS` — Soft wall-clock budget for one archive-sharding cron pass, checked between candidates (a single large session may run past it). Code fallback 5 s; the checked-in `wrangler.toml` ships 10 s after the billing firebreak (default: `5000`, shipped: `10000`)
 - `PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT` — Default row limit for superadmin archive-sharding rollout inspection and failed/poisoned/frozen migration list endpoints (default: `25`)
 - `PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX` — Maximum accepted row limit for superadmin archive-sharding rollout inspection endpoints (default: `100`)
 - `PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_DEFAULT` — Default row limit for frozen-intent detail inspection; each row may perform source and target ProjectData DO RPCs (default: `5`)
@@ -402,6 +412,7 @@ by the read-only cron-liveness check.
 - `VM_ADMISSION_LEASE_TTL_MS` — Fenced VM provisioning claim lease duration (default: `1200000`)
 - `VM_ADMISSION_RETRY_MIN_MS` / `VM_ADMISSION_RETRY_MAX_MS` — Bounds for retrying tasks waiting on VM capacity (defaults: `15000` / `60000`)
 - `VM_ADMISSION_WAIT_TIMEOUT_MS` — Maximum visible wait for VM capacity before failing the task (default: `7200000`)
+- `VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS` — Maximum bounded wait for an otherwise-eligible reusable VM node whose only blocker is an active workspace build queue (default: `1200000`)
 - `VM_ADMISSION_PROVIDER_COOLDOWN_MS` — Cooldown after provider/account capacity errors such as Hetzner server limits (default: `600000`)
 - `VM_ADMISSION_WAKE_BATCH_SIZE` — Maximum waiting TaskRunner DOs nudged by one capacity event (default: `25`)
 - `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` — Maximum provider diagnostic message persisted on admission/capacity rows (default: `500`)
@@ -475,9 +486,13 @@ by the read-only cron-liveness check.
 - `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
 - `TASK_LIVENESS_MAX_ACP_SESSIONS` — Maximum task-scoped ACP sessions inspected per liveness probe (default: 5)
 - `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS` — Timeout for stale-VM-node health probes used by ProjectData idle cleanup and stuck-task reconciliation; a timeout is inconclusive and preserves the task/workspace (default: 5000)
+- `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning allocation/reconciliation request budget, also used for background readiness and workspace dispatch (default: 5000).
+- `NODE_PROVISIONING_RETRY_INTERVAL_MS` — Delay between durable direct provisioning attempts (default: 30000).
+- `NODE_PROVISIONING_MAX_AGE_MS` — Maximum age of a durable direct provisioning intent before retries stop (default: 900000 / 15 min).
+- `NODE_PROVISIONING_MAX_ATTEMPTS` — Maximum durable direct provisioning attempts before retries stop (default: 30). Either allocation age or attempt exhaustion starts a separate bounded diagnostic publication phase using the same retry interval and attempt limit. The age limit applies only to allocation/reconciliation; the unresolved intent is retained. Empty provider inventory never authorizes another create or proves cleanup. All four `NODE_PROVISIONING_*` overrides are optional positive integers; invalid or unset values use their defaults.
 - `NODE_AGENT_READY_TIMEOUT_MS` — Max wait for freshly provisioned node-agent health
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` — Polling interval for fresh-node readiness checks
-- `VM_AGENT_REQUIRED_VERSION` — Deployment-generated required vm-agent build for reusable VM nodes. Official deploys set this from the Git commit SHA after publishing matching binaries; unset disables rollout gating for local/manual or skip-agent deploys.
+- `VM_AGENT_REQUIRED_VERSION` — Deployment-generated required vm-agent build for reusable VM nodes. Official deploys set this from the last commit that changed a vm-agent **build input** (see `scripts/deploy/resolve-vm-agent-release.sh`), not from the deployment commit, so Worker-only deploys leave the existing node pool reusable. Build inputs are `packages/vm-agent/**` minus exactly four pathspecs: `.claude/`, the top-level `AGENTS.md`, `**/*_test.go` and `*_test.go`. A commit touching **only** those paths does not rotate the release and does not drain the node pool. Anything else under the directory does rotate it, including a file that looks like documentation — the list excludes rather than includes on purpose, so an unrecognised new file fails safe by rotating (wasteful) instead of silently serving a stale binary under a current version. If a new non-build file should stop rotating the release, add it to `AGENT_SOURCE_EXCLUDES` rather than assuming its extension exempts it. Unset disables rollout gating for local/manual or skip-agent deploys.
 - `TASK_RUNNER_STEP_MAX_RETRIES` — Max retries per TaskRunner step before failing the task (default: 3)
 - `TASK_RUNNER_RETRY_BASE_DELAY_MS` — Base delay for TaskRunner retry backoff (default: 5000)
 - `TASK_RUNNER_RETRY_MAX_DELAY_MS` — Maximum delay for TaskRunner retry backoff (default: 60000)
@@ -601,6 +616,10 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 ### Container/User
 
 - `CONTAINER_USER` — Optional `docker exec -u` override; when unset, auto-detects effective devcontainer user
+
+### Workspace Builds
+
+- `WORKSPACE_BUILD_QUEUE_DEPTH` — Concurrent devcontainer build slots per workspace VM (default: `1`, supported range: `1` through `16`). Generated cloud-init passes this from the Worker env to newly provisioned VM Agent systemd services. Invalid values do not enable additional build slots and fall back to the default one-slot behavior.
 
 ### Git Operations
 

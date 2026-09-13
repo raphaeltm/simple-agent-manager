@@ -22,7 +22,10 @@ import {
   admitAndSubmitTriggerExecution,
   type TriggerTaskSubmitter,
 } from '../services/trigger-admission';
-import { loadProjectMaxTriggersOverride,resolveMaxTriggersPerProject } from '../services/trigger-limits';
+import {
+  loadProjectMaxTriggersOverride,
+  resolveMaxTriggersPerProject,
+} from '../services/trigger-limits';
 import { renderTemplate } from '../services/trigger-template';
 
 export interface IncidentTriggerSweepStats {
@@ -62,7 +65,8 @@ async function loadIncidentTriggers(
       source_type AS sourceType, cron_expression AS cronExpression, cron_timezone AS cronTimezone,
       skip_if_running AS skipIfRunning, prompt_template AS promptTemplate,
       agent_profile_id AS agentProfileId, skill_id AS skillId, task_mode AS taskMode,
-      vm_size_override AS vmSizeOverride, max_concurrent AS maxConcurrent,
+      vm_size_override AS vmSizeOverride, resource_requirements_json AS resourceRequirementsJson,
+      max_concurrent AS maxConcurrent,
       last_triggered_at AS lastTriggeredAt, trigger_count AS triggerCount,
       next_execution_sequence AS nextExecutionSequence, next_fire_at AS nextFireAt,
       credential_blocked_reason AS credentialBlockedReason,
@@ -101,7 +105,10 @@ async function ensureDefaultIncidentTrigger(
   if (await hasAnyIncidentTrigger(env, project.id)) return false;
 
   const projectMaxTriggers = await loadProjectMaxTriggersOverride(env.DATABASE, project.id);
-  const maxTriggers = resolveMaxTriggersPerProject(projectMaxTriggers, env.MAX_TRIGGERS_PER_PROJECT);
+  const maxTriggers = resolveMaxTriggersPerProject(
+    projectMaxTriggers,
+    env.MAX_TRIGGERS_PER_PROJECT
+  );
   const triggerCount = await env.DATABASE.prepare(
     'SELECT COUNT(*) AS count FROM triggers WHERE project_id = ?'
   )

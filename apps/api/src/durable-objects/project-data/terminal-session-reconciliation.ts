@@ -14,6 +14,7 @@ import {
   findRestorableOrInFlightSleepSnapshot,
   type SleepLifecyclePredicateResult,
 } from '../../services/session-snapshot-sleep-predicate';
+import { isCompletingSessionProtected } from './completion-drain';
 import type { Env } from './types';
 
 const log = createModuleLogger('terminal_session_reconciliation');
@@ -290,6 +291,17 @@ async function reconcileCandidate(
       current.id,
       `sleep_lifecycle_${snapshot.sleep_status ?? 'unknown'}`,
       deferUntil(now.getTime(), env, snapshot)
+    )
+      ? 'deferred'
+      : 'skipped';
+  }
+
+  if (isCompletingSessionProtected(sql, env, current, ownerTask, now)) {
+    return deferCandidate(
+      sql,
+      current.id,
+      'completion_response_drain',
+      deferUntil(now.getTime(), env)
     )
       ? 'deferred'
       : 'skipped';

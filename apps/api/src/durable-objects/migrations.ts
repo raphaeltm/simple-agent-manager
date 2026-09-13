@@ -1836,7 +1836,44 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    name: '045-project-event-wake-delivery',
+    name: '045-project-data-compact-archive',
+    run: (sql) => {
+      const columns = sql.exec('PRAGMA table_info(project_data_archive_target_sessions)').toArray();
+      if (!columns.some((column) => column.name === 'storage_format')) {
+        sql.exec(
+          "ALTER TABLE project_data_archive_target_sessions ADD COLUMN storage_format TEXT NOT NULL DEFAULT 'sqlite-v1'"
+        );
+      }
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_data_archive_raw_chunks (
+        session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        r2_key TEXT NOT NULL,
+        compressed_bytes INTEGER NOT NULL,
+        body_bytes INTEGER NOT NULL,
+        body_sha256 TEXT NOT NULL,
+        first_created_at INTEGER,
+        last_created_at INTEGER,
+        role_counts_json TEXT NOT NULL,
+        row_ids_json TEXT NOT NULL,
+        PRIMARY KEY (session_id, ordinal)
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_archive_raw_chunk_time
+        ON project_data_archive_raw_chunks(session_id, first_created_at, last_created_at)`);
+    },
+  },
+  {
+    name: '046-prompt-delivery-submit-phase',
+    run: (sql) => {
+      const columns = sql.exec('PRAGMA table_info(session_inbox)').toArray();
+      if (!columns.some((column) => column.name === 'prompt_delivery_phase')) {
+        // Existing claims remain NULL: they may have sent a prompt before this
+        // checkpoint existed, so deployment must not turn them into safe retries.
+        sql.exec('ALTER TABLE session_inbox ADD COLUMN prompt_delivery_phase TEXT');
+      }
+    },
+  },
+  {
+    name: '047-project-event-wake-delivery',
     run: (sql) => {
       const additiveColumns = [
         [
@@ -1977,7 +2014,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    name: '046-project-event-wake-retention-indexes',
+    name: '048-project-event-wake-retention-indexes',
     run: (sql) => {
       sql.exec(`
         CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_candidates
@@ -2026,7 +2063,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    name: '047-project-event-server-derived-audience',
+    name: '049-project-event-server-derived-audience',
     run: (sql) => {
       const additiveColumns = [
         [
@@ -2053,7 +2090,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    name: '048-project-event-channel-member-surfaces',
+    name: '050-project-event-channel-member-surfaces',
     run: (sql) => {
       sql.exec(`CREATE TABLE IF NOT EXISTS project_event_channels (
         id TEXT PRIMARY KEY,
@@ -2094,9 +2131,9 @@ export const MIGRATIONS: Migration[] = [
         ON project_event_subscriptions(project_id, updated_at DESC, id)`);
     },
   },
-  { name: '049-project-schedules-standing-watches', run: migrateProjectSchedules },
+  { name: '051-project-schedules-standing-watches', run: migrateProjectSchedules },
   {
-    name: '050-project-event-wake-due-index',
+    name: '052-project-event-wake-due-index',
     run: (sql) => {
       try {
         sql.exec(`ALTER TABLE project_event_subscriptions ADD COLUMN wake_due_at INTEGER`);
@@ -2137,7 +2174,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    name: '051-project-event-retention-lifecycle-index',
+    name: '053-project-event-retention-lifecycle-index',
     run: (sql) => {
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_event_subscriptions_wake_due_order
         ON project_event_subscriptions(project_id, lifecycle_state, requested_delivery,
@@ -2148,7 +2185,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    name: '052-project-event-credential-window-index',
+    name: '054-project-event-credential-window-index',
     run: (sql) => {
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_project_events_credential_window
         ON project_events(project_id, source, subject_type, subject_id,
@@ -2158,7 +2195,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    name: '053-mailbox-active-capacity-index',
+    name: '055-mailbox-active-capacity-index',
     run: (sql) => {
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_session_inbox_active_capacity
         ON session_inbox(id)
@@ -2166,7 +2203,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    name: '054-project-event-orphan-retention-cursor',
+    name: '056-project-event-orphan-retention-cursor',
     run: (sql) => {
       for (const [column, statement] of [
         ['orphan_scan_lifecycle_at',

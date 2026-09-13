@@ -20,18 +20,21 @@ import {
   mapServiceError,
   type McpTokenData,
 } from './_helpers';
-import { extractProfileFields } from './profile-tools';
+import { extractProfileFields, McpProfileFieldValidationError } from './profile-tools';
 
 /** Extract skill-specific fields that go beyond the shared profile fields. */
 function extractSkillExtraFields(params: Record<string, unknown>): Partial<UpdateSkillRequest> {
   const fields: Partial<UpdateSkillRequest> = {};
-  if (typeof params.resourceRequirementsJson === 'string') fields.resourceRequirementsJson = params.resourceRequirementsJson;
-  if (typeof params.defaultProfileId === 'string') fields.defaultProfileId = params.defaultProfileId;
+  if (typeof params.defaultProfileId === 'string')
+    fields.defaultProfileId = params.defaultProfileId;
+  if (params.defaultProfileId === null) fields.defaultProfileId = null;
   return fields;
 }
 
 /** Extract all optional skill fields from MCP params — shared profile fields + skill-specific extras. */
-export function extractSkillFields(params: Record<string, unknown>): Omit<UpdateSkillRequest, 'name'> {
+export function extractSkillFields(
+  params: Record<string, unknown>
+): Omit<UpdateSkillRequest, 'name'> {
   return { ...extractProfileFields(params), ...extractSkillExtraFields(params) };
 }
 
@@ -39,28 +42,34 @@ export async function handleListSkills(
   requestId: string | number | null,
   _params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   try {
     const db = drizzle(env.DATABASE, { schema });
     const skills = await skillService.listSkills(db, tokenData.projectId, tokenData.userId);
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          skills: skills.map((s) => ({
-            id: s.id,
-            name: s.name,
-            description: s.description,
-            agentType: s.agentType,
-            model: s.model,
-            effort: s.effort,
-            isBuiltin: s.isBuiltin,
-          })),
-          count: skills.length,
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              skills: skills.map((s) => ({
+                id: s.id,
+                name: s.name,
+                description: s.description,
+                agentType: s.agentType,
+                model: s.model,
+                effort: s.effort,
+                isBuiltin: s.isBuiltin,
+              })),
+              count: skills.length,
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
     return mapServiceError(requestId, err, {
@@ -75,7 +84,7 @@ export async function handleGetSkill(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const skillId = typeof params.skillId === 'string' ? params.skillId.trim() : '';
   if (!skillId) {
@@ -87,32 +96,38 @@ export async function handleGetSkill(
     const skill = await skillService.getSkill(db, tokenData.projectId, skillId, tokenData.userId);
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          id: skill.id,
-          name: skill.name,
-          description: skill.description,
-          agentType: skill.agentType,
-          model: skill.model,
-          effort: skill.effort,
-          permissionMode: skill.permissionMode,
-          systemPromptAppend: skill.systemPromptAppend,
-          maxTurns: skill.maxTurns,
-          timeoutMinutes: skill.timeoutMinutes,
-          vmSizeOverride: skill.vmSizeOverride,
-          provider: skill.provider,
-          vmLocation: skill.vmLocation,
-          workspaceProfile: skill.workspaceProfile,
-          devcontainerConfigName: skill.devcontainerConfigName,
-          taskMode: skill.taskMode,
-          resourceRequirementsJson: skill.resourceRequirementsJson,
-          defaultProfileId: skill.defaultProfileId,
-          isBuiltin: skill.isBuiltin,
-          createdAt: skill.createdAt,
-          updatedAt: skill.updatedAt,
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              id: skill.id,
+              name: skill.name,
+              description: skill.description,
+              agentType: skill.agentType,
+              model: skill.model,
+              effort: skill.effort,
+              permissionMode: skill.permissionMode,
+              systemPromptAppend: skill.systemPromptAppend,
+              maxTurns: skill.maxTurns,
+              timeoutMinutes: skill.timeoutMinutes,
+              vmSizeOverride: skill.vmSizeOverride,
+              provider: skill.provider,
+              vmLocation: skill.vmLocation,
+              workspaceProfile: skill.workspaceProfile,
+              devcontainerConfigName: skill.devcontainerConfigName,
+              taskMode: skill.taskMode,
+              resourceRequirementsJson: skill.resourceRequirementsJson,
+              defaultProfileId: skill.defaultProfileId,
+              isBuiltin: skill.isBuiltin,
+              createdAt: skill.createdAt,
+              updatedAt: skill.updatedAt,
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
     return mapServiceError(requestId, err, {
@@ -128,18 +143,27 @@ export async function handleCreateSkill(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const name = typeof params.name === 'string' ? params.name.trim() : '';
   if (!name) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'name is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'name is required and must be a non-empty string'
+    );
   }
 
-  const body: CreateSkillRequest = { name, ...extractSkillFields(params) };
-
   try {
+    const body: CreateSkillRequest = { name, ...extractSkillFields(params) };
     const db = drizzle(env.DATABASE, { schema });
-    const skill = await skillService.createSkill(db, tokenData.projectId, tokenData.userId, body, env);
+    const skill = await skillService.createSkill(
+      db,
+      tokenData.projectId,
+      tokenData.userId,
+      body,
+      env
+    );
 
     log.info('mcp.create_skill', {
       skillId: skill.id,
@@ -149,21 +173,30 @@ export async function handleCreateSkill(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          id: skill.id,
-          name: skill.name,
-          description: skill.description,
-          agentType: skill.agentType,
-          model: skill.model,
-          effort: skill.effort,
-          isBuiltin: skill.isBuiltin,
-          message: 'Skill created successfully.',
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              id: skill.id,
+              name: skill.name,
+              description: skill.description,
+              agentType: skill.agentType,
+              model: skill.model,
+              effort: skill.effort,
+              isBuiltin: skill.isBuiltin,
+              message: 'Skill created successfully.',
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
+    if (err instanceof McpProfileFieldValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
     return mapServiceError(requestId, err, {
       fallbackPrefix: 'Failed to create skill',
       logTag: 'mcp.create_skill_failed',
@@ -177,24 +210,34 @@ export async function handleUpdateSkill(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const skillId = typeof params.skillId === 'string' ? params.skillId.trim() : '';
   if (!skillId) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'skillId is required');
   }
 
-  const body: UpdateSkillRequest = {};
-  if (typeof params.name === 'string') body.name = params.name;
-  Object.assign(body, extractSkillFields(params));
-
-  if (Object.keys(body).length === 0) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'No fields to update. Provide at least one field to change.');
-  }
-
   try {
+    const body: UpdateSkillRequest = {};
+    if (typeof params.name === 'string') body.name = params.name;
+    Object.assign(body, extractSkillFields(params));
+
+    if (Object.keys(body).length === 0) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        'No fields to update. Provide at least one field to change.'
+      );
+    }
+
     const db = drizzle(env.DATABASE, { schema });
-    const skill = await skillService.updateSkill(db, tokenData.projectId, skillId, tokenData.userId, body);
+    const skill = await skillService.updateSkill(
+      db,
+      tokenData.projectId,
+      skillId,
+      tokenData.userId,
+      body
+    );
 
     log.info('mcp.update_skill', {
       skillId,
@@ -204,17 +247,26 @@ export async function handleUpdateSkill(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          updated: true,
-          id: skill.id,
-          name: skill.name,
-          updatedFields: Object.keys(body),
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              updated: true,
+              id: skill.id,
+              name: skill.name,
+              updatedFields: Object.keys(body),
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
+    if (err instanceof McpProfileFieldValidationError) {
+      return jsonRpcError(requestId, INVALID_PARAMS, err.message);
+    }
     return mapServiceError(requestId, err, {
       notFoundMessage: `Skill not found: ${skillId}`,
       fallbackPrefix: 'Failed to update skill',
@@ -228,7 +280,7 @@ export async function handleDeleteSkill(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const skillId = typeof params.skillId === 'string' ? params.skillId.trim() : '';
   if (!skillId) {
@@ -246,13 +298,19 @@ export async function handleDeleteSkill(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          deleted: true,
-          skillId,
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              deleted: true,
+              skillId,
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (err) {
     return mapServiceError(requestId, err, {

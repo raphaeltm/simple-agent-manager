@@ -158,7 +158,8 @@ export async function cancelSleepForActiveActivity(input: {
   await input.beforeSideEffect?.();
   await cancelScheduledSessionSleep(
     drizzle(input.env.DATABASE, { schema }),
-    input.chatSessionId
+    input.chatSessionId,
+    { preserveCompletedTaskIntent: true }
   ).catch((err) => {
     log.warn('acp_activity.cancel_scheduled_sleep_failed', {
       sessionId: input.sessionId,

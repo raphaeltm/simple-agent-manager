@@ -1,3 +1,4 @@
+import { isProjectEventWakeEnabled } from './project-events-wake-config';
 import { resolveProjectEventLimits } from './project-events-limits';
 import type { ProjectEventOrphanScanCursor } from './project-events-orphan-retention';
 import type { Env } from './types';
@@ -9,11 +10,7 @@ export type ProjectEventSchedulerState = {
   nextRetentionAt: number | null;
 };
 
-export function isProjectEventWakeEnabled(env: Env): boolean {
-  const raw = env.PROJECT_EVENT_WAKE_ENABLED;
-  if (raw === undefined || raw.trim() === '') return true;
-  return raw === 'true';
-}
+export { isProjectEventWakeEnabled } from './project-events-wake-config';
 
 export function readSchedulerState(sql: SqlStorage, projectId: string): ProjectEventSchedulerState {
   const row = sql

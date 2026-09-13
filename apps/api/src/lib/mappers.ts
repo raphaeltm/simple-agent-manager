@@ -7,7 +7,6 @@
  * - toProjectResponse, toProjectSummaryResponse (was in projects.ts)
  * - toTaskResponse, toDependencyResponse (was in tasks.ts)
  */
-
 import type {
   AgentSession,
   Project,
@@ -27,6 +26,8 @@ import {
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
+
+import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 
 // Mirrors ProjectAgentDefaults (packages/shared/src/types/project.ts) and the
 // write-time AgentDefaultEntrySchema (apps/api/src/schemas/projects.ts,
@@ -67,10 +68,48 @@ function parseAgentDefaults(raw: string | null): ProjectAgentDefaults | null {
 import type * as schema from '../db/schema';
 import { getWorkspaceUrl } from '../services/dns';
 
-export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): WorkspaceResponse {
+export function toWorkspaceResponse(
+  ws: schema.Workspace,
+  baseDomain: string,
+  node?: Pick<
+    schema.Node,
+    | 'cloudProvider'
+    | 'vmSize'
+    | 'providerInstanceType'
+    | 'providerInstanceVcpuCount'
+    | 'providerInstanceMemoryMb'
+    | 'providerInstanceDiskGb'
+    | 'providerInstanceBootDiskSizeGb'
+    | 'providerInstanceArchitecture'
+    | 'observedProviderInstanceType'
+    | 'observedProviderInstanceVcpuCount'
+    | 'observedProviderInstanceMemoryMb'
+    | 'observedProviderInstanceDiskGb'
+  > | null
+): WorkspaceResponse {
   return {
     id: ws.id,
     nodeId: ws.nodeId ?? undefined,
+    ...(node
+      ? {
+          hardware: {
+            cloudProvider: node.cloudProvider as NonNullable<
+              WorkspaceResponse['hardware']
+            >['cloudProvider'],
+            vmSize: node.vmSize as WorkspaceResponse['vmSize'],
+            providerInstanceType: node.providerInstanceType,
+            providerInstanceVcpuCount: node.providerInstanceVcpuCount,
+            providerInstanceMemoryMb: node.providerInstanceMemoryMb,
+            providerInstanceDiskGb: node.providerInstanceDiskGb,
+            providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+            providerInstanceArchitecture: node.providerInstanceArchitecture,
+            observedProviderInstanceType: node.observedProviderInstanceType,
+            observedProviderInstanceVcpuCount: node.observedProviderInstanceVcpuCount,
+            observedProviderInstanceMemoryMb: node.observedProviderInstanceMemoryMb,
+            observedProviderInstanceDiskGb: node.observedProviderInstanceDiskGb,
+          },
+        }
+      : {}),
     projectId: ws.projectId,
     displayName: ws.displayName ?? ws.name,
     name: ws.name,
@@ -79,6 +118,13 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     status: ws.status as WorkspaceResponse['status'],
     vmSize: ws.vmSize as WorkspaceResponse['vmSize'],
     vmLocation: ws.vmLocation as WorkspaceResponse['vmLocation'],
+    providerInstanceType: ws.providerInstanceType ?? null,
+    providerInstanceBootDiskSizeGb: ws.providerInstanceBootDiskSizeGb ?? null,
+    providerInstanceImage: ws.providerInstanceImage ?? null,
+    providerInstanceArchitecture: ws.providerInstanceArchitecture ?? null,
+    resourceRequirementsJson: ws.resourceRequirementsJson ?? null,
+    resolvedReservationJson: ws.resolvedReservationJson ?? null,
+    placementExplanationJson: publicPlacementExplanationJson(ws.placementExplanationJson),
     workspaceProfile:
       (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? DEFAULT_WORKSPACE_PROFILE,
     devcontainerConfigName: ws.devcontainerConfigName ?? null,
@@ -122,6 +168,7 @@ export function toProjectResponse(project: schema.Project): Project {
     repoProvider: (project.repoProvider as RepoProvider) || 'github',
     artifactsRepoId: project.artifactsRepoId ?? null,
     defaultVmSize: (project.defaultVmSize as Project['defaultVmSize']) ?? null,
+    resourceRequirementsJson: project.resourceRequirementsJson ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
     defaultWorkspaceProfile:
       (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
@@ -199,7 +246,7 @@ export function toTaskResponse(
     resourceRequirementsSource:
       (task.resourceRequirementsSource as Task['resourceRequirementsSource']) ?? null,
     resolvedReservationJson: task.resolvedReservationJson ?? null,
-    placementExplanationJson: task.placementExplanationJson ?? null,
+    placementExplanationJson: publicPlacementExplanationJson(task.placementExplanationJson),
     admissionState: task.admissionState ?? null,
     admissionReason: task.admissionReason ?? null,
     admissionNextRetryAt: task.admissionNextRetryAt ?? null,

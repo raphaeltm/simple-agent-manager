@@ -73,6 +73,27 @@ class MockSqlStorage {
 }
 
 describe('DO Migrations', () => {
+  it('adds the submission checkpoint without reclassifying an existing in-flight prompt', () => {
+    const db = new Database(':memory:');
+    try {
+      const sql = createSqlStorage(db);
+      sql.exec(`CREATE TABLE session_inbox (
+        id TEXT PRIMARY KEY, delivery_state TEXT, attempt_id TEXT, runtime_identity TEXT
+      )`);
+      sql.exec(`INSERT INTO session_inbox VALUES ('existing', 'delivering', 'attempt-before-deploy', 'runtime-before-deploy')`);
+      const migration = MIGRATIONS.find((entry) => entry.name === '046-prompt-delivery-submit-phase');
+      expect(migration).toBeDefined();
+      migration!.run(sql);
+      migration!.run(sql);
+      expect(db.prepare('SELECT * FROM session_inbox').get()).toEqual({
+        id: 'existing', delivery_state: 'delivering', attempt_id: 'attempt-before-deploy',
+        runtime_identity: 'runtime-before-deploy', prompt_delivery_phase: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   describe('MIGRATIONS array', () => {
     it('has at least one migration defined', () => {
       expect(MIGRATIONS.length).toBeGreaterThanOrEqual(1);
@@ -529,11 +550,13 @@ describe('DO Migrations', () => {
       // terminal session reconcile marker: 1 from migration 041
       // chat search materialization state: 1 from migration 042
       // terminal archive sharding bridge: 3 from migration 043
-      // project event wake delivery: 6 from migration 045
-      // project event wake retention repair indexes: 9 from migration 046
-      // Additive audience/channel/schedule/wake-seek indexes (047–052): 18.
-      // Active mailbox capacity index (053): 1.
-      expect(indexes).toHaveLength(124);
+      // compact raw chunk time ranges: 1 from migration 045
+      // project event wake delivery: 6 from migration 047
+      // project event wake retention repair indexes: 9 from migration 048
+      // Additive audience/channel/schedule/wake-seek indexes (049–054): 18.
+      // Active mailbox capacity index (055): 1.
+      expect(indexes).toHaveLength(125);
+      expect(indexes.some((query) => query.includes('idx_archive_raw_chunk_time'))).toBe(true);
     });
   });
 });

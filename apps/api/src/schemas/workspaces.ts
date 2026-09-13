@@ -1,5 +1,7 @@
 import * as v from 'valibot';
 
+import { ResourceRequirementsSchema } from './resource-requirements';
+
 const CredentialProviderSchema = v.picklist([
   'hetzner',
   'scaleway',
@@ -11,6 +13,8 @@ const CredentialProviderSchema = v.picklist([
 ]);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const CredentialKindSchema = v.picklist(['api-key', 'oauth-token']);
+const VMArchitectureSchema = v.picklist(['x86_64', 'arm64']);
+const PositiveIntegerSchema = v.pipe(v.number(), v.integer(), v.minValue(1));
 
 export const CreateWorkspaceSchema = v.object({
   name: v.string(),
@@ -22,6 +26,12 @@ export const CreateWorkspaceSchema = v.object({
   vmLocation: v.optional(v.string()),
   installationId: v.optional(v.string()),
   provider: v.optional(CredentialProviderSchema),
+  providerInstanceType: v.optional(v.string()),
+  nativeOffering: v.optional(v.string()),
+  bootDiskSizeGb: v.optional(PositiveIntegerSchema),
+  image: v.optional(v.string()),
+  architecture: v.optional(VMArchitectureSchema),
+  resourceRequirements: v.optional(ResourceRequirementsSchema),
 });
 
 export const UpdateWorkspaceSchema = v.object({

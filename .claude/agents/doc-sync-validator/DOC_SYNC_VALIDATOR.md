@@ -16,15 +16,16 @@ You are a documentation synchronization validator for the Simple Agent Manager p
 
 ### Key Documentation Files (must stay synchronized)
 
-| File                                                        | Purpose                                    |
-| ----------------------------------------------------------- | ------------------------------------------ |
-| `CLAUDE.md`                                                 | Primary project instructions for AI agents |
-| `.specify/memory/constitution.md`                           | Project principles and rules               |
-| `apps/www/src/content/docs/docs/guides/self-hosting.mdx`    | Public deployment guide                    |
-| `apps/www/src/content/docs/docs/reference/configuration.md` | Public configuration and secrets reference |
-| `apps/www/src/content/docs/docs/architecture/security.md`   | Public security architecture               |
-| `AGENTS.md`                                                 | Agent task patterns (non-Claude agents)    |
-| `.claude/rules/*.md`                                        | Auto-loaded behavioral rules (Claude Code) |
+| File                                                         | Purpose                                                       |
+| ------------------------------------------------------------ | ------------------------------------------------------------- |
+| `CLAUDE.md`                                                  | Primary project instructions for AI agents                    |
+| `.specify/memory/constitution.md`                            | Project principles and rules                                  |
+| `apps/www/src/content/docs/docs/guides/self-hosting.mdx`     | Public deployment guide                                       |
+| `apps/www/src/content/docs/docs/reference/configuration.md`  | Public configuration and secrets reference                    |
+| `apps/www/src/content/docs/docs/architecture/security.md`    | Public security architecture                                  |
+| `AGENTS.md`                                                  | Agent task patterns (non-Claude agents)                       |
+| `.claude/rules/*.md`                                         | Compact root behavioral rules and routing stubs (Claude Code) |
+| `apps/*/.claude/rules/*.md`, `packages/*/.claude/rules/*.md` | Path-scoped full behavioral rules (Claude Code)               |
 
 ### Code Sources (documentation must match)
 
@@ -265,5 +266,5 @@ Actual code
 - Version numbers should match (constitution version, package.json, etc.)
 - Consider semantic meaning - minor wording differences may be acceptable
 - AGENTS.md is for implementation patterns (non-Claude agents), CLAUDE.md is for project overview
-- `.claude/rules/*.md` contains auto-loaded behavioral rules for Claude Code
+- Root `.claude/rules/*.md` contains compact auto-loaded rules and routing stubs; full domain rules may live under app/package `.claude/rules/` directories
 ```

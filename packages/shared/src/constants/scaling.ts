@@ -39,7 +39,48 @@ export const MIN_MAX_WORKSPACES_PER_NODE = 1;
 export const MAX_MAX_WORKSPACES_PER_NODE = 10;
 
 /** Default CPU threshold (%). Override per-project or via TASK_RUN_NODE_CPU_THRESHOLD_PERCENT env var. */
-export const DEFAULT_NODE_CPU_THRESHOLD_PERCENT = 50;
+/**
+ * Live CPU is a SATURATION ceiling, not a "this node is busy" mark.
+ *
+ * CPU is compressible — the kernel time-slices it — and each workspace's
+ * committed CPU is already subtracted from the node's declared reservation
+ * budget. Refusing admission at 50% therefore double-counted a co-tenant's own
+ * reserved burst and refused exactly the nodes that were doing useful work: on a
+ * 2-vCPU host one busy core is 50%, so in production only idle nodes were ever
+ * admissible and almost every agent got a VM of its own.
+ *
+ * The node's own cgroup layout says the same thing, and says it in two different
+ * shapes (`packages/cloud-init/src/template.ts`). Memory is protected with a
+ * HARD reservation — `sam-infra.slice` carries `MemoryMin` and the vm-agent unit
+ * `OOMScoreAdjust=-900` — because memory exhaustion KILLS the agent. CPU is
+ * protected with a PROPORTIONAL share instead: `sam-infra.slice` is
+ * `CPUWeight=1000` against `sam-workload.slice`'s 100, which is a CFS weight and
+ * so applies only under contention. Nothing caps the workload's CPU, because CPU
+ * contention only slows the agent down. Admission mirrors exactly that split:
+ * a hard veto for the non-compressible resource, a ceiling for the compressible
+ * one.
+ *
+ * Why 85 rather than a value nearer true saturation:
+ *
+ * - The input is laggy. `cpuPercent` is derived from `cpuLoadAvg1`, a ONE-MINUTE
+ *   trailing load average, and the reading may be up to
+ *   `metricsTtlMs` (3 min) old, so a decision taken at the ceiling can reflect a
+ *   host that is already hotter. 15 points of headroom covers a rising ramp.
+ * - `cpuMillis` is admission-time bookkeeping only — nothing translates it into a
+ *   cgroup quota or `docker run --cpus`. A workspace that under-declares, or
+ *   simply bursts past its reservation, is invisible to the budget check, so this
+ *   ceiling is the only backstop against real usage exceeding declared usage.
+ * - Sustained CPU saturation is not purely a slowdown on this platform: it has
+ *   previously starved the vm-agent heartbeat loop and produced false
+ *   `node_not_live` task failures (`tasks/backlog/2026-08-25-build-concurrency-backpressure.md`).
+ *   That incident's own mitigation — a per-node build queue — covers concurrent
+ *   devcontainer builds but not steady-state contention between running
+ *   workspaces, so admission keeps a real margin.
+ *
+ * Do not lower this back toward a "node is busy" value; do not raise it toward
+ * 100 without first enforcing `cpuMillis` as a real cgroup limit.
+ */
+export const DEFAULT_NODE_CPU_THRESHOLD_PERCENT = 85;
 export const MIN_NODE_CPU_THRESHOLD_PERCENT = 10;
 export const MAX_NODE_CPU_THRESHOLD_PERCENT = 95;
 

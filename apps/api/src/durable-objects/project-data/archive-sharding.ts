@@ -1,6 +1,7 @@
 // FILE SIZE EXCEPTION: ProjectData terminal archive migration state machine — keeping source intent, target copy/seal, canonical hash, exact-read guards, and final source-delete invariants in one module avoids cross-file transaction coupling during Fable review. See .claude/rules/18-file-size-limits.md
 import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import { COMPACT_ARCHIVE_FORMAT, compactArchiveTimeout, type CompactChunkRef,LEGACY_ARCHIVE_FORMAT } from '../../project-data-archive/compact-r2';
 import {
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_BYTES,
   PROJECT_DATA_ARCHIVE_DEFAULT_CHUNK_ROWS,
@@ -28,6 +29,8 @@ import {
   createCanonicalRowsHasher,
   sha256Hex,
 } from '../../project-data-archive/hashing';
+import { type ArchiveWriteReservation,estimateArchiveWrites } from '../../project-data-archive/write-budget';
+import * as compactArchive from './compact-archive';
 import * as messages from './messages';
 import type {
   ArchivedToolPayloadListResult,
@@ -167,6 +170,7 @@ const ARCHIVE_TABLE_SPECS: Record<ProjectDataArchiveTableName, ChunkTableSpec> =
 };
 
 export type ArchiveSourcePrepareInput = {
+  writeReservation?: ArchiveWriteReservation;
   projectId: string;
   sessionId: string;
   migrationId: string;
@@ -247,6 +251,7 @@ export type ArchiveSourceExportChunkInput = {
 };
 
 export type ArchiveTargetPrepareInput = {
+  storageFormat?: typeof COMPACT_ARCHIVE_FORMAT | typeof LEGACY_ARCHIVE_FORMAT;
   projectId: string;
   sessionId: string;
   migrationId: string;
@@ -267,6 +272,7 @@ export type ArchiveTargetPrepareResult = {
 
 export type ArchiveTargetCommitChunkInput = ProjectDataArchiveChunk & {
   now: number;
+  rawChunkRef?: CompactChunkRef;
 };
 
 export type ArchiveTargetCommitChunkResult = {
@@ -335,6 +341,7 @@ export type ArchiveTargetInspectInput = {
 };
 
 export type ArchiveTargetInspectResult = {
+  storageFormat: string;
   state: ProjectDataArchiveTargetState;
   terminalVersionSha256: string;
   aggregateSha256: string | null;
@@ -347,6 +354,8 @@ export type ArchiveTargetInspectResult = {
     sha256: string;
     rowCount: number;
     byteCount: number;
+    r2Key?: string;
+    rawChunkRef?: CompactChunkRef;
   }>;
   sessionRow: ProjectDataArchiveRow;
   databaseSizeBytes: number;
@@ -825,11 +834,14 @@ async function tableAggregateSha256(
     }
     query += ` ORDER BY ${spec.orderBy} LIMIT ?`;
     params.push(pageRows);
-    const page = sql.exec(query, ...params).toArray();
-    for (const raw of page) hasher.update(toArchiveRow(raw, spec.columns));
-    if (page.length < pageRows) break;
-    const tail = page[page.length - 1];
-    if (!tail) break;
+    let count = 0;
+    let tail: Record<string, unknown> | null = null;
+    for (const raw of sql.exec(query, ...params)) {
+      hasher.update(toArchiveRow(raw, spec.columns));
+      tail = raw;
+      count++;
+    }
+    if (count < pageRows || !tail) break;
     cursor = spec.cursorFromRow(tail);
   }
   return hasher.digestHex();
@@ -837,6 +849,8 @@ async function tableAggregateSha256(
 
 export type ComputeTerminalVersionOptions = {
   hashPageRows?: number;
+  compactEnv?: Env;
+  compactDeadline?: number;
 };
 
 export async function computeTerminalVersion(
@@ -852,15 +866,17 @@ export async function computeTerminalVersion(
       'Cannot compute ProjectData archive terminal version for a missing session'
     );
   }
-  const messageCount = countRows(
+  const raw = options.compactEnv && compactArchive.isCompactArchive(sql, sessionId)
+    ? await compactArchive.compactRawDigest(sql, options.compactEnv, sessionId, options.compactDeadline) : null;
+  const messageCount = raw?.messageCount ?? countRows(
     sql,
     'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
     sessionId
   );
-  const lastMessageAt = readLastMessageAt(sql, sessionId);
+  const lastMessageAt = raw ? raw.lastMessageAt : readLastMessageAt(sql, sessionId);
   const components = [
     `chat_session:${canonicalizeArchiveRow(CHAT_SESSION_ANCHOR_COLUMNS, sessionRow)}`,
-    `chat_messages:${await tableAggregateSha256(sql, 'chat_messages', sessionId, pageRows)}`,
+    `chat_messages:${raw?.sha256 ?? await tableAggregateSha256(sql, 'chat_messages', sessionId, pageRows)}`,
     `chat_messages_grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', sessionId, pageRows)}`,
     `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', sessionId, pageRows)}`,
     `comments:${countRows(sql, 'SELECT COUNT(*) AS count FROM comment_threads WHERE session_id = ?', sessionId)}:${countRows(
@@ -973,6 +989,9 @@ export function inspectArchiveSourceIntent(
   validateRootSourceOwner(input);
   const intent = readSourceIntent(sql, input.sessionId);
   if (!intent) return { exists: false, databaseSizeBytes: databaseSize(sql) };
+  if (isCompletedCopyBackPredecessor(sql, intent, input)) {
+    return { exists: false, databaseSizeBytes: databaseSize(sql) };
+  }
   const state = assertSameSourceIntentMigration(intent, input);
   return {
     exists: true,
@@ -996,6 +1015,65 @@ export function inspectArchiveSourceIntent(
   };
 }
 
+/** A verified copy-back releases the root for a strictly newer migration. Old RPCs
+ * still have to match the current intent, so they cannot mutate the successor. */
+function isCompletedCopyBackPredecessor(
+  sql: SqlStorage,
+  intent: Record<string, unknown> | null,
+  input: ArchiveSourceInspectIntentInput
+): boolean {
+  if (intent?.state !== 'rehome_exported' ||
+    intent.session_id !== input.sessionId ||
+    intent.project_id !== input.projectId ||
+    intent.source_owner_name !== input.sourceOwnerName ||
+    intent.migration_id === input.migrationId ||
+    typeof intent.target_generation !== 'number' ||
+    !Number.isSafeInteger(input.targetGeneration) ||
+    !Number.isSafeInteger(intent.target_generation) ||
+    intent.target_generation >= input.targetGeneration) return false;
+  const anchor = sql.exec<{
+    archive_state: string | null;
+    archive_migration_id: string | null;
+    archive_generation: number | null;
+    archive_owner_name: string | null;
+  }>(
+    `SELECT archive_state, archive_migration_id, archive_generation, archive_owner_name
+     FROM chat_sessions WHERE id = ?`, input.sessionId
+  ).toArray()[0];
+  return anchor?.archive_state === 'copy_back_restored' &&
+    anchor.archive_migration_id === intent.migration_id &&
+    anchor.archive_generation === intent.target_generation &&
+    anchor.archive_owner_name === intent.target_owner_name;
+}
+
+function assertPreparedSourceIntent(
+  existing: Record<string, unknown>, input: ArchiveSourcePrepareInput, terminalVersionSha256: string
+): ProjectDataArchiveSourceIntentState {
+  const state = assertSameSourceIntentMigration(existing, input);
+  if (state === 'source_deleted') {
+    throw new ProjectDataArchiveInvariantError(
+      'source_already_deleted',
+      'ProjectData archive source payload has already been deleted'
+    );
+  }
+  if (state === 'rehome_exported') {
+    throw new ProjectDataArchiveInvariantError(
+      'source_rehome_exported',
+      'ProjectData archive source intent has already been re-homed or copied back'
+    );
+  }
+  if (
+    existing.terminal_version_sha256 !== PENDING_TERMINAL_VERSION_SHA256 &&
+    existing.terminal_version_sha256 !== terminalVersionSha256
+  ) {
+    throw new ProjectDataArchiveInvariantError(
+      'terminal_version_changed',
+      'ProjectData archive terminal version changed after source intent'
+    );
+  }
+  return state;
+}
+
 /**
  * Prepare the source intent, or return a typed refusal when a pre-copy eligibility invariant
  * rejects the session before any write. This is the `archiveSourcePrepareIntent` RPC body.
@@ -1003,7 +1081,8 @@ export function inspectArchiveSourceIntent(
  * The D1 candidate query cannot see the DO-local eligibility guards (`session_state`, ACP
  * rows, comments, attention markers, ...), so the coordinator fences a session `migrating` and
  * only then learns here that it cannot move. A refusal is returned ONLY while no source intent
- * row exists for the session — every later invariant (including the same eligibility check on a
+ * row exists for the session, or only a verified completed copy-back predecessor remains.
+ * Every later invariant (including the same eligibility check on a
  * re-prepare with an intent present, and at finalize) still throws, because by then the
  * transcript is fenced on this object and the coordinator must keep the journal on its
  * fail-closed retry path. Returning instead of throwing is what lets the refusal cross the RPC
@@ -1015,11 +1094,16 @@ export async function prepareArchiveSourceIntentOrRefuse(
 ): Promise<ArchiveSourcePrepareOutcome> {
   validateRootSourceOwner(input);
   const minTerminalAgeMs = input.minTerminalAgeMs ?? PROJECT_DATA_ARCHIVE_DEFAULT_SESSION_GRACE_MS;
-  const existing = readSourceIntent(sql, input.sessionId);
+  let existing = readSourceIntent(sql, input.sessionId);
+  const completedPredecessor = isCompletedCopyBackPredecessor(sql, existing, input);
   try {
     assertEligibleTerminalSource(sql, input.sessionId, input.now, minTerminalAgeMs);
+    if (input.writeReservation && estimateArchiveWrites(sql, input.sessionId,
+      input.writeReservation.factor, input.writeReservation.maxMessages) > input.writeReservation.estimatedWrites) {
+      throw new ProjectDataArchiveInvariantError('write_budget_inventory_changed', 'Archive inventory exceeds its reserved write estimate');
+    }
   } catch (error) {
-    if (!existing && error instanceof ProjectDataArchiveInvariantError) {
+    if ((!existing || completedPredecessor) && error instanceof ProjectDataArchiveInvariantError) {
       return {
         refused: true,
         reason: error.reason,
@@ -1028,6 +1112,16 @@ export async function prepareArchiveSourceIntentOrRefuse(
       };
     }
     throw error;
+  }
+  if (completedPredecessor && existing) {
+    // No await between replacement and the fresh fence below; the RPC holds the
+    // source mutation lock. This removes only the completed intent, never history.
+    sql.exec(
+      `DELETE FROM project_data_archive_source_intents
+       WHERE session_id = ? AND migration_id = ? AND state = 'rehome_exported'`,
+      input.sessionId, existing.migration_id as string
+    );
+    existing = null;
   }
   if (!existing) {
     sql.exec(
@@ -1054,28 +1148,7 @@ export async function prepareArchiveSourceIntentOrRefuse(
     hashPageRows: input.hashPageRows,
   });
   if (existing) {
-    const state = assertSameSourceIntentMigration(existing, input);
-    if (state === 'source_deleted') {
-      throw new ProjectDataArchiveInvariantError(
-        'source_already_deleted',
-        'ProjectData archive source payload has already been deleted'
-      );
-    }
-    if (state === 'rehome_exported') {
-      throw new ProjectDataArchiveInvariantError(
-        'source_rehome_exported',
-        'ProjectData archive source intent has already been re-homed or copied back'
-      );
-    }
-    if (
-      existing.terminal_version_sha256 !== PENDING_TERMINAL_VERSION_SHA256 &&
-      existing.terminal_version_sha256 !== terminalVersion.sha256
-    ) {
-      throw new ProjectDataArchiveInvariantError(
-        'terminal_version_changed',
-        'ProjectData archive terminal version changed after source intent'
-      );
-    }
+    const state = assertPreparedSourceIntent(existing, input, terminalVersion.sha256);
     if (existing.source_intent_token !== input.sourceIntentToken) {
       reattachSourceIntentToken(sql, input, state);
     }
@@ -1198,6 +1271,9 @@ export function prepareArchiveTarget(
   sql: SqlStorage,
   input: ArchiveTargetPrepareInput
 ): ArchiveTargetPrepareResult {
+  if (input.storageFormat !== undefined && input.storageFormat !== LEGACY_ARCHIVE_FORMAT && input.storageFormat !== COMPACT_ARCHIVE_FORMAT) {
+    throw new Error('Unsupported archive storage format');
+  }
   if (input.targetOwnerName === input.sourceOwnerName || input.targetGeneration <= 0) {
     throw new ProjectDataArchiveInvariantError(
       'target_owner_mismatch',
@@ -1231,9 +1307,9 @@ export function prepareArchiveTarget(
     `INSERT INTO project_data_archive_target_sessions (
        session_id, project_id, migration_id, owner_name, generation, source_owner_name,
        source_intent_token, state, terminal_version_sha256, expected_message_count,
-       received_message_count, created_at, updated_at
+       received_message_count, created_at, updated_at, storage_format
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, 0, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, 0, ?, ?, ?)`,
     input.sessionId,
     input.projectId,
     input.migrationId,
@@ -1244,7 +1320,8 @@ export function prepareArchiveTarget(
     input.terminalVersionSha256,
     input.expectedMessageCount,
     input.now,
-    input.now
+    input.now,
+    input.storageFormat ?? LEGACY_ARCHIVE_FORMAT
   );
   return { idempotent: false, state: 'prepared' };
 }
@@ -1333,8 +1410,16 @@ function readCommittedRowsForChunk(
 
 export async function commitArchiveTargetChunk(
   sql: SqlStorage,
-  input: ArchiveTargetCommitChunkInput
+  input: ArchiveTargetCommitChunkInput,
+  env?: Env
 ): Promise<ArchiveTargetCommitChunkResult> {
+  const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    migrationId: input.migrationId,
+    targetOwnerName: input.targetOwnerName,
+    targetGeneration: input.targetGeneration,
+  });
   const existingChunk = sql
     .exec(
       'SELECT sha256, row_count FROM project_data_archive_target_chunks WHERE chunk_id = ?',
@@ -1355,13 +1440,6 @@ export async function commitArchiveTargetChunk(
       sha256: input.sha256,
     };
   }
-  const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
-    projectId: input.projectId,
-    sessionId: input.sessionId,
-    migrationId: input.migrationId,
-    targetOwnerName: input.targetOwnerName,
-    targetGeneration: input.targetGeneration,
-  });
   if (!['prepared', 'copying'].includes(state)) {
     throw new ProjectDataArchiveInvariantError(
       'target_not_copyable',
@@ -1376,11 +1454,16 @@ export async function commitArchiveTargetChunk(
       'ProjectData archive source chunk hash did not match the supplied rows'
     );
   }
-  for (const row of input.rows) {
-    insertArchiveRow(sql, input.tableName, row);
+  const rawCompact = input.tableName === 'chat_messages' && compactArchive.isCompactArchive(sql, input.sessionId);
+  let committedHash: string;
+  if (rawCompact) {
+    if (!env || !input.rawChunkRef) throw new Error('Compact archive requires a verified R2 reference');
+    await compactArchive.commitCompactRawChunk(sql, env, input, input.rawChunkRef);
+    committedHash = input.sha256;
+  } else {
+    for (const row of input.rows) insertArchiveRow(sql, input.tableName, row);
+    committedHash = await canonicalRowsSha256(spec.columns, readCommittedRowsForChunk(sql, input.tableName, input.rowIds));
   }
-  const committedRows = readCommittedRowsForChunk(sql, input.tableName, input.rowIds);
-  const committedHash = await canonicalRowsSha256(spec.columns, committedRows);
   if (committedHash !== input.sha256) {
     throw new ProjectDataArchiveInvariantError(
       'target_recomputed_hash_mismatch',
@@ -1409,12 +1492,12 @@ export async function commitArchiveTargetChunk(
   sql.exec(
     `UPDATE project_data_archive_target_sessions
      SET state = 'copying',
-         received_message_count = (
-           SELECT COUNT(*) FROM chat_messages WHERE session_id = ?
-         ),
+         received_message_count = ?,
          updated_at = ?
      WHERE session_id = ?`,
-    input.sessionId,
+    compactArchive.isCompactArchive(sql, input.sessionId)
+      ? compactArchive.compactMessageCount(sql, input.sessionId)
+      : countRows(sql, 'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', input.sessionId),
     input.now,
     input.sessionId
   );
@@ -1432,10 +1515,45 @@ function chunkId(
   return `${input.migrationId}:${input.tableName}:${input.ordinal}`;
 }
 
+async function readValidatedSeal(
+  sql: SqlStorage, input: ArchiveTargetSealInput, env: Env | undefined, compactDeadline: number
+): Promise<ArchiveTargetSealResult> {
+  const row = readTargetSession(sql, input.sessionId);
+  // A resumed coordinator must not delete the root copy using a historical seal
+  // if an external R2 loss occurred while the migration was paused.
+  if (env && compactArchive.isCompactArchive(sql, input.sessionId)) {
+    const verified = await computeTerminalVersion(sql, input.sessionId, { compactEnv: env, compactDeadline, hashPageRows: input.hashPageRows });
+    if (verified.sha256 !== input.terminalVersionSha256 || verified.sha256 !== row?.terminal_version_sha256) {
+      throw new ProjectDataArchiveInvariantError('target_terminal_version_mismatch', 'Compact archive recovery proof no longer matches');
+    }
+  }
+  return {
+    aggregateSha256: strictString(row?.aggregate_sha256, 'target.aggregate_sha256'),
+    messageCount: compactArchive.isCompactArchive(sql, input.sessionId)
+      ? compactArchive.compactMessageCount(sql, input.sessionId) : countRows(
+      sql,
+      'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
+      input.sessionId
+    ),
+    groupedCount: countRows(
+      sql,
+      'SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?',
+      input.sessionId
+    ),
+    toolArchiveCount: countRows(
+      sql,
+      'SELECT COUNT(*) AS count FROM tool_payload_archives WHERE session_id = ?',
+      input.sessionId
+    ),
+  };
+}
+
 export async function sealArchiveTarget(
   sql: SqlStorage,
-  input: ArchiveTargetSealInput
+  input: ArchiveTargetSealInput,
+  env?: Env
 ): Promise<ArchiveTargetSealResult> {
+  const compactDeadline = Date.now() + compactArchiveTimeout(env?.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
   const state = validateTargetOwner(readTargetSession(sql, input.sessionId), {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -1443,26 +1561,9 @@ export async function sealArchiveTarget(
     targetOwnerName: input.targetOwnerName,
     targetGeneration: input.targetGeneration,
   });
+  if (compactArchive.isCompactArchive(sql, input.sessionId) && !env) throw new Error('Compact archive environment required');
   if (state === 'sealed' || state === 'published') {
-    const row = readTargetSession(sql, input.sessionId);
-    return {
-      aggregateSha256: strictString(row?.aggregate_sha256, 'target.aggregate_sha256'),
-      messageCount: countRows(
-        sql,
-        'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
-        input.sessionId
-      ),
-      groupedCount: countRows(
-        sql,
-        'SELECT COUNT(*) AS count FROM chat_messages_grouped WHERE session_id = ?',
-        input.sessionId
-      ),
-      toolArchiveCount: countRows(
-        sql,
-        'SELECT COUNT(*) AS count FROM tool_payload_archives WHERE session_id = ?',
-        input.sessionId
-      ),
-    };
+    return readValidatedSeal(sql, input, env, compactDeadline);
   }
   if (state !== 'copying' && state !== 'prepared') {
     throw new ProjectDataArchiveInvariantError(
@@ -1471,7 +1572,7 @@ export async function sealArchiveTarget(
     );
   }
   const hashPageRows = resolveHashPageRows(input.hashPageRows);
-  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows });
+  const terminalVersion = await computeTerminalVersion(sql, input.sessionId, { hashPageRows, compactEnv: env, compactDeadline });
   if (terminalVersion.sha256 !== input.terminalVersionSha256) {
     throw new ProjectDataArchiveInvariantError(
       'target_terminal_version_mismatch',
@@ -1504,12 +1605,15 @@ export async function sealArchiveTarget(
     [
       `terminal:${input.terminalVersionSha256}`,
       `chunks:${committedChunkHashes.join(',')}`,
-      `messages:${await tableAggregateSha256(sql, 'chat_messages', input.sessionId, hashPageRows)}`,
+      `messages:${env && compactArchive.isCompactArchive(sql, input.sessionId)
+        ? (await compactArchive.compactRawDigest(sql, env, input.sessionId, compactDeadline)).sha256
+        : await tableAggregateSha256(sql, 'chat_messages', input.sessionId, hashPageRows)}`,
       `grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', input.sessionId, hashPageRows)}`,
       `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', input.sessionId, hashPageRows)}`,
     ].join('\n')
   );
-  const messageCount = countRows(
+  const messageCount = compactArchive.isCompactArchive(sql, input.sessionId)
+    ? compactArchive.compactMessageCount(sql, input.sessionId) : countRows(
     sql,
     'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
     input.sessionId
@@ -1570,6 +1674,13 @@ function readTargetChunkInventory(
         sha256: strictString(row.sha256, 'target_chunk.sha256'),
         rowCount: strictInteger(row.row_count, 'target_chunk.row_count'),
         byteCount: strictInteger(row.byte_count, 'target_chunk.byte_count'),
+        ...(() => {
+          if (tableName !== 'chat_messages') return {};
+          const ref = sql.exec('SELECT * FROM project_data_archive_raw_chunks WHERE session_id = ? AND ordinal = ?',
+            sessionId, row.ordinal).toArray()[0];
+          return ref ? { r2Key: String(ref.r2_key), rawChunkRef: { key: String(ref.r2_key), bytes: Number(ref.compressed_bytes),
+            bodyBytes: Number(ref.body_bytes), bodySha256: String(ref.body_sha256) } } : {};
+        })(),
       };
     });
 }
@@ -1581,13 +1692,15 @@ export function inspectArchiveTargetSession(
   const target = readTargetSession(sql, input.sessionId);
   const state = validateTargetOwner(target, input);
   return {
+    storageFormat: strictString(target?.storage_format ?? LEGACY_ARCHIVE_FORMAT, 'target.storage_format'),
     state,
     terminalVersionSha256: strictString(
       target?.terminal_version_sha256,
       'target.terminal_version_sha256'
     ),
     aggregateSha256: optionalNonEmptyString(target?.aggregate_sha256),
-    messageCount: countRows(
+    messageCount: compactArchive.isCompactArchive(sql, input.sessionId)
+      ? compactArchive.compactMessageCount(sql, input.sessionId) : countRows(
       sql,
       'SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?',
       input.sessionId
@@ -1608,6 +1721,19 @@ export function inspectArchiveTargetSession(
   };
 }
 
+async function compactExportPage(
+  sql: SqlStorage, env: Env | undefined,
+  input: { sessionId: string; tableName: ProjectDataArchiveTableName; cursor?: string | null },
+  limit: number
+) {
+  if (!env || input.tableName !== 'chat_messages' || !compactArchive.isCompactArchive(sql, input.sessionId)) return null;
+  const rawCursor = input.cursor ? decodeCursor(input.cursor, 3) : null;
+  const cursor = rawCursor ? {
+    createdAt: Number(cursorPart(rawCursor, 0)), sequence: Number(cursorPart(rawCursor, 1)), id: cursorPart(rawCursor, 2),
+  } : null;
+  return compactArchive.compactExportCandidates(sql, env, input.sessionId, limit, cursor);
+}
+
 async function exportArchiveRowsChunk(
   sql: SqlStorage,
   input: {
@@ -1622,7 +1748,8 @@ async function exportArchiveRowsChunk(
     cursor?: string | null;
     maxRows?: number;
     maxBytes?: number;
-  }
+  },
+  compactEnv?: Env
 ): Promise<ProjectDataArchiveChunk> {
   const spec = validateTableName(input.tableName);
   const maxBytes = normalizePositiveInteger(
@@ -1643,10 +1770,13 @@ async function exportArchiveRowsChunk(
   }
   query += ` ORDER BY ${spec.orderBy} LIMIT ?`;
   params.push(maxRows + 1);
-  const candidates = sql.exec(query, ...params).toArray();
+  const compactCandidates = await compactExportPage(sql, compactEnv, input, maxRows + 1);
+  const candidates: Iterable<Record<string, unknown>> = compactCandidates?.rows ?? sql.exec(query, ...params);
   const rows: ProjectDataArchiveRow[] = [];
   let byteCount = 0;
-  for (const candidate of candidates.slice(0, maxRows)) {
+  let hasMore = compactCandidates?.hasMore ?? false;
+  for (const candidate of candidates) {
+    if (rows.length === maxRows) { hasMore = true; break; }
     const row = toArchiveRow(candidate, spec.columns);
     const candidateBytes = byteLength(canonicalizeArchiveRow(spec.columns, row));
     if (candidateBytes > maxBytes) {
@@ -1655,11 +1785,10 @@ async function exportArchiveRowsChunk(
         'ProjectData archive row exceeds the configured chunk byte budget'
       );
     }
-    if (byteCount + candidateBytes > maxBytes) break;
+    if (byteCount + candidateBytes > maxBytes) { hasMore = true; break; }
     rows.push(row);
     byteCount += candidateBytes;
   }
-  const hasMore = rows.length < candidates.length;
   const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
   const cursor = lastRow ? spec.cursorFromRow(lastRow) : (input.cursor ?? null);
   const rowIds = rows.map((row) =>
@@ -1686,7 +1815,8 @@ async function exportArchiveRowsChunk(
 
 export async function exportArchiveTargetChunk(
   sql: SqlStorage,
-  input: ArchiveTargetExportChunkInput
+  input: ArchiveTargetExportChunkInput,
+  env?: Env
 ): Promise<ProjectDataArchiveChunk> {
   const state = validateTargetOwner(readTargetSession(sql, input.sessionId), input);
   if (state !== 'sealed' && state !== 'published' && state !== 'rehome_exported') {
@@ -1707,7 +1837,7 @@ export async function exportArchiveTargetChunk(
     cursor: input.cursor,
     maxRows: input.maxRows,
     maxBytes: input.maxBytes,
-  });
+  }, env);
 }
 
 function rebuildTargetFts(sql: SqlStorage, sessionId: string, pageRows: number): void {
@@ -2407,17 +2537,13 @@ export function archiveSourceSearchMessages(
   return messages.searchMessages(sql, query, input.sessionId, roles, limit);
 }
 
-export function archiveTargetReadMessages(
+export async function archiveTargetReadMessages(
   sql: SqlStorage,
   env: Env,
   input: ProjectDataArchiveExactReadInput,
-  limit: number,
-  before: number | null,
-  after: number | null,
-  roles: string[] | undefined,
-  compact: boolean,
-  order: 'asc' | 'desc'
-): { messages: Record<string, unknown>[]; hasMore: boolean } {
+  options: compactArchive.CompactRawPageOptions & { compact: boolean }
+): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
+  const { limit, before, after, roles, compact, order } = options;
   validateTargetOwner(readTargetSession(sql, input.sessionId), {
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -2439,6 +2565,10 @@ export function archiveTargetReadMessages(
     );
   }
   const compactOptions = compact ? messages.resolveCompactMessageOptions(env) : undefined;
+  if (compactArchive.isCompactArchive(sql, input.sessionId)) {
+    const rows = await compactArchive.compactRawPage(sql, env, input.sessionId, { ...options, limit: limit + 1 });
+    return messages.formatMessageRows(rows, input.sessionId, limit, compact, order, compactOptions);
+  }
   return messages.getMessages(
     sql,
     input.sessionId,
@@ -2470,7 +2600,17 @@ export async function archiveTargetReadMessageToolContent(
       'ProjectData archive target tool-content read is not sealed'
     );
   }
-  const inlineContent = messages.getMessageToolContent(sql, input.sessionId, input.messageId);
+  let inlineContent: unknown[] | null;
+  if (compactArchive.isCompactArchive(sql, input.sessionId)) {
+    const raw = await compactArchive.compactRawMessage(sql, env, input.sessionId, input.messageId);
+    if (raw?.role !== 'tool') return null;
+    try {
+      const metadata = typeof raw.tool_metadata === 'string' ? JSON.parse(raw.tool_metadata) : null;
+      inlineContent = Array.isArray(metadata?.content) ? metadata.content : [];
+    } catch { inlineContent = []; }
+  } else {
+    inlineContent = messages.getMessageToolContent(sql, input.sessionId, input.messageId);
+  }
   if (inlineContent === null) return null;
   if (inlineContent.length > 0) return { content: inlineContent, source: 'inline' };
   return (
@@ -2502,7 +2642,9 @@ export function archiveTargetReadMessageCount(
       'ProjectData archive target count read is not sealed'
     );
   }
-  return messages.getMessageCount(sql, input.sessionId, roles);
+  return compactArchive.isCompactArchive(sql, input.sessionId)
+    ? compactArchive.compactMessageCount(sql, input.sessionId, roles)
+    : messages.getMessageCount(sql, input.sessionId, roles);
 }
 
 export async function archiveTargetReadArchivedToolPayloads(

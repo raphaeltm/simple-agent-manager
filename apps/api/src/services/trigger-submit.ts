@@ -26,7 +26,7 @@ export interface SubmitTriggeredTaskInput {
   triggerExecutionId: string;
   /** Project this trigger belongs to. */
   projectId: string;
-  /** User who owns the trigger. */
+  /** Current authorized user principal used to execute this trigger. */
   userId: string;
   /** The rendered prompt to use as the task description. */
   renderedPrompt: string;
@@ -40,6 +40,8 @@ export interface SubmitTriggeredTaskInput {
   taskMode: TaskMode;
   /** VM size override from trigger config. */
   vmSizeOverride: string | null;
+  /** Modern workload requirements JSON from trigger config. */
+  resourceRequirementsJson?: string | null;
   /** Trigger name (for branch naming). */
   triggerName: string;
 }
@@ -92,6 +94,7 @@ export async function submitTriggeredTask(
     skillId: input.skillId,
     taskMode: input.taskMode,
     vmSizeOverride: input.vmSizeOverride,
+    resourceRequirementsJson: input.resourceRequirementsJson ?? null,
     source: {
       kind: 'trigger',
       sourceId: input.triggerId,

@@ -297,7 +297,9 @@ describe('agent activity callback', () => {
     expect(mocks.nodeAgent.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
     expect(mocks.updateSets).toContainEqual(
-      expect.objectContaining({ sleepStatus: null, sleepClaimId: null })
+      // Activity fences preparation; the real D1 test verifies the conditional
+      // completion-intent preservation versus ordinary cancellation.
+      expect.objectContaining({ sleepClaimId: null, sleepClaimedAt: null })
     );
   });
 

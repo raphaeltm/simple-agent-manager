@@ -22,7 +22,7 @@ export interface ExactProviderCredentialBinding {
   credentialReference: string | null | undefined;
   /** Updated-at snapshot used to fence placement before a runtime exists. */
   credentialVersion?: number | null;
-  /** Immutable content fingerprint required when deleting an existing runtime. */
+  /** Immutable content fingerprint: the preferred proof when deleting an existing runtime. */
   credentialFingerprint?: string | null;
 }
 
@@ -71,7 +71,7 @@ function parseProviderCredentialReference(
   return null;
 }
 
-function isExactCredentialSource(value: string | null | undefined): value is CredentialSource {
+export function isExactCredentialSource(value: string | null | undefined): value is CredentialSource {
   return value === 'user' || value === 'project' || value === 'platform';
 }
 
@@ -113,6 +113,50 @@ function withCredentialFingerprint(
   credentialFingerprint: string
 ): ExactProviderCredentialBinding {
   return { ...exactCredential, credentialFingerprint };
+}
+
+/**
+ * Does this binding carry a generation proof strong enough to authorize destroying an
+ * existing runtime?
+ *
+ * `credentialFingerprint` is the preferred proof: an immutable identity for one stored
+ * ciphertext generation, introduced by migration 0142. `credentialVersion` is the WEAKER
+ * legacy proof — the credential row's `updated_at` snapshot taken at placement time.
+ *
+ * Requiring a fingerprint outright strands every node provisioned before 0142: that column
+ * is backfill-proof by construction, so those rows can never satisfy it and become
+ * permanently undeletable, retrying teardown forever with no operator override. Accepting
+ * version-only proof is exactly as strong as the binding that provisioned them.
+ *
+ * Why the version snapshot still detects rotation, enumerated per writer (rules 44, 71).
+ * Scope matters: this is a claim about the rows this path can actually resolve, which
+ * `createProviderForExactCredential` filters to `credentialType='cloud-provider'`.
+ *
+ * | Writer | Table / type | Bumps `updated_at`? |
+ * | --- | --- | --- |
+ * | `routes/credentials.ts` (user connect/rotate) | `credentials`, cloud-provider | yes, `new Date().toISOString()` |
+ * | `routes/projects/credentials.ts` (project rotate) | `credentials`, cloud-provider | yes, `new Date().toISOString()` |
+ * | `durable-objects/codex-refresh-lock.ts` | `credentials`, `agent-api-key` | yes, but SQL `datetime('now')` — SECOND precision. Out of scope: the cloud-provider filter excludes it. A future cloud-provider writer using this pattern would silently coarsen the fence to one second. |
+ * | `services/default-capacity-source-credentials.ts` | `credentials`, capacity-source type | yes, and also out of scope for the same reason |
+ * | `composable-credentials/compute-sync.ts` | `cc_credentials`, compute | never mutates ciphertext in place — rotation inserts a NEW row with a new id, so an old reference's generation is frozen. Stronger than the legacy table. |
+ *
+ * ACCEPTED RESIDUAL RISK: `timestampVersion` is millisecond-resolution, so two ciphertext
+ * generations written to the same row within one millisecond would compare equal. That needs
+ * two D1 writes to one row inside 1 ms; the blast radius is bounded to the same user's own
+ * rotated credential (tenant scoping is a separate predicate this does not touch), and the
+ * status quo it replaces was "this node can never be deleted". Accepted, not mitigated.
+ *
+ * This is NOT a relaxation for fingerprinted rows: `exactCredentialGenerationMatches` returns
+ * on the fingerprint branch when one is present, so a matching version can never rescue a
+ * binding whose fingerprint has moved. The truthiness check on `credentialFingerprint` below
+ * deliberately mirrors that function's own `if (exactCredential.credentialFingerprint)`, so an
+ * empty-string fingerprint is treated as absent by both rather than as proof by one of them.
+ */
+export function hasExactProviderCredentialGenerationProof(
+  binding: ExactProviderCredentialBinding | null | undefined
+): boolean {
+  if (!binding?.credentialReference) return false;
+  return Boolean(binding.credentialFingerprint) || binding.credentialVersion != null;
 }
 
 export function exactProviderCredentialBindingFromPlacementSnapshot(

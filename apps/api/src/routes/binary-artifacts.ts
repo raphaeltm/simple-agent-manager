@@ -3,6 +3,7 @@ import type { GenericSchema } from 'valibot';
 
 import type { Env } from '../env';
 import { parseWithSchema } from '../lib/runtime-validation';
+import { AppError } from '../middleware/error';
 
 type ArtifactRoutes = Hono<{ Bindings: Env }>;
 
@@ -14,22 +15,29 @@ interface BinaryArtifactOptions {
   unavailableVersion: Record<string, unknown>;
   versionSchema: GenericSchema;
   versionValidationContext: string;
+  versionedStorage?: {
+    isValidVersion: (version: string) => boolean;
+    queryParameter: string;
+    storagePrefix: (version: string) => string;
+  };
 }
 
 const DEFAULT_OS = 'linux';
 const DEFAULT_ARCH = 'amd64';
+const LEGACY_CACHE_CONTROL = 'public, max-age=3600';
+const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 function artifactKey(prefix: string, name: string): string {
   return `${prefix}/${name}`;
 }
 
-function streamBinary(object: R2ObjectBody, filename: string): Response {
+function streamBinary(object: R2ObjectBody, filename: string, immutable: boolean): Response {
   return new Response(object.body, {
     headers: {
       'Content-Type': 'application/octet-stream',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Content-Length': object.size.toString(),
-      'Cache-Control': 'public, max-age=3600',
+      'Cache-Control': immutable ? IMMUTABLE_CACHE_CONTROL : LEGACY_CACHE_CONTROL,
     },
   });
 }
@@ -50,14 +58,26 @@ export function registerBinaryArtifactRoutes(
       );
     }
 
-    if (!c.env.R2) {
-      return c.json(
-        { error: 'NOT_CONFIGURED', message: options.notConfiguredMessage },
-        503
+    const version = options.versionedStorage
+      ? c.req.query(options.versionedStorage.queryParameter)
+      : undefined;
+    if (version !== undefined && !options.versionedStorage?.isValidVersion(version)) {
+      throw new AppError(
+        400,
+        'INVALID_VERSION',
+        `Invalid ${options.versionedStorage?.queryParameter ?? 'version'}`
       );
     }
 
-    const object = await c.env.R2.get(artifactKey(options.storagePrefix, binaryName));
+    if (!c.env.R2) {
+      return c.json({ error: 'NOT_CONFIGURED', message: options.notConfiguredMessage }, 503);
+    }
+
+    const storagePrefix =
+      version !== undefined && options.versionedStorage
+        ? options.versionedStorage.storagePrefix(version)
+        : options.storagePrefix;
+    const object = await c.env.R2.get(artifactKey(storagePrefix, binaryName));
 
     if (!object) {
       return c.json(
@@ -66,7 +86,7 @@ export function registerBinaryArtifactRoutes(
       );
     }
 
-    return streamBinary(object, binaryName);
+    return streamBinary(object, binaryName, version !== undefined);
   });
 
   routes.get('/version', async (c) => {

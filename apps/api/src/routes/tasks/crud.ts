@@ -213,12 +213,17 @@ crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const hasNextPage = rows.length > limit;
   const tasks = hasNextPage ? rows.slice(0, limit) : rows;
   const taskIds = tasks.map((task) => task.id);
-  const blockedSet = await computeBlockedSet(db, taskIds);
-  const displayProfileHints = await resolveTaskAgentProfileHints(db, {
-    hints: tasks.map((task) => task.agentProfileHint),
-    projectId,
-    userId,
-  });
+  // Independent of each other — one reads task_dependencies, the other agent_profiles, and
+  // neither consumes the other's result. Concurrent, so the request waits for the slower
+  // instead of their sum. This is the highest-round-trip route measured (2618 ms p50).
+  const [blockedSet, displayProfileHints] = await Promise.all([
+    computeBlockedSet(db, taskIds),
+    resolveTaskAgentProfileHints(db, {
+      hints: tasks.map((task) => task.agentProfileHint),
+      projectId,
+      userId,
+    }),
+  ]);
 
   const response: ListTasksResponse = {
     tasks: tasks.map((task) =>
@@ -408,6 +413,16 @@ crudRoutes.delete('/:taskId', requireAuth(), requireApproved(), async (c) => {
   if ((dependentCountRow?.count ?? 0) > 0) {
     throw errors.conflict('Cannot delete task while other tasks depend on it');
   }
+
+  await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
+    status: 'cancelled',
+    errorMessage: task.errorMessage,
+    requiredUserId: userId,
+    projectId,
+    failureLogEvent: 'task.delete_cleanup_failed',
+    logContext: { projectId, source: 'tasks.delete' },
+    destructiveSessionEnd: true,
+  });
 
   // project_id is defence-in-depth (rule 11), matching the other mutations in this file.
   await db

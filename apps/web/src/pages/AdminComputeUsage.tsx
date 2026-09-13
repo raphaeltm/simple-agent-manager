@@ -1,8 +1,14 @@
-import type { AdminNodeUsageResponse, AdminUserNodeDetailedUsage, AdminUserNodeUsageSummary, NodeUsageRecord } from '@simple-agent-manager/shared';
+import type {
+  AdminNodeUsageResponse,
+  AdminUserNodeDetailedUsage,
+  AdminUserNodeUsageSummary,
+  NodeUsageRecord,
+} from '@simple-agent-manager/shared';
 import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
 import { ArrowLeft, Clock, Cpu, HardDrive, Server } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { HardwareDetails } from '../components/hardware/HardwareDetails';
 import { fetchAdminNodeUsage, fetchAdminUserNodeUsage } from '../lib/api';
 
 function formatHours(hours: number): string {
@@ -25,7 +31,9 @@ function formatDuration(startedAt: string, endedAt: string | null): string {
 function NodeStatusBadge({ status }: { status: string }) {
   const isActive = !['destroyed', 'destroying', 'deleted', 'error'].includes(status);
   return (
-    <span className={`inline-flex items-center gap-1.5 sam-type-caption ${isActive ? 'text-success-fg' : 'text-fg-muted'}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 sam-type-caption ${isActive ? 'text-success-fg' : 'text-fg-muted'}`}
+    >
       {isActive && (
         <span className="w-1.5 h-1.5 rounded-full bg-success flex-shrink-0" aria-hidden="true" />
       )}
@@ -42,7 +50,11 @@ function UserRow({ user, onSelect }: { user: AdminUserNodeUsageSummary; onSelect
       className="w-full text-left px-4 py-3 hover:bg-surface-hover transition-colors border-b border-border-default flex items-start gap-3 sm:items-center sm:gap-4"
     >
       {user.avatarUrl ? (
-        <img src={user.avatarUrl} alt="" className="w-8 h-8 rounded-full flex-shrink-0 mt-0.5 sm:mt-0" />
+        <img
+          src={user.avatarUrl}
+          alt=""
+          className="w-8 h-8 rounded-full flex-shrink-0 mt-0.5 sm:mt-0"
+        />
       ) : (
         <div className="w-8 h-8 rounded-full bg-surface flex items-center justify-center flex-shrink-0 mt-0.5 sm:mt-0 border border-border-default">
           <span className="text-fg-muted text-xs font-medium">
@@ -52,7 +64,9 @@ function UserRow({ user, onSelect }: { user: AdminUserNodeUsageSummary; onSelect
       )}
 
       <div className="flex-1 min-w-0">
-        <p className="sam-type-body font-medium truncate m-0">{user.name ?? user.email ?? user.userId}</p>
+        <p className="sam-type-body font-medium truncate m-0">
+          {user.name ?? user.email ?? user.userId}
+        </p>
         {user.name && user.email && (
           <p className="sam-type-caption text-fg-muted truncate m-0">{user.email}</p>
         )}
@@ -66,7 +80,10 @@ function UserRow({ user, onSelect }: { user: AdminUserNodeUsageSummary; onSelect
           </span>
           {user.activeNodes > 0 && (
             <span className="sam-type-caption flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-success inline-block" aria-hidden="true" />
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-success inline-block"
+                aria-hidden="true"
+              />
               <span className="text-fg-muted">{user.activeNodes} active</span>
             </span>
           )}
@@ -76,7 +93,9 @@ function UserRow({ user, onSelect }: { user: AdminUserNodeUsageSummary; onSelect
       {/* Stats on desktop */}
       <div className="hidden sm:flex items-center gap-6 flex-shrink-0 text-right">
         <div>
-          <p className="sam-type-body font-medium tabular-nums m-0">{formatHours(user.totalNodeHours)}</p>
+          <p className="sam-type-body font-medium tabular-nums m-0">
+            {formatHours(user.totalNodeHours)}
+          </p>
           <p className="sam-type-caption text-fg-muted m-0">node-hrs</p>
         </div>
         <div>
@@ -99,7 +118,7 @@ function UserRow({ user, onSelect }: { user: AdminUserNodeUsageSummary; onSelect
   );
 }
 
-function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) {
+export function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) {
   const [data, setData] = useState<AdminUserNodeDetailedUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -112,7 +131,12 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
       .finally(() => setLoading(false));
   }, [userId]);
 
-  if (loading) return <div className="flex justify-center py-12"><Spinner /></div>;
+  if (loading)
+    return (
+      <div className="flex justify-center py-12">
+        <Spinner />
+      </div>
+    );
   if (error) return <p className="sam-type-body text-danger-fg py-4 m-0">{error}</p>;
   if (!data) return null;
 
@@ -131,17 +155,23 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="p-3 text-center">
           <Server className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
-          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatHours(data.totalNodeHours)}</p>
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+            {formatHours(data.totalNodeHours)}
+          </p>
           <p className="sam-type-caption text-fg-muted m-0">Node-hrs</p>
         </Card>
         <Card className="p-3 text-center">
           <Cpu className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
-          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatHours(data.totalVcpuHours)}</p>
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+            {formatHours(data.totalVcpuHours)}
+          </p>
           <p className="sam-type-caption text-fg-muted m-0">vCPU-hrs</p>
         </Card>
         <Card className="p-3 text-center">
           <HardDrive className="w-5 h-5 mx-auto mb-1 text-fg-muted" aria-hidden="true" />
-          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">{formatHours(data.platformNodeHours)}</p>
+          <p className="sam-type-body font-semibold text-lg tabular-nums m-0">
+            {formatHours(data.platformNodeHours)}
+          </p>
           <p className="sam-type-caption text-fg-muted m-0">Platform</p>
         </Card>
         <Card className="p-3 text-center">
@@ -159,12 +189,12 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
           <p className="sam-type-body text-fg-muted m-0">No nodes this period.</p>
         ) : (
           <div className="overflow-x-auto -mx-4 px-4">
-            <table className="w-full text-sm min-w-[580px]">
-              <thead>
+            <table className="w-full text-sm block sm:table">
+              <thead className="hidden sm:table-header-group">
                 <tr className="text-left text-fg-muted border-b border-border-default">
                   <th className="py-2 pr-3 font-medium sam-type-caption">Node</th>
                   <th className="py-2 pr-3 font-medium sam-type-caption">Provider instance</th>
-                  <th className="py-2 pr-3 font-medium sam-type-caption">vCPUs</th>
+                  <th className="py-2 pr-3 font-medium sam-type-caption">Observed vCPUs</th>
                   <th className="py-2 pr-3 font-medium sam-type-caption">Location</th>
                   <th className="py-2 pr-3 font-medium sam-type-caption">Source</th>
                   <th className="py-2 pr-3 font-medium sam-type-caption">Workspaces</th>
@@ -172,22 +202,45 @@ function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) 
                   <th className="py-2 font-medium sam-type-caption">Status</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="block sm:table-row-group">
                 {data.nodes.map((n: NodeUsageRecord) => (
-                  <tr key={n.nodeId} className="border-b border-border-default last:border-0">
+                  <tr
+                    key={n.nodeId}
+                    className="grid grid-cols-2 gap-x-2 border-b border-border-default last:border-0 sm:table-row"
+                  >
                     <td className="py-2 pr-3">
-                      <div className="font-mono sam-type-caption text-fg-primary truncate max-w-[140px]" title={n.nodeId}>
+                      <div
+                        className="font-mono sam-type-caption text-fg-primary truncate max-w-[140px]"
+                        title={n.nodeId}
+                      >
                         {n.name}
                       </div>
-                      <div className="font-mono sam-type-caption text-fg-muted truncate max-w-[140px]" title={n.nodeId}>
+                      <div
+                        className="font-mono sam-type-caption text-fg-muted truncate max-w-[140px]"
+                        title={n.nodeId}
+                      >
                         {n.nodeId.slice(0, 12)}&hellip;
                       </div>
                     </td>
-                    <td className="py-2 pr-3 sam-type-caption">{n.providerInstanceType ?? `${n.vmSize} compatibility hint`}</td>
-                    <td className="py-2 pr-3 tabular-nums sam-type-caption">{n.vcpuCount}</td>
-                    <td className="py-2 pr-3 sam-type-caption">{n.vmLocation}</td>
-                    <td className="py-2 pr-3 sam-type-caption capitalize">{n.credentialSource}</td>
-                    <td className="py-2 pr-3 tabular-nums sam-type-caption">{n.workspaceCount}</td>
+                    <td className="py-2 pr-3 sam-type-caption col-span-2">
+                      <HardwareDetails hardware={n} />
+                    </td>
+                    <td className="py-2 pr-3 tabular-nums sam-type-caption">
+                      <span className="block text-fg-muted sm:hidden">Observed vCPUs</span>
+                      {n.observedProviderInstanceVcpuCount ?? 'Unknown'}
+                    </td>
+                    <td className="py-2 pr-3 sam-type-caption">
+                      <span className="block text-fg-muted sm:hidden">Location</span>
+                      {n.vmLocation}
+                    </td>
+                    <td className="py-2 pr-3 sam-type-caption capitalize">
+                      <span className="block text-fg-muted sm:hidden">Source</span>
+                      {n.credentialSource}
+                    </td>
+                    <td className="py-2 pr-3 tabular-nums sam-type-caption">
+                      <span className="block text-fg-muted sm:hidden">Workspaces</span>
+                      {n.workspaceCount}
+                    </td>
                     <td className="py-2 pr-3 sam-type-caption">
                       <span className="flex items-center gap-1 tabular-nums">
                         <Clock className="w-3 h-3 text-fg-muted" aria-hidden="true" />

@@ -1,4 +1,4 @@
-/** Additive DO migration 049. The parent migration runner owns version tracking. */
+/** Additive DO migration 051. The parent migration runner owns version tracking. */
 export function migrateProjectSchedules(sql: SqlStorage): void {
   sql.exec(`CREATE TABLE IF NOT EXISTS project_schedules (
     id TEXT PRIMARY KEY,

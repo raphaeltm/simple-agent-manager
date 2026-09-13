@@ -721,7 +721,7 @@ func TestHarnessActivityStopsWhenCrashRestartFailsBeforeAttach(t *testing.T) {
 		return reports >= 2
 	})
 
-	host.monitorProcessExit(context.Background(), process, "claude-code", nil, nil)
+	host.monitorProcessExit(process, "claude-code", nil, nil)
 	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
 		t.Fatalf("harness work after failed restart = %#v, want inactive", got)
 	}

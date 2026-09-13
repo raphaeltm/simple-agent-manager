@@ -1,4 +1,6 @@
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/services/default-capacity-pools';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
@@ -567,6 +569,16 @@ describe('submitReservedTask', () => {
 
   it('converges simultaneous same-intent submissions to one task, status, chat, and prompt', async () => {
     const fixture = seedReservedFixture('same-intent');
+    // Provision the pool before racing submissions: catalog bootstrap has its own
+    // lifecycle and must not turn this test into a provider-catalog setup race.
+    await ensureDefaultCapacityPoolsForExistingCredentials(
+      drizzle(fixture.env.DATABASE, { schema }),
+      {
+        userId: fixture.userId,
+        projectId: fixture.projectId,
+        includeInstallation: false,
+      }
+    );
     const { deps, startedTaskIds } = createSubmissionDependencies();
 
     const [first, second] = await Promise.all([
@@ -574,7 +586,10 @@ describe('submitReservedTask', () => {
       submitReservedTask(fixture.env, fixture.input, deps),
     ]);
 
-    expect([first.outcome, second.outcome]).toEqual(['admitted', 'admitted']);
+    expect([first.outcome, second.outcome], JSON.stringify([first, second])).toEqual([
+      'admitted',
+      'admitted',
+    ]);
     expect(new Set([first.taskId, second.taskId])).toEqual(
       new Set([fixture.input.identities.taskId])
     );

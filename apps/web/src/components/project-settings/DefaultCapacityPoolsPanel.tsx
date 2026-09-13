@@ -354,10 +354,10 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
         : capacityPoolQueryKeys.installationDefaults(queryScope);
   const queryFn = () =>
     scope === 'project'
-      ? fetchProjectDefaultCapacityPools(projectId ?? '', { ensure: true })
+      ? fetchProjectDefaultCapacityPools(projectId ?? '')
       : scope === 'user'
-        ? fetchUserDefaultCapacityPools({ ensure: true })
-        : fetchInstallationDefaultCapacityPools({ ensure: true });
+        ? fetchUserDefaultCapacityPools()
+        : fetchInstallationDefaultCapacityPools();
   const query = useQuery<ProjectDefaultCapacityPoolsResponse>({
     queryKey,
     queryFn,

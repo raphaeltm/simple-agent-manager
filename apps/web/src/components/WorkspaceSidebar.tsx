@@ -1,7 +1,7 @@
 import type { TokenUsage } from '@simple-agent-manager/acp-client';
 import type { AgentSession } from '@simple-agent-manager/shared';
 import type { DetectedPort, Event, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import { VM_LOCATIONS } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
 import { ExternalLink, GitBranch, Globe, Play, Trash2 } from 'lucide-react';
 import { type FC, useEffect, useMemo, useState } from 'react';
@@ -13,6 +13,8 @@ import { getPortAccessUrl } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
 import { sanitizeUrl } from '../lib/url-utils';
 import { CollapsibleSection } from './CollapsibleSection';
+import { EffectivePoolSummary } from './hardware/EffectivePoolSummary';
+import { WorkspaceHardwareDetails } from './hardware/HardwareDetails';
 import { ResourceBar } from './node/ResourceBar';
 
 // ─── Types ───────────────────────────────────────────────────
@@ -81,12 +83,6 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
-}
-
-// VM display helpers using shared provider-agnostic constants
-function vmSizeLabel(size: string): string {
-  const config = VM_SIZE_LABELS[size as keyof typeof VM_SIZE_LABELS];
-  return config ? `${config.label} (${config.shortDescription})` : size;
 }
 
 function vmLocationLabel(location: string): string {
@@ -321,12 +317,13 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
               </InfoRow>
             )}
 
-            {/* VM */}
-            {workspace?.vmSize && (
-              <InfoRow label="VM">
-                {vmSizeLabel(workspace.vmSize)}
-                {workspace.vmLocation ? ` \u00B7 ${vmLocationLabel(workspace.vmLocation)}` : ''}
-              </InfoRow>
+            {/* Hardware */}
+            {workspace && (
+              <div className="grid gap-2">
+                <WorkspaceHardwareDetails workspace={workspace} />
+                <span className="text-fg-muted">{vmLocationLabel(workspace.vmLocation)}</span>
+                <EffectivePoolSummary projectId={workspace.projectId} />
+              </div>
             )}
 
             {/* Node */}

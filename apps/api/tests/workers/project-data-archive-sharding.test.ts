@@ -10,6 +10,7 @@ import {
   runScopedProjectDataArchiveCanary,
 } from '../../src/scheduled/project-data-archive-sharding';
 import * as projectDataService from '../../src/services/project-data';
+import { countTargetMessages, projectDataStub, readLocation,seedMessages, withArchiveEnv } from './helpers/archive-fixtures';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
@@ -21,11 +22,7 @@ const OWNER = 'archive-bridge-owner';
 const INSTALLATION = 'archive-bridge-installation';
 const TARGET_SHA = 'b'.repeat(64);
 
-function projectDataStub(ownerName: string): DurableObjectStub<ProjectDataTestDouble> {
-  return env.PROJECT_DATA.get(
-    env.PROJECT_DATA.idFromName(ownerName)
-  ) as DurableObjectStub<ProjectDataTestDouble>;
-}
+
 
 async function seedProjectGraph(projectId: string): Promise<void> {
   await seedUser(OWNER);
@@ -35,25 +32,7 @@ async function seedProjectGraph(projectId: string): Promise<void> {
   });
 }
 
-async function withArchiveEnv<T>(
-  overrides: Partial<Record<keyof WorkerEnv, string>>,
-  fn: () => Promise<T>
-): Promise<T> {
-  const mutableEnv = testEnv as WorkerEnv & Record<string, string | undefined>;
-  const previous = new Map<string, string | undefined>();
-  for (const [key, value] of Object.entries(overrides)) {
-    previous.set(key, mutableEnv[key]);
-    mutableEnv[key] = value;
-  }
-  try {
-    return await fn();
-  } finally {
-    for (const [key, value] of previous) {
-      if (value === undefined) delete mutableEnv[key];
-      else mutableEnv[key] = value;
-    }
-  }
-}
+
 
 function largeMessage(index: number): string {
   return `archive bridge payload ${index} ${'x'.repeat(24 * 1024)}`;
@@ -76,16 +55,7 @@ function largeMessage(index: number): string {
 const OVER_BIND_LIMIT_ROWS = D1_MAX_BOUND_PARAMETERS * 2 + 1;
 
 /** Small bodies: this fixture stresses the bind count, not the byte budget. */
-function seedMessages(count: number) {
-  return Array.from({ length: count }, (_, index) => ({
-    messageId: `bind-limit-message-${String(index).padStart(4, '0')}`,
-    role: index % 2 === 0 ? 'user' : 'assistant',
-    content: `bind limit payload ${index}`,
-    toolMetadata: null,
-    timestamp: new Date(1_000_000 + index * 1_000).toISOString(),
-    sequence: index + 1,
-  }));
-}
+
 
 async function seedTerminalSessionWithMessages(
   projectId: string,
@@ -111,32 +81,9 @@ async function countTargetGroupedMessages(ownerName: string, sessionId: string):
   });
 }
 
-async function countTargetMessages(ownerName: string, sessionId: string): Promise<number> {
-  const target = projectDataStub(ownerName);
-  return runInDurableObject(target, async (_instance, state) => {
-    const row = state.storage.sql
-      .exec('SELECT COUNT(*) AS count FROM chat_messages WHERE session_id = ?', sessionId)
-      .toArray()[0] as { count: number };
-    return row.count;
-  });
-}
 
-async function readLocation(projectId: string, sessionId: string) {
-  return env.DATABASE.prepare(
-    `SELECT location_state, owner_kind, owner_name, generation, migration_id, target_aggregate_sha256
-     FROM project_data_session_locations
-     WHERE project_id = ? AND session_id = ?`
-  )
-    .bind(projectId, sessionId)
-    .first<{
-      location_state: string;
-      owner_kind: string;
-      owner_name: string;
-      generation: number;
-      migration_id: string | null;
-      target_aggregate_sha256: string | null;
-    }>();
-}
+
+
 
 async function clearArchiveCadence(): Promise<void> {
   await env.DATABASE.prepare(

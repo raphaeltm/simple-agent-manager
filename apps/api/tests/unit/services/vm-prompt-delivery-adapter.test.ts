@@ -157,6 +157,19 @@ describe('VM prompt delivery adapter', () => {
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
+  it.each(['replaced', 'storage_failure'])('never sends when the submission checkpoint is %s', async (failure) => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const beforeSubmit = vi.fn(() => {
+      if (failure === 'storage_failure') throw new Error('SQLite temporarily unavailable');
+      return false;
+    });
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+    await expect(adapter.submit({ ...input(false), beforeSubmit }))
+      .resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(beforeSubmit).toHaveBeenCalledWith(protocolFixture.capabilities);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
   it('uses a probe-resolved target without reinterpreting a suspect D1 health mirror', async () => {
     const adapterEnv = envWithTarget({
       ...targetRow,

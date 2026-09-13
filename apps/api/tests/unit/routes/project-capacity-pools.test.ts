@@ -41,20 +41,29 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
+  const actual = await importOriginal<typeof import('../../../src/services/provider-catalogs')>();
 
   return {
     ...actual,
     buildProviderCatalogForCredential: vi.fn(
       async (input: { seed: { provider: CredentialProvider } }) => ({
         offerings: actual.getStaticProviderCatalogOfferings(input.seed.provider),
+        refreshStatus: {
+          succeeded: true,
+          origin: 'static',
+          complete: false,
+          reason: 'static-catalog',
+        },
       })
     ),
   };
 });
 
+const { drizzle } = await import('drizzle-orm/d1');
 const { capacityPoolRoutes } = await import('../../../src/routes/projects/capacity-pools');
+const { readDefaultCapacityPoolSummaries } =
+  await import('../../../src/services/default-capacity-pools');
+const providerCatalogs = await import('../../../src/services/provider-catalogs');
 
 const CATALOG_ADDITION_BIND_LIMIT_TEST_TIMEOUT_MS = 15_000;
 
@@ -81,6 +90,7 @@ function createEnv(options: { bindLimit?: number } = {}) {
     schema.ccCredentials,
     schema.ccConfigurations,
     schema.ccAttachments,
+    schema.platformSettings,
     schema.capacitySources,
     schema.capacityPools,
     schema.capacityPoolCandidates,
@@ -125,10 +135,75 @@ function requestProjectDefaults(
   return createApp().request(`/api/projects/project-1${pathSuffix}`, init, env);
 }
 
+function expectSafePlacementSettings(body: Record<string, any>) {
+  expect(body.placementSettings).toMatchObject({
+    version: 1,
+    legacyWorkloadAdapterVersion: 1,
+    source: {
+      legacyWorkloadMapping: 'default',
+      platformDefaults: 'default',
+      selection: 'default',
+    },
+    resourceDefaults: {
+      legacyWorkloadMapping: {
+        small: {
+          minVcpu: 1,
+          minMemoryGb: 2,
+          minDiskGb: 20,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+        },
+      },
+      platformDefaults: {
+        minVcpu: 2,
+        minMemoryGb: 4,
+        minDiskGb: 40,
+        exclusiveNode: false,
+        maxCoTenants: 4,
+      },
+    },
+  });
+  expect(body.placementSettings.sourceGeneration).toEqual(expect.any(Number));
+  expect(body.placementSettings).not.toHaveProperty('diagnostics');
+}
+
+function countRows(sqlite: Database.Database, tableName: string, whereSql: string) {
+  return (
+    sqlite.prepare(`SELECT COUNT(*) AS count FROM ${tableName} WHERE ${whereSql}`).get() as {
+      count: number;
+    }
+  ).count;
+}
+
+function catalogCredentialSources() {
+  return vi
+    .mocked(providerCatalogs.buildProviderCatalogForCredential)
+    .mock.calls.map((call) => call[0].seed.credentialSource);
+}
+
+async function reconcileExistingDefaults(
+  env: Env,
+  input: {
+    userId?: string;
+    projectId?: string;
+    includeInstallation?: boolean;
+  } = {}
+) {
+  await readDefaultCapacityPoolSummaries(drizzle(env.DATABASE, { schema }), {
+    userId: input.userId ?? 'user-1',
+    projectId: input.projectId ?? 'project-1',
+    includeInstallation: input.includeInstallation ?? false,
+    ensure: true,
+    includeDisabled: true,
+    env,
+  });
+}
+
 describe('project capacity pool routes', () => {
   beforeEach(() => {
     authState.userId = 'user-1';
     authState.role = 'user';
+    vi.mocked(providerCatalogs.buildProviderCatalogForCredential).mockClear();
   });
 
   it('returns the project default as effective and hides installation details for non-superadmins', async () => {
@@ -157,6 +232,7 @@ describe('project capacity pool routes', () => {
     expect(text).not.toContain('platform-encrypted-token-for-platform-cloud-1');
 
     const body = JSON.parse(text);
+    expectSafePlacementSettings(body);
     expect(body.policyMutationSupported).toBe(false);
     expect(body.effectiveScope).toBe('project');
     expect(body.effective.pool).toMatchObject({
@@ -193,6 +269,62 @@ describe('project capacity pool routes', () => {
       .prepare(`SELECT COUNT(*) AS count FROM capacity_pools WHERE scope = 'installation'`)
       .get() as { count: number };
     expect(installationPoolCount.count).toBe(0);
+    expect(catalogCredentialSources()).toEqual(['user', 'project']);
+  });
+
+  it('does not reconcile installation defaults for non-superadmin project ensure or reconcile calls', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, {
+      projectId: 'project-1',
+      userId: 'user-1',
+      role: 'maintainer',
+    });
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-1',
+      projectId: 'project-1',
+    });
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+
+    const ensured = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults?ensure=true',
+      { method: 'GET' },
+      env
+    );
+    expect(ensured.status).toBe(200);
+    const ensuredBody = await ensured.json();
+    expect(ensuredBody).toMatchObject({
+      effectiveScope: 'project',
+      reconciledScopes: ['project', 'user'],
+      defaults: expect.arrayContaining([
+        expect.objectContaining({
+          scope: 'installation',
+          visibility: 'hidden',
+          canReconcile: false,
+          summary: null,
+        }),
+      ]),
+    });
+    expectSafePlacementSettings(ensuredBody);
+
+    const reconciled = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    expect(reconciled.status).toBe(200);
+    const reconciledBody = await reconciled.json();
+    expect(reconciledBody).toMatchObject({
+      effectiveScope: 'project',
+      reconciledScopes: ['project', 'user'],
+      policyMutationSupported: false,
+    });
+
+    expect(catalogCredentialSources()).toEqual(['user', 'project', 'user', 'project']);
+    expect(countRows(sqlite, 'capacity_pools', "scope = 'installation'")).toBe(0);
+    expect(countRows(sqlite, 'capacity_sources', "scope = 'installation'")).toBe(0);
   });
 
   it('GET ensure=true reconciles project defaults without exceeding D1 bind limits', async () => {
@@ -339,13 +471,15 @@ describe('project capacity pool routes', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe('private, no-store');
     const body = await res.json();
-    expect(body.effectiveScope).toBe('user');
-    expect(body.effective.pool).toMatchObject({ scope: 'user', ownerUserId: 'user-1' });
+    expect(body.effectiveScope).toBe('project');
+    expect(body.effectiveState).toBe('configured-empty');
+    expect(body.effective.pool).toMatchObject({ scope: 'project', status: 'active' });
     expect(body.defaults.find((item: { scope: string }) => item.scope === 'project')).toMatchObject(
       {
         visibility: 'visible',
         summary: {
-          pool: { scope: 'project', status: 'disabled' },
+          pool: { scope: 'project', status: 'active', configurationState: 'configured-empty' },
+          effectiveState: 'configured-empty',
           activeCandidateCount: 0,
           candidates: expect.arrayContaining([
             expect.objectContaining({ id: projectDefault.candidates[0].id, status: 'deleted' }),
@@ -355,13 +489,134 @@ describe('project capacity pool routes', () => {
     );
   });
 
-  it('requires project secret-read capability', async () => {
+  it('lets project readers see only the safe effective summary without secret-read', async () => {
     const { sqlite, env } = createEnv();
     seedUser(sqlite, 'user-1');
     seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'viewer' });
     seedCloudCredential(sqlite, {
       id: 'project-cloud-1',
       userId: 'user-1',
+      projectId: 'project-1',
+    });
+    await reconcileExistingDefaults(env);
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('project-cloud-1');
+    expect(text).not.toContain('encrypted-token-for-project-cloud-1');
+    const body = JSON.parse(text);
+    expect(body).toMatchObject({
+      effective: null,
+      effectiveScope: null,
+      effectiveSummary: {
+        scope: 'project',
+        state: 'configured-ready',
+        strategy: 'balanced',
+        exhaustionPolicy: 'queue',
+      },
+      defaults: expect.arrayContaining([
+        expect.objectContaining({ scope: 'project', visibility: 'hidden', summary: null }),
+        expect.objectContaining({ scope: 'user', visibility: 'hidden', summary: null }),
+        expect.objectContaining({ scope: 'installation', visibility: 'hidden', summary: null }),
+      ]),
+    });
+    expect(body.effectiveSummary.availableCandidateCount).toBeGreaterThan(0);
+  });
+
+  it('returns installation-funded safe summary to ordinary project members without admin metadata', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'viewer' });
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+    await reconcileExistingDefaults(env, { includeInstallation: true });
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('platform-cloud-canary');
+    expect(text).not.toContain('platform-encrypted-token-for-platform-cloud-canary');
+    const body = JSON.parse(text);
+    expect(body).toMatchObject({
+      effective: null,
+      effectiveScope: null,
+      effectiveSummary: {
+        scope: 'installation',
+        state: 'configured-ready',
+        strategy: 'balanced',
+        exhaustionPolicy: 'queue',
+      },
+    });
+    expect(body.effectiveSummary.availableCandidateCount).toBeGreaterThan(0);
+  });
+
+  it('does not widen safe summary to installation when the project pool is configured-empty', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-1', role: 'viewer' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-canary',
+      userId: 'user-1',
+      projectId: 'project-1',
+      provider: 'vultr',
+    });
+    seedPlatformCloudCredential(sqlite, 'platform-cloud-canary');
+    await reconcileExistingDefaults(env, { includeInstallation: true });
+    sqlite
+      .prepare(
+        `UPDATE capacity_pool_candidates
+         SET status = 'deleted'
+         WHERE pool_id = 'cap-pool-default:project:project-1'`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `UPDATE capacity_pools
+         SET configuration_state = 'configured-empty'
+         WHERE id = 'cap-pool-default:project:project-1'`
+      )
+      .run();
+
+    const res = await createApp().request(
+      '/api/projects/project-1/capacity-pools/defaults',
+      { method: 'GET' },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain('project-cloud-canary');
+    expect(text).not.toContain('platform-cloud-canary');
+    const body = JSON.parse(text);
+    expect(body.effectiveSummary).toEqual({
+      scope: 'project',
+      state: 'configured-empty',
+      strategy: 'balanced',
+      exhaustionPolicy: 'queue',
+      availableCandidateCount: 0,
+      nativeOfferings: [],
+      reason: 'configured-default-pool-has-no-active-candidates',
+    });
+  });
+
+  it('still requires project read capability for safe effective summaries', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedUser(sqlite, 'user-2');
+    seedProjectMember(sqlite, { projectId: 'project-1', userId: 'user-2', role: 'owner' });
+    seedCloudCredential(sqlite, {
+      id: 'project-cloud-1',
+      userId: 'user-2',
       projectId: 'project-1',
     });
 
@@ -371,10 +626,8 @@ describe('project capacity pool routes', () => {
       env
     );
 
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toMatchObject({
-      error: 'FORBIDDEN',
-    });
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ error: 'NOT_FOUND' });
   });
 
   it('reconciles idempotently through the explicit POST path', async () => {
@@ -481,36 +734,28 @@ describe('project capacity pool routes', () => {
     );
     expect(source).toBeTruthy();
 
-    const remove = await requestProjectDefaults(
-      env,
-      '/capacity-pools/defaults',
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          candidates: [{ id: candidate.id, status: 'deleted' }],
-        }),
-      }
-    );
+    const remove = await requestProjectDefaults(env, '/capacity-pools/defaults', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        candidates: [{ id: candidate.id, status: 'deleted' }],
+      }),
+    });
     expect(remove.status).toBe(200);
 
-    const addBack = await requestProjectDefaults(
-      env,
-      '/capacity-pools/defaults',
-      {
-        method: 'PATCH',
-        body: JSON.stringify({
-          catalogAdditions: [
-            {
-              sourceId: source.id,
-              provider: candidate.provider,
-              location: candidate.location,
-              providerInstanceType: candidate.providerInstanceType,
-              providerInstanceSku: candidate.providerInstanceSku ?? null,
-            },
-          ],
-        }),
-      }
-    );
+    const addBack = await requestProjectDefaults(env, '/capacity-pools/defaults', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        catalogAdditions: [
+          {
+            sourceId: source.id,
+            provider: candidate.provider,
+            location: candidate.location,
+            providerInstanceType: candidate.providerInstanceType,
+            providerInstanceSku: candidate.providerInstanceSku ?? null,
+          },
+        ],
+      }),
+    });
 
     expect(addBack.status).toBe(200);
     const body = await addBack.json();

@@ -1,0 +1,166 @@
+---
+import './explorer.css';
+import { PROVIDER_CATALOG, PROVIDER_IDS } from './catalog';
+import {
+  DEFAULT_STRATEGY,
+  EXHAUSTION_POLICIES,
+  HOST_MEMORY_RESERVE_MB,
+  HOST_ORDERING,
+  MAX_WORKSPACES_PER_NODE,
+  STRATEGIES,
+  WORKLOAD_PRESETS,
+} from './model';
+
+const strategyLabels: Record<string, string> = {
+  pack: 'Pack',
+  spread: 'Spread',
+  balanced: 'Balanced',
+  'smallest-fit': 'Smallest fit',
+};
+const policyLabels: Record<string, string> = {
+  fail: 'fail',
+  queue: 'queue',
+  'fallback-chain': 'fallback-chain',
+};
+---
+
+<p class="explorer-intro">
+  Four strategies, one pool, the same pile of work. Pick a provider, throw workloads at it, and
+  watch where they land — then switch strategy and watch them land somewhere else.
+</p>
+
+<placement-explorer class="placement-lab" aria-label="Interactive placement strategy explorer">
+  <div class="lab-heading">
+    <div>
+      <span class="eyebrow">SAM / SYSTEMS LAB 002</span>
+      <h2>Where does the work go?</h2>
+    </div>
+    <span class="lab-badge"><i></i> INTERACTIVE EXPLAINER</span>
+  </div>
+
+  <noscript>
+    <p class="noscript-note">
+      Enable JavaScript to run the explorer. The full explanation, including every ordering key it
+      demonstrates, is written out below.
+    </p>
+  </noscript>
+
+  <div class="lab-body" hidden data-lab-body>
+    <section class="panel" aria-label="Pool configuration">
+      <div class="panel-title">01 · The pool</div>
+      <div class="field-row">
+        <label class="field">
+          <span>Provider</span>
+          <select data-provider>
+            {PROVIDER_IDS.map((id) => <option value={id}>{PROVIDER_CATALOG[id].label}</option>)}
+          </select>
+        </label>
+        <label class="field">
+          <span>On stockout</span>
+          <select data-policy>
+            {EXHAUSTION_POLICIES.map((policy) => (
+              <option value={policy}>{policyLabels[policy]}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <fieldset class="regions" data-regions>
+        <legend>Regions <span class="hint">tick a region to include it; the flame marks it out of stock</span></legend>
+      </fieldset>
+      <p class="catalog-note" data-catalog-note></p>
+    </section>
+
+    <section class="panel" aria-label="Placement strategy">
+      <div class="panel-title">02 · The strategy</div>
+      <div class="strategies" role="group" aria-label="Placement strategy">
+        {STRATEGIES.map((strategy) => (
+          <button type="button" data-strategy={strategy} aria-pressed={strategy === DEFAULT_STRATEGY}>
+            {strategyLabels[strategy]}
+          </button>
+        ))}
+      </div>
+      <p class="ordering" data-ordering>{HOST_ORDERING[DEFAULT_STRATEGY]}</p>
+    </section>
+
+    <section class="panel" aria-label="Workloads">
+      <div class="panel-title">03 · The work</div>
+      <div class="submit-row">
+        {Object.entries(WORKLOAD_PRESETS).map(([shape, preset]) => (
+          <button type="button" data-shape={shape} title={preset.note}>
+            ＋ {preset.label}
+            <em>{preset.cpuMillis / 1000} vCPU · {preset.memoryMb / 1024} GB</em>
+          </button>
+        ))}
+        <button type="button" class="primary" data-action="batch">⚡ Generate a batch</button>
+      </div>
+      <div class="transport">
+        <button type="button" data-action="step">Step ▸</button>
+        <button type="button" data-action="play">Play ▸▸</button>
+        <button type="button" data-action="reset">Reset</button>
+        <span class="clock" data-clock>STEP 00</span>
+      </div>
+    </section>
+
+    <section class="panel fleet-panel" aria-label="Fleet">
+      <div class="panel-title">
+        04 · The fleet <span class="summary" data-fleet-summary></span>
+      </div>
+      <ul class="fleet" data-fleet aria-live="polite"></ul>
+    </section>
+
+    <div class="readout">
+      <section class="panel" aria-label="Workloads in flight">
+        <div class="panel-title">05 · Workloads</div>
+        <ul class="workloads" data-workloads></ul>
+      </section>
+      <section class="panel" aria-label="Decision log">
+        <div class="panel-title">06 · Decisions</div>
+        <ol class="events" data-events></ol>
+      </section>
+    </div>
+
+    <section class="panel" aria-label="Strategy comparison">
+      <div class="panel-title">
+        07 · Same work, every strategy
+        <span class="summary">run to completion from the current pool</span>
+      </div>
+      <p class="scroll-hint">→ scroll the table for machines bought, cost, work per host and regions</p>
+      <div class="compare-scroll" tabindex="0" role="region" aria-label="Strategy comparison table, scrolls horizontally">
+        <table class="compare" data-compare>
+          <thead>
+            <tr>
+              <th scope="col">Strategy</th>
+              <th scope="col">Ordering key</th>
+              <th scope="col">Bought</th>
+              <th scope="col">Fleet cost</th>
+              <th scope="col">Work per host</th>
+              <th scope="col">Regions</th>
+              <th scope="col">Rejected</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="compare-note" data-compare-note></p>
+    </section>
+
+    <p class="model-note">
+      A teaching model, not production scheduling code. The host memory reserve ({HOST_MEMORY_RESERVE_MB} MB)
+      and the node workspace cap ({MAX_WORKSPACES_PER_NODE}) are real defaults; boot, run, warm and wait durations are compressed into
+      countable steps and are <strong>illustrative values, not SAM defaults</strong>. Machine
+      names, sizes and prices are snapshotted from the provider catalogs in
+      <code>packages/providers</code>, with one price per SKU across regions.
+    </p>
+  </div>
+</placement-explorer>
+
+<script>
+  import './explorer';
+</script>
+
+<style>
+  .explorer-intro {
+    font-size: 1.16rem;
+    color: var(--color-fg-muted);
+  }
+</style>

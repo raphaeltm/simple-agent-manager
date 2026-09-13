@@ -13,6 +13,7 @@ import {
   exportArchiveChunk,
   finalizeSourceDelete,
   GROUPED_ROW_PAGE_SQL,
+  inspectArchiveSourceIntent,
   markArchiveTargetRehomeExported,
   markSourceRecoveryManifestPersisted,
   markSourceTargetSealed,
@@ -38,6 +39,47 @@ import {
 import { createSqlStorage } from './sql-storage-test-utils';
 
 const NOW = 2_000_000;
+
+describe('verified copy-back successor intents', () => {
+  it.each([
+    ['complete', 'rehome_exported', 'copy_back_restored', 'migration-1', 1, 'project-archive:archive:g1:s1', 2, true],
+    ['source still deleted', 'source_deleted', 'copy_back_restored', 'migration-1', 1, 'project-archive:archive:g1:s1', 2, false],
+    ['unrestored anchor', 'rehome_exported', 'source_deleted', 'migration-1', 1, 'project-archive:archive:g1:s1', 2, false],
+    ['wrong migration', 'rehome_exported', 'copy_back_restored', 'other', 1, 'project-archive:archive:g1:s1', 2, false],
+    ['wrong generation', 'rehome_exported', 'copy_back_restored', 'migration-1', 3, 'project-archive:archive:g1:s1', 2, false],
+    ['wrong owner', 'rehome_exported', 'copy_back_restored', 'migration-1', 1, 'other', 2, false],
+    ['same generation', 'rehome_exported', 'copy_back_restored', 'migration-1', 1, 'project-archive:archive:g1:s1', 1, false],
+    ['invalid generation', 'rehome_exported', 'copy_back_restored', 'migration-1', 1, 'project-archive:archive:g1:s1', Number.NaN, false],
+  ] as const)('%s', async (_name, state, archiveState, migration, generation, owner, nextGeneration, allowed) => {
+    const source = makeSql();
+    try {
+      seedTerminalSession(source.sql);
+      const old = {
+        projectId: 'project-archive', sessionId: 'session-archive', migrationId: 'migration-1',
+        sourceOwnerName: 'project-archive', targetOwnerName: 'project-archive:archive:g1:s1',
+        targetGeneration: 1, sourceIntentToken: 'intent-1', now: NOW, minTerminalAgeMs: 0,
+      };
+      await prepareArchiveSourceIntent(source.sql, old);
+      source.sql.exec('UPDATE project_data_archive_source_intents SET state = ?', state);
+      source.sql.exec(
+        'UPDATE chat_sessions SET archive_state = ?, archive_migration_id = ?, archive_generation = ?, archive_owner_name = ?',
+        archiveState, migration, generation, owner
+      );
+      const next = { ...old, migrationId: 'migration-2', sourceIntentToken: 'intent-2',
+        targetOwnerName: 'project-archive:archive:g2:s1', targetGeneration: nextGeneration };
+      if (allowed) {
+        expect(inspectArchiveSourceIntent(source.sql, next)).toMatchObject({ exists: false });
+        await prepareArchiveSourceIntent(source.sql, next);
+        expect(inspectArchiveSourceIntent(source.sql, next)).toMatchObject({ exists: true, state: 'intent_prepared' });
+        expect(() => inspectArchiveSourceIntent(source.sql, old)).toThrow(/identity mismatch/);
+      } else {
+        expect(() => inspectArchiveSourceIntent(source.sql, next)).toThrow(/identity mismatch/);
+        await expect(prepareArchiveSourceIntent(source.sql, next)).rejects.toThrow(/identity mismatch/);
+        expect(inspectArchiveSourceIntent(source.sql, old)).toMatchObject({ exists: true, state });
+      }
+    } finally { source.db.close(); }
+  });
+});
 
 /**
  * Test seam over the production RPC body: re-throws a typed refusal as the invariant error so
@@ -863,7 +905,7 @@ function recordSelectRows(base: SqlStorage): {
       const rows = cursor.toArray();
       recorder.selects++;
       recorder.maxRowsPerSelect = Math.max(recorder.maxRowsPerSelect, rows.length);
-      return { toArray: () => rows, rowsWritten: 0 } as unknown as ReturnType<SqlStorage['exec']>;
+      return { toArray: () => rows, [Symbol.iterator]: () => rows[Symbol.iterator](), rowsWritten: 0 } as unknown as ReturnType<SqlStorage['exec']>;
     },
     get databaseSize() {
       return base.databaseSize;

@@ -21,7 +21,7 @@ export async function commitD1Submission(
        id, project_id, user_id, chat_session_id, title, description, status, execution_step,
        priority, agent_profile_hint, skill_id, skill_hint, task_mode, output_branch,
        triggered_by, trigger_id, trigger_execution_id, requested_vm_size, requested_vm_size_source,
-       resource_requirements_json, resource_requirements_source, resolved_reservation_json,
+       resource_requirements_json, resource_requirement_plan_json, resource_requirements_source, resolved_reservation_json,
        credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
        ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
        created_by, created_at, updated_at
@@ -30,7 +30,7 @@ export async function commitD1Submission(
        ?, ?, ?, ?, ?, ?, 'queued', 'node_selection',
        0, ?, ?, ?, ?, ?,
        ?, ?, ?, ?, ?,
-       ?, ?, ?,
+       ?, ?, ?, ?,
        ?, ?, ?,
        ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
        ?, ?, ?`;
@@ -52,6 +52,7 @@ export async function commitD1Submission(
     t.requestedVmSize,
     t.requestedVmSizeSource,
     t.resourceRequirementsJson,
+    t.resourceRequirementPlanJson,
     t.resourceRequirementsSource,
     t.resolvedReservationJson,
     t.credentialAttributionUserId,

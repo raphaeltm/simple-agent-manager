@@ -35,6 +35,15 @@ const (
 	// Override via ACP_CREDENTIAL_SYNC_TIMEOUT.
 	DefaultACPCredentialSyncTimeout = 10 * time.Second
 
+	// DefaultACPRestartAttemptTimeout bounds ONE agent restart attempt driven by
+	// the process monitor (container exec for auth-file writes, then the ACP
+	// handshake). The monitor holds h.mu for the whole attempt, so an
+	// unbounded attempt on a wedged container runtime would also block Stop().
+	// Derived downward from the host lifecycle context, never upward into it —
+	// see .claude/rules/71-request-context-must-not-outlive-its-request.md.
+	// Override via ACP_RESTART_ATTEMPT_TIMEOUT.
+	DefaultACPRestartAttemptTimeout = 5 * time.Minute
+
 	// DefaultACPActivityReportTimeout preserves the per-attempt activity callback
 	// timeout used before it became configurable. Override via
 	// ACP_ACTIVITY_REPORT_TIMEOUT.

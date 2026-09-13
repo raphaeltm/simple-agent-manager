@@ -1,4 +1,4 @@
-/** Matches the active-only index installed by migration 053. */
+/** Matches the active-only index installed by migration 055. */
 export const MAILBOX_CAPACITY_QUERY = `SELECT COUNT(*) AS cnt FROM (
   SELECT id FROM session_inbox
   WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')

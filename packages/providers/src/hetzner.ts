@@ -14,17 +14,22 @@ import {
   HETZNER_LOCATIONS,
   HETZNER_SIZE_CONFIGS,
   HETZNER_VOLUME_CAPABILITIES,
-  HETZNER_VOLUME_MAX_SIZE_GB,
-  HETZNER_VOLUME_MIN_SIZE_GB,
   type HetznerProviderRuntimeOptions,
   isAlreadyDetachedVolumeError,
+  isHetznerPlacementCapacityError,
   isTransientCapacityError,
   mapHetznerProviderError,
   mapHetznerServerToVMInstance,
   mapHetznerVolumeToInstance,
+  validateHetznerVolumeSize,
 } from './hetzner-metadata';
 import { fetchPaginatedHetznerList } from './hetzner-pagination';
 import { getProviderCatalogOfferings } from './instance-offerings';
+import {
+  assertIncludedBootDiskCapacity,
+  type ResolvedNativeVMConfig,
+  resolveVMConfigWithLegacySizeAdapter,
+} from './native-vm-config';
 import {
   providerDelay,
   providerFetch,
@@ -72,6 +77,7 @@ export {
   HETZNER_MAX_VOLUMES_PER_SERVER,
   HETZNER_VOLUME_MAX_SIZE_GB,
   HETZNER_VOLUME_MIN_SIZE_GB,
+  isHetznerPlacementCapacityError,
   isTransientCapacityError,
 } from './hetzner-metadata';
 
@@ -82,6 +88,8 @@ export class HetznerProvider implements Provider {
   readonly sizes = HETZNER_SIZE_CONFIGS;
   readonly volumeCapabilities = HETZNER_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
+  /** listInstanceOfferings reads the live /server_types API and throws instead of falling back. */
+  readonly instanceOfferingApiBacked = true;
 
   private readonly apiToken: string;
   private readonly datacenter: string;
@@ -129,11 +137,16 @@ export class HetznerProvider implements Provider {
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const sizeConfig = this.sizes[config.size];
-    if (!sizeConfig) {
-      throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
-    }
-    const serverType = config.instanceType ?? sizeConfig.type;
+    const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
+      providerName: this.name,
+      defaultLocation: this.datacenter,
+      legacySizes: this.sizes,
+      defaultImage: DEFAULT_HETZNER_IMAGE,
+    });
+    assertIncludedBootDiskCapacity(this.name, nativeConfig);
+    // Native plans are authorized for one pool location. Cross-location
+    // fallback must be a new control-plane placement decision.
+    const allowLocationFallback = config.native === undefined && this.placementFallbackEnabled;
 
     const deadline = Date.now() + this.capacityRetryBudgetMs;
     let lastCapacityError: ProviderError | undefined;
@@ -144,14 +157,17 @@ export class HetznerProvider implements Provider {
       capacityAttempt++
     ) {
       try {
-        return await this.attemptCreateWithPlacementFallback(config, serverType, context);
+        return await this.attemptCreateWithPlacementFallback(
+          nativeConfig,
+          allowLocationFallback,
+          context
+        );
       } catch (err) {
         lastCapacityError = await this.retryAfterCapacityError(
           err,
           capacityAttempt,
           deadline,
-          config,
-          serverType,
+          nativeConfig,
           context
         );
       }
@@ -167,12 +183,17 @@ export class HetznerProvider implements Provider {
     error: unknown,
     attempt: number,
     deadline: number,
-    config: VMConfig,
-    serverType: string,
+    config: ResolvedNativeVMConfig,
     context?: ProviderRequestContext
   ): Promise<ProviderError> {
     rethrowIfProviderRequestAborted(error, context);
     if (!(error instanceof ProviderError) || !isTransientCapacityError(error)) throw error;
+    // A placement failure is transient capacity for the CONTROL PLANE (it should try another
+    // offering from the pool) but not for THIS loop, which would spend the whole
+    // `capacityRetryBudgetMs` re-asking for the same server type in the same location. Surface it
+    // immediately so the pool's fallback chain descends. `attemptCreateWithPlacementFallback` has
+    // already retried the primary location twice. See `.claude/rules/67`.
+    if (isHetznerPlacementCapacityError(error)) throw error;
 
     const delay = this.computeCapacityRetryDelay(attempt);
     const isLastAttempt = attempt >= this.capacityRetryMaxAttempts - 1;
@@ -182,7 +203,7 @@ export class HetznerProvider implements Provider {
         this.name,
         422,
         `Capacity exhausted after ${attempt + 1} attempts for ` +
-          `server type ${serverType} in ${config.location || this.datacenter}: ` +
+          `server type ${config.instanceType} in ${config.location}: ` +
           error.message,
         { cause: error, providerCode: error.providerCode, category: 'transient_capacity' }
       );
@@ -193,8 +214,8 @@ export class HetznerProvider implements Provider {
       attempt: attempt + 1,
       maxAttempts: this.capacityRetryMaxAttempts,
       budgetRemainingMs: Math.max(0, deadline - Date.now()),
-      serverType,
-      location: config.location || this.datacenter,
+      serverType: config.instanceType,
+      location: config.location,
       statusCode: error.statusCode,
       providerCode: error.providerCode,
     });
@@ -216,14 +237,14 @@ export class HetznerProvider implements Provider {
    * then falls back to other locations on 412 placement errors.
    */
   private async attemptCreateWithPlacementFallback(
-    config: VMConfig,
-    serverType: string,
+    config: ResolvedNativeVMConfig,
+    allowLocationFallback: boolean,
     context?: ProviderRequestContext
   ): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
-    const primaryLocation = config.location || this.datacenter;
+    const primaryLocation = config.location;
 
-    const fallbackLocations = this.placementFallbackEnabled
+    const fallbackLocations = allowLocationFallback
       ? HETZNER_LOCATIONS.filter((loc) => loc !== primaryLocation)
       : [];
     const attemptsToTry: Array<{ location: string; delayMs: number }> = [
@@ -255,11 +276,11 @@ export class HetznerProvider implements Provider {
             },
             body: JSON.stringify({
               name: config.name,
-              server_type: serverType,
+              server_type: config.instanceType,
               image: config.image || DEFAULT_HETZNER_IMAGE,
               location: attempt.location,
               user_data: config.userData,
-              labels: config.labels || {},
+              labels: config.labels,
               start_after_create: true,
             }),
           },
@@ -283,6 +304,8 @@ export class HetznerProvider implements Provider {
         return mapHetznerServerToVMInstance(data.server);
       } catch (err) {
         rethrowIfProviderRequestAborted(err, context);
+        // Deliberately broader than `isHetznerPlacementCapacityError` — see its docstring for
+        // why the three 412 checks in this codebase differ in precision.
         if (err instanceof ProviderError && err.statusCode === 412) {
           this.logger.warn('hetzner placement attempt failed', {
             location: attempt.location,
@@ -473,9 +496,14 @@ export class HetznerProvider implements Provider {
       );
     } catch (error) {
       rethrowIfProviderRequestAborted(error, context);
-      this.logger.warn('hetzner catalog API unavailable; using static instance offerings', {
+      const message =
+        options.allowStaticFallback === false
+          ? 'hetzner catalog API unavailable'
+          : 'hetzner catalog API unavailable; using static instance offerings';
+      this.logger.warn(message, {
         error: error instanceof Error ? error.message : String(error),
       });
+      if (options.allowStaticFallback === false) throw error;
       return getProviderCatalogOfferings(
         this.name as CredentialProvider,
         this.locations,
@@ -489,7 +517,7 @@ export class HetznerProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<VolumeInstance> {
     throwIfProviderRequestAborted(context);
-    this.validateRequestedVolumeSize(config.sizeGb);
+    validateHetznerVolumeSize(config.sizeGb);
 
     let response: Response;
     try {
@@ -613,7 +641,7 @@ export class HetznerProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<VolumeInstance> {
     throwIfProviderRequestAborted(context);
-    this.validateRequestedVolumeSize(config.sizeGb);
+    validateHetznerVolumeSize(config.sizeGb);
     const currentSizeGb =
       config.currentSizeGb ?? (await this.getCurrentVolumeSize(config, context));
     if (config.sizeGb < currentSizeGb) {
@@ -748,25 +776,6 @@ export class HetznerProvider implements Provider {
   private toHetznerLabelSelectorParts(labels?: Record<string, string>): string[] {
     if (!labels) return [];
     return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
-  }
-
-  private validateRequestedVolumeSize(sizeGb: number): void {
-    if (!Number.isInteger(sizeGb) || sizeGb < HETZNER_VOLUME_MIN_SIZE_GB) {
-      throw new ProviderError(
-        this.name,
-        undefined,
-        `Hetzner volume size must be an integer >= ${HETZNER_VOLUME_MIN_SIZE_GB}GB`,
-        { category: 'invalid_config' }
-      );
-    }
-    if (sizeGb > HETZNER_VOLUME_MAX_SIZE_GB) {
-      throw new ProviderError(
-        this.name,
-        undefined,
-        `Hetzner volume size must be <= ${HETZNER_VOLUME_MAX_SIZE_GB}GB`,
-        { category: 'invalid_config' }
-      );
-    }
   }
 
   private async getCurrentVolumeSize(

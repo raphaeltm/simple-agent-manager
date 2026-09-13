@@ -487,6 +487,7 @@ export async function prepareSessionSnapshot(
     recoveryTaskId: null,
     recoveryWorkspaceId: null,
     recoveryAttempts: 0,
+    recoveryFailedAt: null,
     recoveryError: null,
     recoveryClaimedAt: null,
     snapshotGeneration: null,

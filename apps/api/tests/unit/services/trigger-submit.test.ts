@@ -75,6 +75,7 @@ describe('submitTriggeredTask', () => {
       skillId: null,
       taskMode: 'task',
       vmSizeOverride: null,
+      resourceRequirementsJson: null,
       source: {
         kind: 'trigger',
         sourceId: 'trigger-1',
@@ -107,6 +108,7 @@ describe('submitTriggeredTask', () => {
       skillId: 'skill-1',
       taskMode: 'conversation',
       vmSizeOverride: 'medium',
+      resourceRequirementsJson: '{"minVcpu":4}',
     });
 
     expect(reservedMocks.submitReservedTask).toHaveBeenCalledWith(
@@ -116,6 +118,7 @@ describe('submitTriggeredTask', () => {
         skillId: 'skill-1',
         taskMode: 'conversation',
         vmSizeOverride: 'medium',
+        resourceRequirementsJson: '{"minVcpu":4}',
       })
     );
   });

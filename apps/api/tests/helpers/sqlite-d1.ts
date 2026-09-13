@@ -66,7 +66,20 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
 
   const bound = (sql: string, params: unknown[]): ExecutableStatement & Record<string, unknown> => {
     const runSync = () => {
-      const info = sqlite.prepare(sql).run(...normalize(params));
+      const statement = sqlite.prepare(sql);
+      // D1's `batch()` returns a populated `results` array for row-returning statements, and
+      // drizzle's D1 driver reads `result.results` straight back out of each batch entry.
+      // Reporting `results: []` unconditionally would silently turn every batched SELECT into
+      // "no rows" — the kind of infidelity `.claude/rules/28` bans, since a guard fed an empty
+      // result set rejects for the wrong reason.
+      if (statement.reader) {
+        return {
+          success: true,
+          results: statement.all(...normalize(params)),
+          meta: { changes: 0, last_row_id: 0 },
+        };
+      }
+      const info = statement.run(...normalize(params));
       return {
         success: true,
         results: [],
@@ -100,18 +113,33 @@ export function createSqliteD1(sqlite: Database.Database): D1Database {
     ...bound(sql, []),
   });
 
-  return {
+  const batch = async (statements: ExecutableStatement[]) =>
+    sqlite.transaction((items: ExecutableStatement[]) => items.map((item) => item.runSync()))(
+      statements
+    );
+
+  const database = {
     prepare: statement,
-    batch: async (statements: ExecutableStatement[]) =>
-      sqlite.transaction((items: ExecutableStatement[]) => items.map((item) => item.runSync()))(
-        statements
-      ),
+    batch,
     exec: async (sql: string) => {
       sqlite.exec(sql);
       return { count: 0, duration: 0 };
     },
     dump: async () => new ArrayBuffer(0),
-  } as unknown as D1Database;
+    /**
+     * Shape-fidelity shim for the Sessions API so `lib/d1-session.ts` can be exercised in
+     * node-environment tests. It is NOT a replica simulator: there is one engine, so every
+     * query is trivially "consistent". Replica routing, bookmark propagation and
+     * read-after-write across a real session must be proven on workerd
+     * (`tests/workers/`), per `.claude/rules/69`.
+     *
+     * Shares `prepare`/`batch` with the binding by reference rather than re-implementing
+     * them, so a session can never drift from what the binding itself does.
+     */
+    withSession: () => ({ prepare: statement, batch, getBookmark: () => null }),
+  };
+
+  return database as unknown as D1Database;
 }
 
 /** D1 adapter wrapper that fails when one statement exceeds Cloudflare's bind parameter limit. */
@@ -123,22 +151,29 @@ export function createSqliteD1WithBindLimit(
     prepare(sql: string): D1PreparedStatement;
   };
 
+  const prepare = (sql: string) => {
+    const statement = database.prepare(sql);
+    return {
+      ...statement,
+      bind: (...params: unknown[]) => {
+        if (params.length > maxBoundParameters) {
+          throw new Error(
+            `D1 bind parameter limit exceeded: ${params.length} > ${maxBoundParameters}`
+          );
+        }
+        return statement.bind(...params);
+      },
+    };
+  };
+
   return {
     ...database,
-    prepare: (sql: string) => {
-      const statement = database.prepare(sql);
-      return {
-        ...statement,
-        bind: (...params: unknown[]) => {
-          if (params.length > maxBoundParameters) {
-            throw new Error(
-              `D1 bind parameter limit exceeded: ${params.length} > ${maxBoundParameters}`
-            );
-          }
-          return statement.bind(...params);
-        },
-      };
-    },
+    prepare,
+    // A session must not be an escape hatch from the very limit this wrapper exists to
+    // enforce: inheriting `createSqliteD1`'s `withSession` through the spread would hand
+    // back the unlimited `prepare` and silently pass statements this helper is meant to
+    // reject.
+    withSession: () => ({ prepare, batch: database.batch, getBookmark: () => null }),
   } as unknown as D1Database;
 }
 

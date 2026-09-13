@@ -204,14 +204,20 @@ func (s *Server) sendNodeHeartbeat() {
 		payload["deployment"] = map[string]interface{}{"environments": environments}
 	}
 
-	// Enrich heartbeat with lightweight system metrics (procfs only, no exec calls).
+	// Enrich heartbeat with lightweight system metrics. Workspace container
+	// memory is optional, bounded, and omitted when discovery or Docker stats
+	// cannot complete within its configured timeout.
 	if s.sysInfoCollector != nil {
 		if quick, err := s.sysInfoCollector.CollectQuick(); err == nil {
-			payload["metrics"] = map[string]interface{}{
+			metrics := map[string]interface{}{
 				"cpuLoadAvg1":   quick.CPULoadAvg1,
 				"memoryPercent": quick.MemoryPercent,
 				"diskPercent":   quick.DiskPercent,
 			}
+			if workspaceMemory := s.collectWorkspaceMemoryMetrics(); len(workspaceMemory) > 0 {
+				metrics["workspaceMemory"] = workspaceMemory
+			}
+			payload["metrics"] = metrics
 		} else {
 			slog.Warn("Heartbeat metrics collection failed", "error", err)
 		}
@@ -372,6 +378,90 @@ func (s *Server) sendNodeHeartbeat() {
 		defer s.readyRetryMu.Unlock()
 		s.retryPendingReadyCallbacks()
 	}()
+}
+
+type workspaceMemoryMetric struct {
+	WorkspaceID      string  `json:"workspaceId"`
+	MemoryUsageBytes uint64  `json:"memoryUsageBytes"`
+	MemoryLimitBytes uint64  `json:"memoryLimitBytes,omitempty"`
+	MemoryPercent    float64 `json:"memoryPercent,omitempty"`
+	ContainerID      string  `json:"containerId,omitempty"`
+	ContainerName    string  `json:"containerName,omitempty"`
+	CollectedAt      string  `json:"collectedAt,omitempty"`
+}
+
+func (s *Server) collectWorkspaceMemoryMetrics() []workspaceMemoryMetric {
+	if s == nil || s.config == nil || !s.config.ContainerMode {
+		return nil
+	}
+	limit := s.config.HeartbeatWorkspaceMetricsMaxContainers
+	if limit <= 0 {
+		return nil
+	}
+
+	labelValueToWorkspace := make(map[string]string, limit)
+	labelValues := make([]string, 0, limit)
+	s.workspaceMu.RLock()
+	for _, runtime := range s.workspaces {
+		if runtime == nil || !workspaceRuntimeReportsAdmissionMetrics(runtime.Status) {
+			continue
+		}
+		labelValue := strings.TrimSpace(runtime.ContainerLabelValue)
+		if labelValue == "" {
+			continue
+		}
+		labelValueToWorkspace[labelValue] = runtime.ID
+		labelValues = append(labelValues, labelValue)
+		if len(labelValues) > limit {
+			break
+		}
+	}
+	s.workspaceMu.RUnlock()
+	if len(labelValues) == 0 || len(labelValues) > limit {
+		return nil
+	}
+
+	stats, err := sysinfo.CollectDockerContainerStatsForLabelsBounded(
+		context.Background(),
+		sysinfo.DockerContainerStatsOptions{
+			Timeout:        s.config.HeartbeatDockerStatsTimeout,
+			MaxContainers:  limit,
+			MaxOutputBytes: s.config.HeartbeatWorkspaceMetricsMaxOutputBytes,
+		},
+		s.config.ContainerLabelKey,
+		labelValues,
+	)
+	if err != nil {
+		slog.Debug("Heartbeat workspace memory stats unavailable", "error", err)
+		return nil
+	}
+
+	result := make([]workspaceMemoryMetric, 0, len(stats))
+	for _, stat := range stats {
+		workspaceID := labelValueToWorkspace[stat.LabelValue]
+		if workspaceID == "" {
+			continue
+		}
+		result = append(result, workspaceMemoryMetric{
+			WorkspaceID:      workspaceID,
+			MemoryUsageBytes: stat.MemoryUsageBytes,
+			MemoryLimitBytes: stat.MemoryLimitBytes,
+			MemoryPercent:    stat.MemoryPercent,
+			ContainerID:      stat.ID,
+			ContainerName:    stat.Name,
+			CollectedAt:      stat.CollectedAt.Format(time.RFC3339Nano),
+		})
+	}
+	return result
+}
+
+func workspaceRuntimeReportsAdmissionMetrics(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "creating", "recovery":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, engine *deploy.Engine) {
