@@ -178,4 +178,74 @@ describe('ACP activity admission controller', () => {
 
     expect(getAcpActivityAdmissionSnapshotForTests().recent).toBe(2);
   });
+
+  it('emits runtime-work classification details for admitted intermediate idle reports', () => {
+    const config = getAcpActivityAdmissionConfig(env);
+    recordAcpActivityAdmissionSuccess({
+      env,
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      binding: binding('session-1'),
+      report: report({
+        activity: 'idle',
+        runtimeWorkState: 'settling',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude-background-tasks',
+        runtimeWorkProgressAt: 1234,
+      }),
+      reason: 'activity_transition',
+      observedAt: 1500,
+      now: 2000,
+    });
+
+    expect(config.enabled).toBe(true);
+    expect(recordAcpActivityCallbackMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'admitted',
+        reason: 'activity_transition',
+        activity: 'idle',
+        classification: 'intermediate',
+        runtimeWorkState: 'settling',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude-background-tasks',
+        runtimeWorkObservedAt: 1500,
+        runtimeWorkProgressAt: 1234,
+      }),
+      env
+    );
+  });
+
+  it('buckets unknown runtime-work telemetry sources and classifies critical reports', () => {
+    recordAcpActivityAdmissionSuccess({
+      env,
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      binding: binding('session-1'),
+      report: report({
+        activity: 'idle',
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'custom-adapter',
+        runtimeWorkProgressAt: 1234,
+      }),
+      reason: 'critical_transition',
+      observedAt: 1500,
+      now: 2000,
+    });
+
+    expect(recordAcpActivityCallbackMetric).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'admitted',
+        reason: 'critical_transition',
+        activity: 'idle',
+        classification: 'critical',
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'other',
+        runtimeWorkObservedAt: 1500,
+        runtimeWorkProgressAt: 1234,
+      }),
+      env
+    );
+  });
 });

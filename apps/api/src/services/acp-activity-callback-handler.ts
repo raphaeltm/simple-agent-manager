@@ -20,6 +20,7 @@ import {
   type AcpActivityPendingSnapshot,
   admitOrCoalesceAcpActivityCallback,
   buildAcpActivityBinding,
+  buildAcpActivityRuntimeWorkMetricFields,
   cacheAcpActivityBinding,
   clearPendingAcpActivity,
   coalesceAcpActivityAfterProjectDataTransient,
@@ -32,7 +33,6 @@ import {
 import {
   activityReportExtra,
   assertAcpActivityCallbackResourcesActive,
-  cancelSleepForActiveActivity,
   flushCoalescedAcpActivity,
   loadD1ActivityBindingForTransientFallback,
   persistIntermediateActivity,
@@ -152,15 +152,6 @@ async function handleCachedIntermediateActivity(
     workspaceId: cachedBinding.workspaceId,
     chatSessionId: cachedBinding.chatSessionId,
   });
-  await cancelSleepForActiveActivity({
-    env: input.c.env,
-    projectId: input.projectId,
-    sessionId: input.sessionId,
-    chatSessionId: cachedBinding.chatSessionId,
-    body: input.body,
-    beforeSideEffect: () =>
-      revalidateAcpResources(input.c.env, input.projectId, input.sessionId, cachedBinding),
-  });
 
   const admission = admitOrCoalesceAcpActivityCallback({
     env: input.c.env,
@@ -225,20 +216,6 @@ async function handleTransientLookupFallback(input: {
       workspaceId: fallbackBinding.workspaceId,
       chatSessionId: fallbackBinding.chatSessionId,
     });
-    await cancelSleepForActiveActivity({
-      env: context.c.env,
-      projectId: context.projectId,
-      sessionId: context.sessionId,
-      chatSessionId: fallbackBinding.chatSessionId,
-      body: context.body,
-      beforeSideEffect: () =>
-        revalidateAcpResources(
-          context.c.env,
-          context.projectId,
-          context.sessionId,
-          fallbackBinding
-        ),
-    });
     cacheAcpActivityBinding(context.config, context.projectId, fallbackBinding);
     coalesceAcpActivityAfterProjectDataTransient({
       env: context.c.env,
@@ -270,6 +247,7 @@ async function rejectSupersededInstantError(input: {
   sessionId: string;
   body: AcpActivityCallbackReport;
   binding: AcpActivityBinding;
+  observedAt: number;
 }): Promise<Response | null> {
   if (input.body.activity !== 'error') return null;
 
@@ -320,6 +298,7 @@ async function rejectSupersededInstantError(input: {
       workspaceId: input.binding.workspaceId,
       activity: input.body.activity,
       reason: 'stale_generation',
+      ...buildAcpActivityRuntimeWorkMetricFields(input.body, input.observedAt),
       source: 'callback',
     },
     input.c.env
@@ -332,6 +311,7 @@ function throwMissingAcpSession(input: {
   projectId: string;
   sessionId: string;
   body: AcpActivityCallbackReport;
+  observedAt: number;
 }): never {
   recordAcpActivityCallbackMetric(
     {
@@ -342,6 +322,7 @@ function throwMissingAcpSession(input: {
       nodeId: input.body.nodeId,
       activity: input.body.activity,
       reason: 'session_missing',
+      ...buildAcpActivityRuntimeWorkMetricFields(input.body, input.observedAt),
       source: 'callback',
     },
     input.c.env
@@ -432,6 +413,7 @@ async function persistCriticalActivity(input: {
       workspaceId: input.binding.workspaceId,
       activity: input.body.activity,
       reason: 'stale_activity_observed_at',
+      ...buildAcpActivityRuntimeWorkMetricFields(input.body, input.observedAt),
       source: 'callback',
     },
     input.c.env
@@ -667,7 +649,7 @@ export async function handleAcpActivityCallback(
     throw err;
   }
   if (!existing) {
-    throwMissingAcpSession({ c, projectId, sessionId, body });
+    throwMissingAcpSession({ c, projectId, sessionId, body, observedAt });
   }
 
   // Authoritative auth: bind the token's OWN identity (payload.workspace) to the session's
@@ -691,18 +673,6 @@ export async function handleAcpActivityCallback(
   });
   cacheAcpActivityBinding(config, projectId, binding);
 
-  // Mutate sleep state only after the callback token and reported node are
-  // both bound to this exact session. A valid token for another tenant must
-  // not be able to keep a victim's runtime awake by cancelling its sleep.
-  await cancelSleepForActiveActivity({
-    env: c.env,
-    projectId,
-    sessionId,
-    chatSessionId: existing.chatSessionId,
-    body,
-    beforeSideEffect: () => revalidateAcpResources(c.env, projectId, sessionId, binding),
-  });
-
   if (isIntermediate) {
     return handleIntermediateAfterProjectDataLookup({ context: processingContext, binding });
   }
@@ -722,6 +692,7 @@ export async function handleAcpActivityCallback(
     sessionId,
     body,
     binding,
+    observedAt,
   });
   if (staleGenerationResponse) return staleGenerationResponse;
 
@@ -744,6 +715,7 @@ export async function handleAcpActivityCallback(
     binding,
     report: body,
     reason: 'critical_transition',
+    observedAt,
   });
   const persistedActivity = body.runtimeWorkState
     ? await projectDataService.getSessionState(c.env, projectId, sessionId)

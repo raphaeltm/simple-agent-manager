@@ -11,6 +11,7 @@ import {
   type AcpActivityFlushResult,
   type AcpActivityPendingSnapshot,
   buildAcpActivityBinding,
+  buildAcpActivityRuntimeWorkMetricFields,
   coalesceAcpActivityAfterProjectDataTransient,
   type getAcpActivityAdmissionConfig,
   isPendingAcpActivitySnapshotCurrent,
@@ -150,17 +151,13 @@ export async function cancelSleepForActiveActivity(input: {
   sessionId: string;
   chatSessionId: string;
   body: AcpActivityCallbackReport;
-  beforeSideEffect?: () => Promise<void>;
 }): Promise<void> {
   if (input.body.activity !== 'prompting' && !reportedHarnessWorkKeepsRuntimeActive(input.body)) {
     return;
   }
-  await input.beforeSideEffect?.();
-  await cancelScheduledSessionSleep(
-    drizzle(input.env.DATABASE, { schema }),
-    input.chatSessionId,
-    { preserveCompletedTaskIntent: true }
-  ).catch((err) => {
+  await cancelScheduledSessionSleep(drizzle(input.env.DATABASE, { schema }), input.chatSessionId, {
+    preserveCompletedTaskIntent: true,
+  }).catch((err) => {
     log.warn('acp_activity.cancel_scheduled_sleep_failed', {
       sessionId: input.sessionId,
       projectId: input.projectId,
@@ -256,12 +253,20 @@ export async function persistIntermediateActivity(input: {
           workspaceId: input.binding.workspaceId,
           activity: input.body.activity,
           reason: 'stale_activity_observed_at',
+          ...buildAcpActivityRuntimeWorkMetricFields(input.body, input.observedAt),
           source: 'callback',
         },
         input.env
       );
       return 'persisted';
     }
+    await cancelSleepForActiveActivity({
+      env: input.env,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      chatSessionId: input.binding.chatSessionId,
+      body: input.body,
+    });
     recordAcpActivityAdmissionSuccess({
       env: input.env,
       projectId: input.projectId,
@@ -269,6 +274,7 @@ export async function persistIntermediateActivity(input: {
       binding: input.binding,
       report: input.body,
       reason: input.admissionReason,
+      observedAt: input.observedAt,
     });
     return 'persisted';
   } catch (err) {
@@ -322,31 +328,6 @@ export async function flushCoalescedAcpActivity(
     if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
       return { action: 'rejected', reason: 'pending_superseded' };
     }
-    await cancelSleepForActiveActivity({
-      env,
-      projectId: snapshot.projectId,
-      sessionId: snapshot.sessionId,
-      chatSessionId: binding.chatSessionId,
-      body: snapshot.report,
-      beforeSideEffect: () =>
-        assertAcpActivityCallbackResourcesActive(env, {
-          projectId: snapshot.projectId,
-          sessionId: snapshot.sessionId,
-          nodeId: binding.nodeId,
-          workspaceId: binding.workspaceId,
-          chatSessionId: binding.chatSessionId,
-        }),
-    });
-    if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
-      return { action: 'rejected', reason: 'pending_superseded' };
-    }
-    await assertAcpActivityCallbackResourcesActive(env, {
-      projectId: snapshot.projectId,
-      sessionId: snapshot.sessionId,
-      nodeId: binding.nodeId,
-      workspaceId: binding.workspaceId,
-      chatSessionId: binding.chatSessionId,
-    });
     const applied = await projectDataService.reportAcpSessionActivity(
       env,
       snapshot.projectId,
@@ -357,6 +338,16 @@ export async function flushCoalescedAcpActivity(
     if (applied === false) {
       return { action: 'rejected', reason: 'stale_activity_observed_at' };
     }
+    if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
+      return { action: 'rejected', reason: 'pending_superseded' };
+    }
+    await cancelSleepForActiveActivity({
+      env,
+      projectId: snapshot.projectId,
+      sessionId: snapshot.sessionId,
+      chatSessionId: binding.chatSessionId,
+      body: snapshot.report,
+    });
     return { action: 'flushed' };
   } catch (err) {
     if (isTransientDurableObjectError(err)) {
