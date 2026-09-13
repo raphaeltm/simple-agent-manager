@@ -42,7 +42,7 @@ The initial broad runs found fixture/merge failures; the table records the subse
 
 Read-only Sonar verification found that the paused checkpoint `0f150939f` was analyzed after its handoff: quality gate OK, new-code duplication 2.7738621431131287% on 41,855 new lines (analysis 2026-09-07T14:45:35Z). The new draft’s analysis status is tracked separately in the PR; the paused result is not a current-head analysis claim.
 
-Usage checked at 06:44Z: 43% of weekly Codex quota used. Stop near 80%, push and record state if reached. No staging, main merge, PR #2031 mutation, CodeRabbit request, or SAM subtask dispatch occurred.
+Usage checked at 07:06Z: 48% of weekly Codex quota used. Stop near 80%, push and record state if reached. No staging, main merge, PR #2031 mutation, CodeRabbit request, or SAM subtask dispatch occurred.
 
 ## Migration mapping
 
@@ -88,13 +88,13 @@ The following primary file lists partition every changed path exactly once. The 
 
 | Piece                                                                      | Primary files | Shared additional touches | Maximum listed footprint |
 | -------------------------------------------------------------------------- | ------------: | ------------------------: | -----------------------: |
-| 1. Foundation: ordered migrations, contracts, bounded storage              |            55 |                         2 |                       57 |
+| 1. Foundation: ordered migrations, contracts, bounded storage              |            54 |                         3 |                       57 |
 | 2. Same-chat durable wake and mailbox integration, OFF                     |            33 |                         7 |                       40 |
-| 3. Durable source outbox and GitHub/generic producers                      |            23 |                         6 |                       29 |
-| 4. Credential-limit telemetry and proxy accounting                         |            45 |                         0 |                       45 |
-| 5. Reserved submissions, schedules, watches, live trigger-path integration |            76 |                         4 |                       80 |
+| 3. Durable source outbox and GitHub/generic producers                      |            24 |                         6 |                       30 |
+| 4. Credential-limit telemetry and proxy accounting                         |            45 |                         1 |                       46 |
+| 5. Reserved submissions, schedules, watches, live trigger-path integration |            77 |                         6 |                       83 |
 | 6. Channels, member subscriptions, API/MCP surfaces                        |            24 |                         6 |                       30 |
-| 7. Events UI, remaining docs, and integration evidence                     |            67 |                         0 |                       67 |
+| 7. Events UI, remaining docs, and integration evidence                     |            66 |                         0 |                       66 |
 
 ## 1. Foundation: ordered migrations, contracts, bounded storage
 
@@ -103,6 +103,8 @@ Dependencies: current main only. Carries **all seven D1 migrations 0156–0162 a
 Runtime: additive schema, core admission/read/retention/accounting changes; retention may run against existing event data. It is not literally no-op: bounded retention and active-mailbox capacity accounting change storage behavior. No event prompt materialization; resolver and wrangler flag remain false. Risk: medium (SQLite/D1 compatibility and retention correctness).
 
 Hunks: in `project-events.ts`, hold back ONLY exports/imports of materialization and wake-delivery modules until piece 2; core scheduler/retention exports stay here. In ProjectData `index.ts` and `alarm-schedule.ts`, add only retention scheduling/runner hooks and required project-id lookup; leave wake, schedule/watch and channel integrations for their pieces. Whole-file replacement of either entry point is forbidden.
+
+Schema fixture hunk: `tests/unit/routes/mcp.test.ts` must take only the `mockInstructionRows` switch to schema-derived `getTableColumns(schema.tasks)` mapping here. The new `tasks.terminalTransitionId` column shifts main's positional raw rows; postponing this fixture repair until piece 5 breaks existing instruction tests. Keep main's tool-count assertions until the actual tool registrations land. The new alarm-schedule.test.ts belongs wholly to piece 5 because it seeds schedules and asserts deadlines that require the schedule alarm source.
 
 Exact primary file list:
 
@@ -139,7 +141,6 @@ apps/api/src/durable-objects/project-data/types.ts
 apps/api/src/env.ts
 apps/api/src/lib/bounded-request-body.ts
 apps/api/src/lib/runtime-validation.ts
-apps/api/tests/unit/durable-objects/alarm-schedule.test.ts
 apps/api/tests/unit/durable-objects/migrations.test.ts
 apps/api/tests/unit/durable-objects/project-events-pull.test.ts
 apps/api/tests/unit/durable-objects/project-events-wake-config.test.ts
@@ -169,6 +170,7 @@ Additional shared-file hunk touches (included in footprint):
 ```text
 apps/api/src/durable-objects/project-data/alarm-schedule.ts
 apps/api/src/durable-objects/project-data/index.ts
+apps/api/tests/unit/routes/mcp.test.ts
 ```
 
 ## 2. Same-chat durable wake and mailbox integration, OFF
@@ -237,7 +239,9 @@ Dependencies: pieces 1–2. Migrations: none (0156, 0160, 0162 already present).
 
 Runtime: source intents persist in D1 and retry through outbox; GitHub check_run/check_suite/workflow_run/review and configured generic webhook forwarding begin recording events. App manifest/setup permissions and event read trust fences align with producers. This is live ingress/admission, but does not change normal trigger task submission or enable wake. Risk: medium/high (idempotency, HMAC/auth, private event payloads, exhaustion and retry liveness).
 
-Hunks: `trigger-webhooks.ts` takes only event producer ingress/forwarding changes, preserving main's task-submission route; `scheduled/handler.ts` takes outbox reconcile wiring only. `project-lifecycle-events.ts` takes outbox import and explicit via-outbox helper only, without changing terminal transition callers until piece 5. Self-host page/docs take App event manifest/permission/setup hunks; mobile layout and unrelated docs stay piece 7. Existing project-data admission and event-deliveries read interfaces are already present on main; their imports are not a requirement to pre-land all later changes to those files.
+Hunks: `trigger-webhooks.ts` takes only event producer ingress/forwarding changes, preserving main's task-submission route; `scheduled/handler.ts` takes outbox reconcile wiring only. `project-lifecycle-events.ts` takes outbox import and explicit via-outbox helper only, without changing terminal transition callers until piece 5. Self-host page/docs take App event manifest/permission/setup and mobile preview-layout hunks; unrelated docs stay piece 7. Existing project-data admission and event-deliveries read interfaces are already present on main; their imports are not a requirement to pre-land all later changes to those files.
+
+Test/CSS hunk boundaries: the unit source-outbox suite must withhold imports/helpers and admission/revival/supersession cases that call new credential-limit admissions/config/types until piece 4. The Worker source-outbox durability suite may keep SQL-only credential-envelope cases; place its losing-terminal-transition/source-capture race case and transitionTaskToTerminal import with piece 5 to exercise the real new terminal integration, rather than trivially asserting no capture before it is wired. The new self-host-overflow-helpers.ts ships here with its WWW test importers; carry self-host/index.astro mobile preview/layout CSS here so those assertions validate the intended producer/setup slice.
 
 Exact primary file list:
 
@@ -260,6 +264,7 @@ apps/www/public/scripts/self-host-wizard-helpers.js
 apps/www/public/scripts/self-host-wizard.js
 apps/www/src/components/GitHubAppSetup.astro
 apps/www/tests/playwright/github-app-setup-docs.spec.ts
+apps/www/tests/playwright/self-host-overflow-helpers.ts
 apps/www/tests/playwright/self-host-wizard-generate-link.spec.ts
 apps/www/tests/playwright/self-host-wizard-secrets.spec.ts
 apps/www/tests/playwright/self-host-wizard-xss.spec.ts
@@ -285,6 +290,8 @@ Dependencies: pieces 1–3. Migrations: none (0157, 0158, DO 054 already present
 Runtime: VM-agent usage reports, credential reference/generation attribution, observed provider limit windows, threshold events, and proxy accounting become live. Agent runtime credential/proxy handshake and callback schemas ship together. Wake remains OFF. Risk: high (credential privacy/authorization, billing attribution, Go/API compatibility). Run Go race/usage tests plus real-JWT callback and proxy accounting suites. Missing observations must not become fabricated quota authority.
 
 All listed schema/runtime files belong here: splitting ACP report schema or runtime attribution from callback/Go telemetry would create a contract mismatch. Shared contracts and configuration were installed additively in piece 1.
+
+Additional shared-test hunk: complete the credential admissions/config/types imports, helper builders and admission/revival/supersession cases in tests/unit/services/project-event-source-outbox.test.ts withheld in piece 3. The earlier source-only cases remain unchanged.
 
 Exact primary file list:
 
@@ -336,6 +343,12 @@ packages/vm-agent/internal/acp/session_host_usage.go
 packages/vm-agent/internal/acp/session_host_usage_test.go
 ```
 
+Additional shared-file hunk touches (included in footprint):
+
+```text
+apps/api/tests/unit/services/project-event-source-outbox.test.ts
+```
+
 ## 5. Reserved submissions, schedules, watches, live trigger-path integration
 
 Dependencies: pieces 1–4. Migrations: none (0159, 0161, DO 051 already present).
@@ -343,6 +356,8 @@ Dependencies: pieces 1–4. Migrations: none (0159, 0161, DO 051 already present
 Runtime: replaces normal trigger submission with durable reserved identities/checkpoints, fences revoked sessions and creator authority, wires one-off schedule/watch alarm runners and exposes schedule APIs/MCP tools. Existing trigger and task lifecycle paths now use the reconciled durable submission flow and source outbox hooks. Schedules/watches can execute after explicit creation; **the event-wake flag does not disable schedules**. Risk: highest (provisioning capacity, session identity, task starts, retry duplication). Keep main's node pools, placement snapshots, wake fixes, and creator/compute gates.
 
 Hunks: finish reserved-submission methods in sessions.ts/ProjectData/service; add scheduled_action guard and invalidScheduledDeliveryTarget to prompt runner now. Finish source recovery/submission integration only after reserved contract and storage are available. `index.ts`/MCP dispatch and tool-definition barrels receive schedule/watch imports, routes and cases only; channel/member cases remain for piece 6. Keep earlier retention/wake/outbox portions of alarm and scheduled handlers. Tests that mock service barrels must preserve real-module exports added earlier. Schedule MCP tools import `channelCallerContext`: introduce only that caller-authentication helper and its existing-main dependencies in `services/project-event-channels.ts` now; leave channel publish/follow/history wrappers and their ProjectData method calls for piece 6. Do not copy the full channel service into piece 5.
+
+Shared fixture hunk: tests/workers/project-schedules.test.ts imports body/fixture from helpers/event-channels.ts. Introduce that helper file's existing-user/project/session setup, MCP tool invoker, actor and body parser here, but omit its publish closure and returned publish property, which reference piece-6 service.publishProjectEventChannel. Add those two channel-only fragments in piece 6. Include the losing-terminal-transition race case from the Worker outbox suite here for meaningful source-capture regression coverage. The entire alarm-schedule.test.ts lands here, when computeScheduleAlarmTime is actually wired.
 
 Exact primary file list:
 
@@ -395,6 +410,7 @@ apps/api/tests/integration/node-selection.test.ts
 apps/api/tests/integration/webhook-trigger-ingress.test.ts
 apps/api/tests/integration/workspace-dispatch-race.test.ts
 apps/api/tests/unit/chat-session-management.test.ts
+apps/api/tests/unit/durable-objects/alarm-schedule.test.ts
 apps/api/tests/unit/durable-objects/project-orchestrator-scheduling.test.ts
 apps/api/tests/unit/durable-objects/project-schedule-admission-limits.test.ts
 apps/api/tests/unit/durable-objects/project-schedule-recovery.test.ts
@@ -432,6 +448,8 @@ apps/api/src/durable-objects/project-data/prompt-delivery-runner.ts
 apps/api/src/durable-objects/project-data/sessions.ts
 apps/api/src/services/project-event-channels.ts
 apps/api/src/services/session-recovery.ts
+apps/api/tests/workers/helpers/event-channels.ts
+apps/api/tests/workers/project-event-source-outbox-durability.test.ts
 ```
 
 ## 6. Channels, member subscriptions, API/MCP surfaces
@@ -441,6 +459,8 @@ Dependencies: pieces 1–5. Migrations: none (DO 049–050 already present).
 Runtime: member subscription/delivery inspection APIs, publish/history/follow/catch-up channels and MCP tools become available. Channel publications can admit events; no automatic event prompt materialization because the flag stays OFF. Risk: high (member/agent audience separation, replay/cursors, capability and untrusted content boundaries).
 
 Hunks: complete channel methods/imports in ProjectData and service proxy; add channel/member route registrations and MCP dispatch/definition entries to the existing shared entry points. Carry only channel/member test cases in the shared MCP suite. Earlier schedule dispatch cases must remain.
+
+Complete the shared tests/workers/helpers/event-channels.ts helper by adding the channel publish closure and returned publish property. All other fixture construction landed with schedule boundary tests in piece 5. No piece-6 primary source/test imports a newly added piece-7 UI module.
 
 Exact primary file list:
 
@@ -522,7 +542,6 @@ apps/www/src/content/docs/docs/guides/webhook-triggers.md
 apps/www/src/content/docs/docs/reference/api.md
 apps/www/src/content/docs/docs/reference/configuration.md
 apps/www/src/pages/self-host/index.astro
-apps/www/tests/playwright/self-host-overflow-helpers.ts
 apps/www/tests/playwright/self-host-wizard-preview-overflow.spec.ts
 scripts/quality/gitleaks-reviewed-baseline.json
 specs/001-mvp/contracts/api.md
