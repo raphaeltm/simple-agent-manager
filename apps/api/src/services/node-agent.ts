@@ -659,6 +659,7 @@ export async function sendPromptToAgentOnNode(
     protocolVersion?: number;
     deliveryId?: string;
     sourceTaskGuard?: VmAgentContainerRequestGuard;
+    beforeExternalMutation?: () => Promise<void>;
   }
 ): Promise<unknown> {
   const body: {
@@ -687,6 +688,7 @@ export async function sendPromptToAgentOnNode(
         workspaceId,
         requestTimeoutMs: options?.requestTimeoutMs,
         sourceTaskGuard: options?.sourceTaskGuard,
+        beforeExternalMutation: options?.beforeExternalMutation,
         body: JSON.stringify(body),
       }
     );

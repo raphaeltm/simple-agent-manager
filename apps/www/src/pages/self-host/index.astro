@@ -1420,11 +1420,11 @@ const cfPermissions = [
     .sh-reset { display: none; }
     .sh-stage { padding: 28px 20px 100px; max-width: 100%; }
     .sh-field-row { grid-template-columns: 1fr; gap: 0; }
-    .sh-derived dl { grid-template-columns: 1fr; gap: 3px; }
+    .sh-derived dl { grid-template-columns: minmax(0, 1fr); gap: 3px; }
     :global(.sh-derived dt:not(:first-child)) { margin-top: 8px; }
     :global(.sh-derived dd) {
       overflow-wrap: break-word;
-      word-break: normal;
+      word-break: break-all;
     }
     :global(.sh-app-result .sh-derived dd) {
       background: var(--color-bg-inset);

@@ -83,7 +83,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
   {
     name: 'create_project_event_subscription',
     description:
-      'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. After creating, call list_subscription_events with the returned subscriptionId to replay missed/queued matching events, get_event for full stored event details, then ack_event_delivery after processing each delivery. Delivery selection records intent only in this wave and does not inject prompts, steer runtimes, interrupt runtimes, or spawn tasks.',
+      'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. For existing_session_prompt, SAM may wake this same chat later with event IDs only after a matching event materializes; read wakeInstructions in the response, checkpoint local state before ending your turn, and use list_subscription_events/get_event/ack_event_delivery after wake or polling.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -97,7 +97,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
           type: 'string',
           enum: PROJECT_EVENT_REQUESTED_DELIVERY_MODES,
           description:
-            'Requested delivery policy. The current pull model records this separately from matching/routing and resolves non-record-only modes to recorded_not_injected until a future delivery adapter wave explicitly enables injection.',
+            'Requested delivery policy. record_only stays pull-only. existing_session_prompt resolves to a durable same-chat prompt queue when the caller target supports it; other injection modes are recorded_not_injected until their adapters are enabled.',
         },
         target: DELIVERY_TARGET_SCHEMA,
         reason: {

@@ -8,21 +8,20 @@ import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../../src/s
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
-  createSession: vi.fn(),
-  persistMessage: vi.fn(),
+  createReservedTaskSessionWithInitialMessage: vi.fn(),
   stopSession: vi.fn(),
+  getSession: vi.fn(),
+  resolveSkillProfile: vi.fn(),
   requireRepositoryOwnerAccess: vi.fn(),
   startTaskRunnerDO: vi.fn(),
   ensureTaskRunnerStarted: vi.fn(),
   generateTaskTitle: vi.fn(),
-  resolveSkillProfile: vi.fn(),
-  parseSkillResourceRequirementsJson: vi.fn(),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
-  createSession: mocks.createSession,
-  persistMessage: mocks.persistMessage,
+  createReservedTaskSessionWithInitialMessage: mocks.createReservedTaskSessionWithInitialMessage,
   stopSession: mocks.stopSession,
+  getSession: mocks.getSession,
 }));
 
 vi.mock('../../../src/routes/projects/_helpers', () => ({
@@ -45,7 +44,7 @@ vi.mock('../../../src/services/agent-profiles', () => ({
 
 vi.mock('../../../src/services/skills', () => ({
   resolveSkillProfile: mocks.resolveSkillProfile,
-  parseSkillResourceRequirementsJson: mocks.parseSkillResourceRequirementsJson,
+  parseSkillResourceRequirementsJson: vi.fn(() => ({})),
 }));
 
 const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
@@ -60,6 +59,7 @@ function createEnv() {
       BASE_DOMAIN: 'sammy.party',
       BRANCH_NAME_PREFIX: 'sam/',
       BRANCH_NAME_MAX_LENGTH: '60',
+      DEFAULT_TASK_AGENT_TYPE: 'opencode',
     } as Env,
   };
 }
@@ -104,6 +104,18 @@ function seedTriggerRows(sqlite: Database.Database): void {
        )`
     )
     .run();
+  sqlite
+    .prepare(
+      `INSERT INTO trigger_executions (
+         id, trigger_id, project_id, status, rendered_prompt, scheduled_at,
+         sequence_number, created_at
+       )
+       VALUES (
+         'exec-1', 'trigger-1', 'project-1', 'queued', 'Run the scheduled job',
+         '2026-09-07T00:00:00.000Z', 1, '2026-09-07T00:00:00.000Z'
+       )`
+    )
+    .run();
 }
 
 async function seedProjectDefaultPool(env: Env): Promise<void> {
@@ -117,39 +129,61 @@ async function seedProjectDefaultPool(env: Env): Promise<void> {
 describe('submitTriggeredTask capacity-pool integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.createSession.mockResolvedValue('session-1');
-    mocks.persistMessage.mockResolvedValue(undefined);
+    mocks.createReservedTaskSessionWithInitialMessage.mockResolvedValue({
+      outcome: 'created',
+      sessionId: 'chat_exec-1',
+      initialMessageId: 'msg_exec-1',
+      sessionInserted: true,
+      initialMessageInserted: true,
+    });
     mocks.stopSession.mockResolvedValue(undefined);
+    mocks.getSession.mockResolvedValue({
+      id: 'chat_exec-1',
+      taskId: 'exec-1',
+      createdByUserId: 'user-1',
+      status: 'active',
+    });
+    mocks.resolveSkillProfile.mockResolvedValue(null);
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);
     mocks.ensureTaskRunnerStarted.mockResolvedValue(false);
     mocks.generateTaskTitle.mockResolvedValue('Triggered capacity task');
     mocks.resolveSkillProfile.mockResolvedValue(null);
-    mocks.parseSkillResourceRequirementsJson.mockReturnValue({});
   });
 
-  it('uses centralized placement to persist concrete pool snapshots and start TaskRunner', async () => {
-    const { sqlite, env } = createEnv();
-    seedTriggerRows(sqlite);
-    await seedProjectDefaultPool(env);
+  it.each([null, 'skill-1'])(
+    'uses centralized placement and persists selected skill %s through reserved task submission',
+    async (skillId) => {
+      const { sqlite, env } = createEnv();
+      seedTriggerRows(sqlite);
+      await seedProjectDefaultPool(env);
+      if (skillId)
+        mocks.resolveSkillProfile.mockResolvedValue({
+          skillId,
+          skillHint: skillId,
+          profileId: null,
+          agentType: 'opencode',
+          resourceRequirementsJson: null,
+        });
 
-    await submitTriggeredTask(env, {
-      triggerId: 'trigger-1',
-      triggerExecutionId: 'exec-1',
-      projectId: 'project-1',
-      userId: 'user-1',
-      renderedPrompt: 'Run the scheduled job',
-      triggeredBy: 'cron',
-      agentProfileId: null,
-      skillId: null,
-      taskMode: 'task',
-      vmSizeOverride: null,
-      triggerName: 'Scheduled Capacity',
-    });
+      await submitTriggeredTask(env, {
+        triggerId: 'trigger-1',
+        triggerExecutionId: 'exec-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        renderedPrompt: 'Run the scheduled job',
+        triggeredBy: 'cron',
+        agentProfileId: null,
+        skillId,
+        taskMode: 'task',
+        vmSizeOverride: null,
+        triggerName: 'Scheduled Capacity',
+      });
 
-    const taskRow = sqlite
-      .prepare(
-        `SELECT
+      const taskRow = sqlite
+        .prepare(
+          `SELECT
+           skill_id, skill_hint,
            capacity_pool_id,
            capacity_pool_scope,
            capacity_source_id,
@@ -162,44 +196,55 @@ describe('submitTriggeredTask capacity-pool integration', () => {
            provider_instance_disk_gb
          FROM tasks
          WHERE project_id = 'project-1'`
-      )
-      .get() as Record<string, unknown>;
+        )
+        .get() as Record<string, unknown>;
 
-    expect(taskRow).toMatchObject({
-      capacity_pool_id: 'cap-pool-default:project:project-1',
-      capacity_pool_scope: 'project',
-      capacity_source_id: 'cap-source-default:project:project-cloud-1',
-      placement_credential_source: 'project',
-      placement_credential_reference: 'credentials:project-cloud-1',
-      provider_instance_type: 'cx23',
-      provider_instance_vcpu_count: 2,
-      provider_instance_memory_mb: 4096,
-      provider_instance_disk_gb: 40,
-    });
-    expect(String(taskRow.capacity_pool_candidate_id)).toContain(':hetzner:nbg1:cx23');
-    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
-      env,
-      expect.objectContaining({
-        taskId: expect.any(String),
-        projectId: 'project-1',
-        userId: 'user-1',
-        cloudProvider: 'hetzner',
-        credentialAttributionProjectId: 'project-1',
-        credentialAttributionSource: 'project',
-        capacityPoolSelection: expect.objectContaining({
-          poolId: 'cap-pool-default:project:project-1',
-          candidates: expect.arrayContaining([
-            expect.objectContaining({
-              provider: 'hetzner',
-              location: 'nbg1',
-              providerInstanceType: 'cx23',
-            }),
-          ]),
-        }),
-      })
-    );
-  });
-
+      expect(taskRow).toMatchObject({
+        skill_id: skillId,
+        skill_hint: skillId,
+        capacity_pool_id: 'cap-pool-default:project:project-1',
+        capacity_pool_scope: 'project',
+        capacity_source_id: 'cap-source-default:project:project-cloud-1',
+        placement_credential_source: 'project',
+        placement_credential_reference: 'credentials:project-cloud-1',
+        provider_instance_type: 'cx23',
+        provider_instance_vcpu_count: 2,
+        provider_instance_memory_mb: 4096,
+        provider_instance_disk_gb: 40,
+      });
+      if (skillId)
+        expect(mocks.resolveSkillProfile).toHaveBeenCalledWith(
+          expect.anything(),
+          'project-1',
+          null,
+          skillId,
+          'user-1',
+          env
+        );
+      expect(String(taskRow.capacity_pool_candidate_id)).toContain(':hetzner:nbg1:cx23');
+      expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+        env,
+        expect.objectContaining({
+          taskId: expect.any(String),
+          projectId: 'project-1',
+          userId: 'user-1',
+          cloudProvider: 'hetzner',
+          credentialAttributionProjectId: 'project-1',
+          credentialAttributionSource: 'project',
+          capacityPoolSelection: expect.objectContaining({
+            poolId: 'cap-pool-default:project:project-1',
+            candidates: expect.arrayContaining([
+              expect.objectContaining({
+                provider: 'hetzner',
+                location: 'nbg1',
+                providerInstanceType: 'cx23',
+              }),
+            ]),
+          }),
+        })
+      );
+    }
+  );
   it('persists project resource requirements when trigger config omits them', async () => {
     const { sqlite, env } = createEnv();
     seedTriggerRows(sqlite);
@@ -334,7 +379,7 @@ describe('submitTriggeredTask capacity-pool integration', () => {
     sqlite
       .prepare(`UPDATE projects SET resource_requirements_json = ? WHERE id = 'project-1'`)
       .run(JSON.stringify({ exclusiveNode: false }));
-    mocks.resolveSkillProfile.mockResolvedValueOnce({
+    mocks.resolveSkillProfile.mockResolvedValue({
       profileId: 'profile-1',
       skillId: 'skill-1',
       agentType: 'claude-code',
@@ -422,41 +467,52 @@ describe('submitTriggeredTask capacity-pool integration', () => {
     });
   });
 
-  it('rejects removed trigger execution principals before task/session/runner side effects', async () => {
-    const { sqlite, env } = createEnv();
-    seedTriggerRows(sqlite);
-    sqlite
-      .prepare(
-        `UPDATE project_members
-         SET status = 'removed'
-         WHERE project_id = 'project-1' AND user_id = 'user-1'`
-      )
-      .run();
+  it.each(['removed', 'viewer', 'missing'])(
+    'rejects %s trigger execution principals before task/session/runner side effects',
+    async (principal) => {
+      const { sqlite, env } = createEnv();
+      seedTriggerRows(sqlite);
+      if (principal === 'missing') {
+        sqlite
+          .prepare(
+            `DELETE FROM project_members WHERE project_id = 'project-1' AND user_id = 'user-1'`
+          )
+          .run();
+      } else {
+        sqlite
+          .prepare(
+            `UPDATE project_members SET status = ?, role = ? WHERE project_id = 'project-1' AND user_id = 'user-1'`
+          )
+          .run(
+            principal === 'removed' ? 'removed' : 'active',
+            principal === 'viewer' ? 'viewer' : 'owner'
+          );
+      }
 
-    await expect(
-      submitTriggeredTask(env, {
-        triggerId: 'trigger-1',
-        triggerExecutionId: 'exec-1',
-        projectId: 'project-1',
-        userId: 'user-1',
-        renderedPrompt: 'Run the scheduled job',
-        triggeredBy: 'cron',
-        agentProfileId: null,
-        skillId: null,
-        taskMode: 'task',
-        vmSizeOverride: null,
-        resourceRequirementsJson: null,
-        triggerName: 'Scheduled Capacity',
-      })
-    ).rejects.toThrow(/execution principal is not a current project member/);
+      await expect(
+        submitTriggeredTask(env, {
+          triggerId: 'trigger-1',
+          triggerExecutionId: 'exec-1',
+          projectId: 'project-1',
+          userId: 'user-1',
+          renderedPrompt: 'Run the scheduled job',
+          triggeredBy: 'cron',
+          agentProfileId: null,
+          skillId: null,
+          taskMode: 'task',
+          vmSizeOverride: null,
+          resourceRequirementsJson: null,
+          triggerName: 'Scheduled Capacity',
+        })
+      ).rejects.toThrow(/execution principal is not a current project member/);
 
-    expect(mocks.resolveSkillProfile).not.toHaveBeenCalled();
-    expect(mocks.createSession).not.toHaveBeenCalled();
-    expect(mocks.persistMessage).not.toHaveBeenCalled();
-    expect(mocks.requireRepositoryOwnerAccess).not.toHaveBeenCalled();
-    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
-    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 });
-  });
+      expect(mocks.resolveSkillProfile).not.toHaveBeenCalled();
+      expect(mocks.createReservedTaskSessionWithInitialMessage).not.toHaveBeenCalled();
+      expect(mocks.requireRepositoryOwnerAccess).not.toHaveBeenCalled();
+      expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+      expect(sqlite.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 });
+    }
+  );
 
   it('allows active trigger execution principals to use shared project credentials', async () => {
     const { sqlite, env } = createEnv();
@@ -474,6 +530,12 @@ describe('submitTriggeredTask capacity-pool integration', () => {
       )
       .run();
     await seedProjectDefaultPool(env);
+    mocks.getSession.mockResolvedValue({
+      id: 'chat_exec-1',
+      taskId: 'exec-1',
+      createdByUserId: 'member-1',
+      status: 'active',
+    });
 
     await submitTriggeredTask(env, {
       triggerId: 'trigger-1',

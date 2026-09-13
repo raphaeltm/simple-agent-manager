@@ -6,6 +6,7 @@ import type {
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
+import { enqueueAndAdmitProjectEventSourceIntent } from './project-event-source-outbox';
 import {
   buildDeploymentEnvironmentLifecycleEventInput,
   buildDeploymentPublishJobLifecycleEventInput,
@@ -69,6 +70,13 @@ export function recordTaskLifecycleEventBestEffort(
     eventType: taskLifecycleEventType(input.status),
     subjectId: input.taskId,
   });
+}
+
+export async function recordTaskLifecycleEventViaSourceOutbox(
+  env: Env,
+  input: TaskLifecycleEventInput
+) {
+  return enqueueAndAdmitProjectEventSourceIntent(env, await buildTaskLifecycleEventInput(input));
 }
 
 export async function recordSessionLifecycleEvent(

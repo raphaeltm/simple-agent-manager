@@ -4,6 +4,7 @@ import type {
   ProjectEventMetadata,
   ProjectEventSeverity,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_PROJECT_EVENT_LIMITS } from '@simple-agent-manager/shared';
 import { eq, or, type SQL } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -16,11 +17,16 @@ import * as projectDataService from './project-data';
 
 const GITHUB_EVENT_SOURCE = 'github';
 const SUPPORTED_GITHUB_PROJECT_EVENT_TYPES = new Set([
+  'check_run',
+  'check_suite',
   'issues',
   'issue_comment',
   'pull_request',
+  'pull_request_review',
+  'pull_request_review_comment',
   'push',
   'repository',
+  'workflow_run',
 ]);
 
 type ProjectCandidate = {
@@ -181,7 +187,23 @@ function resolveSubject(
   event: GitHubWebhookEvent,
   payload: Record<string, unknown>
 ): AdmitProjectEventInput['subject'] {
+  if (['check_run', 'check_suite', 'workflow_run'].includes(event.event)) {
+    const headSha = githubHeadSha(payload);
+    if (headSha) return { type: 'commit', id: headSha };
+    const checkRunId = jsonStringOrNull(recordValue(payload.check_run)?.id);
+    if (checkRunId) return { type: 'check_run', id: checkRunId };
+    const checkSuiteId = jsonStringOrNull(recordValue(payload.check_suite)?.id);
+    if (checkSuiteId) return { type: 'check_suite', id: checkSuiteId };
+    const workflowRunId = jsonStringOrNull(recordValue(payload.workflow_run)?.id);
+    if (workflowRunId) return { type: 'workflow_run', id: workflowRunId };
+  }
   if (event.event === 'pull_request' && event.pull_request?.number) {
+    return { type: 'pull_request', id: String(event.pull_request.number) };
+  }
+  if (
+    (event.event === 'pull_request_review' || event.event === 'pull_request_review_comment') &&
+    event.pull_request?.number
+  ) {
     return { type: 'pull_request', id: String(event.pull_request.number) };
   }
   if (event.event === 'issues' && event.issue?.number) {
@@ -225,8 +247,12 @@ function buildMetadata(
   const issue = recordValue(payload.issue);
   const comment = recordValue(payload.comment);
   const headCommit = recordValue(payload.head_commit);
+  const checkRun = recordValue(payload.check_run);
+  const checkSuite = recordValue(payload.check_suite);
+  const workflowRun = recordValue(payload.workflow_run);
+  const review = recordValue(payload.review);
 
-  return {
+  const metadata: ProjectEventMetadata = {
     provider: 'github',
     deliveryId,
     event: event.event,
@@ -247,7 +273,10 @@ function buildMetadata(
     installation: {
       id: jsonStringOrNull(installation?.id),
     },
-    pullRequest: {
+  };
+
+  if (pullRequest || event.pull_request) {
+    metadata.pullRequest = {
       number: jsonStringOrNull(pullRequest?.number ?? event.pull_request?.number),
       state: stringValue(pullRequest?.state) ?? null,
       draft: booleanValue(pullRequest?.draft ?? event.pull_request?.draft),
@@ -257,23 +286,102 @@ function buildMetadata(
       baseRef:
         stringValue(recordValue(pullRequest?.base)?.ref ?? event.pull_request?.base?.ref) ?? null,
       url: stringValue(pullRequest?.html_url) ?? null,
-    },
-    issue: {
+      headSha: stringValue(recordValue(pullRequest?.head)?.sha) ?? null,
+    };
+  }
+
+  if (event.event === 'issues' || event.event === 'issue_comment') {
+    metadata.issue = {
       number: jsonStringOrNull(issue?.number ?? event.issue?.number),
       state: stringValue(issue?.state) ?? null,
       url: stringValue(issue?.html_url) ?? null,
       isPullRequest: isPullRequestComment(payload),
-    },
-    comment: {
+    };
+  }
+
+  if (event.event === 'issue_comment') {
+    metadata.comment = {
       id: jsonStringOrNull(comment?.id),
       url: stringValue(comment?.html_url) ?? null,
-    },
-    push: {
+    };
+  }
+
+  if (event.event === 'push') {
+    metadata.push = {
       ref: event.ref ?? null,
       branch: event.ref ? event.ref.replace(/^refs\/heads\//, '') : null,
       headSha: stringValue(headCommit?.id ?? event.head_commit?.id) ?? null,
-    },
-  };
+    };
+  }
+
+  if (event.event === 'check_run') {
+    metadata.checkRun = {
+      id: jsonStringOrNull(checkRun?.id),
+      name: stringValue(checkRun?.name) ?? null,
+      status: stringValue(checkRun?.status) ?? null,
+      conclusion: stringValue(checkRun?.conclusion) ?? null,
+      headSha: stringValue(checkRun?.head_sha) ?? null,
+      checkSuiteId: jsonStringOrNull(recordValue(checkRun?.check_suite)?.id),
+      externalId: jsonStringOrNull(checkRun?.external_id),
+      detailsUrl: stringValue(checkRun?.details_url) ?? null,
+      htmlUrl: stringValue(checkRun?.html_url) ?? null,
+      pullRequests: pullRequestNumbers(checkRun?.pull_requests),
+    };
+  }
+
+  if (event.event === 'check_suite') {
+    metadata.checkSuite = {
+      id: jsonStringOrNull(checkSuite?.id),
+      status: stringValue(checkSuite?.status) ?? null,
+      conclusion: stringValue(checkSuite?.conclusion) ?? null,
+      headSha: stringValue(checkSuite?.head_sha) ?? null,
+      beforeSha: stringValue(checkSuite?.before) ?? null,
+      afterSha: stringValue(checkSuite?.after) ?? null,
+      pullRequests: pullRequestNumbers(checkSuite?.pull_requests),
+    };
+  }
+
+  if (event.event === 'workflow_run') {
+    metadata.workflowRun = {
+      id: jsonStringOrNull(workflowRun?.id),
+      name: stringValue(workflowRun?.name) ?? null,
+      runNumber: jsonStringOrNull(workflowRun?.run_number),
+      runAttempt: jsonStringOrNull(workflowRun?.run_attempt),
+      status: stringValue(workflowRun?.status) ?? null,
+      conclusion: stringValue(workflowRun?.conclusion) ?? null,
+      event: stringValue(workflowRun?.event) ?? null,
+      headBranch: stringValue(workflowRun?.head_branch) ?? null,
+      headSha: stringValue(workflowRun?.head_sha) ?? null,
+      workflowId: jsonStringOrNull(workflowRun?.workflow_id),
+      checkSuiteId: jsonStringOrNull(workflowRun?.check_suite_id),
+      htmlUrl: stringValue(workflowRun?.html_url) ?? null,
+      pullRequests: pullRequestNumbers(workflowRun?.pull_requests),
+    };
+  }
+
+  if (event.event === 'pull_request_review') {
+    metadata.review = {
+      id: jsonStringOrNull(review?.id),
+      state: stringValue(review?.state) ?? null,
+      commitId: stringValue(review?.commit_id) ?? null,
+      submittedAt: stringValue(review?.submitted_at) ?? null,
+      url: stringValue(review?.html_url) ?? null,
+    };
+  }
+
+  if (event.event === 'pull_request_review_comment') {
+    metadata.reviewComment = {
+      id: jsonStringOrNull(comment?.id),
+      path: stringValue(comment?.path) ?? null,
+      commitId: stringValue(comment?.commit_id) ?? null,
+      originalCommitId: stringValue(comment?.original_commit_id) ?? null,
+      line: jsonStringOrNull(comment?.line),
+      originalLine: jsonStringOrNull(comment?.original_line),
+      url: stringValue(comment?.html_url) ?? null,
+    };
+  }
+
+  return metadata;
 }
 
 function buildDisplay(
@@ -296,6 +404,14 @@ function buildDisplay(
 
 function displaySubject(subject: AdmitProjectEventInput['subject']): string {
   switch (subject.type) {
+    case 'commit':
+      return `Commit ${subject.id.slice(0, 12)}`;
+    case 'check_run':
+      return `Check run ${subject.id}`;
+    case 'check_suite':
+      return `Check suite ${subject.id}`;
+    case 'workflow_run':
+      return `Workflow run ${subject.id}`;
     case 'pull_request':
       return `Pull request #${subject.id}`;
     case 'issue':
@@ -323,6 +439,24 @@ function displayUrlForEvent(
     const pullRequestUrl = stringValue(recordValue(payload.pull_request)?.html_url);
     if (pullRequestUrl) return pullRequestUrl;
   }
+  if (event.event === 'pull_request_review') {
+    const reviewUrl = stringValue(recordValue(payload.review)?.html_url);
+    if (reviewUrl) return reviewUrl;
+  }
+  if (event.event === 'pull_request_review_comment') {
+    const reviewCommentUrl = stringValue(recordValue(payload.comment)?.html_url);
+    if (reviewCommentUrl) return reviewCommentUrl;
+  }
+  if (event.event === 'check_run') {
+    const checkRunUrl =
+      stringValue(recordValue(payload.check_run)?.html_url) ??
+      stringValue(recordValue(payload.check_run)?.details_url);
+    if (checkRunUrl) return checkRunUrl;
+  }
+  if (event.event === 'workflow_run') {
+    const workflowRunUrl = stringValue(recordValue(payload.workflow_run)?.html_url);
+    if (workflowRunUrl) return workflowRunUrl;
+  }
   return stringValue(recordValue(payload.repository)?.html_url) ?? null;
 }
 
@@ -332,9 +466,19 @@ function resolveOccurredAt(payload: Record<string, unknown>, fallback: number): 
   const comment = recordValue(payload.comment);
   const repository = recordValue(payload.repository);
   const headCommit = recordValue(payload.head_commit);
+  const checkRun = recordValue(payload.check_run);
+  const checkSuite = recordValue(payload.check_suite);
+  const workflowRun = recordValue(payload.workflow_run);
+  const review = recordValue(payload.review);
   return (
     timestampValue(comment?.updated_at) ??
     timestampValue(comment?.created_at) ??
+    timestampValue(review?.submitted_at) ??
+    timestampValue(workflowRun?.updated_at) ??
+    timestampValue(workflowRun?.run_started_at) ??
+    timestampValue(checkRun?.completed_at) ??
+    timestampValue(checkRun?.started_at) ??
+    timestampValue(checkSuite?.updated_at) ??
     timestampValue(pullRequest?.updated_at) ??
     timestampValue(pullRequest?.created_at) ??
     timestampValue(issue?.updated_at) ??
@@ -358,6 +502,27 @@ async function fingerprintGitHubWebhookPayload(
 
 function isPullRequestComment(payload: Record<string, unknown>): boolean {
   return recordValue(recordValue(payload.issue)?.pull_request) !== null;
+}
+
+function githubHeadSha(payload: Record<string, unknown>): string | null {
+  const checkRun = recordValue(payload.check_run);
+  const checkSuite = recordValue(payload.check_suite);
+  const workflowRun = recordValue(payload.workflow_run);
+  return (
+    stringValue(checkRun?.head_sha) ??
+    stringValue(checkSuite?.head_sha) ??
+    stringValue(checkSuite?.after) ??
+    stringValue(workflowRun?.head_sha) ??
+    null
+  );
+}
+
+function pullRequestNumbers(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, DEFAULT_PROJECT_EVENT_LIMITS.maxMetadataArrayItems)
+    .map((item) => jsonStringOrNull(recordValue(item)?.number))
+    .filter((item): item is string => item !== null);
 }
 
 function recordValue(value: unknown): Record<string, unknown> | null {

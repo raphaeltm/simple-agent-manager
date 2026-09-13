@@ -24,6 +24,7 @@ import {
   parseWorkspaceId,
   type SearchResultParsed,
 } from './row-schemas';
+import { assertSessionIdentityGuard, type SessionIdentityGuard } from './sessions';
 import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import type { Env } from './types';
 import { generateId } from './types';
@@ -93,7 +94,8 @@ export function persistMessage(
   role: string,
   content: string,
   toolMetadata: string | null,
-  messageId?: string
+  messageId?: string,
+  guard?: SessionIdentityGuard | null
 ): {
   id: string;
   now: number;
@@ -103,6 +105,7 @@ export function persistMessage(
   toolMetadata: string | null;
 } {
   assertTranscriptWriteAllowed(sql, sessionId, 'persistMessage');
+  assertSessionIdentityGuard(sql, sessionId, 'persist message', guard);
   const id = messageId ?? generateId();
   const existing = sql
     .exec(

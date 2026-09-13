@@ -60,3 +60,10 @@ export function checkpointVmPromptSubmission(
   }
   return null;
 }
+
+/** Carries a definite pre-send denial through the node transport callback. */
+export class PromptDeliveryGuardError extends Error {
+  constructor(readonly result: PromptDeliveryResult) {
+    super('Prompt delivery authority changed before transport');
+  }
+}

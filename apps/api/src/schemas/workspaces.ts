@@ -55,6 +55,7 @@ export const UpdateAgentSessionSchema = v.object({
 // Workspace runtime schemas
 export const AgentTypeBodySchema = v.object({
   agentType: v.string(),
+  agentSessionId: v.optional(v.string()),
 });
 
 export const CredentialInjectionSchema = v.object({

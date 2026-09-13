@@ -10,7 +10,6 @@ import {
   type ProjectEventMatchRecord,
   type ProjectEventMatchState,
   type ProjectEventRecord,
-  type ProjectEventStorageAccountingRecord,
   type ProjectEventSubscriptionOwner,
   type ProjectEventSubscriptionRecord,
 } from '@simple-agent-manager/shared';
@@ -26,46 +25,21 @@ import {
   mapProjectEventDeliveryAttempt,
   mapProjectEventDeliveryBatch,
   mapProjectEventMatch,
-  mapProjectEventStorageAccounting,
   mapProjectEventSubscription,
 } from './project-events-mappers';
 import { filterMatchesProjectEvent, projectEventKeys } from './project-events-normalization';
 import { normalizeNullableText, normalizeText } from './project-events-values';
+import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import { generateId } from './types';
 
 const log = createModuleLogger('project_data.project_events.storage');
 const OWNER_TYPE_SET = new Set<string>(PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES);
 const ATTEMPT_STATE_SET = new Set<string>(PROJECT_EVENT_DELIVERY_ATTEMPT_STATES);
-
-type ProjectEventTable =
-  | 'project_events'
-  | 'project_event_subscriptions'
-  | 'project_event_subscription_match_keys'
-  | 'project_event_matches'
-  | 'project_event_delivery_batches'
-  | 'project_event_delivery_attempts';
-type ProjectEventTimestampColumn = 'created_at' | 'matched_at' | 'received_at' | 'updated_at';
+export const SQLITE_MAX_BIND_PARAMETERS = 100;
 
 type FingerprintRow = { idempotency_fingerprint: string };
 type CountRow = { cnt: number };
 type IdRow = { id: string };
-type AccountingAggregateRow = {
-  record_count: number;
-  estimated_bytes: number;
-  oldest_created_at: number | null;
-  newest_created_at: number | null;
-};
-type DeleteOldRowsInput = {
-  sql: SqlStorage;
-  table: ProjectEventTable;
-  projectId: string;
-  timestampColumn: ProjectEventTimestampColumn;
-  cutoff: number;
-  limit: number;
-  extraWhere?: string;
-  extraParams?: unknown[];
-};
-
 function isFingerprintRow(input: unknown): input is FingerprintRow {
   return isJsonRecord(input) && typeof input.idempotency_fingerprint === 'string';
 }
@@ -76,16 +50,6 @@ function isCountRow(input: unknown): input is CountRow {
 
 function isIdRow(input: unknown): input is IdRow {
   return isJsonRecord(input) && typeof input.id === 'string';
-}
-
-function isAccountingAggregateRow(input: unknown): input is AccountingAggregateRow {
-  return (
-    isJsonRecord(input) &&
-    typeof input.record_count === 'number' &&
-    typeof input.estimated_bytes === 'number' &&
-    (typeof input.oldest_created_at === 'number' || input.oldest_created_at === null) &&
-    (typeof input.newest_created_at === 'number' || input.newest_created_at === null)
-  );
 }
 
 export function readEventById(
@@ -127,7 +91,8 @@ export function createMatchesForEvent(
   sql: SqlStorage,
   event: ProjectEventRecord,
   now: number,
-  limits: ProjectEventLimits
+  limits: ProjectEventLimits,
+  requireCompleteFanout = false
 ): ProjectEventMatchRecord[] {
   const eventKeys = projectEventKeys(event);
   const placeholders = eventKeys.map(() => '?').join(', ');
@@ -145,10 +110,13 @@ export function createMatchesForEvent(
       event.projectId,
       now,
       ...eventKeys,
-      limits.maxActiveSubscriptionsPerProject
+      limits.maxActiveSubscriptionsPerProject + (requireCompleteFanout ? 1 : 0)
     )
     .toArray();
 
+  if (requireCompleteFanout && rows.length > limits.maxActiveSubscriptionsPerProject) {
+    throw new ProjectEventLimitExceededError('Channel subscription candidate capacity exceeded');
+  }
   const matches: ProjectEventMatchRecord[] = [];
   for (const row of rows) {
     let subscription: ProjectEventSubscriptionRecord;
@@ -159,9 +127,14 @@ export function createMatchesForEvent(
       continue;
     }
     if (!filterMatchesProjectEvent(subscription.filter, event)) continue;
+    if (!subscriptionCanMatchProjectEvent(subscription, event)) continue;
+    if (requireCompleteFanout && matches.length >= limits.maxMatchesPerEvent) {
+      // The enclosing channel transaction rolls back all earlier match writes.
+      throw new ProjectEventLimitExceededError('Channel event fanout capacity exceeded');
+    }
     const match = insertMatchIfAbsent(sql, event, subscription, now);
     matches.push(match);
-    if (matches.length >= limits.maxMatchesPerEvent) break;
+    if (!requireCompleteFanout && matches.length >= limits.maxMatchesPerEvent) break;
   }
   return matches;
 }
@@ -284,27 +257,32 @@ export function expireDueSubscriptions(
     .toArray();
   const ids = rows.filter(isIdRow).map((row) => row.id);
   if (ids.length === 0) return 0;
-  const placeholders = ids.map(() => '?').join(', ');
-  sql.exec(
-    `UPDATE project_event_subscriptions
-     SET lifecycle_state = 'expired', updated_at = ?
-     WHERE project_id = ? AND id IN (${placeholders})`,
-    now,
-    projectId,
-    ...ids
-  );
-  sql.exec(
-    `UPDATE project_event_matches
-     SET state = 'expired', lifecycle_checked_at = ?, reason = ?
-     WHERE project_id = ?
-       AND subscription_id IN (${placeholders})
-       AND batch_id IS NULL
-       AND state = 'matched'`,
-    now,
-    'subscription expired',
-    projectId,
-    ...ids
-  );
+  for (const chunk of chunkIdsForBindBudget(ids, 2)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE project_event_subscriptions
+       SET lifecycle_state = 'expired', wake_due_at = NULL, updated_at = ?
+       WHERE project_id = ? AND id IN (${placeholders})`,
+      now,
+      projectId,
+      ...chunk
+    );
+  }
+  for (const chunk of chunkIdsForBindBudget(ids, 3)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE project_event_matches
+       SET state = 'expired', lifecycle_checked_at = ?, reason = ?
+       WHERE project_id = ?
+         AND subscription_id IN (${placeholders})
+         AND batch_id IS NULL
+         AND state = 'matched'`,
+      now,
+      'subscription expired',
+      projectId,
+      ...chunk
+    );
+  }
   return ids.length;
 }
 
@@ -328,18 +306,25 @@ export function readMatchesByIds(
   subscriptionId: string,
   matchIds: string[]
 ): ProjectEventMatchRecord[] {
-  const placeholders = matchIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT * FROM project_event_matches
-       WHERE project_id = ? AND subscription_id = ? AND id IN (${placeholders})
-       ORDER BY matched_at ASC, id ASC`,
-      projectId,
-      subscriptionId,
-      ...matchIds
-    )
-    .toArray();
-  return mapRows(rows, mapProjectEventMatch, matchIds.length, 'event_match');
+  const rows: unknown[] = [];
+  for (const chunk of chunkIdsForBindBudget(matchIds, 2)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    rows.push(
+      ...sql
+        .exec(
+          `SELECT * FROM project_event_matches
+           WHERE project_id = ? AND subscription_id = ? AND id IN (${placeholders})
+           ORDER BY matched_at ASC, id ASC`,
+          projectId,
+          subscriptionId,
+          ...chunk
+        )
+        .toArray()
+    );
+  }
+  return mapRows(rows, mapProjectEventMatch, matchIds.length, 'event_match').sort(
+    (left, right) => left.matchedAt - right.matchedAt || left.id.localeCompare(right.id)
+  );
 }
 
 export function readEventsForMatches(
@@ -348,20 +333,26 @@ export function readEventsForMatches(
   matchIds: string[],
   limit: number
 ): ProjectEventRecord[] {
-  const placeholders = matchIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT e.*
-       FROM project_event_matches m
-       JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id
-       WHERE m.project_id = ? AND m.id IN (${placeholders})
-       ORDER BY m.matched_at ASC, m.id ASC
-       LIMIT ?`,
-      projectId,
-      ...matchIds,
-      limit
-    )
-    .toArray();
+  const rows: unknown[] = [];
+  for (const chunk of chunkIdsForBindBudget(matchIds, 2)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    rows.push(
+      ...sql
+        .exec(
+          `SELECT e.*
+           FROM project_event_matches m
+           JOIN project_events e ON e.project_id = m.project_id AND e.id = m.event_id
+           WHERE m.project_id = ? AND m.id IN (${placeholders})
+           ORDER BY m.matched_at ASC, m.id ASC
+           LIMIT ?`,
+          projectId,
+          ...chunk,
+          Math.max(0, limit - rows.length)
+        )
+        .toArray()
+    );
+    if (rows.length >= limit) break;
+  }
   return mapRows(rows, mapProjectEvent, limit, 'project_event');
 }
 
@@ -427,17 +418,20 @@ export function updateMatchesForBatch(
   now: number
 ): void {
   const matchState = matchStateForBatchState(batchState);
-  const placeholders = matchIds.map(() => '?').join(', ');
-  sql.exec(
-    `UPDATE project_event_matches
-     SET batch_id = ?, state = ?, lifecycle_checked_at = ?
-     WHERE project_id = ? AND id IN (${placeholders})`,
-    batchId,
-    matchState,
-    now,
-    projectId,
-    ...matchIds
-  );
+  for (const chunk of chunkIdsForBindBudget(matchIds, 4)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE project_event_matches
+       SET batch_id = ?, state = ?, lifecycle_checked_at = ?
+       WHERE project_id = ? AND id IN (${placeholders})`,
+      batchId,
+      matchState,
+      now,
+      projectId,
+      ...chunk
+    );
+  }
+  refreshWakeDueAtForMatches(sql, projectId, matchIds, now);
 }
 
 function matchStateForBatchState(
@@ -516,12 +510,31 @@ export function readAttemptFingerprint(sql: SqlStorage, attemptId: string): stri
 export function countAttemptsForBatch(sql: SqlStorage, projectId: string, batchId: string): number {
   const row = sql
     .exec(
-      'SELECT COUNT(*) AS cnt FROM project_event_delivery_attempts WHERE project_id = ? AND batch_id = ?',
+      `SELECT COUNT(*) AS cnt
+       FROM project_event_delivery_attempts
+       WHERE project_id = ? AND batch_id = ? AND attempt_number > 0`,
       projectId,
       batchId
     )
     .toArray()[0];
   return isCountRow(row) ? row.cnt : 0;
+}
+
+export function nextPhysicalAttemptNumber(
+  sql: SqlStorage,
+  projectId: string,
+  batchId: string
+): number {
+  const row = sql
+    .exec(
+      `SELECT COALESCE(MAX(attempt_number), 0) AS cnt
+       FROM project_event_delivery_attempts
+       WHERE project_id = ? AND batch_id = ? AND attempt_number > 0`,
+      projectId,
+      batchId
+    )
+    .toArray()[0];
+  return (isCountRow(row) ? row.cnt : 0) + 1;
 }
 
 export function updateBatchForAttempt(
@@ -594,160 +607,61 @@ export function mapRows<T>(
   return mapped;
 }
 
-export function readRecentRows<T>(
-  sql: SqlStorage,
-  table: ProjectEventTable,
-  projectId: string,
-  orderColumn: ProjectEventTimestampColumn,
-  limit: number,
-  mapper: (row: unknown) => T
-): { items: T[]; hasMore: boolean } {
-  const selectSql = recentRowsSelectSql(table, orderColumn);
-  const rows = sql.exec(selectSql, projectId, limit + 1).toArray();
-  return { items: mapRows(rows, mapper, limit, table), hasMore: rows.length > limit };
-}
-
-export function readAccounting(
-  sql: SqlStorage,
-  projectId: string
-): ProjectEventStorageAccountingRecord[] {
-  const rows = sql
-    .exec(
-      `SELECT * FROM project_event_storage_accounting
-       WHERE project_id = ?
-       ORDER BY category ASC`,
-      projectId
-    )
-    .toArray();
-  return mapRows(rows, mapProjectEventStorageAccounting, rows.length, 'storage_accounting');
-}
-
-export function deleteOldRows(input: DeleteOldRowsInput): number {
-  const {
-    sql,
-    table,
-    projectId,
-    timestampColumn,
-    cutoff,
-    limit,
-    extraWhere = '',
-    extraParams = [],
-  } = input;
-  const selectSql = deleteOldRowsSelectSql(table, timestampColumn, extraWhere);
-  const rows = sql.exec(selectSql, projectId, cutoff, ...extraParams, limit).toArray();
-  const ids = rows.filter(isIdRow).map((row) => row.id);
-  return deleteRowsByIds(sql, table, projectId, ids);
-}
-
-export function deleteOldEventsWithoutMatches(
+export function claimProjectEventMatchesForBatch(
   sql: SqlStorage,
   projectId: string,
-  cutoff: number,
-  limit: number
+  matchIds: readonly string[],
+  batchId: string,
+  now: number,
+  reason: string
 ): number {
-  const rows = sql
-    .exec(
-      `SELECT e.id FROM project_events e
-       WHERE e.project_id = ?
-         AND e.received_at < ?
-         AND NOT EXISTS (
-           SELECT 1 FROM project_event_matches m
-           WHERE m.project_id = ? AND m.event_id = e.id
-         )
-       ORDER BY e.received_at ASC, e.id
-       LIMIT ?`,
-      projectId,
-      cutoff,
-      projectId,
-      limit
-    )
-    .toArray();
-  const ids = rows.filter(isIdRow).map((row) => row.id);
-  return deleteRowsByIds(sql, 'project_events', projectId, ids);
-}
-
-function deleteRowsByIds(
-  sql: SqlStorage,
-  table: ProjectEventTable,
-  projectId: string,
-  ids: string[]
-): number {
-  if (ids.length === 0) return 0;
-  const placeholders = ids.map(() => '?').join(', ');
-  const deleteSql = deleteRowsByIdsSql(table, placeholders);
-  sql.exec(deleteSql, projectId, ...ids);
-  return ids.length;
-}
-
-export function accountingFor(
-  sql: SqlStorage,
-  projectId: string,
-  category: ProjectEventTable,
-  timestampColumn: ProjectEventTimestampColumn,
-  byteExpression: string,
-  measuredAt: number
-): ProjectEventStorageAccountingRecord {
-  const selectSql = accountingSelectSql(category, timestampColumn, byteExpression);
-  const row = sql.exec(selectSql, projectId).toArray()[0];
-  const parsed = isAccountingAggregateRow(row)
-    ? row
-    : {
-        record_count: 0,
-        estimated_bytes: 0,
-        oldest_created_at: null,
-        newest_created_at: null,
-      };
-  return {
-    projectId,
-    category,
-    recordCount: parsed.record_count,
-    estimatedBytes: parsed.estimated_bytes,
-    oldestCreatedAt: parsed.oldest_created_at,
-    newestCreatedAt: parsed.newest_created_at,
-    measuredAt,
-  };
-}
-
-function recentRowsSelectSql(
-  table: ProjectEventTable,
-  orderColumn: ProjectEventTimestampColumn
-): string {
-  return `SELECT * FROM ${table}
+  if (matchIds.length === 0) return 0;
+  let claimed = 0;
+  for (const chunk of chunkIdsForBindBudget(matchIds, 4)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    sql.exec(
+      `UPDATE project_event_matches
+       SET batch_id = ?, state = 'batch_created', lifecycle_checked_at = ?, reason = ?
        WHERE project_id = ?
-       ORDER BY ${orderColumn} DESC, id
-       LIMIT ?`;
+         AND id IN (${placeholders})
+         AND state = 'matched'
+         AND batch_id IS NULL`,
+      batchId,
+      now,
+      reason,
+      projectId,
+      ...chunk
+    );
+    const row = sql
+      .exec(
+        `SELECT COUNT(*) AS cnt
+         FROM project_event_matches
+         WHERE project_id = ?
+           AND id IN (${placeholders})
+           AND state = 'batch_created'
+           AND batch_id = ?`,
+        projectId,
+        ...chunk,
+        batchId
+      )
+      .toArray()[0];
+    claimed += typeof row?.cnt === 'number' ? row.cnt : 0;
+  }
+  refreshWakeDueAtForMatches(sql, projectId, matchIds, now);
+  return claimed;
 }
 
-function deleteOldRowsSelectSql(
-  table: ProjectEventTable,
-  timestampColumn: ProjectEventTimestampColumn,
-  extraWhere: string
-): string {
-  return `SELECT id FROM ${table}
-       WHERE project_id = ? AND ${timestampColumn} < ? ${extraWhere}
-       ORDER BY ${timestampColumn} ASC, id
-       LIMIT ?`;
+export function chunkIdsForBindBudget(ids: readonly string[], reservedBinds: number): string[][] {
+  const size = SQLITE_MAX_BIND_PARAMETERS - reservedBinds;
+  if (size <= 0) throw new ProjectEventValidationError('SQL bind budget is exhausted');
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
 }
 
-function deleteRowsByIdsSql(table: ProjectEventTable, placeholders: string): string {
-  return `DELETE FROM ${table}
-     WHERE project_id = ? AND id IN (${placeholders})`;
-}
-
-function accountingSelectSql(
-  category: ProjectEventTable,
-  timestampColumn: ProjectEventTimestampColumn,
-  byteExpression: string
-): string {
-  return `SELECT COUNT(*) AS record_count,
-              COALESCE(SUM(${byteExpression}), 0) AS estimated_bytes,
-              MIN(${timestampColumn}) AS oldest_created_at,
-              MAX(${timestampColumn}) AS newest_created_at
-       FROM ${category}
-       WHERE project_id = ?`;
-}
-
-function insertMatchIfAbsent(
+export function insertMatchIfAbsent(
   sql: SqlStorage,
   event: ProjectEventRecord,
   subscription: ProjectEventSubscriptionRecord,
@@ -779,8 +693,20 @@ function insertMatchIfAbsent(
   );
   sql.exec(
     `UPDATE project_event_subscriptions
-     SET last_matched_at = ?, updated_at = ?
+     SET last_matched_at = ?,
+         wake_due_at = CASE
+           WHEN requested_delivery = 'existing_session_prompt'
+            AND resolved_delivery = 'queued_for_prompt_delivery'
+            AND contract_version >= 2
+            AND owner_version >= 2
+            AND (wake_due_at IS NULL OR wake_due_at > ?)
+           THEN ?
+           ELSE wake_due_at
+         END,
+         updated_at = ?
      WHERE project_id = ? AND id = ? AND lifecycle_state = 'active'`,
+    now,
+    now,
     now,
     now,
     event.projectId,
@@ -794,5 +720,54 @@ function insertMatchIfAbsent(
         matchId
       )
       .toArray()[0]
+  );
+}
+
+export function refreshWakeDueAtForMatches(
+  sql: SqlStorage,
+  projectId: string,
+  matchIds: readonly string[],
+  now: number
+): void {
+  for (const chunk of chunkIdsForBindBudget(matchIds, 1)) {
+    const placeholders = chunk.map(() => '?').join(', ');
+    const rows = sql
+      .exec(
+        `SELECT DISTINCT subscription_id
+         FROM project_event_matches
+         WHERE project_id = ? AND id IN (${placeholders})`,
+        projectId,
+        ...chunk
+      )
+      .toArray();
+    for (const row of rows) {
+      if (typeof row.subscription_id === 'string') {
+        refreshWakeDueAtForSubscription(sql, projectId, row.subscription_id, now);
+      }
+    }
+  }
+}
+
+export function refreshWakeDueAtForSubscription(
+  sql: SqlStorage,
+  projectId: string,
+  subscriptionId: string,
+  now: number
+): void {
+  sql.exec(
+    `UPDATE project_event_subscriptions
+     SET wake_due_at = (
+           SELECT MIN(m.matched_at)
+           FROM project_event_matches m
+           WHERE m.project_id = project_event_subscriptions.project_id
+             AND m.subscription_id = project_event_subscriptions.id
+             AND m.state = 'matched'
+             AND m.batch_id IS NULL
+         ),
+         updated_at = ?
+     WHERE project_id = ? AND id = ?`,
+    now,
+    projectId,
+    subscriptionId
   );
 }

@@ -33,6 +33,7 @@ type AgentTaskRow = {
   status: string;
   workspace_id: string | null;
   chat_session_id: string | null;
+  recovery_source_task_id: string | null;
 };
 
 type WorkspaceRow = {
@@ -52,7 +53,10 @@ type AgentSessionRow = {
 
 export type AgentSubscriptionContext = {
   projectId: string;
+  userId: string;
   owner: ProjectEventSubscriptionOwner;
+  legacyOwners: ProjectEventSubscriptionOwner[];
+  sourceTaskId: string;
   target: NonNullable<ProjectEventDeliveryPreference['target']>;
 };
 
@@ -102,6 +106,18 @@ function ownersEqual(a: ProjectEventSubscriptionOwner, b: ProjectEventSubscripti
   return a.type === b.type && a.id === b.id;
 }
 
+function uniqueOwners(owners: ProjectEventSubscriptionOwner[]): ProjectEventSubscriptionOwner[] {
+  const seen = new Set<string>();
+  const result: ProjectEventSubscriptionOwner[] = [];
+  for (const owner of owners) {
+    const key = `${owner.type}:${owner.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(owner);
+  }
+  return result;
+}
+
 function isOwnerScope(value: unknown): value is ProjectEventSubscriptionOwnerScope {
   return (
     typeof value === 'string' &&
@@ -142,11 +158,15 @@ export function resolveDeliveryPreference(
   requested: ProjectEventRequestedDeliveryMode,
   target: ProjectEventDeliveryPreference['target']
 ): ProjectEventDeliveryPreference {
+  const resolved =
+    requested === 'record_only'
+      ? 'record_only'
+      : requested === 'existing_session_prompt'
+        ? 'queued_for_prompt_delivery'
+        : 'recorded_not_injected';
   return {
     requested,
-    // The canonical pull model records caller delivery intent but does not queue
-    // prompts, steer runtimes, interrupt runtimes, or spawn tasks.
-    resolved: requested === 'record_only' ? 'record_only' : 'recorded_not_injected',
+    resolved,
     target,
   };
 }
@@ -173,7 +193,7 @@ async function resolveAgentContext(
 
   const task = await firstRow<AgentTaskRow>(
     env,
-    `SELECT id, project_id, user_id, status, workspace_id, chat_session_id
+    `SELECT id, project_id, user_id, status, workspace_id, chat_session_id, recovery_source_task_id
      FROM tasks
      WHERE id = ? AND project_id = ?
      LIMIT 1`,
@@ -254,15 +274,28 @@ async function resolveAgentContext(
       'Calling task has no durable chat session for event subscription target'
     );
   }
-  const ownerId = agentSessionId ?? `${taskId}:${sessionId}`;
+  const ownerId = `${projectId}:${sessionId}`;
+  const sourceTaskId = task.recovery_source_task_id ?? task.id;
+  const legacyOwners = uniqueOwners(
+    [agentSessionId, `${taskId}:${sessionId}`]
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .map((id) => ({
+        type: 'agent' as const,
+        id,
+        name: caller.ownerName ?? agentSessionId ?? taskId,
+      }))
+  );
 
   return {
     projectId,
+    userId,
     owner: {
       type: 'agent',
       id: ownerId,
       name: caller.ownerName ?? agentSessionId ?? taskId,
     },
+    legacyOwners,
+    sourceTaskId,
     target: {
       sessionId,
       taskId,
@@ -399,11 +432,13 @@ export function requireAgentAccess(
 ): void {
   const target = subscription.deliveryPreference.target;
   if (
-    !ownersEqual(subscription.owner, context.owner) ||
-    target?.sessionId !== context.target.sessionId
+    target?.sessionId === context.target.sessionId &&
+    (ownersEqual(subscription.owner, context.owner) ||
+      context.legacyOwners.some((owner) => ownersEqual(subscription.owner, owner)))
   ) {
-    throw errors.notFound('Event subscription');
+    return;
   }
+  throw errors.notFound('Event subscription');
 }
 
 export function resolveAgentExpiresAt(

@@ -25,6 +25,11 @@ export interface UpstreamAuth {
   headers: Record<string, string>;
   /** The resolved billing mode that was used. */
   billingMode: BillingMode;
+  /** Non-secret credential/account reference actually used for provider calls. */
+  credentialReference: string;
+  credentialSource: 'platform';
+  credentialProvider: 'anthropic';
+  providerMode: 'unified-billing' | 'platform-key';
 }
 
 /**
@@ -65,7 +70,7 @@ export function resolveUnifiedBillingToken(env: Env): string | undefined {
  */
 export async function resolveUpstreamAuth(
   env: Env,
-  db: ReturnType<typeof drizzle>,
+  db: ReturnType<typeof drizzle>
 ): Promise<UpstreamAuth> {
   const mode = await resolveBillingMode(env);
   const cfToken = resolveUnifiedBillingToken(env);
@@ -73,17 +78,24 @@ export async function resolveUpstreamAuth(
   // Warn when falling back to the high-privilege CF_API_TOKEN
   if (cfToken && !env.CF_AIG_TOKEN && env.CF_API_TOKEN) {
     log.warn('ai_billing.unified.using_platform_token', {
-      message: 'CF_AIG_TOKEN not set — falling back to CF_API_TOKEN for AI Gateway. Set CF_AIG_TOKEN for least-privilege billing.',
+      message:
+        'CF_AIG_TOKEN not set — falling back to CF_API_TOKEN for AI Gateway. Set CF_AIG_TOKEN for least-privilege billing.',
     });
   }
 
   if (mode === 'unified') {
     if (!cfToken) {
-      throw new Error('Unified Billing enabled but no CF token is configured (set CF_AIG_TOKEN or CF_API_TOKEN)');
+      throw new Error(
+        'Unified Billing enabled but no CF token is configured (set CF_AIG_TOKEN or CF_API_TOKEN)'
+      );
     }
     return {
       headers: { 'cf-aig-authorization': `Bearer ${cfToken}` },
       billingMode: 'unified',
+      credentialReference: 'platform_proxy:cloudflare-ai-gateway',
+      credentialSource: 'platform',
+      credentialProvider: 'anthropic',
+      providerMode: 'unified-billing',
     };
   }
 
@@ -93,6 +105,10 @@ export async function resolveUpstreamAuth(
       return {
         headers: { 'cf-aig-authorization': `Bearer ${cfToken}` },
         billingMode: 'unified',
+        credentialReference: 'platform_proxy:cloudflare-ai-gateway',
+        credentialSource: 'platform',
+        credentialProvider: 'anthropic',
+        providerMode: 'unified-billing',
       };
     }
     // Fall back to platform credential
@@ -105,15 +121,21 @@ export async function resolveUpstreamAuth(
 
 async function resolvePlatformKeyAuth(
   env: Env,
-  db: ReturnType<typeof drizzle>,
+  db: ReturnType<typeof drizzle>
 ): Promise<UpstreamAuth> {
   const encryptionKey = getCredentialEncryptionKey(env);
   const cred = await getPlatformAgentCredential(db, 'claude-code', encryptionKey);
   if (!cred?.credential) {
-    throw new Error('No Anthropic API key configured. An admin must add a Claude Code platform credential.');
+    throw new Error(
+      'No Anthropic API key configured. An admin must add a Claude Code platform credential.'
+    );
   }
   return {
     headers: { 'x-api-key': cred.credential },
     billingMode: 'platform-key',
+    credentialReference: `platform_credentials:${cred.credentialId}`,
+    credentialSource: 'platform',
+    credentialProvider: 'anthropic',
+    providerMode: 'platform-key',
   };
 }

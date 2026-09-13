@@ -69,6 +69,11 @@ export function mapProjectEvent(row: unknown): ProjectEventRecord {
       parsed.metadata_json,
       'project_events.metadata_json'
     ),
+    audience: {
+      scope: parsed.audience_scope,
+      projectId: parsed.audience_project_id,
+      userId: parsed.audience_user_id,
+    },
     display: parseJsonColumn<ProjectEventDisplayData>(
       parsed.display_json,
       'project_events.display_json'
@@ -95,7 +100,7 @@ export function mapProjectEventSubscription(row: unknown): ProjectEventSubscript
   return {
     id: parsed.id,
     projectId: parsed.project_id,
-    contractVersion: 1,
+    contractVersion: parsed.contract_version,
     owner: {
       type: parsed.owner_type,
       id: parsed.owner_id,
@@ -157,6 +162,10 @@ export function mapProjectEventDeliveryBatch(row: unknown): ProjectEventDelivery
     subscriptionId: parsed.subscription_id,
     idempotencyKey: parsed.idempotency_key,
     state: parsed.state,
+    deliveryChannel: parsed.delivery_channel,
+    deliveredVia: parsed.delivered_via,
+    deliveryExpiresAt: parsed.delivery_expires_at,
+    readableUntil: parsed.readable_until,
     ackRequired: parsed.ack_required === 1,
     requestedDelivery: parsed.requested_delivery,
     resolvedDelivery: parsed.resolved_delivery,
@@ -220,6 +229,7 @@ export function mapProjectEventDeliveryAttempt(row: unknown): ProjectEventDelive
     idempotencyKey: parsed.idempotency_key,
     attemptNumber: parsed.attempt_number,
     state: parsed.state,
+    transportState: parsed.transport_state,
     adapter: parsed.adapter,
     protocolVersion: parsed.protocol_version,
     runtimeId: parsed.runtime_id,

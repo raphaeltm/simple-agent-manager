@@ -30,6 +30,9 @@ import {
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
+import { purgeExpiredCredentialLimitWindows } from '../services/credential-limit-events/admissions';
+import { resolveCredentialLimitConfig } from '../services/credential-limit-events/config';
+import { reconcileProjectEventSourceOutbox } from '../services/project-event-source-outbox';
 import { reconcileStaleWebhookDeliveries } from '../services/webhook-delivery-reconciliation';
 import { purgeExpiredWebhookDeliveries } from '../services/webhook-trigger-store';
 
@@ -55,6 +58,10 @@ export interface TriggerExecutionCleanupStats {
   retentionPurged: number;
   /** Number of expired generic webhook delivery records purged */
   webhookDeliveriesPurged: number;
+  /** Number of source outbox intents admitted to ProjectData */
+  projectEventSourceOutboxAdmitted: number;
+  /** Number of expired credential-limit observation windows purged */
+  credentialLimitWindowsPurged: number;
   /** Number of errors encountered */
   errors: number;
 }
@@ -373,6 +380,8 @@ export async function runTriggerExecutionCleanup(env: Env): Promise<TriggerExecu
       staleQueuedRecovered: 0,
       retentionPurged: 0,
       webhookDeliveriesPurged: 0,
+      projectEventSourceOutboxAdmitted: 0,
+      credentialLimitWindowsPurged: 0,
       errors: 0,
     };
   }
@@ -399,6 +408,44 @@ export async function runTriggerExecutionCleanup(env: Env): Promise<TriggerExecu
   );
 
   let webhookCleanupErrors = 0;
+  let sourceOutboxErrors = 0;
+  let credentialLimitErrors = 0;
+  let projectEventSourceOutboxAdmitted = 0;
+  let credentialLimitWindowsPurged = 0;
+  try {
+    const credentialConfig = resolveCredentialLimitConfig(env);
+    credentialLimitWindowsPurged = await purgeExpiredCredentialLimitWindows(
+      env,
+      Date.now(),
+      credentialConfig
+    );
+    if (credentialLimitWindowsPurged > 0) {
+      log.info('credential_limit_windows_purged', { count: credentialLimitWindowsPurged });
+    }
+  } catch (error) {
+    credentialLimitErrors += 1;
+    log.error('credential_limit_window_purge_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  try {
+    const reconciled = await reconcileProjectEventSourceOutbox(env);
+    projectEventSourceOutboxAdmitted = reconciled.admitted;
+    if (
+      reconciled.admitted > 0 ||
+      reconciled.retryableFailed > 0 ||
+      reconciled.permanentFailed > 0 ||
+      reconciled.expired > 0
+    ) {
+      log.info('project_event_source_outbox_reconciled', { ...reconciled });
+    }
+  } catch (error) {
+    sourceOutboxErrors += 1;
+    log.error('project_event_source_outbox_reconciliation_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   try {
     const reconciled = await reconcileStaleWebhookDeliveries(env);
     if (reconciled > 0) log.info('webhook_deliveries_reconciled', { count: reconciled });
@@ -439,6 +486,14 @@ export async function runTriggerExecutionCleanup(env: Env): Promise<TriggerExecu
     staleQueuedRecovered: staleQueued.recovered,
     retentionPurged: retention.purged,
     webhookDeliveriesPurged,
-    errors: staleRunning.errors + staleQueued.errors + retention.errors + webhookCleanupErrors,
+    projectEventSourceOutboxAdmitted,
+    credentialLimitWindowsPurged,
+    errors:
+      staleRunning.errors +
+      staleQueued.errors +
+      retention.errors +
+      webhookCleanupErrors +
+      sourceOutboxErrors +
+      credentialLimitErrors,
   };
 }

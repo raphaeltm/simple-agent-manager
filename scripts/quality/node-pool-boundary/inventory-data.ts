@@ -58,12 +58,16 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     requiredEvidence: CANONICAL_TASK_START,
   },
   {
-    filePath: 'apps/api/src/services/trigger-submit.ts',
+    filePath: 'apps/api/src/services/reserved-task-submission-storage.ts',
     table: 'tasks',
-    owner: 'submitTriggeredTask',
-    role: 'trigger submission adapter',
-    canonicalService: 'resolveTaskStartPlacement -> startTaskRunnerDO',
-    requiredEvidence: CANONICAL_TASK_START,
+    owner: 'commitD1Submission',
+    role: 'reserved trigger/schedule/watch task and checkpoint writer',
+    canonicalService: 'prepareNewSubmission -> commitD1Submission -> startInputFromSnapshot',
+    requiredEvidence: [
+      { kind: 'export', name: 'commitD1Submission' },
+      { kind: 'call', name: 'capacityPlacementSnapshotSqlValues' },
+      { kind: 'call', name: 'batch' },
+    ],
   },
   {
     filePath: 'apps/api/src/durable-objects/sam-session/tools/dispatch-task.ts',
@@ -207,6 +211,8 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     requiredEvidence: [
       { kind: 'export', name: 'reserveWorkspacePlacement' },
       { kind: 'call', name: 'capacityPlacementSnapshotSqlValues' },
+      { kind: 'call', name: 'buildWorkspaceAdmissionSql' },
+      { kind: 'call', name: 'buildTaskLifecyclePlacementPredicate' },
     ],
   },
   {

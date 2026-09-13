@@ -1,3 +1,4 @@
+import { PROJECT_SCHEDULE_TOOLS } from './tool-definitions-project-schedule-tools';
 /**
  * MCP tool definitions — the schema for all tools exposed via the MCP server.
  *
@@ -49,6 +50,7 @@ import { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-to
 import { POLICY_TOOLS } from './tool-definitions-policy-tools';
 import { PROFILE_TOOLS } from './tool-definitions-profile-tools';
 import { PROJECT_AWARENESS_TOOLS } from './tool-definitions-project-awareness';
+import { PROJECT_EVENT_CHANNEL_TOOLS } from './tool-definitions-project-event-channel-tools';
 import { PROJECT_EVENT_TOOLS } from './tool-definitions-project-event-tools';
 import { SESSION_IDEA_TOOLS } from './tool-definitions-session-idea-tools';
 import { SKILL_TOOLS } from './tool-definitions-skill-tools';
@@ -67,6 +69,8 @@ export const MCP_TOOLS = [
   ...COMMENT_TOOLS,
   ...LIBRARY_FILE_COMMENT_TOOLS,
   ...PROJECT_EVENT_SUBSCRIPTION_TOOLS,
+  ...PROJECT_EVENT_CHANNEL_TOOLS,
+  ...PROJECT_SCHEDULE_TOOLS,
   ...PROJECT_EVENT_TOOLS,
   ...TRIGGER_TOOLS,
   ...INCIDENT_TOOLS,

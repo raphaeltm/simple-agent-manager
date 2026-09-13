@@ -186,6 +186,16 @@
       "digests": [
         "41c0f6b3fbd4c3ca9c7c1f107da6099134aaf3088bc9392d407391ade48b4317"
       ]
+    },
+    {
+      "classification": "code-identifier",
+      "reason": "Exact previously reviewed non-secret bytes moved by eventing integration; compared with main and existing reviewed digest.",
+      "owner": "security",
+      "reviewedAt": "2026-09-13",
+      "expiresAt": "2026-10-13",
+      "digests": [
+        "15613fa56910bf18e53abb4161fda7fda6689b25010a23bd1e30d254ccc8ade5"
+      ]
     }
   ]
 }

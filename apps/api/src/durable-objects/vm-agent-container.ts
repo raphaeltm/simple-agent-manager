@@ -7,7 +7,7 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
-  isSessionRecoverySourceTaskGuardValid,
+  isSessionRecoverySourceTaskGuardFullyValidForEnv,
   SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
@@ -95,7 +95,11 @@ function sameSourceTaskGuard(
     right &&
     left.taskId === right.taskId &&
     left.projectId === right.projectId &&
-    left.chatSessionId === right.chatSessionId
+    left.chatSessionId === right.chatSessionId &&
+    (left.requiredProjectMemberId ?? null) === (right.requiredProjectMemberId ?? null) &&
+    (left.projectEventWake?.batchId ?? null) === (right.projectEventWake?.batchId ?? null) &&
+    (left.projectEventWake?.subscriptionId ?? null) ===
+      (right.projectEventWake?.subscriptionId ?? null)
   );
 }
 function stoppedRecoveryResult(): VmAgentContainerRecoveryResult {
@@ -241,7 +245,7 @@ export class VmAgentContainer extends Container<Env> {
     // before proxyHttp() reaches prepareForRequest()/ensureAwake(). A caller-
     // side check alone leaves a network-RPC window where a terminal parent can
     // still cold-start compute.
-    if (!(await isSessionRecoverySourceTaskGuardValid(this.env.DATABASE, sourceTaskGuard))) {
+    if (!(await isSessionRecoverySourceTaskGuardFullyValidForEnv(this.env, sourceTaskGuard))) {
       await this.abortRevokedSourceTaskWake(sourceTaskGuard);
       return revokedSourceTaskResponse();
     }
@@ -580,7 +584,7 @@ export class VmAgentContainer extends Container<Env> {
   ): Promise<void> {
     if (
       sourceTaskGuard &&
-      !(await isSessionRecoverySourceTaskGuardValid(this.env.DATABASE, sourceTaskGuard))
+      !(await isSessionRecoverySourceTaskGuardFullyValidForEnv(this.env, sourceTaskGuard))
     ) {
       throw new SessionRecoveryAuthorityRevokedError();
     }

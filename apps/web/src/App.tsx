@@ -143,6 +143,7 @@ const ProjectTriggerDetail = lazyNamed(
   'ProjectTriggerDetail'
 );
 const ProjectTriggers = lazyNamed(() => import('./pages/ProjectTriggers'), 'ProjectTriggers');
+const ProjectEvents = lazyNamed(() => import('./pages/ProjectEvents'), 'ProjectEvents');
 const SamPrototype = lazyNamed(() => import('./pages/SamPrototype'), 'SamPrototype');
 const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
@@ -327,6 +328,7 @@ export default function App() {
                         </Route>
                         <Route path="activity" element={page(<ProjectActivity />)} />
                         <Route path="notifications" element={page(<ProjectNotifications />)} />
+                        <Route path="events" element={page(<ProjectEvents />)} />
                         <Route path="triggers" element={page(<ProjectTriggers />)} />
                         <Route
                           path="triggers/:triggerId"

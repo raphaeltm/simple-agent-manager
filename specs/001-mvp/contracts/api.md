@@ -21,6 +21,7 @@ Authorization: Bearer {API_TOKEN}
 ```
 
 **Error Response** (401 Unauthorized):
+
 ```json
 {
   "error": "Unauthorized",
@@ -50,6 +51,7 @@ Unsupported MIME types return a client error without decrypting the file body.
 Create a new workspace.
 
 **Request**:
+
 ```http
 POST /vms HTTP/1.1
 Authorization: Bearer {token}
@@ -73,6 +75,7 @@ Content-Type: application/json
 > `claude login` in the CloudCLI terminal using their Claude Max subscription.
 
 **Success Response** (201 Created):
+
 ```json
 {
   "id": "ws-abc123",
@@ -89,13 +92,13 @@ Content-Type: application/json
 
 **Error Responses**:
 
-| Status | Error | Description |
-|--------|-------|-------------|
-| 400 | `invalid_repo_url` | Repository URL is malformed |
-| 400 | `invalid_size` | Size must be small/medium/large |
-| 400 | `github_required` | Private repo requires GitHub connection |
-| 400 | `repo_not_accessible` | Repo not in GitHub App permissions |
-| 503 | `provider_unavailable` | Cloud provider API is down |
+| Status | Error                  | Description                             |
+| ------ | ---------------------- | --------------------------------------- |
+| 400    | `invalid_repo_url`     | Repository URL is malformed             |
+| 400    | `invalid_size`         | Size must be small/medium/large         |
+| 400    | `github_required`      | Private repo requires GitHub connection |
+| 400    | `repo_not_accessible`  | Repo not in GitHub App permissions      |
+| 503    | `provider_unavailable` | Cloud provider API is down              |
 
 ```json
 {
@@ -111,6 +114,7 @@ Content-Type: application/json
 List all workspaces.
 
 **Request**:
+
 ```http
 GET /vms HTTP/1.1
 Authorization: Bearer {token}
@@ -122,6 +126,7 @@ Authorization: Bearer {token}
 | `status` | string | Filter by status (optional) |
 
 **Success Response** (200 OK):
+
 ```json
 {
   "workspaces": [
@@ -151,12 +156,14 @@ Authorization: Bearer {token}
 Get workspace details.
 
 **Request**:
+
 ```http
 GET /vms/ws-abc123 HTTP/1.1
 Authorization: Bearer {token}
 ```
 
 **Success Response** (200 OK):
+
 ```json
 {
   "id": "ws-abc123",
@@ -177,9 +184,9 @@ Authorization: Bearer {token}
 
 **Error Responses**:
 
-| Status | Error | Description |
-|--------|-------|-------------|
-| 404 | `workspace_not_found` | Workspace does not exist |
+| Status | Error                 | Description              |
+| ------ | --------------------- | ------------------------ |
+| 404    | `workspace_not_found` | Workspace does not exist |
 
 ---
 
@@ -188,12 +195,14 @@ Authorization: Bearer {token}
 Stop and delete a workspace.
 
 **Request**:
+
 ```http
 DELETE /vms/ws-abc123 HTTP/1.1
 Authorization: Bearer {token}
 ```
 
 **Success Response** (200 OK):
+
 ```json
 {
   "id": "ws-abc123",
@@ -204,10 +213,10 @@ Authorization: Bearer {token}
 
 **Error Responses**:
 
-| Status | Error | Description |
-|--------|-------|-------------|
-| 404 | `workspace_not_found` | Workspace does not exist |
-| 409 | `workspace_already_stopped` | Workspace is already stopped |
+| Status | Error                       | Description                  |
+| ------ | --------------------------- | ---------------------------- |
+| 404    | `workspace_not_found`       | Workspace does not exist     |
+| 409    | `workspace_already_stopped` | Workspace is already stopped |
 
 ---
 
@@ -216,6 +225,7 @@ Authorization: Bearer {token}
 Callback endpoint for VM self-termination. Called by the VM before self-destruct.
 
 **Request**:
+
 ```http
 POST /vms/ws-abc123/cleanup HTTP/1.1
 Authorization: Bearer {token}
@@ -232,6 +242,7 @@ Content-Type: application/json
 | `reason` | string | Yes | Reason for cleanup: `idle_timeout`, `manual`, `error` |
 
 **Success Response** (200 OK):
+
 ```json
 {
   "id": "ws-abc123",
@@ -241,6 +252,7 @@ Content-Type: application/json
 ```
 
 **Notes**:
+
 - This endpoint is called by the VM, not the UI
 - Removes DNS records before VM self-destructs
 - Idempotent: can be called multiple times safely
@@ -254,12 +266,14 @@ Content-Type: application/json
 Initiate GitHub App installation. Redirects user to GitHub.
 
 **Request**:
+
 ```http
 GET /github/connect HTTP/1.1
 Authorization: Bearer {token}
 ```
 
 **Response** (302 Redirect):
+
 ```
 Location: https://github.com/apps/simple-agent-manager/installations/new
 ```
@@ -271,6 +285,7 @@ Location: https://github.com/apps/simple-agent-manager/installations/new
 GitHub App installation callback. Called by GitHub after user installs the app.
 
 **Request**:
+
 ```http
 GET /github/callback?installation_id=12345&setup_action=install HTTP/1.1
 ```
@@ -282,11 +297,13 @@ GET /github/callback?installation_id=12345&setup_action=install HTTP/1.1
 | `setup_action` | string | `install` or `update` |
 
 **Success Response** (302 Redirect):
+
 ```
 Location: https://app.{domain}/?github=connected
 ```
 
 **Error Response** (302 Redirect):
+
 ```
 Location: https://app.{domain}/?github=error&message=...
 ```
@@ -298,27 +315,27 @@ Location: https://app.{domain}/?github=error&message=...
 Get current GitHub connection status.
 
 **Request**:
+
 ```http
 GET /github/status HTTP/1.1
 Authorization: Bearer {token}
 ```
 
 **Success Response** (200 OK) - Connected:
+
 ```json
 {
   "connected": true,
   "installationId": 12345,
   "accountLogin": "username",
   "accountType": "User",
-  "repositories": [
-    "username/repo1",
-    "username/repo2"
-  ],
+  "repositories": ["username/repo1", "username/repo2"],
   "installedAt": "2026-01-24T12:00:00Z"
 }
 ```
 
 **Success Response** (200 OK) - Not Connected:
+
 ```json
 {
   "connected": false,
@@ -333,12 +350,14 @@ Authorization: Bearer {token}
 List accessible repositories from GitHub App installation.
 
 **Request**:
+
 ```http
 GET /github/repos HTTP/1.1
 Authorization: Bearer {token}
 ```
 
 **Success Response** (200 OK):
+
 ```json
 {
   "repositories": [
@@ -361,10 +380,10 @@ Authorization: Bearer {token}
 
 **Error Responses**:
 
-| Status | Error | Description |
-|--------|-------|-------------|
-| 400 | `github_not_connected` | No GitHub App installation found |
-| 502 | `github_api_error` | GitHub API unavailable |
+| Status | Error                  | Description                      |
+| ------ | ---------------------- | -------------------------------- |
+| 400    | `github_not_connected` | No GitHub App installation found |
+| 502    | `github_api_error`     | GitHub API unavailable           |
 
 ---
 
@@ -373,12 +392,14 @@ Authorization: Bearer {token}
 Disconnect GitHub App (does not uninstall from GitHub).
 
 **Request**:
+
 ```http
 DELETE /github/disconnect HTTP/1.1
 Authorization: Bearer {token}
 ```
 
 **Success Response** (200 OK):
+
 ```json
 {
   "disconnected": true,
@@ -414,15 +435,16 @@ All errors follow this structure:
 
 ## Rate Limits
 
-| Endpoint | Limit | Window |
-|----------|-------|--------|
-| POST /vms | 10 | 1 hour |
-| GET /vms | 100 | 1 minute |
-| GET /vms/:id | 100 | 1 minute |
-| DELETE /vms/:id | 20 | 1 minute |
-| POST /vms/:id/cleanup | 10 | 1 minute |
+| Endpoint              | Limit | Window   |
+| --------------------- | ----- | -------- |
+| POST /vms             | 10    | 1 hour   |
+| GET /vms              | 100   | 1 minute |
+| GET /vms/:id          | 100   | 1 minute |
+| DELETE /vms/:id       | 20    | 1 minute |
+| POST /vms/:id/cleanup | 10    | 1 minute |
 
 **Rate Limit Headers**:
+
 ```
 X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 95
@@ -430,6 +452,7 @@ X-RateLimit-Reset: 1706097600
 ```
 
 **Rate Limit Exceeded** (429 Too Many Requests):
+
 ```json
 {
   "error": "rate_limit_exceeded",
@@ -444,13 +467,13 @@ X-RateLimit-Reset: 1706097600
 
 For future integration, workspaces will emit events:
 
-| Event | Payload |
-|-------|---------|
-| `workspace.created` | Full workspace object |
-| `workspace.running` | Full workspace object |
-| `workspace.failed` | Workspace with error |
-| `workspace.stopping` | Workspace ID |
-| `workspace.stopped` | Workspace ID |
+| Event                | Payload               |
+| -------------------- | --------------------- |
+| `workspace.created`  | Full workspace object |
+| `workspace.running`  | Full workspace object |
+| `workspace.failed`   | Workspace with error  |
+| `workspace.stopping` | Workspace ID          |
+| `workspace.stopped`  | Workspace ID          |
 
 ---
 
@@ -466,7 +489,7 @@ const API_TOKEN = 'your-token';
 const response = await fetch(`${API_URL}/vms`, {
   method: 'POST',
   headers: {
-    'Authorization': `Bearer ${API_TOKEN}`,
+    Authorization: `Bearer ${API_TOKEN}`,
     'Content-Type': 'application/json',
   },
   body: JSON.stringify({
@@ -517,5 +540,20 @@ curl -X DELETE https://api.example.com/vms/ws-abc123 \
 ## OpenAPI Specification
 
 Full OpenAPI 3.0 spec will be generated from route handlers and available at:
+
 - `/openapi.json` - JSON format
 - `/docs` - Swagger UI (optional, development only)
+
+## Project event member controls
+
+Active project members with `task:read` can `GET /api/projects/:projectId/event-subscriptions`
+with `state`, `limit`, and `sessionId`, inspect `GET /:subscriptionId`, browse
+`GET /api/projects/:projectId/event-channels`, and read `GET /event-channels/:channel/history`.
+Subscription session filtering precedes the bounded SQL limit. Channel reads accept
+`cursor` and `limit`; history discloses `watermark`, `hasMore`, and `retentionGap`.
+
+`POST /api/projects/:projectId/event-subscriptions/:subscriptionId/cancel` requires
+`task:write`, accepts only optional `reason`, and derives cancellation attribution
+from the authenticated human. Human/agent-owned subscriptions can be cancelled;
+policy/system/standing-watch ownership uses its separate control path. Cancellation
+is idempotent and revokes pending canonical deliveries.

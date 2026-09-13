@@ -17,16 +17,16 @@ import { createModuleLogger } from '../lib/logger';
 import { NodeAgentHttpError, nodeAgentRequest, sendPromptToAgentOnNode } from './node-agent';
 import * as projectDataService from './project-data';
 import { ensureSessionRecovery } from './session-recovery';
+import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import { markSessionSnapshotAwakeInPlace } from './session-snapshots';
 import {
   checkpointVmPromptSubmission,
   prepareVmPromptDelivery,
+  PromptDeliveryGuardError,
 } from './vm-prompt-delivery-preparation';
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
-
 const RuntimeIdentitySchema = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(256));
-
 const CapabilitiesSchema = v.object({
   protocolVersion: v.number(),
   runtimeIdentity: RuntimeIdentitySchema,
@@ -80,6 +80,8 @@ export interface VmPromptDeliverySourceTaskGuard {
   taskId: string;
   projectId: string;
   chatSessionId: string;
+  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+  requiredProjectMemberId?: string | null;
 }
 
 export interface VmPromptDeliveryAdapterInput {
@@ -229,17 +231,17 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         this.env,
         target.userId,
         input.claim.message.promptMessageId,
-        capabilities.protocolVersion === VM_PROMPT_DELIVERY_PROTOCOL_VERSION
-          ? {
-              requestTimeoutMs: input.requestTimeoutMs,
-              protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
-              deliveryId: input.claim.message.id,
-              ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
-            }
-          : {
-              requestTimeoutMs: input.requestTimeoutMs,
-              ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
-            }
+        {
+          requestTimeoutMs: input.requestTimeoutMs,
+          ...(capabilities.protocolVersion === VM_PROMPT_DELIVERY_PROTOCOL_VERSION
+            ? { protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION, deliveryId: input.claim.message.id }
+            : {}),
+          ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
+          beforeExternalMutation: async () => {
+            const denied = await this.runSideEffectGuard(input);
+            if (denied) throw new PromptDeliveryGuardError(denied);
+          },
+        }
       );
       if (capabilities.protocolVersion === 0 && input.allowLegacyVm) {
         return {
@@ -290,6 +292,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         receipt,
       };
     } catch (error) {
+      if (error instanceof PromptDeliveryGuardError) return error.result;
       const status = httpStatus(error);
       const conflict = this.parseConflictResponse(error);
       if (

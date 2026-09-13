@@ -43,6 +43,7 @@ export interface WorkspacePlacementInput {
   normalizedDisplayName: string;
   repository: string;
   branch: string;
+  chatSessionId?: string | null;
   vmSize: VMSize;
   vmLocation: VMLocation;
   workspaceProfile: WorkspaceProfile;
@@ -50,9 +51,19 @@ export interface WorkspacePlacementInput {
   agentProfileHint: string | null;
   resourceRequirementsJson?: string | null;
   capacityPlacementSnapshot?: CapacityPlacementSnapshot | null;
+  taskLifecycleGuard?: WorkspacePlacementTaskLifecycleGuard | null;
   authorityNodeClass?: PlacementAuthorityNodeClass;
   resolvedReservation?: ResolvedResourceReservation | null;
   createdAt: string;
+}
+
+export interface WorkspacePlacementTaskLifecycleGuard {
+  taskId: string;
+  projectId: string;
+  userId: string;
+  chatSessionId: string | null;
+  requireChatSessionMatch?: boolean;
+  reservedIntentFingerprint?: string | null;
 }
 
 /**
@@ -76,24 +87,26 @@ export async function reserveWorkspacePlacement(
     return false;
   }
   const admission = buildWorkspaceAdmissionSql(input, policyOrMaxWorkspaces);
+  const taskLifecyclePredicate = buildTaskLifecyclePlacementPredicate(input.taskLifecycleGuard);
   const result = await database
     .prepare(
       `${admission.sql}
        INSERT INTO workspaces
          (id, node_id, project_id, user_id, installation_id, name, display_name,
-          normalized_display_name, repository, branch, status, vm_size, vm_location,
+          normalized_display_name, repository, branch, chat_session_id, status, vm_size, vm_location,
           workspace_profile, devcontainer_config_name, agent_profile_hint,
           resource_requirements_json,
           resolved_reservation_json,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS},
           created_at, updated_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?,
           ?,
           requested.reservation_json,
           ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
           ?, ?
        FROM node_scope n, requested_reservation requested, active_reservations active, admission_policy policy
-         WHERE ${workspaceAdmissionEligibilitySql()}`
+         WHERE ${workspaceAdmissionEligibilitySql()}
+         ${taskLifecyclePredicate.sql}`
     )
     .bind(
       ...admission.binds,
@@ -107,6 +120,7 @@ export async function reserveWorkspacePlacement(
       input.normalizedDisplayName,
       input.repository,
       input.branch,
+      input.chatSessionId ?? null,
       input.vmSize,
       input.vmLocation,
       input.workspaceProfile,
@@ -115,7 +129,8 @@ export async function reserveWorkspacePlacement(
       input.resourceRequirementsJson ?? null,
       ...capacityPlacementSnapshotSqlValues(input.capacityPlacementSnapshot),
       input.createdAt,
-      input.createdAt
+      input.createdAt,
+      ...taskLifecyclePredicate.binds
     )
     .run();
 
@@ -188,6 +203,57 @@ export async function attachPrecreatedWorkspacePlacement(
     .run();
 
   return (result.meta.changes ?? 0) > 0;
+}
+
+function buildTaskLifecyclePlacementPredicate(
+  guard: WorkspacePlacementTaskLifecycleGuard | null | undefined
+): {
+  sql: string;
+  binds: Array<string | number | null>;
+} {
+  if (!guard) return { sql: '', binds: [] };
+
+  const requireChatSessionMatch = guard.requireChatSessionMatch === true ? 1 : 0;
+  const reservedIntentFingerprint = guard.reservedIntentFingerprint ?? null;
+  return {
+    sql: `AND EXISTS (
+           SELECT 1
+             FROM tasks guarded_task
+            WHERE guarded_task.id = ?
+              AND guarded_task.project_id = ?
+              AND guarded_task.user_id = ?
+              AND guarded_task.status = 'queued'
+              AND guarded_task.workspace_id IS NULL
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM reserved_task_session_revocations guarded_revocation
+                 WHERE guarded_revocation.project_id = guarded_task.project_id
+                   AND guarded_revocation.chat_session_id = guarded_task.chat_session_id
+              )
+              AND (? IS NULL OR ? = 0 OR guarded_task.chat_session_id = ?)
+              AND (
+                ? IS NULL
+                OR EXISTS (
+                  SELECT 1
+                    FROM task_submission_checkpoints guarded_checkpoint
+                   WHERE guarded_checkpoint.task_id = guarded_task.id
+                     AND guarded_checkpoint.intent_fingerprint = ?
+                     AND guarded_checkpoint.chat_session_id = ?
+                )
+              )
+         )`,
+    binds: [
+      guard.taskId,
+      guard.projectId,
+      guard.userId,
+      guard.chatSessionId,
+      requireChatSessionMatch,
+      guard.chatSessionId,
+      reservedIntentFingerprint,
+      reservedIntentFingerprint,
+      guard.chatSessionId,
+    ],
+  };
 }
 
 /** Shared admission reads and parameter ordering for both atomic workspace mutations. */
