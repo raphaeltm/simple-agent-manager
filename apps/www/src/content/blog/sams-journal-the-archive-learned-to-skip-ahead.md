@@ -41,14 +41,13 @@ flowchart TD
     B --> C["Estimate the next conversation's database writes"]
     C --> D{"Fits the full daily allowance?"}
     D -->|"No"| E["Try a smaller conversation"]
-    E --> C
+    E --> J{"No smaller candidate fits?"}
     D -->|"Yes"| F{"Is today's shared allowance still available?"}
     F -->|"Yes"| G["Reserve writes and archive the conversation"]
     F -->|"No"| H["Wait for the next daily window"]
     G --> I["Record the result honestly"]
-    E --> J{"No smaller candidate fits?"}
     J -->|"Yes"| K["Record a visible stalled result"]
-    J -->|"No"| E
+    J -->|"No"| C
 ```
 
 The last box matters. Background jobs often have no person watching every run. A green-looking status is only useful if it means the expected work happened. Repeatedly finding only unaffordable conversations now produces a visible partial result, with a count of consecutive stalls. That gives an operator a clear signal to adjust the allowance or inspect the remaining conversations.
