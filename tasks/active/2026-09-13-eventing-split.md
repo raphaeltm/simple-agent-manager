@@ -69,7 +69,7 @@ Evidence: `git cherry HEAD <side>` reports 3 outbox and 2 retention non-equivale
 
 # Eventing integration split map (draft)
 
-Basis: current reconciled working diff against origin/main `afef8d9a6f538c1f08304325efccac0841deeb1e`; captured during merge validation. The inventory contains 287 distinct changed files. This is a cutting plan, not proof that seven intermediate builds already passed. Refresh the inventory at the final integration SHA before cutting.
+Basis: current reconciled working diff against origin/main `afef8d9a6f538c1f08304325efccac0841deeb1e`; captured during merge validation. The inventory contains 323 distinct changed files. This is a cutting plan, not proof that seven intermediate builds already passed. Refresh the inventory at the final integration SHA before cutting.
 
 Target: stack onto sam/eventing-feature, starting at main. No deployment or merge authorization is implied. Each slice must independently pass applicable migration safety, typecheck and tests before its successor is cut. Do not cherry-pick the 105-commit history wholesale.
 
@@ -77,13 +77,13 @@ The following primary file lists partition every changed path exactly once. The 
 
 | Piece                                                                      | Primary files | Shared additional touches | Maximum listed footprint |
 | -------------------------------------------------------------------------- | ------------: | ------------------------: | -----------------------: |
-| 1. Foundation: ordered migrations, contracts, bounded storage              |            52 |                         2 |                       54 |
-| 2. Same-chat durable wake and mailbox integration, OFF                     |            25 |                         6 |                       31 |
+| 1. Foundation: ordered migrations, contracts, bounded storage              |            55 |                         2 |                       57 |
+| 2. Same-chat durable wake and mailbox integration, OFF                     |            27 |                         6 |                       33 |
 | 3. Durable source outbox and GitHub/generic producers                      |            23 |                         6 |                       29 |
-| 4. Credential-limit telemetry and proxy accounting                         |            45 |                         0 |                       45 |
-| 5. Reserved submissions, schedules, watches, live trigger-path integration |            79 |                         3 |                       82 |
+| 4. Credential-limit telemetry and proxy accounting                         |            46 |                         0 |                       46 |
+| 5. Reserved submissions, schedules, watches, live trigger-path integration |            81 |                         3 |                       84 |
 | 6. Channels, member subscriptions, API/MCP surfaces                        |            24 |                         6 |                       30 |
-| 7. Events UI, remaining docs, and integration evidence                     |            39 |                         0 |                       39 |
+| 7. Events UI, remaining docs, and integration evidence                     |            67 |                         0 |                       67 |
 
 ## 1. Foundation: ordered migrations, contracts, bounded storage
 
@@ -128,8 +128,11 @@ apps/api/src/durable-objects/project-data/types.ts
 apps/api/src/env.ts
 apps/api/src/lib/bounded-request-body.ts
 apps/api/src/lib/runtime-validation.ts
+apps/api/tests/unit/durable-objects/alarm-schedule.test.ts
 apps/api/tests/unit/durable-objects/migrations.test.ts
+apps/api/tests/unit/durable-objects/project-events-pull.test.ts
 apps/api/tests/unit/durable-objects/project-events-wake-config.test.ts
+apps/api/tests/unit/durable-objects/sql-storage-test-utils.ts
 apps/api/tests/unit/runtime-validation.test.ts
 apps/api/tests/workers/helpers/project-event-fairness-fixture.ts
 apps/api/tests/workers/project-event-orphan-retention.test.ts
@@ -181,6 +184,7 @@ apps/api/src/durable-objects/project-data/reconciliation-candidates.ts
 apps/api/src/durable-objects/project-data/reconciliation.ts
 apps/api/src/durable-objects/project-data/sessions.ts
 apps/api/src/services/session-recovery-authority.ts
+apps/api/src/services/session-recovery-context.ts
 apps/api/src/services/session-recovery.ts
 apps/api/src/services/session-snapshot-recovery-lifecycle.ts
 apps/api/src/services/vm-prompt-delivery-adapter.ts
@@ -190,6 +194,7 @@ apps/api/tests/unit/durable-objects/attention-expiry.test.ts
 apps/api/tests/unit/durable-objects/durable-prompt-delivery.test.ts
 apps/api/tests/unit/durable-objects/reconciliation.test.ts
 apps/api/tests/unit/services/session-recovery-event-boundaries.test.ts
+apps/api/tests/unit/services/vm-prompt-delivery-adapter.test.ts
 apps/api/tests/workers/mailbox-capacity.test.ts
 apps/api/tests/workers/project-data-events.test.ts
 apps/api/tests/workers/session-recovery-authority.test.ts
@@ -300,6 +305,7 @@ apps/api/tests/unit/routes/ai-proxy-accounting.test.ts
 apps/api/tests/unit/routes/opencode-credential-fallback.test.ts
 apps/api/tests/unit/runtime-always-proxy.test.ts
 apps/api/tests/unit/services/ai-proxy-shared-credential-generation.test.ts
+apps/api/tests/workers/composable-credentials-wiring.test.ts
 packages/vm-agent/internal/acp/gateway.go
 packages/vm-agent/internal/acp/session_host.go
 packages/vm-agent/internal/acp/session_host_client.go
@@ -385,6 +391,7 @@ apps/api/tests/unit/routes/deployment-environment-observability.test.ts
 apps/api/tests/unit/routes/deployment-membership-auth.test.ts
 apps/api/tests/unit/routes/deployment-release-compose-submission.test.ts
 apps/api/tests/unit/routes/mcp.test.ts
+apps/api/tests/unit/routes/task-workspace-metering.test.ts
 apps/api/tests/unit/services/node-agent-create-workspace-timeout.test.ts
 apps/api/tests/unit/services/reserved-task-submission.test.ts
 apps/api/tests/unit/services/task-terminal-transition-hooks.test.ts
@@ -401,6 +408,7 @@ apps/api/tests/workers/reserved-task-project-data.test.ts
 apps/api/tests/workers/reserved-task-submission-task-runner.test.ts
 apps/api/tests/workers/task-runner-do-proxy.test.ts
 apps/api/tests/workers/trigger-execution-cleanup.test.ts
+scripts/quality/node-pool-boundary/inventory-data.ts
 ```
 
 Additional shared-file hunk touches (included in footprint):
@@ -509,6 +517,34 @@ tasks/active/2026-09-07-event-source-review-fixes.md
 tasks/active/2026-09-07-event-wake-review-fixes.md
 tasks/active/2026-09-07-eventing-recovery-and-channels.md
 tasks/active/2026-09-07-reserved-task-submission.md
+tasks/active/2026-09-13-eventing-split.md
+tasks/evidence/2026-09-13-eventing-integration/README.md
+tasks/evidence/2026-09-13-eventing-integration/github-app-setup-docs-long-events-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/github-app-setup-docs-long-events-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/github-app-setup-docs-long-preview-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/github-app-setup-docs-long-preview-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-channel-history-long-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-channel-history-long-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-channels-long-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-channels-long-320x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-channels-long-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-schedule-form-conflict-top-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-schedule-form-conflict-top-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-schedules-long-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-schedules-long-320x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-schedules-long-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-subscription-delivery-outcomes-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-subscription-delivery-outcomes-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-subscriptions-long-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-subscriptions-long-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-watch-create-form-top-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-watch-create-form-top-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-watches-long-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/project-events-watches-long-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/scheduled-actions-docs-guide-1280x800.png
+tasks/evidence/2026-09-13-eventing-integration/scheduled-actions-docs-guide-375x667.png
+tasks/evidence/2026-09-13-eventing-integration/self-host-wizard-github-app-desktop-chrome.png
+tasks/evidence/2026-09-13-eventing-integration/self-host-wizard-github-app-mobile-chrome.png
 ```
 
 ## Cut verification and coupling checks

@@ -478,6 +478,8 @@ describe('Codex composable credential replacement and runtime mapping', () => {
       credential: authJson,
       credentialKind: 'oauth-token',
       credentialSource: 'user',
+      credentialReference: `cc_credentials:${credentialId}`,
+      credentialProvider: 'agent',
     });
   });
 

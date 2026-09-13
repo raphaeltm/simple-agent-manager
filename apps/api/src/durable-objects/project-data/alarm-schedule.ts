@@ -83,7 +83,9 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
     computeStandingWatchAlarmTime(sql, env, projectId),
   ].filter((time): time is number => time !== null);
 
-  return candidates.length > 0 ? Math.min(...candidates) : null;
+  // Persisted retry deadlines may be overdue, including epoch zero. Cloudflare
+  // rejects non-positive alarm times; overdue work should run immediately.
+  return candidates.length > 0 ? Math.max(Date.now(), Math.min(...candidates)) : null;
 }
 
 function readStoredProjectId(sql: SqlStorage): string | null {

@@ -1,18 +1,28 @@
 import { env, runInDurableObject } from 'cloudflare:test';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type {
   StartTaskInput,
   TaskRunner,
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
+import {
+  CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
+  capacityPlacementSnapshotSqlValues,
+} from '../../src/services/capacity-placement-snapshot';
+import { ensureDefaultCapacityPoolsForExistingCredentials } from '../../src/services/default-capacity-pools';
 import { fetchNodeAgent } from '../../src/services/node-agent';
+import { resolveTaskStartPlacementCredentialAttribution } from '../../src/services/placement-resolver';
 import * as projectDataService from '../../src/services/project-data';
 import {
   reservedIdentitiesForTriggerExecution,
   submitReservedTask,
 } from '../../src/services/reserved-task-submission';
+import type { AcceptedSnapshot } from '../../src/services/reserved-task-submission-contracts';
 import type {
   ReservedTaskSubmissionDependencies,
   ReservedTaskSubmissionInput,
@@ -67,6 +77,29 @@ async function runTaskRunnerAlarm(taskId: string): Promise<void> {
 }
 
 async function makeReadyNode(nodeId: string, userId: string): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  const project = await db
+    .select()
+    .from(schema.projects)
+    .where(eq(schema.projects.userId, userId))
+    .get();
+  if (!project) throw new Error('Missing fixture project');
+  const resolution = await resolveTaskStartPlacementCredentialAttribution(
+    db,
+    {
+      entryPoint: 'trigger-submit',
+      taskId: `placement-${nodeId}`,
+      projectId: project.id,
+      userId,
+      project,
+      credentialProjectPolicy: 'current-project',
+      taskModeDefault: 'workspace-profile',
+    },
+    { env: testEnv }
+  );
+  if ('error' in resolution) throw new Error(resolution.error);
+  const snapshot = resolution.capacityPlacementSnapshot;
+  if (!snapshot) throw new Error('Missing authoritative pool snapshot');
   const now = new Date().toISOString();
   await seedNode(nodeId, userId, {
     vmSize: 'small',
@@ -81,10 +114,27 @@ async function makeReadyNode(nodeId: string, userId: string): Promise<void> {
             agent_version = ?,
             runtime = 'vm',
             node_role = 'workspace',
+            cloud_provider = 'hetzner',
+            provider_instance_id = ?,
+            observed_hardware_source = 'observed',
+            observed_provider_instance_vcpu_count = ?,
+            observed_provider_instance_memory_mb = ?,
+            observed_provider_instance_disk_gb = ?,
+            ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS},
             last_metrics = ?
       WHERE id = ?`
   )
-    .bind(now, 'current-sha', JSON.stringify({ cpuLoadAvg1: 5, memoryPercent: 10 }), nodeId)
+    .bind(
+      now,
+      testEnv.VM_AGENT_REQUIRED_VERSION ?? '0123456789abcdef0123456789abcdef01234567',
+      `provider-${nodeId}`,
+      snapshot.providerInstanceVcpuCount,
+      snapshot.providerInstanceMemoryMb,
+      snapshot.providerInstanceDiskGb,
+      ...capacityPlacementSnapshotSqlValues(snapshot),
+      JSON.stringify({ version: 1, cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+      nodeId
+    )
     .run();
 }
 
@@ -190,6 +240,12 @@ async function seedReservedFixture(label: string): Promise<{
     },
   };
 
+  // Establish the configured provider-native pool before concurrent submissions.
+  await ensureDefaultCapacityPoolsForExistingCredentials(drizzle(env.DATABASE, { schema }), {
+    userId,
+    projectId,
+    includeInstallation: false,
+  });
   return { userId, installationId, projectId, repository, triggerId, executionId, input };
 }
 
@@ -479,11 +535,12 @@ async function reservedPlacementInput(
   }
 ): Promise<Parameters<typeof reserveWorkspacePlacement>[1]> {
   const checkpoint = await env.DATABASE.prepare(
-    `SELECT intent_fingerprint FROM task_submission_checkpoints WHERE task_id = ?`
+    `SELECT intent_fingerprint, accepted_snapshot_json FROM task_submission_checkpoints WHERE task_id = ?`
   )
     .bind(fixture.input.identities.taskId)
-    .first<{ intent_fingerprint: string }>();
+    .first<{ intent_fingerprint: string; accepted_snapshot_json: string }>();
   if (!checkpoint) throw new Error('Missing reserved checkpoint');
+  const accepted = JSON.parse(checkpoint.accepted_snapshot_json) as AcceptedSnapshot;
 
   return {
     id: workspaceId,
@@ -502,7 +559,8 @@ async function reservedPlacementInput(
     workspaceProfile: 'full',
     devcontainerConfigName: null,
     agentProfileHint: null,
-    capacityPlacementSnapshot: null,
+    capacityPlacementSnapshot: accepted.task.capacityPlacementSnapshot,
+    resolvedReservation: accepted.runner.resolvedReservation,
     taskLifecycleGuard: {
       taskId: fixture.input.identities.taskId,
       projectId: fixture.projectId,
