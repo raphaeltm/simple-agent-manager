@@ -6,32 +6,43 @@ Integration task `01M2CPJWC5TD30E9RCWK6052HX`; parent `01M2CJMWKFGPV064H208AQFXG
 
 DO NOT MERGE. Phases 1–5 only. No staging deployment, no merge to main, no CodeRabbit request, no modification of PR #2031, no SAM subtasks. Integration branch `sam/eventing-integration` is review/CI material; the parent owns cutting, staging and landing decisions.
 
-## Research and implementation checklist
+## Reconciliation evidence
 
-- [x] Resume existing origin integration branch at paused eventing head `0f150939f`.
-- [x] Read paused handoff on original branch and merge current main `afef8d9a6` without rebasing. Merge checkpoint `0a8d9cecb` pushed.
-- [x] Resolve 21 conflicts preserving main resource plans, admission/identity guards, event source authority and submit-phase checkpoints.
-- [x] Renumber D1/DO migrations, preserve main applied prefix, update references.
-- [x] Single wake resolver defaults OFF, checked-in Wrangler OFF; real resolver red/green test.
-- [x] Correct saved MemoryRouter imports to installed react-router package; 92 tests pass.
-- [x] Retain30-minute Worker CI job bound and main's bounded-range contract test.
-- [x] Review exact secret-scan candidate bytes against main's reviewed baseline; add expiring moved-location entry only.
-- [x] Confirm side branch runtime changes represented; no blind cherry-picks.
-- [ ] Finish check:fast, final typecheck/build and full API/Workers/web/www/Go validation.
-- [ ] Complete specialist review and final source fixes.
-- [ ] Publish reviewed desktop/mobile evidence.
-- [ ] Refresh exact split inventory after final fixes and evidence files.
-- [ ] Open required draft CI PR; fill preflight/specialist evidence truthfully; get CI green without CodeRabbit.
+Draft CI PR: [#2073](https://github.com/raphaeltm/simple-agent-manager/pull/2073). The PR body is the live source for CI results and any subsequent follow-up. This document records the source reconciliation and exact cutting plan; it stays active for the parent’s later stack execution.
 
-Acceptance: pushed integration branch descends from both paused head and current main; all required checks pass; draft PR has migration table and exact seven-piece split; each piece <100 files and names shared-file hunk dependencies. Keep this task active: cutting and activation remain parent-owned.
+- Resumed existing integration at paused `0f150939f`; merged main `afef8d9a6` without rebasing. Pushed merge `0a8d9cecb` preserves both parents.
+- Resolved all 21 conflicts. Main resource-plan layering and aggregate capacity admission now survive through reserved submission. Ordinary task allocation permits its normal pending chat linkage; reserved and mismatched identities remain fenced.
+- Renumbered pending eventing D1/DO entries while preserving main’s applied prefix. Single wake resolver and checked-in Wrangler default OFF; actual resolver regression proved red before repair.
+- Repaired the paused MemoryRouter imports using the installed `react-router` package. Retained the bounded 30-minute Worker CI budget and main’s budget contract test. Exact moved secret-scan candidate bytes match main’s existing reviewed code identifier; only its expiring location digest was added.
+- Added a real SQLite→mailbox→adapter→node transport JWT-signing barrier regression: cancellation after preparation prevents physical fetch. Canonical alarm selection now clamps overdue timestamps to now and preserves future/empty results.
+- Aligned Worker placement fixtures with main’s observed hardware and effective pool authority; retained physical workspace/first-harness assertions. Extracted recovery context loading to preserve the 800-line file-size gate.
+- Independent local Cloudflare/security, Go/test, UI/doc/env/constitution and implementation/split reviews completed. The full inherited feature still requires the parent’s consolidated staging validation before activation.
 
-## Validation findings
+## Local validation
 
-Initial full API:728 files,9882 passed/16 failed; repairs in progress, not a green claim. Full web:306 files3655 tests passed,2 files failed import; corrected files now92/92. www unit49/49. VM all packages and CLI all packages passed; ACP race passed76.7% package coverage. Native Workers suite in progress. Local Events browser20/20 (375x667,1280x800); public site128-case run in progress. No live/staging evidence claimed.
+| Validation                                  | Result                                                                                                                                   |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm check:fast`                           | PASS: format ratchet, oxlint, 13 lint tasks, zero blocking type-boundary counts                                                          |
+| Workspace typecheck / build                 | PASS: 19 / 9 tasks                                                                                                                       |
+| API suite                                   | PASS: 729 files, 9,906 tests                                                                                                             |
+| Web suite                                   | PASS: 308 files, 3,747 tests                                                                                                             |
+| www unit / browser                          | PASS: 49 / 128 tests                                                                                                                     |
+| Events browser                              | PASS: 20 mobile/desktop scenarios; additional 320px overflow scenario passed                                                             |
+| VM-agent Go / CLI Go                        | PASS: all packages                                                                                                                       |
+| ACP race                                    | PASS: 76.7% package coverage; telemetry file 82.2%                                                                                       |
+| Quality scripts                             | PASS: 46 files, 612 tests                                                                                                                |
+| D1 / DO migration safety                    | PASS; migration compatibility 19 tests, deployment/workflow compatibility 22 tests                                                       |
+| Source AST / node-pool boundary / file-size | PASS; AST advisory warnings retained, zero errors                                                                                        |
+| Current-tree / PR-range secret scans        | PASS, zero new unreviewed findings                                                                                                       |
+| Workers                                     | Full initial diagnostic run plus corrected reserved/credential 54 and cleanup 17 focused cases; frozen-head full result tracked in PR CI |
 
-Additional integration fixes: main node-pool resource layering moved into reserved submission; final VM transport authority recheck closes reproduced JWT-signing revocation window; test SQL adapter now returns DELETE RETURNING rows; recovery fixture includes real running node. Ordinary task allocation linkage regression under repair.
+The initial broad runs found fixture/merge failures; the table records the subsequent successful reruns. An intermediate API run also emitted a Vitest console RPC teardown error; the final 729-file run completed without it. The initial Workers run overlapped a three-second local mutation test and is not represented as final frozen-head proof; remote CI provides that proof. No failed or interrupted run is counted as passing.
 
-Usage checked at06:28Z:39% of weekly Codex quota used. Stop near80%, push and record state if reached.
+[Reviewed screenshot inventory](../evidence/2026-09-13-eventing-integration/README.md): 26 retained captures cover every changed surface on mobile and desktop. All were visually reviewed. Browser APIs were mocked; no staging/production validation is claimed. UI rubric 4/4/4/4/5.
+
+Read-only Sonar verification found that the paused checkpoint `0f150939f` was analyzed after its handoff: quality gate OK, new-code duplication 2.7738621431131287% on 41,855 new lines (analysis 2026-09-07T14:45:35Z). The new draft’s analysis status is tracked separately in the PR; the paused result is not a current-head analysis claim.
+
+Usage checked at 06:44Z: 43% of weekly Codex quota used. Stop near 80%, push and record state if reached. No staging, main merge, PR #2031 mutation, CodeRabbit request, or SAM subtask dispatch occurred.
 
 ## Migration mapping
 
@@ -78,10 +89,10 @@ The following primary file lists partition every changed path exactly once. The 
 | Piece                                                                      | Primary files | Shared additional touches | Maximum listed footprint |
 | -------------------------------------------------------------------------- | ------------: | ------------------------: | -----------------------: |
 | 1. Foundation: ordered migrations, contracts, bounded storage              |            55 |                         2 |                       57 |
-| 2. Same-chat durable wake and mailbox integration, OFF                     |            27 |                         6 |                       33 |
+| 2. Same-chat durable wake and mailbox integration, OFF                     |            33 |                         7 |                       40 |
 | 3. Durable source outbox and GitHub/generic producers                      |            23 |                         6 |                       29 |
-| 4. Credential-limit telemetry and proxy accounting                         |            46 |                         0 |                       46 |
-| 5. Reserved submissions, schedules, watches, live trigger-path integration |            81 |                         4 |                       85 |
+| 4. Credential-limit telemetry and proxy accounting                         |            45 |                         0 |                       45 |
+| 5. Reserved submissions, schedules, watches, live trigger-path integration |            76 |                         4 |                       80 |
 | 6. Channels, member subscriptions, API/MCP surfaces                        |            24 |                         6 |                       30 |
 | 7. Events UI, remaining docs, and integration evidence                     |            67 |                         0 |                       67 |
 
@@ -166,11 +177,14 @@ Dependencies: piece 1. Migrations: none (047, 048, 052, 055 already present).
 
 Runtime: mailbox active-capacity enforcement, atomic acceptance/finalization, recovery authority/identity fences and reconciler changes apply to existing deliveries. Event wake engine is installed but dormant with PROJECT_EVENT_WAKE_ENABLED=false. Main's submitting-phase checkpoint and deferred terminal alarm behavior must remain. Risk: high (existing parent wake and session recovery paths).
 
-Hunks: add wake exports withheld from `project-events.ts`; add only event wake alarm hooks/authority RPCs and guarded failSession/linkSession behavior in ProjectData and the project-data service. Add source-task-guard propagation to `task-runner-do.ts` and TaskRunner types, without reserved-submission branches. In prompt-delivery-runner.ts defer the import/call of `invalidScheduledDeliveryTarget` and the scheduled_action-specific source guard until piece 5; retain combined parent/event validation and beforeSubmit checkpoint now. If sessions.ts contains reserved-initial-session construction, carry that method with piece 5; identity guard changes stay here. Tests in this piece must use actual default resolver for the dormant case and explicitly activate only positive wake scenarios.
+Hunks: add wake exports withheld from `project-events.ts`; add only event wake alarm hooks/authority RPCs and guarded failSession/linkSession behavior in ProjectData and the project-data service. Add source-task-guard propagation to `task-runner-do.ts` and TaskRunner types, without the `TaskRunnerStartGuard` import, startGuard config or reserved-submission branches. In TaskRunner `index.ts`, carry the switch to `isSessionRecoveryTaskAndEventAuthorized`, event/member config defaults, and `hasRecoveryAuthority` event ProjectData RPC validation now. Keep existing main failure handling; defer startGuard-specific `assertRecoveryAuthority` options/calls and queued-first-start/idempotency changes until piece 5.
+
+The full changed deltas of `node-agent.ts`, its create-workspace-timeout test, `node-lifecycle.ts`, `vm-agent-container.ts`, TaskRunner `helpers.ts` and `node-selection.ts` belong in piece 2. They propagate event batch authority and validate it at VM/container/node-allocation boundaries; waiting until pieces 4/5 would either fail typing on `beforeExternalMutation` or leave authority gaps. Optional requiredProjectMemberId support may travel additively with these guard implementations; scheduled deliveries still are not wired until piece 5. No credential telemetry implementation is present in the vm-agent-container.ts delta. In prompt-delivery-runner.ts defer the import/call of `invalidScheduledDeliveryTarget` and the scheduled_action-specific source guard until piece 5; retain combined parent/event validation and beforeSubmit checkpoint now. If sessions.ts contains reserved-initial-session construction, carry that method with piece 5; identity guard changes stay here. Tests in this piece must use actual default resolver for the dormant case and explicitly activate only positive wake scenarios.
 
 Exact primary file list:
 
 ```text
+apps/api/src/durable-objects/node-lifecycle.ts
 apps/api/src/durable-objects/project-data/attention-expiry.ts
 apps/api/src/durable-objects/project-data/durability-foundation.ts
 apps/api/src/durable-objects/project-data/mailbox.ts
@@ -183,6 +197,10 @@ apps/api/src/durable-objects/project-data/prompt-delivery.ts
 apps/api/src/durable-objects/project-data/reconciliation-candidates.ts
 apps/api/src/durable-objects/project-data/reconciliation.ts
 apps/api/src/durable-objects/project-data/sessions.ts
+apps/api/src/durable-objects/task-runner/helpers.ts
+apps/api/src/durable-objects/task-runner/node-selection.ts
+apps/api/src/durable-objects/vm-agent-container.ts
+apps/api/src/services/node-agent.ts
 apps/api/src/services/session-recovery-authority.ts
 apps/api/src/services/session-recovery-context.ts
 apps/api/src/services/session-recovery.ts
@@ -193,6 +211,7 @@ apps/api/tests/integration/session-recovery-handoff.test.ts
 apps/api/tests/unit/durable-objects/attention-expiry.test.ts
 apps/api/tests/unit/durable-objects/durable-prompt-delivery.test.ts
 apps/api/tests/unit/durable-objects/reconciliation.test.ts
+apps/api/tests/unit/services/node-agent-create-workspace-timeout.test.ts
 apps/api/tests/unit/services/session-recovery-event-boundaries.test.ts
 apps/api/tests/unit/services/vm-prompt-delivery-adapter.test.ts
 apps/api/tests/workers/mailbox-capacity.test.ts
@@ -206,6 +225,7 @@ Additional shared-file hunk touches (included in footprint):
 apps/api/src/durable-objects/project-data/alarm-schedule.ts
 apps/api/src/durable-objects/project-data/index.ts
 apps/api/src/durable-objects/project-data/project-events.ts
+apps/api/src/durable-objects/task-runner/index.ts
 apps/api/src/durable-objects/task-runner/types.ts
 apps/api/src/services/project-data.ts
 apps/api/src/services/task-runner-do.ts
@@ -269,7 +289,6 @@ All listed schema/runtime files belong here: splitting ACP report schema or runt
 Exact primary file list:
 
 ```text
-apps/api/src/durable-objects/vm-agent-container.ts
 apps/api/src/routes/ai-proxy-anthropic.ts
 apps/api/src/routes/ai-proxy-passthrough-errors.ts
 apps/api/src/routes/ai-proxy-passthrough-telemetry.ts
@@ -323,12 +342,11 @@ Dependencies: pieces 1–4. Migrations: none (0159, 0161, DO 051 already present
 
 Runtime: replaces normal trigger submission with durable reserved identities/checkpoints, fences revoked sessions and creator authority, wires one-off schedule/watch alarm runners and exposes schedule APIs/MCP tools. Existing trigger and task lifecycle paths now use the reconciled durable submission flow and source outbox hooks. Schedules/watches can execute after explicit creation; **the event-wake flag does not disable schedules**. Risk: highest (provisioning capacity, session identity, task starts, retry duplication). Keep main's node pools, placement snapshots, wake fixes, and creator/compute gates.
 
-Hunks: finish reserved-submission methods in sessions.ts/ProjectData/service; add scheduled_action guard and invalidScheduledDeliveryTarget to prompt runner now. Finish source recovery/submission integration only after reserved contract and storage are available. `index.ts`/MCP dispatch and tool-definition barrels receive schedule/watch imports, routes and cases only; channel/member cases remain for piece 6. Keep earlier retention/wake/outbox portions of alarm and scheduled handlers. Tests that mock service barrels must preserve real-module exports added earlier.
+Hunks: finish reserved-submission methods in sessions.ts/ProjectData/service; add scheduled_action guard and invalidScheduledDeliveryTarget to prompt runner now. Finish source recovery/submission integration only after reserved contract and storage are available. `index.ts`/MCP dispatch and tool-definition barrels receive schedule/watch imports, routes and cases only; channel/member cases remain for piece 6. Keep earlier retention/wake/outbox portions of alarm and scheduled handlers. Tests that mock service barrels must preserve real-module exports added earlier. Schedule MCP tools import `channelCallerContext`: introduce only that caller-authentication helper and its existing-main dependencies in `services/project-event-channels.ts` now; leave channel publish/follow/history wrappers and their ProjectData method calls for piece 6. Do not copy the full channel service into piece 5.
 
 Exact primary file list:
 
 ```text
-apps/api/src/durable-objects/node-lifecycle.ts
 apps/api/src/durable-objects/project-data/alarm-schedule.ts
 apps/api/src/durable-objects/project-data/index.ts
 apps/api/src/durable-objects/project-data/message-persistence.ts
@@ -342,9 +360,7 @@ apps/api/src/durable-objects/project-data/project-event-schedules-storage.ts
 apps/api/src/durable-objects/project-data/project-event-schedules-validation.ts
 apps/api/src/durable-objects/project-data/project-standing-watches-runner.ts
 apps/api/src/durable-objects/project-data/project-standing-watches-storage.ts
-apps/api/src/durable-objects/task-runner/helpers.ts
 apps/api/src/durable-objects/task-runner/index.ts
-apps/api/src/durable-objects/task-runner/node-selection.ts
 apps/api/src/durable-objects/task-runner/reserved-project-data-guard.ts
 apps/api/src/durable-objects/task-runner/session-linking.ts
 apps/api/src/durable-objects/task-runner/state-machine.ts
@@ -362,7 +378,6 @@ apps/api/src/routes/project-standing-watches.ts
 apps/api/src/routes/trigger-webhooks.ts
 apps/api/src/scheduled/handler.ts
 apps/api/src/scheduled/trigger-execution-cleanup.ts
-apps/api/src/services/node-agent.ts
 apps/api/src/services/project-data.ts
 apps/api/src/services/project-lifecycle-events.ts
 apps/api/src/services/reserved-task-session-revocations.ts
@@ -392,7 +407,6 @@ apps/api/tests/unit/routes/deployment-membership-auth.test.ts
 apps/api/tests/unit/routes/deployment-release-compose-submission.test.ts
 apps/api/tests/unit/routes/mcp.test.ts
 apps/api/tests/unit/routes/task-workspace-metering.test.ts
-apps/api/tests/unit/services/node-agent-create-workspace-timeout.test.ts
 apps/api/tests/unit/services/reserved-task-submission.test.ts
 apps/api/tests/unit/services/task-terminal-transition-hooks.test.ts
 apps/api/tests/unit/services/task-terminal-transition.test.ts
@@ -411,14 +425,12 @@ apps/api/tests/workers/trigger-execution-cleanup.test.ts
 scripts/quality/node-pool-boundary/inventory-data.ts
 ```
 
-Schedule MCP dependency: `routes/mcp/project-schedule-tools.ts` imports `channelCallerContext` from `services/project-event-channels.ts`. Piece 5 must carry that caller-context helper and its required imports only; leave channel API/storage functions to piece 6.
-
 Additional shared-file hunk touches (included in footprint):
 
 ```text
-apps/api/src/services/project-event-channels.ts
 apps/api/src/durable-objects/project-data/prompt-delivery-runner.ts
 apps/api/src/durable-objects/project-data/sessions.ts
+apps/api/src/services/project-event-channels.ts
 apps/api/src/services/session-recovery.ts
 ```
 
@@ -558,3 +570,11 @@ tasks/evidence/2026-09-13-eventing-integration/self-host-wizard-github-app-mobil
 - For each slice, compile and run its affected suites against its actual predecessor; this map has not executed those intermediate builds. Any newly required shared test fixture/import is another counted file, so recount before opening each PR.
 - Final union check: git diff --name-only origin/main at the approved integration head must equal the primary inventory plus any explicitly documented later validation/state artifacts. Each shared file final content must match the integration result, preserving main merge fixes.
 - Side-branch containment is a separate integration audit owned by the parent; this draft does not assert commit ancestry from file-name similarity.
+
+## Transport/recovery dependency audit follow-up
+
+Piece 2 now owns the node-agent transport callback and its VM/container race regression, NodeLifecycle event/source-member guard SQL, VmAgentContainer full event-authority revalidation, and both TaskRunner source-guard constructors. TaskRunner index is an explicitly counted shared hunk: event-aware authority, event/member config normalization and validation RPC land in piece 2, reserved startGuard semantics in piece 5.
+
+Remaining forward imports from piece-2 sources were checked: attention-expiry uses the existing main transitionTaskToTerminal interface; prompt-delivery/reconciliation use existing main message persistence; recovery uses the piece-2 hunk of task-runner-do; container/recovery authority/adapter use the piece-2 authority RPC and identity-guard hunk of project-data; helper/node-selection types use the piece-2 TaskRunConfig field additions. The sole import of a wholly absent later module, project-event-schedules-delivery, is explicitly withheld from prompt runner until piece 5.
+
+Schedule MCP tools also import channelCallerContext; the piece-5 shared helper hunk is preserved and documented, while channel service wrappers remain piece 6. This avoids creating a backwards schedule-to-channel implementation dependency. No code files were changed by this map audit.
