@@ -118,11 +118,11 @@ function createCredentialD1(overrides: Partial<TestEnv> = {}) {
       updated_at TEXT
     );
   `);
-  sqlite.exec(readFileSync(migrationPath('0156_project_event_source_outbox.sql'), 'utf8'));
-  sqlite.exec(readFileSync(migrationPath('0157_credential_limit_windows.sql'), 'utf8'));
-  sqlite.exec(readFileSync(migrationPath('0158_credential_limit_event_admissions.sql'), 'utf8'));
+  sqlite.exec(readFileSync(migrationPath('0157_project_event_source_outbox.sql'), 'utf8'));
+  sqlite.exec(readFileSync(migrationPath('0158_credential_limit_windows.sql'), 'utf8'));
+  sqlite.exec(readFileSync(migrationPath('0159_credential_limit_event_admissions.sql'), 'utf8'));
   sqlite.exec(
-    readFileSync(migrationPath('0160_project_event_source_outbox_durability.sql'), 'utf8')
+    readFileSync(migrationPath('0161_project_event_source_outbox_durability.sql'), 'utf8')
   );
   sqlite.prepare('INSERT INTO users (id) VALUES (?)').run('user-1');
   sqlite.prepare('INSERT INTO projects (id) VALUES (?)').run('project-1');

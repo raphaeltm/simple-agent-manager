@@ -24,7 +24,7 @@ Parent shared build and 18 Workers tests pass. Reconciliation/attention has 71 p
 
 ## Ownership and delivery
 
-A2 reserves additive DO migration **048** if needed; do not rewrite045 or rebuild tables. C2 may use **047** for server-derived audience after coordination. Later channel/schedule schema IDs belong to parent. B2 owns source outbox/D1 0160 and the missing attention fixture; C2 owns credential telemetry/D1 0158; D0 owns reserved submission/D1 0159. Do not edit their implementations. Coordinate shared physical-start guards with D0; no second generic queue or placement resolver. Parent resolves shared index/barrel conflicts.
+A2 reserves additive DO migration **048** if needed; do not rewrite045 or rebuild tables. C2 may use **047** for server-derived audience after coordination. Later channel/schedule schema IDs belong to parent. B2 owns source outbox/D1 0161 and the missing attention fixture; C2 owns credential telemetry/D1 0159; D0 owns reserved submission/D1 0160. Do not edit their implementations. Coordinate shared physical-start guards with D0; no second generic queue or placement resolver. Parent resolves shared index/barrel conflicts.
 
 Read all original sectionA/R6 requirements as well as these defects. Validate real workerd/D1 boundaries, existing mailbox/task-wait/reconciliation/attention/access/sleep/archive behavior, migration safety, API lint/typecheck and file sizes. Build shared first; measure rows, scans and wall bounds. Push an early recoverable checkpoint before heavy checks and serialize processes. Use independent local Cloudflare/security reviewers where available; if unavailable, report that so parent review supplies it, rather than calling self-review independent.
 

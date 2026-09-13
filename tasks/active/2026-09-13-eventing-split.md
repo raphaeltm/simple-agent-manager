@@ -11,6 +11,7 @@ DO NOT MERGE. Phases 1–5 only. No staging deployment, no merge to main, no Cod
 Draft CI PR: [#2073](https://github.com/raphaeltm/simple-agent-manager/pull/2073). The PR body is the live source for CI results and any subsequent follow-up. This document records the source reconciliation and exact cutting plan; it stays active for the parent’s later stack execution.
 
 - Resumed existing integration at paused `0f150939f`; merged main `afef8d9a6` without rebasing. Pushed merge `0a8d9cecb` preserves both parents.
+- Subsequently merged current main `ef3fe1825` (#2069 and #2071) cleanly after CI caught the new main migration collision. Updated validation after that merge is tracked in the PR body.
 - Resolved all 21 conflicts. Main resource-plan layering and aggregate capacity admission now survive through reserved submission. Ordinary task allocation permits its normal pending chat linkage; reserved and mismatched identities remain fenced.
 - Renumbered pending eventing D1/DO entries while preserving main’s applied prefix. Single wake resolver and checked-in Wrangler default OFF; actual resolver regression proved red before repair.
 - Repaired the paused MemoryRouter imports using the installed `react-router` package. Retained the bounded 30-minute Worker CI budget and main’s budget contract test. Exact moved secret-scan candidate bytes match main’s existing reviewed code identifier; only its expiring location digest was added.
@@ -46,17 +47,21 @@ Usage checked at 07:06Z: 48% of weekly Codex quota used. Stop near 80%, push and
 
 ## Migration mapping
 
-Neither environment has applied the eventing names; rename only the pending eventing entries. Main D1 through0155 and DO through046 remain unchanged. All migrations belong to split piece1 so subsequent pieces never insert earlier entries into applied order.
+### Migration allocation update after current-main advance
+
+During integration CI, current main advanced to `ef3fe1825` and introduced `0156_archive_sweep_consecutive_budget_stalls.sql` in #2069. The duplicate `0156` ordering check correctly failed. Integration merged that main update and preserved its applied migration allocation. Because eventing migrations remain unapplied, their final D1 allocation is now **0157–0163** (original paused branch **0144–0150**), preserving relative order. The earlier integration allocation0156–0162 is superseded. DO eventing allocations remain **047–056**, after unchanged main045/046. The mapping and split lists above reflect the final allocation.
+
+Neither environment has applied the eventing names; rename only the pending eventing entries. Main D1 through0156 and DO through046 remain unchanged. All migrations belong to split piece1 so subsequent pieces never insert earlier entries into applied order.
 
 | Store | Old pending name                                    | New pending name                                    |
 | ----- | --------------------------------------------------- | --------------------------------------------------- |
-| D1    | `0144_project_event_source_outbox`                  | `0156_project_event_source_outbox`                  |
-| D1    | `0145_credential_limit_windows`                     | `0157_credential_limit_windows`                     |
-| D1    | `0146_credential_limit_event_admissions`            | `0158_credential_limit_event_admissions`            |
-| D1    | `0147_task_submission_checkpoints`                  | `0159_task_submission_checkpoints`                  |
-| D1    | `0148_project_event_source_outbox_durability`       | `0160_project_event_source_outbox_durability`       |
-| D1    | `0149_reserved_task_session_revocations`            | `0161_reserved_task_session_revocations`            |
-| D1    | `0150_project_event_source_outbox_exhaustion_index` | `0162_project_event_source_outbox_exhaustion_index` |
+| D1    | `0144_project_event_source_outbox`                  | `0157_project_event_source_outbox`                  |
+| D1    | `0145_credential_limit_windows`                     | `0158_credential_limit_windows`                     |
+| D1    | `0146_credential_limit_event_admissions`            | `0159_credential_limit_event_admissions`            |
+| D1    | `0147_task_submission_checkpoints`                  | `0160_task_submission_checkpoints`                  |
+| D1    | `0148_project_event_source_outbox_durability`       | `0161_project_event_source_outbox_durability`       |
+| D1    | `0149_reserved_task_session_revocations`            | `0162_reserved_task_session_revocations`            |
+| D1    | `0150_project_event_source_outbox_exhaustion_index` | `0163_project_event_source_outbox_exhaustion_index` |
 | DO    | `045-project-event-wake-delivery`                   | `047-project-event-wake-delivery`                   |
 | DO    | `046-project-event-wake-retention-indexes`          | `048-project-event-wake-retention-indexes`          |
 | DO    | `047-project-event-server-derived-audience`         | `049-project-event-server-derived-audience`         |
@@ -74,15 +79,15 @@ Both `pnpm quality:migration-safety` and `pnpm quality:do-migration-safety` pass
 
 - `sam/implement-core-event-retention-cjketx`: `c1ff1c719` corresponds to integrated `8d4ebdb50`; 24 file patches byte-identical, remaining code differences only integration context around concurrent env/constants changes. No missing retention/wake implementation found. Its extra `fc72bcfe0` only lowers local reasoning effort xhigh→high and adds workspace trust in `.codex/config.toml`; intentionally excluded from feature integration.
 - `sam/fix-event-source-outbox-sp4b5p`: `26772e077` and `3bfb8a15a` correspond to integrated `27834faf2` and `a991a7ccb`. Added implementation lines match; differences are integration context and task checkboxes. `bb343c3d1` final fixes are superseded by later integrated repairs: live final lease fencing (`project-event-source-outbox.ts:286`), indexed exhaustion (`project-event-source-outbox-reconcile-helpers.ts:83`), credential predecessor CAS capture (`project-event-source-outbox.ts:94`), canonical resolver/timeout (`project-event-source-outbox-contract.ts:331`), shared sweep mutation/deadline accounting (`project-event-source-outbox.ts:540`). Workers durability tests retain credential capture and live-final/abandoned lease regressions (`project-event-source-outbox-durability.test.ts:376,502`). No missing runtime fix identified.
-- Literal exception: `bb343c3d1` removed the active-attempts index from the existing migration and schema. Integration preserves that index and appends the exhaustion index (now D1 `0162`) instead. Do not blindly cherry-pick the old migration edit. The old extracted `project-event-source-outbox-config.ts` is superseded by the canonical contract module, not missing behavior.
+- Literal exception: `bb343c3d1` removed the active-attempts index from the existing migration and schema. Integration preserves that index and appends the exhaustion index (now D1 `0163`) instead. Do not blindly cherry-pick the old migration edit. The old extracted `project-event-source-outbox-config.ts` is superseded by the canonical contract module, not missing behavior.
 
 Evidence: `git cherry HEAD <side>` reports 3 outbox and 2 retention non-equivalent commits, so ancestry alone does not prove inclusion. Compared full per-file patches for predecessor pairs, their added lines, and final runtime code/test scenarios. No side branch was modified.
 
 # Eventing integration split map (draft)
 
-Basis: current reconciled working diff against origin/main `afef8d9a6f538c1f08304325efccac0841deeb1e`; captured during merge validation. The inventory contains 323 distinct changed files. This is a cutting plan, not proof that seven intermediate builds already passed. Refresh the inventory at the final integration SHA before cutting.
+Basis: current reconciled working diff against origin/main `ef3fe1825a45abf7728400ba4cdffcec7b749f34`; captured during merge validation. The inventory contains 323 distinct changed files. This is a cutting plan, not proof that seven intermediate builds already passed. Refresh the inventory at the final integration SHA before cutting.
 
-Target: stack onto sam/eventing-feature, starting at main. No deployment or merge authorization is implied. Each slice must independently pass applicable migration safety, typecheck and tests before its successor is cut. Do not cherry-pick the 105-commit history wholesale.
+Target: stack onto sam/eventing-feature after updating its base to current main `ef3fe1825` (the feature branch itself was not modified by this task). No deployment or merge authorization is implied. Each slice must independently pass applicable migration safety, typecheck and tests before its successor is cut. Do not cherry-pick the 105-commit history wholesale.
 
 The following primary file lists partition every changed path exactly once. The additional shared-file lists enumerate earlier/later hunk touches; counts include those touches. A primary owner receives the remaining feature-specific hunks, not permission to overwrite earlier pieces. All seven pieces stay under 100 files.
 
@@ -98,7 +103,7 @@ The following primary file lists partition every changed path exactly once. The 
 
 ## 1. Foundation: ordered migrations, contracts, bounded storage
 
-Dependencies: current main only. Carries **all seven D1 migrations 0156–0162 and all ten DO migrations 047–056**, in numeric order. This deliberately moves schedule/channel/credential schema earlier than the corresponding feature to avoid later appending a lower migration number. `project-event-schedules-schema.ts` must accompany migrations.ts because migration 051 imports it. Shared type/constant barrels also ship together.
+Dependencies: current main only. Carries **all seven D1 migrations 0157–0163 and all ten DO migrations 047–056**, in numeric order. This deliberately moves schedule/channel/credential schema earlier than the corresponding feature to avoid later appending a lower migration number. `project-event-schedules-schema.ts` must accompany migrations.ts because migration 051 imports it. Shared type/constant barrels also ship together.
 
 Runtime: additive schema, core admission/read/retention/accounting changes; retention may run against existing event data. It is not literally no-op: bounded retention and active-mailbox capacity accounting change storage behavior. No event prompt materialization; resolver and wrangler flag remain false. Risk: medium (SQLite/D1 compatibility and retention correctness).
 
@@ -110,13 +115,13 @@ Exact primary file list:
 
 ```text
 apps/api/.env.example
-apps/api/src/db/migrations/0156_project_event_source_outbox.sql
-apps/api/src/db/migrations/0157_credential_limit_windows.sql
-apps/api/src/db/migrations/0158_credential_limit_event_admissions.sql
-apps/api/src/db/migrations/0159_task_submission_checkpoints.sql
-apps/api/src/db/migrations/0160_project_event_source_outbox_durability.sql
-apps/api/src/db/migrations/0161_reserved_task_session_revocations.sql
-apps/api/src/db/migrations/0162_project_event_source_outbox_exhaustion_index.sql
+apps/api/src/db/migrations/0157_project_event_source_outbox.sql
+apps/api/src/db/migrations/0158_credential_limit_windows.sql
+apps/api/src/db/migrations/0159_credential_limit_event_admissions.sql
+apps/api/src/db/migrations/0160_task_submission_checkpoints.sql
+apps/api/src/db/migrations/0161_project_event_source_outbox_durability.sql
+apps/api/src/db/migrations/0162_reserved_task_session_revocations.sql
+apps/api/src/db/migrations/0163_project_event_source_outbox_exhaustion_index.sql
 apps/api/src/db/schema.ts
 apps/api/src/durable-objects/migrations.ts
 apps/api/src/durable-objects/project-data/mailbox-capacity.ts
@@ -235,7 +240,7 @@ apps/api/src/services/task-runner-do.ts
 
 ## 3. Durable source outbox and GitHub/generic producers
 
-Dependencies: pieces 1–2. Migrations: none (0156, 0160, 0162 already present).
+Dependencies: pieces 1–2. Migrations: none (0157, 0161, 0163 already present).
 
 Runtime: source intents persist in D1 and retry through outbox; GitHub check_run/check_suite/workflow_run/review and configured generic webhook forwarding begin recording events. App manifest/setup permissions and event read trust fences align with producers. This is live ingress/admission, but does not change normal trigger task submission or enable wake. Risk: medium/high (idempotency, HMAC/auth, private event payloads, exhaustion and retry liveness).
 
@@ -285,7 +290,7 @@ apps/www/src/pages/self-host/index.astro
 
 ## 4. Credential-limit telemetry and proxy accounting
 
-Dependencies: pieces 1–3. Migrations: none (0157, 0158, DO 054 already present).
+Dependencies: pieces 1–3. Migrations: none (0158, 0159, DO 054 already present).
 
 Runtime: VM-agent usage reports, credential reference/generation attribution, observed provider limit windows, threshold events, and proxy accounting become live. Agent runtime credential/proxy handshake and callback schemas ship together. Wake remains OFF. Risk: high (credential privacy/authorization, billing attribution, Go/API compatibility). Run Go race/usage tests plus real-JWT callback and proxy accounting suites. Missing observations must not become fabricated quota authority.
 
@@ -351,7 +356,7 @@ apps/api/tests/unit/services/project-event-source-outbox.test.ts
 
 ## 5. Reserved submissions, schedules, watches, live trigger-path integration
 
-Dependencies: pieces 1–4. Migrations: none (0159, 0161, DO 051 already present).
+Dependencies: pieces 1–4. Migrations: none (0160, 0162, DO 051 already present).
 
 Runtime: replaces normal trigger submission with durable reserved identities/checkpoints, fences revoked sessions and creator authority, wires one-off schedule/watch alarm runners and exposes schedule APIs/MCP tools. Existing trigger and task lifecycle paths now use the reconciled durable submission flow and source outbox hooks. Schedules/watches can execute after explicit creation; **the event-wake flag does not disable schedules**. Risk: highest (provisioning capacity, session identity, task starts, retry duplication). Keep main's node pools, placement snapshots, wake fixes, and creator/compute gates.
 
@@ -583,7 +588,7 @@ tasks/evidence/2026-09-13-eventing-integration/self-host-wizard-github-app-mobil
 
 ## Cut verification and coupling checks
 
-- Run migration safety after piece 1 and each successor. DO migration entries 001–046 and main D1 files through 0155 remain byte/order compatible. Do not defer a lower numbered branch migration until a later feature.
+- Run migration safety after piece 1 and each successor. DO migration entries 001–046 and main D1 files through 0156 remain byte/order compatible. Do not defer a lower numbered branch migration until a later feature.
 - Inspect actual added imports at each cut: project-events.ts exports wake modules (piece 2); migrations.ts imports schedule schema (piece 1); prompt runner imports scheduled validation (piece 5); schedule runner imports submitReservedTask (piece 5); lifecycle helper imports source outbox (piece 3). These are concrete reasons whole-file partitioning alone is insufficient.
 - Re-run the focused default resolver scheduler tests after every shared entry-point edit. Default false must be resolved from an empty environment, with explicit true positive control. Main submitting-phase persistence and source authority checks must stay on the real adapter path.
 - For each slice, compile and run its affected suites against its actual predecessor; this map has not executed those intermediate builds. Any newly required shared test fixture/import is another counted file, so recount before opening each PR.

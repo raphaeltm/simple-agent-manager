@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Env as WorkerEnv } from '../../src/env';
 import { D1_MAX_BOUND_PARAMETERS } from '../../src/lib/d1-limits';
+import { ARCHIVE_WRITE_FIXED_RESERVATION } from '../../src/project-data-archive/write-budget';
 import {
   abandonProjectDataArchiveMigration,
   copyBackProjectDataArchiveMigration,
@@ -761,5 +762,585 @@ describe('ProjectData archive-sharding bridge in the Workers runtime', () => {
         }
       );
     });
+  });
+});
+
+/**
+ * The 2026-09-08 -> 2026-09-12 production standstill: `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET`
+ * was lowered to 100000 through a GitHub `production` Environment override while
+ * `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` stayed at the checked-in 5000. The affordability
+ * ceiling became 3093 write units while selection still admitted 5000-message candidates, and
+ * `ORDER BY message_count DESC LIMIT 1` picked the same 4994-message session every hour,
+ * estimated ~160,808 writes, was refused before `reserveArchiveWrites` touched D1, and
+ * `continue`d out of a one-element list. No journal row, no location change, no error — and
+ * `last_status = 'succeeded'` for 226 runs while the object climbed from 94% to 96.7%.
+ *
+ * Every test here drives the real `runProjectDataArchiveSharding` against real DO SQLite and
+ * real D1 so selection, estimation and reservation all run for themselves (`.claude/rules/62`).
+ * None of them tells the sweep which candidate to take. A fixture seeded only with affordable
+ * candidates would have passed throughout the outage, so each one seeds a mix and asserts on
+ * which session actually moved.
+ */describe('archive sweep affordability ceiling and budget fall-through', () => {
+  /**
+   * Per-session message ids. The shared `seedMessages` helper numbers its ids from zero, so
+   * two sessions in the same Durable Object collide on `messageId` and the second one silently
+   * persists only its non-overlapping tail — which quietly changes the `message_count` a
+   * candidate is ranked and filtered by.
+   */
+  function messagesFor(prefix: string, count: number, filler = 0) {
+    return Array.from({ length: count }, (_, index) => ({
+      messageId: `${prefix}-${String(index).padStart(4, '0')}`,
+      role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+      content: `${prefix} payload ${index}${filler > 0 ? ` ${'h'.repeat(filler)}` : ''}`,
+      toolMetadata: null,
+      timestamp: new Date(2_000_000 + index * 1_000).toISOString(),
+      sequence: index + 1,
+    }));
+  }
+
+  type SeededSession = { sessionId: string; messageCount: number; estimate: number };
+
+  /**
+   * Seed one terminal session and read back BOTH numbers the sweep reasons about: the
+   * `session_summaries.message_count` it selects and ranks by, and the write estimate the
+   * real Durable Object computes for it. Every fixture below is sized from these measurements
+   * rather than from assumed message sizes, so a change to the grouping rule or to the FTS
+   * unit size makes the preconditions fail loudly instead of silently moving the boundary.
+   *
+   * Measuring the cost model is not the same as telling the sweep what to pick: the sweep
+   * still runs its own selection, its own estimate and its own reservation.
+   */
+  async function seedTerminalSession(
+    source: DurableObjectStub<ProjectDataTestDouble>,
+    prefix: string,
+    count: number,
+    filler = 0
+  ): Promise<SeededSession> {
+    const sessionId = await source.createSession(null, prefix);
+    await source.persistMessageBatch(sessionId, messagesFor(prefix, count, filler));
+    await source.stopSession(sessionId);
+    await source.runSummarySyncForTest();
+    const estimate = await source.archiveSourceEstimateWrites(
+      sessionId,
+      1,
+      Number.MAX_SAFE_INTEGER
+    );
+    const row = await env.DATABASE.prepare(
+      'SELECT message_count FROM session_summaries WHERE id = ?'
+    )
+      .bind(sessionId)
+      .first<{ message_count: number }>();
+    if (!row) throw new Error(`No session_summaries row for ${prefix}`);
+    return { sessionId, messageCount: row.message_count, estimate };
+  }
+
+  /**
+   * Tests in this file share one D1, and EVERY input `selectMigrationWork` reads is global:
+   *
+   * - `selectCandidates` ranks across all projects (that global ranking is the behaviour
+   *   under test), so an earlier fixture competes for this tick's one session slot.
+   * - `selectReclaimableMigrations` is also global and is served FIRST, so one leftover
+   *   in-flight journal consumes `sweepSessions` outright and leaves `pending` empty —
+   *   the sweep then migrates nothing for a reason that has nothing to do with the budget.
+   * - `project_data_archive_write_budget` is a single `'global'` row keyed only by UTC
+   *   window, so an earlier test's reservations are still charged against this one.
+   *
+   * Clearing all three is fixture hygiene, not hand-feeding: within the project the sweep
+   * still sees a mix of candidates and chooses for itself, and it still spends the allowance
+   * itself. It also makes these tests independent of whether an earlier test PASSED, which
+   * the first draft was not — a failure upstream perturbed them into failing for unrelated
+   * reasons, which is exactly the sort of coupling that makes a red suite unreadable.
+   */
+  async function isolateSweepFixture(projectId: string): Promise<void> {
+    await env.DATABASE.batch([
+      env.DATABASE.prepare('DELETE FROM session_summaries WHERE project_id != ?').bind(projectId),
+      env.DATABASE.prepare('DELETE FROM project_data_archive_migrations WHERE project_id != ?').bind(
+        projectId
+      ),
+      env.DATABASE.prepare(
+        'DELETE FROM project_data_session_locations WHERE project_id != ?'
+      ).bind(projectId),
+      env.DATABASE.prepare('DELETE FROM project_data_archive_write_budget'),
+    ]);
+  }
+
+  async function readCadence() {
+    return env.DATABASE.prepare(
+      `SELECT last_status, last_error, consecutive_budget_stalls, run_count
+       FROM project_data_archive_global_sweep_cadence
+       WHERE sweep_name = 'archive_sharding_global_sweep'`
+    ).first<{
+      last_status: string;
+      last_error: string | null;
+      consecutive_budget_stalls: number;
+      run_count: number;
+    }>();
+  }
+
+  async function newArchiveProject(prefix: string) {
+    const projectId = `${prefix}-${crypto.randomUUID()}`;
+    await seedProjectGraph(projectId);
+    const source = projectDataStub(projectId);
+    await source.ensureProjectId(projectId);
+    return { projectId, source };
+  }
+
+  it('migrates an affordable session when the largest eligible one exceeds the whole allowance', async () => {
+    await clearArchiveCadence();
+    const { projectId, source } = await newArchiveProject('archive-ceiling');
+
+    // Production's shape: one candidate far above what the allowance can pay for, sorting
+    // first under `ORDER BY message_count DESC`, and several affordable ones behind it.
+    const unaffordable = await seedTerminalSession(source, 'unaffordable', 400);
+    const largestAffordable = await seedTerminalSession(source, 'affordable-a', 40);
+    const midAffordable = await seedTerminalSession(source, 'affordable-b', 30);
+    const smallAffordable = await seedTerminalSession(source, 'affordable-c', 20);
+    await isolateSweepFixture(projectId);
+
+    // factor 1 keeps write units and estimate arithmetic legible, and 0% assumed overhead
+    // makes the derived ceiling exactly the affordable unit count.
+    const allowance = largestAffordable.estimate;
+    const affordableWriteUnits = allowance - ARCHIVE_WRITE_FIXED_RESERVATION;
+
+    // Fixture preconditions: the mix must actually straddle the boundary. Without these the
+    // test could stop testing anything if the grouping rule or FTS unit size changed, and
+    // would then pass while proving nothing (`.claude/rules/69`).
+    expect(unaffordable.estimate).toBeGreaterThan(allowance);
+    expect(unaffordable.messageCount).toBe(400);
+    expect(largestAffordable.messageCount).toBe(40);
+    expect(affordableWriteUnits).toBeGreaterThanOrEqual(largestAffordable.messageCount);
+    expect(affordableWriteUnits).toBeLessThan(unaffordable.messageCount);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        // The deployed production selection shape: one project, one session slot.
+        PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+        // The drifted value, left deliberately high: the derived ceiling must override it.
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000',
+        PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+        PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+      },
+      async () => {
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
+
+        // The whole point: the tick made progress instead of stalling on the big session.
+        expect(stats).toMatchObject({ skipped: false, migrated: 1, failed: 0 });
+        expect(stats.messageCeiling).toBe(affordableWriteUnits);
+        expect(stats.affordableWriteUnits).toBe(affordableWriteUnits);
+        // The oversized session never reached `reserve()` at all — the derived ceiling
+        // removed it from selection, so no budget refusal was needed to skip it.
+        expect(stats.budgetUnaffordable).toBe(0);
+
+        // Largest-first is preserved WITHIN the affordable set: the 40-message session moved,
+        // not one of the smaller ones. Ranking still matches the sweep's purpose
+        // (`.claude/rules/65`) — the fixed 1000-unit reservation makes bigger sessions the
+        // more efficient use of the allowance.
+        expect(await readLocation(projectId, largestAffordable.sessionId)).toMatchObject({
+          location_state: 'archive_shard',
+        });
+        // Liveness controls: everything else is still exactly where it was, and in particular
+        // the unaffordable session is readable in root rather than fenced `migrating`.
+        expect(await readLocation(projectId, unaffordable.sessionId)).toBeNull();
+        expect(await readLocation(projectId, midAffordable.sessionId)).toBeNull();
+        expect(await readLocation(projectId, smallAffordable.sessionId)).toBeNull();
+        expect(await source.getMessageCount(unaffordable.sessionId)).toBe(400);
+
+        // The sweep's own liveness signal advanced, and the cadence row is clean.
+        expect(await readCadence()).toMatchObject({
+          last_status: 'succeeded',
+          last_error: null,
+          consecutive_budget_stalls: 0,
+        });
+      }
+    );
+  });
+
+  it('falls through to a smaller candidate when the top candidate passes the ceiling but the budget refuses it', async () => {
+    await clearArchiveCadence();
+    const { projectId, source } = await newArchiveProject('archive-fallthrough');
+
+    // Two sessions with almost identical `message_count`, so NO message-count-derived ceiling
+    // can separate them — but wildly different real cost, because the estimate also charges
+    // for grouped rows and FTS bytes. This is the residual error the derived ceiling cannot
+    // remove, and the case the fall-through exists for.
+    const heavy = await seedTerminalSession(source, 'heavy', 21, 48 * 1024);
+    const light = await seedTerminalSession(source, 'light', 20);
+    await isolateSweepFixture(projectId);
+
+    const allowance = light.estimate;
+    const affordableWriteUnits = allowance - ARCHIVE_WRITE_FIXED_RESERVATION;
+
+    // Preconditions: the heavy session must sort FIRST, must PASS the derived ceiling (so the
+    // ceiling cannot be what skips it), and must still be unaffordable.
+    expect(heavy.messageCount).toBeGreaterThan(light.messageCount);
+    expect(affordableWriteUnits).toBeGreaterThanOrEqual(heavy.messageCount);
+    expect(heavy.estimate).toBeGreaterThan(allowance);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
+        // ONE session slot, exactly as production ran. With a slot-sized candidate read the
+        // refusal below would end the tick; the over-fetch is the only thing that supplies a
+        // smaller candidate to descend to.
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000',
+        PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+        PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+        PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '5',
+      },
+      async () => {
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
+
+        expect(stats).toMatchObject({ skipped: false, migrated: 1, failed: 0 });
+        // The heavy session WAS tried and refused — that is what the descent is descending
+        // from. Asserting it proves the fall-through ran, rather than the ceiling having
+        // quietly excluded the heavy session after all.
+        expect(stats.budgetUnaffordable).toBe(1);
+        expect(stats.budgetWindowExhausted).toBe(0);
+
+        expect(await readLocation(projectId, light.sessionId)).toMatchObject({
+          location_state: 'archive_shard',
+        });
+        // The refused candidate opened no `migrating` fence, so it stays readable in root and
+        // is a candidate again next tick.
+        expect(await readLocation(projectId, heavy.sessionId)).toBeNull();
+        expect(await source.getMessageCount(heavy.sessionId)).toBe(heavy.messageCount);
+
+        // One refusal is not a stall: the tick migrated something.
+        expect(await readCadence()).toMatchObject({
+          last_status: 'succeeded',
+          consecutive_budget_stalls: 0,
+        });
+      }
+    );
+  });
+
+  it('stops reporting succeeded after consecutive sweeps that can afford nothing, and resets once one lands', async () => {
+    await clearArchiveCadence();
+    const { projectId, source } = await newArchiveProject('archive-stall');
+
+    const heavy = await seedTerminalSession(source, 'heavy-only', 12, 48 * 1024);
+    await isolateSweepFixture(projectId);
+
+    // An allowance that admits the session by message_count but never by cost. The derived
+    // ceiling cannot exclude it, so every tick reaches `reserve()` and is refused with
+    // `exceeds_allowance` — the deadlock signature.
+    const allowance = ARCHIVE_WRITE_FIXED_RESERVATION + 100;
+    expect(allowance - ARCHIVE_WRITE_FIXED_RESERVATION).toBeGreaterThanOrEqual(heavy.messageCount);
+    expect(heavy.estimate).toBeGreaterThan(allowance);
+
+    const stallEnv = {
+      PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+      PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+      PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+      PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
+      PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+      PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000',
+      PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+      PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+      PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '1000',
+      PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS: '3',
+      PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '5',
+    } as const;
+
+    const base = Date.now() + 60_000;
+    await withArchiveEnv(stallEnv, async () => {
+      // Below the threshold the sweep still reports succeeded: an occasional unaffordable
+      // candidate is expected, because the ceiling is derived from an ASSUMED overhead.
+      for (const [index, tick] of [base, base + 10_000].entries()) {
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(tick));
+        expect(stats).toMatchObject({ migrated: 0, budgetUnaffordable: 1 });
+        expect(await readCadence()).toMatchObject({
+          last_status: 'succeeded',
+          last_error: null,
+          consecutive_budget_stalls: index + 1,
+        });
+      }
+
+      await runProjectDataArchiveSharding(testEnv, new Date(base + 20_000));
+      const stalled = await readCadence();
+      expect(stalled).toMatchObject({ last_status: 'partial', consecutive_budget_stalls: 3 });
+      // The message must name the recovery action, not just the symptom (`.claude/rules/72`),
+      // and must say that waiting will not help — that was the false signal for four days.
+      expect(stalled?.last_error).toContain('Waiting will not clear this');
+      expect(stalled?.last_error).toContain('PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET');
+      expect(stalled?.last_error).toContain('PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET');
+    });
+
+    // Control: a sweep that DOES migrate resets the streak, so an alert always describes a
+    // CURRENT run of stuck ticks rather than accumulating for the object's lifetime
+    // (`.claude/rules/61`).
+    await withArchiveEnv(
+      { ...stallEnv, PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(heavy.estimate) },
+      async () => {
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(base + 30_000));
+        expect(stats).toMatchObject({ migrated: 1, budgetUnaffordable: 0 });
+        expect(await readLocation(projectId, heavy.sessionId)).toMatchObject({
+          location_state: 'archive_shard',
+        });
+        expect(await readCadence()).toMatchObject({
+          last_status: 'succeeded',
+          last_error: null,
+          consecutive_budget_stalls: 0,
+        });
+      }
+    );
+  });
+
+  /**
+   * The over-fetch must widen what the tick can CHOOSE from, never what it may DO.
+   *
+   * `sweepSessions` bounds how many sessions a tick fences `migrating`, which is the bound
+   * that keeps one tick's copy work inside its wall-time budget. Reading spare candidates for
+   * fall-through must not quietly turn that into "everything we read" — the first cut of this
+   * change computed the slot count and then forgot to pass it, so the bound fell back to the
+   * whole over-fetched list and was enforced only incidentally by the message budget.
+   */
+  it('journals at most sweepSessions candidates even when the over-fetch returns more affordable ones', async () => {
+    await clearArchiveCadence();
+    const { projectId, source } = await newArchiveProject('archive-slot-bound');
+
+    const seeded = [];
+    for (let index = 0; index < 6; index++) {
+      seeded.push(await seedTerminalSession(source, `slot-${index}`, 10));
+    }
+    await isolateSweepFixture(projectId);
+
+    // Nothing else may bind: the allowance affords every candidate many times over and the
+    // cumulative message budget is far above their total, so `sweepSessions` is the only
+    // thing that can stop the loop. Without that, this test cannot attribute the result.
+    const totalMessages = seeded.reduce((sum, entry) => sum + entry.messageCount, 0);
+    const allowance = 1_000_000;
+    expect(seeded).toHaveLength(6);
+    expect(totalMessages).toBeLessThan(5_000);
+    for (const entry of seeded) expect(entry.estimate).toBeLessThan(allowance / 6);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '2',
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000',
+        PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+        PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+        PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '5',
+        // Generous, so a slow fixture cannot mask the slot bound by running out of time.
+        PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '30000',
+      },
+      async () => {
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
+        expect(stats).toMatchObject({ skipped: false, migrated: 2, failed: 0 });
+
+        const archived = [];
+        for (const entry of seeded) {
+          const location = await readLocation(projectId, entry.sessionId);
+          if (location?.location_state === 'archive_shard') archived.push(entry.sessionId);
+        }
+        // Exactly two fences opened, and the other four are untouched and still readable in
+        // root — the liveness half, so "2" cannot be satisfied by the sweep half-failing.
+        expect(archived).toHaveLength(2);
+        expect(6 - archived.length).toBe(4);
+        for (const entry of seeded) {
+          if (archived.includes(entry.sessionId)) continue;
+          expect(await source.getMessageCount(entry.sessionId)).toBe(entry.messageCount);
+        }
+      }
+    );
+  });
+
+  /**
+   * A refused candidate moved no rows, so it must not spend any of the tick's cumulative
+   * message budget either.
+   *
+   * This is the half of the packer that a "did it migrate?" assertion cannot see: committing
+   * the budget on admission rather than on success still migrates SOMETHING, just fewer
+   * things, and every other test in this file has at most one candidate that can succeed —
+   * so all of them stay green with the invariant broken. The discriminating shape is a large
+   * refused candidate followed by smaller ones whose CUMULATIVE size only fits if the refused
+   * one was not counted.
+   */
+  it('does not charge the cumulative message budget for a candidate the write budget refused', async () => {
+    await clearArchiveCadence();
+    const { projectId, source } = await newArchiveProject('archive-packer-commit');
+
+    // Sorts first (highest message_count) and is far too expensive to reserve, because its
+    // grouped FTS bytes dominate the estimate rather than its row count.
+    const refused = await seedTerminalSession(source, 'refused', 21, 128 * 1024);
+    const small = [
+      await seedTerminalSession(source, 'small-a', 10),
+      await seedTerminalSession(source, 'small-b', 10),
+      await seedTerminalSession(source, 'small-c', 10),
+    ];
+    await isolateSweepFixture(projectId);
+
+    const allowance = ARCHIVE_WRITE_FIXED_RESERVATION + 3_000;
+    const smallTotalMessages = small.reduce((sum, entry) => sum + entry.messageCount, 0);
+    const smallTotalEstimate = small.reduce((sum, entry) => sum + entry.estimate, 0);
+    // Cumulative budget that fits all three small sessions, but NOT the refused one plus even
+    // a single small one. Without commit-on-success, the refused candidate eats 21 of the 35
+    // and only one small session can follow.
+    const messageBudget = smallTotalMessages + 5;
+
+    expect(refused.messageCount).toBeGreaterThan(small[0]!.messageCount);
+    expect(refused.estimate).toBeGreaterThan(allowance);
+    expect(smallTotalEstimate).toBeLessThanOrEqual(allowance);
+    expect(refused.messageCount + small[0]!.messageCount).toBeLessThanOrEqual(messageBudget);
+    expect(refused.messageCount + smallTotalMessages).toBeGreaterThan(messageBudget);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '3',
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: String(messageBudget),
+        PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+        PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+        PROJECT_DATA_ARCHIVE_CHUNK_ROWS: '5',
+        PROJECT_DATA_ARCHIVE_WALL_TIME_MS: '30000',
+      },
+      async () => {
+        const stats = await runProjectDataArchiveSharding(testEnv, new Date(Date.now() + 60_000));
+        expect(stats).toMatchObject({ skipped: false, migrated: 3, failed: 0 });
+        expect(stats.budgetUnaffordable).toBe(1);
+
+        for (const entry of small) {
+          expect(await readLocation(projectId, entry.sessionId)).toMatchObject({
+            location_state: 'archive_shard',
+          });
+        }
+        expect(await readLocation(projectId, refused.sessionId)).toBeNull();
+      }
+    );
+  });
+
+  /**
+   * The derived ceiling protects the UNSCOPED sweep from choosing a candidate it can never
+   * reserve. An operator naming a session is not that case — they are asking for exactly that
+   * session, and `reserveArchiveWrites` still has the final say on its cost. Both halves need
+   * proving: without the control, "the bypass works" is also satisfied by the ceiling never
+   * being applied to the scoped path at all.
+   */
+  it('lets an operator-named session bypass the derived ceiling, but not a project-wide canary', async () => {
+    const { projectId, source } = await newArchiveProject('archive-scoped-bypass');
+    const oversized = await seedTerminalSession(source, 'oversized', 400);
+    await isolateSweepFixture(projectId);
+
+    const allowance = ARCHIVE_WRITE_FIXED_RESERVATION + 300;
+    const sweepMessageBudget = 5_000;
+    // Straddle: above the derived ceiling, below the static message budget. If the two were
+    // still one number this fixture could not exist.
+    expect(oversized.messageCount).toBeGreaterThan(allowance - ARCHIVE_WRITE_FIXED_RESERVATION);
+    expect(oversized.messageCount).toBeLessThan(sweepMessageBudget);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: String(sweepMessageBudget),
+        PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+        PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+      },
+      async () => {
+        const named = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          sessionId: oversized.sessionId,
+          dryRun: true,
+          nowDate: new Date(Date.now() + 60_000),
+        });
+        expect(named.selected.map((entry) => entry.sessionId)).toEqual([oversized.sessionId]);
+
+        // Control: the same project, no session named. The ceiling applies and the session is
+        // not offered — the sweep's own protection, reachable through the canary too.
+        const projectWide = await runScopedProjectDataArchiveCanary(testEnv, {
+          projectId,
+          dryRun: true,
+          nowDate: new Date(Date.now() + 60_000),
+        });
+        expect(projectWide.selected).toEqual([]);
+      }
+    );
+  });
+
+  it('does not count an exhausted daily pool as a stall', async () => {
+    await clearArchiveCadence();
+    const { projectId, source } = await newArchiveProject('archive-pool-spent');
+
+    const first = await seedTerminalSession(source, 'first', 30);
+    const second = await seedTerminalSession(source, 'second', 20);
+    await isolateSweepFixture(projectId);
+
+    // Enough for the first session, not enough for both. The second refusal is therefore a
+    // SPENT POOL, whose recovery is simply the next UTC window — it must not be counted as a
+    // stall, or the alert would fire on almost every tick of a healthy day.
+    const allowance = first.estimate;
+    expect(first.estimate + second.estimate).toBeGreaterThan(allowance);
+    expect(second.estimate).toBeLessThanOrEqual(allowance);
+    expect(allowance - ARCHIVE_WRITE_FIXED_RESERVATION).toBeGreaterThanOrEqual(first.messageCount);
+
+    await withArchiveEnv(
+      {
+        PROJECT_DATA_ARCHIVE_SHARDING_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_COMPACT_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '1',
+        PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET: '5000',
+        PROJECT_DATA_ARCHIVE_SWEEP_UNIT_OVERHEAD_PERCENT: '0',
+        PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR: '1',
+        PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET: String(allowance),
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS: '1000',
+        // Threshold 1: even the most trigger-happy setting must not treat a spent pool as a
+        // stall. Without the category split this assertion would fail on every healthy day.
+        PROJECT_DATA_ARCHIVE_BUDGET_STALL_ALERT_SWEEPS: '1',
+      },
+      async () => {
+        const base = Date.now() + 60_000;
+        const firstTick = await runProjectDataArchiveSharding(testEnv, new Date(base));
+        expect(firstTick).toMatchObject({ migrated: 1 });
+        expect(await readLocation(projectId, first.sessionId)).toMatchObject({
+          location_state: 'archive_shard',
+        });
+
+        // Same UTC window, pool now spent. The exact refusal COUNT is not the point (and is
+        // sensitive to how many candidates the over-fetch reaches), so assert the categories:
+        // at least one spent-pool refusal, and zero unaffordable ones.
+        const secondTick = await runProjectDataArchiveSharding(testEnv, new Date(base + 10_000));
+        expect(secondTick).toMatchObject({ migrated: 0 });
+        expect(secondTick.budgetWindowExhausted ?? 0).toBeGreaterThanOrEqual(1);
+        expect(secondTick.budgetUnaffordable).toBe(0);
+        expect(await readLocation(projectId, second.sessionId)).toBeNull();
+
+        // Even at a threshold of 1, an exhausted pool leaves the cadence clean.
+        expect(await readCadence()).toMatchObject({
+          last_status: 'succeeded',
+          last_error: null,
+          consecutive_budget_stalls: 0,
+        });
+      }
+    );
   });
 });

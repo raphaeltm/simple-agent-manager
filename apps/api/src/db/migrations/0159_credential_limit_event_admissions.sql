@@ -1,9 +1,9 @@
 -- Credential limit eventing repair state.
 --
 -- Credential event emission now composes with the generic producer-side
--- `project_event_source_outbox` introduced by migration 0156. This migration
+-- `project_event_source_outbox` introduced by migration 0157. This migration
 -- remains C2-owned and only adds credential-generation fencing plus bounded
--- window retention indexes for the credential observation state created by 0157.
+-- window retention indexes for the credential observation state created by 0158.
 
 ALTER TABLE agent_sessions
   ADD COLUMN agent_credential_generation INTEGER NOT NULL DEFAULT 0
