@@ -76,12 +76,23 @@ function summarizeToolNames(calls: ToolCallItem[]): string {
   return `${seen.slice(0, 2).join(', ')} and ${seen.length - 2} more`;
 }
 
-/** First word of the tool's title, which is where the tool name lives in practice. */
+/**
+ * The tool's short name.
+ *
+ * `toolName` is a qualified identifier (`mcp__sam-mcp__upload_to_library`), so
+ * its LAST segment is the name. A `title` is human text (`"Read: src/a.ts"`,
+ * `"Bash: pnpm test"`), so its FIRST token is. Taking the last segment of a
+ * title yields the argument instead of the tool, which reads as "a.ts, b.ts"
+ * where the user expects "Read".
+ */
 function shortToolLabel(call: ToolCallItem): string {
-  const source = call.toolName ?? call.title ?? '';
-  const base = source.split(/__|\/|:/).filter(Boolean).pop() ?? source;
-  const firstWord = base.trim().split(/\s+/)[0] ?? '';
-  return firstWord.replace(/[:,]$/, '');
+  if (call.toolName) {
+    const segments = call.toolName.split(/__|\/|\.|:/).filter(Boolean);
+    const last = segments[segments.length - 1] ?? call.toolName;
+    return last.trim();
+  }
+  const firstToken = (call.title ?? '').trim().split(/[:\s]+/)[0] ?? '';
+  return firstToken;
 }
 
 /**

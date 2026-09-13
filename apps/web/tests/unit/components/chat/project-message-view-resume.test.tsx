@@ -108,6 +108,10 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
   PlanView: () => null,
   RawFallbackView: () => null,
   mapToolCallContent: vi.fn(),
+  // Identity stub: this suite is about resume/delivery UX, so the item list must
+  // reach the renderer unchanged rather than being reshaped into tool groups.
+  collapseToolRuns: (items: unknown[]) => items,
+  ToolCallGroupCard: () => null,
   TypewriterText: ({ text }: { text: string }) => text,
   UserMessageFade: ({ text }: { text: string }) => text,
 }));

@@ -118,6 +118,13 @@ export function ProjectChat() {
     },
     [navigate, state.projectId]
   );
+  // Debugging escape hatch: `?tools=expanded` opens every collapsed tool run.
+  // Read here because this page owns router context; the message view is also
+  // mounted outside a Router.
+  const expandToolRuns = useMemo(
+    () => new URLSearchParams(location.search).get('tools') === 'expanded',
+    [location.search]
+  );
   const commentMessageTarget = useMemo(() => {
     const params = new URLSearchParams(location.search);
     const messageId = params.get('commentMessage');
@@ -530,6 +537,7 @@ export function ProjectChat() {
                 />
               )}
             <ProjectMessageView
+              expandToolRuns={expandToolRuns}
               projectId={state.projectId}
               sessionId={activeSessionId}
               isProvisioning={

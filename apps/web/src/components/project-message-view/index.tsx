@@ -22,7 +22,6 @@ import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { useLocation } from 'react-router';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { getMessageToolContent } from '../../lib/api/sessions';
@@ -90,6 +89,12 @@ interface ProjectMessageViewProps {
   agentProfiles?: AgentProfile[];
   /** Slash commands available for follow-up prompt autocomplete. */
   slashCommands?: SlashCommand[];
+  /**
+   * Render every collapsed tool run already expanded. Owned by the page because
+   * it comes from the URL, and this component is also mounted outside a Router
+   * (workspace view, unit tests) where router hooks are unavailable.
+   */
+  expandToolRuns?: boolean;
   /** Open hierarchy modal for the given task. */
   onShowHierarchy?: (taskId: string) => void;
   /** Start a new chat from read-only sessions. */
@@ -118,6 +123,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   closeError,
   agentProfiles = [],
   slashCommands = [],
+  expandToolRuns = false,
   onShowHierarchy,
   onNewChat,
   targetMessageId,
@@ -172,12 +178,6 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // Escape hatch for reading every tool call, e.g. when debugging a session.
   // Raphaël expects ~99% of users never to expand, so the default is collapsed
   // and this stays a URL flag rather than another visible session control.
-  const routerLocation = useLocation();
-  const expandToolRuns = useMemo(
-    () => new URLSearchParams(routerLocation.search).get('tools') === 'expanded',
-    [routerLocation.search]
-  );
-
   // Convert DO messages to conversation items (single source), then collapse
   // runs of ordinary tool calls into one inline count card. Typed cards
   // (document previews) are deliberately displayed content, so they break a run
