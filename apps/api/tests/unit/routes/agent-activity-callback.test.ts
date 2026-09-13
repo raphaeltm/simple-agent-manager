@@ -641,14 +641,8 @@ describe('agent activity callback', () => {
     await Promise.resolve();
 
     expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
-    expect(mocks.log.info).toHaveBeenCalledWith(
-      'acp_activity.telemetry',
-      expect.objectContaining({
-        outcome: 'rejected',
-        reason: 'pending_superseded',
-        source: 'admission_control',
-      })
-    );
+    expect(mocks.updateSets).toHaveLength(2);
+    expect(mocks.updateSets).toContainEqual(expect.objectContaining({ status: 'error' }));
   });
 
   it('coalesces through transient ProjectData reset/overload and retries the flush without VM retry noise', async () => {

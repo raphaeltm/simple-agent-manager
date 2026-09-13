@@ -247,6 +247,7 @@ async function rejectSupersededInstantError(input: {
   sessionId: string;
   body: AcpActivityCallbackReport;
   binding: AcpActivityBinding;
+  observedAt: number;
 }): Promise<Response | null> {
   if (input.body.activity !== 'error') return null;
 
@@ -297,7 +298,7 @@ async function rejectSupersededInstantError(input: {
       workspaceId: input.binding.workspaceId,
       activity: input.body.activity,
       reason: 'stale_generation',
-      ...buildAcpActivityRuntimeWorkMetricFields(input.body),
+      ...buildAcpActivityRuntimeWorkMetricFields(input.body, input.observedAt),
       source: 'callback',
     },
     input.c.env
@@ -691,6 +692,7 @@ export async function handleAcpActivityCallback(
     sessionId,
     body,
     binding,
+    observedAt,
   });
   if (staleGenerationResponse) return staleGenerationResponse;
 

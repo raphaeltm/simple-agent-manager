@@ -45,3 +45,8 @@ Source idea: SAM idea `01M2CJ1F6R0GNHBKT6E5T2G9KC`.
 - Scheduler selection remains bounded, isolated, idempotent, and fair across mixed VM/Instant candidates.
 - Callback telemetry exposes enough nonsecret runtime-work/classification data to diagnose future intermediate idle reports.
 - No hardcoded incident IDs, production-only backdoors, forced task completion, or weakened snapshot guards are introduced.
+
+## CodeRabbit follow-up
+
+- CodeRabbit review `452e20d0-283f-4575-863d-12ed188ab58b` requested two changes after PR #2071 opened: remove the pre-cancel validation hook from coalesced sleep cancellation and include `observedAt` on stale-generation runtime telemetry.
+- Follow-up commit addressed both findings. Targeted validation passed: `pnpm --filter @simple-agent-manager/api exec vitest run tests/integration/session-sleep-lifecycle.test.ts tests/unit/services/acp-activity-admission.test.ts tests/unit/routes/agent-activity-callback.test.ts`, `pnpm --filter @simple-agent-manager/api typecheck`, `pnpm --filter @simple-agent-manager/api lint`, and `git diff --check`.
