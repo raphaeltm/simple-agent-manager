@@ -1014,7 +1014,9 @@ func (s *Server) Start() error {
 }
 
 func (s *Server) startResourceGuard() {
-	if s.resourceGuard == nil {
+	// Workspace eviction observes host PSI and Docker. Standalone/Instant
+	// runtimes have no Docker daemon; deployment nodes have a separate lifecycle.
+	if s.config == nil || s.config.Role != config.RoleWorkspace || s.resourceGuard == nil {
 		return
 	}
 	if err := s.resourceGuard.Start(context.Background()); err != nil {

@@ -9,6 +9,7 @@ describe('multi-workspace nodes integration wiring', () => {
     readFileSync(resolve(process.cwd(), 'src/routes/workspaces/_helpers.ts'), 'utf8'),
     readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8'),
     readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'src/routes/workspaces/workspace-stop.ts'), 'utf8'),
     readFileSync(resolve(process.cwd(), 'src/routes/workspaces/agent-sessions.ts'), 'utf8'),
   ].join('\n');
   const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');

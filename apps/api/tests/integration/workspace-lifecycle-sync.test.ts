@@ -18,8 +18,8 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('workspace lifecycle synchronization', () => {
-  const lifecycleFile = readFileSync(
-    resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'),
+  const stopFile = readFileSync(
+    resolve(process.cwd(), 'src/routes/workspaces/workspace-stop.ts'),
     'utf8'
   );
   const crudFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8');
@@ -50,13 +50,13 @@ describe('workspace lifecycle synchronization', () => {
 
   describe('workspace stop → session stop synchronization', () => {
     it('stop route calls projectDataService.stopSession', () => {
-      expect(lifecycleFile).toContain('finalizeWorkspaceLifecycleClosure');
+      expect(stopFile).toContain('finalizeWorkspaceStopOnNode');
       expect(finalizerFile).toMatch(/projectDataService\s*\.\s*stopSession/);
       expect(finalizerFile).toContain('workspace_lifecycle_finalizer.project_session_failed');
     });
 
     it('stop route cleans up workspace activity', () => {
-      expect(lifecycleFile).toContain('finalizeWorkspaceLifecycleClosure');
+      expect(stopFile).toContain('finalizeWorkspaceStopOnNode');
       expect(finalizerFile).toMatch(/projectDataService\s*\.\s*cleanupWorkspaceActivity/);
       expect(finalizerFile).toContain('workspace_lifecycle_finalizer.activity_cleanup_failed');
     });
