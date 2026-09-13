@@ -113,12 +113,13 @@ pass the gates below against current `main` before merge.
 - [x] Finish Go unit/race/vet plus VM smoke/integration validation.
 - [x] Complete desktop/mobile Playwright audit and post reviewed screenshots.
 - [x] Obtain final Go, Cloudflare, security, resource, test, env, docs, constitution, completion reviews.
-- [ ] Coordinate staging ownership and deploy the pinned final candidate.
-- [ ] Provision one real VM; verify fresh heartbeat, workspace terminal, inherited cgroup boot
+- [x] Coordinate staging ownership and deploy the pinned final candidate.
+- [x] Provision one real VM; verify fresh heartbeat, workspace terminal, inherited cgroup boot
       configuration and agent survival under controlled stress, monitoring, eviction/restart,
       preserved workspace state, and callback behavior. Distinguish configuration evidence
       from direct runtime ancestry inspection; no cgroup design changes remain in this PR.
-- [ ] Delete this test's staging workspaces/nodes; verify zero staging VMs at rest.
+- [x] Delete this test's staging workspace/node with provider termination acknowledgment.
+- [ ] Verify global zero staging VMs at rest; previous run's unresolved allocation remains.
 - [ ] Update PR evidence, pass CI/SonarCloud, resolve CodeRabbit feedback.
 - [ ] Merge #1980 and monitor production deployment.
 
@@ -155,7 +156,10 @@ pass the gates below against current `main` before merge.
   for the behavior-preserving routing extraction.
 - Full non-API TypeScript coverage passed, including web 308 files / 3,749 tests.
   Final API coverage passed: 718 files / 9,755 tests against the stable candidate.
-- Independent completion review passed implementation scope; runtime staging,
-  cleanup, final CI and CodeRabbit remain open gates. Reviewed screenshots:
+- Independent completion review passed implementation and own VM verification;
+  global zero-VM proof, final evidence/CI, CodeRabbit and merge remain open. Reviewed screenshots:
   https://github.com/raphaeltm/simple-agent-manager/pull/1980#issuecomment-5652096199
-- No staging deployment or VM provisioning has occurred in this continuation yet.
+- Combined staging deployment, real VM heartbeat/terminal/agent access, OOM eviction,
+  fresh snapshot capture, UI restart, overlay preservation and own cleanup passed.
+  See [integration verification](../evidence/2026-09-13-vm-resource-management/verification.md).
+  Global zero-VM proof remains pending for the previous run’s unresolved allocation.
