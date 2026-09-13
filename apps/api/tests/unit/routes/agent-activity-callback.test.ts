@@ -303,6 +303,80 @@ describe('agent activity callback', () => {
     );
   });
 
+  it('emits route-level runtime-work telemetry with observed callback time and source bucketing', async () => {
+    vi.useFakeTimers();
+    const observedAt = Date.parse('2026-08-31T00:00:01.500Z');
+    vi.setSystemTime(observedAt);
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'custom_adapter',
+      runtimeWorkProgressAt: 1234,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'idle',
+      expect.objectContaining({
+        observedAt,
+        runtimeWorkSource: 'custom_adapter',
+      })
+    );
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'admitted',
+        activity: 'idle',
+        classification: 'intermediate',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'other',
+        runtimeWorkObservedAt: observedAt,
+        runtimeWorkProgressAt: 1234,
+      })
+    );
+  });
+
+  it('does not cancel scheduled sleep when ProjectData rejects stale intermediate activity', async () => {
+    vi.useFakeTimers();
+    const observedAt = Date.parse('2026-08-31T00:00:01.500Z');
+    vi.setSystemTime(observedAt);
+    mocks.projectData.reportAcpSessionActivity.mockResolvedValueOnce(false);
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'custom_adapter',
+      runtimeWorkProgressAt: 1234,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.updateSets).toHaveLength(0);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'rejected',
+        reason: 'stale_activity_observed_at',
+        activity: 'idle',
+        classification: 'intermediate',
+        runtimeWorkSource: 'other',
+        runtimeWorkObservedAt: observedAt,
+      })
+    );
+  });
+
   it('does not fail valid activity callbacks when best-effort sleep cancellation fails', async () => {
     mocks.projectData.getSessionState.mockResolvedValueOnce({ runtimeWorkState: 'active' });
     mocks.updateReject = new Error('Failed query: update "session_snapshots" set ...');
@@ -667,7 +741,7 @@ describe('agent activity callback', () => {
 
     expect(response.status).toBe(204);
     expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(1);
-    expect(mocks.updateSets).toHaveLength(2);
+    expect(mocks.updateSets).toHaveLength(1);
     expect(mocks.nodeAgent.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
 
@@ -685,6 +759,53 @@ describe('agent activity callback', () => {
       })
     );
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel scheduled sleep when a coalesced flush is rejected as stale', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T00:00:00.000Z'));
+    const app = await createTestApp();
+
+    await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'custom_adapter',
+      runtimeWorkProgressAt: 1000,
+    });
+    expect(mocks.updateSets).toHaveLength(1);
+    mocks.updateSets.length = 0;
+    mocks.projectData.reportAcpSessionActivity.mockResolvedValueOnce(false);
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'custom_adapter',
+      runtimeWorkProgressAt: 1000,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.updateSets).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
+    expect(mocks.updateSets).toHaveLength(0);
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'rejected',
+        reason: 'stale_activity_observed_at',
+        source: 'admission_control',
+        classification: 'intermediate',
+        runtimeWorkSource: 'other',
+      })
+    );
   });
 
   it('keeps cached callbacks subject to terminal workspace 410 behavior', async () => {

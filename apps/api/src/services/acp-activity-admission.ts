@@ -179,6 +179,39 @@ export function isIntermediateAcpActivityReport(report: AcpActivityCallbackRepor
   );
 }
 
+const ACP_RUNTIME_WORK_TELEMETRY_SOURCES = new Set([
+  'acp_tool_call',
+  'claude-background-tasks',
+  'claude_sdk',
+]);
+
+function runtimeWorkTelemetrySource(source: string | undefined): string | null {
+  if (!source) return null;
+  return ACP_RUNTIME_WORK_TELEMETRY_SOURCES.has(source) ? source : 'other';
+}
+
+export function buildAcpActivityRuntimeWorkMetricFields(
+  report: AcpActivityCallbackReport,
+  observedAt?: number
+): {
+  classification: 'intermediate' | 'critical';
+  runtimeWorkState?: AcpRuntimeWorkState | null;
+  runtimeWorkCount?: number | null;
+  runtimeWorkSource?: string | null;
+  runtimeWorkObservedAt?: number | null;
+  runtimeWorkProgressAt?: number | null;
+} {
+  return {
+    classification: isIntermediateAcpActivityReport(report) ? 'intermediate' : 'critical',
+    runtimeWorkState: report.runtimeWorkState ?? null,
+    runtimeWorkCount: typeof report.runtimeWorkCount === 'number' ? report.runtimeWorkCount : null,
+    runtimeWorkSource: runtimeWorkTelemetrySource(report.runtimeWorkSource),
+    runtimeWorkObservedAt: observedAt ?? null,
+    runtimeWorkProgressAt:
+      typeof report.runtimeWorkProgressAt === 'number' ? report.runtimeWorkProgressAt : null,
+  };
+}
+
 export function buildAcpActivityBinding(session: AcpSession): AcpActivityBinding | null {
   if (!session.nodeId) return null;
   return {
@@ -320,6 +353,7 @@ export function recordAcpActivityAdmissionSuccess(input: {
   reason: string;
   source?: 'callback' | 'coalesced_flush';
   coalescedCount?: number;
+  observedAt?: number;
   now?: number;
 }): void {
   const now = input.now ?? Date.now();
@@ -346,6 +380,7 @@ export function recordAcpActivityAdmissionSuccess(input: {
       workspaceId: input.binding.workspaceId,
       activity: input.report.activity,
       reason: input.reason,
+      ...buildAcpActivityRuntimeWorkMetricFields(input.report, input.observedAt ?? now),
       source: input.source ?? 'callback',
       coalescedCount: input.coalescedCount,
       pendingCount: pendingActivityByKey.size,
@@ -358,9 +393,7 @@ export function clearPendingAcpActivity(projectId: string, sessionId: string): v
   pendingActivityByKey.delete(activityKey(projectId, sessionId));
 }
 
-export function isPendingAcpActivitySnapshotCurrent(
-  snapshot: AcpActivityPendingSnapshot
-): boolean {
+export function isPendingAcpActivitySnapshotCurrent(snapshot: AcpActivityPendingSnapshot): boolean {
   return pendingActivityByKey.get(snapshot.key)?.version === snapshot.version;
 }
 
@@ -465,6 +498,7 @@ function coalescePendingActivity(input: {
       workspaceId: input.binding.workspaceId,
       activity: input.report.activity,
       reason: input.reason,
+      ...buildAcpActivityRuntimeWorkMetricFields(input.report, input.observedAt ?? input.now),
       source: 'callback',
       coalescedCount: pending.coalescedCount,
       pendingCount: pendingActivityByKey.size,
@@ -547,6 +581,7 @@ async function flushPendingActivity(
       reason: 'coalesced_flush',
       source: 'coalesced_flush',
       coalescedCount: snapshot.coalescedCount,
+      observedAt: snapshot.observedAt,
     });
     return;
   }
@@ -669,6 +704,7 @@ function recordRejectedPending(
       workspaceId: pending.binding.workspaceId,
       activity: pending.report.activity,
       reason,
+      ...buildAcpActivityRuntimeWorkMetricFields(pending.report, pending.observedAt),
       source: 'admission_control',
       coalescedCount: pending.coalescedCount,
       pendingCount: pendingActivityByKey.size,

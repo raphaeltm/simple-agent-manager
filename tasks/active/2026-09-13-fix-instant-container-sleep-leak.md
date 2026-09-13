@@ -18,14 +18,14 @@ Source idea: SAM idea `01M2CJ1F6R0GNHBKT6E5T2G9KC`.
 
 ## Implementation checklist
 
-- [ ] Add a failing scheduler regression for a running `cf-container` workspace with an in-progress awaiting-followup task, `idle`/expired active or settling runtime work, no `session_snapshots` row, and no later callback. The test must verify discovery creates the sleep intent and a later due sweep sleeps it through the existing path.
-- [ ] Update unscheduled sleep reconciliation to include supported Instant workspace nodes while preserving VM behavior, bounded batch size, metadata guards, and idempotence.
-- [ ] Ensure discovery remains fair when a batch contains mixed VM/Instant, malformed, active, and already-scheduled candidates.
-- [ ] Add structured logs for successful sleep-intent reconciliation that include source, runtime, workspace, chat, user, and node IDs without prompts, tool content, env values, headers, or secrets.
-- [ ] Extend ACP activity callback telemetry with allowlisted runtime-work state/count/source/timestamps and the classification decision so future incidents can distinguish legitimate settling from stale work.
-- [ ] Update tests for telemetry fields and Instant discovery behavior.
-- [ ] Run targeted API tests, typecheck, lint, and build as required by the `/do` workflow.
-- [ ] Run task-completion, Cloudflare, constitution/config, security, and test reviews before PR.
+- [x] Add a failing scheduler regression for a running `cf-container` workspace with an in-progress awaiting-followup task, `idle`/expired active or settling runtime work, no `session_snapshots` row, and no later callback. The test must verify discovery creates the sleep intent and a later due sweep sleeps it through the existing path.
+- [x] Update unscheduled sleep reconciliation to include supported Instant workspace nodes while preserving VM behavior, bounded batch size, metadata guards, and idempotence.
+- [x] Ensure discovery remains fair when a batch contains mixed VM/Instant, malformed, active, and already-scheduled candidates.
+- [x] Add structured logs for successful sleep-intent reconciliation that include source, runtime, workspace, chat, user, and node IDs without prompts, tool content, env values, headers, or secrets.
+- [x] Extend ACP activity callback telemetry with allowlisted runtime-work state/count/source/timestamps and the classification decision so future incidents can distinguish legitimate settling from stale work.
+- [x] Update tests for telemetry fields and Instant discovery behavior.
+- [x] Run targeted API tests, API typecheck/lint, and full repo `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+- [x] Run task-completion, Cloudflare, constitution/config, security, and test reviews before PR.
 - [ ] Deploy to staging, verify automatic Instant sleep/wake behavior with tracked resource IDs, and clean up test compute.
 
 ## Acceptance criteria

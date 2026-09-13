@@ -57,6 +57,8 @@ async function reconcileUnscheduledSessionSleeps(
       workspaceId: schema.workspaces.id,
       userId: schema.workspaces.userId,
       chatSessionId: schema.workspaces.chatSessionId,
+      nodeId: schema.workspaces.nodeId,
+      runtime: schema.nodes.runtime,
     })
     .from(schema.workspaces)
     .innerJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
@@ -75,7 +77,7 @@ async function reconcileUnscheduledSessionSleeps(
       and(
         inArray(schema.workspaces.status, ['running', 'recovery']),
         eq(schema.nodes.nodeRole, 'workspace'),
-        eq(schema.nodes.runtime, 'vm'),
+        inArray(schema.nodes.runtime, ['vm', 'cf-container']),
         isNotNull(schema.workspaces.projectId),
         isNotNull(schema.workspaces.chatSessionId),
         isNull(schema.sessionSnapshots.sleepingAt),
@@ -98,6 +100,14 @@ async function reconcileUnscheduledSessionSleeps(
         sleepAfterMs: 0,
       });
       reconciled++;
+      log.info('session_sleep_sweep.reconciled_missing_intent', {
+        source: 'scheduled_sleep_intent_reconciliation',
+        workspaceId: candidate.workspaceId,
+        chatSessionId: candidate.chatSessionId,
+        nodeId: candidate.nodeId,
+        runtime: candidate.runtime,
+        userId: candidate.userId,
+      });
     } catch (error) {
       const retryDelayMs = parsePositiveInt(
         env.SESSION_SLEEP_RETRY_DELAY_MS,
