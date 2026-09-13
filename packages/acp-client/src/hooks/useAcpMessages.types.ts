@@ -59,6 +59,26 @@ export interface ToolCallItem {
   messageId?: string;
 }
 
+/**
+ * A run of consecutive tool calls, collapsed into one inline card.
+ *
+ * Raphaël, 2026-09-11: "listing every tool call is kind of nice as a developer,
+ * but frankly, I almost never look at that stuff" — seeing that tools ARE being
+ * called is the reassurance that matters, so a run renders as a single
+ * "3 tool calls" card between text blocks. Tapping it reveals the list; tapping
+ * one row loads that call's output through the existing lazy-load path.
+ *
+ * Every member call is kept whole — this is a display grouping, not a payload
+ * one, so each call keeps its `messageId` and stays individually expandable.
+ */
+export interface ToolCallGroupItem {
+  kind: 'tool_call_group';
+  /** Identity of the run, which is its first call's id (matches the group rule). */
+  id: string;
+  calls: ToolCallItem[];
+  timestamp: number;
+}
+
 export interface ToolCallContentItem {
   type: 'content' | 'diff' | 'terminal';
   text?: string;
@@ -111,6 +131,7 @@ export type ConversationItem =
   | AgentCrashReportItem
   | ThinkingItem
   | ToolCallItem
+  | ToolCallGroupItem
   | PlanItem
   | RawFallback;
 

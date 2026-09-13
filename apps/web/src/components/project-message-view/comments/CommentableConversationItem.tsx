@@ -33,6 +33,7 @@ export function CommentableConversationItem({
   onLoadToolContent,
   animateAgentText,
   animateUserMessage,
+  expandToolRuns,
   canWriteSession,
   agentActivity,
   animationTargetIdx,
@@ -47,6 +48,7 @@ export function CommentableConversationItem({
   onLoadToolContent: (messageId: string) => Promise<ToolCallContentItem[]>;
   animateAgentText: boolean;
   animateUserMessage: boolean;
+  expandToolRuns?: boolean;
   canWriteSession: boolean;
   agentActivity: string;
   animationTargetIdx: number;
@@ -88,6 +90,7 @@ export function CommentableConversationItem({
             agentActivity === 'responding'
           }
           animateUserMessage={animateUserMessage}
+          expandToolRuns={expandToolRuns}
         />
       </div>
 

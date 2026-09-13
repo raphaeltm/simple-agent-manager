@@ -9,7 +9,12 @@ import React, {
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { getErrorMeta } from '../errors';
-import type { AcpMessagesHandle, ConversationItem, PlanItem } from '../hooks/useAcpMessages';
+import type {
+  AcpMessagesHandle,
+  ConversationItem,
+  PlanItem,
+  ToolCallItem,
+} from '../hooks/useAcpMessages';
 import type { AcpSessionHandle } from '../hooks/useAcpSession';
 import type { SlashCommand } from '../types';
 import { AgentCrashReportView } from './AgentCrashReportView';
@@ -25,6 +30,7 @@ import { SlashCommandPalette } from './SlashCommandPalette';
 import { StickyPlanButton } from './StickyPlanButton';
 import { ThinkingBlock } from './ThinkingBlock';
 import { ToolCallCard } from './ToolCallCard';
+import { ToolCallGroupCard } from './ToolCallGroupCard';
 import { UsageIndicator } from './UsageIndicator';
 import { appendDictatedText, VoiceButton } from './VoiceButton';
 
@@ -564,6 +570,8 @@ const ConversationItemView = React.memo(function ConversationItemView({
       return <ThinkingBlock text={item.text} active={item.active} />;
     case 'tool_call':
       return <ToolCallCard toolCall={item} />;
+    case 'tool_call_group':
+      return <ToolCallGroupCard group={item} />;
     case 'plan':
       return <PlanView plan={item} />;
     case 'agent_crash_report':
@@ -599,17 +607,25 @@ function exportConversationAsMarkdown(items: ConversationItem[]): string {
         lines.push(`> **Thinking:** ${item.text}`, '');
         break;
       case 'tool_call':
-        lines.push(`### Tool: ${item.title}`, '');
-        for (const c of item.content) {
-          if (c.text) {
-            lines.push('```', c.text, '```', '');
-          }
-        }
+        lines.push(...toolCallMarkdown(item));
+        break;
+      case 'tool_call_group':
+        // A collapsed run is a display grouping only — the export still lists
+        // every call, or an exported conversation would lose them.
+        for (const call of item.calls) lines.push(...toolCallMarkdown(call));
         break;
     }
   }
 
   return lines.join('\n');
+}
+
+function toolCallMarkdown(item: ToolCallItem): string[] {
+  const lines: string[] = [`### Tool: ${item.title}`, ''];
+  for (const c of item.content) {
+    if (c.text) lines.push('```', c.text, '```', '');
+  }
+  return lines;
 }
 
 function downloadTextFile(content: string, filename: string): void {

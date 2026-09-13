@@ -1,7 +1,6 @@
 import {
   DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
-  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
 } from '@simple-agent-manager/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -91,9 +90,13 @@ export function useSessionLifecycle(
         };
       }
 
+      // The initial load takes the standard page, not the whole conversation.
+      // Server-side grouping means one page now carries whole turns rather than
+      // individual streamed tokens, and `hasMore` + "Load earlier messages" (and
+      // `loadUntil` for timeline jumps) reach anything older.
       return getChatSession(projectId, sessionId, {
         signal,
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+        limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
       });
     },
   });

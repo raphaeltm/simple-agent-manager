@@ -1,12 +1,15 @@
 /**
  * Behavioral tests for useSessionLifecycle loading semantics:
- * - Initial load requests the FULL conversation (CHAT_SESSION_MESSAGE_MAX ceiling).
+ * - Initial load requests the standard page (CHAT_SESSION_MESSAGE_LIMIT).
  * - The 3s poll requests only the small recent window (CHAT_SESSION_MESSAGE_LIMIT).
  * - loadUntil() pages backward until a target timestamp is covered (the timeline
  *   jump fallback for oversized/guard-trimmed sessions), and short-circuits when
  *   the target is already loaded or there is no more history.
  */
-import { DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+} from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -219,7 +222,7 @@ describe('useSessionLifecycle loading semantics', () => {
     expect(mocks.wsOptions.every((o) => o.enabled === false)).toBe(true);
   });
 
-  it('requests the FULL conversation (max ceiling) on initial load', async () => {
+  it('requests the standard page, not the whole conversation, on initial load', async () => {
     mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false));
 
     renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), { wrapper });
@@ -227,9 +230,13 @@ describe('useSessionLifecycle loading semantics', () => {
     await waitFor(() => {
       expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
         signal: expect.any(AbortSignal),
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+        limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
       });
     });
+    // Discriminating: the 50,000-row ceiling must not be requested anywhere.
+    for (const call of mocks.getChatSession.mock.calls) {
+      expect(call[2]?.limit).not.toBe(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+    }
   });
 
   it('delta-fetches after the newest cached message and merges cached plus new rows', async () => {

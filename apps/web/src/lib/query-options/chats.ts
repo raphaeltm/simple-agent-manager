@@ -1,4 +1,4 @@
-import { DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
+import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
 import { queryOptions } from '@tanstack/react-query';
 
 import {
@@ -103,7 +103,7 @@ export function chatSessionMessagesQueryOptions(
     queryFn: ({ signal }) =>
       getChatSession(projectId, sessionId, {
         signal,
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+        limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
       }),
   });
 }

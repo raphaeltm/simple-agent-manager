@@ -442,9 +442,9 @@ describe('ProjectMessageView — session isolation', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
-    // Initial load requests the full-conversation ceiling.
+    // Initial load requests the standard page, not the 50,000-row ceiling.
     await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(1));
-    expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+    expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
     // The fallback poll must request only the small recent window — never the ceiling.
     // Under full coverage load, React may commit the polling effect after the
     // first timer advance, so advance multiple intervals until it fires.
@@ -455,7 +455,7 @@ describe('ProjectMessageView — session isolation', () => {
     }
     await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(2));
     expect(limits.slice(1)).toContain(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
-    expect(limits.slice(1)).not.toContain(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+    expect(limits).not.toContain(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
   });
 
   it('does not apply polling response from a different session', async () => {

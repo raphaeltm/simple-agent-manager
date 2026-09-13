@@ -1,4 +1,8 @@
-import type { ConversationItem, ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type {
+  ConversationItem,
+  ToolCallContentItem,
+  ToolCallItem,
+} from '@simple-agent-manager/acp-client';
 import {
   AgentCrashReportView,
   MessageBubble as AcpMessageBubble,
@@ -6,6 +10,7 @@ import {
   RawFallbackView,
   ThinkingBlock as AcpThinkingBlock,
   ToolCallCard as AcpToolCallCard,
+  ToolCallGroupCard as AcpToolCallGroupCard,
   UserMessageFade,
 } from '@simple-agent-manager/acp-client';
 import { memo, useCallback } from 'react';
@@ -95,6 +100,8 @@ interface AcpConversationItemViewProps {
   animateUserMessage?: boolean;
   /** Project context — enables typed tool-call cards (e.g. DocumentCard previews). */
   projectId?: string;
+  /** Render collapsed tool runs already expanded (the ?tools=expanded escape hatch). */
+  expandToolRuns?: boolean;
 }
 
 /** Renders a single ACP ConversationItem using the shared acp-client components.
@@ -107,6 +114,7 @@ function AcpConversationItemViewImpl({
   animateText,
   animateUserMessage,
   projectId,
+  expandToolRuns,
 }: AcpConversationItemViewProps) {
   // Depend on `startPlayback` (a stable useCallback) rather than the whole
   // GlobalAudio context value — that value is memoized but re-created as
@@ -177,26 +185,25 @@ function AcpConversationItemViewImpl({
       );
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;
-    case 'tool_call': {
-      // Typed tool-call cards (e.g. DocumentCard) render in place of the generic
-      // card when the tool matches the registry; unknown tools fall back.
-      const TypedCard = matchToolCard(item);
-      if (TypedCard) {
-        return <TypedCard item={item} projectId={projectId} />;
-      }
+    case 'tool_call':
+      return renderToolCall(item, { onFileClick, onLoadToolContent, projectId });
+    case 'tool_call_group':
+      // A run of ordinary tool calls collapses to one "N tool calls" card.
+      // `renderCall` is a stable module-scope function bound via an inline
+      // closure only when this item renders, so it cannot churn the memoized
+      // card on unrelated parent renders (`.claude/rules/64`).
       return (
-        <AcpToolCallCard
-          toolCall={item}
+        <AcpToolCallGroupCard
+          group={item}
+          defaultExpanded={expandToolRuns}
           onFileClick={onFileClick}
           onLoadContent={onLoadToolContent}
-          className={
-            item.contentLoaded === false
-              ? 'glass-surface rounded-md border-border-default'
-              : undefined
+          className="glass-surface border-border-default"
+          renderCall={(call) =>
+            renderToolCall(call, { onFileClick, onLoadToolContent, projectId })
           }
         />
       );
-    }
     case 'plan':
       return <PlanView plan={item} />;
     case 'system_message':
@@ -208,6 +215,35 @@ function AcpConversationItemViewImpl({
     default:
       return null;
   }
+}
+
+/**
+ * One tool call, typed card when the registry matches it and the generic card
+ * otherwise. Shared by the standalone `tool_call` case and by the expanded list
+ * inside a `tool_call_group`, so a document card looks the same in both.
+ */
+function renderToolCall(
+  item: ToolCallItem,
+  {
+    onFileClick,
+    onLoadToolContent,
+    projectId,
+  }: Pick<AcpConversationItemViewProps, 'onFileClick' | 'onLoadToolContent' | 'projectId'>
+) {
+  const TypedCard = matchToolCard(item);
+  if (TypedCard) {
+    return <TypedCard item={item} projectId={projectId} />;
+  }
+  return (
+    <AcpToolCallCard
+      toolCall={item}
+      onFileClick={onFileClick}
+      onLoadContent={onLoadToolContent}
+      className={
+        item.contentLoaded === false ? 'glass-surface rounded-md border-border-default' : undefined
+      }
+    />
+  );
 }
 
 /**

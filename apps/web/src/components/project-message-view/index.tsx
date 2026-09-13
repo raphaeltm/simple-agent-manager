@@ -12,12 +12,17 @@ import type {
   SlashCommand,
   ToolCallContentItem,
 } from '@simple-agent-manager/acp-client';
-import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
+import {
+  collapseToolRuns,
+  mapToolCallContent,
+  PlanModal,
+} from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { useLocation } from 'react-router';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { getMessageToolContent } from '../../lib/api/sessions';
@@ -46,6 +51,7 @@ import { SessionToolRail } from './SessionToolRail';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import { nearestItemId } from './timeline-jump';
 import type { TimelineJumpTarget } from './timeline-types';
+import { matchToolCard } from './tool-cards';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
@@ -163,9 +169,23 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   );
   const unresolvedCommentCount = commentCounts.all - commentCounts.resolved;
 
-  // Convert DO messages to conversation items (single source)
+  // Escape hatch for reading every tool call, e.g. when debugging a session.
+  // Raphaël expects ~99% of users never to expand, so the default is collapsed
+  // and this stays a URL flag rather than another visible session control.
+  const routerLocation = useLocation();
+  const expandToolRuns = useMemo(
+    () => new URLSearchParams(routerLocation.search).get('tools') === 'expanded',
+    [routerLocation.search]
+  );
+
+  // Convert DO messages to conversation items (single source), then collapse
+  // runs of ordinary tool calls into one inline count card. Typed cards
+  // (document previews) are deliberately displayed content, so they break a run
+  // and keep rendering standalone.
   const conversationItems = useMemo<ConversationItem[]>(() => {
-    return chatMessagesToConversationItems(lc.messages);
+    return collapseToolRuns(chatMessagesToConversationItems(lc.messages), {
+      isStandalone: (call) => matchToolCard(call) !== null,
+    });
   }, [lc.messages]);
 
   // Build item-id → 0-based data index map for jump-to-message from the timeline.
@@ -180,6 +200,13 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     const map = new Map<string, number>();
     conversationItems.forEach((item, i) => {
       map.set(item.id, i);
+      // A tool call inside a collapsed run is no longer a top-level row, but a
+      // comment thread can still anchor on it. Map every member id to the group's
+      // index so jumping to one scrolls to the card that contains it instead of
+      // dead-clicking.
+      if (item.kind === 'tool_call_group') {
+        for (const call of item.calls) map.set(call.id, i);
+      }
     });
     return map;
   }, [conversationItems]);
@@ -394,6 +421,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           onLoadToolContent={handleLoadToolContent}
           animateAgentText
           animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+          expandToolRuns={expandToolRuns}
           canWriteSession={canWriteSession}
           agentActivity={lc.agentActivity}
           animationTargetIdx={animationTargetIdx}
@@ -410,6 +438,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       lc.agentActivity,
       animationTargetIdx,
       animatedUserMsgIds,
+      expandToolRuns,
       canWriteSession,
       commentUi.rowState,
     ]

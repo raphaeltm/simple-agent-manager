@@ -43,6 +43,7 @@ export type {
   ThinkingItem,
   TokenUsage,
   ToolCallContentItem,
+  ToolCallGroupItem,
   ToolCallItem,
   UserMessage,
 } from './useAcpMessages.types';

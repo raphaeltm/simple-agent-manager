@@ -427,6 +427,65 @@ describe('mergeMessages', () => {
   });
 });
 
+/**
+ * Server-side delta grouping means a REST read can return one row whose content
+ * is the concatenation of several rows the live WebSocket already delivered
+ * separately. These pin that the merge layer supersedes the fragments instead of
+ * rendering their text twice.
+ */
+describe('mergeMessages with a server-grouped superset row', () => {
+  // The live socket delivered one row per 2s flush: "The " then "answer is 42."
+  const liveFlushes = [
+    msg({ id: 'flush-1', createdAt: 1000, sequence: 1, content: 'The ' }),
+    msg({ id: 'flush-2', createdAt: 2000, sequence: 2, content: 'answer is 42.' }),
+  ];
+  // A later REST read groups both into one row keyed by the FIRST row's id.
+  const groupedRow = msg({
+    id: 'flush-1',
+    createdAt: 1000,
+    sequence: 1,
+    content: 'The answer is 42.',
+  });
+
+  it('replace drops the superseded fragment instead of duplicating its text', () => {
+    const prev = [msg({ id: 'user-1', createdAt: 500, sequence: 0, role: 'user' }), ...liveFlushes];
+    const result = mergeMessages(
+      prev,
+      [msg({ id: 'user-1', createdAt: 500, sequence: 0, role: 'user' }), groupedRow],
+      'replace'
+    );
+
+    expect(result.map((m) => m.id)).toEqual(['user-1', 'flush-1']);
+    expect(result.find((m) => m.id === 'flush-1')?.content).toBe('The answer is 42.');
+    // The absorbed fragment is gone, so the rendered bubble cannot read
+    // "The answer is 42.answer is 42."
+    expect(result.some((m) => m.id === 'flush-2')).toBe(false);
+  });
+
+  it('replace preserves older paginated history outside the incoming window', () => {
+    const older = msg({ id: 'older', createdAt: 10, sequence: 0, content: 'earlier turn' });
+    const result = mergeMessages([older, ...liveFlushes], [groupedRow], 'replace');
+    expect(result.map((m) => m.id)).toEqual(['older', 'flush-1']);
+  });
+
+  it('append leaves a live fragment alone when a delta read adds only newer rows', () => {
+    // The `after=` delta query returns rows strictly newer than the cached tail,
+    // so it can never overlap an already-delivered fragment.
+    const newer = msg({ id: 'flush-3', createdAt: 3000, sequence: 3, content: ' Done.' });
+    const result = mergeMessages(liveFlushes, [newer], 'append');
+    expect(result.map((m) => m.id)).toEqual(['flush-1', 'flush-2', 'flush-3']);
+    expect(result.map((m) => m.content).join('')).toBe('The answer is 42. Done.');
+  });
+
+  it('prepend keeps the live fragments rather than re-adding absorbed text', () => {
+    // "Load earlier" pages are older than everything loaded, but if a grouped row
+    // did overlap, prev must win so text is not doubled.
+    const result = mergeMessages(liveFlushes, [groupedRow], 'prepend');
+    expect(result.map((m) => m.id)).toEqual(['flush-1', 'flush-2']);
+    expect(result.map((m) => m.content).join('')).toBe('The answer is 42.');
+  });
+});
+
 describe('getLastMessageId', () => {
   it('returns the last message ID', () => {
     const messages = [msg({ id: 'a', createdAt: 1 }), msg({ id: 'b', createdAt: 2 })];

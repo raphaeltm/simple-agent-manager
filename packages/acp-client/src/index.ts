@@ -12,6 +12,11 @@ export * from './transport/websocket';
 export { getAllStaticCommands, getStaticCommands } from './commands/registry';
 
 // Hooks
+export {
+  collapseToolRuns,
+  type CollapseToolRunsOptions,
+  DEFAULT_MIN_COLLAPSED_TOOL_RUN,
+} from './collapse-tool-runs';
 export * from './hooks/useAcpMessages';
 export * from './hooks/useAcpSession';
 export * from './hooks/useAudioPlayback';
@@ -52,6 +57,7 @@ export { StickyPlanButton } from './components/StickyPlanButton';
 export { TerminalBlock } from './components/TerminalBlock';
 export { ThinkingBlock } from './components/ThinkingBlock';
 export { ToolCallCard } from './components/ToolCallCard';
+export { ToolCallGroupCard } from './components/ToolCallGroupCard';
 export type { TypewriterTextProps } from './components/TypewriterText';
 export { TypewriterText } from './components/TypewriterText';
 export { UsageIndicator } from './components/UsageIndicator';
