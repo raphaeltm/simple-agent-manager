@@ -207,49 +207,53 @@ func TestEvictionDeliveryRetainsTransientAndAuthFailuresButRetiresGone(t *testin
 }
 
 func TestEvictionPreparedStopRecoversAfterAgentRestart(t *testing.T) {
-	s := newEvictionTestServer()
-	path := initializeEvictionTestStore(t, s)
-	logPath := setupEvictionDocker(t, evictionTestContainerID)
-	t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", "1")
-	if err := s.stopEvictedWorkspaceContainer(context.Background(), evictionTargetFixture(s)); err == nil {
-		t.Fatal("expected Docker stop failure")
-	}
-	if s.workspaces["workspace-1"].Status != "running" {
-		t.Fatal("failed stop was announced as complete")
-	}
-	if err := s.store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	restarted := newEvictionTestServer()
-	restarted.store = reopenEvictionTestStore(t, path)
-	restarted.workspaces = map[string]*WorkspaceRuntime{}
-	t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", "0")
-	requests := make(chan map[string]interface{}, 1)
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]interface{}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		requests <- body
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer api.Close()
-	restarted.config.ControlPlaneURL = api.URL
-	if err := restarted.deliverPendingWorkspaceEvictionAt(context.Background(), "", time.Now().Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case body := <-requests:
-		if body["containerStopped"] != true {
-			t.Fatalf("unconfirmed stop callback: %v", body)
-		}
-	default:
-		t.Fatal("recovered intent was not delivered")
-	}
-	calls, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(calls), "stop --time") != 2 || strings.Contains(string(calls), " rm ") {
-		t.Fatalf("stop was not safely retried: %s", calls)
+	for _, test := range []struct{ name, exit string }{{"crash-after-stop-before-mark", "0"}, {"failed-stop", "1"}} {
+		t.Run(test.name, func(t *testing.T) {
+			s := newEvictionTestServer()
+			path := initializeEvictionTestStore(t, s)
+			logPath := setupEvictionDocker(t, evictionTestContainerID)
+			t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", test.exit)
+			if err := s.stopEvictedWorkspaceContainer(context.Background(), evictionTargetFixture(s)); (err != nil) != (test.exit == "1") {
+				t.Fatalf("initial stop: %v", err)
+			}
+			if s.workspaces["workspace-1"].Status != "running" {
+				t.Fatal("failed stop was announced as complete")
+			}
+			if err := s.store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restarted := newEvictionTestServer()
+			restarted.store = reopenEvictionTestStore(t, path)
+			restarted.workspaces = map[string]*WorkspaceRuntime{}
+			t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", "0")
+			requests := make(chan map[string]interface{}, 1)
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]interface{}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				requests <- body
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer api.Close()
+			restarted.config.ControlPlaneURL = api.URL
+			if err := restarted.deliverPendingWorkspaceEvictionAt(context.Background(), "", time.Now().Add(time.Hour)); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case body := <-requests:
+				if body["containerStopped"] != true {
+					t.Fatalf("unconfirmed stop callback: %v", body)
+				}
+			default:
+				t.Fatal("recovered intent was not delivered")
+			}
+			calls, err := os.ReadFile(logPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Count(string(calls), "stop --time") != 2 || strings.Contains(string(calls), " rm ") {
+				t.Fatalf("stop was not safely retried: %s", calls)
+			}
+		})
 	}
 }
 
@@ -294,5 +298,33 @@ func TestEvictionDeliveryShutdownKeepsClaimedRow(t *testing.T) {
 	pending, err := s.store.ClaimEvictionDelivery(context.Background(), "", time.Now().Add(time.Hour), time.Second, time.Minute, time.Second)
 	if err != nil || pending == nil {
 		t.Fatalf("shutdown lost durable callback: %#v %v", pending, err)
+	}
+}
+
+func TestEvictionOutboxPersistsOnlyAllowlistedResultFields(t *testing.T) {
+	s := newEvictionTestServer()
+	initializeEvictionTestStore(t, s)
+	secret := "gho_" + strings.Repeat("C", 36)
+	prompt := "private eviction snapshot prompt canary"
+	result := resourcemon.EvictionResult{
+		Target: evictionTargetFixture(s), ContainerStopped: true,
+		SnapshotError:      errors.New("Authorization: Bearer " + secret),
+		ContainerStopError: errors.New(prompt),
+	}
+	result.Target.Event.Message = prompt
+	result.Target.Event.ContainerName = secret
+	if applied, err := s.store.RecordWorkspaceEviction(context.Background(), s.workspaceEvictionDelivery(result)); err != nil || !applied {
+		t.Fatalf("queue=%v %v", applied, err)
+	}
+	stored, err := s.store.ClaimEvictionDelivery(context.Background(), "", time.Now().Add(time.Hour), time.Second, time.Minute, time.Second)
+	if err != nil || stored == nil {
+		t.Fatal("could not read queued eviction")
+	}
+	encoded, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), secret) || strings.Contains(string(encoded), prompt) || strings.Contains(string(encoded), "workspace-callback-token") {
+		t.Fatal("sensitive values reached the durable outbox")
 	}
 }

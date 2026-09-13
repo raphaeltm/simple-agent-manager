@@ -47,6 +47,9 @@ func (s *Server) prepareWorkspaceEvictionStop(ctx context.Context, target resour
 		return err
 	}
 	delivery := s.workspaceEvictionDelivery(resourcemon.EvictionResult{Target: target})
+	if delivery.ProjectID == "" {
+		return fmt.Errorf("workspace project identity unavailable; refusing eviction without a recoverable callback")
+	}
 	persistCtx, cancel := context.WithTimeout(ctx, s.config.EvictionResolveTimeout)
 	defer cancel()
 	applied, err := s.store.RecordWorkspaceEviction(persistCtx, delivery)

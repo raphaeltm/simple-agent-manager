@@ -221,7 +221,7 @@ export async function reserveEvictedWorkspaceRestart(
        WHERE ${workspaceAdmissionEligibilitySql()}
      )
      UPDATE workspaces SET status = 'creating', error_message = NULL, updated_at = ?,
-       eviction_generation = ?, eviction_finalized_at = NULL
+       eviction_generation = ?, eviction_finalized_at = NULL, stop_runtime_confirmed_at = NULL
      WHERE id = ? AND node_id = ? AND user_id = ? AND project_id = ?
        AND chat_session_id IS ? AND status = 'evicted'
        AND eviction_generation IS ? AND eviction_finalized_at IS NOT NULL

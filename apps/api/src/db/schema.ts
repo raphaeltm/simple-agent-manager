@@ -1344,6 +1344,8 @@ export const workspaces = sqliteTable(
     evictionGeneration: text('eviction_generation'),
     /** Restart may reserve capacity only after serialized eviction cleanup completes. */
     evictionFinalizedAt: text('eviction_finalized_at'),
+    /** VM Stop acknowledged; explicit Stop can retry internal cleanup without stopping again. */
+    stopRuntimeConfirmedAt: text('stop_runtime_confirmed_at'),
     dispatchedAt: text('dispatched_at'),
     /** Agent profile ID used for this workspace's task — drives GitHub CLI policy enforcement. */
     agentProfileHint: text('agent_profile_hint'),

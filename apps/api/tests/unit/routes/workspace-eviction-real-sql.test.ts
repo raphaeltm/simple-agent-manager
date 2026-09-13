@@ -7,10 +7,13 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { workspaceEvictionCallbackRoute } from '../../../src/routes/projects/workspace-eviction-callback';
+import { lifecycleRoutes } from '../../../src/routes/workspaces/lifecycle';
 import { closeOrphanedComputeUsage } from '../../../src/services/compute-usage';
 import {
   finalizeWorkspaceEvictionInNode,
+  finalizeWorkspaceStopInNode,
   type WorkspaceEvictionIdentity,
+  type WorkspaceStopIdentity,
 } from '../../../src/services/workspace-eviction-lifecycle';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -19,6 +22,24 @@ const mocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
   cleanupWorkspaceActivity: vi.fn(),
   recordActivityEvent: vi.fn(),
+  stopWorkspaceOnNode: vi.fn(),
+  deleteSessionSnapshotState: vi.fn(),
+  scheduleWorkspaceDeletion: vi.fn(),
+}));
+vi.mock('../../../src/middleware/auth', () => ({
+  getUserId: () => 'user',
+  requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
+  requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
+}));
+vi.mock('../../../src/services/node-agent', () => ({
+  stopWorkspaceOnNode: mocks.stopWorkspaceOnNode,
+  restartWorkspaceOnNode: vi.fn(),
+  rebuildWorkspaceOnNode: vi.fn(),
+}));
+vi.mock('../../../src/services/nodes', () => ({ stopNodeResources: vi.fn() }));
+vi.mock('../../../src/services/session-sleep', () => ({ sleepWorkspaceSession: vi.fn() }));
+vi.mock('../../../src/services/session-snapshots', () => ({
+  deleteSessionSnapshotState: mocks.deleteSessionSnapshotState,
 }));
 vi.mock('../../../src/services/jwt', () => ({ verifyCallbackToken: mocks.verifyCallbackToken }));
 vi.mock('../../../src/services/project-data', () => ({
@@ -60,8 +81,15 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
       env,
       { waitUntil: (promise: Promise<unknown>) => pending.push(promise) } as ExecutionContext
     );
-    await Promise.all(pending);
     return response;
+  }
+
+  function stop() {
+    return app.fetch(
+      new Request('https://api.test/workspaces/workspace/stop', { method: 'POST' }),
+      env,
+      { waitUntil: (promise: Promise<unknown>) => pending.push(promise) } as ExecutionContext
+    );
   }
 
   beforeEach(() => {
@@ -70,10 +98,12 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     mocks.stopSession.mockResolvedValue(undefined);
     mocks.cleanupWorkspaceActivity.mockResolvedValue(undefined);
     mocks.recordActivityEvent.mockResolvedValue(undefined);
+    mocks.stopWorkspaceOnNode.mockResolvedValue(undefined);
+    mocks.scheduleWorkspaceDeletion.mockResolvedValue(true);
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
     sqlite.exec(`
-      INSERT INTO nodes (id, user_id, status) VALUES ('node', 'user', 'running');
+      INSERT INTO nodes (id, user_id, status, health_status, runtime) VALUES ('node', 'user', 'running', 'healthy', 'vm');
       INSERT INTO workspaces (id, user_id, project_id, node_id, chat_session_id, status, updated_at)
         VALUES ('workspace', 'user', 'project', 'node', 'chat', 'running', '2026-09-01T00:00:00.000Z');
       INSERT INTO agent_sessions (id, workspace_id, user_id, status)
@@ -87,6 +117,14 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
       NODE_LIFECYCLE: {
         idFromName: (name: string) => name,
         get: () => ({
+          scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion,
+          finalizeWorkspaceStop: (identity: WorkspaceStopIdentity) => {
+            const result = finalizationQueue
+              .catch(() => undefined)
+              .then(() => finalizeWorkspaceStopInNode(env, identity));
+            finalizationQueue = result;
+            return result;
+          },
           finalizeWorkspaceEviction: (identity: WorkspaceEvictionIdentity) => {
             const result = finalizationQueue
               .catch(() => undefined)
@@ -105,9 +143,149 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
         : c.json({ error: error.message }, 500)
     );
     app.route('/projects', workspaceEvictionCallbackRoute);
+    app.route('/workspaces', lifecycleRoutes);
   });
 
   afterEach(() => sqlite.close());
+
+  it('refuses a stale Stop claim after eviction finalizes, preserving its snapshot and billing', async () => {
+    const original = env.DATABASE.prepare.bind(env.DATABASE);
+    let injected = false;
+    env.DATABASE.prepare = ((sql: string) => {
+      const statement = original(sql);
+      if (!injected && sql.startsWith('select') && sql.includes('from "nodes"')) {
+        injected = true;
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...params: unknown[]) => {
+          const bound = bind(...params);
+          const raw = bound.raw.bind(bound);
+          bound.raw = async (...args: Parameters<typeof bound.raw>) => {
+            const result = await raw(...args);
+      expect((await evict()).status).toBe(204);
+      expect(sqlite.prepare('SELECT stop_runtime_confirmed_at FROM workspaces').get()).toEqual({
+        stop_runtime_confirmed_at: null,
+      });
+            return result;
+          };
+          return bound;
+        };
+      }
+      return statement;
+    }) as D1Database['prepare'];
+    expect((await stop()).status).toBe(409);
+    expect(state().workspace).toEqual({ status: 'evicted' });
+    expect(state().usage).toEqual({ ended_at: expect.any(String) });
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.deleteSessionSnapshotState).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'preserves eviction when it beats an in-flight Stop completion (reject=%s)',
+    async (reject) => {
+      mocks.stopWorkspaceOnNode.mockImplementationOnce(async () => {
+        expect(state().workspace).toEqual({ status: 'stopping' });
+        expect((await evict()).status).toBe(204);
+        if (reject) throw new Error('VM is already evicted');
+      });
+      expect((await stop()).status).toBe(200);
+      await Promise.all(pending);
+      expect(state().workspace).toEqual({ status: 'evicted' });
+      expect(mocks.stopSession).toHaveBeenCalledOnce();
+      expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+      expect(mocks.deleteSessionSnapshotState).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps a rejected Stop active until the delayed eviction callback arrives', async () => {
+    mocks.stopWorkspaceOnNode.mockRejectedValueOnce(new Error('VM is already evicted'));
+    expect((await stop()).status).toBe(200);
+    await Promise.all(pending);
+    expect(state().workspace).toEqual({ status: 'running' });
+    const restart = await app.fetch(
+      new Request('https://api.test/workspaces/workspace/restart', {
+        method: 'POST',
+      }),
+      env
+    );
+    expect(restart.status).toBe(400);
+    expect((await evict()).status).toBe(204);
+    expect(state().workspace).toEqual({ status: 'evicted' });
+    expect(state().usage).toEqual({ ended_at: expect.any(String) });
+  });
+
+  it('holds eviction restart eligibility until an earlier Stop finalizer finishes', async () => {
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mocks.stopSession.mockImplementationOnce(async () => {
+      entered();
+      await blocked;
+    });
+    expect((await stop()).status).toBe(200);
+    await started;
+    const eviction = evict();
+    // Wait for the callback's atomic D1 transition, before queued DO cleanup.
+    for (
+      let i = 0;
+      i < 100 && (state().workspace as { status: string }).status !== 'evicted';
+      i++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(state().workspace).toEqual({ status: 'evicted' });
+    expect(sqlite.prepare('SELECT eviction_finalized_at FROM workspaces').get()).toEqual({
+      eviction_finalized_at: null,
+    });
+    release();
+    expect((await eviction).status).toBe(204);
+    await Promise.all(pending);
+    expect(state().workspace).toEqual({ status: 'evicted' });
+    expect(sqlite.prepare('SELECT eviction_finalized_at FROM workspaces').get()).toEqual({
+      eviction_finalized_at: expect.any(String),
+    });
+    expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+  });
+
+  it('finalizes an uncontended Stop before exposing stopped state', async () => {
+    sqlite.exec(`INSERT INTO session_snapshots
+      (id, workspace_id, chat_session_id, project_id, status, sleep_status, sleep_after, expires_at)
+      VALUES ('stop-snapshot', 'workspace', 'chat', 'project', 'available', 'scheduled',
+        '2026-09-13T00:00:00.000Z', '2099-01-01T00:00:00.000Z')`);
+    expect((await stop()).status).toBe(200);
+    await Promise.all(pending);
+    expect(state().workspace).toEqual({ status: 'stopped' });
+    expect(state().usage).toEqual({ ended_at: expect.any(String) });
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledOnce();
+    expect(mocks.stopSession).toHaveBeenCalledOnce();
+    expect(
+      sqlite.prepare('SELECT status, sleep_status, sleep_after FROM session_snapshots').get()
+    ).toEqual({ status: 'available', sleep_status: null, sleep_after: null });
+  });
+
+  it('retries confirmed Stop cleanup after a ProjectData failure without stopping the VM again', async () => {
+    mocks.stopSession.mockRejectedValueOnce(new Error('temporary ProjectData failure'));
+    expect((await stop()).status).toBe(200);
+    await Promise.all(pending);
+    expect(state().workspace).toEqual({ status: 'stopping' });
+    expect(sqlite.prepare('SELECT stop_runtime_confirmed_at FROM workspaces').get()).toEqual({
+      stop_runtime_confirmed_at: expect.any(String),
+    });
+    expect((await stop()).status).toBe(200);
+    await Promise.all(pending);
+    expect(state().workspace).toEqual({ status: 'stopped' });
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledOnce();
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith('node', 'workspace', env, 'user', {
+      expectedEvictionGeneration: '',
+      beforeExternalMutation: expect.any(Function),
+    });
+    expect(mocks.stopSession).toHaveBeenCalledTimes(2);
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledOnce();
+  });
 
   it('closes metering and sessions at eviction, retaining workspace and snapshot state', async () => {
     sqlite.exec(`INSERT INTO session_snapshots

@@ -1074,6 +1074,7 @@ func validConfig() *Config {
 		WorkspaceBuildQueueDepth:                DefaultWorkspaceBuildQueueDepth,
 		DeployPreflightCommandTimeout:           DefaultDeployPreflightCommandTimeout,
 		LogStreamPingWriteTimeout:               DefaultLogStreamPingWriteTimeout,
+		ResourceEventBufferSize:                 DefaultResourceEventBufferSize,
 		PSIPollInterval:                         time.Duration(DefaultPSIPollIntervalSeconds) * time.Second,
 		ContainerStatsInterval:                  time.Duration(DefaultContainerStatsIntervalSeconds) * time.Second,
 		PSIMemorySomeWarningThreshold:           DefaultPSIMemorySomeWarningThreshold,

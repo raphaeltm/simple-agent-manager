@@ -938,6 +938,7 @@ An out-of-range weight makes the unit fail to load, which would take the slice h
 | `DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT`        | `15s`                                  | VM-agent TLS handshake timeout for artifact downloads                     |
 | `DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT`      | `60s`                                  | VM-agent first-response-header timeout for artifact downloads             |
 | `DEPLOY_ARTIFACT_IDLE_TIMEOUT`                 | `2m`                                   | VM-agent idle watchdog for artifact body-read progress                    |
+| `DEFAULT_RESOURCE_EVENT_BUFFER_SIZE` | `64` | Capacity of each bounded pressure/Docker event queue; positive integer |
 | `DEFAULT_PSI_POLL_INTERVAL_SECONDS` | `10` | Linux memory PSI sampling interval, in seconds |
 | `DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS` | `30` | Docker resource statistics sampling interval, in seconds |
 | `DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD` | `25` | Warning threshold for the maximum PSI some-memory avg10/avg60 percentage |
@@ -947,7 +948,7 @@ An out-of-range weight makes the unit fail to load, which would take the slice h
 | `DEFAULT_EVICTION_DEBOUNCE_SECONDS`            | `30`                                   | Minimum cooldown between ResourceGuard eviction attempts      |
 | `DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS`    | `120`                                  | VM-agent pre-stop ResourceGuard eviction snapshot deadline                |
 | `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` | `10`                                   | Grace period passed to `docker stop --time` during ResourceGuard eviction |
-| `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` | `300` | Maximum backoff between durable eviction callback delivery attempts, in seconds; the initial delay uses the eviction cooldown |
+| `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` | `300` | Backoff cap for durable eviction callback retries, in seconds; the operation lease is a lower bound and can exceed this cap. Delivery starts on a later heartbeat |
 | `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS`     | `5`                                    | Docker label resolution deadline before ResourceGuard eviction            |
 
 ## Platform Limits

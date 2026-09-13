@@ -327,8 +327,9 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.DefaultBranch = opt.DefaultBranch
 			metadataChanged = true
 		}
-		if opt.ProjectID != "" {
+		if opt.ProjectID != "" && runtime.ProjectID == "" {
 			runtime.ProjectID = opt.ProjectID
+			metadataChanged = true
 		}
 		if opt.ChatSessionID != "" {
 			runtime.ChatSessionID = opt.ChatSessionID
@@ -351,7 +352,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	effectiveBranch := branch
 	var persistedWorkspaceDir, persistedContainerWorkDir, persistedContainerLabelValue, persistedContainerUser string
 	var persistedCallbackToken string
-	var persistedChatSessionID, persistedEvictionGeneration string
+	var persistedProjectID, persistedChatSessionID, persistedEvictionGeneration string
 	var persistedBaseBranch, persistedDefaultBranch string
 	var persistedRepoProvider, persistedCloneURL, persistedRepositoryHost, persistedRepositoryPath string
 	var persistedLightweight, metadataUnavailable bool
@@ -384,6 +385,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			persistedCloneURL = meta.CloneURL
 			persistedRepositoryHost = meta.RepositoryHost
 			persistedRepositoryPath = meta.RepositoryPath
+			persistedProjectID = meta.ProjectID
 			persistedChatSessionID = meta.ChatSessionID
 			persistedEvictionGeneration = meta.EvictionGeneration
 			if meta.Evicted {
@@ -430,7 +432,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		ContainerWorkDir:       containerWorkDir,
 		ContainerUser:          containerUser,
 		CallbackToken:          firstNonEmpty(strings.TrimSpace(callbackToken), strings.TrimSpace(persistedCallbackToken)),
-		ProjectID:              opt.ProjectID,
+		ProjectID:              firstNonEmpty(persistedProjectID, opt.ProjectID),
 		ChatSessionID:          firstNonEmpty(opt.ChatSessionID, persistedChatSessionID),
 		EvictionGeneration:     firstNonEmpty(persistedEvictionGeneration, opt.EvictionGeneration),
 		MetadataUnavailable:    metadataUnavailable,
@@ -622,6 +624,7 @@ func (s *Server) writeWorkspaceMetadata(runtime *WorkspaceRuntime) error {
 		CloneURL:               runtime.CloneURL,
 		RepositoryHost:         runtime.RepositoryHost,
 		RepositoryPath:         runtime.RepositoryPath,
+		ProjectID:              runtime.ProjectID,
 		ChatSessionID:          runtime.ChatSessionID,
 		EvictionGeneration:     runtime.EvictionGeneration,
 		Evicted:                runtime.Status == "evicted",

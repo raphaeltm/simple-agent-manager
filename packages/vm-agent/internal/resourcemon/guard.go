@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // PressureEventType identifies why a pressure event was emitted.
@@ -68,17 +70,17 @@ func (c ResourceGuardConfig) Validate() error {
 	if c.ContainerStatsInterval <= 0 {
 		errs = append(errs, fmt.Errorf("ContainerStatsInterval must be > 0, got %s", c.ContainerStatsInterval))
 	}
-	if c.PSIThresholds.MemorySomeWarningThreshold <= 0 {
-		errs = append(errs, fmt.Errorf("MemorySomeWarningThreshold must be > 0, got %f", c.PSIThresholds.MemorySomeWarningThreshold))
+	if !config.IsValidPSIThreshold(c.PSIThresholds.MemorySomeWarningThreshold) {
+		errs = append(errs, fmt.Errorf("MemorySomeWarningThreshold must be a finite percentage in (0, 100], got %f", c.PSIThresholds.MemorySomeWarningThreshold))
 	}
-	if c.PSIThresholds.MemorySomeCriticalThreshold <= 0 {
-		errs = append(errs, fmt.Errorf("MemorySomeCriticalThreshold must be > 0, got %f", c.PSIThresholds.MemorySomeCriticalThreshold))
+	if !config.IsValidPSIThreshold(c.PSIThresholds.MemorySomeCriticalThreshold) {
+		errs = append(errs, fmt.Errorf("MemorySomeCriticalThreshold must be a finite percentage in (0, 100], got %f", c.PSIThresholds.MemorySomeCriticalThreshold))
 	}
-	if c.PSIThresholds.MemoryFullWarningThreshold <= 0 {
-		errs = append(errs, fmt.Errorf("MemoryFullWarningThreshold must be > 0, got %f", c.PSIThresholds.MemoryFullWarningThreshold))
+	if !config.IsValidPSIThreshold(c.PSIThresholds.MemoryFullWarningThreshold) {
+		errs = append(errs, fmt.Errorf("MemoryFullWarningThreshold must be a finite percentage in (0, 100], got %f", c.PSIThresholds.MemoryFullWarningThreshold))
 	}
-	if c.PSIThresholds.MemoryFullCriticalThreshold <= 0 {
-		errs = append(errs, fmt.Errorf("MemoryFullCriticalThreshold must be > 0, got %f", c.PSIThresholds.MemoryFullCriticalThreshold))
+	if !config.IsValidPSIThreshold(c.PSIThresholds.MemoryFullCriticalThreshold) {
+		errs = append(errs, fmt.Errorf("MemoryFullCriticalThreshold must be a finite percentage in (0, 100], got %f", c.PSIThresholds.MemoryFullCriticalThreshold))
 	}
 	if c.PSIThresholds.MemorySomeWarningThreshold > c.PSIThresholds.MemorySomeCriticalThreshold {
 		errs = append(errs, fmt.Errorf("MemorySomeWarningThreshold must be <= MemorySomeCriticalThreshold"))
@@ -119,7 +121,7 @@ func NewResourceGuard(cfg ResourceGuardConfig) (*ResourceGuard, error) {
 		return nil, err
 	}
 	if cfg.EventBuffer <= 0 {
-		cfg.EventBuffer = 64
+		cfg.EventBuffer = config.DefaultResourceEventBufferSize
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()

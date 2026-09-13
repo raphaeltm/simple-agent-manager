@@ -401,6 +401,7 @@ func TestEvictionRejectsOOMFromPreviousRunOfSameContainer(t *testing.T) {
 	t.Setenv("SAM_EVICTION_TEST_STARTED_AT", now.Format(time.RFC3339Nano))
 	target := resourcemon.EvictionTarget{WorkspaceID: "workspace-1", ContainerID: evictionTestContainerID,
 		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Reason:         resourcemon.EvictionReasonOOMKill,
 		Event:          resourcemon.PressureEvent{Type: resourcemon.PressureEventContainerOOM, OccurredAt: now.Add(-time.Minute)}}
 	if err := s.stopEvictedWorkspaceContainer(context.Background(), target); err == nil {
 		t.Fatal("stopped container restarted after OOM event")

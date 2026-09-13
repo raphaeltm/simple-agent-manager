@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/auth"
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/persistence"
 )
 
@@ -322,5 +323,103 @@ func TestPreparedEvictionIntentBlocksRecoveryAndUnfencedRebuild(t *testing.T) {
 	}
 	if runtime.Status != "evicted" {
 		t.Fatalf("durable intent did not restore evicted status: %q", runtime.Status)
+	}
+}
+
+func TestEvictedWorkspaceCreateReplayCannotProvisionAfterAgentRestart(t *testing.T) {
+	for _, standalone := range []bool{false, true} {
+		t.Run(fmt.Sprintf("standalone=%t", standalone), func(t *testing.T) {
+			s, token, finish := newRestartGenerationTestServer(t, "evicted")
+			defer finish(errors.New("provisioning must not start"))
+			if standalone {
+				s.config.Role = config.RoleStandalone
+			}
+			s.workspaces = make(map[string]*WorkspaceRuntime)
+			rec := postCreateWorkspaceWithRepository(t, s, token, "ws-restart", "owner/repo")
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("create replay accepted: %d %s", rec.Code, rec.Body.String())
+			}
+			meta, err := s.store.GetWorkspaceMetadata("ws-restart")
+			if err != nil || meta == nil || !meta.Evicted || meta.CallbackToken != "" {
+				t.Fatalf("rejected create changed durable state: %#v %v", meta, err)
+			}
+			if runtime, ok := s.getWorkspaceRuntime("ws-restart"); ok && runtime.ProvisioningActive {
+				t.Fatal("replayed create started provisioning")
+			}
+		})
+	}
+}
+
+func TestWorkspaceBootstrapRestoresFenceAndSkipsPreservedEvictedOverlay(t *testing.T) {
+	s, _, finish := newRestartGenerationTestServer(t, "evicted")
+	defer finish(errors.New("test complete"))
+	const workspaceID = "boot-workspace"
+	if err := s.store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{WorkspaceID: workspaceID, Repository: "owner/repo", ProjectID: "project-1", Evicted: true, EvictionGeneration: restartTestGeneration}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := *s.config
+	cfg.WorkspaceID = workspaceID
+	cfg.BootstrapToken = "configured-bootstrap-token"
+	// Real bootstrap.Run would fail on this state path if the guard let it run.
+	cfg.BootstrapStatePath = t.TempDir()
+	if err := s.initializeBootWorkspace(&cfg, s.workspaces["ws-restart"].PTY); err != nil {
+		t.Fatal(err)
+	}
+	runtime := s.workspaces[workspaceID]
+	if runtime.Status != "evicted" || runtime.EvictionGeneration != restartTestGeneration || runtime.ProjectID != "project-1" {
+		t.Fatalf("boot initialization lost durable fence: %#v", runtime)
+	}
+	// Prepared intents can exist while the old process still thought it running.
+	runtime.Status = "running"
+	if err := s.BootstrapWorkspace(context.Background(), &cfg, nil); err != nil {
+		t.Fatalf("evicted bootstrap should remain dormant: %v", err)
+	}
+	if runtime.Status != "evicted" || s.bootstrapComplete.Load() {
+		t.Fatal("legacy bootstrap advertised an evicted workspace as ready")
+	}
+}
+
+func TestWorkspaceLifecycleLockReclaimsEntriesAfterWaitersAndCancellation(t *testing.T) {
+	s := &Server{}
+	first := s.workspaceLifecycleLock("ws")
+	if err := first.Lock(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := s.workspaceLifecycleLock("ws").Lock(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("second lock bypassed holder: %v", err)
+	}
+	if len(s.workspaceLifecycleLocks) != 1 {
+		t.Fatal("canceling waiter removed active lock")
+	}
+	first.Unlock()
+	if len(s.workspaceLifecycleLocks) != 0 {
+		t.Fatal("completed workspace lock leaked")
+	}
+	for i := 0; i < 100; i++ {
+		lock := s.workspaceLifecycleLock(fmt.Sprintf("workspace-%d", i))
+		if err := lock.Lock(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		lock.Unlock()
+	}
+	if len(s.workspaceLifecycleLocks) != 0 {
+		t.Fatal("historical workspace lifecycle entries accumulated")
+	}
+}
+
+func TestWorkspaceRuntimeHydratesPersistedProjectIdentity(t *testing.T) {
+	s, _, finish := newRestartGenerationTestServer(t, "running")
+	defer finish(errors.New("test complete"))
+	s.upsertWorkspaceRuntime("ws-restart", "", "", "", "", workspaceRuntimeOpts{ProjectID: "project-1", ChatSessionID: "chat-1"})
+	s.workspaces = make(map[string]*WorkspaceRuntime)
+	runtime := s.upsertWorkspaceRuntime("ws-restart", "", "", "running", "")
+	if runtime.ProjectID != "project-1" || runtime.ChatSessionID != "chat-1" {
+		t.Fatalf("dynamic workspace lost callback identity: %#v", runtime)
+	}
+	s.upsertWorkspaceRuntime("ws-restart", "", "", "", "", workspaceRuntimeOpts{ProjectID: "unrelated-project"})
+	if runtime.ProjectID != "project-1" {
+		t.Fatal("ordinary update replaced project identity")
 	}
 }

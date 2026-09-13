@@ -543,6 +543,7 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 
 	resourceGuard, err := resourcemon.NewResourceGuard(resourcemon.ResourceGuardConfig{
+		EventBuffer:            cfg.ResourceEventBufferSize,
 		PSIPollInterval:        cfg.PSIPollInterval,
 		ContainerStatsInterval: cfg.ContainerStatsInterval,
 		DockerStatsTimeout:     cfg.SysInfoDockerTimeout,

@@ -20,6 +20,12 @@ func (s *Server) workspaceLifecycleLock(workspaceID string) *workspaceLifecycleH
 }
 
 func (l *workspaceLifecycleHandle) Lock(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s := l.server
 	s.workspaceLifecycleMu.Lock()
 	if s.workspaceLifecycleLocks == nil {
@@ -33,6 +39,11 @@ func (l *workspaceLifecycleHandle) Lock(ctx context.Context) error {
 	entry.users++
 	s.workspaceLifecycleMu.Unlock()
 	if err := entry.semaphore.Lock(ctx); err != nil {
+		l.release(entry)
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		entry.semaphore.Unlock()
 		l.release(entry)
 		return err
 	}

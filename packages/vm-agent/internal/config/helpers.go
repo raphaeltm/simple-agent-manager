@@ -347,17 +347,20 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.PSIMemorySomeWarningThreshold <= 0 {
-		errs = append(errs, fmt.Errorf("%s must be > 0, got %f", EnvDefaultPSIMemorySomeWarningThreshold, c.PSIMemorySomeWarningThreshold))
+	if c.ResourceEventBufferSize <= 0 {
+		errs = append(errs, fmt.Errorf("%s must be > 0", EnvDefaultResourceEventBufferSize))
 	}
-	if c.PSIMemorySomeCriticalThreshold <= 0 {
-		errs = append(errs, fmt.Errorf("%s must be > 0, got %f", EnvDefaultPSIMemorySomeCriticalThreshold, c.PSIMemorySomeCriticalThreshold))
+	if !IsValidPSIThreshold(c.PSIMemorySomeWarningThreshold) {
+		errs = append(errs, fmt.Errorf("%s must be a finite percentage in (0, 100], got %f", EnvDefaultPSIMemorySomeWarningThreshold, c.PSIMemorySomeWarningThreshold))
 	}
-	if c.PSIMemoryFullWarningThreshold <= 0 {
-		errs = append(errs, fmt.Errorf("%s must be > 0, got %f", EnvDefaultPSIMemoryFullWarningThreshold, c.PSIMemoryFullWarningThreshold))
+	if !IsValidPSIThreshold(c.PSIMemorySomeCriticalThreshold) {
+		errs = append(errs, fmt.Errorf("%s must be a finite percentage in (0, 100], got %f", EnvDefaultPSIMemorySomeCriticalThreshold, c.PSIMemorySomeCriticalThreshold))
 	}
-	if c.PSIMemoryFullCriticalThreshold <= 0 {
-		errs = append(errs, fmt.Errorf("%s must be > 0, got %f", EnvDefaultPSIMemoryFullCriticalThreshold, c.PSIMemoryFullCriticalThreshold))
+	if !IsValidPSIThreshold(c.PSIMemoryFullWarningThreshold) {
+		errs = append(errs, fmt.Errorf("%s must be a finite percentage in (0, 100], got %f", EnvDefaultPSIMemoryFullWarningThreshold, c.PSIMemoryFullWarningThreshold))
+	}
+	if !IsValidPSIThreshold(c.PSIMemoryFullCriticalThreshold) {
+		errs = append(errs, fmt.Errorf("%s must be a finite percentage in (0, 100], got %f", EnvDefaultPSIMemoryFullCriticalThreshold, c.PSIMemoryFullCriticalThreshold))
 	}
 	if c.PSIMemorySomeWarningThreshold > c.PSIMemorySomeCriticalThreshold {
 		errs = append(errs, fmt.Errorf("%s must be <= %s", EnvDefaultPSIMemorySomeWarningThreshold, EnvDefaultPSIMemorySomeCriticalThreshold))

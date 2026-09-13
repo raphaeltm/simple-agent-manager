@@ -114,8 +114,38 @@ pass the gates below against current `main` before merge.
 - [ ] Complete desktop/mobile Playwright audit and post reviewed screenshots.
 - [ ] Obtain final Go, Cloudflare, security, resource, test, env, docs, constitution, completion reviews.
 - [ ] Coordinate staging ownership and deploy the pinned final candidate.
-- [ ] Provision one real VM; verify fresh heartbeat, workspace terminal, cgroup placement,
-      monitoring, eviction/restart, preserved workspace state, and callback behavior.
+- [ ] Provision one real VM; verify fresh heartbeat, workspace terminal, inherited cgroup boot
+      configuration and agent survival under controlled stress, monitoring, eviction/restart,
+      preserved workspace state, and callback behavior. Distinguish configuration evidence
+      from direct runtime ancestry inspection; no cgroup design changes remain in this PR.
 - [ ] Delete this test's staging workspaces/nodes; verify zero staging VMs at rest.
 - [ ] Update PR evidence, pass CI/SonarCloud, resolve CodeRabbit feedback.
 - [ ] Merge #1980 and monitor production deployment.
+
+### Review-driven recovery hardening
+
+- Independent review found browser reconnect, legacy bootstrap, automatic recovery,
+  and create replay could revive evicted containers after agent restart. Persist
+  eviction state and fence every provisioning entry with the workspace lifecycle lock.
+- Serialize snapshot/stop against restart; revalidate after snapshot-lock waits and
+  pin the captured container identity so old work cannot snapshot or stop a successor.
+- Persist a stop intent before irreversible Docker stop, then retain a token-free
+  callback outbox across crashes. Retry one due item per heartbeat with a deadline,
+  lease, single-delivery lock and capped backoff. Only confirmed stops reach the API.
+- Persist project identity alongside generation for dynamic-workspace hydration;
+  never infer a project or use unverified labels to authorize eviction.
+- Current main was merged through `ef3fe1825`; the additive D1 migration is now
+  `0157_workspace_eviction_fencing.sql`, following main's archive-sweep migration.
+
+### Current validation evidence (pending final head reruns)
+
+- Sequential root typecheck19/19, lint13/13, build9/9 passed before final recovery additions.
+- API65 focused tests and32 real workerd tests passed, including actual D1/DO finalization.
+- Deployment/quality scripts610/610 passed with one worker; initial concurrent fixture
+  timeouts reproduced as load-only and passed unchanged when serialized.
+- Structural quality suite15 commands, migration ordering, preflight, current-tree
+  and PR-range secret scans passed (zero new secret findings).
+- Real component Playwright mock audit passed mobile375x667/desktop1280x800 across
+  normal/stress/empty/30-card scenarios. Fixed Unknown badge and cramped mobile title.
+- Docker-backed Go bootstrap integration passed; remaining full suites are in progress.
+- No staging deployment or VM provisioning has occurred in this continuation yet.

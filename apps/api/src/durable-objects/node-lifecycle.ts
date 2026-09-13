@@ -50,7 +50,9 @@ import { boundedWarmPlacementClaimGuardSql } from '../services/warm-placement-cl
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
 import {
   finalizeWorkspaceEvictionInNode,
+  finalizeWorkspaceStopInNode,
   type WorkspaceEvictionIdentity,
+  type WorkspaceStopIdentity,
 } from '../services/workspace-eviction-lifecycle';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../services/workspace-resource-capacity';
 import { NodeLifecycleProvisioning } from './node-lifecycle-provisioning';
@@ -100,6 +102,12 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   async finalizeWorkspaceEviction(identity: WorkspaceEvictionIdentity): Promise<boolean> {
     return this.ctx.blockConcurrencyWhile(() =>
       finalizeWorkspaceEvictionInNode(this.env as Env, identity)
+    );
+  }
+
+  async finalizeWorkspaceStop(identity: WorkspaceStopIdentity): Promise<boolean> {
+    return this.ctx.blockConcurrencyWhile(() =>
+      finalizeWorkspaceStopInNode(this.env as Env, identity)
     );
   }
 

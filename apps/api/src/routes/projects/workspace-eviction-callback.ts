@@ -18,7 +18,12 @@ import {
 import * as projectDataService from '../../services/project-data';
 import { finalizeWorkspaceEvictionOnNode } from '../../services/workspace-eviction-lifecycle';
 
-const WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUS_VALUES = ['creating', 'running', 'recovery'];
+const WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUS_VALUES = [
+  'creating',
+  'running',
+  'recovery',
+  'stopping',
+];
 const WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUSES = new Set(
   WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUS_VALUES
 );
@@ -267,7 +272,8 @@ workspaceEvictionCallbackRoute.post(
     ];
     const [transition] = await c.env.DATABASE.batch([
       c.env.DATABASE.prepare(
-        `UPDATE workspaces SET status = 'evicted', error_message = ?, updated_at = ?, eviction_finalized_at = NULL
+        `UPDATE workspaces SET status = 'evicted', error_message = ?, updated_at = ?, eviction_finalized_at = NULL,
+           stop_runtime_confirmed_at = NULL
          WHERE id = ? AND user_id = ? AND project_id = ? AND node_id = ?
            AND chat_session_id IS ? AND status = ? AND eviction_generation IS ? AND runtime_deletion_confirmed_at IS NULL
            AND EXISTS (SELECT 1 FROM nodes WHERE nodes.id = workspaces.node_id AND nodes.status = ?)`

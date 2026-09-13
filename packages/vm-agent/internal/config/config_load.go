@@ -224,6 +224,7 @@ func Load() (*Config, error) {
 		MetricsInterval:   getEnvDuration("METRICS_INTERVAL", time.Minute),
 
 		// Active resource monitoring settings - configurable per constitution principle XI
+		ResourceEventBufferSize:          getEnvInt(EnvDefaultResourceEventBufferSize, DefaultResourceEventBufferSize),
 		PSIPollInterval:                  time.Duration(getEnvInt(EnvDefaultPSIPollIntervalSeconds, DefaultPSIPollIntervalSeconds)) * time.Second,
 		ContainerStatsInterval:           time.Duration(getEnvInt(EnvDefaultContainerStatsIntervalSeconds, DefaultContainerStatsIntervalSeconds)) * time.Second,
 		PSIMemorySomeWarningThreshold:    getEnvFloat(EnvDefaultPSIMemorySomeWarningThreshold, DefaultPSIMemorySomeWarningThreshold),

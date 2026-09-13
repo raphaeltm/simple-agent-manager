@@ -42,7 +42,7 @@ func TestWorkspaceEvictionGenerationCASResistsStaleMetadataAndReloads(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale := WorkspaceMetadata{WorkspaceID: "ws-fence", Repository: "owner/repo", ChatSessionID: "chat-1", Evicted: true}
+	stale := WorkspaceMetadata{WorkspaceID: "ws-fence", Repository: "owner/repo", ProjectID: "project-1", ChatSessionID: "chat-1", Evicted: true}
 	if err := store.UpsertWorkspaceMetadata(stale); err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +61,7 @@ func TestWorkspaceEvictionGenerationCASResistsStaleMetadataAndReloads(t *testing
 	}
 	for _, old := range []string{"", first, "unrelated-stale-token"} {
 		stale.EvictionGeneration = old
+		stale.ProjectID = "unrelated-stale-project"
 		if err := store.UpsertWorkspaceMetadata(stale); err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +75,7 @@ func TestWorkspaceEvictionGenerationCASResistsStaleMetadataAndReloads(t *testing
 	}
 	defer store.Close()
 	meta, err := store.GetWorkspaceMetadata("ws-fence")
-	if err != nil || meta == nil || meta.EvictionGeneration != second || meta.Evicted || meta.ChatSessionID != "chat-1" {
+	if err != nil || meta == nil || meta.EvictionGeneration != second || meta.Evicted || meta.ProjectID != "project-1" || meta.ChatSessionID != "chat-1" {
 		t.Fatalf("durable generation lost: %#v, %v", meta, err)
 	}
 	if changed, err := store.CompareAndSwapWorkspaceEvictionGeneration("missing", "", first); err != nil || changed {

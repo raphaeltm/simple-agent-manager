@@ -6,6 +6,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { lifecycleRoutes } from '../../../src/routes/workspaces/lifecycle';
+import { stopWorkspaceOnNode } from '../../../src/services/node-agent';
 import { finalizeWorkspaceEvictionInNode, type WorkspaceEvictionIdentity } from '../../../src/services/workspace-eviction-lifecycle';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -175,14 +176,49 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
       VALUES (?, ?, 'owner', 'active')`).run(PROJECT_ID, USER_ID);
   }
 
+  it('snapshots the current generation for an internal VM Stop before a delayed network request', async () => {
+    sqlite.prepare("UPDATE workspaces SET eviction_generation = 'observed-generation' WHERE id = ?")
+      .run(WORKSPACE_ID);
+    mocks.signNodeManagementToken.mockImplementationOnce(async () => {
+      sqlite.prepare("UPDATE workspaces SET eviction_generation = 'successor-generation' WHERE id = ?")
+        .run(WORKSPACE_ID);
+      return { token: 'signed-test-token' };
+    });
+    await stopWorkspaceOnNode(NODE_ID, WORKSPACE_ID, env, USER_ID);
+    expect(JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body as string))
+      .toEqual({ expectedEvictionGeneration: 'observed-generation' });
+  });
+
+  it('preserves an explicit Stop claim generation instead of refreshing it from a successor', async () => {
+    sqlite.prepare("UPDATE workspaces SET eviction_generation = 'successor-generation' WHERE id = ?")
+      .run(WORKSPACE_ID);
+    await stopWorkspaceOnNode(NODE_ID, WORKSPACE_ID, env, USER_ID, {
+      expectedEvictionGeneration: 'claimed-generation',
+    });
+    expect(JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body as string))
+      .toEqual({ expectedEvictionGeneration: 'claimed-generation' });
+  });
+
+  it('refuses an internal Stop after workspace attachment identity changes', async () => {
+    sqlite.prepare('UPDATE workspaces SET node_id = NULL WHERE id = ?').run(WORKSPACE_ID);
+    await expect(stopWorkspaceOnNode(NODE_ID, WORKSPACE_ID, env, USER_ID)).rejects.toMatchObject({
+      statusCode: 409,
+    });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it('restarts an evicted workspace with a fresh reservation, metering row and exact generation pair', async () => {
     prepareEvictedRestart();
+    sqlite.prepare('UPDATE workspaces SET stop_runtime_confirmed_at = ? WHERE id = ?')
+      .run('2026-09-01T00:00:00.000Z', WORKSPACE_ID);
     const response = await requestLifecycle('restart');
     expect(response.status).toBe(200);
     await Promise.all(waitUntilPromises);
     expect(workspaceStatus()).toBe('creating');
     const row = sqlite.prepare('SELECT eviction_generation, eviction_finalized_at FROM workspaces WHERE id = ?').get(WORKSPACE_ID) as { eviction_generation: string };
     expect(row).toEqual({ eviction_generation: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/), eviction_finalized_at: null });
+    expect(sqlite.prepare('SELECT stop_runtime_confirmed_at FROM workspaces WHERE id = ?')
+      .get(WORKSPACE_ID)).toEqual({ stop_runtime_confirmed_at: null });
     const request = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
     expect(JSON.parse(request?.body as string)).toEqual({ evictionGeneration: row.eviction_generation, expectedEvictionGeneration: 'old-generation' });
     expect(sqlite.prepare('SELECT workspace_id, ended_at FROM compute_usage').all()).toEqual([{ workspace_id: WORKSPACE_ID, ended_at: null }]);
@@ -198,6 +234,15 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     expect(workspaceStatus()).toBe('evicted');
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(sqlite.prepare('SELECT id FROM compute_usage').all()).toEqual([]);
+  });
+
+  it.each(['restart', 'rebuild'] as const)('clears earlier Stop proof when %s creates a new runtime generation', async (action) => {
+    sqlite.prepare(`UPDATE workspaces SET status = 'error', eviction_generation = 'old-generation',
+      stop_runtime_confirmed_at = '2026-09-01T00:00:00.000Z' WHERE id = ?`).run(WORKSPACE_ID);
+    expect((await requestLifecycle(action)).status).toBe(action === 'rebuild' ? 202 : 200);
+    await Promise.all(waitUntilPromises);
+    expect(sqlite.prepare('SELECT stop_runtime_confirmed_at FROM workspaces WHERE id = ?')
+      .get(WORKSPACE_ID)).toEqual({ stop_runtime_confirmed_at: null });
   });
 
   it('refuses platform eviction restart when its user quota is exhausted', async () => {

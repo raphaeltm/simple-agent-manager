@@ -1,6 +1,8 @@
 package config
 
 const (
+	// EnvDefaultResourceEventBufferSize configures each bounded pressure event queue.
+	EnvDefaultResourceEventBufferSize = "DEFAULT_RESOURCE_EVENT_BUFFER_SIZE"
 	// EnvDefaultPSIPollIntervalSeconds configures PSI polling cadence in seconds.
 	EnvDefaultPSIPollIntervalSeconds = "DEFAULT_PSI_POLL_INTERVAL_SECONDS"
 	// EnvDefaultContainerStatsIntervalSeconds configures Docker stats polling cadence in seconds.
@@ -26,6 +28,8 @@ const (
 )
 
 const (
+	// DefaultResourceEventBufferSize is the capacity of each pressure event queue.
+	DefaultResourceEventBufferSize = 64
 	// DefaultPSIPollIntervalSeconds is the default PSI polling cadence.
 	DefaultPSIPollIntervalSeconds = 10
 	// DefaultContainerStatsIntervalSeconds is the default Docker stats polling cadence.
@@ -49,3 +53,7 @@ const (
 	// DefaultEvictionResolveTimeoutSeconds is the default pressure target resolution deadline.
 	DefaultEvictionResolveTimeoutSeconds = 5
 )
+
+// IsValidPSIThreshold accepts finite stall percentages in (0, 100].
+// Positive comparisons deliberately reject NaN as well as infinities.
+func IsValidPSIThreshold(value float64) bool { return value > 0 && value <= 100 }

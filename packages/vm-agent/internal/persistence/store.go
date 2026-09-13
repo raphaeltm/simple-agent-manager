@@ -48,6 +48,7 @@ type WorkspaceMetadata struct {
 	CloneURL               string `json:"cloneUrl,omitempty"`
 	RepositoryHost         string `json:"repositoryHost,omitempty"`
 	RepositoryPath         string `json:"repositoryPath,omitempty"`
+	ProjectID              string `json:"projectId,omitempty"`
 	ChatSessionID          string `json:"chatSessionId,omitempty"`
 	EvictionGeneration     string `json:"evictionGeneration,omitempty"`
 	Evicted                bool   `json:"evicted,omitempty"`
@@ -163,6 +164,7 @@ func (s *Store) migrate() error {
 		migrateV13,
 		migrateV14,
 		migrateV15,
+		migrateV16,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -248,6 +250,12 @@ func migrateV14(db *sql.DB) error {
 	return err
 }
 
+// migrateV16 retains the authorized project identity of dynamic workspaces.
+func migrateV16(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE workspace_metadata ADD COLUMN project_id TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 // migrateV1 creates the initial tabs table.
 func migrateV1(db *sql.DB) error {
 	_, err := db.Exec(`
@@ -315,8 +323,8 @@ func (s *Store) UpsertWorkspaceMetadata(meta WorkspaceMetadata) error {
 
 	_, err = s.db.Exec(
 		`INSERT INTO workspace_metadata
-			(workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, chat_session_id, eviction_generation, evicted, lightweight, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, project_id, chat_session_id, eviction_generation, evicted, lightweight, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			repository = excluded.repository, branch = excluded.branch,
 			base_branch = excluded.base_branch, default_branch = excluded.default_branch,
@@ -325,10 +333,11 @@ func (s *Store) UpsertWorkspaceMetadata(meta WorkspaceMetadata) error {
 			callback_token = excluded.callback_token, repo_provider = excluded.repo_provider,
 			clone_url = excluded.clone_url, repository_host = excluded.repository_host,
 			repository_path = excluded.repository_path, chat_session_id = excluded.chat_session_id,
+			project_id = CASE WHEN workspace_metadata.project_id = '' THEN excluded.project_id ELSE workspace_metadata.project_id END,
 			lightweight = excluded.lightweight, updated_at = excluded.updated_at`,
 		meta.WorkspaceID, meta.Repository, meta.Branch, meta.BaseBranch, meta.DefaultBranch, meta.ContainerWorkDir,
 		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, callbackToken,
-		meta.RepoProvider, meta.CloneURL, meta.RepositoryHost, meta.RepositoryPath, meta.ChatSessionID, meta.EvictionGeneration, meta.Evicted,
+		meta.RepoProvider, meta.CloneURL, meta.RepositoryHost, meta.RepositoryPath, meta.ProjectID, meta.ChatSessionID, meta.EvictionGeneration, meta.Evicted,
 		meta.Lightweight, meta.UpdatedAt,
 	)
 	if err != nil {
@@ -361,12 +370,12 @@ func (s *Store) GetWorkspaceMetadata(workspaceID string) (*WorkspaceMetadata, er
 
 	var m WorkspaceMetadata
 	err := s.db.QueryRow(
-		`SELECT workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, chat_session_id, eviction_generation, evicted, lightweight, updated_at
+		`SELECT workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, project_id, chat_session_id, eviction_generation, evicted, lightweight, updated_at
 		FROM workspace_metadata WHERE workspace_id = ?`,
 		workspaceID,
 	).Scan(&m.WorkspaceID, &m.Repository, &m.Branch, &m.BaseBranch, &m.DefaultBranch, &m.ContainerWorkDir,
 		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.CallbackToken,
-		&m.RepoProvider, &m.CloneURL, &m.RepositoryHost, &m.RepositoryPath, &m.ChatSessionID, &m.EvictionGeneration, &m.Evicted,
+		&m.RepoProvider, &m.CloneURL, &m.RepositoryHost, &m.RepositoryPath, &m.ProjectID, &m.ChatSessionID, &m.EvictionGeneration, &m.Evicted,
 		&m.Lightweight, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil

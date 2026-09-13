@@ -42,6 +42,8 @@ func (s *Server) initializeBootWorkspace(cfg *config.Config, ptyManager *pty.Man
 		}
 		if meta != nil {
 			s.workspaces[cfg.WorkspaceID].EvictionGeneration = meta.EvictionGeneration
+			s.workspaces[cfg.WorkspaceID].ProjectID = firstNonEmpty(meta.ProjectID, cfg.ProjectID)
+			s.workspaces[cfg.WorkspaceID].ChatSessionID = firstNonEmpty(meta.ChatSessionID, cfg.ChatSessionID)
 			if meta.Evicted {
 				s.workspaces[cfg.WorkspaceID].Status = "evicted"
 			}

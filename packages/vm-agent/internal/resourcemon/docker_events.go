@@ -68,7 +68,7 @@ func NewDockerEventSubscriber(cfg DockerEventSubscriberConfig) *DockerEventSubsc
 		cfg.CommandFactory = defaultDockerEventCommand
 	}
 	if cfg.EventBuffer <= 0 {
-		cfg.EventBuffer = 16
+		cfg.EventBuffer = config.DefaultResourceEventBufferSize
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()

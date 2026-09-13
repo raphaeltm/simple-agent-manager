@@ -38,7 +38,9 @@ import { importPKCS8, SignJWT } from 'jose';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { Env } from '../../src/env';
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
+import { finalizeWorkspaceStopOnNode } from '../../src/services/workspace-eviction-lifecycle';
 
 // Unique IDs per test run to avoid cross-test contamination (shared D1, no isolatedStorage)
 const TEST_PREFIX = `auth-val-${Date.now()}`;
@@ -521,6 +523,22 @@ describe('node callback auth', () => {
 // =============================================================================
 
 describe('workspace eviction callback', () => {
+  it('finalizes a confirmed Stop through the real NodeLifecycle RPC and refuses replay', async () => {
+    const workspaceId = `${TEST_PREFIX}-confirmed-stop`;
+    const claimedAt = new Date().toISOString();
+    await env.DATABASE.prepare(`INSERT INTO workspaces
+      (id, user_id, node_id, name, repository, branch, status, vm_size, vm_location,
+       created_at, updated_at, stop_runtime_confirmed_at)
+      VALUES (?, ?, ?, 'confirmed stop', 'test-repo', 'main', 'stopping', 'cx22', 'fsn1',
+        datetime('now'), ?, ?)`)
+      .bind(workspaceId, USER_ID, NODE_ID, claimedAt, claimedAt).run();
+    const identity = { workspaceId, userId: USER_ID, nodeId: NODE_ID, generation: null,
+      projectId: null, chatSessionId: null, claimedAt };
+    expect(await finalizeWorkspaceStopOnNode(env as unknown as Env, identity)).toBe(true);
+    expect(await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+      .bind(workspaceId).first()).toEqual({ status: 'stopped' });
+    expect(await finalizeWorkspaceStopOnNode(env as unknown as Env, identity)).toBe(false);
+  });
   it('returns 401 without a callback JWT', async () => {
     const response = await SELF.fetch(
       `https://api.test.example.com/api/projects/${PROJECT_ID}/workspaces/${EVICTION_WORKSPACE_ID}/eviction`,

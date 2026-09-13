@@ -294,7 +294,7 @@ func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T
 		if err == nil || err.Error() != "rapid exit" {
 			t.Fatalf("first recovery err = %v, want rapid exit", err)
 		}
-	default:
+	case <-time.After(time.Second):
 		t.Fatal("missing recovery error")
 	}
 	assertNoSecondCompletion(t, completed)

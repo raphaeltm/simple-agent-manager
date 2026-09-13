@@ -338,6 +338,7 @@ type Config struct {
 	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
 
 	// Active resource monitoring settings - configurable per constitution principle XI
+	ResourceEventBufferSize          int           // Bounded pressure event queue capacity (env: DEFAULT_RESOURCE_EVENT_BUFFER_SIZE, default: 64)
 	PSIPollInterval                  time.Duration // PSI memory pressure polling interval (env: DEFAULT_PSI_POLL_INTERVAL_SECONDS, default: 10s)
 	ContainerStatsInterval           time.Duration // Docker stats polling interval (env: DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS, default: 30s)
 	PSIMemorySomeWarningThreshold    float64       // some memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD, default: 25.0)
