@@ -37,10 +37,9 @@
  * `session_snapshots.workspace_id`'s `ON DELETE SET NULL` had fired
  * (`.claude/rules/63`).
  */
-import type { SessionResumabilitySnapshot } from './task-runtime-liveness-types';
-
 import { isRestorableSnapshot } from './session-snapshot-artifacts';
 import { sessionRecoveryBudgetAvailable } from './session-snapshot-recovery-budget';
+import type { SessionResumabilitySnapshot } from './task-runtime-liveness-types';
 
 /** `session_snapshots.sleep_status` value meaning "asleep right now". */
 export const SLEEPING_SLEEP_STATUS = 'sleeping';

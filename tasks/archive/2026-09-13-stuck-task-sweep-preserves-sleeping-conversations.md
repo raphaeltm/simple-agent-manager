@@ -59,6 +59,25 @@ workspace_id = ?`, so it could not find the row even if it ran.
 resumer gate — claims on `chat_session_id` + `user_id` and **never mentions `workspace_id`**.
 The destroyer reads a workspace-keyed record; the resumer reads a chat-session-keyed one.
 
+**CORRECTION (found during implementation).** Shape A sessions are NOT wakeable today.
+`loadRecoveryContext` (`session-recovery.ts:103`) — the FIRST gate in `ensureSessionRecovery`,
+before the claim — requires `snapshot.workspace_id` to be non-null AND the `workspaces` row it
+names to still exist AND that row's `user_id` to match. Deleting the workspace row nulls the
+snapshot's pointer via `ON DELETE SET NULL`, so the gate can never pass again. The cf-container
+path is no escape either: it resolves its target from the same workspace row
+(`vm-prompt-delivery-adapter.ts:455`) and `ensureSessionRecovery` short-circuits it with
+`container_runtime_wakes_in_place`. 38 of 289 sleeping snapshots are in this state.
+
+`.claude/rules/58` req 2 is explicit that being **looser** than the resumer is its own failure:
+preserving a session the wake path will never accept hangs the task until the snapshot TTL
+instead of retiring it. So `classifySessionWakeability` mirrors this requirement too, as
+`recoveryWorkspacePresent`, and shape A retires — as a **lifecycle `cancelled`**, not a failure.
+The underlying wake-path defect is tracked as SAM idea `01M2CQD1FK7YA96VD6Q74302K0`.
+
+What the fix DOES rescue on this path is the variant where `tasks.workspace_id` is null but the
+**snapshot** still names a live workspace row — the resumer accepts that, and the pre-fix
+classifier did not even probe for it.
+
 **Shape B (3 of 9) — terminalized inside the wake-retry decay window.**
 `recovery_attempts=3`, `recovery_status='failed'`, and `tasks.updated_at` is **0, 1 and 3
 minutes** after `session_snapshots.recovery_failed_at`. `sessionRecoveryBudgetAvailable`
@@ -71,6 +90,11 @@ therefore said "dead" during a refusal that was only ever temporary.
 full snapshot TTL for a wake that can never happen". That argument holds for **permanent**
 refusals (expired, not restorable, already awake). It does not hold for the attempt budget,
 whose refusal is bounded by 15 minutes, not by the TTL.
+
+These are the same three sessions (`516141ed`, `b176e912`, `813752af`) already tracked by
+`tasks/active/2026-09-10-wake-attempt-budget-strands-sessions.md` as a stranding incident. That
+task fixes the resumer side; this one stops the sweep converting the stranding into a permanent
+revocation of the guarded wake path.
 
 ### F3 — Ceiling rows: the compute was already released
 
@@ -188,26 +212,26 @@ so agent-session churn inside a live workspace cannot reset the cost bound, whil
 
 ## Implementation checklist
 
-- [ ] `services/task-runtime-liveness.ts`: add `SessionWakeability`,
+- [x] `services/task-runtime-liveness.ts`: add `SessionWakeability`,
       `classifySessionWakeability`, `loadSessionWakeabilityByChatSession`; reimplement
       `isSessionResumable` on top of it with unchanged semantics
-- [ ] `services/task-runtime-liveness.ts`: `needsSessionResumabilityProbe` fires for a
+- [x] `services/task-runtime-liveness.ts`: `needsSessionResumabilityProbe` fires for a
       missing/null workspace; `workspace_missing` + `workspace_<status>` gain the
       `_snapshot_resumable` / `_wake_retry_pending` inconclusive escapes
-- [ ] `services/task-runtime-liveness-types.ts`: signals carry `chatSessionId` for the
+- [x] `services/task-runtime-liveness-types.ts`: signals carry `chatSessionId` for the
       chat-session-keyed probe
-- [ ] `scheduled/stuck-tasks.ts`: probe wakeability by chat session in
+- [x] `scheduled/stuck-tasks.ts`: probe wakeability by chat session in
       `getTaskRuntimeLiveness`
-- [ ] `durable-objects/project-data/task-runtime-liveness.ts`: same signal wired (rule 44)
-- [ ] `scheduled/stuck-tasks.ts`: `task_mode` in `STUCK_TASK_CANDIDATE_COLUMNS` +
+- [x] `durable-objects/project-data/task-runtime-liveness.ts`: same signal wired (rule 44)
+- [x] `scheduled/stuck-tasks.ts`: `task_mode` in `STUCK_TASK_CANDIDATE_COLUMNS` +
       `StuckTaskCandidate`
-- [ ] `scheduled/stuck-tasks.ts`: single preserve gate at the terminal choke point,
+- [x] `scheduled/stuck-tasks.ts`: single preserve gate at the terminal choke point,
       `stuck_task.preserved_sleeping` log, `cancelled` lifecycle label for expired sleeps
-- [ ] `scheduled/stuck-tasks.ts`: ceiling ages from `workspaces.created_at`; skip + log when
+- [x] `scheduled/stuck-tasks.ts`: ceiling ages from `workspaces.created_at`; skip + log when
       absent or on lookup error
-- [ ] File-size check: `stuck-tasks.ts` is 1567 lines with a documented exception; do not
+- [x] File-size check: `stuck-tasks.ts` is 1567 lines with a documented exception; do not
       grow it materially — put new shared logic in the service module
-- [ ] Tests (below)
+- [x] Tests (below)
 - [ ] `pnpm check:fast`, `pnpm typecheck`, `pnpm test`, `pnpm build`
 
 ## Tests (`.claude/rules/62` — enter through the real sweep)

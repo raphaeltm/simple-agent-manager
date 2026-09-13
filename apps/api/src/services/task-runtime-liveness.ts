@@ -17,12 +17,11 @@ import type {
   TaskSupersession,
 } from './task-runtime-liveness-types';
 
+export type { SessionWakeability } from './session-wakeability';
 export {
   classifySessionWakeability,
   loadSessionWakeabilitySnapshot,
 } from './session-wakeability';
-export type { SessionWakeability } from './session-wakeability';
-
 export type {
   ContainerLifecycleSnapshot,
   NodeHealthProbeOutcome,

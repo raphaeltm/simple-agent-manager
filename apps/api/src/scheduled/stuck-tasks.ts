@@ -49,6 +49,11 @@ import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryMaxAttempts,
 } from '../services/session-snapshot-recovery-budget';
+import {
+  evaluateSleepGuard,
+  resolveRuntimeGenerationAge,
+  sleepGuardApplies,
+} from '../services/stuck-task-sleep-guard';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
@@ -66,11 +71,6 @@ import {
   type TaskRuntimeLivenessSignals,
   type TaskSupersession,
 } from '../services/task-runtime-liveness';
-import {
-  evaluateSleepGuard,
-  resolveRuntimeGenerationAge,
-  sleepGuardApplies,
-} from '../services/stuck-task-sleep-guard';
 import { transitionTaskToTerminal } from '../services/task-terminal-transition';
 import {
   getVmAdmissionDiagnostics,

@@ -18,14 +18,14 @@
  */
 import { log } from '../lib/logger';
 import {
+  sessionRecoveryAttemptDecayMs,
+  sessionRecoveryMaxAttempts,
+} from './session-snapshot-recovery-budget';
+import {
   classifySessionWakeability,
   loadSessionWakeabilitySnapshot,
   type SessionWakeability,
 } from './session-wakeability';
-import {
-  sessionRecoveryAttemptDecayMs,
-  sessionRecoveryMaxAttempts,
-} from './session-snapshot-recovery-budget';
 
 type SleepGuardEnv = {
   DATABASE: D1Database;

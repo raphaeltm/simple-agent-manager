@@ -474,6 +474,51 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
     });
   });
 
+  /**
+   * `.claude/rules/44` / `.claude/rules/61`: the DO idle-cleanup adapter has NO
+   * sweep-level sleeping-session gate — the classifier is its only protection.
+   * The cron adapter's equivalent case is covered twice (classifier + gate), so
+   * without this the fix would be one-adapter-deep on the path that has no
+   * second line of defence.
+   */
+  it('DO adapter: preserves a slept session whose task lost its workspace binding', async () => {
+    seedWorkspace('deleted');
+    seedSnapshot();
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(
+      getLocalTaskRuntimeLiveness(sql, doEnv(), {
+        taskId: TASK_ID,
+        projectId: PROJECT_ID,
+        workspaceId: null,
+        chatSessionId: CHAT_SESSION_ID,
+      })
+    ).resolves.toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'workspace_missing_snapshot_resumable',
+    });
+  });
+
+  it('DO adapter: still terminalizes a missing workspace with no snapshot', async () => {
+    // Discriminating control for the case above.
+    seedWorkspace('deleted');
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(
+      getLocalTaskRuntimeLiveness(sql, doEnv(), {
+        taskId: TASK_ID,
+        projectId: PROJECT_ID,
+        workspaceId: null,
+        chatSessionId: CHAT_SESSION_ID,
+      })
+    ).resolves.toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'workspace_missing',
+    });
+  });
+
   // `.claude/rules/61`: the DO destroyer is a separate entry point from the cron
   // one and needs its own proof that the decayed budget reaches it.
   it.each([
