@@ -643,6 +643,14 @@ describe('agent activity callback', () => {
     expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledTimes(2);
     expect(mocks.updateSets).toHaveLength(2);
     expect(mocks.updateSets).toContainEqual(expect.objectContaining({ status: 'error' }));
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'acp_activity.telemetry',
+      expect.objectContaining({
+        outcome: 'rejected',
+        reason: 'pending_superseded',
+        source: 'admission_control',
+      })
+    );
   });
 
   it('coalesces through transient ProjectData reset/overload and retries the flush without VM retry noise', async () => {
@@ -1107,6 +1115,9 @@ describe('agent activity callback', () => {
     });
 
     it('(a) rejects a stale error callback after recovery completed — session NOT regressed', async () => {
+      vi.useFakeTimers();
+      const observedAt = Date.parse('2026-08-31T00:00:01.500Z');
+      vi.setSystemTime(observedAt);
       // Recovery completed: agent_sessions.updated_at reconciled to running well
       // after the OLD container's token was issued (gap 180s ≫ 60s margin).
       mocks.guardRow = {
@@ -1142,6 +1153,16 @@ describe('agent activity callback', () => {
           nodeId: 'node-1',
           runtime: 'cf-container',
           action: 'rejected_stale_callback',
+        })
+      );
+      expect(mocks.log.info).toHaveBeenCalledWith(
+        'acp_activity.telemetry',
+        expect.objectContaining({
+          outcome: 'rejected',
+          reason: 'stale_generation',
+          source: 'callback',
+          classification: 'critical',
+          runtimeWorkObservedAt: observedAt,
         })
       );
     });

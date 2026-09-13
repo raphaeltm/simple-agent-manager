@@ -315,6 +315,9 @@ export async function flushCoalescedAcpActivity(
     if (!bindingMatchesSnapshot(binding, snapshot)) {
       return { action: 'rejected', reason: 'binding_changed' };
     }
+    if (!isPendingAcpActivitySnapshotCurrent(snapshot)) {
+      return { action: 'rejected', reason: 'pending_superseded' };
+    }
     await assertAcpActivityCallbackResourcesActive(env, {
       projectId: snapshot.projectId,
       sessionId: snapshot.sessionId,
