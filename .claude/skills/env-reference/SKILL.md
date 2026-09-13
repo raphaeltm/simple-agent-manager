@@ -389,6 +389,7 @@ by the read-only cron-liveness check.
 - `VM_ADMISSION_LEASE_TTL_MS` — Fenced VM provisioning claim lease duration (default: `1200000`)
 - `VM_ADMISSION_RETRY_MIN_MS` / `VM_ADMISSION_RETRY_MAX_MS` — Bounds for retrying tasks waiting on VM capacity (defaults: `15000` / `60000`)
 - `VM_ADMISSION_WAIT_TIMEOUT_MS` — Maximum visible wait for VM capacity before failing the task (default: `7200000`)
+- `VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS` — Maximum bounded wait for an otherwise-eligible reusable VM node whose only blocker is an active workspace build queue (default: `1200000`)
 - `VM_ADMISSION_PROVIDER_COOLDOWN_MS` — Cooldown after provider/account capacity errors such as Hetzner server limits (default: `600000`)
 - `VM_ADMISSION_WAKE_BATCH_SIZE` — Maximum waiting TaskRunner DOs nudged by one capacity event (default: `25`)
 - `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` — Maximum provider diagnostic message persisted on admission/capacity rows (default: `500`)
@@ -468,7 +469,7 @@ by the read-only cron-liveness check.
 - `NODE_PROVISIONING_MAX_ATTEMPTS` — Maximum durable direct provisioning attempts before retries stop (default: 30). Either allocation age or attempt exhaustion starts a separate bounded diagnostic publication phase using the same retry interval and attempt limit. The age limit applies only to allocation/reconciliation; the unresolved intent is retained. Empty provider inventory never authorizes another create or proves cleanup. All four `NODE_PROVISIONING_*` overrides are optional positive integers; invalid or unset values use their defaults.
 - `NODE_AGENT_READY_TIMEOUT_MS` — Max wait for freshly provisioned node-agent health
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` — Polling interval for fresh-node readiness checks
-- `VM_AGENT_REQUIRED_VERSION` — Deployment-generated required vm-agent build for reusable VM nodes. Official deploys set this from the Git commit SHA after publishing matching binaries; unset disables rollout gating for local/manual or skip-agent deploys.
+- `VM_AGENT_REQUIRED_VERSION` — Deployment-generated required vm-agent build for reusable VM nodes. Official deploys set this from the last commit that changed a vm-agent **build input** (see `scripts/deploy/resolve-vm-agent-release.sh`), not from the deployment commit, so Worker-only deploys leave the existing node pool reusable. Build inputs are `packages/vm-agent/**` minus exactly four pathspecs: `.claude/`, the top-level `AGENTS.md`, `**/*_test.go` and `*_test.go`. A commit touching **only** those paths does not rotate the release and does not drain the node pool. Anything else under the directory does rotate it, including a file that looks like documentation — the list excludes rather than includes on purpose, so an unrecognised new file fails safe by rotating (wasteful) instead of silently serving a stale binary under a current version. If a new non-build file should stop rotating the release, add it to `AGENT_SOURCE_EXCLUDES` rather than assuming its extension exempts it. Unset disables rollout gating for local/manual or skip-agent deploys.
 - `TASK_RUNNER_STEP_MAX_RETRIES` — Max retries per TaskRunner step before failing the task (default: 3)
 - `TASK_RUNNER_RETRY_BASE_DELAY_MS` — Base delay for TaskRunner retry backoff (default: 5000)
 - `TASK_RUNNER_RETRY_MAX_DELAY_MS` — Maximum delay for TaskRunner retry backoff (default: 60000)
@@ -592,6 +593,10 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 ### Container/User
 
 - `CONTAINER_USER` — Optional `docker exec -u` override; when unset, auto-detects effective devcontainer user
+
+### Workspace Builds
+
+- `WORKSPACE_BUILD_QUEUE_DEPTH` — Concurrent devcontainer build slots per workspace VM (default: `1`, supported range: `1` through `16`). Generated cloud-init passes this from the Worker env to newly provisioned VM Agent systemd services. Invalid values do not enable additional build slots and fall back to the default one-slot behavior.
 
 ### Git Operations
 

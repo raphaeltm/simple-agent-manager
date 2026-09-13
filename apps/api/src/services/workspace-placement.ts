@@ -5,7 +5,11 @@ import type {
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { resolveResourceReservation } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_NODE_CPU_THRESHOLD_PERCENT,
+  DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT,
+  resolveResourceReservation,
+} from '@simple-agent-manager/shared';
 
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
@@ -376,8 +380,13 @@ function legacyWorkspaceAdmissionPolicy(maxWorkspaces: number): WorkspaceAdmissi
     hostMemoryReserveMb: DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
     diskPressureThresholdPercent: DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT,
     metricsTtlMs: DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS,
-    cpuThresholdPercent: 50,
-    memoryThresholdPercent: 50,
+    // These two duplicated the shared defaults as literals and were left behind
+    // when the CPU ceiling moved. This helper backs the numeric overload of
+    // reserveWorkspacePlacement — the FINAL atomic reservation, which
+    // `.claude/rules/69` names as the correctness boundary — so a stale value
+    // here silently reinstates the old veto for any caller that uses it.
+    cpuThresholdPercent: DEFAULT_NODE_CPU_THRESHOLD_PERCENT,
+    memoryThresholdPercent: DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT,
     cpuScoreWeightPercent: DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT,
     memoryScoreWeightPercent: DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT,
   };

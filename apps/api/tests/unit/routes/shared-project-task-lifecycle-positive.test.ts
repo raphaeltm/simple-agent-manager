@@ -244,6 +244,35 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     );
   });
 
+  it('DELETE /:taskId: cancels admission before deleting the task row', async () => {
+    await seedTask({ status: 'queued', errorMessage: 'waiting for capacity' });
+    mocks.cleanupTerminalTaskResourcesOrThrow.mockImplementationOnce(async () => {
+      expect((await readTask())?.id).toBe('task-1');
+    });
+
+    const response = await makeApp(crudRoutes).fetch(
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1`, {
+        method: 'DELETE',
+      }),
+      env,
+      mockCtx
+    );
+
+    expect(response.status).toBe(200);
+    expect(await readTask()).toBeUndefined();
+    expect(mocks.cleanupTerminalTaskResourcesOrThrow).toHaveBeenCalledWith(
+      env,
+      'task-1',
+      expect.objectContaining({
+        status: 'cancelled',
+        errorMessage: 'waiting for capacity',
+        requiredUserId: MEMBER,
+        projectId: PROJECT,
+        destructiveSessionEnd: true,
+      })
+    );
+  });
+
   it('POST /:taskId/status: same-status in_progress replay does not emit lifecycle noise', async () => {
     await seedTask({ status: 'in_progress' });
 

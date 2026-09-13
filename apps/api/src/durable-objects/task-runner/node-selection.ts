@@ -5,8 +5,6 @@
  * policy remain independently reviewable. See rule 18.
  */
 import {
-  type CapacityPlacementSnapshot,
-  type CapacityPoolStrategy,
   type ResolvedResourceReservation,
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
@@ -20,13 +18,10 @@ import {
 } from '../../services/placement-resolver';
 import {
   comparePlacementRolloutHosts,
-  PLACEMENT_ROLLOUT_BASELINE_STRATEGY,
-  resolvePlacementRollout,
 } from '../../services/placement-rollout';
 import {
   comparePlacementHostsByStrategy,
   normalizePlacementHostSignals,
-  type PlacementHostSignals,
 } from '../../services/placement-strategy';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
@@ -34,7 +29,6 @@ import {
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
 import {
-  evaluateWorkspaceReservationCapacity,
   hasWorkspaceReservationCapacity,
   isResolvedResourceReservation,
   loadActiveWorkspaceReservationUsage,
@@ -45,15 +39,23 @@ import {
   type TrustedWorkspaceNodeCapacityRow,
 } from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
+import {
+  evaluateReusableNodeCandidate,
+  type RankedReusableNode,
+} from './node-placement-candidate';
+import {
+  type DeferrableReusableNodeCandidate,
+  type ReusableNodePlacementResult,
+  type ReusableNodeSelection,
+  selectReusableNodeDeferral,
+} from './node-placement-deferral';
 import { updatePlacementDiagnostics } from './placement-diagnostics';
+import { taskPlacementStrategy } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export { verifyNodeAgentHealthy } from './node-agent-health';
-
-export interface ReusableNodeSelection {
-  nodeId: string;
-  capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
-}
+export type { ReusableNodePlacementResult, ReusableNodeSelection } from './node-placement-deferral';
+export { taskPlacementStrategy } from './task-placement-strategy';
 
 export type NodePlacementFields = {
   id: string;
@@ -410,6 +412,32 @@ export async function findNodeWithCapacity(
   state: TaskRunnerState,
   rc: TaskRunnerContext
 ): Promise<ReusableNodeSelection | null> {
+  const placement = await findReusableNodePlacement(state, rc);
+  return placement?.kind === 'selected' ? placement.selection : null;
+}
+
+function resolveNoReusableNodePlacement(
+  state: TaskRunnerState,
+  diagnosticHosts: PlacementHostDiagnosticInput[],
+  deferrableCandidates: DeferrableReusableNodeCandidate[],
+  rejectionDiagnostics: Array<{ nodeId: string; reasons: string[] }>
+): ReusableNodePlacementResult | null {
+  const deferral = selectReusableNodeDeferral(state, diagnosticHosts, deferrableCandidates);
+  if (deferral) return deferral;
+  updatePlacementDiagnostics(state, { hosts: diagnosticHosts });
+  if (rejectionDiagnostics.length) {
+    log.info('task_runner_do.node_capacity_rejected', {
+      taskId: state.taskId,
+      sample: rejectionDiagnostics.slice(0, 5),
+    });
+  }
+  return null;
+}
+
+export async function findReusableNodePlacement(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<ReusableNodePlacementResult | null> {
   const scaling = state.config.projectScaling;
   const policy = resolveWorkspaceAdmissionPolicy(rc.env, scaling);
   const requestedReservation = getTaskReservation(state);
@@ -499,98 +527,41 @@ export async function findNodeWithCapacity(
   const nodeIds = nodes.results.map((n) => n.id);
   const usageByNode = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, nodeIds);
 
-  type RankedNode = {
-    id: string;
-    vmLocation: string;
-    capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
-    signals: PlacementHostSignals;
-  };
-
-  const candidates: RankedNode[] = [];
+  const candidates: RankedReusableNode[] = [];
+  const deferrableCandidates: DeferrableReusableNodeCandidate[] = [];
   const diagnosticHosts: PlacementHostDiagnosticInput[] = [];
   const rejectionDiagnostics: Array<{ nodeId: string; reasons: string[] }> = [];
 
   for (const node of nodes.results) {
-    const metrics = parseWorkspaceAdmissionMetrics(node, policy);
-    const signals = normalizePlacementHostSignals({
-      node,
-      usage: usageByNode.get(node.id),
-      request: requestedReservation,
-      policy,
-      metrics,
-    });
     const selection = resolveReusableNodeSelection(state, node);
-    const exclusion = !isNodeAgentVersionCompatible(
-      node.agentVersion,
-      rc.env.VM_AGENT_REQUIRED_VERSION
-    )
-      ? 'Host agent version is incompatible'
-      : !nodeSatisfiesTaskResources(node, state)
-        ? 'Trusted host hardware does not satisfy the requested resources'
-        : !selection || !authoritativeNodes.has(node.id)
-          ? 'Host is outside the current pool allocation authority'
-          : null;
-    if (exclusion || !selection) {
-      diagnosticHosts.push({
-        signals,
-        outcome: 'rejected',
-        reasons: [exclusion ?? 'Host is not eligible'],
-        provider: node.cloudProvider,
-        location: node.vmLocation,
-        providerInstanceType: node.providerInstanceType,
-      });
-      continue;
-    }
-
-    const capacity = evaluateWorkspaceReservationCapacity(
+    const evaluation = evaluateReusableNodeCandidate({
       node,
-      usageByNode.get(node.id),
-      requestedReservation,
+      selection,
       policy,
-      metrics
-    );
-    const diagnosticHost: PlacementHostDiagnosticInput = {
-      signals: normalizePlacementHostSignals({
-        node,
-        usage: usageByNode.get(node.id),
-        request: requestedReservation,
-        policy,
-        metrics,
-      }),
-      outcome: 'rejected',
-      reasons: capacity.admitted ? ['Another eligible host ranked higher'] : capacity.reasons,
-      provider: node.cloudProvider,
-      location: node.vmLocation,
-      providerInstanceType: node.providerInstanceType,
-    };
-    diagnosticHosts.push(diagnosticHost);
-    if (!capacity.admitted) {
-      rejectionDiagnostics.push({ nodeId: node.id, reasons: capacity.reasons });
-      continue;
-    }
-    candidates.push({
-      id: node.id,
-      vmLocation: node.vmLocation,
-      capacityPlacementSnapshot: selection.capacityPlacementSnapshot,
-      signals: normalizePlacementHostSignals({
-        node,
-        usage: usageByNode.get(node.id),
-        request: requestedReservation,
-        policy,
-        metrics,
-      }),
+      usage: usageByNode.get(node.id),
+      requestedReservation,
+      agentCompatible: isNodeAgentVersionCompatible(
+        node.agentVersion,
+        rc.env.VM_AGENT_REQUIRED_VERSION
+      ),
+      satisfiesTaskResources: nodeSatisfiesTaskResources(node, state),
+      authoritative: authoritativeNodes.has(node.id),
     });
+    diagnosticHosts.push(evaluation.diagnosticHost);
+    if (evaluation.candidate) candidates.push(evaluation.candidate);
+    if (evaluation.deferrableCandidate) {
+      deferrableCandidates.push(evaluation.deferrableCandidate);
+    }
+    if (evaluation.rejection) rejectionDiagnostics.push(evaluation.rejection);
   }
 
   if (!candidates.length) {
-    updatePlacementDiagnostics(state, { hosts: diagnosticHosts });
-    if (rejectionDiagnostics.length) {
-      log.info('task_runner_do.node_capacity_rejected', {
-        taskId: state.taskId,
-        sample: rejectionDiagnostics.slice(0, 5),
-      });
-    }
-    return null;
+    return resolveNoReusableNodePlacement(
+      state,
+      diagnosticHosts,
+      deferrableCandidates,
+      rejectionDiagnostics
+    );
   }
 
   // Requested location stays a hard preference (an explicit locality constraint
@@ -629,7 +600,10 @@ export async function findNodeWithCapacity(
     selectedDiagnostic.reasons = [];
   }
   updatePlacementDiagnostics(state, { hosts: diagnosticHosts, selectedNodeId: best.id });
-  return { nodeId: best.id, capacityPlacementSnapshot: best.capacityPlacementSnapshot };
+  return {
+    kind: 'selected',
+    selection: { nodeId: best.id, capacityPlacementSnapshot: best.capacityPlacementSnapshot },
+  };
 }
 
 export async function hasReusableNodeReservationCapacity(
@@ -739,23 +713,6 @@ function offeringSatisfiesReservation(
   if (offering.memoryMb < reservation.memoryMb) return false;
   if (offering.diskGb !== null && offering.diskGb * 1024 < reservation.diskMb) return false;
   return true;
-}
-
-/**
- * The effective pool's configured packing strategy for this run.
- *
- * A run with no capacity-pool selection is a legacy/unpooled placement: it keeps
- * the historical least-loaded ordering, which `balanced` reproduces exactly.
- */
-export function taskPlacementStrategy(state: TaskRunnerState): CapacityPoolStrategy {
-  const selection = state.config.capacityPoolSelection;
-  if (!selection) return PLACEMENT_ROLLOUT_BASELINE_STRATEGY;
-  return resolvePlacementRollout({
-    userId: state.userId,
-    poolId: selection.poolId,
-    strategy: selection.strategy,
-    cohortPercent: selection.selectionSettings?.rolloutCohortPercent,
-  }).appliedStrategy;
 }
 
 export function getTaskReservation(state: TaskRunnerState): ResolvedResourceReservation {

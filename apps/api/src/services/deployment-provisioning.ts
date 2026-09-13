@@ -143,6 +143,15 @@ export async function findDeploymentNodeWithCapacity(
     env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
     DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
   );
+  // NOTE: this reads the SAME env var as workspace admission
+  // (`resolveWorkspaceAdmissionPolicy`) but resolves a DIFFERENT default, and
+  // unlike that path it has no declared-reservation accounting underneath it —
+  // only `maxEnvironments`. Setting TASK_RUN_NODE_CPU_THRESHOLD_PERCENT for the
+  // workspace path therefore also moves this veto, which is the only CPU
+  // protection deployment nodes have. The comparison below is also unit-mixed
+  // (a raw load average against a percent). Both are tracked in SAM idea
+  // 01M27ZBDV1HRDYJMASDGHCAZR3; deliberately not changed here so a workspace
+  // scheduling fix does not silently alter deployment placement.
   const cpuThreshold = parseEnvInt(
     env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
     DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT

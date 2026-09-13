@@ -63,7 +63,7 @@ export interface PlacementResourceFacts {
 /** Why one candidate host won or lost. */
 export interface PlacementHostDiagnostic {
   nodeId: string;
-  outcome: 'selected' | 'rejected';
+  outcome: 'selected' | 'deferred' | 'rejected';
   /** Already-sanitized admission reasons, verbatim from the capacity gate. */
   reasons: string[];
   /** The host's own capacity, tagged with how it was established. */

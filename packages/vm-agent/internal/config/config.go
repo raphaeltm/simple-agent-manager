@@ -136,6 +136,15 @@ const (
 	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
 	DefaultDeployBuildPublishTimeout = 20 * time.Minute
 
+	// DefaultWorkspaceBuildQueueDepth preserves the historical single devcontainer
+	// build slot per VM while allowing operators to tune the per-node queue depth.
+	// Override via WORKSPACE_BUILD_QUEUE_DEPTH.
+	DefaultWorkspaceBuildQueueDepth = 1
+
+	// MaxWorkspaceBuildQueueDepth bounds the per-node devcontainer build semaphore
+	// so direct env usage cannot allocate an unbounded channel.
+	MaxWorkspaceBuildQueueDepth = 16
+
 	// DefaultDeployTeardownTimeout bounds per-environment deployment teardown.
 	// Override via DEPLOY_TEARDOWN_TIMEOUT.
 	DefaultDeployTeardownTimeout = 2 * time.Minute
@@ -298,6 +307,10 @@ type Config struct {
 	// Devcontainer build timeout — prevents indefinite hangs when apt/network fails.
 	// Configurable per constitution principle XI.
 	DevcontainerBuildTimeout time.Duration // Max time for a single devcontainer up call (env: DEVCONTAINER_BUILD_TIMEOUT, default: 15m)
+
+	// WorkspaceBuildQueueDepth limits concurrent devcontainer builds on this VM.
+	// Configurable per constitution principle XI.
+	WorkspaceBuildQueueDepth int // Concurrent build slots (env: WORKSPACE_BUILD_QUEUE_DEPTH, default: 1)
 
 	// Devcontainer cache settings — opportunistic image caching via container registry.
 	// Configurable per constitution principle XI.

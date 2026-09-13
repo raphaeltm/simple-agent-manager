@@ -63,11 +63,11 @@ import {
   getTaskReservation,
   releaseClaimedWarmNode,
   type ReusableNodeSelection,
-  taskPlacementStrategy,
   tryClaimWarmNode,
   verifyNodeAgentHealthy,
 } from './node-selection';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
+import { taskPlacementStrategy } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 async function trySelectReusableNodeForProvisioning(

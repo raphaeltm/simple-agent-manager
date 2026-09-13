@@ -90,6 +90,9 @@ export const DEFAULT_VM_ADMISSION_RETRY_MAX_MS = 60 * 1000;
 /** Maximum time a task can wait for VM capacity before visible failure. */
 export const DEFAULT_VM_ADMISSION_WAIT_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
+/** Maximum time to defer placement onto a node whose only blocker is an active build queue. */
+export const DEFAULT_VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS = 20 * 60 * 1000;
+
 /** Cooldown after provider/account-capacity failures such as Hetzner server limits. */
 export const DEFAULT_VM_ADMISSION_PROVIDER_COOLDOWN_MS = 10 * 60 * 1000;
 

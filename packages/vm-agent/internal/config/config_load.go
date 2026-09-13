@@ -197,6 +197,9 @@ func Load() (*Config, error) {
 		// Devcontainer build timeout — prevents indefinite hangs on network failures.
 		DevcontainerBuildTimeout: getEnvDuration("DEVCONTAINER_BUILD_TIMEOUT", 15*time.Minute),
 
+		// Per-node build concurrency. Keep the default at one slot for rollout compatibility.
+		WorkspaceBuildQueueDepth: getBoundedPositiveEnvInt("WORKSPACE_BUILD_QUEUE_DEPTH", DefaultWorkspaceBuildQueueDepth, MaxWorkspaceBuildQueueDepth),
+
 		// Devcontainer cache settings — opportunistic image caching.
 		DevcontainerCacheEnabled:     getEnvBool("DEVCONTAINER_CACHE_ENABLED", false),
 		DevcontainerCacheRegistry:    getEnv("DEVCONTAINER_CACHE_REGISTRY", "ghcr.io"),

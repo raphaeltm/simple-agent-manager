@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { handleNodeSelection } from '../../../src/durable-objects/task-runner/node-steps';
 import type {
@@ -7,6 +7,22 @@ import type {
 } from '../../../src/durable-objects/task-runner/types';
 import type { TaskStartCapacityPoolSelection } from '../../../src/services/placement-resolver';
 import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/session-recovery-authority';
+
+const admissionMocks = vi.hoisted(() => ({
+  resolveVmAdmissionScope: vi.fn(),
+  waitForVmAdmissionCapacity: vi.fn(),
+}));
+
+vi.mock('../../../src/services/vm-admission-control', async (importActual) => {
+  const actual = await importActual<typeof import('../../../src/services/vm-admission-control')>();
+  return {
+    ...actual,
+    resolveVmAdmissionScope: (...args: unknown[]) =>
+      admissionMocks.resolveVmAdmissionScope(...args),
+    waitForVmAdmissionCapacity: (...args: unknown[]) =>
+      admissionMocks.waitForVmAdmissionCapacity(...args),
+  };
+});
 
 type D1ResultMap = {
   persistedWarmClaim?: string | null;
@@ -55,6 +71,7 @@ type D1ResultMap = {
 };
 
 type MockNode = NonNullable<D1ResultMap['preferredNode']>;
+type ExistingNodeSeed = NonNullable<D1ResultMap['existingNodes']>[number];
 
 type PlacementMetadataFields = {
   capacity_pool_id?: string | null;
@@ -317,6 +334,7 @@ function createContext(results: D1ResultMap): TaskRunnerContext {
       NODE_HEARTBEAT_STALE_SECONDS: '180',
       MAX_WORKSPACES_PER_NODE: '5',
       VM_AGENT_REQUIRED_VERSION: 'current-sha',
+      VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS: '900000',
     },
     ctx: {
       storage: {
@@ -531,6 +549,92 @@ function nodeCapacityFields(selection: TaskStartCapacityPoolSelection) {
     placement_explanation_json: candidate.snapshot.placementExplanationJson,
   };
 }
+
+const ADMISSION_SCOPE = {
+  provider: 'hetzner' as const,
+  credentialSource: 'user' as const,
+  credentialDomainKey: 'user:user-1:hetzner',
+  providerDomainKey: 'hetzner:user:user-1:hetzner',
+  scopeKey: 'user:user-1:workspace-vm:hetzner:user:user-1:hetzner',
+};
+
+function busyBuildMetrics(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    cpuLoadAvg1: 0.1,
+    memoryPercent: 10,
+    diskPercent: 10,
+    creatingWorkspaces: 1,
+    ...overrides,
+  });
+}
+
+function idleBuildMetrics(): string {
+  return busyBuildMetrics({ creatingWorkspaces: 0 });
+}
+
+function busyBuildWaitExpired() {
+  return {
+    kind: 'expired' as const,
+    reason: 'wait_deadline_expired' as const,
+    waitDeadlineAt: '2026-09-11T12:15:00.000Z',
+  };
+}
+
+function busyBuildState({
+  cpuMillis = 500,
+  selection = capacityPoolSelection('user'),
+}: {
+  cpuMillis?: number;
+  selection?: TaskStartCapacityPoolSelection;
+} = {}): TaskRunnerState {
+  return createState({
+    config: {
+      ...createState().config,
+      cloudProvider: 'hetzner',
+      capacityPoolSelection: selection,
+      resolvedReservation: {
+        cpuMillis,
+        memoryMb: 1_024,
+        diskMb: 1_024,
+        exclusiveNode: false,
+        maxCoTenants: 4,
+        source: 'task',
+        sourceId: 'task-1',
+        version: 1,
+      },
+    },
+  });
+}
+
+function busyBuildNode(
+  id: string,
+  selection: TaskStartCapacityPoolSelection,
+  overrides: Partial<ExistingNodeSeed> = {}
+): ExistingNodeSeed {
+  const candidate = selection.candidates[0];
+  return {
+    id,
+    vm_size: candidate.machineSize,
+    vm_location: candidate.location,
+    health_status: 'healthy',
+    last_metrics: busyBuildMetrics(),
+    last_heartbeat_at: new Date().toISOString(),
+    agent_version: 'current-sha',
+    ...nodeCapacityFields(selection),
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  admissionMocks.resolveVmAdmissionScope.mockResolvedValue(ADMISSION_SCOPE);
+  admissionMocks.waitForVmAdmissionCapacity.mockResolvedValue({
+    kind: 'waiting',
+    reason: 'compatible_node_building_workspace',
+    nextRetryAt: '2026-09-11T12:00:15.000Z',
+    waitDeadlineAt: '2026-09-11T12:15:00.000Z',
+  });
+});
 
 describe('TaskRunner node selection VM size minimum behavior', () => {
   it('rejects an impossible persisted plan before selecting or provisioning a node', async () => {
@@ -1276,6 +1380,190 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
 
     expect(state.stepResults.nodeId).toBe('node-ready');
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('parks instead of provisioning when the only otherwise-eligible host is busy building', async () => {
+    const selection = capacityPoolSelection('user', {
+      machineSize: 'small',
+      providerInstanceType: 'cx23',
+      vcpuCount: 2,
+      memoryMb: 4_096,
+      diskGb: 40,
+    });
+    const state = busyBuildState({ selection });
+    const rc = createContext({
+      existingNodes: [busyBuildNode('node-building-only', selection)],
+      workspaceReservations: [
+        {
+          nodeId: 'node-building-only',
+          resolvedReservationJson: JSON.stringify({
+            ...state.config.resolvedReservation,
+            cpuMillis: 1_000,
+            memoryMb: 2_048,
+          }),
+        },
+      ],
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(admissionMocks.waitForVmAdmissionCapacity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: state.taskId, scopeKey: ADMISSION_SCOPE.scopeKey }),
+      'compatible_node_building_workspace',
+      null,
+      null,
+      expect.objectContaining({ waitTimeoutMs: expect.any(Number) })
+    );
+    expect(rc.updateD1ExecutionStep).toHaveBeenCalledWith(
+      state.taskId,
+      'waiting_for_node_capacity'
+    );
+    expect(rc.ctx.storage.setAlarm).toHaveBeenCalledWith(Date.parse('2026-09-11T12:00:15.000Z'));
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+    expect(state.stepResults.placementDiagnostics).toMatchObject({
+      selectedNodeId: null,
+      queue: {
+        state: 'waiting',
+        reason: 'compatible_node_building_workspace',
+      },
+      hosts: [
+        {
+          nodeId: 'node-building-only',
+          outcome: 'deferred',
+          reasons: ['node build queue is busy'],
+        },
+      ],
+    });
+  });
+
+  it('provisions when the busy host also fails a real resource budget', async () => {
+    const selection = capacityPoolSelection('user', {
+      machineSize: 'small',
+      providerInstanceType: 'cx23',
+      vcpuCount: 2,
+      memoryMb: 4_096,
+      diskGb: 40,
+    });
+    const state = busyBuildState({ cpuMillis: 1_500, selection });
+    const rc = createContext({
+      existingNodes: [busyBuildNode('node-building-full', selection)],
+      workspaceReservations: [
+        {
+          nodeId: 'node-building-full',
+          resolvedReservationJson: JSON.stringify({
+            ...state.config.resolvedReservation,
+            cpuMillis: 1_000,
+          }),
+        },
+      ],
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(admissionMocks.waitForVmAdmissionCapacity).not.toHaveBeenCalled();
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
+    expect(state.stepResults.placementDiagnostics?.hosts[0]).toMatchObject({
+      nodeId: 'node-building-full',
+      outcome: 'rejected',
+      reasons: expect.arrayContaining(['CPU share budget would be exceeded']),
+    });
+  });
+
+  it('places on the existing node when the build slot frees on wake', async () => {
+    const state = busyBuildState();
+    const selection = state.config.capacityPoolSelection!;
+    const now = new Date().toISOString();
+    const results: D1ResultMap = {
+      existingNodes: [busyBuildNode('node-build-frees', selection, { last_heartbeat_at: now })],
+      healthByNode: {
+        'node-build-frees': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    };
+    const rc = createContext(results);
+
+    await handleNodeSelection(state, rc);
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+
+    results.existingNodes = [
+      {
+        ...results.existingNodes![0],
+        last_metrics: idleBuildMetrics(),
+      },
+    ];
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBe('node-build-frees');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('falls through to provisioning when the busy-build wait budget expires', async () => {
+    admissionMocks.waitForVmAdmissionCapacity.mockResolvedValueOnce(busyBuildWaitExpired());
+    const state = busyBuildState();
+    const selection = state.config.capacityPoolSelection!;
+    const rc = createContext({
+      existingNodes: [busyBuildNode('node-building-expired', selection)],
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
+    expect(state.stepResults.placementDiagnostics).toMatchObject({
+      queue: {
+        state: 'expired',
+        reason: 'compatible_node_building_workspace',
+        waitDeadlineAt: '2026-09-11T12:15:00.000Z',
+      },
+    });
+  });
+
+  it('treats stale busy-build telemetry as stale instead of deferrable', async () => {
+    const state = busyBuildState();
+    const selection = state.config.capacityPoolSelection!;
+    const rc = createContext({
+      existingNodes: [
+        busyBuildNode('node-building-stale', selection, {
+          last_heartbeat_at: '2026-09-11T11:00:00.000Z',
+        }),
+      ],
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(admissionMocks.waitForVmAdmissionCapacity).not.toHaveBeenCalled();
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
+    expect(state.stepResults.placementDiagnostics?.hosts[0]).toMatchObject({
+      outcome: 'rejected',
+      reasons: ['node telemetry is stale'],
+    });
+  });
+
+  it('does not re-park a permanently-building node after the bounded wait expires', async () => {
+    admissionMocks.waitForVmAdmissionCapacity
+      .mockResolvedValueOnce({
+        kind: 'waiting',
+        reason: 'compatible_node_building_workspace',
+        nextRetryAt: '2026-09-11T12:00:15.000Z',
+        waitDeadlineAt: '2026-09-11T12:15:00.000Z',
+      })
+      .mockResolvedValueOnce(busyBuildWaitExpired());
+    const state = busyBuildState();
+    const selection = state.config.capacityPoolSelection!;
+    const rc = createContext({
+      existingNodes: [busyBuildNode('node-building-forever', selection)],
+    });
+
+    await handleNodeSelection(state, rc);
+    await handleNodeSelection(state, rc);
+
+    expect(admissionMocks.waitForVmAdmissionCapacity).toHaveBeenCalledTimes(2);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
   });
 
   it('skips a better-ranked stale node and selects a compatible current node', async () => {

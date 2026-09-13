@@ -39,6 +39,20 @@ func getEnvInt(key string, defaultValue int) int {
 	return defaultValue
 }
 
+// getBoundedPositiveEnvInt returns a positive integer environment variable in range or a default.
+func getBoundedPositiveEnvInt(key string, defaultValue int, maxValue int) int {
+	value := getEnvInt(key, defaultValue)
+	if value < 1 {
+		slog.Warn("config: env var must be positive", "key", key, "default", defaultValue)
+		return defaultValue
+	}
+	if value > maxValue {
+		slog.Warn("config: env var exceeds maximum", "key", key, "value", value, "max", maxValue, "default", defaultValue)
+		return defaultValue
+	}
+	return value
+}
+
 // getEnvInt64 returns an int64 environment variable or a default.
 func getEnvInt64(key string, defaultValue int64) int64 {
 	if value := os.Getenv(key); value != "" {
@@ -268,6 +282,13 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf(
 			"HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES must be 1024-1048576, got %d",
 			c.HeartbeatWorkspaceMetricsMaxOutputBytes,
+		))
+	}
+	if c.WorkspaceBuildQueueDepth < 1 || c.WorkspaceBuildQueueDepth > MaxWorkspaceBuildQueueDepth {
+		errs = append(errs, fmt.Errorf(
+			"WORKSPACE_BUILD_QUEUE_DEPTH must be 1-%d, got %d",
+			MaxWorkspaceBuildQueueDepth,
+			c.WorkspaceBuildQueueDepth,
 		))
 	}
 

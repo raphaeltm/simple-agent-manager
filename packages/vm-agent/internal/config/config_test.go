@@ -960,6 +960,7 @@ func validConfig() *Config {
 		HeartbeatWorkspaceMetricsMaxContainers:  8,
 		HeartbeatWorkspaceMetricsMaxOutputBytes: 64 * 1024,
 		DevcontainerCachePushTimeout:            DefaultDevcontainerCachePushTimeout,
+		WorkspaceBuildQueueDepth:                DefaultWorkspaceBuildQueueDepth,
 		DeployPreflightCommandTimeout:           DefaultDeployPreflightCommandTimeout,
 		LogStreamPingWriteTimeout:               DefaultLogStreamPingWriteTimeout,
 	}
@@ -1000,6 +1001,8 @@ func TestValidateOperationalTimeouts(t *testing.T) {
 		{"cache push", func(cfg *Config) { cfg.DevcontainerCachePushTimeout = 0 }, "DEVCONTAINER_CACHE_PUSH_TIMEOUT"},
 		{"deploy preflight", func(cfg *Config) { cfg.DeployPreflightCommandTimeout = 0 }, "DEPLOY_PREFLIGHT_COMMAND_TIMEOUT"},
 		{"log stream ping write", func(cfg *Config) { cfg.LogStreamPingWriteTimeout = 0 }, "LOG_STREAM_PING_WRITE_TIMEOUT"},
+		{"workspace build queue depth low", func(cfg *Config) { cfg.WorkspaceBuildQueueDepth = 0 }, "WORKSPACE_BUILD_QUEUE_DEPTH"},
+		{"workspace build queue depth high", func(cfg *Config) { cfg.WorkspaceBuildQueueDepth = MaxWorkspaceBuildQueueDepth + 1 }, "WORKSPACE_BUILD_QUEUE_DEPTH"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1725,6 +1728,58 @@ func TestDevcontainerBuildTimeoutOverride(t *testing.T) {
 	}
 	if cfg.DevcontainerBuildTimeout != 25*time.Minute {
 		t.Fatalf("DevcontainerBuildTimeout=%v, want %v", cfg.DevcontainerBuildTimeout, 25*time.Minute)
+	}
+}
+
+func TestWorkspaceBuildQueueDepthDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.WorkspaceBuildQueueDepth != DefaultWorkspaceBuildQueueDepth {
+		t.Fatalf("WorkspaceBuildQueueDepth=%d, want %d", cfg.WorkspaceBuildQueueDepth, DefaultWorkspaceBuildQueueDepth)
+	}
+}
+
+func TestWorkspaceBuildQueueDepthOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("WORKSPACE_BUILD_QUEUE_DEPTH", "3")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.WorkspaceBuildQueueDepth != 3 {
+		t.Fatalf("WorkspaceBuildQueueDepth=%d, want 3", cfg.WorkspaceBuildQueueDepth)
+	}
+}
+
+func TestWorkspaceBuildQueueDepthInvalidUsesDefault(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "zero", value: "0"},
+		{name: "above max", value: "17"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+			t.Setenv("WORKSPACE_ID", "ws-123")
+			t.Setenv("WORKSPACE_BUILD_QUEUE_DEPTH", tt.value)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load returned error: %v", err)
+			}
+			if cfg.WorkspaceBuildQueueDepth != DefaultWorkspaceBuildQueueDepth {
+				t.Fatalf("WorkspaceBuildQueueDepth=%d, want %d", cfg.WorkspaceBuildQueueDepth, DefaultWorkspaceBuildQueueDepth)
+			}
+		})
 	}
 }
 

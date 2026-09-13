@@ -3,7 +3,9 @@
 set -euo pipefail
 
 : "${R2_BUCKET:?R2_BUCKET is required}"
-: "${DEPLOY_SHA:?DEPLOY_SHA is required}"
+# The release key is the VM-agent release commit (the last commit that changed
+# packages/vm-agent), not the deployment commit — see resolve-vm-agent-release.sh.
+: "${VM_AGENT_RELEASE:?VM_AGENT_RELEASE is required}"
 : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}"
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
 
@@ -11,7 +13,7 @@ publish_agent_artifact() {
   local architecture="$1"
   local legacy="${2:-false}"
   local source_path="$GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-$architecture"
-  local object_path="$R2_BUCKET/agents/releases/$DEPLOY_SHA/vm-agent-linux-$architecture"
+  local object_path="$R2_BUCKET/agents/releases/$VM_AGENT_RELEASE/vm-agent-linux-$architecture"
   if [ "$legacy" = true ]; then
     object_path="$R2_BUCKET/agents/vm-agent-linux-$architecture"
   fi
