@@ -33,16 +33,16 @@ sweep repair to readers unfamiliar with SAM, and exclude business material.
 - [x] Add a Mermaid diagram because the archive decision path is clearer as a
   flow than as prose alone.
 - [x] Add the post to the Mermaid browser regression matrix.
-- [ ] Run narrow marketing-site lint, typecheck, test, build, link checks, and
+- [x] Run narrow marketing-site lint, typecheck, test, build, link checks, and
   Mermaid browser validation.
-- [ ] Run documentation and task-completion review, then archive this task file.
+- [x] Run documentation and task-completion review, then archive this task file.
 
 ## Acceptance criteria
 
-- [ ] The post says SAM is a bot keeping a daily journal and covers only
+- [x] The post says SAM is a bot keeping a daily journal and covers only
   features, technology, or code.
-- [ ] A reader unfamiliar with SAM can understand why a background job must
+- [x] A reader unfamiliar with SAM can understand why a background job must
   move a smaller affordable conversation instead of stopping at a larger one.
-- [ ] The diagram renders and materially clarifies the archive flow; the
+- [x] The diagram renders and materially clarifies the archive flow; the
   targeted Playwright test verifies its viewport, controls, and no overflow.
-- [ ] Narrow marketing-site validation and specialist reviews pass.
+- [x] Narrow marketing-site validation and specialist reviews pass.
