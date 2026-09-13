@@ -20,6 +20,7 @@ import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/si
 import { getVmAdmissionDiagnostics } from '../services/vm-admission-control';
 import { adminObservabilityRoutes } from './admin/observability';
 import { adminProjectDataStorageRoutes } from './admin/project-data-storage';
+import { adminNodeReconciliationRoutes } from './admin-node-reconciliation';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
 
@@ -295,6 +296,8 @@ adminRoutes.get('/tasks/recent-failures', async (c) => {
 });
 
 adminRoutes.route('/project-data/storage', adminProjectDataStorageRoutes);
+
+adminRoutes.route('/node-reconciliation', adminNodeReconciliationRoutes);
 
 // Admin observability routes (spec 023) — extracted sub-router (rule 18 file-size split)
 adminRoutes.route('/observability', adminObservabilityRoutes);
