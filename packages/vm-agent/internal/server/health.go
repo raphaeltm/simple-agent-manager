@@ -113,7 +113,10 @@ func (s *Server) sendNodeReady() {
 	if resp.StatusCode >= 300 {
 		body := readAcpHeartbeatErrorBody(resp.Body)
 		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-			s.markControlPlaneCallbacksTerminal("node_ready", resp.StatusCode, body)
+			// POST /api/nodes/:id/ready only returns a terminal status via
+			// rejectTerminalNodeCallback, i.e. this node row is gone.
+			s.handleTerminalControlPlaneCallback(
+				"node_ready", callbackScopeNode, resp.StatusCode, body)
 			return
 		}
 		slog.Warn("Node ready callback returned non-success status",
@@ -247,7 +250,11 @@ func (s *Server) sendNodeHeartbeat() {
 	if resp.StatusCode >= 300 {
 		body := readAcpHeartbeatErrorBody(resp.Body)
 		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-			s.markControlPlaneCallbacksTerminal("node_heartbeat", resp.StatusCode, body)
+			// POST /api/nodes/:id/heartbeat only returns a terminal status via
+			// rejectTerminalNodeCallback, i.e. this node row is gone. This is the
+			// single authority that stops callbacks on a genuinely deleted node.
+			s.handleTerminalControlPlaneCallback(
+				"node_heartbeat", callbackScopeNode, resp.StatusCode, body)
 			return
 		}
 		slog.Warn("Node heartbeat returned non-success status",

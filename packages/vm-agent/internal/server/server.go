@@ -1562,13 +1562,15 @@ func (s *Server) postTaskCallback(callbackURL, taskID, token string, body map[st
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		slog.Info("Task callback sent", "taskId", taskID, "body", string(payload))
 	} else if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-		slog.Warn("Task callback: terminal status",
-			"statusCode", resp.StatusCode,
-			"taskId", taskID,
-			"callbackURL", callbackURL,
-			"responseBody", responseBody,
-		)
-		s.markControlPlaneCallbacksTerminal("task_callback", resp.StatusCode, responseBody)
+		// A task-status callback's resource is the TASK. The control plane returns
+		// 410 here for routine races — most often the workspace compare-and-swap
+		// fence in apps/api/src/routes/workspaces/_helpers.ts firing because the
+		// task was just cancelled or re-dispatched. That is not evidence this node
+		// is gone; it may still be running other workspaces. postTaskCallback is
+		// fire-and-forget with no retry loop, so there is nothing to stop.
+		s.handleTerminalControlPlaneCallback(
+			"task_callback", callbackScopeResource, resp.StatusCode, responseBody,
+			"taskId", taskID, "callbackURL", callbackURL)
 	} else {
 		slog.Error("Task callback: unexpected status",
 			"statusCode", resp.StatusCode,

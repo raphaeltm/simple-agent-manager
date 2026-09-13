@@ -33,6 +33,7 @@ Callback JWT routes are not allowed to convert designed terminal callback states
 2. Callback routes targeting deleted, destroyed, stopped, missing, or otherwise tombstoned node/workspace resources MUST return a documented terminal callback response such as `410 Gone` or another VM-agent-terminal status (`401`/`403`/`404`/`410`) before mutating liveness or accepting writes.
 3. Designed callback `4xx`/`410` responses MUST use non-error or bounded low-severity logging. They MUST NOT emit an error-level log or persisted platform error row for every retry attempt.
 4. Tests for callback-route changes MUST include the discriminating control: a live node/workspace callback still succeeds through the combined app/router wiring.
+5. A terminal status carries a SCOPE. `/api/nodes/:id/...` can only be terminal because that node is gone; `/api/projects/:id/...` and the task-status callback are terminal for one project/workspace/task while the node stays healthy. The VM agent must only shut down node-wide state for the former — see `packages/vm-agent/.claude/rules/75-terminal-signals-must-match-their-resource-scope.md`. When adding a new `410`, state which scope it speaks for.
 
 ### How to Identify VM Agent Callback Routes
 

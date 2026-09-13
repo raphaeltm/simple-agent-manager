@@ -129,7 +129,11 @@ func TestSendAcpHeartbeats_PostsToCorrectEndpoint(t *testing.T) {
 	}
 }
 
-func TestSendAcpHeartbeatsTerminalStatusStopsFutureCallbacks(t *testing.T) {
+// A terminal status on the per-PROJECT ACP heartbeat must NOT latch node-wide
+// callback state. The endpoint returns 410 for a single deleted workspace and 403
+// for a project the callback token is not bound to; neither means this node is
+// gone. Divergence case for `.claude/rules/75`.
+func TestSendAcpHeartbeatsTerminalStatusDoesNotLatchNodeCallbacks(t *testing.T) {
 	for _, status := range []int{
 		http.StatusUnauthorized,
 		http.StatusForbidden,
@@ -145,7 +149,7 @@ func TestSendAcpHeartbeatsTerminalStatusStopsFutureCallbacks(t *testing.T) {
 				requestCount++
 				mu.Unlock()
 				w.WriteHeader(status)
-				_, _ = w.Write([]byte(`{"error":"terminal","message":"callback resource is gone"}`))
+				_, _ = w.Write([]byte(`{"error":"GONE","message":"Workspace is deleted; ACP heartbeat resource is gone"}`))
 			}))
 			defer ts.Close()
 
@@ -158,7 +162,6 @@ func TestSendAcpHeartbeatsTerminalStatusStopsFutureCallbacks(t *testing.T) {
 				},
 				workspaces: map[string]*WorkspaceRuntime{
 					"ws-1": {ID: "ws-1", ProjectID: "proj-a", Status: "running"},
-					"ws-2": {ID: "ws-2", ProjectID: "proj-b", Status: "running"},
 				},
 				callbackToken:    "test-token",
 				httpClient:       &http.Client{Timeout: 5 * time.Second},
@@ -168,17 +171,26 @@ func TestSendAcpHeartbeatsTerminalStatusStopsFutureCallbacks(t *testing.T) {
 
 			s.sendAcpHeartbeats()
 
-			if !s.controlPlaneCallbacksStopped() {
-				t.Fatal("expected terminal ACP heartbeat response to stop control-plane callbacks")
+			// Liveness: the heartbeat really was attempted and really saw the status.
+			mu.Lock()
+			first := requestCount
+			mu.Unlock()
+			if first != 1 {
+				t.Fatalf("expected the ACP heartbeat to be attempted once, got %d", first)
 			}
 
+			if s.controlPlaneCallbacksStopped() {
+				t.Fatal("a resource-scoped ACP heartbeat status must not latch node-wide callbacks")
+			}
+
+			// And the reporter keeps trying on the next tick rather than going silent.
 			s.sendAcpHeartbeats()
 
 			mu.Lock()
-			count := requestCount
+			second := requestCount
 			mu.Unlock()
-			if count != 1 {
-				t.Fatalf("expected one ACP heartbeat request before terminal stop, got %d", count)
+			if second != 2 {
+				t.Fatalf("expected the ACP heartbeat to keep running, got %d requests", second)
 			}
 		})
 	}

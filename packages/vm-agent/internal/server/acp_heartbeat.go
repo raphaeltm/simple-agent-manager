@@ -132,7 +132,15 @@ func (s *Server) sendAcpHeartbeatForProject(projectID, nodeID, token string) {
 	if resp.StatusCode >= 300 {
 		body := readAcpHeartbeatErrorBody(resp.Body)
 		if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-			s.markControlPlaneCallbacksTerminal("node_acp_heartbeat", resp.StatusCode, body)
+			// This endpoint is addressed per PROJECT, not per node, and returns a
+			// terminal status for resource-scoped reasons that say nothing about
+			// node liveness: a single deleted workspace (node-acp-heartbeat.ts
+			// `terminalResourceResponse` with kind 'workspace') or a project the
+			// callback token is not bound to (403). A deleted node is caught by
+			// the node heartbeat instead.
+			s.handleTerminalControlPlaneCallback(
+				"node_acp_heartbeat", callbackScopeResource, resp.StatusCode, body,
+				"projectId", projectID, "nodeId", nodeID)
 			return
 		}
 		level := slog.LevelWarn
