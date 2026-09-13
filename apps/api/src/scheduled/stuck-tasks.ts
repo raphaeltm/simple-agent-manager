@@ -55,7 +55,7 @@ import {
   isSessionResumable,
   isSupersededTerminalReason,
   loadRuntimeWorkspaceSnapshot,
-  loadSessionResumabilitySnapshot,
+  loadSessionWakeabilitySnapshot,
   loadTaskSupersession,
   needsNodeHealthProbe,
   needsSessionResumabilityProbe,
@@ -66,6 +66,11 @@ import {
   type TaskRuntimeLivenessSignals,
   type TaskSupersession,
 } from '../services/task-runtime-liveness';
+import {
+  evaluateSleepGuard,
+  resolveRuntimeGenerationAge,
+  sleepGuardApplies,
+} from '../services/stuck-task-sleep-guard';
 import { transitionTaskToTerminal } from '../services/task-terminal-transition';
 import {
   getVmAdmissionDiagnostics,
@@ -150,6 +155,13 @@ export interface StuckTaskCandidate {
   project_id: string;
   user_id: string;
   status: string;
+  /**
+   * A conversation-mode task stays `in_progress` between turns by design, so the
+   * sleeping-session guard needs to tell it apart from a task-mode run. Absent
+   * from this projection until 2026-09-13, which is why every terminal branch
+   * treated a sleeping conversation like a stalled task.
+   */
+  task_mode: string | null;
   execution_step: string | null;
   updated_at: string;
   started_at: string | null;
@@ -276,7 +288,7 @@ function parseStuckTaskScanCursor(raw: string | null): StuckTaskScanCursor | nul
   }
 }
 
-const STUCK_TASK_CANDIDATE_COLUMNS = `id, project_id, user_id, status, execution_step, updated_at, started_at,
+const STUCK_TASK_CANDIDATE_COLUMNS = `id, project_id, user_id, status, task_mode, execution_step, updated_at, started_at,
        workspace_id, auto_provisioned_node_id, chat_session_id`;
 
 /**
@@ -460,7 +472,17 @@ export async function probeTaskRunnerStatus(
 /** Prove task-scoped liveness. A shared-node heartbeat is never sufficient. */
 export async function getTaskRuntimeLiveness(
   env: Env,
-  task: { id: string; project_id: string; workspace_id: string | null }
+  task: {
+    id: string;
+    project_id: string;
+    workspace_id: string | null;
+    /**
+     * The resumer claims on this, not on the workspace, so the classifier needs
+     * it to read the same record (`.claude/rules/58`). Falls back to the
+     * workspace's binding only when the task row has none.
+     */
+    chat_session_id?: string | null;
+  }
 ): Promise<TaskRuntimeLiveness> {
   const probeTimeoutMs = parseMs(
     env.TASK_LIVENESS_PROBE_TIMEOUT_MS,
@@ -497,19 +519,19 @@ export async function getTaskRuntimeLiveness(
   let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
   /** True when resumability alone already yields an inconclusive verdict. */
   let resumabilityResolvedInconclusive = false;
-  if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
+  const chatSessionId = task.chat_session_id ?? workspace?.chatSessionId ?? null;
+  const wakeProbe = { workspace, workspaceProbeOutcome, chatSessionId };
+  if (needsSessionResumabilityProbe(wakeProbe)) {
     try {
-      sessionResumability = await loadSessionResumabilitySnapshot(
+      sessionResumability = await loadSessionWakeabilitySnapshot(
         env.DATABASE,
         task.project_id,
-        workspace.id,
-        workspace.chatSessionId
+        wakeProbe.chatSessionId
       );
       resumabilityProbeOutcome = 'ok';
       resumabilityResolvedInconclusive = isSessionResumable(
         sessionResumability,
-        task.project_id,
-        workspace.id,
+        { projectId: task.project_id, chatSessionId: wakeProbe.chatSessionId },
         { maxRecoveryAttempts, recoveryAttemptDecayMs, nowMs }
       );
     } catch (err) {
@@ -550,6 +572,7 @@ export async function getTaskRuntimeLiveness(
   let livenessSignals: TaskRuntimeLivenessSignals = {
     projectId: task.project_id,
     taskWorkspaceId: task.workspace_id,
+    chatSessionId,
     workspace,
     workspaceProbeOutcome,
     supersessionProbeOutcome,
@@ -695,7 +718,8 @@ export async function getTaskReconciliationDiagnostics(
   taskId: string
 ): Promise<TaskReconciliationDiagnostics | null> {
   const task = await env.DATABASE.prepare(
-    `SELECT id, project_id, status, execution_step, started_at, updated_at, workspace_id
+    `SELECT id, project_id, status, execution_step, started_at, updated_at, workspace_id,
+            chat_session_id
      FROM tasks
      WHERE id = ?
      LIMIT 1`
@@ -709,6 +733,7 @@ export async function getTaskReconciliationDiagnostics(
       started_at: string | null;
       updated_at: string;
       workspace_id: string | null;
+      chat_session_id: string | null;
     }>();
 
   if (!task) return null;
@@ -989,6 +1014,8 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     let deadRuntimeRecovery = false;
     /** Benign supersession termination — recorded as `cancelled`, never `failed`. */
     let supersededTermination = false;
+    /** Benign sleep-expiry termination — recorded as `cancelled`, never `failed`. */
+    let lifecycleTermination = false;
     /**
      * The ONE place a conclusive verdict becomes a terminal reason. Every branch
      * that can terminalize a task routes through here, so a supersession can
@@ -1120,7 +1147,51 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const executionMs = now.getTime() - startedAt;
           if (executionMs > maxExecutionMs) {
+            // The ceiling bounds COMPUTE, so it must age the allocated runtime
+            // generation, not the conversation row — a conversation legitimately
+            // lives for weeks across many sleeps and wakes, and 79 of the last 80
+            // production ceiling firings were on a workspace that was already
+            // deleted (`.claude/rules/74`, idea 01M0SHQDH3FQQG7NMFKMFPSXWM). The
+            // row age remains the ENTRY gate, so this extra point lookup is still
+            // paid only by 24h+ candidates (`.claude/rules/47`).
+            let ceilingApplies = false;
             if (executionMs > absoluteCeilingMs) {
+              const generation = await resolveRuntimeGenerationAge(env, task, now.getTime());
+              if (generation.kind === 'unknown') {
+                log.info('stuck_task.ceiling_preserved_generation_unknown', {
+                  taskId: task.id,
+                  projectId: task.project_id,
+                  executionMs,
+                  action: 'preserved',
+                });
+                break;
+              }
+              if (generation.kind === 'no_runtime') {
+                // No allocation exists, so there is no runaway cost to bound. Fall
+                // through to the liveness branch, which understands sleep,
+                // supersession and genuine runtime death.
+                log.info('stuck_task.ceiling_skipped_no_runtime', {
+                  taskId: task.id,
+                  projectId: task.project_id,
+                  workspaceId: task.workspace_id,
+                  executionMs,
+                  action: 'deferred_to_liveness',
+                });
+              } else if (generation.ageMs <= absoluteCeilingMs) {
+                log.info('stuck_task.ceiling_skipped_younger_generation', {
+                  taskId: task.id,
+                  projectId: task.project_id,
+                  workspaceId: task.workspace_id,
+                  conversationAgeMs: executionMs,
+                  runtimeGenerationAgeMs: generation.ageMs,
+                  absoluteCeilingMs,
+                  action: 'deferred_to_liveness',
+                });
+              } else {
+                ceilingApplies = true;
+              }
+            }
+            if (ceilingApplies) {
               // The ceiling is a cost backstop: it still terminalizes unconditionally
               // and deliberately does NOT pay for a full liveness probe (no ACP /
               // container round-trips — a property pinned by
@@ -1350,6 +1421,55 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       if (!isStuck) continue;
     }
 
+    // THE choke point. Every branch above that can terminalize a task converges
+    // here, so the sleeping-session guard is applied once rather than three times
+    // — the ceiling (`:1116-1181`), the liveness timeout (`:1183-1230`) and the
+    // reconciliation grace (`:1258-1275`) are all covered by construction, and a
+    // future fourth branch cannot forget it. This is the same `.claude/rules/66`
+    // requirement-3 lesson `terminalReasonFor` above already encodes for
+    // supersession; in production it was violated for sleep, and 41 of one week's
+    // 94 task failures were wakeable conversations shown a red "Task failed".
+    if (sleepGuardApplies(task, { compactionLoop: compactionLoopRecovery !== null })) {
+      const guard = await evaluateSleepGuard(env, task, now.getTime());
+      if (guard.kind === 'unknown') {
+        log.info('stuck_task.preserved_sleep_state_unknown', {
+          taskId: task.id,
+          projectId: task.project_id,
+          chatSessionId: task.chat_session_id,
+          action: 'preserved',
+        });
+        continue;
+      }
+      if (guard.kind === 'preserve') {
+        log.info('stuck_task.preserved_sleeping', {
+          taskId: task.id,
+          projectId: task.project_id,
+          chatSessionId: task.chat_session_id,
+          taskMode: task.task_mode,
+          executionStep: task.execution_step,
+          wakeability: guard.wakeability,
+          withheldReason: reason,
+          action: 'preserved',
+        });
+        continue;
+      }
+      if (guard.kind === 'lifecycle') {
+        // It still leaves the candidate set (`.claude/rules/47` bounded escape),
+        // but a sleep that outlived its snapshot is a lifecycle outcome, not an
+        // agent failure — policies `a974b04f` and `486d1dd1`. `cancelled` is
+        // already the repo's word for that, and `ActiveTaskCard` keys its red
+        // failure line on `status === 'failed'`, so this alone removes the banner.
+        lifecycleTermination = true;
+        reason = guard.reason;
+        log.info('stuck_task.sleep_expired_lifecycle_termination', {
+          taskId: task.id,
+          projectId: task.project_id,
+          chatSessionId: task.chat_session_id,
+          action: 'cancelled',
+        });
+      }
+    }
+
     try {
       // Gather diagnostic context before recovery
       const diagnosticElapsedMs =
@@ -1419,7 +1539,8 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         env
       );
 
-      const terminalStatus: 'failed' | 'cancelled' = supersededTermination ? 'cancelled' : 'failed';
+      const terminalStatus: 'failed' | 'cancelled' =
+        supersededTermination || lifecycleTermination ? 'cancelled' : 'failed';
       const transitionOutcome = await transitionTaskToTerminal(env, {
         taskId: task.id,
         projectId: task.project_id,

@@ -6,8 +6,7 @@ import {
 
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
-import { isRestorableSnapshot } from './session-snapshot-artifacts';
-import { sessionRecoveryBudgetAvailable } from './session-snapshot-recovery-budget';
+import { classifySessionWakeability } from './session-wakeability';
 import type {
   RuntimeWorkspaceSnapshot,
   SessionResumabilitySnapshot,
@@ -17,6 +16,12 @@ import type {
   TaskRuntimeLivenessSignals,
   TaskSupersession,
 } from './task-runtime-liveness-types';
+
+export {
+  classifySessionWakeability,
+  loadSessionWakeabilitySnapshot,
+} from './session-wakeability';
+export type { SessionWakeability } from './session-wakeability';
 
 export type {
   ContainerLifecycleSnapshot,
@@ -91,8 +96,6 @@ const TERMINAL_ACP_STATUSES = new Set<AcpSessionStatus>(ACP_SESSION_TERMINAL_STA
 const INCONCLUSIVE_WORKSPACE_STATUSES = new Set(['creating', 'sleeping', 'recovery']);
 const TERMINAL_CONTAINER_STATUSES = new Set(['stopping', 'stopped', 'expired', 'error']);
 const TERMINAL_NODE_STATUSES = new Set(['stopped', 'deleted', 'destroyed', 'destroying', 'error']);
-/** `session_snapshots.sleep_status` value meaning "asleep right now". */
-const RESUMABLE_SLEEP_STATUS = 'sleeping';
 const MAX_TASK_SUPERSESSION_CHAIN_DEPTH = 32;
 
 export function getTaskLivenessNodeHealthProbeTimeoutMs(
@@ -181,80 +184,53 @@ export async function probeNodeHealthForTaskLiveness(
 }
 
 /**
- * True when the session is currently asleep with a restorable, unexpired
- * snapshot. `.claude/rules/02` requires sleep to be classified inconclusive:
- * `NodeLifecycle` rewrites a slept workspace's `sleeping` status to `deleted`
- * five minutes after sleep, so workspace status alone cannot distinguish
- * "slept and restorable" from "destroyed".
+ * Whether the sleeping-session record can still authorize a wake.
  *
- * A user-initiated delete destroys the snapshot row entirely
- * (`session-snapshot-persistence.ts:deleteSessionSnapshotState`), so snapshot
- * presence — not a deletion-cause column — is the discriminator.
+ * `.claude/rules/02` requires sleep to be classified inconclusive: `NodeLifecycle`
+ * rewrites a slept workspace's `sleeping` status to `deleted` five minutes after
+ * sleep, and the workspace row is eventually removed outright, so workspace state
+ * alone cannot distinguish "slept and restorable" from "destroyed".
  *
- * Every condition below mirrors one the resumer already enforces, so this
- * predicate can never be looser than the gate that authorizes a real wake
- * (`.claude/rules/58`). Being *equal* rather than merely safe matters: a
- * snapshot the resumer would refuse must terminalize, or the task waits out the
- * full snapshot TTL for a wake that can never happen.
+ * The predicate itself lives in `session-wakeability.ts` beside the loader that
+ * reads the resumer's own record; this wrapper only decides what the *task*
+ * verdict should be. `retry_pending` and `resumable` are both inconclusive here —
+ * the difference is diagnostic, so an operator reading `liveness.reason` can tell
+ * "asleep and claimable" from "asleep, waiting out a wake-retry window".
  */
 export function isSessionResumable(
   snapshot: SessionResumabilitySnapshot | null,
-  projectId: string,
-  workspaceId: string,
+  scope: { projectId: string; chatSessionId: string },
   budget: { maxRecoveryAttempts: number; recoveryAttemptDecayMs: number; nowMs: number }
 ): boolean {
-  if (!snapshot) return false;
-  // Defence in depth: the loader is already project+workspace scoped, so these
-  // two re-checks are the in-memory half of the pair `.claude/rules/28` wants.
-  if (snapshot.projectId !== projectId) return false;
-  if (snapshot.workspaceId !== workspaceId) return false;
-  if (snapshot.sleepingAt === null) return false;
-  // A session that already woke clears both `sleeping_at` and `sleep_status`
-  // (`markSessionSnapshotAwakeInPlace`, `completeSessionSnapshotRecovery`);
-  // this is the belt-and-braces half of that pair.
-  if (snapshot.sleepStatus !== RESUMABLE_SLEEP_STATUS) return false;
-  // Mirrors `restorableSnapshotCondition()` in the claim's WHERE clause.
-  if (!isRestorableSnapshot(snapshot.status, snapshot.degradation)) return false;
-  // Mirrors the resumer's attempt budget exactly, decay included
-  // (`session-snapshot-recovery-budget.ts`). A budget that is merely spent is NOT
-  // conclusive: the resumer will release it once the last clean failure ages past
-  // the decay window, so declaring the task dead here would destroy a session the
-  // resumer can still wake (`.claude/rules/58`). Only a budget that is spent AND
-  // undecayed refuses the claim, at which point preserving the task would strand
-  // it until the snapshot TTL — the second bounded escape (`.claude/rules/47`).
-  if (
-    !sessionRecoveryBudgetAvailable({
-      recoveryAttempts: snapshot.recoveryAttempts,
-      recoveryFailedAtMs: snapshot.recoveryFailedAtMs,
-      maxAttempts: budget.maxRecoveryAttempts,
-      decayMs: budget.recoveryAttemptDecayMs,
-      nowMs: budget.nowMs,
-    })
-  ) {
-    return false;
-  }
-  // An absent or unparseable expiry is treated as NOT resumable so a snapshot
-  // can never make a task immortal (`.claude/rules/47` bounded escape path).
-  if (snapshot.expiresAtMs === null) return false;
-  return snapshot.expiresAtMs > budget.nowMs;
+  return classifySessionWakeability(snapshot, scope, budget).kind !== 'unwakeable';
 }
 
 /**
- * Whether a resumability lookup can still change the verdict. Adapters use this
- * to keep the extra D1 read off the hot path: it only fires for a workspace
- * that would otherwise be declared conclusively dead
+ * Whether a wakeability lookup can still change the verdict. Adapters use this
+ * to keep the extra D1 read off the hot path: it only fires for a task that
+ * would otherwise be declared conclusively dead
  * (`.claude/rules/47` control-loop I/O budget).
+ *
+ * Deliberately NOT gated on a workspace row existing, nor on
+ * `workspace.chatSessionId`. Deleting a slept workspace nulls
+ * `tasks.workspace_id` and, via `ON DELETE SET NULL`,
+ * `session_snapshots.workspace_id` — so gating on either would blind this probe
+ * to exactly the population it exists to protect (`.claude/rules/63`). This is
+ * the same correction already documented on `needsTaskSupersessionProbe`.
+ * `chatSessionId` is the task's own canonical binding, which is what the resumer
+ * claims on.
  */
-export function needsSessionResumabilityProbe(
-  workspace: RuntimeWorkspaceSnapshot | null,
-  workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome']
-): workspace is RuntimeWorkspaceSnapshot & { chatSessionId: string } {
+export function needsSessionResumabilityProbe(signals: {
+  workspace: RuntimeWorkspaceSnapshot | null;
+  workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'];
+  chatSessionId: string | null;
+}): signals is typeof signals & { chatSessionId: string } {
+  if (signals.workspaceProbeOutcome !== 'ok') return false;
+  if (!signals.chatSessionId) return false;
+  if (signals.workspace === null) return true;
   return (
-    workspaceProbeOutcome === 'ok' &&
-    workspace !== null &&
-    workspace.chatSessionId !== null &&
-    workspace.status !== 'running' &&
-    !INCONCLUSIVE_WORKSPACE_STATUSES.has(workspace.status)
+    signals.workspace.status !== 'running' &&
+    !INCONCLUSIVE_WORKSPACE_STATUSES.has(signals.workspace.status)
   );
 }
 
@@ -291,6 +267,52 @@ export function needsTaskSupersessionProbe(
  * merely mislabel it — it permanently revokes the guarded/parent wake path for
  * that conversation.
  */
+/**
+ * A task whose conversation is still asleep-and-wakeable is not dead. Returns
+ * the inconclusive verdict that must pre-empt any conclusive-death return, or
+ * null when the sleeping-session record cannot explain the state.
+ *
+ * This is the `.claude/rules/58` pairing: `classifySessionWakeability` reads the
+ * record `claimSessionSnapshotRecovery` claims against, so the destroyer and the
+ * resumer cannot disagree about whether the conversation can still be woken.
+ * A failed lookup withholds the terminal verdict (req 4) — the destructive
+ * action is the irreversible one.
+ */
+function sessionWakeVerdict(
+  signals: TaskRuntimeLivenessSignals,
+  workspace: RuntimeWorkspaceSnapshot | null,
+  reasonPrefix: string
+): TaskRuntimeLiveness | null {
+  if (signals.resumabilityProbeOutcome === 'error') {
+    return result(workspace, {
+      live: false,
+      conclusive: false,
+      reason: `${reasonPrefix}_resumability_unknown`,
+      activeAcpSessionId: null,
+    });
+  }
+  if (!signals.chatSessionId) return null;
+  const wakeability = classifySessionWakeability(
+    signals.sessionResumability,
+    { projectId: signals.projectId, chatSessionId: signals.chatSessionId },
+    {
+      maxRecoveryAttempts: signals.resumabilityMaxRecoveryAttempts,
+      recoveryAttemptDecayMs: signals.resumabilityRecoveryAttemptDecayMs,
+      nowMs: signals.nowMs,
+    }
+  );
+  if (wakeability.kind === 'unwakeable') return null;
+  return result(workspace, {
+    live: false,
+    conclusive: false,
+    reason:
+      wakeability.kind === 'resumable'
+        ? `${reasonPrefix}_snapshot_resumable`
+        : `${reasonPrefix}_wake_retry_pending`,
+    activeAcpSessionId: null,
+  });
+}
+
 function supersessionVerdict(
   signals: TaskRuntimeLivenessSignals,
   workspace: RuntimeWorkspaceSnapshot | null,
@@ -365,7 +387,13 @@ export function classifyTaskRuntimeLiveness(
     });
   }
   if (!signals.taskWorkspaceId || !workspace) {
+    // A slept conversation whose workspace row was deleted outright reaches here
+    // with `taskWorkspaceId` already nulled, so this branch — not the
+    // `status !== 'running'` one below — is where production's sleeping sessions
+    // were being declared dead (`sam-prod`, 2026-09-13). The wake record is
+    // chat-session-keyed and survives that deletion, so it is still readable.
     return (
+      sessionWakeVerdict(signals, workspace, 'workspace_missing') ??
       supersessionVerdict(signals, workspace, 'workspace_missing') ??
       result(workspace, {
         live: false,
@@ -398,32 +426,11 @@ export function classifyTaskRuntimeLiveness(
     // Sleep is not death. A slept session keeps a restorable `session_snapshots`
     // row that `session-recovery.ts` can wake even when the workspace row reads
     // `deleted`, so terminalizing here would destroy recoverable work.
-    if (signals.resumabilityProbeOutcome === 'error') {
-      return result(workspace, {
-        live: false,
-        conclusive: false,
-        reason: `workspace_${workspace.status}_resumability_unknown`,
-        activeAcpSessionId: null,
-      });
-    }
-    if (
-      isSessionResumable(signals.sessionResumability, signals.projectId, workspace.id, {
-        maxRecoveryAttempts: signals.resumabilityMaxRecoveryAttempts,
-        recoveryAttemptDecayMs: signals.resumabilityRecoveryAttemptDecayMs,
-        nowMs: signals.nowMs,
-      })
-    ) {
-      return result(workspace, {
-        live: false,
-        conclusive: false,
-        reason: `workspace_${workspace.status}_snapshot_resumable`,
-        activeAcpSessionId: null,
-      });
-    }
     // Supersession is checked last among the inconclusive escapes so a genuinely
     // restorable snapshot still reports the more specific `_snapshot_resumable`
     // reason, but before any conclusive-death return.
     return (
+      sessionWakeVerdict(signals, workspace, `workspace_${workspace.status}`) ??
       supersessionVerdict(signals, workspace, `workspace_${workspace.status}`) ??
       result(workspace, {
         live: false,
@@ -669,12 +676,6 @@ export async function loadRuntimeWorkspaceSnapshot(
   };
 }
 
-function parseTimestamp(value: string | null): number | null {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 /**
  * Follow the exact persisted ownership handoff marker to decide whether this
  * task has been superseded. This deliberately does not infer from family
@@ -723,52 +724,3 @@ export async function loadTaskSupersession(
   return row.status === 'queued' || row.status === 'delegated' ? 'live' : 'terminal';
 }
 
-/**
- * Load the session sleep record used to tell "slept and restorable" apart from
- * "destroyed". Project- and workspace-scoped per `.claude/rules/11`;
- * `chat_session_id` is uniquely indexed so this is a point lookup.
- */
-export async function loadSessionResumabilitySnapshot(
-  db: D1Database,
-  projectId: string,
-  workspaceId: string,
-  chatSessionId: string
-): Promise<SessionResumabilitySnapshot | null> {
-  const row = await db
-    .prepare(
-      `SELECT chat_session_id, project_id, workspace_id, sleeping_at, sleep_status, expires_at,
-            status, degradation, recovery_attempts, recovery_failed_at
-     FROM session_snapshots
-     WHERE chat_session_id = ? AND project_id = ? AND workspace_id = ?
-     LIMIT 1`
-    )
-    .bind(chatSessionId, projectId, workspaceId)
-    .first<{
-      chat_session_id: string;
-      project_id: string | null;
-      workspace_id: string | null;
-      sleeping_at: string | null;
-      sleep_status: string | null;
-      expires_at: string | null;
-      status: string | null;
-      degradation: string | null;
-      recovery_attempts: number | null;
-      recovery_failed_at: string | null;
-    }>();
-  if (!row) return null;
-
-  return {
-    chatSessionId: row.chat_session_id,
-    projectId: row.project_id,
-    workspaceId: row.workspace_id,
-    sleepingAt: parseTimestamp(row.sleeping_at),
-    sleepStatus: row.sleep_status,
-    expiresAtMs: parseTimestamp(row.expires_at),
-    status: row.status,
-    degradation: row.degradation,
-    // NOT NULL DEFAULT 0 in schema; coalesce defensively so a null can never
-    // read as "attempts remaining" via NaN comparison.
-    recoveryAttempts: row.recovery_attempts ?? 0,
-    recoveryFailedAtMs: parseTimestamp(row.recovery_failed_at),
-  };
-}

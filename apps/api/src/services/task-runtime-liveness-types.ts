@@ -60,20 +60,34 @@ export interface ContainerLifecycleSnapshot {
  * what "gone" means (`.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`).
  *
  * The resume path is two functions, and this type carries the inputs to both:
- *  - `session-recovery.ts:loadRecoveryContext` — requires `workspaceId`,
- *    a matching `projectId`, and `sleepingAt`.
+ *  - `session-recovery.ts:loadRecoveryContext` — assembles context only.
  *  - `session-snapshot-recovery-lifecycle.ts:claimSessionSnapshotRecovery` —
- *    the function that actually authorizes a wake. It additionally requires a
+ *    the function that actually authorizes a wake. It is keyed on
+ *    `chat_session_id` + `user_id` and requires `sleeping_at IS NOT NULL`, a
  *    restorable `status`/`degradation` pair, an unexpired `expires_at`, and an
  *    available attempt budget — `recovery_attempts <
  *    SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`, OR a spent budget whose last clean
  *    failure is older than SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS
  *    (`session-snapshot-recovery-budget.ts`).
+ *
+ * `workspaceId` is carried for diagnostics only. The claim never filters on it,
+ * and it is nulled by `ON DELETE SET NULL` when the slept workspace row is
+ * removed, so scoping a recoverability verdict to it is precisely the
+ * `.claude/rules/58` divergence this type exists to prevent.
  */
 export interface SessionResumabilitySnapshot {
   chatSessionId: string;
   projectId: string | null;
   workspaceId: string | null;
+  /**
+   * Whether the `workspaces` row `loadRecoveryContext` requires still exists and
+   * is owned by the snapshot's user. A joined fact rather than a snapshot column:
+   * the restore path needs the row, not just the id, and the id alone is nulled
+   * by `ON DELETE SET NULL` when the row goes. Carried here so the destroyer
+   * mirrors the whole restore path rather than only the claim
+   * (`.claude/rules/58` req 2).
+   */
+  recoveryWorkspacePresent: boolean;
   /** ms epoch; null when the session was never slept. */
   sleepingAt: number | null;
   sleepStatus: string | null;
@@ -112,6 +126,14 @@ export interface TaskRuntimeLivenessSignals {
   /** The task's project — re-checked against the snapshot row in memory. */
   projectId: string;
   taskWorkspaceId: string | null;
+  /**
+   * The task's canonical chat session, used to read the sleeping-session record
+   * the resumer claims against (`.claude/rules/58`). Supplied independently of
+   * the workspace because deleting a slept workspace nulls both
+   * `tasks.workspace_id` and `session_snapshots.workspace_id`, while the chat
+   * session binding — the resumer's own key — survives.
+   */
+  chatSessionId: string | null;
   /** Optional canonical chat owner used by reconciliation's cross-store fence. */
   expectedChatSessionId?: string | null;
   /** Optional current ACP owner; historical siblings cannot terminalize it. */

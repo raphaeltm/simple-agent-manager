@@ -356,23 +356,26 @@ describe('every writer of the failed status maintains the decay anchor', () => {
 });
 
 describe('consumers that mirror the budget', () => {
-  /** The destroyer's verdict for a spent budget whose failure is `agoMs` old. */
-  function destroyerSeesResumable(agoMs: number): boolean {
+  /**
+   * The destroyer's verdict for a spent budget whose last clean failure is
+   * `agoMs` old, or that has no failure anchor at all (`agoMs === null`).
+   */
+  function destroyerWithholdsVerdict(agoMs: number | null): boolean {
     return isSessionResumable(
       {
         chatSessionId: CHAT_SESSION_ID,
         projectId: PROJECT_ID,
         workspaceId: WORKSPACE_ID,
+        recoveryWorkspacePresent: true,
         sleepingAt: NOW.getTime() - 60 * 60 * 1000,
         sleepStatus: 'sleeping',
         expiresAtMs: NOW.getTime() + 60 * 60 * 1000,
         status: 'available',
         degradation: 'none',
         recoveryAttempts: MAX_ATTEMPTS,
-        recoveryFailedAtMs: NOW.getTime() - agoMs,
+        recoveryFailedAtMs: agoMs === null ? null : NOW.getTime() - agoMs,
       },
-      PROJECT_ID,
-      WORKSPACE_ID,
+      { projectId: PROJECT_ID, chatSessionId: CHAT_SESSION_ID },
       { maxRecoveryAttempts: MAX_ATTEMPTS, recoveryAttemptDecayMs: DECAY_MS, nowMs: NOW.getTime() }
     );
   }
@@ -406,11 +409,32 @@ describe('consumers that mirror the budget', () => {
   it('the destroyer withholds a terminal verdict while the resumer would still wake', () => {
     // `.claude/rules/58`: a widened resumer with an un-widened classifier means the
     // sweep terminalizes tasks whose sessions are demonstrably restorable.
-    expect(destroyerSeesResumable(60 * 60 * 1000)).toBe(true);
+    expect(destroyerWithholdsVerdict(60 * 60 * 1000)).toBe(true);
   });
 
-  it('the destroyer still terminalizes an undecayed exhausted burst', () => {
-    expect(destroyerSeesResumable(60 * 1000)).toBe(false);
+  it('the destroyer waits out an undecayed burst instead of terminalizing it', () => {
+    // CHANGED 2026-09-13. This case previously asserted `false` — terminalize —
+    // on the reasoning that the destroyer must mirror the resumer exactly. It
+    // mirrors the resumer at one INSTANT, and an undecayed burst is a refusal the
+    // resumer releases by itself `DECAY_MS` later.
+    //
+    // Production proved the difference matters: tasks `01M20YT9EH…`,
+    // `01M213XGR2…` and `01M22VG3JN…` were failed 0, 1 and 3 minutes after
+    // `recovery_failed_at`, inside a 15-minute window the resumer would have
+    // reopened — and `sourceTaskGuardCondition` then refused every guarded wake
+    // for those conversations forever, because the source task was terminal.
+    // A destroyer is irreversible and a resumer retries, so when the two disagree
+    // only about TIMING the destroyer waits. The bound is unchanged: `expires_at`
+    // still terminalizes (`.claude/rules/47`).
+    expect(destroyerWithholdsVerdict(60 * 1000)).toBe(true);
+  });
+
+  it('the destroyer still terminalizes a burst that can never decay', () => {
+    // Discriminating control for the case above. `recovery_failed_at IS NULL`
+    // means no attempt ever reported back, so `sessionRecoveryBudgetAvailable`
+    // never releases the budget — the refusal is permanent, and the bounded
+    // escape must fire rather than pinning the task open until the TTL.
+    expect(destroyerWithholdsVerdict(null)).toBe(false);
   });
 
   it('agent activity reports a decayed-budget session as still sleeping', () => {

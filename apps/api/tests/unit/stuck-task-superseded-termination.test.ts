@@ -231,14 +231,24 @@ beforeEach(() => {
     )
     .run(NODE_ID, iso(0), iso(-7_200_000), iso(0));
   // The handoff deleted the predecessor's workspace and nulled its chat binding.
+  seedWorkspace(iso(-7_200_000));
+});
+
+/**
+ * `created_at` is the ceiling's clock now: it ages the allocated runtime
+ * generation rather than the conversation row. A test that means to exercise the
+ * ceiling must age this, not just `tasks.started_at`.
+ */
+function seedWorkspace(createdAt: string): void {
+  sqlite.prepare(`DELETE FROM workspaces WHERE id = ?`).run(WORKSPACE_ID);
   sqlite
     .prepare(
       `INSERT INTO workspaces (id, user_id, name, repository, branch, status, vm_size, vm_location,
                              project_id, chat_session_id, node_id, created_at, updated_at)
      VALUES (?, 'user-1', 'ws', 'org/repo', 'main', 'deleted', 'cpx21', 'nbg1', ?, NULL, ?, ?, ?)`
     )
-    .run(WORKSPACE_ID, PROJECT_ID, NODE_ID, iso(-7_200_000), iso(0));
-});
+    .run(WORKSPACE_ID, PROJECT_ID, NODE_ID, createdAt, iso(0));
+}
 
 describe('stuck-task sweep — superseded predecessors are cancelled, never failed', () => {
   /**
@@ -291,6 +301,8 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
 
   /** Same control for the ceiling branch. */
   it('still records failed at the absolute ceiling when never superseded', async () => {
+    // The allocation must be as old as the conversation for the ceiling to apply.
+    seedWorkspace(iso(-30 * 60 * 60 * 1000));
     seedTask(PREDECESSOR_ID, { startedAt: iso(-30 * 60 * 60 * 1000) });
 
     await recoverStuckTasks(env());
@@ -298,6 +310,23 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     const row = statusOf(PREDECESSOR_ID);
     expect(row.status).toBe('failed');
     expect(row.error_message).toContain('runaway-cost ceiling');
+  });
+
+  it('does not charge the ceiling to a conversation whose allocation is young', async () => {
+    // The `.claude/rules/74` divergence case: the ceiling's CONDITION is
+    // "unbounded compute is still burning", its old SIGNAL was the age of the
+    // `tasks` row. A conversation can be weeks old across many sleeps and wakes
+    // while its current allocation is minutes old. The default fixture's
+    // workspace is 2 hours old, so the ceiling must defer to the liveness branch.
+    seedTask(PREDECESSOR_ID, { startedAt: iso(-30 * 60 * 60 * 1000) });
+
+    await recoverStuckTasks(env());
+
+    const row = statusOf(PREDECESSOR_ID);
+    expect(row.error_message ?? '').not.toContain('runaway-cost ceiling');
+    // Liveness control (`.claude/rules/62`): asserting only the absence above is
+    // also satisfied by the sweep never reaching this task at all.
+    expect(row.error_message ?? '').toContain('no longer live');
   });
 
   /** A live successor still preserves the predecessor entirely — no write at all. */

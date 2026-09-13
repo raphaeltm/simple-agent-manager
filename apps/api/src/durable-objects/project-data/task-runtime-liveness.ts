@@ -18,7 +18,7 @@ import {
   classifyTaskRuntimeLiveness,
   isSessionResumable,
   loadRuntimeWorkspaceSnapshot,
-  loadSessionResumabilitySnapshot,
+  loadSessionWakeabilitySnapshot,
   loadTaskSupersession,
   needsNodeHealthProbe,
   needsSessionResumabilityProbe,
@@ -202,19 +202,21 @@ export async function getLocalTaskRuntimeLiveness(
   let resumabilityResolvedInconclusive = false;
   const workspaceChatMatches =
     !task.chatSessionId || !workspace || workspace.chatSessionId === task.chatSessionId;
-  if (workspaceChatMatches && needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
+  // Same signal as the scheduled adapter (`.claude/rules/44`): a signal wired
+  // into one adapter and not the other reintroduces the bug on the unwired path.
+  const chatSessionId = task.chatSessionId ?? workspace?.chatSessionId ?? null;
+  const wakeProbe = { workspace, workspaceProbeOutcome, chatSessionId };
+  if (workspaceChatMatches && needsSessionResumabilityProbe(wakeProbe)) {
     try {
-      sessionResumability = await loadSessionResumabilitySnapshot(
+      sessionResumability = await loadSessionWakeabilitySnapshot(
         env.DATABASE,
         task.projectId,
-        workspace.id,
-        workspace.chatSessionId
+        wakeProbe.chatSessionId
       );
       resumabilityProbeOutcome = 'ok';
       resumabilityResolvedInconclusive = isSessionResumable(
         sessionResumability,
-        task.projectId,
-        workspace.id,
+        { projectId: task.projectId, chatSessionId: wakeProbe.chatSessionId },
         { maxRecoveryAttempts, recoveryAttemptDecayMs, nowMs }
       );
     } catch (err) {
@@ -256,6 +258,7 @@ export async function getLocalTaskRuntimeLiveness(
   let livenessSignals: TaskRuntimeLivenessSignals = {
     projectId: task.projectId,
     taskWorkspaceId: task.workspaceId,
+    chatSessionId,
     expectedChatSessionId: task.chatSessionId,
     expectedAcpSessionId: task.acpSessionId,
     workspace,

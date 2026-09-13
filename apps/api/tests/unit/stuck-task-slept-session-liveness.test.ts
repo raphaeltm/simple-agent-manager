@@ -295,16 +295,34 @@ describe('stuck-task liveness for a slept session', () => {
   // destroyer must not terminalize it (`.claude/rules/58`). Exercises the D1 read
   // and the row->classifier mapping of `recovery_failed_at`, which the pure
   // classifier test cannot. The undecayed row is the discriminating control.
+  // CHANGED 2026-09-13: the undecayed row is no longer terminalized. A budget spent
+  // with a finite `recovery_failed_at` releases itself after the decay window, so
+  // that is a TIMING disagreement with the resumer, not a permanent refusal — see
+  // `session-wakeability.ts`. The discriminating control moved to
+  // `recovery_failed_at IS NULL`, which never decays.
   it.each([
-    ['decayed', -60 * 60 * 1000, false, 'workspace_deleted_snapshot_resumable'],
-    ['undecayed', -60 * 1000, true, 'workspace_deleted'],
-  ])('cron adapter: %s spent budget', async (_label, failedAtOffsetMs, conclusive, reason) => {
+    ['decayed', -60 * 60 * 1000, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', -60 * 1000, 'workspace_deleted_wake_retry_pending'],
+  ])('cron adapter: %s spent budget', async (_label, failedAtOffsetMs, reason) => {
     seedWorkspace('deleted');
     seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(failedAtOffsetMs) });
 
     await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
-      conclusive,
+      conclusive: false,
       reason,
+    });
+  });
+
+  it('cron adapter: terminalizes a spent budget that can never decay', async () => {
+    // Discriminating control for the pair above (`.claude/rules/47` bounded
+    // escape): with no clean failure anchor the budget never releases, so the
+    // task must still leave the candidate set.
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: null });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: true,
+      reason: 'workspace_deleted',
     });
   });
 
@@ -334,14 +352,42 @@ describe('stuck-task liveness for a slept session', () => {
     });
   });
 
-  it('ignores a snapshot belonging to a different workspace', async () => {
-    // Proves the `workspace_id` predicate is evaluated.
+  it('ignores a snapshot belonging to a different chat session', async () => {
+    // Proves the `chat_session_id` predicate is evaluated. Deleting it from the
+    // query makes this case return `conclusive: false` instead.
+    //
+    // REPLACES a `workspaceId: 'workspace-other'` case removed on 2026-09-13.
+    // `claimSessionSnapshotRecovery` is keyed on chat session and never filtered
+    // on `workspace_id`, and `ON DELETE SET NULL` nulls that column when the
+    // slept workspace row is removed — so scoping the read to it terminalized
+    // exactly the sessions the resumer could still wake. Chat session is the
+    // predicate that actually scopes this lookup.
     seedWorkspace('deleted');
-    seedSnapshot({ workspaceId: 'workspace-other' });
+    seedSnapshot({ chatSessionId: 'some-other-chat-session' });
 
     await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
       conclusive: true,
       reason: 'workspace_deleted',
+    });
+  });
+
+  it('preserves a snapshot that has been re-pointed at a newer workspace', async () => {
+    // The workspace column moves across a wake, and the destroyer must not read
+    // that as "belongs to someone else". `loadRecoveryContext` only needs the row
+    // NAMED BY THE SNAPSHOT to exist, which it does here.
+    seedWorkspace('deleted');
+    sqlite
+      .prepare(
+        `INSERT INTO workspaces (id, user_id, name, repository, branch, status, vm_size, vm_location,
+                               project_id, chat_session_id, node_id, created_at, updated_at)
+       VALUES ('workspace-newer', 'user-1', 'ws2', 'org/repo', 'main', 'deleted', 'cpx21', 'nbg1', ?, ?, ?, ?, ?)`
+      )
+      .run(PROJECT_ID, CHAT_SESSION_ID, NODE_ID, iso(-3_600_000), iso(0));
+    seedSnapshot({ workspaceId: 'workspace-newer' });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_deleted_snapshot_resumable',
     });
   });
 
@@ -431,17 +477,29 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
   // `.claude/rules/61`: the DO destroyer is a separate entry point from the cron
   // one and needs its own proof that the decayed budget reaches it.
   it.each([
-    ['decayed', -60 * 60 * 1000, false, 'workspace_deleted_snapshot_resumable'],
-    ['undecayed', -60 * 1000, true, 'workspace_deleted'],
-  ])('DO adapter: %s spent budget', async (_label, failedAtOffsetMs, conclusive, reason) => {
+    ['decayed', -60 * 60 * 1000, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', -60 * 1000, 'workspace_deleted_wake_retry_pending'],
+  ])('DO adapter: %s spent budget', async (_label, failedAtOffsetMs, reason) => {
     seedWorkspace('deleted');
     seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(failedAtOffsetMs) });
     const sql = createSqlStorage(new Database(':memory:'));
 
     await expect(getLocalTaskRuntimeLiveness(sql, doEnv(), doTask)).resolves.toMatchObject({
       live: false,
-      conclusive,
+      conclusive: false,
       reason,
+    });
+  });
+
+  it('DO adapter: terminalizes a spent budget that can never decay', async () => {
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: null });
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(getLocalTaskRuntimeLiveness(sql, doEnv(), doTask)).resolves.toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'workspace_deleted',
     });
   });
 

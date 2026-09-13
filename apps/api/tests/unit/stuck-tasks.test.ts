@@ -139,8 +139,8 @@ function collectTaskTerminalRows(
 
 function collectWorkspaceNodeRows(
   prepareResponses: Map<string, { results: unknown[]; changes?: number }>
-): Map<string, { node_id: string | null }> {
-  const rows = new Map<string, { node_id: string | null }>();
+): Map<string, { node_id: string | null; created_at: string | null }> {
+  const rows = new Map<string, { node_id: string | null; created_at: string | null }>();
 
   for (const config of prepareResponses.values()) {
     for (const row of config.results) {
@@ -149,6 +149,11 @@ function collectWorkspaceNodeRows(
       if (typeof candidate.id === 'string' && 'node_id' in candidate) {
         rows.set(candidate.id, {
           node_id: typeof candidate.node_id === 'string' ? candidate.node_id : null,
+          // The runaway-cost ceiling ages the allocated runtime generation, so a
+          // workspace fixture that omits `created_at` has no generation to age and
+          // the ceiling defers to the liveness branch. Tests that mean to exercise
+          // the ceiling must supply it.
+          created_at: typeof candidate.created_at === 'string' ? candidate.created_at : null,
         });
       }
     }
@@ -200,6 +205,25 @@ function createMockEnv(
   const workspaceNodeRows = collectWorkspaceNodeRows(prepareResponses);
   const mockDb = {
     prepare: vi.fn((sql: string) => {
+      if (
+        sql.includes('SELECT created_at FROM workspaces') &&
+        sql.includes('WHERE id = ? AND project_id = ?')
+      ) {
+        return {
+          bind: vi.fn((workspaceId: string) => {
+            const row = workspaceNodeRows.get(workspaceId);
+            const created = row?.created_at ? { created_at: row.created_at } : null;
+            return {
+              all: vi.fn().mockResolvedValue({ results: created ? [created] : [] }),
+              first: vi.fn().mockResolvedValue(created),
+              run: vi.fn().mockResolvedValue({ meta: { changes: 0 } }),
+            };
+          }),
+          all: vi.fn().mockResolvedValue({ results: [] }),
+          first: vi.fn().mockResolvedValue(null),
+          run: vi.fn().mockResolvedValue({ meta: { changes: 0 } }),
+        };
+      }
       if (
         sql.includes('SELECT node_id') &&
         sql.includes('FROM workspaces') &&
@@ -1090,7 +1114,10 @@ describe('recoverStuckTasks', () => {
         ],
       });
       responses.set('node_id, status FROM workspaces', {
-        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+        // `created_at` matters now: the ceiling ages the allocated runtime
+        // generation, and this fixture is the control that a genuinely live,
+        // 25-hour-old allocation must STILL be terminalized.
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running', created_at: startedAt }],
       });
       responses.set('status, health_status FROM nodes', {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],

@@ -19,6 +19,7 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
   return {
     projectId: 'project-1',
     taskWorkspaceId: 'workspace-1',
+    chatSessionId: 'chat-1',
     workspaceProbeOutcome: 'ok',
     workspace: {
       id: 'workspace-1',
@@ -572,6 +573,8 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
       chatSessionId: 'chat-1',
       projectId: 'project-1',
       workspaceId: 'workspace-1',
+      // The `workspaces` row `loadRecoveryContext` requires still exists.
+      recoveryWorkspacePresent: true,
       sleepingAt: SLEEPING_AT,
       sleepStatus: 'sleeping',
       expiresAtMs: EXPIRES_AT,
@@ -654,8 +657,19 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
     // Every real wake path clears BOTH fields; this guards the half-cleared
     // shape defensively rather than reproducing an observed transition.
     ['already woke (sleep_status cleared)', { sleepStatus: null }],
-    ['snapshot for another workspace', { workspaceId: 'workspace-2' }],
+    // NOTE: `workspaceId: 'workspace-2'` used to appear here. It was removed on
+    // 2026-09-13: `claimSessionSnapshotRecovery` is keyed on chat session and
+    // never filtered on `workspace_id`, and the column is nulled by
+    // `ON DELETE SET NULL` when the slept workspace row is removed — so scoping
+    // the verdict to it terminalized exactly the sessions the resumer could
+    // still wake. `snapshot for another chat session` below is the replacement
+    // control, and it discriminates the predicate that actually scopes the read.
+    ['snapshot for another chat session', { chatSessionId: 'chat-2' }],
     ['snapshot for another project', { projectId: 'project-2' }],
+    // `loadRecoveryContext` requires the workspace ROW, so a snapshot that lost
+    // its pointer is genuinely unwakeable — the destroyer must not be LOOSER
+    // than the resumer either (`.claude/rules/58` req 2).
+    ['snapshot lost its runtime workspace row', { recoveryWorkspacePresent: false }],
     // Parity with `claimSessionSnapshotRecovery`: the resumer refuses these, so
     // preserving the task would strand it until the snapshot TTL.
     ['unrestorable status/degradation pair', { status: 'failed', degradation: 'none' }],
@@ -688,9 +702,13 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
   // proves the struct -> call seam production actually uses (`.claude/rules/62`).
   // Both cases sit one millisecond either side of the cutoff.
   it.each([
-    ['decayed', -1, false, 'workspace_deleted_snapshot_resumable'],
-    ['undecayed', 1, true, 'workspace_deleted'],
-  ])('%s exhausted budget', (_label, cutoffOffsetMs, conclusive, reason) => {
+    ['decayed', -1, 'workspace_deleted_snapshot_resumable'],
+    // CHANGED 2026-09-13: an undecayed burst is a refusal the resumer releases by
+    // itself within `RECOVERY_ATTEMPT_DECAY_MS`, so the destroyer waits it out
+    // under its own diagnostic reason rather than terminalizing. See
+    // `session-snapshot-recovery-budget.test.ts` for the production evidence.
+    ['undecayed', 1, 'workspace_deleted_wake_retry_pending'],
+  ])('%s exhausted budget', (_label, cutoffOffsetMs, reason) => {
     const base = signals();
     expect(
       classifyTaskRuntimeLiveness(
@@ -703,7 +721,26 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
           }),
         })
       )
-    ).toMatchObject({ conclusive, reason });
+    ).toMatchObject({ conclusive: false, reason });
+  });
+
+  it('terminalizes an exhausted budget that can never decay', () => {
+    // Discriminating control for the row above: with no clean failure anchor the
+    // budget never releases, so the bounded escape must still fire
+    // (`.claude/rules/47`).
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable({
+            recoveryAttempts: MAX_RECOVERY_ATTEMPTS,
+            recoveryFailedAtMs: null,
+          }),
+        })
+      )
+    ).toMatchObject({ live: false, conclusive: true, reason: 'workspace_deleted' });
   });
 
   it('still preserves on the last remaining wake attempt', () => {
@@ -738,12 +775,39 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
     });
   });
 
-  it('keeps a missing workspace row conclusively dead even with a snapshot', () => {
-    // `loadRecoveryContext` requires the workspace row to exist, so a
-    // hard-deleted workspace genuinely cannot be resumed.
+  it('keeps a missing workspace row conclusively dead when the snapshot lost its row too', () => {
+    // `loadRecoveryContext` requires the `workspaces` ROW, and deleting it also
+    // nulls `session_snapshots.workspace_id` via `ON DELETE SET NULL`. This is
+    // production's shape: 36 of 278 sleeping VM snapshots hold a null pointer and
+    // genuinely cannot be woken (SAM idea 01M2CQD1FK7YA96VD6Q74302K0).
     expect(
       classifyTaskRuntimeLiveness(
         signals({
+          workspace: null,
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable({
+            workspaceId: null,
+            recoveryWorkspacePresent: false,
+          }),
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'workspace_missing',
+    });
+  });
+
+  it('preserves a task whose own workspace binding is gone but whose snapshot still resolves', () => {
+    // The 2026-09-13 production shape the sweep was failing: `tasks.workspace_id`
+    // is null, so the classifier reaches `workspace_missing` — but the SNAPSHOT
+    // still names a live workspace row, which is what `loadRecoveryContext`
+    // actually reads. The resumer would accept this wake, so the destroyer must
+    // not terminalize it (`.claude/rules/58`).
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          taskWorkspaceId: null,
           workspace: null,
           resumabilityProbeOutcome: 'ok',
           sessionResumability: resumable(),
@@ -751,8 +815,26 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
       )
     ).toMatchObject({
       live: false,
-      conclusive: true,
-      reason: 'workspace_missing',
+      conclusive: false,
+      reason: 'workspace_missing_snapshot_resumable',
+    });
+  });
+
+  it('withholds the missing-workspace verdict when the snapshot read failed', () => {
+    // `.claude/rules/58` req 4 on the branch that previously had no probe at all.
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          taskWorkspaceId: null,
+          workspace: null,
+          resumabilityProbeOutcome: 'error',
+          sessionResumability: null,
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'workspace_missing_resumability_unknown',
     });
   });
 
@@ -769,23 +851,75 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
   });
 
   it('does not probe resumability for a workspace that is not about to be failed', () => {
-    expect(needsSessionResumabilityProbe(signals().workspace, 'ok')).toBe(false);
+    expect(
+      needsSessionResumabilityProbe({
+        workspace: signals().workspace,
+        workspaceProbeOutcome: 'ok',
+        chatSessionId: 'chat-1',
+      })
+    ).toBe(false);
   });
 
   it.each(['deleted', 'stopped', 'error', 'pending'])(
     'probes resumability before failing a %s workspace',
     (status) => {
       const base = signals();
-      expect(needsSessionResumabilityProbe({ ...workspaceFrom(base), status }, 'ok')).toBe(true);
+      expect(
+        needsSessionResumabilityProbe({
+          workspace: { ...workspaceFrom(base), status },
+          workspaceProbeOutcome: 'ok',
+          chatSessionId: 'chat-1',
+        })
+      ).toBe(true);
     }
   );
 
-  it('skips the probe when workspace identity or the workspace read is unusable', () => {
+  it('probes resumability when the workspace row is gone entirely', () => {
+    // The production shape from 2026-09-13: deleting a slept workspace nulls
+    // `tasks.workspace_id`, so the classifier reaches `workspace_missing` with no
+    // row at all. Gating the probe on a workspace existing blinded it to exactly
+    // the sessions it protects (`.claude/rules/63`).
+    expect(
+      needsSessionResumabilityProbe({
+        workspace: null,
+        workspaceProbeOutcome: 'ok',
+        chatSessionId: 'chat-1',
+      })
+    ).toBe(true);
+  });
+
+  it('skips the probe when the chat binding or the workspace read is unusable', () => {
     const base = signals();
     const deleted = { ...workspaceFrom(base), status: 'deleted' };
-    expect(needsSessionResumabilityProbe(deleted, 'error')).toBe(false);
-    expect(needsSessionResumabilityProbe({ ...deleted, chatSessionId: null }, 'ok')).toBe(false);
-    expect(needsSessionResumabilityProbe(null, 'ok')).toBe(false);
-    expect(needsSessionResumabilityProbe({ ...deleted, status: 'sleeping' }, 'ok')).toBe(false);
+    expect(
+      needsSessionResumabilityProbe({
+        workspace: deleted,
+        workspaceProbeOutcome: 'error',
+        chatSessionId: 'chat-1',
+      })
+    ).toBe(false);
+    // No chat session means no key to read the resumer's record with — that is
+    // the supersession handoff's shape, which `needsTaskSupersessionProbe` owns.
+    expect(
+      needsSessionResumabilityProbe({
+        workspace: deleted,
+        workspaceProbeOutcome: 'ok',
+        chatSessionId: null,
+      })
+    ).toBe(false);
+    expect(
+      needsSessionResumabilityProbe({
+        workspace: null,
+        workspaceProbeOutcome: 'ok',
+        chatSessionId: null,
+      })
+    ).toBe(false);
+    expect(
+      needsSessionResumabilityProbe({
+        workspace: { ...deleted, status: 'sleeping' },
+        workspaceProbeOutcome: 'ok',
+        chatSessionId: 'chat-1',
+      })
+    ).toBe(false);
   });
 });
