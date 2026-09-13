@@ -107,12 +107,12 @@ pass the gates below against current `main` before merge.
 
 - [x] Reconcile current main without restoring obsolete cgroup configuration.
 - [x] Integrate shared bounded Docker telemetry and numeric memory/PID parsing.
-- [ ] Fix and adversarially re-review eviction ownership, stop/retry, and lifecycle races.
-- [ ] Test generation/finalization migration and explicit restart admission/replay behavior.
-- [ ] Finish TypeScript lint/typecheck/test/build and quality/secret checks.
-- [ ] Finish Go unit/race/vet plus VM smoke/integration validation.
-- [ ] Complete desktop/mobile Playwright audit and post reviewed screenshots.
-- [ ] Obtain final Go, Cloudflare, security, resource, test, env, docs, constitution, completion reviews.
+- [x] Fix and adversarially re-review eviction ownership, stop/retry, and lifecycle races.
+- [x] Test generation/finalization migration and explicit restart admission/replay behavior.
+- [x] Finish TypeScript lint/typecheck/test/build and quality/secret checks.
+- [x] Finish Go unit/race/vet plus VM smoke/integration validation.
+- [x] Complete desktop/mobile Playwright audit and post reviewed screenshots.
+- [x] Obtain final Go, Cloudflare, security, resource, test, env, docs, constitution, completion reviews.
 - [ ] Coordinate staging ownership and deploy the pinned final candidate.
 - [ ] Provision one real VM; verify fresh heartbeat, workspace terminal, inherited cgroup boot
       configuration and agent survival under controlled stress, monitoring, eviction/restart,
@@ -134,18 +134,28 @@ pass the gates below against current `main` before merge.
   lease, single-delivery lock and capped backoff. Only confirmed stops reach the API.
 - Persist project identity alongside generation for dynamic-workspace hydration;
   never infer a project or use unverified labels to authorize eviction.
-- Current main was merged through `ef3fe1825`; the additive D1 migration is now
+- Current main was merged through `c2f035b35`; the additive D1 migration is now
   `0157_workspace_eviction_fencing.sql`, following main's archive-sweep migration.
 
-### Current validation evidence (pending final head reruns)
+### Current validation evidence (2026-09-13, implementation head f03c29e6d)
 
-- Sequential root typecheck19/19, lint13/13, build9/9 passed before final recovery additions.
-- API65 focused tests and32 real workerd tests passed, including actual D1/DO finalization.
+- Sequential root typecheck 19/19 and lint 13/13 passed; final API typecheck passed
+  after the latest SDK update and module split. Final root build passed 9/9.
+- API 77 focused tests and 33 real workerd tests passed, including actual D1/DO
+  finalization. Module extraction also passed 31 lifecycle and 53 wiring tests.
 - Deployment/quality scripts610/610 passed with one worker; initial concurrent fixture
   timeouts reproduced as load-only and passed unchanged when serialized.
 - Structural quality suite15 commands, migration ordering, preflight, current-tree
   and PR-range secret scans passed (zero new secret findings).
 - Real component Playwright mock audit passed mobile375x667/desktop1280x800 across
   normal/stress/empty/30-card scenarios. Fixed Unknown badge and cramped mobile title.
-- Docker-backed Go bootstrap integration passed; remaining full suites are in progress.
+- Full Go race suite with coverage and vet passed. Docker bootstrap and ACP
+  integration, VM E2E, and mock/Worker VM smoke passed. Final affected config,
+  resource, persistence and server race suites passed, followed by focused tests
+  for the behavior-preserving routing extraction.
+- Full non-API TypeScript coverage passed, including web 308 files / 3,749 tests.
+  Final API coverage passed: 718 files / 9,755 tests against the stable candidate.
+- Independent completion review passed implementation scope; runtime staging,
+  cleanup, final CI and CodeRabbit remain open gates. Reviewed screenshots:
+  https://github.com/raphaeltm/simple-agent-manager/pull/1980#issuecomment-5652096199
 - No staging deployment or VM provisioning has occurred in this continuation yet.

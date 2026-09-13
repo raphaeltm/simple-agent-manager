@@ -137,8 +137,9 @@ ordinary containers.
 
 The implementation above describes the historical component PR. Current `main`
 already supplies a more complete replacement: `sam-workload.slice` is Docker's
-cgroup parent, `sam-infra.slice` retains protected CPU/memory priority, and boot
-verification checks actual cgroup ancestry and limits. PR #1980 completion
+cgroup parent, `sam-infra.slice` retains protected CPU/memory priority, and an installed verifier script can check actual cgroup ancestry and limits.
+The script is covered by tests but has no automatic boot caller; direct runtime
+ancestry inspection has not been performed by this continuation. PR #1980 completion
 preserves that implementation and its shared admission/provisioning memory reserve.
 The old Docker-service-only MemoryMax and fixed 768 MB default are not reapplied.
 Final combined verification is tracked in the active resource-monitoring task.
