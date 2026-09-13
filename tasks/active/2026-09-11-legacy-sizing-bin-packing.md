@@ -2,8 +2,8 @@
 
 ## Context
 
-Parent session: `76c74d95-4316-4c7b-be8f-8ed1fdfabcbe`  
-Parent task: `01M27RVQDA90YMA2NGBJ2YVR58`  
+Parent session: `76c74d95-4316-4c7b-be8f-8ed1fdfabcbe`
+Parent task: `01M27RVQDA90YMA2NGBJ2YVR58`
 Sizing follow-up noted in parent handoff: `01M28CM31AW1VHE29PWZ9YWH16`
 
 Legacy `small` / `medium` / `large` workload reservations were still sized close to whole provider classes. With the default 512 MiB host memory reserve, the old `medium` and `large` reservations left no practical room for node reuse, causing SAM to provision a VM per agent instead of bin-packing compatible work.
