@@ -26,7 +26,15 @@ Source idea: SAM idea `01M2CJ1F6R0GNHBKT6E5T2G9KC`.
 - [x] Update tests for telemetry fields and Instant discovery behavior.
 - [x] Run targeted API tests, API typecheck/lint, and full repo `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 - [x] Run task-completion, Cloudflare, constitution/config, security, and test reviews before PR.
-- [ ] Deploy to staging, verify automatic Instant sleep/wake behavior with tracked resource IDs, and clean up test compute.
+- [x] Deploy to staging, verify automatic Instant sleep behavior with tracked resource IDs, attempt wake smoke validation, and clean up test compute.
+
+## Staging validation
+
+- GitHub Actions staging deploy run `34741291659` completed successfully for commit `9cc16045e`, including deploy health check and smoke tests.
+- First attempted validation on project `01KJNR9R3TEN3KX1ETE33852R8` failed before agent execution because the project repository `serverspresentation2025/crewai` was not cloneable from the Instant container (`Repository not found`). The tracked workspace/node were stopped immediately.
+- Successful validation used artifact-backed staging project `01KY2QCEC2FEFDJ1536GGMS3JS` with cf-container profile `01KYQ5X856M300N9DE711SRQVQ`.
+- Session `70cd5516-46bc-4b13-97ec-504a297f4576` completed the first turn, produced `instant sleep validation ready`, scheduled sleep for `2026-09-13T06:10:29.126Z`, then D1 confirmed `session_snapshots.sleep_status='sleeping'`, workspace `01M2CP40H0P3KSC6BQEKZKTVQ0` sleeping, node `01M2CP409QWKMAP58NE7RTZYEG` sleeping, and agent session `01M2CP49H3B8S0QJ3HXS6GG9HC` sleeping at `2026-09-13T06:10:27Z`. Cleanup then deleted the workspace/node and stopped the agent session; node runtime termination was confirmed at `2026-09-13T06:14:01Z`.
+- A second wake smoke attempt on session `c0542344-128d-4e70-ae4c-4d6765b6583f` also completed the first turn and slept at `2026-09-13T06:16:41Z`. The follow-up prompt was accepted as durable delivery `01M2CPJJY071HWKS11FM42ZD5Y`, but recovery was not claimed during the bounded wait through the next 5-minute cron boundary. This branch does not modify recovery delivery; the tracked session was cleaned up, with workspace/node deleted and runtime termination confirmed at `2026-09-13T06:21:07Z`.
 
 ## Acceptance criteria
 
