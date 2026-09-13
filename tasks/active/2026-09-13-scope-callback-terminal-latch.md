@@ -1,6 +1,6 @@
 # Scope the VM-agent control-plane callback terminal latch to node-scoped callbacks
 
-**Status:** backlog
+**Status:** active
 **Created:** 2026-09-13
 **Origin:** Production incident on node `01M2CP77EV4GMCA28KXSX7J0BJ`, diagnosed from
 `debug-01M2CP77EV4GMCA28KXSX7J0BJ.tar.gz` + prod D1.
