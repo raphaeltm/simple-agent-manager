@@ -69,4 +69,27 @@ describe('node usage calculations', () => {
     expect(totals.platformVcpuHours).toBe(8);
     expect(totals.activeNodes).toBe(0);
   });
+
+  it('uses provider-native vCPU metadata before legacy size presets', () => {
+    const totals = calculateNodeUsageTotalsForRows(
+      [
+        {
+          vmSize: 'small',
+          cloudProvider: 'hetzner',
+          providerInstanceVcpuCount: 12,
+          credentialSource: 'platform',
+          status: 'running',
+          createdAt: '2026-05-01T00:00:00.000Z',
+          updatedAt: '2026-05-01T00:00:00.000Z',
+        },
+      ],
+      new Date('2026-05-01T00:00:00.000Z'),
+      new Date('2026-05-01T04:00:00.000Z'),
+      new Date('2026-05-01T04:00:00.000Z'),
+    );
+
+    expect(totals.platformNodeHours).toBe(4);
+    expect(totals.platformVcpuHours).toBe(48);
+    expect(totals.totalVcpuHours).toBe(48);
+  });
 });

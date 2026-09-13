@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -51,14 +52,15 @@ func testEvictionController(
 		ResolveTimeout:  time.Second,
 		ResolveWorkspace: func(_ context.Context, metric ContainerMetric) (WorkspaceContainer, bool) {
 			return WorkspaceContainer{
-				WorkspaceID:   "ws-" + metric.ID,
+				WorkspaceID:   "workspace-" + strings.TrimPrefix(metric.ID, "container-"),
 				ContainerID:   metric.ID,
 				ContainerName: metric.Name,
 			}, true
 		},
 		SnapshotWorkspace: func(context.Context, EvictionTarget) error { return nil },
 		StopContainer:     func(context.Context, EvictionTarget) error { return nil },
-		MarkWorkspaceEvicted: func(EvictionResult) {
+		MarkWorkspaceEvicted: func(EvictionResult) bool {
+			return true
 		},
 		NotifyEviction: func(context.Context, EvictionResult) error { return nil },
 		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -113,10 +115,11 @@ func TestEvictionControllerSnapshotsBeforeStoppingContainerFromPressureEvents(t 
 			calls = append(calls, "stop")
 			return nil
 		}
-		cfg.MarkWorkspaceEvicted = func(EvictionResult) {
+		cfg.MarkWorkspaceEvicted = func(EvictionResult) bool {
 			mu.Lock()
 			defer mu.Unlock()
 			calls = append(calls, "mark")
+			return true
 		}
 		cfg.NotifyEviction = func(context.Context, EvictionResult) error {
 			mu.Lock()
@@ -275,6 +278,7 @@ func TestEvictionControllerStopsContainerAfterSnapshotFailure(t *testing.T) {
 func TestEvictionControllerSelectsLargestMemoryConsumerForSystemCriticalPressure(t *testing.T) {
 	source := newFakePressureSource()
 	source.setPressure(ResourcePressure{
+		Level: PressureLevelCritical,
 		Containers: []ContainerMetric{
 			{ID: "small", Name: "small-container", MemUsageBytes: 1024},
 			{ID: "large", Name: "large-container", MemUsageBytes: 4096},
@@ -309,6 +313,7 @@ func TestEvictionControllerSelectsLargestMemoryConsumerForSystemCriticalPressure
 func TestEvictionControllerBoundsWorkspaceResolution(t *testing.T) {
 	source := newFakePressureSource()
 	source.setPressure(ResourcePressure{
+		Level: PressureLevelCritical,
 		Containers: []ContainerMetric{
 			{ID: "blocked", Name: "blocked-container", MemUsageBytes: 4096},
 		},
@@ -365,5 +370,193 @@ func TestEvictionControllerWarningPressureDoesNotEvict(t *testing.T) {
 
 	if snapshots.Load() != 0 || stops.Load() != 0 {
 		t.Fatalf("warning pressure triggered snapshot=%d stop=%d, want none", snapshots.Load(), stops.Load())
+	}
+}
+
+func TestEvictionControllerRejectsUnverifiedOOMWorkspace(t *testing.T) {
+	for _, claimed := range []string{"workspace-1", ""} {
+		t.Run("claim="+claimed, func(t *testing.T) {
+			source := newFakePressureSource()
+			var snapshots int
+			controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+				cfg.ResolveWorkspace = func(context.Context, ContainerMetric) (WorkspaceContainer, bool) { return WorkspaceContainer{}, false }
+				cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error { snapshots++; return nil }
+			})
+			controller.handleEvent(context.Background(), oomPressureEvent(claimed, "container-1"))
+			if snapshots != 0 {
+				t.Fatal("unverified event caused snapshot")
+			}
+		})
+	}
+}
+
+func TestEvictionControllerResolvesExitedOOMWithoutMetricsOrWorkspaceLabel(t *testing.T) {
+	source := newFakePressureSource()
+	var target EvictionTarget
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.SnapshotWorkspace = func(_ context.Context, got EvictionTarget) error { target = got; return nil }
+	})
+	controller.handleEvent(context.Background(), oomPressureEvent("", "container-1"))
+	if target.WorkspaceID != "workspace-1" || target.ContainerID != "container-1" {
+		t.Fatalf("exited OOM target = %#v", target)
+	}
+}
+
+func TestEvictionControllerRejectsMismatchedOOMClaim(t *testing.T) {
+	source := newFakePressureSource()
+	controller := testEvictionController(t, source, nil)
+	if target, ok := controller.selectTarget(context.Background(), oomPressureEvent("workspace-2", "container-1")); ok {
+		t.Fatalf("accepted forged workspace claim: %#v", target)
+	}
+}
+
+func TestEvictionControllerStopFailureDoesNotFinalizeAndCanRetry(t *testing.T) {
+	source := newFakePressureSource()
+	now := time.Now()
+	var stops, marks, notifications int
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.Clock = func() time.Time { return now }
+		cfg.StopContainer = func(context.Context, EvictionTarget) error {
+			stops++
+			if stops == 1 {
+				return errors.New("Docker unavailable")
+			}
+			return nil
+		}
+		cfg.MarkWorkspaceEvicted = func(EvictionResult) bool { marks++; return true }
+		cfg.NotifyEviction = func(context.Context, EvictionResult) error { notifications++; return nil }
+	})
+	event := oomPressureEvent("workspace-1", "container-1")
+	controller.handleEvent(context.Background(), event)
+	if marks != 0 || notifications != 0 {
+		t.Fatal("failed stop finalized eviction")
+	}
+	now = now.Add(time.Minute)
+	controller.handleEvent(context.Background(), event)
+	if stops != 2 || marks != 1 || notifications != 1 {
+		t.Fatalf("stops=%d marks=%d notifications=%d", stops, marks, notifications)
+	}
+}
+
+func TestEvictionControllerSkipsRecoveredPressureAndSupersededRuntime(t *testing.T) {
+	source := newFakePressureSource()
+	var snapshots, notifications int
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error { snapshots++; return nil }
+		cfg.MarkWorkspaceEvicted = func(EvictionResult) bool { return false }
+		cfg.NotifyEviction = func(context.Context, EvictionResult) error { notifications++; return nil }
+	})
+	controller.handleEvent(context.Background(), PressureEvent{Type: PressureEventSystemMemory, Level: PressureLevelCritical})
+	if snapshots != 0 {
+		t.Fatal("stale pressure triggered eviction")
+	}
+	controller.handleEvent(context.Background(), oomPressureEvent("", "container-1"))
+	if snapshots != 1 || notifications != 0 {
+		t.Fatal("superseded eviction notified control plane")
+	}
+}
+
+func TestEvictionControllerDoesNotSubstituteSameNameReplacement(t *testing.T) {
+	source := newFakePressureSource()
+	source.setPressure(ResourcePressure{Containers: []ContainerMetric{{ID: "replacement", Name: "app"}}})
+	var resolvedID string
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.ResolveWorkspace = func(_ context.Context, metric ContainerMetric) (WorkspaceContainer, bool) {
+			resolvedID = metric.ID
+			return WorkspaceContainer{}, false
+		}
+	})
+	event := oomPressureEvent("", "old-container")
+	event.ContainerName = "app"
+	controller.handleEvent(context.Background(), event)
+	if resolvedID != "old-container" {
+		t.Fatalf("resolved stale event against %q", resolvedID)
+	}
+}
+
+func TestEvictionControllerCloseCancelsSnapshotWithoutStopping(t *testing.T) {
+	source := newFakePressureSource()
+	entered := make(chan struct{})
+	var stops atomic.Int32
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.SnapshotTimeout = time.Hour
+		cfg.SnapshotWorkspace = func(ctx context.Context, _ EvictionTarget) error { close(entered); <-ctx.Done(); return ctx.Err() }
+		cfg.StopContainer = func(context.Context, EvictionTarget) error { stops.Add(1); return nil }
+	})
+	if err := controller.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	source.events <- oomPressureEvent("", "container-1")
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("snapshot missing")
+	}
+	done := make(chan struct{})
+	go func() { controller.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown did not cancel snapshot")
+	}
+	if stops.Load() != 0 {
+		t.Fatal("shutdown initiated a container stop")
+	}
+}
+
+func TestEvictionControllerWaitsForSettlingWindowAndFreshPSI(t *testing.T) {
+	source := newFakePressureSource()
+	now := time.Now()
+	var stopped []string
+	state := ResourcePressure{Level: PressureLevelCritical,
+		System:     SystemPressure{Memory: MemoryPressure{CollectedAt: now}},
+		Containers: []ContainerMetric{{ID: "first", MemUsageBytes: 2}, {ID: "second", MemUsageBytes: 1}}}
+	source.setPressure(state)
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.Clock = func() time.Time { return now }
+		cfg.StopContainer = func(_ context.Context, target EvictionTarget) error {
+			stopped = append(stopped, target.ContainerID)
+			return nil
+		}
+	})
+	event := PressureEvent{Type: PressureEventSystemMemory, Level: PressureLevelCritical}
+	controller.handleEvent(context.Background(), event)
+	state.Containers = state.Containers[1:]
+	state.System.Memory.CollectedAt = now.Add(time.Second)
+	source.setPressure(state)
+	now = now.Add(time.Second)
+	controller.handleEvent(context.Background(), event)
+	if len(stopped) != 1 {
+		t.Fatal("evicted second workload during settling window")
+	}
+	state.System.Memory.CollectedAt = now.Add(-time.Second)
+	source.setPressure(state)
+	now = now.Add(time.Minute)
+	controller.handleEvent(context.Background(), event)
+	if len(stopped) != 1 {
+		t.Fatal("evicted second workload using pre-stop PSI sample")
+	}
+	state.System.Memory.CollectedAt = now
+	source.setPressure(state)
+	controller.handleEvent(context.Background(), event)
+	if !reflect.DeepEqual(stopped, []string{"first", "second"}) {
+		t.Fatalf("stopped = %v", stopped)
+	}
+}
+
+func TestEvictionControllerDoesNotStopAfterPressureRecoversDuringSnapshot(t *testing.T) {
+	source := newFakePressureSource()
+	source.setPressure(ResourcePressure{Level: PressureLevelCritical, Containers: []ContainerMetric{{ID: "first"}}})
+	var stops int
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+			source.setPressure(ResourcePressure{Level: PressureLevelNone})
+			return nil
+		}
+		cfg.StopContainer = func(context.Context, EvictionTarget) error { stops++; return nil }
+	})
+	controller.handleEvent(context.Background(), PressureEvent{Type: PressureEventSystemMemory, Level: PressureLevelCritical})
+	if stops != 0 {
+		t.Fatal("stopped workload after pressure recovered during snapshot")
 	}
 }

@@ -81,6 +81,9 @@ func (c APIClient) SubmitTask(ctx context.Context, projectID string, message str
 	addIfSet(body, "vmLocation", options.VMLocation)
 	addIfSet(body, "vmSize", options.VMSize)
 	addIfSet(body, "workspaceProfile", options.Workspace)
+	if options.Resource != nil {
+		body["resourceRequirements"] = options.Resource
+	}
 
 	var response SubmitTaskResponse
 	err := c.request(ctx, http.MethodPost, projectAPIPath(projectID, "tasks", "submit"), body, &response)

@@ -59,11 +59,14 @@
     "quality:repo-visibility": "tsx scripts/quality/check-repo-quality-visibility.ts",
     "quality:type-boundaries": "tsx scripts/quality/check-type-boundaries.ts",
     "quality:runtime-boundary-semantics": "tsx scripts/quality/check-runtime-boundary-semantics.ts",
+    "quality:node-pool-boundary": "tsx scripts/quality/node-pool-boundary.ts",
+    "quality:node-pool-boundary:report": "tsx scripts/quality/node-pool-boundary.ts --report",
     "quality:direct-dependency-evidence": "tsx scripts/quality/check-direct-dependency-evidence.ts",
     "quality:govulncheck-diff": "tsx scripts/quality/check-go-vulnerability-diff.ts",
     "quality:gitleaks:current": "tsx scripts/quality/run-gitleaks.ts --mode=current-tree",
     "quality:gitleaks:pr": "tsx scripts/quality/run-gitleaks.ts --mode=pr-range",
-    "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries"
+    "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries",
+    "quality:agent-context-budget": "tsx scripts/quality/check-agent-context-budget.ts"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
@@ -71,7 +74,7 @@
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.0",
-    "@commitlint/config-conventional": "21.2.0",
+    "@commitlint/config-conventional": "21.2.2",
     "@eslint/js": "catalog:",
     "@types/iarna__toml": "2.0.5",
     "@types/node": "catalog:",
@@ -88,7 +91,7 @@
     "prettier": "3.8.3",
     "ts-morph": "28.0.0",
     "tsx": "catalog:",
-    "turbo": "2.9.9",
+    "turbo": "2.10.12",
     "typescript": "catalog:",
     "typescript-eslint": "catalog:",
     "valibot": "catalog:",

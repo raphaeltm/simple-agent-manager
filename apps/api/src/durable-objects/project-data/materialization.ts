@@ -41,7 +41,17 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
     .map((row) => parseMaterializationToken(row));
 
   if (tokens.length === 0) {
-    sql.exec('UPDATE chat_sessions SET materialized_at = ? WHERE id = ?', Date.now(), sessionId);
+    sql.exec(
+      `UPDATE chat_sessions
+       SET materialized_at = ?,
+           search_index_state = 'complete',
+           search_index_updated_at = ?,
+           search_index_degradation_reason = NULL
+       WHERE id = ?`,
+      Date.now(),
+      Date.now(),
+      sessionId
+    );
     return;
   }
 
@@ -88,7 +98,18 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
     }
   }
 
-  sql.exec('UPDATE chat_sessions SET materialized_at = ? WHERE id = ?', Date.now(), sessionId);
+  const now = Date.now();
+  sql.exec(
+    `UPDATE chat_sessions
+     SET materialized_at = ?,
+         search_index_state = 'complete',
+         search_index_updated_at = ?,
+         search_index_degradation_reason = NULL
+     WHERE id = ?`,
+    now,
+    now,
+    sessionId
+  );
 }
 
 /**

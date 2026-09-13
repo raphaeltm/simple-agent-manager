@@ -649,6 +649,8 @@ export interface RunTaskRequest {
   workspaceProfile?: WorkspaceProfile;
   nodeId?: string;
   branch?: string;
+  /** Explicit resource requirements for this run. Overrides lower configuration layers. */
+  resourceRequirements?: ResourceRequirements;
 }
 
 export interface RunTaskResponse {
@@ -668,6 +670,10 @@ export interface ListTaskEventsResponse {
   events: TaskStatusEvent[];
 }
 
+export const AGENT_ACTIVITY_STATES = ['working', 'awake-idle', 'sleeping', 'superseded'] as const;
+
+export type AgentActivityState = (typeof AGENT_ACTIVITY_STATES)[number];
+
 // =============================================================================
 // Dashboard
 // =============================================================================
@@ -686,6 +692,7 @@ export interface DashboardTask {
   lastMessageAt: number | null;
   messageCount: number;
   isActive: boolean;
+  agentActivityState: AgentActivityState;
 }
 
 export interface DashboardActiveTasksResponse {

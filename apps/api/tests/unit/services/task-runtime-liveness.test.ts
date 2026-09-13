@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  classifyTaskRuntimeDelivery,
   classifyTaskRuntimeLiveness,
   needsNodeHealthProbe,
   needsSessionResumabilityProbe,
@@ -12,6 +13,7 @@ const NOW = Date.parse('2026-08-06T12:00:00.000Z');
 const STALE_MS = 5 * 60 * 1000;
 /** Mirrors `DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`. */
 const MAX_RECOVERY_ATTEMPTS = 3;
+const RECOVERY_ATTEMPT_DECAY_MS = 15 * 60 * 1000;
 
 function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRuntimeLivenessSignals {
   return {
@@ -23,6 +25,7 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
       status: 'running',
       chatSessionId: 'chat-1',
       nodeId: 'node-1',
+      userId: 'user-1',
       nodeRuntime: 'vm',
       nodeStatus: 'running',
       nodeHealthStatus: 'healthy',
@@ -52,6 +55,7 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
     resumabilityProbeOutcome: 'not_run',
     sessionResumability: null,
     resumabilityMaxRecoveryAttempts: MAX_RECOVERY_ATTEMPTS,
+    resumabilityRecoveryAttemptDecayMs: RECOVERY_ATTEMPT_DECAY_MS,
     // Same back-compat proof for the supersession signals: `not_run` / `none`
     // must leave every pre-existing verdict in this file untouched.
     supersessionProbeOutcome: 'not_run',
@@ -74,6 +78,7 @@ describe('classifyTaskRuntimeLiveness', () => {
       workspaceStatus: 'running',
       nodeId: 'node-1',
       activeAcpSessionId: 'acp-1',
+      deliveryTarget: { nodeId: 'node-1', userId: 'user-1' },
     });
   });
 
@@ -179,7 +184,7 @@ describe('classifyTaskRuntimeLiveness', () => {
     });
   });
 
-  it('treats stale heartbeat with running workspaces as conclusive after failed node probe', () => {
+  it('treats a failed stale-node health response as inconclusive', () => {
     const base = signals();
     expect(
       classifyTaskRuntimeLiveness(
@@ -196,8 +201,8 @@ describe('classifyTaskRuntimeLiveness', () => {
       )
     ).toMatchObject({
       live: false,
-      conclusive: true,
-      reason: 'node_not_live',
+      conclusive: false,
+      reason: 'node_health_probe_failed',
     });
   });
 
@@ -288,6 +293,80 @@ describe('classifyTaskRuntimeLiveness', () => {
       conclusive: true,
       reason: 'task_acp_session_terminal',
       activeAcpSessionId: 'acp-completed',
+    });
+  });
+
+  it('does not let a historical terminal ACP session kill the expected running owner', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          expectedAcpSessionId: 'acp-current',
+          acpSessions: [
+            {
+              id: 'acp-historical',
+              status: 'completed',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW,
+              updatedAt: NOW,
+              startedAt: NOW - 4_000,
+              createdAt: NOW - 5_000,
+            },
+            {
+              id: 'acp-current',
+              status: 'running',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW - STALE_MS - 1,
+              updatedAt: NOW - STALE_MS - 1,
+              startedAt: NOW - 2_000,
+              createdAt: NOW - 3_000,
+            },
+          ],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'task_acp_session_stale',
+    });
+  });
+
+  it('accepts terminal ACP evidence only for the expected current owner', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          expectedAcpSessionId: 'acp-current',
+          acpSessions: [
+            {
+              id: 'acp-current',
+              status: 'completed',
+              workspaceId: 'workspace-1',
+              lastHeartbeatAt: NOW,
+              updatedAt: NOW,
+              startedAt: NOW - 1_000,
+              createdAt: NOW - 2_000,
+            },
+          ],
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'task_acp_session_terminal',
+      activeAcpSessionId: 'acp-current',
+    });
+  });
+
+  it('treats a rebound workspace chat as inconclusive', () => {
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          expectedChatSessionId: 'chat-expected',
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'workspace_chat_session_mismatch',
     });
   });
 
@@ -407,6 +486,72 @@ describe('classifyTaskRuntimeLiveness', () => {
   });
 });
 
+describe('classifyTaskRuntimeDelivery', () => {
+  const target = { nodeId: 'node-1', userId: 'user-1' };
+
+  it('delivers when live runtime evidence and a scoped target agree', () => {
+    expect(
+      classifyTaskRuntimeDelivery({
+        live: true,
+        conclusive: true,
+        reason: 'task_acp_session_live',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+        activeAcpSessionId: 'acp-1',
+        deliveryTarget: target,
+      })
+    ).toEqual({ kind: 'deliverable', target });
+  });
+
+  it.each(['task_acp_session_missing', 'task_acp_session_stale', 'task_acp_session_suspect'])(
+    'permits one bounded delivery probe for %s',
+    (reason) => {
+      expect(
+        classifyTaskRuntimeDelivery({
+          live: false,
+          conclusive: false,
+          reason,
+          workspaceStatus: 'running',
+          nodeId: 'node-1',
+          activeAcpSessionId: null,
+          deliveryTarget: target,
+        })
+      ).toEqual({ kind: 'deliverable', target });
+    }
+  );
+
+  it.each(['node_health_probe_failed', 'node_health_probe_timeout', 'node_health_probe_error'])(
+    'defers delivery when node reachability is %s',
+    (reason) => {
+      expect(
+        classifyTaskRuntimeDelivery({
+          live: false,
+          conclusive: false,
+          reason,
+          workspaceStatus: 'running',
+          nodeId: 'node-1',
+          activeAcpSessionId: null,
+          deliveryTarget: target,
+        })
+      ).toEqual({ kind: 'inconclusive', reason });
+    }
+  );
+
+  it('routes explicit terminal ownership evidence to canonical convergence', () => {
+    expect(
+      classifyTaskRuntimeDelivery({
+        live: false,
+        conclusive: true,
+        reason: 'task_acp_session_terminal',
+        workspaceStatus: 'running',
+        nodeId: 'node-1',
+        activeAcpSessionId: 'acp-1',
+        deliveryTarget: target,
+      })
+    ).toEqual({ kind: 'terminal', reason: 'task_acp_session_terminal', nodeId: 'node-1' });
+  });
+});
+
 /**
  * Regression suite for the 2026-08-16 production incident: two task sessions
  * (`da90b7c4`, `8bd22a42`) were terminalized as
@@ -433,6 +578,7 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
       status: 'available',
       degradation: 'none',
       recoveryAttempts: 0,
+      recoveryFailedAtMs: null,
       ...overrides,
     } satisfies SessionResumabilitySnapshot;
   }
@@ -534,6 +680,30 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
       conclusive: true,
       reason: 'workspace_deleted',
     });
+  });
+
+  // Through the REAL wiring: `classifyTaskRuntimeLiveness` reads both budget
+  // signals off `TaskRuntimeLivenessSignals` and hands them to
+  // `isSessionResumable`. The dedicated budget suite proves the primitive; this
+  // proves the struct -> call seam production actually uses (`.claude/rules/62`).
+  // Both cases sit one millisecond either side of the cutoff.
+  it.each([
+    ['decayed', -1, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', 1, true, 'workspace_deleted'],
+  ])('%s exhausted budget', (_label, cutoffOffsetMs, conclusive, reason) => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable({
+            recoveryAttempts: MAX_RECOVERY_ATTEMPTS,
+            recoveryFailedAtMs: base.nowMs - RECOVERY_ATTEMPT_DECAY_MS + cutoffOffsetMs,
+          }),
+        })
+      )
+    ).toMatchObject({ conclusive, reason });
   });
 
   it('still preserves on the last remaining wake attempt', () => {

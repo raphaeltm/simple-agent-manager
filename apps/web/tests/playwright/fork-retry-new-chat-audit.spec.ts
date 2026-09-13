@@ -187,9 +187,9 @@ test.describe('Fork/retry new chat screen audit', () => {
     await expect(page.getByText('Forking from: Fix the login bug')).toBeVisible();
     await expect(page.getByText('Branch: sam/fix-login-bug')).toBeVisible();
 
-    const textareaValue = await page
-      .getByPlaceholder('Describe what you want the agent to do...')
-      .inputValue();
+    const textarea = page.getByPlaceholder('Describe what you want the agent to do...');
+    await expect(textarea).toHaveValue(/Previous session: "Fix the login bug"/);
+    const textareaValue = await textarea.inputValue();
     expect(textareaValue).toContain('SAM MCP tools');
     expect(textareaValue).toContain('Previous session: "Fix the login bug"');
 

@@ -6,7 +6,12 @@ import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
 export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
-  // D1 Database
+  // D1 Database.
+  // On the Worker `fetch` path this is NOT the raw binding: `index.ts`'s default export hands
+  // each request a D1 Sessions API facade (see lib/d1-session.ts), so every query in one
+  // request shares a session and only the first crosses to the primary region. `scheduled()`
+  // and Durable Objects receive the raw binding. Anything keyed on binding IDENTITY must go
+  // through `resolveD1BindingIdentity`.
   DATABASE: D1Database;
   // KV for sessions
   KV: KVNamespace;
@@ -49,6 +54,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Analytics Engine for usage tracking (optional — binding absent in local dev / Miniflare)
   ANALYTICS?: AnalyticsEngineDataset;
   // Observability D1 (error storage — spec 023)
+  // Also session-scoped on the `fetch` path — see the note on DATABASE above.
   OBSERVABILITY_DATABASE: D1Database;
   // Durable Objects
   PROJECT_DATA: DurableObjectNamespace;
@@ -188,6 +194,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PAGES_PROJECT_NAME?: string;
   // Pages project name for proxying www.* requests (marketing site)
   WWW_PAGES_PROJECT_NAME?: string;
+  // D1 Sessions API anchor for the Worker fetch handler: 'first-primary' (default) or
+  // 'disabled' to route every query straight at the primary. See lib/d1-session.ts.
+  D1_SESSION_MODE?: string;
   // User approval / invite-only mode
   REQUIRE_APPROVAL?: string;
   // Smoke test auth tokens (CI authentication — only set in staging/test environments)
@@ -255,10 +264,17 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL?: string; // VM-agent progress callback throttle as a Go duration (default: 15s)
   SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT?: string; // VM-agent progress callback timeout as a Go duration (default: 5s)
   SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES?: string; // Max snapshot control-plane JSON request size (default: 262144)
-  SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS?: string; // Max replacement-runtime wake attempts (default: 3)
+  SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS?: string; // Max replacement-runtime wake attempts per burst (default: 3)
+  SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS?: string; // How long a spent wake-attempt burst stays spent (default: 900000)
   SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 900000)
   HARNESS_BACKGROUND_WORK_LEASE_MS?: string; // Fresh normalized harness-work report lease before sleep is allowed (default: 300000)
   HARNESS_BACKGROUND_WORK_MAX_DURATION_MS?: string; // Absolute ceiling, from the last lifecycle progress edge, on harness-work sleep deferral (default: 1800000)
+  ACP_ACTIVITY_ADMISSION_ENABLED?: string; // "false" disables activity callback coalescing/admission control (default: true)
+  ACP_ACTIVITY_COALESCE_WINDOW_MS?: string; // Minimum interval between redundant intermediate ProjectData activity writes (default: 2000)
+  ACP_ACTIVITY_COALESCE_TTL_MS?: string; // Max age of coalesced intermediate reports before reconciliation is relied on (default: 60000)
+  ACP_ACTIVITY_COALESCE_MAX_PENDING?: string; // Max pending coalesced activity reports per Worker isolate (default: 512)
+  ACP_ACTIVITY_BINDING_CACHE_TTL_MS?: string; // Short-lived authorized ACP binding cache TTL (default: 30000)
+  ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES?: string; // Max cached ACP activity bindings per Worker isolate (default: 2048)
   ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS?: string; // Durable parent-wait D1 reconciliation interval (default: 30000)
   ORCHESTRATOR_WAIT_MAX_CHILDREN?: string; // Max same-project task IDs in one wait_for_subtasks call (default: 20)
   ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT?: string; // Max active parent waits per project (default: 100)
@@ -269,8 +285,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SLEEP_RETRY_DELAY_MS?: string; // Delay after a fail-closed sleep attempt (default: 300000)
   SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 9)
   SESSION_SLEEP_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted automatic sleep claims (default: 600000)
+  SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS?: string; // Absolute ceiling for in-flight sleep destroyer deferral (default: 1800000)
+  SESSION_SLEEP_IN_FLIGHT_REPAIR_BATCH_SIZE?: string; // Bounded cron repair for stale post-capture in-flight sleep rows (default: 25)
+  TERMINAL_NODE_LIFECYCLE_REPAIR_BATCH_SIZE?: string; // Bounded cron repair for active-looking rows on terminal nodes (default: 25)
+  TERMINAL_NODE_LIFECYCLE_REPAIR_WALL_BUDGET_MS?: string; // Wall-clock budget for terminal-node lifecycle repair (default: 10000)
   SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted replacement-runtime wake claims (default: 600000)
-  SESSION_LIFECYCLE_ERROR_MAX_LENGTH?: string; // Stored sleep/recovery diagnostic cap (default: 2048)
+  SESSION_LIFECYCLE_ERROR_MAX_LENGTH?: string; // Stored session lifecycle and agent activity failure diagnostic cap (default: 2048)
   SESSION_SNAPSHOT_PURGE_ENABLED?: string; // Kill switch: "false" disables expired snapshot row purge (default: enabled)
   SESSION_SNAPSHOT_PURGE_BATCH_SIZE?: string; // Max expired snapshot rows deleted per run (default: 250)
   LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE?: string; // R2 objects listed/deleted per project cleanup page (default: 1000)
@@ -302,11 +322,20 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Hierarchy limits
   MAX_NODES_PER_USER?: string;
   MAX_WORKSPACES_PER_NODE?: string;
+  CAPACITY_POOL_BACKFILL_SCOPE_BATCH_SIZE?: string; // Optional max user/project scopes reconciled by one unscoped capacity-pool backfill call
+  CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE?: string; // Optional candidate rows published per source per pass before the durable cursor resumes the rest
+  CAPACITY_POOL_CATALOG_CACHE_TTL_MS?: string; // Optional per-isolate credential-scoped provider catalog cache TTL
+  CAPACITY_POOL_SCHEDULED_RECONCILIATION_INTERVAL_MS?: string; // Optional minimum interval between scheduled capacity-pool reconciliation runs (default 24h)
+  CAPACITY_POOL_LEGACY_WORKLOAD_MAPPING_JSON?: string; // Optional legacy-size workload slice mapping; platform_settings overrides it
+  CAPACITY_POOL_PLATFORM_DEFAULTS_JSON?: string; // Optional platform resource defaults for capacity-aware reservation; platform_settings overrides it
+  CAPACITY_POOL_SELECTION_SETTINGS_JSON?: string; // Optional capacity-pool ranking/cohort settings; platform_settings overrides it
   VM_ADMISSION_CONTROL_MODE?: string;
   VM_ADMISSION_LEASE_TTL_MS?: string;
   VM_ADMISSION_RETRY_MIN_MS?: string;
   VM_ADMISSION_RETRY_MAX_MS?: string;
   VM_ADMISSION_WAIT_TIMEOUT_MS?: string;
+  VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS?: string;
+  WORKSPACE_BUILD_QUEUE_DEPTH?: string;
   VM_ADMISSION_PROVIDER_COOLDOWN_MS?: string;
   VM_ADMISSION_WAKE_BATCH_SIZE?: string;
   VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH?: string;
@@ -338,12 +367,22 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_HEARTBEAT_STALE_SECONDS?: string;
   NODE_AGENT_READY_TIMEOUT_MS?: string;
   NODE_AGENT_READY_POLL_INTERVAL_MS?: string;
-  VM_AGENT_REQUIRED_VERSION?: string; // Deployment commit SHA required for reusable VM nodes; unset disables rollout gating for local/manual dev
+  VM_AGENT_REQUIRED_VERSION?: string; // VM-agent release (last commit changing packages/vm-agent build inputs, NOT the deployment commit) required for reusable VM nodes; unset disables rollout gating for local/manual dev
   // Task run configuration (autonomous execution)
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
+  TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT?: string;
+  TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB?: string;
+  TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT?: string;
+  TASK_RUN_NODE_METRICS_TTL_MS?: string;
+  TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT?: string;
+  TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT?: string;
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   // Warm node pooling configuration
+  NODE_PROVISIONING_REQUEST_TIMEOUT_MS?: string;
+  NODE_PROVISIONING_RETRY_INTERVAL_MS?: string;
+  NODE_PROVISIONING_MAX_AGE_MS?: string;
+  NODE_PROVISIONING_MAX_ATTEMPTS?: string;
   NODE_WARM_TIMEOUT_MS?: string;
   NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS?: string; // Destroying-state alarm backstop (default: 86400000)
   MAX_AUTO_NODE_LIFETIME_MS?: string;
@@ -356,6 +395,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_ABSOLUTE_MAX_LIFETIME_MS?: string; // Absolute age ceiling for auto-provisioned workspace nodes (default: 86400000 = 24 h)
   NODE_CLEANUP_SWEEP_LIMIT?: string; // Max node candidates per cleanup phase per cron run (default: 25)
   NODE_CLEANUP_FAILURE_BACKOFF_MS?: string; // Failed candidate exclusion window (default: 3600000)
+  NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS?: string; // Stopped-node phase wall-time budget (default: 20000)
+  NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS?: string; // Stopped-node provider/DNS budget per candidate (default: 5000)
   WORKSPACE_CLEANUP_SWEEP_LIMIT?: string; // Max workspace candidates per cleanup phase per cron run (default: 50)
   // Provider-side orphan reconciliation
   PROVIDER_ORPHAN_RECONCILIATION_ENABLED?: string; // Set 'false' to disable the provider-side reconciler (default: enabled)
@@ -368,6 +409,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP?: string; // Max reporter-scoped tasks inspected by each ProjectData idle-cleanup pass (default: 5)
   // Auto-delete stopped workspaces after this TTL (default: 300000 = 5 minutes)
   WORKSPACE_STOPPED_TTL_MS?: string;
+  WORKSPACE_DELETION_RETRY_BASE_MS?: string; // Initial retry delay for unconfirmed VM deletion (default: 60000)
+  WORKSPACE_DELETION_RETRY_MAX_MS?: string; // Maximum exponential retry delay (default: 3600000)
+  WORKSPACE_DELETION_MAX_RESIDENCE_MS?: string; // Hot retry lifetime before durable dead-letter quarantine (default: 86400000)
+  WORKSPACE_DELETION_ALARM_BATCH_SIZE?: string; // Maximum due deletions per NodeLifecycle alarm (default: 3)
+  WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT?: string; // Maximum expired callback throttle claims pruned per signal (default: 25)
+  WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS?: string; // Per-workspace/callback activity dedupe window (default: 300)
+  WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH?: string; // Sanitized workspaces.error_message bound (default: 500)
   // Task agent configuration
   DEFAULT_TASK_AGENT_TYPE?: string;
   // Task execution timeout (stuck task recovery)
@@ -390,6 +438,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ACCOUNT_MAP_MAX_SESSIONS_PER_PROJECT?: string;
   ACCOUNT_MAP_CACHE_TTL_SECONDS?: string;
   // Dashboard configuration
+  DASHBOARD_ACTIVE_TASK_LIMIT?: string;
   DASHBOARD_INACTIVE_THRESHOLD_MS?: string;
   // Boot log configuration
   BOOT_LOG_TTL_SECONDS?: string;
@@ -470,7 +519,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Swap file configuration
   SWAP_SIZE_MB?: string; // Swap file size in MB (default: 2048, set to "0" to disable)
   SWAP_SWAPPINESS?: string; // vm.swappiness value 0-100 (default: 60)
-  VM_AGENT_MEMORY_RESERVE_MB?: string; // Memory in MB reserved for OS + vm-agent before Docker MemoryMax (default: 768)
   // Hetzner base image override (e.g., "ubuntu-24.04" to roll back from the
   // default "docker-ce" marketplace image). Only applies to Hetzner nodes.
   HETZNER_BASE_IMAGE?: string;
@@ -555,20 +603,101 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT?: string;
   PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED?: string;
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID?: string; // Required immutable operator plan id when a fixed cutoff is configured
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY?: string; // Required verified R2 target-manifest root for a fixed cleanup plan
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256?: string; // Required SHA-256 of the approved target-manifest root
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES?: string; // Verified approved-plan batch-manifest size ceiling (default: 2000000)
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES?: string; // Verified approved-plan root-manifest size ceiling (default: 1000000)
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS?: string; // Hard cumulative approved source-row ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES?: string; // Hard cumulative approved projected-reclaim ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS?: string; // Hard cumulative approved R2 operation ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS?: string; // Hard cumulative approved cleanup wall-time ceiling
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS?: string; // Optional comma-separated project allowlist for automatic cleanup; empty means all projects
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT?: string; // Optional fixed exclusive message creation cutoff in epoch milliseconds; malformed/future values fail closed
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO?: string;
-  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS?: string;
-  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES?: string;
-  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES?: string; // Max single legacy tool_metadata row bytes read by archival cleanup (default: 1048576)
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS?: string; // Eligible candidate cap; ordinary physical scan uses the relief-measure max-row window
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES?: string; // Read budget; ordinary cleanup may admit one oversized first row to advance its cursor
+  PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES?: string; // Hard per-row read ceiling; raise deliberately for larger legacy rows without exceeding archive max (default: 1048576)
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM?: string;
   PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS?: string; // Wall-time budget for one archival cleanup pass (default: 20000)
+  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS?: string; // Hard row cap for explicit superadmin manual cleanup (default: 500)
+  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES?: string; // Max manual read budget; ordinary-path first-row exception applies unless an exact plan binds the row ceiling (default: 2097152)
+  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS?: string; // Hard wall-time cap for explicit superadmin manual cleanup (default: 20000)
+  PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS?: string; // Persisted cooldown after explicit manual cleanup (default: 86400000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS?: string; // Tool payload age before archive+strip eligibility (default: 5)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS?: string; // Cadence for retention archive scans (default: 86400000)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX?: string; // Private R2 prefix for archived ProjectData tool payloads
-  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS?: string; // Per-R2-write timeout for archival cleanup (default: 5000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS?: string; // Per-R2 write/read-back operation timeout for archival cleanup (default: 5000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS?: string; // Max R2 put/get/body operations per cleanup pass (default: 1500)
   PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS?: string; // Retry deferral after archive/write failures (default: 300000)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES?: string; // R2 chunk size for legacy oversized tool payload archives (default: 524288)
+  PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES?: string; // Absolute bounded metadata read cap for legacy oversized archives (default: 1900000)
+  PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS?: string; // Default row budget for admin-only ProjectData relief measurement slices
+  PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS?: string; // Max physical row window for admin/preflight measurement and ordinary cleanup selection
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED?: string; // Disabled-by-default cleanup of old terminal-session grouped/FTS derived rows
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO?: string;
+  PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES?: string;
+  PROJECT_DATA_ARCHIVE_SHARDING_ENABLED?: string; // Exact archive read routing switch (default: disabled)
+  PROJECT_DATA_ARCHIVE_COMPACT_ENABLED?: string; // Opt-in compact raw-history writer (default: disabled)
+  PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET?: string; // Installation-wide estimated daily SQL write allowance (default: 250000)
+  PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR?: string; // Estimate multiplier per row/512 bytes of grouped FTS text (default: 32)
+  PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS?: string; // Shared compact operation / chunk-write R2 I/O deadline (default: 10000)
+  PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS?: string; // Unused-reservation receipts; minimum one budget window (default: 604800000)
+  PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT?: string; // Receipts pruned per unused-reservation release, 0 disables cleanup (default: 100)
+  PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED?: string; // Separate kill switch for unscoped scheduled archive-sharding sweep (default: disabled)
+  PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS?: string; // Persisted cadence between unscoped archive-sharding sweeps (default: 86400000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED?: string; // Enable one exact project-scoped, read-only resumable relief preflight (default: false)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID?: string; // Required immutable operator plan identifier when preflight is enabled
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID?: string; // Required exact ProjectData project target when preflight is enabled
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT?: string; // Required fixed exclusive tool-message cutoff in epoch milliseconds
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS?: string; // Per-slice physical row-window limit (default: 5000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS?: string; // Persisted cadence between slices (default: 300000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES?: string; // Overall claimed-attempt ceiling (default: 100)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS?: string; // Overall physical rows-examined ceiling (default: 500000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES?: string; // Overall projected net reclaimable-byte evidence ceiling (default: 2000000000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS?: string; // D1 claim lease duration (default: 60000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS?: string; // Absolute measurement plus manifest-I/O slice deadline (default: 20000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN?: string; // Maximum sequential slices per scheduled invocation (default: 1)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS?: string; // Admission budget for starting sequential slices (default: 25000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS?: string; // Required lease headroom above a slice wall budget (default: 5000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS?: string; // Required return headroom inside slice/run wall budgets (default: 500)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS?: string; // Per-slice ProjectData measurement budget (default: 10000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES?: string; // Combined D1 JSON ceiling for session and batch-proof state (default: 1750000)
+  PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH?: string; // Persisted preflight diagnostic character ceiling (default: 1000)
+  PROJECT_DATA_ARCHIVE_SHARD_COUNT?: string;
+  PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS?: string;
+  PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS?: string;
+  PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET?: string;
+  PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS?: string;
+  PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS?: string; // Retry window for sessions the root object refused at prepare before any copy (default: 604800000)
+  PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS?: string; // Minimum age of a failed archive journal before an unscoped sweep reclaims it (default: 3600000)
+  PROJECT_DATA_ARCHIVE_CHUNK_ROWS?: string;
+  PROJECT_DATA_ARCHIVE_CHUNK_BYTES?: string;
+  PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS?: string;
+  PROJECT_DATA_ARCHIVE_LEASE_MS?: string;
+  PROJECT_DATA_ARCHIVE_WALL_TIME_MS?: string;
+  PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT?: string;
+  PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX?: string;
+  PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_DEFAULT?: string;
+  PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX?: string;
+  PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS?: string;
+  PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS?: string;
+  PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX?: string;
+  PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH?: string;
+  PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS?: string;
+  PROJECT_DATA_ARCHIVE_R2_PREFIX?: string;
+  PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS?: string;
   PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS?: string;
@@ -607,6 +736,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_INDEX_MAX_ROWS?: string;
   /** How stale coverage may be before the session list falls back to the DO. */
   SESSION_INDEX_MAX_STALENESS_MS?: string;
+  /** Max projects inspected for terminal-session ledger drift per cron sweep. */
+  TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE?: string;
+  /** Max active ProjectData sessions reconciled per project per cron sweep. */
+  TERMINAL_SESSION_RECONCILE_BATCH_SIZE?: string;
+  /** Max active D1 session_summaries reconciled globally per cron sweep. */
+  TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE?: string;
+  /** Retry delay for live/snapshot-protected or temporarily ineligible candidates. */
+  TERMINAL_SESSION_RECONCILE_DEFER_MS?: string;
   // ACP Session Lifecycle (spec 027)
   ACP_SESSION_DETECTION_WINDOW_MS?: string;
   ACP_SESSION_MAX_FORK_DEPTH?: string;
@@ -700,8 +837,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS?: string; // Hard ceiling for check-in expiry deferral by active prompt/tool work (default: 7200000 = 2 hours)
   TASK_RECONCILIATION_MIN_ALARM_DELAY_MS?: string; // Minimum reconciliation alarm delay (default: 10000 = 10 seconds)
   TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP?: string; // Max candidates processed per alarm sweep (default: 5)
-  TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS?: string; // Node heartbeat freshness threshold for reconciliation delivery (default: 300000 = 5 minutes)
   TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS?: string; // Short timeout for reconciliation-originated node calls (default: 5000 = 5 seconds)
+  TASK_RECONCILIATION_CANDIDATE_LEASE_MS?: string; // Durable claim floor; effective lease covers configured liveness + delivery I/O budgets (default: 30000 = 30 seconds)
+  TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS?: string; // Inconclusive attempts before task reconciliation quarantine (default: 3)
+  TASK_RECONCILIATION_QUARANTINE_MS?: string; // Cooldown after inconclusive attempt exhaustion (default: 300000 = 5 minutes)
   TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS?: string; // Short timeout for task-liveness VM-agent health probes (default: 5000 = 5 seconds)
   // Durable mailbox (Phase 1 orchestrator messaging)
   MAILBOX_ACK_TIMEOUT_MS?: string; // Ack timeout before re-delivery (default: 300000)
@@ -827,6 +966,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string; // "https" (default) or "http"
   VM_AGENT_PORT?: string; // "8443" (default) or custom port
+  VM_AGENT_MEMORY_RESERVE_MB?: string; // Optional Docker workload-slice MemoryMax reserve for VM-agent reachability headroom
+  SAM_INFRA_SLICE_MEMORY_MIN_MB?: string; // systemd MemoryMin for vm-agent/system services slice
+  SAM_INFRA_SLICE_CPU_WEIGHT?: string; // systemd CPUWeight for the vm-agent slice (1-10000, default 1000)
+  SAM_WORKLOAD_SLICE_CPU_WEIGHT?: string; // systemd CPUWeight for the Docker workload slice (1-10000, default 100)
+  DOCKER_MEMORY_MIN_MB?: string; // Minimum Docker MemoryMax retained when VM_AGENT_MEMORY_RESERVE_MB is enabled
+  HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES?: string; // Max bytes read from heartbeat Docker metric commands
+  HEARTBEAT_DOCKER_STATS_TIMEOUT?: string; // VM-agent heartbeat Docker stats timeout (default: 2s)
+  HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS?: string; // Max workspace containers measured per heartbeat (default: 8)
   // Devcontainer image caching
   DEVCONTAINER_CACHE_ENABLED?: string; // "true" to enable managed registry caching (default: disabled)
   DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID?: string; // Cloudflare account for managed registry credentials
@@ -1006,7 +1153,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Compute quota enforcement
   COMPUTE_QUOTA_ENFORCEMENT_ENABLED?: string; // Kill switch for quota checks (default: true)
   // VM size fallback on transient capacity exhaustion
-  CAPACITY_SIZE_FALLBACK_ENABLED?: string; // Kill switch: "false" disables size descent on capacity exhaustion (default: true)
   // Event-driven triggers (cron) configuration
   MAX_TRIGGERS_PER_PROJECT?: string; // Max triggers per project (default: 10)
   CRON_MIN_INTERVAL_MINUTES?: string; // Min cron interval in minutes (default: 15)
@@ -1183,7 +1329,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CF_CONTAINER_VM_AGENT_PORT?: string; // vm-agent standalone HTTP port inside the raw container (default: 8080)
   CF_CONTAINER_PORT_READY_TIMEOUT_MS?: string; // Max time to wait for vm-agent port readiness (default: 30000)
   CF_CONTAINER_WAKE_TIMEOUT_MS?: string; // Max time for launch + restore before forwarding a wake request (default: 120000)
-  CF_CONTAINER_RECOVERY_MAX_ATTEMPTS?: string; // Max snapshot restore attempts before terminal reconciliation (default: 2)
+  CF_CONTAINER_RECOVERY_MAX_ATTEMPTS?: string; // Max snapshot restore attempts before terminal reconciliation (default/minimum: 2)
   INSTANT_STALE_CALLBACK_MARGIN_MS?: string; // Freshness margin for rejecting destructive callbacks from superseded Instant containers (default: 60000)
   CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS?: string; // Max time for the synchronous standalone create-workspace request incl. clone (default: 120000)
   CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS?: string; // Max time for the ProjectData RPC that checks harness work lease before sleep (default: 5000)

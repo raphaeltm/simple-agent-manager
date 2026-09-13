@@ -18,6 +18,7 @@ let workspaceRows: Array<{
   nodeId?: string | null;
   nodeStatus?: string | null;
 }> = [];
+let workspaceReadResponses: Array<typeof workspaceRows> = [];
 let policyResult: { environmentId: string } | { error: string } = { environmentId: 'env-1' };
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
@@ -57,7 +58,7 @@ vi.mock('drizzle-orm/d1', () => ({
       from: vi.fn().mockReturnValue({
         leftJoin: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue(workspaceRows),
+            limit: vi.fn(async () => workspaceReadResponses.shift() ?? workspaceRows),
           }),
         }),
         where: vi.fn().mockReturnValue({
@@ -130,6 +131,7 @@ describe('registry-push-credentials callback (vertical slice)', () => {
         nodeStatus: 'running',
       },
     ];
+    workspaceReadResponses = [];
     policyResult = { environmentId: 'env-1' };
     consumeRateLimitMock.mockResolvedValue({
       allowed: true,
@@ -217,6 +219,18 @@ describe('registry-push-credentials callback (vertical slice)', () => {
     });
     expect(consumeRateLimitMock).not.toHaveBeenCalled();
     expect(mintMock).not.toHaveBeenCalled();
+  });
+
+  it('does not return a minted credential when deletion wins before delivery', async () => {
+    const active = workspaceRows;
+    workspaceReadResponses = [active, active, active, [{ ...active[0]!, status: 'stopping' }]];
+    const app = await buildApp();
+
+    const res = await request(app, 'proj-1');
+
+    expect(mintMock).toHaveBeenCalledOnce();
+    expect(res.status).toBe(410);
+    expect(await res.text()).not.toContain(mintedCredential.password);
   });
 
   it('returns 410 for callbacks from a workspace attached to a deleted node before minting credentials', async () => {

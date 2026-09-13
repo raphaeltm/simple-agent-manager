@@ -2,9 +2,11 @@ import { Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { AppError } from '../middleware/error';
 import { registerBinaryArtifactRoutes } from './binary-artifacts';
 
 const agentRoutes = new Hono<{ Bindings: Env }>();
+const VM_AGENT_RELEASE_RE = /^[0-9a-f]{40}$/;
 
 const agentVersionSchema = v.object({
   version: v.string(),
@@ -24,6 +26,11 @@ registerBinaryArtifactRoutes(agentRoutes, {
   unavailableVersion: { version: 'unknown', available: false },
   versionSchema: agentVersionSchema,
   versionValidationContext: 'agent.version_metadata',
+  versionedStorage: {
+    isValidVersion: (version) => VM_AGENT_RELEASE_RE.test(version),
+    queryParameter: 'release',
+    storagePrefix: (version) => `agents/releases/${version}`,
+  },
 });
 
 /**
@@ -34,6 +41,15 @@ agentRoutes.get('/install-script', async (c) => {
   const controlPlaneUrl = c.req.header('host')
     ? `https://${c.req.header('host')}`
     : 'https://api.workspaces.example.com';
+  const requiredRelease = c.env.VM_AGENT_REQUIRED_VERSION?.trim();
+  if (requiredRelease && !VM_AGENT_RELEASE_RE.test(requiredRelease)) {
+    throw new AppError(
+      503,
+      'INVALID_VM_AGENT_REQUIRED_VERSION',
+      'Configured VM agent release is invalid'
+    );
+  }
+  const releaseQuery = requiredRelease ? `&release=${requiredRelease}` : '';
 
   const script = `#!/bin/bash
 set -e
@@ -52,7 +68,7 @@ OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 echo "Downloading VM Agent for $OS-$ARCH..."
 
 # Download agent binary
-curl -fsSL "${controlPlaneUrl}/api/agent/download?os=$OS&arch=$ARCH" -o /usr/local/bin/vm-agent
+curl -fsSL "${controlPlaneUrl}/api/agent/download?os=$OS&arch=$ARCH${releaseQuery}" -o /usr/local/bin/vm-agent
 
 # Make executable
 chmod +x /usr/local/bin/vm-agent

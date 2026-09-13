@@ -62,16 +62,7 @@ func (s *Server) runSessionSnapshot(ctx context.Context, input *sessionSnapshotH
 	if s.sessionSnapshotRunner != nil {
 		return s.sessionSnapshotRunner(ctx, input)
 	}
-	return s.hibernateSessionSnapshot(
-		ctx,
-		input.runtime,
-		input.sessionID,
-		input.chatSessionID,
-		input.runtimeName,
-		input.acpSessionID,
-		input.agentType,
-		input.callbackToken,
-	)
+	return s.hibernateSessionSnapshot(ctx, input)
 }
 
 func (s *Server) captureSessionSnapshot(ctx context.Context, input *sessionSnapshotHandlerInput) (map[string]interface{}, error) {

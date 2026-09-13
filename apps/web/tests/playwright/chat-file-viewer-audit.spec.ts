@@ -386,28 +386,23 @@ async function assertNoOverflow(page: Page) {
 }
 
 /**
- * Expand the session header and click a panel button (Files or Git).
- * Uses expect assertions instead of isVisible guards to ensure elements are found.
+ * Click a panel control (Files or Git) in the session tool rail.
+ *
+ * These used to be buried in the session-header disclosure, so this helper had to
+ * expand it first. They are always visible now.
  */
 async function openPanel(page: Page, buttonName: 'Files' | 'Git') {
-  const chevron = page.locator('[aria-label="Show session details"]');
-  await expect(chevron).toBeVisible({ timeout: 3000 });
-  await chevron.click();
-  await page.waitForTimeout(200);
-
-  const btn = page.getByRole('button', { name: buttonName, exact: false }).first();
+  const btn = page.getByTestId(`session-tool-${buttonName.toLowerCase()}`).first();
   await expect(btn).toBeVisible({ timeout: 3000 });
   await btn.click();
   await page.waitForTimeout(800);
 }
 
-/**
- * Expand the session header (without clicking a panel button).
- */
+/** Open the session-details disclosure via the tool rail's Details action. */
 async function expandSessionHeader(page: Page) {
-  const chevron = page.locator('[aria-label="Show session details"]');
-  await expect(chevron).toBeVisible({ timeout: 3000 });
-  await chevron.click();
+  const details = page.getByTestId('session-tool-details').first();
+  await expect(details).toBeVisible({ timeout: 3000 });
+  await details.click();
   await page.waitForTimeout(300);
 }
 
@@ -440,10 +435,10 @@ test.describe('ChatFileViewer — Session Header — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(1000);
 
-    // When no workspace, chevron may still be available — try to expand
-    const chevron = page.locator('[aria-label="Show session details"]');
-    if (await chevron.isVisible()) {
-      await chevron.click();
+    // With no workspace the rail still offers Details — expand it for the screenshot.
+    const details = page.getByTestId('session-tool-details').first();
+    if (await details.isVisible().catch(() => false)) {
+      await details.click();
       await page.waitForTimeout(300);
     }
 

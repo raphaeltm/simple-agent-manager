@@ -68,12 +68,30 @@ condition it is meant to detect, instead of causing it.
    file sizes across cases that should differ means the run captured the same thing every
    time — the audit is measuring something other than the feature.
 
+## Asynchronous Ordering Defects Need Controlled Ordering
+
+If the bug is an ordering bug, the test must own that ordering. Do not rely on
+`mockResolvedValue`, `setTimeout(0)`, or the scheduler to happen to reproduce production
+latency; those mocks often resolve before React, the Durable Object, or the browser can
+commit the intermediate state that causes the defect.
+
+Use a deferred promise, explicit queue drain, fake clock, or protocol-level test harness
+that lets the test stop at the load-bearing midpoint, assert the system is in that state,
+then release the next step. For a UI hook, that usually means waiting until the first state
+commit is observable before resolving the in-flight request whose handler was previously
+cancelled, ignored, or routed through the wrong guard.
+
+After changing mock timing, repeat the discrimination check. A test that failed under one
+mock schedule can become non-discriminating under another; the red/green proof belongs to
+the final timing model, not to an earlier draft.
+
 ## Quick Compliance Check
 
 - [ ] The test triggers the feature the way a user or the runtime does
 - [ ] No test supplies the value it is asserting on
 - [ ] No test overrides a production gate to reach the code under it
 - [ ] Every guard was deleted once and the intended test went red
+- [ ] Ordering-dependent tests control the critical midpoint before releasing the next step
 - [ ] Absence assertions are paired with a positive-render assertion
 - [ ] Screenshots were opened and differ where the scenarios differ
 

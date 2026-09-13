@@ -312,7 +312,7 @@ func TestTriggersShowsTable(t *testing.T) {
 func TestProfilesShowsTable(t *testing.T) {
 	env := tempConfigEnv(t)
 	setActiveProjectConfig(t, env, "project_1", "My Project")
-	doer, captured := captureJSONRequest(t, `{"items":[{"id":"prof_1","name":"fast-agent","agentType":"claude-code","vmSizeOverride":"cx22","taskMode":"task"}]}`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `{"items":[{"id":"prof_1","name":"fast-agent","agentType":"claude-code","resourceRequirementsJson":"{\"minVcpu\":4,\"exclusiveNode\":false}","taskMode":"task"}]}`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"profiles"}, doer, env.values)
 
 	code := Run(context.Background(), runtime)
@@ -322,7 +322,7 @@ func TestProfilesShowsTable(t *testing.T) {
 	if captured.URL != "https://api.example.com/api/projects/project_1/agent-profiles" {
 		t.Fatalf("path = %s", captured.URL)
 	}
-	if !strings.Contains(stdout.String(), "fast-agent") {
+	if !strings.Contains(stdout.String(), "fast-agent") || !strings.Contains(stdout.String(), "4 vCPU") || !strings.Contains(stdout.String(), "exclusive=false") {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
@@ -346,7 +346,7 @@ func TestActivityShowsTable(t *testing.T) {
 }
 
 func TestNodesShowsTable(t *testing.T) {
-	doer, captured := captureJSONRequest(t, `[{"id":"node_1","name":"builder","cloudProvider":"hetzner","vmSize":"cx22","vmLocation":"fsn1","status":"running","ipAddress":"1.2.3.4"}]`, http.StatusOK)
+	doer, captured := captureJSONRequest(t, `[{"id":"node_1","name":"builder","cloudProvider":"hetzner","vmSize":"small","vmLocation":"fsn1","providerInstanceType":"cx22","providerInstanceVcpuCount":2,"providerInstanceMemoryMb":4096,"providerInstanceDiskGb":40,"status":"running","ipAddress":"1.2.3.4"}]`, http.StatusOK)
 	runtime, stdout, stderr := testRuntime(t, []string{"nodes"}, doer, nil)
 
 	code := Run(context.Background(), runtime)
@@ -357,8 +357,21 @@ func TestNodesShowsTable(t *testing.T) {
 		t.Fatalf("path = %s", captured.URL)
 	}
 	output := stdout.String()
-	if !strings.Contains(output, "hetzner") || !strings.Contains(output, "1.2.3.4") {
+	if !strings.Contains(output, "hetzner") || !strings.Contains(output, "cx22") || !strings.Contains(output, "2 vCPU") || !strings.Contains(output, "1.2.3.4") {
 		t.Fatalf("stdout = %s", output)
+	}
+}
+
+func TestNodesLabelsLegacyOnlyHardwareAsCompatibilityEstimate(t *testing.T) {
+	doer, _ := captureJSONRequest(t, `[{"id":"node_1","cloudProvider":"hetzner","vmSize":"medium","vmLocation":"fsn1","status":"running"}]`, http.StatusOK)
+	runtime, stdout, stderr := testRuntime(t, []string{"nodes"}, doer, nil)
+
+	code := Run(context.Background(), runtime)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "unknown hardware (compatibility estimate: medium)") {
+		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
 

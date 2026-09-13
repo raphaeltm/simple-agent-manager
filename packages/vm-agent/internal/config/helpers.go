@@ -39,6 +39,20 @@ func getEnvInt(key string, defaultValue int) int {
 	return defaultValue
 }
 
+// getBoundedPositiveEnvInt returns a positive integer environment variable in range or a default.
+func getBoundedPositiveEnvInt(key string, defaultValue int, maxValue int) int {
+	value := getEnvInt(key, defaultValue)
+	if value < 1 {
+		slog.Warn("config: env var must be positive", "key", key, "default", defaultValue)
+		return defaultValue
+	}
+	if value > maxValue {
+		slog.Warn("config: env var exceeds maximum", "key", key, "value", value, "max", maxValue, "default", defaultValue)
+		return defaultValue
+	}
+	return value
+}
+
 // getEnvInt64 returns an int64 environment variable or a default.
 func getEnvInt64(key string, defaultValue int64) int64 {
 	if value := os.Getenv(key); value != "" {
@@ -252,6 +266,31 @@ func (c *Config) Validate() error {
 			c.ErrorReportCollectorJobs,
 		))
 	}
+	if c.HeartbeatDockerStatsTimeout <= 0 {
+		errs = append(errs, fmt.Errorf(
+			"HEARTBEAT_DOCKER_STATS_TIMEOUT must be > 0, got %s",
+			c.HeartbeatDockerStatsTimeout,
+		))
+	}
+	if c.HeartbeatWorkspaceMetricsMaxContainers < 0 || c.HeartbeatWorkspaceMetricsMaxContainers > 128 {
+		errs = append(errs, fmt.Errorf(
+			"HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS must be 0-128, got %d",
+			c.HeartbeatWorkspaceMetricsMaxContainers,
+		))
+	}
+	if c.HeartbeatWorkspaceMetricsMaxOutputBytes < 1024 || c.HeartbeatWorkspaceMetricsMaxOutputBytes > 1048576 {
+		errs = append(errs, fmt.Errorf(
+			"HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES must be 1024-1048576, got %d",
+			c.HeartbeatWorkspaceMetricsMaxOutputBytes,
+		))
+	}
+	if c.WorkspaceBuildQueueDepth < 1 || c.WorkspaceBuildQueueDepth > MaxWorkspaceBuildQueueDepth {
+		errs = append(errs, fmt.Errorf(
+			"WORKSPACE_BUILD_QUEUE_DEPTH must be 1-%d, got %d",
+			MaxWorkspaceBuildQueueDepth,
+			c.WorkspaceBuildQueueDepth,
+		))
+	}
 
 	if c.JWTIssuer != "" {
 		if err := auth.ValidateIssuerURL(c.JWTIssuer); err != nil {
@@ -290,6 +329,7 @@ func (c *Config) Validate() error {
 		{"LOG_STREAM_PING_WRITE_TIMEOUT", c.LogStreamPingWriteTimeout},
 		{"DEVCONTAINER_CACHE_PUSH_TIMEOUT", c.DevcontainerCachePushTimeout},
 		{"ACP_CREDENTIAL_SYNC_TIMEOUT", c.ACPCredentialSyncTimeout},
+		{"ACP_RESTART_ATTEMPT_TIMEOUT", c.ACPRestartAttemptTimeout},
 		{"ACP_ACTIVITY_REPORT_TIMEOUT", c.ACPActivityReportTimeout},
 		{"ACP_HARNESS_ACTIVITY_REPORT_DEBOUNCE", c.ACPHarnessActivityReportDebounce},
 		{"JWKS_FETCH_TIMEOUT", c.JWKSFetchTimeout},
@@ -299,6 +339,7 @@ func (c *Config) Validate() error {
 		{EnvDefaultEvictionSnapshotTimeoutSeconds, c.EvictionSnapshotTimeout},
 		{EnvDefaultEvictionDockerStopTimeoutSeconds, c.EvictionDockerStopTimeout},
 		{EnvDefaultEvictionResolveTimeoutSeconds, c.EvictionResolveTimeout},
+		{EnvDefaultEvictionCallbackRetryMaxSeconds, c.EvictionCallbackRetryMaxInterval},
 	}
 	for _, timeout := range requiredTimeouts {
 		if timeout.value <= 0 {

@@ -20,11 +20,14 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireApproved: () => async (_c: unknown, next: () => Promise<void>) => next(),
 }));
 
-// Credential resolution runs AFTER the quota gate; returning null makes a quota-passing request
-// fail closed at 403, which is exactly the signal we use to detect "the quota did not block".
-vi.mock('../../../src/services/provider-credentials', () => ({
-  resolveCredentialSource: vi.fn().mockResolvedValue(null),
-  createProviderForUser: vi.fn().mockResolvedValue(null),
+// Canonical allocation runs AFTER the quota gate; returning a credentials error makes a
+// quota-passing request fail closed at 403, which is the signal we use to detect
+// "the quota did not block".
+vi.mock('../../../src/services/canonical-vm-allocation', () => ({
+  resolveCanonicalVmAllocationPlan: vi.fn().mockResolvedValue({
+    error: 'Cloud provider credentials required. Connect your account in Settings.',
+    errorKind: 'credentials',
+  }),
 }));
 
 vi.mock('../../../src/lib/logger', () => ({

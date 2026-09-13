@@ -34,6 +34,7 @@ export function toTriggerResponse(row: schema.TriggerRow): TriggerResponse {
     skillId: row.skillId,
     taskMode: (row.taskMode ?? 'task') as TriggerResponse['taskMode'],
     vmSizeOverride: row.vmSizeOverride,
+    resourceRequirementsJson: row.resourceRequirementsJson,
     maxConcurrent: row.maxConcurrent,
     lastTriggeredAt: row.lastTriggeredAt,
     triggerCount: row.triggerCount,

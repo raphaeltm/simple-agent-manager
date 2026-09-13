@@ -29,8 +29,15 @@ import {
   getInstantStaleCallbackMarginMs,
   isSupersededInstantCallback,
 } from '../_stale-callback-guard';
-import { assertWorkspaceCallbackResourceById } from '../workspaces/_helpers';
-import { computeBlockedForTask, setTaskStatus } from './_helpers';
+import {
+  assertWorkspaceCallbackIdentityCurrent,
+  assertWorkspaceCallbackResourceById,
+} from '../workspaces/_helpers';
+import {
+  computeBlockedForTask,
+  setTaskStatus,
+  updateTaskExecutionStepFromCallback,
+} from './_helpers';
 
 /**
  * Task callback route — mounted BEFORE projectsRoutes in index.ts
@@ -77,7 +84,13 @@ taskCallbackRoute.post(
       throw errors.forbidden('Token workspace mismatch');
     }
     const workspaceId = task.workspaceId;
-    await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'task_status');
+    const workspaceSnapshot = await assertWorkspaceCallbackResourceById(
+      c.env,
+      workspaceId,
+      'task_status'
+    );
+    const revalidateWorkspace = () =>
+      assertWorkspaceCallbackIdentityCurrent(c.env, workspaceSnapshot, 'task_status');
 
     // --- Execution-step-only update (no status transition) ---
     // When executionStep is provided without toStatus, update the step and
@@ -117,12 +130,16 @@ taskCallbackRoute.post(
         stepUpdate.outputPrUrl = body.outputPrUrl?.trim() || null;
       }
 
-      await db.update(schema.tasks).set(stepUpdate).where(eq(schema.tasks.id, task.id));
+      const refreshed = await updateTaskExecutionStepFromCallback(db, task, stepUpdate, {
+        env: c.env,
+        expected: workspaceSnapshot,
+      });
 
       // Record activity event for execution step update
       c.executionCtx.waitUntil(
-        projectDataService
-          .recordActivityEvent(
+        (async () => {
+          await revalidateWorkspace();
+          await projectDataService.recordActivityEvent(
             c.env,
             projectId,
             'task.execution_step',
@@ -136,10 +153,10 @@ taskCallbackRoute.post(
               executionStep: body.executionStep,
               pushed: body.gitPushResult?.pushed ?? false,
             }
-          )
-          .catch((e) => {
-            log.warn('task.execution_step_activity_failed', { taskId, error: String(e) });
-          })
+          );
+        })().catch((e) => {
+          log.warn('task.execution_step_activity_failed', { taskId, error: String(e) });
+        })
       );
 
       const recoverableErrorMessage = body.errorMessage?.trim();
@@ -154,6 +171,7 @@ taskCallbackRoute.post(
                   .limit(1)
               : [];
 
+            await revalidateWorkspace();
             await projectDataService.recordActivityEvent(
               c.env,
               projectId,
@@ -197,6 +215,7 @@ taskCallbackRoute.post(
               .where(eq(schema.workspaces.id, workspaceId))
               .limit(1);
 
+            await revalidateWorkspace();
             await projectDataService.recordActivityEvent(
               c.env,
               projectId,
@@ -222,14 +241,8 @@ taskCallbackRoute.post(
         );
       }
 
-      const [refreshed] = await db
-        .select()
-        .from(schema.tasks)
-        .where(eq(schema.tasks.id, task.id))
-        .limit(1);
-
       const blocked = await computeBlockedForTask(db, task.id);
-      return c.json(toTaskResponse(refreshed ?? task, blocked));
+      return c.json(toTaskResponse(refreshed, blocked));
     }
 
     // --- Standard status transition ---
@@ -245,12 +258,14 @@ taskCallbackRoute.post(
       task.status === body.toStatus &&
       (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled')
     ) {
+      await revalidateWorkspace();
       await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
         status: body.toStatus,
         errorMessage: task.errorMessage,
         projectId,
         failureLogEvent: 'task.callback_terminal_cleanup_failed',
         logContext: { projectId, source: 'task.callback.idempotent' },
+        beforeSideEffect: revalidateWorkspace,
       });
       const blocked = await computeBlockedForTask(db, task.id);
       return c.json(toTaskResponse(task, blocked));
@@ -323,31 +338,39 @@ taskCallbackRoute.post(
         outputBranch: body.outputBranch,
         outputPrUrl: body.outputPrUrl,
         errorMessage: body.errorMessage,
+        callbackFence: { env: c.env, expected: workspaceSnapshot },
       }
     );
 
-    if (task.status !== body.toStatus && isLifecycleTaskStatus(body.toStatus)) {
+    const lifecycleStatus = body.toStatus;
+    if (task.status !== lifecycleStatus && isLifecycleTaskStatus(lifecycleStatus)) {
       c.executionCtx.waitUntil(
-        recordTaskLifecycleEventBestEffort(c.env, {
-          projectId,
-          taskId,
-          status: body.toStatus,
-          fromStatus: task.status,
-          workspaceId: task.workspaceId,
-          actorType: 'workspace_callback',
-          actorId: payload.workspace,
-          reason: body.reason ?? body.errorMessage ?? null,
-          source: 'tasks.callback_status',
-          occurredAt: updatedTask.updatedAt,
-          title: task.title,
+        (async () => {
+          await revalidateWorkspace();
+          await recordTaskLifecycleEventBestEffort(c.env, {
+            projectId,
+            taskId,
+            status: lifecycleStatus,
+            fromStatus: task.status,
+            workspaceId: task.workspaceId,
+            actorType: 'workspace_callback',
+            actorId: payload.workspace,
+            reason: body.reason ?? body.errorMessage ?? null,
+            source: 'tasks.callback_status',
+            occurredAt: updatedTask.updatedAt,
+            title: task.title,
+          });
+        })().catch((e) => {
+          log.warn('task.callback_lifecycle_event_failed', { taskId, error: String(e) });
         })
       );
     }
 
     // Record activity event for task status change (from workspace callback)
     c.executionCtx.waitUntil(
-      projectDataService
-        .recordActivityEvent(
+      (async () => {
+        await revalidateWorkspace();
+        await projectDataService.recordActivityEvent(
           c.env,
           projectId,
           `task.${body.toStatus}`,
@@ -357,10 +380,10 @@ taskCallbackRoute.post(
           null,
           taskId,
           { title: task.title, fromStatus: task.status, toStatus: body.toStatus }
-        )
-        .catch((e) => {
-          log.warn('task.callback_activity_event_failed', { taskId, error: String(e) });
-        })
+        );
+      })().catch((e) => {
+        log.warn('task.callback_activity_event_failed', { taskId, error: String(e) });
+      })
     );
 
     // On terminal states, stop/fail the chat session and handle workspace/container cleanup.
@@ -375,6 +398,7 @@ taskCallbackRoute.post(
         projectId,
         failureLogEvent: 'task.callback_terminal_cleanup_failed',
         logContext: { projectId, source: 'task.callback' },
+        beforeSideEffect: revalidateWorkspace,
       });
 
       // Emit notifications for terminal task states (best-effort)
@@ -388,7 +412,9 @@ taskCallbackRoute.post(
               .limit(1);
             const sessionId = ws?.chatSessionId ?? null;
 
+            await revalidateWorkspace();
             const projectName = await notificationService.getProjectName(c.env, projectId);
+            await revalidateWorkspace();
             if (body.toStatus === 'completed') {
               await notificationService.notifyTaskComplete(c.env, task.userId, {
                 projectId,

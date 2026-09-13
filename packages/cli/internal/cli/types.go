@@ -69,17 +69,21 @@ type SubmitTaskResponse struct {
 }
 
 type TaskStatusResponse struct {
-	ID            string  `json:"id,omitempty"`
-	Title         string  `json:"title,omitempty"`
-	Status        string  `json:"status,omitempty"`
-	ExecutionStep string  `json:"executionStep,omitempty"`
-	TaskMode      string  `json:"taskMode,omitempty"`
-	OutputBranch  *string `json:"outputBranch,omitempty"`
-	OutputPRURL   *string `json:"outputPrUrl,omitempty"`
-	OutputSummary *string `json:"outputSummary,omitempty"`
-	ErrorMessage  *string `json:"errorMessage,omitempty"`
-	FinalizedAt   *string `json:"finalizedAt,omitempty"`
-	UpdatedAt     string  `json:"updatedAt,omitempty"`
+	ID                         string  `json:"id,omitempty"`
+	Title                      string  `json:"title,omitempty"`
+	Status                     string  `json:"status,omitempty"`
+	ExecutionStep              string  `json:"executionStep,omitempty"`
+	TaskMode                   string  `json:"taskMode,omitempty"`
+	RequestedVMSize            string  `json:"requestedVmSize,omitempty"`
+	RequestedVMSizeSource      string  `json:"requestedVmSizeSource,omitempty"`
+	ResourceRequirementsJSON   *string `json:"resourceRequirementsJson,omitempty"`
+	ResourceRequirementsSource string  `json:"resourceRequirementsSource,omitempty"`
+	OutputBranch               *string `json:"outputBranch,omitempty"`
+	OutputPRURL                *string `json:"outputPrUrl,omitempty"`
+	OutputSummary              *string `json:"outputSummary,omitempty"`
+	ErrorMessage               *string `json:"errorMessage,omitempty"`
+	FinalizedAt                *string `json:"finalizedAt,omitempty"`
+	UpdatedAt                  string  `json:"updatedAt,omitempty"`
 }
 
 type WorkspaceResponse struct {
@@ -134,9 +138,18 @@ type TaskSubmitOptions struct {
 	Node           string
 	ParentTask     string
 	Provider       string
+	Resource       *ResourceRequirements
 	VMLocation     string
 	VMSize         string
 	Workspace      string
+}
+
+type ResourceRequirements struct {
+	MinVCPU       *float64 `json:"minVcpu,omitempty"`
+	MinMemoryGB   *float64 `json:"minMemoryGb,omitempty"`
+	MinDiskGB     *float64 `json:"minDiskGb,omitempty"`
+	ExclusiveNode *bool    `json:"exclusiveNode,omitempty"`
+	MaxCoTenants  *float64 `json:"maxCoTenants,omitempty"`
 }
 
 // Project represents a project in list responses.
@@ -287,12 +300,13 @@ type TriggerListResponse struct {
 
 // AgentProfile represents an agent profile.
 type AgentProfile struct {
-	ID             string `json:"id"`
-	Name           string `json:"name,omitempty"`
-	AgentType      string `json:"agentType,omitempty"`
-	VMSize         string `json:"vmSize,omitempty"`
-	VMSizeOverride string `json:"vmSizeOverride,omitempty"`
-	TaskMode       string `json:"taskMode,omitempty"`
+	ID                       string  `json:"id"`
+	Name                     string  `json:"name,omitempty"`
+	AgentType                string  `json:"agentType,omitempty"`
+	VMSize                   string  `json:"vmSize,omitempty"`
+	VMSizeOverride           string  `json:"vmSizeOverride,omitempty"`
+	ResourceRequirementsJSON *string `json:"resourceRequirementsJson,omitempty"`
+	TaskMode                 string  `json:"taskMode,omitempty"`
 }
 
 // ProfileListResponse wraps a list of agent profiles.
@@ -315,14 +329,18 @@ type ActivityListResponse struct {
 
 // Node represents an infrastructure node.
 type Node struct {
-	ID            string `json:"id"`
-	Name          string `json:"name,omitempty"`
-	CloudProvider string `json:"cloudProvider,omitempty"`
-	VMSize        string `json:"vmSize,omitempty"`
-	VMLocation    string `json:"vmLocation,omitempty"`
-	Status        string `json:"status,omitempty"`
-	HealthStatus  string `json:"healthStatus,omitempty"`
-	IPAddress     string `json:"ipAddress,omitempty"`
+	ID                        string   `json:"id"`
+	Name                      string   `json:"name,omitempty"`
+	CloudProvider             string   `json:"cloudProvider,omitempty"`
+	VMSize                    string   `json:"vmSize,omitempty"`
+	VMLocation                string   `json:"vmLocation,omitempty"`
+	ProviderInstanceType      string   `json:"providerInstanceType,omitempty"`
+	ProviderInstanceVCPUCount *float64 `json:"providerInstanceVcpuCount,omitempty"`
+	ProviderInstanceMemoryMB  *float64 `json:"providerInstanceMemoryMb,omitempty"`
+	ProviderInstanceDiskGB    *float64 `json:"providerInstanceDiskGb,omitempty"`
+	Status                    string   `json:"status,omitempty"`
+	HealthStatus              string   `json:"healthStatus,omitempty"`
+	IPAddress                 string   `json:"ipAddress,omitempty"`
 }
 
 // NodeListResponse wraps a list of nodes.

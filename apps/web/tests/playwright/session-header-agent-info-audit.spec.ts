@@ -290,7 +290,8 @@ async function screenshot(page: Page, name: string) {
 }
 
 async function expandHeader(page: Page) {
-  const expandBtn = page.locator('button[aria-label="Show session details"]').first();
+  // The details disclosure is opened by the tool rail's Details action now.
+  const expandBtn = page.getByTestId('session-tool-details').first();
   await expandBtn.waitFor({ state: 'visible', timeout: 10000 });
   await expandBtn.click();
   await page.waitForTimeout(300);

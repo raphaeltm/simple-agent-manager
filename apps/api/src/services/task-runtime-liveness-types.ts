@@ -7,6 +7,7 @@ export interface TaskRuntimeLiveness {
   workspaceStatus: string | null;
   nodeId: string | null;
   activeAcpSessionId: string | null;
+  deliveryTarget?: { nodeId: string; userId: string };
 }
 
 export type RuntimeProbeOutcome = 'ok' | 'timeout' | 'error' | 'unknown' | 'not_run';
@@ -17,6 +18,7 @@ export interface RuntimeWorkspaceSnapshot {
   status: string;
   chatSessionId: string | null;
   nodeId: string | null;
+  userId: string | null;
   nodeRuntime: string | null;
   nodeStatus: string | null;
   nodeHealthStatus: string | null;
@@ -62,8 +64,11 @@ export interface ContainerLifecycleSnapshot {
  *    a matching `projectId`, and `sleepingAt`.
  *  - `session-snapshot-recovery-lifecycle.ts:claimSessionSnapshotRecovery` —
  *    the function that actually authorizes a wake. It additionally requires a
- *    restorable `status`/`degradation` pair, an unexpired `expires_at`, and
- *    `recovery_attempts < SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`.
+ *    restorable `status`/`degradation` pair, an unexpired `expires_at`, and an
+ *    available attempt budget — `recovery_attempts <
+ *    SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`, OR a spent budget whose last clean
+ *    failure is older than SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS
+ *    (`session-snapshot-recovery-budget.ts`).
  */
 export interface SessionResumabilitySnapshot {
   chatSessionId: string;
@@ -77,6 +82,13 @@ export interface SessionResumabilitySnapshot {
   status: string | null;
   degradation: string | null;
   recoveryAttempts: number;
+  /**
+   * ms epoch of the last clean wake-failure report; null when absent or
+   * unparseable. The resumer releases a spent attempt budget only from this
+   * timestamp, so the classifier must carry it or it will declare a session
+   * dead that the resumer would still wake.
+   */
+  recoveryFailedAtMs: number | null;
 }
 
 export type ResumabilityProbeOutcome = 'ok' | 'error' | 'not_run';
@@ -84,10 +96,11 @@ export type ResumabilityProbeOutcome = 'ok' | 'error' | 'not_run';
 export type SupersessionProbeOutcome = 'ok' | 'error' | 'not_run';
 
 /**
- * How this task's recovery family relates to it.
- *  - `none`     — no newer wake successor exists; this task was never superseded.
- *  - `live`     — a newer, non-terminal successor owns the conversation right now.
- *  - `terminal` — this task WAS superseded, and the whole family has since ended.
+ * How this task's recovery ownership marker relates to it.
+ *  - `none`     — no exact wake successor marker exists; this task was never superseded.
+ *  - `live`     — a successor exists but has not accepted runtime ownership yet.
+ *  - `terminal` — this task WAS superseded and is safe to retire benignly because
+ *                 the exact successor is in_progress or later.
  *
  * `terminal` is deliberately distinct from `none`. The task is dead either way,
  * but it ended because its conversation moved on, not because its runtime died,
@@ -99,6 +112,10 @@ export interface TaskRuntimeLivenessSignals {
   /** The task's project — re-checked against the snapshot row in memory. */
   projectId: string;
   taskWorkspaceId: string | null;
+  /** Optional canonical chat owner used by reconciliation's cross-store fence. */
+  expectedChatSessionId?: string | null;
+  /** Optional current ACP owner; historical siblings cannot terminalize it. */
+  expectedAcpSessionId?: string | null;
   workspace: RuntimeWorkspaceSnapshot | null;
   workspaceProbeOutcome: 'ok' | 'error' | 'unknown';
   nowMs: number;
@@ -127,6 +144,12 @@ export interface TaskRuntimeLivenessSignals {
    * classifier applies the same wake-attempt ceiling the claim does.
    */
   resumabilityMaxRecoveryAttempts: number;
+  /**
+   * `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` as the resumer resolves it. The
+   * ceiling above is a burst budget, so the classifier needs the same decay
+   * window or it will call a session dead that the resumer would still wake.
+   */
+  resumabilityRecoveryAttemptDecayMs: number;
   /**
    * `not_run` preserves the pre-supersession behaviour for callers that cannot
    * reach D1; `error` withholds a conclusive-death verdict because the

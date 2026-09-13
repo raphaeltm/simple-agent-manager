@@ -14,6 +14,7 @@ import {
   nodeStatusTerminatesCallbacks,
 } from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
+import { signalWorkspaceDeletionUnconfirmedCallback } from '../../services/workspace-deletion-callback-signal';
 
 /**
  * Node-level ACP heartbeat route — mounted BEFORE projectsRoutes in index.ts
@@ -144,7 +145,8 @@ async function authorizeWorkspaceScopedHeartbeat(
     return { kind: 'workspace', workspaceId: payload.workspace, status: 'missing' };
   }
 
-  const authorized = workspaceRow.nodeId === requestedNodeId && workspaceRow.projectId === projectId;
+  const authorized =
+    workspaceRow.nodeId === requestedNodeId && workspaceRow.projectId === projectId;
   if (!authorized) {
     log.warn('acp_heartbeat.callback_token_not_bound_to_node', {
       projectId,
@@ -221,12 +223,19 @@ function terminalResourcePayload(resource: TerminalCallbackResource): {
   };
 }
 
-function terminalResourceResponse(
+async function terminalResourceResponse(
   c: Context<{ Bindings: Env }>,
   projectId: string,
   requestedNodeId: string,
   resource: TerminalCallbackResource
 ) {
+  if (resource.kind === 'workspace') {
+    await signalWorkspaceDeletionUnconfirmedCallback(
+      c.env,
+      resource.workspaceId,
+      'node_acp_heartbeat'
+    );
+  }
   logTerminalResource(projectId, requestedNodeId, resource);
   return c.json(terminalResourcePayload(resource), 410);
 }
@@ -252,12 +261,12 @@ nodeAcpHeartbeatRoute.post(
     // supplying a guessed nodeId. See .claude/rules/28 and security-critique #1.
     const authTerminalResource = await authorizeAcpHeartbeat(db, payload, projectId, body.nodeId);
     if (authTerminalResource) {
-      return terminalResourceResponse(c, projectId, body.nodeId, authTerminalResource);
+      return await terminalResourceResponse(c, projectId, body.nodeId, authTerminalResource);
     }
 
     const activeNodeStatus = await loadNodeStatus(db, body.nodeId);
     if (!activeNodeStatus || nodeStatusTerminatesCallbacks(activeNodeStatus)) {
-      return terminalResourceResponse(c, projectId, body.nodeId, {
+      return await terminalResourceResponse(c, projectId, body.nodeId, {
         kind: 'node',
         status: activeNodeStatus ?? 'missing',
       });

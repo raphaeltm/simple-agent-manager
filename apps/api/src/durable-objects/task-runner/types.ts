@@ -8,6 +8,7 @@ import type {
   CapacityPlacementSnapshot,
   CredentialProvider,
   CredentialSource,
+  PlacementDecisionDiagnostics,
   ResolvedResourceReservation,
   ResourceRequirements,
   ResourceRequirementsSource,
@@ -27,6 +28,7 @@ import type { TaskStartCapacityPoolSelection } from '../../services/placement-re
 // the complete Worker Env interface. DOs receive the full env at runtime.
 
 export interface StepResults {
+  placementDiagnostics?: PlacementDecisionDiagnostics;
   nodeId: string | null;
   autoProvisioned: boolean;
   /** Exact warm-pool claim owned by this task until workspace activation or release. */
@@ -73,6 +75,9 @@ export interface TaskRunConfig {
   cloudProvider: CredentialProvider | null;
   /** Provider-native instance type/SKU selected from a compute pool. Null preserves legacy size mapping. */
   providerInstanceType?: string | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: 'x86_64' | 'arm64' | null;
   /** Root-pinned credential attribution user for this task tree. */
   credentialAttributionUserId: string;
   /** Project scope when credentialAttributionSource is 'project'. */
@@ -103,11 +108,17 @@ export interface TaskRunConfig {
     maxWorkspacesPerNode?: number | null;
     nodeCpuThresholdPercent?: number | null;
     nodeMemoryThresholdPercent?: number | null;
+    nodeCpuShareBudgetPercent?: number | null;
+    nodeHostMemoryReserveMb?: number | null;
+    nodeDiskPressureThresholdPercent?: number | null;
+    nodeMetricsTtlMs?: number | null;
+    nodeCpuScoreWeightPercent?: number | null;
+    nodeMemoryScoreWeightPercent?: number | null;
     warmNodeTimeoutMs?: number | null;
   } | null;
-  /** Resolved resource requirements (audit-only, Phase 0). */
+  /** Raw resolved inputs retained for audit and provenance. */
   resourceRequirements?: ResourceRequirements | null;
-  /** Resolved reservation in scheduler units (audit-only, Phase 0). */
+  /** Immutable scheduler reservation used for node selection and final workspace placement. */
   resolvedReservation?: ResolvedResourceReservation | null;
   /** Effective one-pool placement selection for VM tasks. Null preserves legacy placement. */
   capacityPoolSelection?: TaskStartCapacityPoolSelection | null;
@@ -117,6 +128,8 @@ export interface TaskRunConfig {
   resumeSnapshotChatSessionId?: string | null;
   /** Live source parent that revocably authorizes a snapshot-recovery TaskRunner. */
   recoverySourceTaskId?: string | null;
+  /** Failed/stopped predecessor whose workspace deletion must be confirmed before replacement. */
+  retrySourceTaskId?: string | null;
 }
 
 export interface TaskRunnerState {

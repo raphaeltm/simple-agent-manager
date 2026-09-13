@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
   updateSessionTopic: vi.fn(),
   resolveCredentialSource: vi.fn(),
+  resolveCanonicalVmAllocationPlan: vi.fn(),
   generateTaskTitle: vi.fn(),
   getTaskTitleConfig: vi.fn(),
   truncateTitle: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
+  projectMemberRolesWithCapability: vi.fn(() => ['owner', 'admin', 'maintainer']),
   requireProjectAccess: mocks.requireProjectAccess,
   requireProjectCapability: mocks.requireProjectCapability,
 }));
@@ -76,9 +78,12 @@ vi.mock('../../../src/services/project-data', () => ({
 vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
 }));
+vi.mock('../../../src/services/canonical-vm-allocation', () => ({
+  placementProjectDefaultsFromRow: vi.fn((project: unknown) => project),
+  resolveCanonicalVmAllocationPlan: mocks.resolveCanonicalVmAllocationPlan,
+}));
 vi.mock('../../../src/services/placement-resolver', async (importActual) => {
-  const actual =
-    await importActual<typeof import('../../../src/services/placement-resolver')>();
+  const actual = await importActual<typeof import('../../../src/services/placement-resolver')>();
   return {
     ...actual,
     resolveTaskStartPlacementCredentialAttributionFromPlacement:
@@ -194,6 +199,35 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
       credentialSource: 'user',
       providerName: 'hetzner',
     });
+    mocks.resolveCanonicalVmAllocationPlan.mockResolvedValue({
+      placement: {
+        resolvedReservation: {
+          cpuMillis: 1000,
+          memoryMb: 1024,
+          diskMb: 1024,
+          exclusiveNode: false,
+          maxCoTenants: 4,
+          source: 'task',
+          sourceId: 'direct-workspace-test',
+          version: 1,
+        },
+        vmSizeSource: 'task',
+      },
+      credential: { credentialSource: 'user', providerName: 'hetzner' },
+      quotaCredentialSource: 'user',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
+      effectiveProvider: 'hetzner',
+      vmSize: 'medium',
+      vmLocation: 'nbg1',
+      providerInstanceType: 'cx22',
+      providerInstanceBootDiskSizeGb: null,
+      providerInstanceImage: null,
+      providerInstanceArchitecture: null,
+      capacityPoolSelection: null,
+      capacityPlacementSnapshot: null,
+    });
     mocks.resolveTaskStartPlacementCredentialAttributionFromPlacement.mockResolvedValue({
       placement: expect.anything(),
       credential: {
@@ -240,7 +274,11 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
   function post(path: string, body: unknown, ctx?: ExecutionContext): Promise<Response> {
     return buildApp().request(
       path,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
       mockEnv,
       ctx
     );
@@ -366,16 +404,16 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
       null,
       'Fallback title',
       expect.any(String),
-      'user-1',
+      'user-1'
     );
     expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ taskTitle: 'Fallback title' }),
+      expect.objectContaining({ taskTitle: 'Fallback title' })
     );
     expect(mocks.generateTaskTitle).toHaveBeenCalledWith(
       expect.anything(),
       'Write a detailed implementation plan for async task titles',
-      {},
+      {}
     );
   });
 
@@ -398,15 +436,17 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     expect(titleUpdatePromise).toBeDefined();
     await titleUpdatePromise;
 
-    expect(updateSetSpy).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'Generated AI title',
-      updatedAt: expect.any(String),
-    }));
+    expect(updateSetSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Generated AI title',
+        updatedAt: expect.any(String),
+      })
+    );
     expect(mocks.updateSessionTopic).toHaveBeenCalledWith(
       expect.anything(),
       'proj-1',
       'sess-1',
-      'Generated AI title',
+      'Generated AI title'
     );
   });
 
@@ -417,7 +457,18 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
   it('task run: returns 403 and does NOT start the Task Runner when access is revoked', async () => {
     // run.ts pre-gate db sequence: task lookup (.limit) -> dependencies (.where, no limit) ->
     // installation lookup (.limit). Credential resolution is mocked at the service boundary.
-    limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
+    limitResponses.push([
+      {
+        id: 'task-1',
+        projectId: 'proj-1',
+        userId: 'owner-user',
+        status: 'ready',
+        title: 'Task One',
+        description: 'do the work',
+        outputBranch: null,
+        agentProfileHint: null,
+      },
+    ]);
     whereResponses.push([]); // no task dependencies
     limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
     mocks.getUserInstallationRepositories.mockResolvedValue([OTHER_REPO]);
@@ -430,7 +481,18 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
 
   it('task run: rejects with 403 when the repository id has drifted, before provisioning', async () => {
     mocks.requireProjectCapability.mockResolvedValue(makeProject({ githubRepoId: 42 }));
-    limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
+    limitResponses.push([
+      {
+        id: 'task-1',
+        projectId: 'proj-1',
+        userId: 'owner-user',
+        status: 'ready',
+        title: 'Task One',
+        description: 'do the work',
+        outputBranch: null,
+        agentProfileHint: null,
+      },
+    ]);
     whereResponses.push([]);
     limitResponses.push([INSTALLATION_ROW]);
     // User can still see a repo with the bound full name, but a DIFFERENT id.
@@ -438,7 +500,10 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
 
     const res = await post('/api/projects/proj-1/tasks/task-1/run', {});
 
-    await expectForbidden(res, 'GitHub repository access has changed; repository ID no longer matches');
+    await expectForbidden(
+      res,
+      'GitHub repository access has changed; repository ID no longer matches'
+    );
     expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
   });
 
@@ -447,7 +512,18 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     // the installation lookup. The optimistic-lock UPDATE goes through the raw
     // DATABASE.prepare mock (meta.changes === 1). createSession + startTaskRunnerDO
     // are mocked at their boundaries (rule 35) so the request reaches provisioning.
-    limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
+    limitResponses.push([
+      {
+        id: 'task-1',
+        projectId: 'proj-1',
+        userId: 'owner-user',
+        status: 'ready',
+        title: 'Task One',
+        description: 'do the work',
+        outputBranch: null,
+        agentProfileHint: null,
+      },
+    ]);
     whereResponses.push([]); // no task dependencies
     limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
     limitResponses.push([{ githubId: null }]); // caller githubId fallback lookup

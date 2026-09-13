@@ -1,4 +1,5 @@
 import { AMBIGUOUS_LABEL_MARKER_PREFIX } from './kv-tags';
+import { observedHardware } from './native-vm-config';
 import type { ProviderErrorCategory, VMInstance, VMStatus, VolumeInstance } from './types';
 import { ProviderError } from './types';
 import type { UpCloudLabel, UpCloudServer, UpCloudStorage } from './validation-upcloud';
@@ -22,13 +23,23 @@ export function mapUpCloudStatus(state: string): VMStatus {
 }
 
 export function toUpCloudVM(server: UpCloudServer): VMInstance {
+  const resources =
+    server.coreNumber !== undefined && server.memoryAmount !== undefined
+      ? { vcpuCount: server.coreNumber, memoryMb: server.memoryAmount }
+      : null;
+
   return {
     id: server.uuid,
     name: server.title || server.hostname,
     ip: publicUpCloudIPv4(server),
     status:
       server.state === 'started' ? 'running' : server.state === 'stopped' ? 'off' : 'initializing',
-    serverType: server.plan,
+    serverType: server.plan ?? '',
+    observedHardware: observedHardware({
+      serverType: server.plan,
+      resources,
+      unknownResourcesReason: 'UpCloud server response omitted core_number or memory_amount',
+    }),
     createdAt: server.created,
     labels: fromUpCloudLabels(server.labels),
   };

@@ -1,7 +1,9 @@
 import {
   expectObject,
   type JsonObject,
+  optionalNonNegativeInteger,
   optionalObject,
+  optionalPositiveInteger,
   optionalString,
   requireArray,
   requireNumber,
@@ -30,6 +32,7 @@ export interface DigitalOceanDropletPayload {
   created_at: string;
   networks_v4: DigitalOceanNetworkV4[];
   tags: string[];
+  size?: { vcpus: number; memory: number; disk: number };
 }
 
 export interface DigitalOceanVolumePayload {
@@ -115,7 +118,25 @@ function validateDroplet(payload: unknown, context: string): DigitalOceanDroplet
     created_at: optionalString(droplet, 'created_at', PROVIDER, context) ?? '',
     networks_v4: extractNetworksV4(droplet, context),
     tags: optionalStringArray(droplet, 'tags', context),
+    ...extractSize(droplet, context),
   };
+}
+
+function extractSize(
+  droplet: JsonObject,
+  context: string
+): { size?: DigitalOceanDropletPayload['size'] } {
+  const size = optionalObject(droplet, 'size', PROVIDER, context);
+  if (!size) return {};
+  const parsed = {
+    vcpus: optionalPositiveInteger(size, 'vcpus', PROVIDER, `${context}.size`),
+    memory: optionalPositiveInteger(size, 'memory', PROVIDER, `${context}.size`),
+    disk: optionalNonNegativeInteger(size, 'disk', PROVIDER, `${context}.size`),
+  };
+  if (parsed.vcpus === undefined || parsed.memory === undefined || parsed.disk === undefined) {
+    throw validationError(PROVIDER, `${context}.size`, 'expected vcpus, memory, and disk numbers');
+  }
+  return { size: parsed as { vcpus: number; memory: number; disk: number } };
 }
 
 function validateVolume(payload: unknown, context: string): DigitalOceanVolumePayload {

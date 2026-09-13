@@ -40,6 +40,7 @@ function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
     githubRepoId: 42,
     githubRepoNodeId: 'R_repo',
     defaultVmSize: null,
+    resourceRequirementsJson: null,
     defaultAgentType: 'claude-code',
     defaultWorkspaceProfile: null,
     defaultDevcontainerConfigName: null,
@@ -111,10 +112,14 @@ function makeTrigger(overrides: Partial<schema.TriggerRow> = {}): schema.Trigger
     cronTimezone: 'UTC',
     skipIfRunning: true,
     promptTemplate: 'Check the repo',
+    executionUserId: null,
+    executionUserAuthorizedAt: null,
+    executionUserAuthorizedBy: null,
     agentProfileId: null,
     skillId: null,
     taskMode: 'task',
     vmSizeOverride: null,
+    resourceRequirementsJson: null,
     maxConcurrent: 1,
     lastTriggeredAt: null,
     triggerCount: 0,
@@ -169,6 +174,7 @@ function makeTask(overrides: Partial<schema.Task> = {}): schema.Task {
     requestedVmSizeSource: null,
     provisionedVmSize: null,
     resourceRequirementsJson: null,
+    resourceRequirementPlanJson: null,
     resourceRequirementsSource: null,
     resolvedReservationJson: null,
     placementExplanationJson: null,
@@ -272,6 +278,13 @@ function triggerDetails(hasCoverage = false) {
     sourceType: 'cron',
     agentTarget: 'claude-code',
     computeTarget: 'hetzner',
+    // Creator and effective executor are recorded separately so a reviewer can
+    // see which one is departing after a keep-active transfer.
+    creatorUserId: 'departing-user',
+    executionUserId: null,
+    effectiveExecutionUserId: 'departing-user',
+    executionCapability: 'task:write',
+    hasAuthorizedRemainingExecutionPrincipal: true,
     remainingProjectCoverage: {
       agent: hasCoverage
         ? { attachmentId: 'attach-agent-owner', configurationId: 'config-agent-owner' }
@@ -346,6 +359,7 @@ function storedAction(input: {
 describe('project member offboarding apply', () => {
   let app: Hono<{ Bindings: Env }>;
   let selectResults: QueryResult[];
+  let executionPrincipalMembers: QueryResult;
   let updatedRows: Array<{ table: unknown; values: Record<string, unknown> }>;
   let updateReturningRows: unknown[][];
   let transactionCalls: number;
@@ -360,6 +374,11 @@ describe('project member offboarding apply', () => {
     mocks.currentUserId = 'owner-user';
     mocks.requireProjectCapability.mockResolvedValue(makeProject());
     selectResults = [];
+    // Active members available as a trigger execution principal.
+    executionPrincipalMembers = [
+      { userId: 'owner-user', role: 'owner', status: 'active' },
+      { userId: 'departing-user', role: 'admin', status: 'active' },
+    ];
     updatedRows = [];
     updateReturningRows = [];
     transactionCalls = 0;
@@ -380,13 +399,32 @@ describe('project member offboarding apply', () => {
     };
 
     const mockDb = {
-      select: vi.fn(() => makeSelectBuilder()),
+      // `enumerateOffboardingResources` now also loads the active members who
+      // could serve as a trigger execution principal. That lookup is answered
+      // out-of-band, keyed on its distinctive {userId, role, status} projection,
+      // so it does not shift the positional sequences these cases were written
+      // against. The predicate itself is proven against real project_members
+      // rows in tests/unit/services/offboarding-trigger-execution-principal.test.ts.
+      select: vi.fn((projection?: Record<string, unknown>) => {
+        const keys = projection ? Object.keys(projection).sort().join(',') : '';
+        if (keys === 'role,status,userId') {
+          const chain: Record<string, unknown> = {};
+          chain.from = vi.fn(() => chain);
+          chain.where = vi.fn(() => chain);
+          chain.then = (resolve: (value: QueryResult) => unknown) =>
+            Promise.resolve(executionPrincipalMembers).then(resolve);
+          return chain;
+        }
+        return makeSelectBuilder();
+      }),
       update: vi.fn((table: unknown) => ({
         set: vi.fn((values: Record<string, unknown>) => {
           updatedRows.push({ table, values });
           const updateChain = {
             where: vi.fn(() => updateChain),
-            returning: vi.fn(() => Promise.resolve(updateReturningRows.shift() ?? [{ id: 'updated' }])),
+            returning: vi.fn(() =>
+              Promise.resolve(updateReturningRows.shift() ?? [{ id: 'updated' }])
+            ),
             then: (resolve: () => unknown) => Promise.resolve(undefined).then(resolve),
           };
           return updateChain;
@@ -410,7 +448,9 @@ describe('project member offboarding apply', () => {
     app.route('/api/projects', projectMembersRoutes);
   });
 
-  async function apply(actions: Array<{ resourceKind: string; resourceId: string; action: string }>) {
+  async function apply(
+    actions: Array<{ resourceKind: string; resourceId: string; action: string }>
+  ) {
     return app.request(
       '/api/projects/proj-1/members/departing-user/offboarding-apply',
       {
@@ -448,7 +488,11 @@ describe('project member offboarding apply', () => {
       [],
       [],
     ];
-    updateReturningRows = [[{ id: 'trigger-personal' }], [{ id: 'task-queued' }], [{ userId: 'departing-user' }]];
+    updateReturningRows = [
+      [{ id: 'trigger-personal' }],
+      [{ id: 'task-queued' }],
+      [{ userId: 'departing-user' }],
+    ];
 
     const response = await apply([
       { resourceKind: 'trigger', resourceId: 'trigger-personal', action: 'break_and_flag' },
@@ -551,7 +595,7 @@ describe('project member offboarding apply', () => {
       [],
       [],
     ];
-    updateReturningRows = [[{ userId: 'departing-user' }]];
+    updateReturningRows = [[{ id: 'trigger-personal' }], [{ userId: 'departing-user' }]];
 
     const response = await apply([
       { resourceKind: 'trigger', resourceId: 'trigger-personal', action: 'reattach_to_project' },
@@ -566,9 +610,18 @@ describe('project member offboarding apply', () => {
         blocksRemoval: false,
       }),
     ]);
-    expect(updatedRows.some((row) => row.table === schema.triggers)).toBe(false);
     expect(updatedRows).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          table: schema.triggers,
+          values: expect.objectContaining({
+            executionUserId: 'owner-user',
+            executionUserAuthorizedBy: 'owner-user',
+            credentialBlockedReason: null,
+            credentialBlockedAt: null,
+            credentialBlockedBy: null,
+          }),
+        }),
         expect.objectContaining({
           table: schema.projectMembers,
           values: expect.objectContaining({ status: 'removed' }),

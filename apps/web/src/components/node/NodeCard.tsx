@@ -3,7 +3,7 @@ import type {
   ProviderCatalog,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS, VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
 import {
   Button,
   Card,
@@ -15,7 +15,7 @@ import { Plus, Rocket, Server } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
-import { formatVmSizeInline, lookupSizeInfo } from '../vm/format-vm-size';
+import { HardwareDetails } from '../hardware/HardwareDetails';
 import { MiniMetricBadge } from './MiniMetricBadge';
 import { NodeWorkspaceMiniCard } from './NodeWorkspaceMiniCard';
 
@@ -27,7 +27,7 @@ interface NodeCardProps {
   onStop: (id: string) => void;
   onDelete: (id: string) => void;
   onCreateWorkspace: (nodeId: string) => void;
-  /** Provider catalogs for exact VM spec display (optional). */
+  /** @deprecated Existing nodes display persisted hardware, never current catalog guesses. */
   catalogs?: ProviderCatalog[];
 }
 
@@ -64,12 +64,9 @@ export const NodeCard: FC<NodeCardProps> = ({
   onStop,
   onDelete,
   onCreateWorkspace,
-  catalogs = [],
 }) => {
   const navigate = useNavigate();
   const overflowItems = getNodeActions(node, { onStop, onDelete });
-  const sizeLabels = VM_SIZE_LABELS[node.vmSize];
-  const sizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
   const locationConfig = VM_LOCATIONS[node.vmLocation];
   const metrics = node.lastMetrics;
   const hasMetrics =
@@ -161,30 +158,19 @@ export const NodeCard: FC<NodeCardProps> = ({
               : 'Unknown'}
           </span>
           <span aria-hidden="true">&middot;</span>
-          {sizeInfo ? (
-            <>
-              <span className="font-medium text-fg-primary">{sizeInfo.type}</span>
-              <span aria-hidden="true">&middot;</span>
-              <span>
-                {sizeInfo.vcpu} vCPU, {sizeInfo.ramGb} GB RAM
-              </span>
-              <span aria-hidden="true">&middot;</span>
-              <span>{sizeInfo.storageGb} GB storage</span>
-              <span aria-hidden="true">&middot;</span>
-              <span>{sizeInfo.price}</span>
-            </>
-          ) : (
-            <span aria-label={`Size: ${sizeLabels ? sizeLabels.label : node.vmSize}`}>
-              {formatVmSizeInline(node.vmSize, null)}
-            </span>
-          )}
-          <span aria-hidden="true">&middot;</span>
           <span
             aria-label={`Location: ${locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}`}
           >
             {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}
           </span>
         </div>
+
+        <HardwareDetails hardware={node} />
+        {node.providerInstancePriceDisplay && (
+          <span className="text-xs text-fg-muted">
+            Offering price: {node.providerInstancePriceDisplay}
+          </span>
+        )}
 
         {/* Resource metrics */}
         {hasMetrics ? (
@@ -264,7 +250,9 @@ export const NodeCard: FC<NodeCardProps> = ({
         {/* Error message */}
         {node.errorMessage && (
           <div className="p-2 bg-danger-tint rounded-sm">
-            <span className="sam-type-caption text-danger">{node.errorMessage}</span>
+            <span className="sam-type-caption text-danger [overflow-wrap:anywhere]">
+              {node.errorMessage}
+            </span>
           </div>
         )}
       </Card>

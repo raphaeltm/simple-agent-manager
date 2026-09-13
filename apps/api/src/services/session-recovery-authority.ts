@@ -1,6 +1,7 @@
 import { log } from '../lib/logger';
 
 const TERMINAL_TASK_STATUSES_SQL = "'completed', 'failed', 'cancelled'";
+const LIVE_TASK_STATUSES_SQL = "'queued', 'delegated', 'in_progress', 'awaiting_followup'";
 
 export interface SessionRecoverySourceTaskGuard {
   taskId: string;
@@ -32,7 +33,22 @@ export async function isSessionRecoverySourceTaskGuardValid(
          FROM tasks source
         WHERE source.id = ?
           AND source.project_id = ?
-          AND source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+          AND (
+            source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+            OR (
+              source.status = 'cancelled'
+              AND source.superseded_by_task_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1
+                  FROM tasks marked_successor
+                 WHERE marked_successor.id = source.superseded_by_task_id
+                   AND marked_successor.project_id = source.project_id
+                   AND marked_successor.chat_session_id = ?
+                   AND marked_successor.triggered_by = 'session-recovery'
+                   AND marked_successor.status IN (${LIVE_TASK_STATUSES_SQL})
+              )
+            )
+          )
           AND (
             source.chat_session_id = ?
             OR EXISTS (
@@ -47,7 +63,13 @@ export async function isSessionRecoverySourceTaskGuardValid(
           )
         LIMIT 1`
     )
-    .bind(guard.taskId, guard.projectId, guard.chatSessionId, guard.chatSessionId)
+    .bind(
+      guard.taskId,
+      guard.projectId,
+      guard.chatSessionId,
+      guard.chatSessionId,
+      guard.chatSessionId
+    )
     .first<{ id: string }>();
   return Boolean(row);
 }
@@ -129,7 +151,9 @@ export async function restoreSessionRecoveryHandoff(
     database
       .prepare(
         `UPDATE tasks
-            SET chat_session_id = ?, updated_at = ?
+            SET chat_session_id = ?,
+                superseded_by_task_id = NULL,
+                updated_at = ?
           WHERE id = (SELECT recovery_source_task_id FROM tasks WHERE id = ?)
             AND chat_session_id IS NULL
             AND ${claimStillOwned}
@@ -204,7 +228,9 @@ export async function failAndRestoreSessionRecoveryHandoff(
     database
       .prepare(
         `UPDATE tasks
-            SET chat_session_id = ?, updated_at = ?
+            SET chat_session_id = ?,
+                superseded_by_task_id = NULL,
+                updated_at = ?
           WHERE id = (SELECT recovery_source_task_id FROM tasks WHERE id = ?)
             AND chat_session_id IS NULL
             AND EXISTS (
@@ -255,14 +281,20 @@ export async function failAndRestoreSessionRecoveryHandoff(
       ),
     database
       .prepare(
+        // `recovery_failed_at` is the anchor the wake attempt budget decays from
+        // (`session-snapshot-recovery-budget.ts`). This is the SECOND writer of
+        // `recovery_status = 'failed'`; omitting it here would leave the anchor
+        // NULL, which the budget predicate deliberately fails closed on, and a
+        // session that failed three kickoffs through this path would be stranded
+        // exactly as the 2026-09-09 incident stranded four.
         `UPDATE session_snapshots
             SET recovery_status = 'failed', recovery_error = ?,
-                recovery_claimed_at = NULL, updated_at = ?
+                recovery_claimed_at = NULL, recovery_failed_at = ?, updated_at = ?
           WHERE chat_session_id = ?
             AND recovery_task_id = ?
             AND recovery_status = 'waking'`
       )
-      .bind(input.error, now, input.chatSessionId, input.recoveryTaskId),
+      .bind(input.error, now, now, input.chatSessionId, input.recoveryTaskId),
     database
       .prepare(
         `INSERT INTO task_status_events

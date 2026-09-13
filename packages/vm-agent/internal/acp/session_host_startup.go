@@ -42,7 +42,22 @@ func (h *SessionHost) startAgentWithSessionMode(ctx context.Context, agentType s
 	h.process = process
 	h.attachACPConnection(process, agentType)
 	go h.monitorStderr(process)
-	go h.monitorProcessExit(ctx, process, agentType, cred, startup.settings)
+	// The monitor OUTLIVES this call. It restarts the agent after a crash or an
+	// intentional prompt-cancel process stop — minutes or hours later. `ctx`
+	// belongs to whatever drove THIS startup: an HTTP snapshot-restore request
+	// (server.handleRestoreAgentSession -> RestoreAgent) or a viewer WebSocket
+	// connection (Gateway.handleMessage -> SelectAgent). Both are cancelled as
+	// soon as that request/connection ends, so capturing `ctx` here means every
+	// later restart runs its container exec, auth-file write and ACP handshake
+	// under an already-cancelled context and fails with "context canceled",
+	// leaving the host in HostError with no usable agent. Hand the monitor the
+	// host's own lifecycle context, which only Stop() cancels — and it takes no
+	// context parameter at all, so there is no way to hand it this one.
+	//
+	// Startup I/O below deliberately KEEPS `ctx`: the initial attempt should
+	// still abort when its own request is abandoned. Host lifetime and
+	// startup-attempt lifetime are separate on purpose.
+	go h.monitorProcessExit(process, agentType, cred, startup.settings)
 
 	return h.establishACPSession(ctx, agentType, startup.settings, previousAcpSessionID, requireLoadSession)
 }
@@ -57,6 +72,7 @@ type agentStartup struct {
 
 const codexACPManagedConfigEnv = `CODEX_CONFIG={"sandbox_mode":"danger-full-access","approval_policy":"never"}`
 const codexACPManagedAgentModeEnv = "INITIAL_AGENT_MODE=agent-full-access"
+const codexACPManagedCodexPathEnv = "CODEX_PATH=codex"
 
 func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) (*agentStartup, error) {
 	var containerID string
@@ -475,15 +491,19 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: write SAM MCP config.toml: %w", err)
 	}
-	// codex-acp@1.1.2 ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
+	// codex-acp (verified through 1.10.0) ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
 	// each app-server thread, but every turn then applies the ACP agent mode's
 	// approval and sandbox policy on top. Select the wrapper's supported full-access
 	// mode as well so main turns and spawned subagents cannot fall back to bwrap
-	// inside SAM-managed containers.
+	// inside SAM-managed containers. CODEX_PATH makes the adapter execute the
+	// explicitly installed and version-validated companion instead of resolving a
+	// potentially different nested @openai/codex dependency.
 	startup.envVars = removeEnvVar(startup.envVars, "CODEX_CONFIG")
 	startup.envVars = removeEnvVar(startup.envVars, "INITIAL_AGENT_MODE")
+	startup.envVars = removeEnvVar(startup.envVars, "CODEX_PATH")
 	startup.envVars = append(startup.envVars, codexACPManagedConfigEnv)
 	startup.envVars = append(startup.envVars, codexACPManagedAgentModeEnv)
+	startup.envVars = append(startup.envVars, codexACPManagedCodexPathEnv)
 	for _, envVar := range codexMcpEnvVars {
 		key, _, ok := strings.Cut(envVar, "=")
 		if ok {
@@ -565,6 +585,6 @@ func (h *SessionHost) attachACPConnection(process agentProcess, agentType string
 	if serializeTimeout <= 0 {
 		serializeTimeout = DefaultNotifSerializeTimeout
 	}
-	orderedStdout := newOrderedPipe(process.Stdout(), processedCh, h.ctx.Done(), serializeTimeout)
+	orderedStdout := newOrderedPipe(process.Stdout(), processedCh, h.lifecycleContext().Done(), serializeTimeout)
 	h.acpConn = acpsdk.NewClientSideConnection(client, process.Stdin(), orderedStdout)
 }

@@ -91,6 +91,7 @@ function seedSnapshot(
     status?: string;
     degradation?: string;
     recoveryAttempts?: number;
+    recoveryFailedAt?: string | null;
   } = {}
 ): void {
   sqlite
@@ -98,8 +99,8 @@ function seedSnapshot(
       `INSERT INTO session_snapshots (id, project_id, workspace_id, node_id, user_id, chat_session_id,
                                     runtime, status, degradation, manifest_r2_key, home_r2_key,
                                     expires_at, sleeping_at, sleep_status, recovery_attempts,
-                                    sleep_attempts, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest-key', 'home-key', ?, ?, ?, ?, 0, ?, ?)`
+                                    recovery_failed_at, sleep_attempts, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest-key', 'home-key', ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       'snapshot-1',
@@ -113,6 +114,7 @@ function seedSnapshot(
       overrides.sleepingAt === undefined ? iso(-9 * 60 * 1000) : overrides.sleepingAt,
       overrides.sleepStatus === undefined ? 'sleeping' : overrides.sleepStatus,
       overrides.recoveryAttempts ?? 0,
+      overrides.recoveryFailedAt ?? null,
       iso(-3_600_000),
       iso(0)
     );
@@ -143,14 +145,15 @@ function seedTask(
     recoverySourceTaskId?: string | null;
     createdAt?: string;
     chatSessionId?: string | null;
+    supersededByTaskId?: string | null;
   } = {}
 ): void {
   sqlite
     .prepare(
       `INSERT INTO tasks (id, project_id, user_id, workspace_id, title, status, priority,
-                        triggered_by, recovery_source_task_id, chat_session_id,
+                        triggered_by, recovery_source_task_id, chat_session_id, superseded_by_task_id,
                         created_by, created_at, updated_at)
-     VALUES (?, ?, 'user-1', ?, 'task', ?, 0, ?, ?, ?, 'user-1', ?, ?)`
+     VALUES (?, ?, 'user-1', ?, 'task', ?, 0, ?, ?, ?, ?, 'user-1', ?, ?)`
     )
     .run(
       id,
@@ -160,6 +163,7 @@ function seedTask(
       overrides.triggeredBy ?? 'user',
       overrides.recoverySourceTaskId ?? null,
       overrides.chatSessionId === undefined ? CHAT_SESSION_ID : overrides.chatSessionId,
+      overrides.supersededByTaskId ?? null,
       overrides.createdAt ?? iso(-3_600_000),
       iso(0)
     );
@@ -286,6 +290,24 @@ describe('stuck-task liveness for a slept session', () => {
     });
   });
 
+  // The 2026-09-09 incident, through the REAL cron adapter: a spent budget whose
+  // last clean failure has aged out is still wakeable by the resumer, so the
+  // destroyer must not terminalize it (`.claude/rules/58`). Exercises the D1 read
+  // and the row->classifier mapping of `recovery_failed_at`, which the pure
+  // classifier test cannot. The undecayed row is the discriminating control.
+  it.each([
+    ['decayed', -60 * 60 * 1000, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', -60 * 1000, true, 'workspace_deleted'],
+  ])('cron adapter: %s spent budget', async (_label, failedAtOffsetMs, conclusive, reason) => {
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(failedAtOffsetMs) });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive,
+      reason,
+    });
+  });
+
   it('withholds a death verdict when the cron adapter snapshot read fails', async () => {
     // Rule 44 symmetry: the cron adapter has its own try/catch, so it needs its
     // own error-path proof rather than inheriting the DO adapter's.
@@ -403,6 +425,23 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
       live: false,
       conclusive: true,
       reason: 'workspace_deleted',
+    });
+  });
+
+  // `.claude/rules/61`: the DO destroyer is a separate entry point from the cron
+  // one and needs its own proof that the decayed budget reaches it.
+  it.each([
+    ['decayed', -60 * 60 * 1000, false, 'workspace_deleted_snapshot_resumable'],
+    ['undecayed', -60 * 1000, true, 'workspace_deleted'],
+  ])('DO adapter: %s spent budget', async (_label, failedAtOffsetMs, conclusive, reason) => {
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 3, recoveryFailedAt: iso(failedAtOffsetMs) });
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(getLocalTaskRuntimeLiveness(sql, doEnv(), doTask)).resolves.toMatchObject({
+      live: false,
+      conclusive,
+      reason,
     });
   });
 
@@ -527,15 +566,15 @@ describe('ProjectData idle-cleanup liveness for a stale VM node heartbeat', () =
     });
   });
 
-  it('returns conclusive node_not_live only after a failed node health probe', async () => {
+  it('preserves the task after a failed node health probe response', async () => {
     fetchWithTimeoutMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
 
     const verdict = await getLocalTaskRuntimeLiveness(sqlWithLiveAcpSession(), doEnv(), doTask);
 
     expect(verdict).toMatchObject({
       live: false,
-      conclusive: true,
-      reason: 'node_not_live',
+      conclusive: false,
+      reason: 'node_health_probe_failed',
     });
   });
 
@@ -665,15 +704,28 @@ describe('task supersession — a successful wake must not fail its predecessor'
 
   /** The wake successor `createRecoveryTask` mints, with a fresh ULID. */
   function seedRecoverySuccessor(
-    overrides: { status?: string; rootId?: string; createdAt?: string; id?: string } = {}
+    overrides: {
+      status?: string;
+      rootId?: string;
+      createdAt?: string;
+      id?: string;
+      predecessorId?: string;
+      markPredecessor?: boolean;
+    } = {}
   ): void {
-    seedTask(overrides.id ?? SUCCESSOR_ID, {
+    const successorId = overrides.id ?? SUCCESSOR_ID;
+    seedTask(successorId, {
       status: overrides.status ?? 'in_progress',
       triggeredBy: 'session-recovery',
       recoverySourceTaskId: overrides.rootId ?? TASK_ID,
       createdAt: overrides.createdAt ?? iso(-60_000),
       chatSessionId: CHAT_SESSION_ID,
     });
+    if (overrides.markPredecessor !== false) {
+      sqlite
+        .prepare(`UPDATE tasks SET superseded_by_task_id = ? WHERE id = ?`)
+        .run(successorId, overrides.predecessorId ?? TASK_ID);
+    }
   }
 
   /**
@@ -689,8 +741,8 @@ describe('task supersession — a successful wake must not fail its predecessor'
 
     await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
       live: false,
-      conclusive: false,
-      reason: 'workspace_deleted_superseded_by_live_wake',
+      conclusive: true,
+      reason: 'workspace_deleted_superseded_by_completed_wake',
     });
   });
 
@@ -713,7 +765,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
       chatSessionId: null,
     });
     // The newest wake also points at ROOT, not at MIDDLE.
-    seedRecoverySuccessor({ rootId: ROOT_ID, createdAt: iso(-60_000) });
+    seedRecoverySuccessor({ rootId: ROOT_ID, createdAt: iso(-60_000), predecessorId: MIDDLE_ID });
     seedWorkspace('deleted');
 
     await expect(
@@ -723,8 +775,8 @@ describe('task supersession — a successful wake must not fail its predecessor'
         workspace_id: WORKSPACE_ID,
       })
     ).resolves.toMatchObject({
-      conclusive: false,
-      reason: 'workspace_deleted_superseded_by_live_wake',
+      conclusive: true,
+      reason: 'workspace_deleted_superseded_by_completed_wake',
     });
   });
 
@@ -750,6 +802,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
       id: DIRECT_CHILD_ID,
       rootId: MIDDLE_ID,
       createdAt: iso(-6 * 60_000),
+      predecessorId: MIDDLE_ID,
     });
     seedWorkspace('deleted');
     sqlite.prepare(`UPDATE workspaces SET chat_session_id = NULL WHERE id = ?`).run(WORKSPACE_ID);
@@ -761,8 +814,8 @@ describe('task supersession — a successful wake must not fail its predecessor'
         workspace_id: WORKSPACE_ID,
       })
     ).resolves.toMatchObject({
-      conclusive: false,
-      reason: 'workspace_deleted_superseded_by_live_wake',
+      conclusive: true,
+      reason: 'workspace_deleted_superseded_by_completed_wake',
     });
   });
 
@@ -782,6 +835,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
       rootId: MIDDLE_ID,
       status: 'completed',
       createdAt: iso(-6 * 60_000),
+      predecessorId: MIDDLE_ID,
     });
     seedWorkspace('deleted');
     sqlite.prepare(`UPDATE workspaces SET chat_session_id = NULL WHERE id = ?`).run(WORKSPACE_ID);
@@ -847,7 +901,8 @@ describe('task supersession — a successful wake must not fail its predecessor'
     seedRecoverySuccessor({ status: 'in_progress' });
 
     await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
-      conclusive: false,
+      conclusive: true,
+      reason: 'workspace_deleted_superseded_by_completed_wake',
     });
 
     sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`).run(SUCCESSOR_ID);
@@ -872,7 +927,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
     const counting = {
       DATABASE: {
         prepare: (query: string) => {
-          if (query.includes('FROM tasks self')) supersessionReads++;
+          if (query.includes('supersession_chain')) supersessionReads++;
           return createSqliteD1(sqlite).prepare(query);
         },
       },
@@ -909,15 +964,20 @@ describe('task supersession — a successful wake must not fail its predecessor'
   it('preserves the ROOT of a chain that still has a live descendant', async () => {
     const ROOT_ID = '01M064TG00ROOT00000000000';
     const MIDDLE_ID = '01M064TG11MIDDLE000000000';
-    seedTask(ROOT_ID, { status: 'in_progress', createdAt: iso(-7_200_000), chatSessionId: null });
+    seedTask(ROOT_ID, {
+      status: 'in_progress',
+      createdAt: iso(-7_200_000),
+      chatSessionId: null,
+      supersededByTaskId: MIDDLE_ID,
+    });
     seedTask(MIDDLE_ID, {
-      status: 'failed',
+      status: 'cancelled',
       triggeredBy: 'session-recovery',
       recoverySourceTaskId: ROOT_ID,
       createdAt: iso(-3_600_000),
       chatSessionId: null,
     });
-    seedRecoverySuccessor({ rootId: ROOT_ID, createdAt: iso(-60_000) });
+    seedRecoverySuccessor({ rootId: ROOT_ID, createdAt: iso(-60_000), predecessorId: MIDDLE_ID });
     seedWorkspace('deleted');
 
     await expect(
@@ -927,8 +987,8 @@ describe('task supersession — a successful wake must not fail its predecessor'
         workspace_id: WORKSPACE_ID,
       })
     ).resolves.toMatchObject({
-      conclusive: false,
-      reason: 'workspace_deleted_superseded_by_live_wake',
+      conclusive: true,
+      reason: 'workspace_deleted_superseded_by_completed_wake',
     });
   });
 
@@ -939,8 +999,8 @@ describe('task supersession — a successful wake must not fail its predecessor'
     seedRecoverySuccessor();
 
     await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
-      conclusive: false,
-      reason: 'workspace_stopped_superseded_by_live_wake',
+      conclusive: true,
+      reason: 'workspace_stopped_superseded_by_completed_wake',
     });
   });
 
@@ -948,7 +1008,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
   it('does not treat an older family member as a superseding wake', async () => {
     seedWorkspace('deleted');
     nullOutHandoffBindings();
-    seedRecoverySuccessor({ createdAt: iso(-7_200_000) });
+    seedRecoverySuccessor({ createdAt: iso(-7_200_000), markPredecessor: false });
 
     await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
       conclusive: true,
@@ -998,7 +1058,7 @@ describe('task supersession — a successful wake must not fail its predecessor'
     const broken = {
       DATABASE: {
         prepare: (query: string) =>
-          query.includes('FROM tasks self')
+          query.includes('supersession_chain')
             ? { bind: () => ({ first: () => Promise.reject(new Error('D1 unavailable')) }) }
             : createSqliteD1(sqlite).prepare(query),
       },
@@ -1025,8 +1085,8 @@ describe('task supersession — a successful wake must not fail its predecessor'
         workspaceId: WORKSPACE_ID,
       })
     ).resolves.toMatchObject({
-      conclusive: false,
-      reason: 'workspace_deleted_superseded_by_live_wake',
+      conclusive: true,
+      reason: 'workspace_deleted_superseded_by_completed_wake',
     });
   });
 
@@ -1060,8 +1120,8 @@ describe('task supersession — a successful wake must not fail its predecessor'
     await expect(
       getTaskRuntimeLiveness(env, { id: TASK_ID, project_id: PROJECT_ID, workspace_id: null })
     ).resolves.toMatchObject({
-      conclusive: false,
-      reason: 'workspace_missing_superseded_by_live_wake',
+      conclusive: true,
+      reason: 'workspace_missing_superseded_by_completed_wake',
     });
   });
 });

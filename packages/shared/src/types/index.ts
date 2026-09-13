@@ -47,8 +47,11 @@ export type {
   CapacityPlacementSnapshot,
   CapacityPool,
   CapacityPoolCandidate,
+  CapacityPoolConfigurationState,
   CapacityPoolFallback,
+  CapacityPoolPlacementSettings,
   CapacityPoolScope,
+  CapacityPoolSelectionWeights,
   CapacityPoolStatus,
   CapacityPoolStrategy,
   CapacitySourceIdentity,
@@ -56,30 +59,55 @@ export type {
   CapacityWorkloadRole,
   DefaultCapacityPoolCandidateCatalogAddition,
   DefaultCapacityPoolCandidateStatusUpdate,
+  DefaultCapacityPoolEffectiveState,
   DefaultCapacityPoolPolicyUpdate,
   DefaultCapacityPoolScopeSummary,
   DefaultCapacityPoolSummary,
   DefaultCapacityPoolUpdateRequest,
   ProjectDefaultCapacityPoolsResponse,
+  SafeCapacityPoolPlacementSettingsSummary,
+  SafeEffectiveCapacityPoolReason,
+  SafeEffectiveCapacityPoolSummary,
 } from './capacity-pool';
 export {
   CAPACITY_CREDENTIAL_SOURCES,
   CAPACITY_EXHAUSTION_POLICIES,
   CAPACITY_PLACEMENT_CREDENTIAL_SOURCES,
+  CAPACITY_POOL_CONFIGURATION_STATES,
   CAPACITY_POOL_SCOPES,
   CAPACITY_POOL_STATUSES,
   CAPACITY_POOL_STRATEGIES,
   CAPACITY_SOURCE_KINDS,
   CAPACITY_WORKLOAD_ROLES,
+  DEFAULT_CAPACITY_POOL_EFFECTIVE_STATES,
   isCapacityCredentialSource,
   isCapacityExhaustionPolicy,
   isCapacityPlacementCredentialSource,
+  isCapacityPoolConfigurationState,
   isCapacityPoolScope,
   isCapacityPoolStatus,
   isCapacityPoolStrategy,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
+  SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
 } from './capacity-pool';
+
+// Placement diagnostics (why-this-node / why-queued / why-rejected)
+export type {
+  PlacementAttemptDiagnostic,
+  PlacementAuthorityDiagnostic,
+  PlacementDecisionDiagnostics,
+  PlacementHostDiagnostic,
+  PlacementQueueDiagnostic,
+  PlacementResourceEvidence,
+  PlacementResourceFacts,
+  PlacementRolloutDiagnostic,
+} from './placement-diagnostics';
+export {
+  assertPlacementDiagnosticsAreUserSafe,
+  PLACEMENT_DIAGNOSTICS_FORBIDDEN_KEYS,
+  PLACEMENT_DIAGNOSTICS_VERSION,
+} from './placement-diagnostics';
 
 // GitHub
 export type {
@@ -158,12 +186,18 @@ export type {
   LocationInfo,
   ProviderCatalog,
   ProviderCatalogOfferingInfo,
+  ProviderCatalogRefreshOrigin,
+  ProviderCatalogRefreshStatus,
   ProviderCatalogResponse,
   ProviderInstanceCatalogSource,
   ProviderInstanceOffering,
   SizeInfo,
 } from './provider';
-export { isProviderInstanceCatalogSource, PROVIDER_INSTANCE_CATALOG_SOURCES } from './provider';
+export {
+  isProviderInstanceCatalogSource,
+  PROVIDER_CATALOG_REFRESH_ORIGINS,
+  PROVIDER_INSTANCE_CATALOG_SOURCES,
+} from './provider';
 
 // Project
 export type {
@@ -234,6 +268,7 @@ export type {
 
 // Task
 export type {
+  AgentActivityState,
   CompletionEvidence,
   CompletionEvidenceVerificationKind,
   CompletionTestRun,
@@ -328,6 +363,7 @@ export { PROJECT_EVENT_SUBSCRIPTION_CALLER_KINDS, PROJECT_EVENT_SUBSCRIPTION_OWN
 // prettier-ignore
 export { PROJECT_EVENT_CONTRACT_VERSION, PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS, PROJECT_EVENT_DELIVERY_ADAPTER_KINDS, PROJECT_EVENT_DELIVERY_ATTEMPT_STATES, PROJECT_EVENT_DELIVERY_BATCH_STATES, PROJECT_EVENT_DELIVERY_CAPABILITY_MODES, PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS, PROJECT_EVENT_DELIVERY_TARGET_STATES, PROJECT_EVENT_FILTER_FIELDS, PROJECT_EVENT_FILTER_VERSION, PROJECT_EVENT_REQUESTED_DELIVERY_MODES, PROJECT_EVENT_RESOLVED_DELIVERY_MODES, PROJECT_EVENT_SEVERITIES, PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES, PROJECT_EVENT_SUBSCRIPTION_STATES } from './project-events';
 export {
+  AGENT_ACTIVITY_STATES,
   ATTACHMENT_DEFAULTS,
   COMPLETION_EVIDENCE_VERIFICATION_KINDS,
   EXECUTION_STEP_LABELS,
@@ -592,6 +628,7 @@ export type {
   ComputeUsagePeriod,
   ComputeUsageRecord,
   ComputeUsageResponse,
+  ComputeVcpuCountSource,
   NodeUsageRecord,
 } from './compute-usage';
 
@@ -777,8 +814,12 @@ export type {
 
 // Resource Requirements & Reservations
 export type {
+  LegacyVmSizeResolutionInput,
   PlacementExplanation,
   ResolvedResourceReservation,
+  ResourceRequirementField,
+  ResourceRequirementFieldProvenance,
+  ResourceRequirementProvenance,
   ResourceRequirements,
   ResourceRequirementsSource,
   ResourceResolutionInput,

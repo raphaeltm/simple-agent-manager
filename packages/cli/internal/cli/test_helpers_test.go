@@ -64,6 +64,14 @@ func captureJSONRequest(t *testing.T, responseBody string, status int) (HTTPDoer
 	return doer, captured
 }
 
+func noRequestDoer(t *testing.T) HTTPDoer {
+	t.Helper()
+	return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		t.Fatalf("unexpected HTTP request: %s %s", req.Method, req.URL.String())
+		return jsonResponse(`{}`, http.StatusInternalServerError), nil
+	})
+}
+
 type fakeRunner struct {
 	goos     string
 	goarch   string

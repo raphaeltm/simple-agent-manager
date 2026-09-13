@@ -79,7 +79,7 @@ export async function claimSessionSnapshotSleep(
   );
   const repairableStrandedFailure = and(
     eq(schema.sessionSnapshots.sleepStatus, 'failed'),
-    isNull(schema.sessionSnapshots.sleepAfter),
+    or(isNull(schema.sessionSnapshots.sleepAfter), lte(schema.sessionSnapshots.sleepAfter, nowIso)),
     or(
       eq(schema.sessionSnapshots.status, 'degraded'),
       isNotNull(schema.sessionSnapshots.captureGeneration)
@@ -152,6 +152,7 @@ export async function claimSessionSnapshotSleep(
     .set({
       sleepClaimId: input.claimId,
       sleepClaimedAt: nowIso,
+      sleepStoppingSince: sql`COALESCE(${schema.sessionSnapshots.sleepStoppingSince}, ${schema.sessionSnapshots.sleepClaimedAt}, ${schema.sessionSnapshots.updatedAt}, ${schema.sessionSnapshots.createdAt}, ${nowIso})`,
       sleepAfter: null,
       updatedAt: nowIso,
     })
@@ -206,13 +207,15 @@ export async function beginSessionSnapshotStopping(
   claimId: string,
   now = new Date()
 ): Promise<boolean> {
+  const nowIso = now.toISOString();
   const result = await db
     .update(schema.sessionSnapshots)
     .set({
       sleepStatus: 'stopping',
       sleepAfter: null,
-      sleepClaimedAt: now.toISOString(),
-      updatedAt: now.toISOString(),
+      sleepClaimedAt: nowIso,
+      sleepStoppingSince: sql`COALESCE(${schema.sessionSnapshots.sleepStoppingSince}, ${nowIso})`,
+      updatedAt: nowIso,
     })
     .where(
       and(
@@ -257,42 +260,7 @@ export async function deferSessionSnapshotStopping(
   return (result.meta.changes ?? 0) > 0;
 }
 
-export async function failSessionSnapshotSleepBeforeTeardown(
-  db: Db,
-  env: Env,
-  chatSessionId: string,
-  claimId: string,
-  error: string,
-  now = new Date()
-): Promise<boolean> {
-  const retryDelayMs = parsePositiveInt(
-    (env as SnapshotLeaseEnv).SESSION_SLEEP_RETRY_DELAY_MS,
-    DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS
-  );
-  const maxAttempts = parsePositiveInt(
-    (env as SnapshotLeaseEnv).SESSION_SLEEP_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
-  );
-  const retryAt = new Date(now.getTime() + retryDelayMs).toISOString();
-  const result = await db
-    .update(schema.sessionSnapshots)
-    .set({
-      sleepStatus: 'failed',
-      sleepAfter: sql`CASE WHEN ${schema.sessionSnapshots.sleepAttempts} >= ${maxAttempts} THEN NULL ELSE ${retryAt} END`,
-      sleepError: sessionLifecycleError(env, error),
-      sleepClaimId: null,
-      sleepClaimedAt: null,
-      updatedAt: now.toISOString(),
-    })
-    .where(
-      and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        eq(schema.sessionSnapshots.sleepStatus, 'preparing'),
-        eq(schema.sessionSnapshots.sleepClaimId, claimId)
-      )
-    );
-  return (result.meta.changes ?? 0) > 0;
-}
+export { failSessionSnapshotSleepBeforeTeardown } from './session-snapshot-sleep-failure';
 
 /**
  * Defer an automatic sleep before a claim is consumed. Activity/idle
@@ -387,6 +355,7 @@ async function markSessionSnapshotSleepingWithConfig(
       recoveryStatus: null,
       recoveryError: null,
       recoveryAttempts: 0,
+      recoveryFailedAt: null,
       sleepStatus: 'sleeping',
       sleepAfter: null,
       sleepError: warning,
@@ -478,6 +447,7 @@ export async function scheduleSessionSnapshotSleep(
       sleepError: null,
       sleepClaimId: null,
       sleepClaimedAt: null,
+      sleepStoppingSince: null,
       updatedAt: now.toISOString(),
     })
     .where(
@@ -493,25 +463,4 @@ export async function scheduleSessionSnapshotSleep(
     );
 }
 
-export async function cancelScheduledSessionSleep(db: Db, chatSessionId: string): Promise<void> {
-  await db
-    .update(schema.sessionSnapshots)
-    .set({
-      sleepStatus: null,
-      sleepAfter: null,
-      sleepError: null,
-      sleepClaimId: null,
-      sleepClaimedAt: null,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(
-      and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        isNull(schema.sessionSnapshots.sleepingAt),
-        or(
-          isNull(schema.sessionSnapshots.sleepStatus),
-          inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed', 'preparing'])
-        )
-      )
-    );
-}
+export { cancelScheduledSessionSleep } from './session-snapshot-sleep-cancel';

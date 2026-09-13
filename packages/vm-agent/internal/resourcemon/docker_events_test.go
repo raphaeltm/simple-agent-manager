@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -120,7 +123,7 @@ func TestDefaultDockerEventCommandArgs(t *testing.T) {
 		t.Fatalf("Args=%#v, want %#v", cmd.Args, want)
 	}
 	for i := range want {
-		if cmd.Args[i] != want[i] {
+		if (i == 0 && filepath.Base(cmd.Args[i]) != want[i]) || (i != 0 && cmd.Args[i] != want[i]) {
 			t.Fatalf("Args[%d]=%q, want %q; full args=%#v", i, cmd.Args[i], want[i], cmd.Args)
 		}
 	}
@@ -173,7 +176,95 @@ func TestDockerEventSubscriberHelperProcess(t *testing.T) {
 	if os.Getenv("SAM_TEST_DOCKER_EVENT_HELPER") != "1" {
 		return
 	}
+	if os.Getenv("SAM_TEST_DOCKER_EVENT_OVERSIZED") == "1" {
+		_, _ = fmt.Fprintln(os.Stdout, strings.Repeat("x", 128*1024))
+		select {}
+	}
 	_, _ = fmt.Fprintln(os.Stdout, `{"status":"oom","id":"container-helper","Type":"container","Action":"oom","Actor":{"ID":"container-helper","Attributes":{"name":"helper","sam.workspace.id":"ws-helper"}}}`)
 	_ = os.Stdout.Sync()
+	if os.Getenv("SAM_TEST_DOCKER_EVENT_EXIT") == "1" {
+		os.Exit(0)
+	}
 	select {}
+}
+
+func TestDockerEventSubscriberReconnectsAfterStartFailureAndDisconnect(t *testing.T) {
+	var attempts atomic.Int32
+	subscriber := NewDockerEventSubscriber(DockerEventSubscriberConfig{
+		ReconnectInterval: 10 * time.Millisecond,
+		CommandFactory: func(ctx context.Context) *exec.Cmd {
+			if attempts.Add(1) == 1 {
+				return exec.CommandContext(ctx, "/nonexistent-sam-test-docker")
+			}
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestDockerEventSubscriberHelperProcess", "--")
+			cmd.Env = append(os.Environ(), "SAM_TEST_DOCKER_EVENT_HELPER=1", "SAM_TEST_DOCKER_EVENT_EXIT=1")
+			return cmd
+		},
+	})
+	if err := subscriber.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer subscriber.Close()
+	for i := 0; i < 2; i++ {
+		select {
+		case event, ok := <-subscriber.Events():
+			if !ok || event.ContainerID != "container-helper" {
+				t.Fatalf("stream ended or lost event: %#v", event)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("stream did not reconnect")
+		}
+	}
+	if attempts.Load() < 3 {
+		t.Fatalf("attempts=%d", attempts.Load())
+	}
+}
+
+func TestDockerEventSubscriberOversizedLineDoesNotHangReconnect(t *testing.T) {
+	var attempts atomic.Int32
+	subscriber := NewDockerEventSubscriber(DockerEventSubscriberConfig{
+		ReconnectInterval: 10 * time.Millisecond,
+		CommandFactory: func(ctx context.Context) *exec.Cmd {
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=TestDockerEventSubscriberHelperProcess", "--")
+			cmd.Env = append(os.Environ(), "SAM_TEST_DOCKER_EVENT_HELPER=1")
+			if attempts.Add(1) == 1 {
+				cmd.Env = append(cmd.Env, "SAM_TEST_DOCKER_EVENT_OVERSIZED=1")
+			}
+			return cmd
+		},
+	})
+	if err := subscriber.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer subscriber.Close()
+	select {
+	case event := <-subscriber.Events():
+		if event.ContainerID != "container-helper" {
+			t.Fatalf("unexpected event %#v", event)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("oversized stream blocked reconnect")
+	}
+}
+
+func TestDockerEventSubscriberCloseCancelsReconnectDelay(t *testing.T) {
+	attempted := make(chan struct{}, 1)
+	subscriber := NewDockerEventSubscriber(DockerEventSubscriberConfig{
+		ReconnectInterval: time.Hour,
+		CommandFactory: func(ctx context.Context) *exec.Cmd {
+			attempted <- struct{}{}
+			return exec.CommandContext(ctx, "/nonexistent-sam-test-docker")
+		},
+	})
+	if err := subscriber.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	<-attempted
+	done := make(chan struct{})
+	go func() { _ = subscriber.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("close waited for reconnect timer")
+	}
 }

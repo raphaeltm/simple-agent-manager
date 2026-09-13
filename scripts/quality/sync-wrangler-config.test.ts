@@ -5,7 +5,9 @@ import {
   detectArtifactsAvailable,
   ensureTomlMap,
   generateApiWorkerEnv,
+  listEnvironmentVarOverrides,
   resolveArtifactsBindingEnabled,
+  writeDeploymentMarkers,
 } from '../deploy/sync-wrangler-config.js';
 import type { PulumiOutputs, WranglerToml } from '../deploy/types.js';
 
@@ -46,6 +48,33 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it.each([
+    { migrationTag: null, tailExists: false, bootstrap: true, tailSync: true },
+    { migrationTag: null, tailExists: true, bootstrap: true, tailSync: false },
+    { migrationTag: 'v1', tailExists: false, bootstrap: false, tailSync: true },
+    { migrationTag: 'v1', tailExists: true, bootstrap: false, tailSync: false },
+  ])('separates API bootstrap from Tail repair: %j', (state) => {
+    const directory = mkdtempSync(join(tmpdir(), 'sam-deploy-markers-'));
+    try {
+      // Prior failed runs must not leave bootstrap markers for an existing API.
+      writeDeploymentMarkers(null, false, directory);
+      writeDeploymentMarkers(state.migrationTag, state.tailExists, directory);
+      expect(existsSync(join(directory, 'api-worker-first-deploy'))).toBe(state.bootstrap);
+      expect(existsSync(join(directory, 'tail-worker-first-deploy'))).toBe(state.tailSync);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('omits an empty VM-agent release from the generated Worker configuration', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('VM_AGENT_REQUIRED_VERSION', '');
+
+    const vars = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
+
+    expect(vars).not.toHaveProperty('VM_AGENT_REQUIRED_VERSION');
+  });
+
   it('passes deployment image-resolution limits into generated deployments', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('DEPLOYMENT_IMAGE_RESOLVE_REQUEST_TIMEOUT_MS', '1000');
@@ -65,6 +94,49 @@ describe('sync wrangler config', () => {
       DEPLOYMENT_IMAGE_RESOLVE_MAX_CONCURRENT_FETCHES: '2',
       DEPLOYMENT_IMAGE_RESOLVE_MAX_SERVICES: '1',
     });
+  });
+
+  it('logs every GitHub Environment override that differs from the checked-in wrangler.toml value', () => {
+    // PR #2023 flipped this var to "true" in wrangler.toml while the production Environment
+    // still pinned "false"; the Worker shipped "false" and nothing in the deploy log said so.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED', 'false');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS', '10');
+    vi.stubEnv('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS', '3600000');
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const topLevel: WranglerToml = {
+      vars: {
+        PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'true',
+        PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
+      },
+    };
+
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null);
+
+    // The override still wins (that is the designed emergency-brake path)...
+    expect(envConfig.vars).toMatchObject({
+      PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED: 'false',
+      PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS: '10',
+      PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS: '3600000',
+    });
+    // ...but it is now visible in the deploy log, and only when it actually differs.
+    const lines = log.mock.calls.map((call) => call.map(String).join(' '));
+    expect(lines).toContainEqual(
+      expect.stringContaining(
+        'Environment override: PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED="false" replaces wrangler.toml "true"'
+      )
+    );
+    expect(lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS'))).toEqual(
+      []
+    );
+    // A var absent from wrangler.toml is an addition, not an override.
+    expect(
+      lines.filter((line) => line.includes('PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS'))
+    ).toEqual([]);
+    expect(
+      listEnvironmentVarOverrides({ A: 'true', B: 'same' }, { A: 'false', B: 'same', C: 'added' })
+    ).toEqual([{ name: 'A', checkedIn: 'true', override: 'false' }]);
+    expect(listEnvironmentVarOverrides(undefined, { A: 'false' })).toEqual([]);
   });
 
   it('propagates the top-level CPU limit into generated deployment environments', () => {
@@ -189,6 +261,15 @@ describe('sync wrangler config', () => {
     expect(unset).not.toHaveProperty('CF_CONTAINER_RECOVERY_MAX_ATTEMPTS');
     expect(unset).not.toHaveProperty('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS');
     expect(unset).not.toHaveProperty('CF_CONTAINER_CLONE_FILTER');
+    for (const name of [
+      'ACP_ACTIVITY_ADMISSION_ENABLED',
+      'ACP_ACTIVITY_COALESCE_WINDOW_MS',
+      'ACP_ACTIVITY_COALESCE_TTL_MS',
+      'ACP_ACTIVITY_COALESCE_MAX_PENDING',
+      'ACP_ACTIVITY_BINDING_CACHE_TTL_MS',
+      'ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES',
+    ])
+      expect(unset).not.toHaveProperty(name);
     expect(unset).not.toHaveProperty('PLATFORM_FEEDBACK_PROJECT_ID');
     for (const name of [
       'REPORT_ISSUE_TITLE_MAX_LENGTH',
@@ -252,6 +333,12 @@ describe('sync wrangler config', () => {
     vi.stubEnv('CF_CONTAINER_RECOVERY_MAX_ATTEMPTS', '3');
     vi.stubEnv('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS', '180000');
     vi.stubEnv('CF_CONTAINER_CLONE_FILTER', 'off');
+    vi.stubEnv('ACP_ACTIVITY_ADMISSION_ENABLED', 'false');
+    vi.stubEnv('ACP_ACTIVITY_COALESCE_WINDOW_MS', '1500');
+    vi.stubEnv('ACP_ACTIVITY_COALESCE_TTL_MS', '45000');
+    vi.stubEnv('ACP_ACTIVITY_COALESCE_MAX_PENDING', '123');
+    vi.stubEnv('ACP_ACTIVITY_BINDING_CACHE_TTL_MS', '9000');
+    vi.stubEnv('ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES', '456');
     vi.stubEnv('PLATFORM_FEEDBACK_PROJECT_ID', '01KXN5YQ9TGN29ZZ8DP2DKAKHN');
     vi.stubEnv('REPORT_ISSUE_TITLE_MAX_LENGTH', '200');
     vi.stubEnv('REPORT_ISSUE_DESCRIPTION_MAX_LENGTH', '5000');
@@ -309,6 +396,12 @@ describe('sync wrangler config', () => {
       CF_CONTAINER_RECOVERY_MAX_ATTEMPTS: '3',
       CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: '180000',
       CF_CONTAINER_CLONE_FILTER: 'off',
+      ACP_ACTIVITY_ADMISSION_ENABLED: 'false',
+      ACP_ACTIVITY_COALESCE_WINDOW_MS: '1500',
+      ACP_ACTIVITY_COALESCE_TTL_MS: '45000',
+      ACP_ACTIVITY_COALESCE_MAX_PENDING: '123',
+      ACP_ACTIVITY_BINDING_CACHE_TTL_MS: '9000',
+      ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES: '456',
       PLATFORM_FEEDBACK_PROJECT_ID: '01KXN5YQ9TGN29ZZ8DP2DKAKHN',
       REPORT_ISSUE_TITLE_MAX_LENGTH: '200',
       REPORT_ISSUE_DESCRIPTION_MAX_LENGTH: '5000',
@@ -681,3 +774,6 @@ describe('ensureTomlMap', () => {
     );
   });
 });
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';

@@ -176,6 +176,12 @@ type SessionHostConfig struct {
 
 	// RuntimeAssetsProvider fetches resolved project/profile/skill runtime assets
 	// for standalone sessions. It must not log or persist secret values.
+	//
+	// Set once at construction and never reassigned, which is what makes the
+	// unlocked read in HasRuntimeAssetsProvider safe. If this ever becomes
+	// mutable (e.g. a hot-reloadable provider), every reader must take h.mu —
+	// note consumePreviousSelectionOnSuccess already mutates two sibling fields
+	// of this struct under that lock.
 	RuntimeAssetsProvider RuntimeAssetsProvider
 }
 
@@ -539,6 +545,15 @@ func (h *SessionHost) ContainerWorkDir() string {
 	return h.config.ContainerWorkDir
 }
 
+// HasRuntimeAssetsProvider reports whether this host was wired to fetch resolved
+// project/profile/skill runtime assets. Standalone (cf-container) sessions have no
+// devcontainer to read /etc/sam/project-env from, so the provider is the only path
+// by which project env vars and runtime files reach the agent process — a nil
+// provider there means the session silently starts without them.
+func (h *SessionHost) HasRuntimeAssetsProvider() bool {
+	return h.config.RuntimeAssetsProvider != nil
+}
+
 // ViewerCount returns the number of active viewers.
 func (h *SessionHost) ViewerCount() int {
 	h.viewerMu.RLock()
@@ -570,7 +585,7 @@ func (h *SessionHost) AttachViewer(id string, conn *websocket.Conn) *Viewer {
 	// Register the viewer BEFORE starting the write pump goroutine to
 	// close the TOCTOU window between the status check above and the
 	// goroutine launch. If the session transitions to stopped after our
-	// check, the goroutine will exit via h.ctx.Done().
+	// check, the goroutine will exit via lifecycleContext().Done().
 	h.viewerMu.Lock()
 	h.viewers[id] = viewer
 	if h.suspendTimer != nil {
@@ -905,23 +920,28 @@ func phaseTimeout(phaseMs int, fallback time.Duration) time.Duration {
 }
 
 // applySessionSettings calls SetSessionConfigOption for the model and
-// SetSessionMode on the ACP connection. Both calls are non-fatal.
-func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentSettingsPayload) {
+// SetSessionMode on the ACP connection. A rejected explicit Codex model is fatal:
+// continuing would silently run a different model. Other adapter settings remain
+// best-effort for backward compatibility.
+func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentSettingsPayload) error {
 	if settings == nil || h.acpConn == nil || h.sessionID == "" {
-		return
+		return nil
 	}
 
 	// These RPCs run while h.mu is held for write, and the ACP SDK blocks each
 	// response on its notification worker catching up (waitNotificationsUpTo).
 	// The caller's ctx is the WebSocket connection lifetime — effectively
 	// unbounded — so a stalled notification worker would hang the handshake (and
-	// every h.mu reader) forever. Bound it explicitly; both calls are non-fatal.
+	// every h.mu reader) forever. Bound it explicitly; Codex model selection
+	// failures are returned while the remaining settings stay best-effort.
 	settingsCtx, cancel := context.WithTimeout(ctx, h.sessionSettingsTimeout())
 	defer cancel()
 	ctx = settingsCtx
 
 	if settings.Model != "" {
-		h.applySessionModelConfigOption(ctx, settings.Model)
+		if err := h.applySessionModelConfigOption(ctx, settings.Model); err != nil && h.agentType == "openai-codex" {
+			return fmt.Errorf("cannot apply requested Codex model %q: %w", settings.Model, err)
+		}
 	}
 
 	if settings.PermissionMode != "" && settings.PermissionMode != "default" {
@@ -948,16 +968,17 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 			}
 		}
 	}
+	return nil
 }
 
-func (h *SessionHost) applySessionModelConfigOption(ctx context.Context, model string) {
+func (h *SessionHost) applySessionModelConfigOption(ctx context.Context, model string) error {
 	modelConfigID, ok := findModelConfigOptionID(h.configOptions)
 	if !ok {
-		slog.Warn("ACP session model config option unavailable (non-fatal)", "model", model)
+		slog.Warn("ACP session model config option unavailable", "model", model)
 		h.reportLifecycle("warn", "ACP session model config option unavailable", map[string]interface{}{
 			"model": model,
 		})
-		return
+		return fmt.Errorf("model config option unavailable")
 	}
 
 	slog.Info("ACP: setting session model config option", "model", model, "configId", string(modelConfigID))
@@ -969,13 +990,13 @@ func (h *SessionHost) applySessionModelConfigOption(ctx context.Context, model s
 		},
 	})
 	if err != nil {
-		slog.Warn("ACP SetSessionConfigOption failed (non-fatal)", "model", model, "configId", string(modelConfigID), "error", err)
+		slog.Warn("ACP SetSessionConfigOption failed", "model", model, "configId", string(modelConfigID), "error", err)
 		h.reportLifecycle("warn", "ACP session model config option failed", map[string]interface{}{
 			"model":    model,
 			"configId": string(modelConfigID),
 			"error":    err.Error(),
 		})
-		return
+		return fmt.Errorf("set session model config option: %w", err)
 	}
 
 	h.configOptions = resp.ConfigOptions
@@ -984,6 +1005,7 @@ func (h *SessionHost) applySessionModelConfigOption(ctx context.Context, model s
 		"model":    model,
 		"configId": string(modelConfigID),
 	})
+	return nil
 }
 
 func findModelConfigOptionID(options []acpsdk.SessionConfigOption) (acpsdk.SessionConfigId, bool) {

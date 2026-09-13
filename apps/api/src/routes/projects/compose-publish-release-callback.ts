@@ -9,7 +9,7 @@ import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
 import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
-import { errors } from '../../middleware/error';
+import { AppError, errors } from '../../middleware/error';
 import {
   getComposeImageArtifactMaxBytes,
   validateCompletedComposeImageArtifacts,
@@ -149,11 +149,12 @@ function composeHasModelProvider(composeYaml: string): boolean {
 }
 
 composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c) => {
-  const { projectId, workspaceId, userId, db } = await verifyWorkspacePublishCallback(
-    c,
-    'compose_publish_release',
-    'Invalid token scope for compose-publish release'
-  );
+  const { projectId, workspaceId, userId, db, assertCurrent } =
+    await verifyWorkspacePublishCallback(
+      c,
+      'compose_publish_release',
+      'Invalid token scope for compose-publish release'
+    );
 
   let submissionBody: Record<string, unknown>;
   try {
@@ -258,8 +259,10 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
           maxBytes: maxArtifactBytes,
         })
       );
+      await assertCurrent();
       await validateCompletedComposeImageArtifacts(c.env, artifacts);
     } catch (err) {
+      if (err instanceof AppError) throw err;
       throw errors.badRequest(err instanceof Error ? err.message : String(err));
     }
   }
@@ -273,6 +276,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     );
   }
   if (requiresVolumes && placement) {
+    await assertCurrent();
     await createMissingDeclaredVolumes(db, c.env, userId, {
       environmentId,
       volumes: volumeDeclarations,
@@ -327,6 +331,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   const releaseId = ulid();
   const releaseCreatedAt = new Date().toISOString();
 
+  await assertCurrent();
   try {
     await db.insert(schema.deploymentReleases).values({
       id: releaseId,
@@ -341,6 +346,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       createdBy: userId,
       createdAt: releaseCreatedAt,
     });
+    await assertCurrent();
     await db
       .update(schema.deploymentEnvironments)
       .set({
@@ -349,6 +355,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       })
       .where(eq(schema.deploymentEnvironments.id, environmentId));
   } catch (err) {
+    if (err instanceof AppError) throw err;
     const internalMessage = err instanceof Error ? err.message : String(err);
     log.error('compose_publish_release.insert_failed', {
       projectId,
@@ -369,6 +376,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     reference: submission.reference ?? null,
   });
 
+  await assertCurrent();
   c.executionCtx?.waitUntil(
     recordDeploymentReleaseLifecycleEventBestEffort(c.env, {
       projectId,
@@ -410,6 +418,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   if (requiresVolumes && nodeId && currentNodeMode !== 'exclusive') {
     try {
       if (currentNodeStatus === 'running') {
+        await assertCurrent();
         await teardownDeploymentEnvironmentOnNode(nodeId, environmentId, c.env, userId);
       }
       const volumes = await listEnvironmentVolumes(db, environmentId);
@@ -423,9 +432,11 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
         attachedServerIds.add(currentNodeProviderInstanceId);
       }
       for (const serverId of attachedServerIds) {
+        await assertCurrent();
         await detachEnvironmentVolumes(db, c.env, userId, environmentId, serverId);
       }
     } catch (err) {
+      if (err instanceof AppError) throw err;
       // Shared→exclusive migration (teardown + volume detach) failed. The
       // release was already recorded durably above, so we MUST NOT return a
       // 500 here: the VM agent treats a 5xx as a transient publish failure and
@@ -433,6 +444,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       // next version number (duplicate version records). Record the
       // volume-attach failure for diagnosis and return the durable release.
       // The migration is retried via the deploy verb or the next release.
+      await assertCurrent();
       await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
       log.error('compose_publish_release.shared_to_exclusive_migration_failed', {
         projectId,
@@ -442,6 +454,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
         action: 'release_recorded_migration_deferred',
         ...serializeError(err),
       });
+      await assertCurrent();
       return c.json({
         releaseId,
         version: nextVersion,
@@ -449,6 +462,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
         nodeId,
       });
     }
+    await assertCurrent();
     await db
       .update(schema.deploymentEnvironments)
       .set({ nodeId: null, updatedAt: new Date().toISOString() })
@@ -468,6 +482,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
         ? c.env.DEPLOYMENT_MODEL_RUNNER_VM_SIZE?.trim() || DEPLOYMENT_MODEL_RUNNER_VM_SIZE
         : undefined;
 
+      await assertCurrent();
       const result = await provisionDeploymentNode(environmentId, projectId, userId, c.env, {
         vmSizeOverride: placement?.vmSize ?? vmSizeOverride,
         ...(placement
@@ -478,14 +493,18 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       if (result) {
         nodeId = result.nodeId;
         const provisioningPromise = result.provisioningPromise.catch(async (err) => {
+          await assertCurrent();
           await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
           throw err;
         });
         const finishPromise = requiresVolumes
           ? provisioningPromise.then(async () => {
               try {
+                await assertCurrent();
                 await attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
               } catch (err) {
+                if (err instanceof AppError) throw err;
+                await assertCurrent();
                 await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
                 throw err;
               }
@@ -501,16 +520,20 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
         });
       }
     } else if (requiresVolumes) {
+      await assertCurrent();
       const attachPromise = attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
       c.executionCtx?.waitUntil(attachPromise.catch(() => undefined));
       try {
         await attachPromise;
       } catch (err) {
+        if (err instanceof AppError) throw err;
+        await assertCurrent();
         await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
         throw err;
       }
     }
   } catch (err) {
+    if (err instanceof AppError) throw err;
     log.error('compose_publish_release.provisioning_trigger_failed', {
       projectId,
       environmentId,
@@ -521,6 +544,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
 
   // Response shape matches the agent's Go ReleaseResult struct
   // (releaseId/version/status).
+  await assertCurrent();
   return c.json({
     releaseId,
     version: nextVersion,

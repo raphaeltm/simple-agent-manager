@@ -4,12 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { StatusBadge } from '../src/components/StatusBadge';
 
 describe('StatusBadge', () => {
-  describe('trigger statuses', () => {
+  describe('registered statuses', () => {
     // Before these were registered, `<StatusBadge status="active"/>` rendered
     // the literal text "Unknown" — while STILL pulsing, because the pulse keys
     // off the raw status string rather than a resolved config entry.
     it.each([
       ['active', 'Active'],
+      ['evicted', 'Evicted'],
       ['paused', 'Paused'],
       ['disabled', 'Disabled'],
     ])('renders %s as "%s"', (status, label) => {

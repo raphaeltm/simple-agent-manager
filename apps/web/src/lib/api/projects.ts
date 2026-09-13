@@ -1,5 +1,6 @@
 import type {
   AddProjectRepositoryRequest,
+  AgentActivityState,
   AvailableRepositoriesResponse,
   CreatedProjectInviteLinkResponse,
   CreateProjectInviteRequest,
@@ -81,6 +82,7 @@ export interface AccountMapResponse {
     status: string;
     executionStep: string | null;
     priority: number | null;
+    agentActivityState: AgentActivityState;
   }>;
   relationships: Array<{
     source: string;
@@ -282,10 +284,13 @@ export async function transferProjectOwnership(
   projectId: string,
   data: ProjectOwnershipTransferRequest
 ): Promise<ProjectOwnershipTransferResponse> {
-  return request<ProjectOwnershipTransferResponse>(`/api/projects/${projectId}/ownership-transfer`, {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
+  return request<ProjectOwnershipTransferResponse>(
+    `/api/projects/${projectId}/ownership-transfer`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  );
 }
 
 export async function previewProjectMemberOffboarding(

@@ -77,3 +77,45 @@ The VM agent currently persists periodic host resource snapshots and can assembl
 - `$constitution-validator`: PASS — new thresholds and intervals are centralized as defaults with env overrides and validation; domain constants such as `sam.workspace.id` and Docker exit code `137` are protocol identifiers.
 - `$env-validator`: PASS — new process-level VM-agent env vars are documented in `packages/vm-agent/.env.example` and `.claude/skills/env-reference/SKILL.md`; no API Worker or GitHub Actions secret mapping is required.
 - `$doc-sync-validator`: PASS — documentation touched matches code-level env names/defaults and no public API, schema, or UI documentation is affected.
+
+## PR #1980 integration completion (2026-09-13)
+
+The original component PR evidence above is historical. The combined change must
+pass the gates below against current `main` before merge.
+
+### Reconciliation and review findings
+
+- Current main already implements and verifies the cgroup workload hierarchy,
+  infrastructure CPU priority, and effective shared host-memory reserve. Preserve
+  those paths; the original Docker-service-only limit and 768 MB default are
+  superseded.
+- Resource telemetry must reuse `internal/sysinfo/docker_metrics.go` with bounded
+  subprocess output and cancellation, preserving heartbeat label filtering.
+- Eviction must prove the actual container label and current runtime identity,
+  including exited OOM victims and delayed events from an older container run.
+- Failed container stops must remain retryable. Sustained critical PSI must be
+  reconsidered with fresh data and cooldown; Docker monitoring must reconnect.
+- API eviction must atomically close usage/session records, finalize ProjectData
+  state, and preserve the stopped overlay. Explicit restart must reserve capacity
+  and reject delayed callbacks from previous restart generations. Automatic
+  rescheduling remains outside this PR.
+- A nullable D1 generation/finalization marker and local SQLite generation must
+  survive upgrades and agent restarts without stale metadata overwrites.
+- Workspace cards must display Evicted and expose the existing Start action.
+
+### Completion checklist
+
+- [x] Reconcile current main without restoring obsolete cgroup configuration.
+- [x] Integrate shared bounded Docker telemetry and numeric memory/PID parsing.
+- [ ] Fix and adversarially re-review eviction ownership, stop/retry, and lifecycle races.
+- [ ] Test generation/finalization migration and explicit restart admission/replay behavior.
+- [ ] Finish TypeScript lint/typecheck/test/build and quality/secret checks.
+- [ ] Finish Go unit/race/vet plus VM smoke/integration validation.
+- [ ] Complete desktop/mobile Playwright audit and post reviewed screenshots.
+- [ ] Obtain final Go, Cloudflare, security, resource, test, env, docs, constitution, completion reviews.
+- [ ] Coordinate staging ownership and deploy the pinned final candidate.
+- [ ] Provision one real VM; verify fresh heartbeat, workspace terminal, cgroup placement,
+      monitoring, eviction/restart, preserved workspace state, and callback behavior.
+- [ ] Delete this test's staging workspaces/nodes; verify zero staging VMs at rest.
+- [ ] Update PR evidence, pass CI/SonarCloud, resolve CodeRabbit feedback.
+- [ ] Merge #1980 and monitor production deployment.

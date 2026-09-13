@@ -1,13 +1,9 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -26,8 +22,10 @@ const (
 )
 
 type evictionWorkspaceCandidate struct {
-	workspaceID string
-	labelValue  string
+	workspaceID        string
+	labelValue         string
+	runtimeVersion     string
+	evictionGeneration string
 }
 
 func (s *Server) newResourceEvictionController() (*resourcemon.EvictionController, error) {
@@ -53,7 +51,32 @@ func (s *Server) captureEvictionSessionSnapshot(ctx context.Context, target reso
 	if err != nil {
 		return err
 	}
-	_, err = s.captureSessionSnapshot(ctx, input)
+	snapshotLock := s.sessionSnapshotLock(input.chatSessionID)
+	if err := snapshotLock.Lock(ctx); err != nil {
+		return err
+	}
+	defer snapshotLock.Unlock()
+	// Acquire lifecycle ownership only after the snapshot queue: a capture
+	// queued behind another operation must not block a newer restart claim.
+	lifecycleLock := s.workspaceLifecycleLock(target.WorkspaceID)
+	if err := lifecycleLock.Lock(ctx); err != nil {
+		return err
+	}
+	defer lifecycleLock.Unlock()
+	if !s.evictionTargetIsCurrent(ctx, target) {
+		return fmt.Errorf("eviction target is no longer current")
+	}
+	// Freeze the Docker identity after both waits. The shared snapshot runner
+	// must never rediscover a successor container for this eviction's snapshot.
+	input.containerTarget, err = s.resolveContainerSnapshotTarget(ctx, input.runtime)
+	if err != nil {
+		return err
+	}
+	if !dockerContainerIdentityMatches(input.containerTarget.containerID, target.ContainerID) {
+		return fmt.Errorf("snapshot container no longer matches eviction target")
+	}
+	input.containerTarget.containerID = target.ContainerID
+	_, err = s.runSessionSnapshot(ctx, input)
 	return err
 }
 
@@ -145,7 +168,7 @@ func (s *Server) evictionAgentSession(workspaceID string) (agentsessions.Session
 func (s *Server) resolveEvictionWorkspaceForMetric(ctx context.Context, metric resourcemon.ContainerMetric) (resourcemon.WorkspaceContainer, bool) {
 	candidates := s.evictionWorkspaceCandidates()
 	for _, candidate := range candidates {
-		containerID, err := container.FindContainerByLabel(ctx, s.config.ContainerLabelKey, candidate.labelValue)
+		containerID, err := s.latestEvictionContainer(ctx, candidate.labelValue)
 		if err != nil {
 			continue
 		}
@@ -153,9 +176,11 @@ func (s *Server) resolveEvictionWorkspaceForMetric(ctx context.Context, metric r
 			continue
 		}
 		return resourcemon.WorkspaceContainer{
-			WorkspaceID:   candidate.workspaceID,
-			ContainerID:   containerID,
-			ContainerName: metric.Name,
+			WorkspaceID:        candidate.workspaceID,
+			ContainerID:        containerID,
+			ContainerName:      metric.Name,
+			RuntimeVersion:     candidate.runtimeVersion,
+			EvictionGeneration: candidate.evictionGeneration,
 		}, true
 	}
 	return resourcemon.WorkspaceContainer{}, false
@@ -178,8 +203,10 @@ func (s *Server) evictionWorkspaceCandidates() []evictionWorkspaceCandidate {
 			continue
 		}
 		candidates = append(candidates, evictionWorkspaceCandidate{
-			workspaceID: workspaceID,
-			labelValue:  labelValue,
+			workspaceID:        workspaceID,
+			labelValue:         labelValue,
+			runtimeVersion:     runtime.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			evictionGeneration: runtime.EvictionGeneration,
 		})
 	}
 	return candidates
@@ -194,22 +221,93 @@ func dockerContainerIdentityMatches(a, b string) bool {
 	return a == b || strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
 }
 
+// latestEvictionContainer includes exited containers, because a die/137 event
+// is delivered after its victim disappeared from running-only discovery. Docker
+// applies the label filter before the latest limit; a rebuilt container wins.
+func (s *Server) latestEvictionContainer(ctx context.Context, labelValue string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, s.config.EvictionResolveTimeout)
+	defer cancel()
+	filter := "label=" + s.config.ContainerLabelKey + "=" + labelValue
+	cmd := exec.CommandContext(queryCtx, container.DockerCLIPath(), "ps", "--all", "--no-trunc", "--latest", "--filter", filter, "--format", "{{.ID}}")
+	cmd.WaitDelay = s.config.EvictionResolveTimeout
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("resolve eviction container: %w", err)
+	}
+	id := strings.TrimSpace(string(output))
+	if !isValidContainerID(id) {
+		return "", fmt.Errorf("eviction container identity unavailable")
+	}
+	return id, nil
+}
+
+func (s *Server) evictionTargetIsCurrent(ctx context.Context, target resourcemon.EvictionTarget) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, s.config.EvictionResolveTimeout)
+	defer cancel()
+	resolved, ok := s.resolveEvictionWorkspaceForMetric(ctx, resourcemon.ContainerMetric{ID: target.ContainerID})
+	if !ok || resolved.WorkspaceID != target.WorkspaceID || resolved.RuntimeVersion != target.RuntimeVersion || resolved.EvictionGeneration != target.EvictionGeneration {
+		return false
+	}
+	if target.Event.Type == resourcemon.PressureEventContainerOOM && !target.Event.OccurredAt.IsZero() &&
+		!s.evictionEventMatchesContainerStart(ctx, target) {
+		return false
+	}
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	runtime := s.workspaces[target.WorkspaceID]
+	return runtime != nil && (runtime.Status == "running" || runtime.Status == "recovery") &&
+		runtime.UpdatedAt.UTC().Format(time.RFC3339Nano) == target.RuntimeVersion
+}
+
+// Docker start can reuse an ID. Reject an OOM event from its previous run.
+func (s *Server) evictionEventMatchesContainerStart(ctx context.Context, target resourcemon.EvictionTarget) bool {
+	queryCtx, cancel := context.WithTimeout(ctx, s.config.EvictionResolveTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(queryCtx, container.DockerCLIPath(), "inspect", "--format", "{{.State.StartedAt}}", target.ContainerID)
+	cmd.WaitDelay = s.config.EvictionResolveTimeout
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(output)))
+	return err == nil && !startedAt.After(target.Event.OccurredAt)
+}
+
 func (s *Server) stopEvictedWorkspaceContainer(ctx context.Context, target resourcemon.EvictionTarget) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	lockCtx, lockCancel := context.WithTimeout(ctx, s.config.EvictionResolveTimeout)
+	defer lockCancel()
+	lifecycleLock := s.workspaceLifecycleLock(target.WorkspaceID)
+	if err := lifecycleLock.Lock(lockCtx); err != nil {
+		return err
+	}
+	defer lifecycleLock.Unlock()
 	containerID := strings.TrimSpace(target.ContainerID)
-	if containerID == "" {
-		resolvedID, _, _, err := s.resolveContainerForWorkspace(target.WorkspaceID)
-		if err != nil {
-			return err
-		}
-		containerID = resolvedID
-	}
 	if !isValidContainerID(containerID) {
-		return fmt.Errorf("invalid container ID format: %q", containerID)
+		return fmt.Errorf("invalid eviction container ID")
 	}
+	// Snapshotting may take minutes. Never stop a replacement or mark a newly
+	// restarted runtime based on the target selected before that snapshot.
+	if !s.evictionTargetIsCurrent(ctx, target) {
+		return fmt.Errorf("eviction target is no longer current")
+	}
+	// Write-ahead intent blocks automatic recovery even if the agent exits
+	// after Docker stops but before the completed eviction can be committed.
+	if err := s.prepareWorkspaceEvictionStop(ctx, target); err != nil {
+		return err
+	}
+	return s.stopEvictionContainer(ctx, containerID)
+}
 
+func (s *Server) stopEvictionContainer(ctx context.Context, containerID string) error {
 	stopTimeout := s.config.EvictionDockerStopTimeout
 	stopCtx, cancel := context.WithTimeout(ctx, evictionDockerStopCommandTimeout(stopTimeout))
 	defer cancel()
@@ -219,8 +317,9 @@ func (s *Server) stopEvictedWorkspaceContainer(ctx context.Context, target resou
 		stopSeconds = 1
 	}
 
-	cmd := exec.CommandContext(stopCtx, "docker", evictionDockerStopArgs(stopSeconds, containerID)...)
+	cmd := exec.CommandContext(stopCtx, container.DockerCLIPath(), evictionDockerStopArgs(stopSeconds, containerID)...)
 	cmd.Env = append(os.Environ(), evictionDockerSafePath)
+	cmd.WaitDelay = stopTimeout
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker stop %s failed: %w: %s", containerID, err, strings.TrimSpace(string(output)))
@@ -236,23 +335,56 @@ func evictionDockerStopCommandTimeout(stopTimeout time.Duration) time.Duration {
 	return stopTimeout + stopTimeout/2
 }
 
-func (s *Server) markWorkspaceEvicted(result resourcemon.EvictionResult) {
+func (s *Server) markWorkspaceEvicted(result resourcemon.EvictionResult) bool {
 	workspaceID := result.Target.WorkspaceID
-	if workspaceID == "" {
-		return
+	if workspaceID == "" || !result.ContainerStopped || s.store == nil {
+		return false
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.HTTPCallbackTimeout)
+	defer cancel()
+	lifecycleLock := s.workspaceLifecycleLock(workspaceID)
+	if err := lifecycleLock.Lock(ctx); err != nil {
+		return false
+	}
+	defer lifecycleLock.Unlock()
+	runtime, err := s.evictionWorkspaceRuntimeSnapshot(workspaceID)
+	if err != nil || (runtime.Status != "running" && runtime.Status != "recovery") ||
+		runtime.UpdatedAt.UTC().Format(time.RFC3339Nano) != result.Target.RuntimeVersion || runtime.EvictionGeneration != result.Target.EvictionGeneration {
+		return false
+	}
+	if err := s.writeWorkspaceMetadata(runtime); err != nil {
+		slog.Error("Failed to persist eviction workspace metadata", "workspaceId", workspaceID, "error", err)
+		return false
+	}
+	delivery := s.workspaceEvictionDelivery(result)
+	applied, err := s.store.RecordWorkspaceEviction(ctx, delivery)
+	if err != nil || !applied {
+		slog.Error("Failed to durably finalize workspace eviction", "workspaceId", workspaceID, "error", err)
+		return false
+	}
+	return s.finishLocalWorkspaceEviction(result)
+}
 
+// Caller holds the workspace lifecycle lock. Durable state is already committed.
+func (s *Server) finishLocalWorkspaceEviction(result resourcemon.EvictionResult) bool {
+	workspaceID := result.Target.WorkspaceID
+	// The durable marker and delivery are committed before local state changes.
+	// Restart/rebuild claims share the lifecycle lock, never the global mutex.
 	s.workspaceMu.Lock()
-	if runtime, ok := s.workspaces[workspaceID]; ok && runtime != nil {
-		if runtime.PTY != nil {
-			runtime.PTY.CloseAllSessions()
-		}
-		runtime.Status = "evicted"
-		runtime.ProvisioningActive = false
-		runtime.ReadyCallbackPending = false
-		runtime.UpdatedAt = nowUTC()
+	current := s.workspaces[workspaceID]
+	if current == nil || current.EvictionGeneration != result.Target.EvictionGeneration {
+		s.workspaceMu.Unlock()
+		return true // Persisted intent remains authoritative after agent restart.
 	}
+	current.Status = "evicted"
+	current.ProvisioningActive = false
+	current.ReadyCallbackPending = false
+	current.UpdatedAt = nowUTC()
+	ptyManager := current.PTY
 	s.workspaceMu.Unlock()
+	if ptyManager != nil {
+		ptyManager.CloseAllSessions()
+	}
 
 	if s.agentSessions != nil {
 		for _, session := range s.agentSessions.List(workspaceID) {
@@ -274,6 +406,7 @@ func (s *Server) markWorkspaceEvicted(result resourcemon.EvictionResult) {
 		"snapshotError":    errorMessage(result.SnapshotError),
 		"containerStopErr": errorMessage(result.ContainerStopError),
 	})
+	return true
 }
 
 func evictionSessionErrorMessage(reason resourcemon.EvictionReason) string {
@@ -283,82 +416,6 @@ func evictionSessionErrorMessage(reason resourcemon.EvictionReason) string {
 	default:
 		return "workspace evicted due to memory pressure"
 	}
-}
-
-func (s *Server) notifyWorkspaceEvicted(ctx context.Context, result resourcemon.EvictionResult) error {
-	if s.controlPlaneCallbacksStopped() {
-		slog.Info("Workspace eviction callback skipped after terminal callback state",
-			"workspaceId", result.Target.WorkspaceID,
-			"reason", result.Target.Reason,
-		)
-		return nil
-	}
-	if s.config == nil || strings.TrimSpace(s.config.ControlPlaneURL) == "" {
-		return fmt.Errorf("control plane URL is not configured")
-	}
-
-	projectID := s.projectIDForEviction(result.Target.WorkspaceID)
-	if projectID == "" {
-		return fmt.Errorf("workspace %s has no project ID for eviction callback", result.Target.WorkspaceID)
-	}
-
-	token := s.callbackTokenForWorkspace(result.Target.WorkspaceID)
-	if token == "" {
-		return fmt.Errorf("workspace %s has no callback token for eviction callback", result.Target.WorkspaceID)
-	}
-
-	endpoint := strings.TrimRight(s.config.ControlPlaneURL, "/") +
-		"/api/projects/" + url.PathEscape(projectID) +
-		"/workspaces/" + url.PathEscape(result.Target.WorkspaceID) +
-		"/eviction"
-
-	body := map[string]interface{}{
-		"nodeId":           strings.TrimSpace(s.config.NodeID),
-		"workspaceId":      result.Target.WorkspaceID,
-		"reason":           string(result.Target.Reason),
-		"snapshotCaptured": result.SnapshotCaptured,
-		"containerStopped": result.ContainerStopped,
-	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.controlPlaneHTTPClient(0).Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	responseBody := readBoundedResponseBody(resp.Body)
-
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		slog.Info("Workspace eviction callback sent",
-			"workspaceId", result.Target.WorkspaceID,
-			"projectId", projectID,
-			"reason", result.Target.Reason,
-			"snapshotCaptured", result.SnapshotCaptured,
-			"containerStopped", result.ContainerStopped,
-		)
-		return nil
-	}
-	if isTerminalControlPlaneCallbackStatus(resp.StatusCode) {
-		slog.Info("Workspace eviction callback returned terminal status",
-			"workspaceId", result.Target.WorkspaceID,
-			"projectId", projectID,
-			"statusCode", resp.StatusCode,
-			"responseBody", responseBody,
-		)
-		return nil
-	}
-
-	return fmt.Errorf("workspace eviction callback returned HTTP %d: %s", resp.StatusCode, responseBody)
 }
 
 func (s *Server) projectIDForEviction(workspaceID string) string {

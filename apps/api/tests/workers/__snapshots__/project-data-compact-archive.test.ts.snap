@@ -1,0 +1,8 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`compact archive SQL cost measurement > reduces measured target writes for the same consolidated streaming transcript > legacy and compact SQL writes for 1001 streaming fragments 1`] = `
+[
+  3058,
+  63,
+]
+`;

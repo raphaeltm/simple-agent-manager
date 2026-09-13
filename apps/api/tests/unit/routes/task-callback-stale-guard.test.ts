@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
+import { taskCallbackRoute } from '../../../src/routes/tasks/callback';
 
 // S2: a superseded (dead) Instant container can POST a stale `toStatus:'failed'`
 // callback with a still-valid token AFTER the DO recovered a NEW generation to
@@ -118,6 +119,7 @@ vi.mock('../../../src/services/task-status', () => ({
 
 vi.mock('../../../src/routes/tasks/_helpers', () => ({
   computeBlockedForTask: mocks.computeBlockedForTask.mockResolvedValue(false),
+  updateTaskExecutionStepFromCallback: vi.fn(),
   setTaskStatus: mocks.setTaskStatus.mockImplementation(
     async (_db, task, toStatus, _source, _workspace, options) => ({
       ...task,
@@ -137,8 +139,9 @@ function tokenWithIatSeconds(iatSeconds: number): string {
 
 const OLD_TOKEN = tokenWithIatSeconds(TOKEN_IAT_SECONDS);
 
-async function createTestApp(): Promise<Hono> {
-  const { taskCallbackRoute } = await import('../../../src/routes/tasks/callback');
+// Routes import during collection so cold compilation is outside the callback test deadline.
+function createTestApp(): Hono {
+
   const app = new Hono();
   app.route('/api/projects', taskCallbackRoute);
   app.onError((err, c) => {
@@ -196,7 +199,7 @@ describe('task callback stale Instant guard', () => {
       runtime: 'cf-container',
       updatedAt: new Date(TOKEN_IAT_MS + 180_000).toISOString(),
     };
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const res = await postFailed(app);
 
@@ -226,7 +229,7 @@ describe('task callback stale Instant guard', () => {
       runtime: 'cf-container',
       updatedAt: new Date(TOKEN_IAT_MS + 500).toISOString(),
     };
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const res = await postFailed(app);
 
@@ -265,7 +268,7 @@ describe('task callback stale Instant guard', () => {
       runtime: 'cf-container',
       updatedAt: new Date(TOKEN_IAT_MS + 300_000).toISOString(),
     };
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const res = await postFailed(app);
 
@@ -283,7 +286,7 @@ describe('task callback stale Instant guard', () => {
       runtime: 'vm',
       updatedAt: new Date(TOKEN_IAT_MS + 999_000).toISOString(),
     };
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const res = await postFailed(app);
 
@@ -293,7 +296,7 @@ describe('task callback stale Instant guard', () => {
   });
 
   it('does not emit a lifecycle event for a replayed same-status in_progress callback', async () => {
-    const app = await createTestApp();
+    const app = createTestApp();
 
     const res = await postStatusCallback(app, { toStatus: 'in_progress', reason: 'replayed' });
 

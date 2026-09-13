@@ -42,6 +42,7 @@ const TASK_COLUMNS = [
   'userId',
   'chatSessionId',
   'recoverySourceTaskId',
+  'supersededByTaskId',
   'parentTaskId',
   'workspaceId',
   'title',
@@ -50,16 +51,61 @@ const TASK_COLUMNS = [
   'executionStep',
   'priority',
   'agentProfileHint',
+  'skillId',
+  'skillHint',
   'startedAt',
   'completedAt',
   'errorMessage',
   'outputSummary',
   'outputBranch',
   'outputPrUrl',
+  'completionEvidence',
   'finalizedAt',
   'taskMode',
   'dispatchDepth',
   'autoProvisionedNodeId',
+  'claimedWarmNodeId',
+  'claimedWarmNodeAt',
+  'triggeredBy',
+  'triggerId',
+  'triggerExecutionId',
+  'agentCredentialSource',
+  'credentialAttributionUserId',
+  'credentialAttributionProjectId',
+  'credentialAttributionSource',
+  'credentialBlockedReason',
+  'credentialBlockedAt',
+  'missionId',
+  'schedulerState',
+  'requestedVmSize',
+  'requestedVmSizeSource',
+  'provisionedVmSize',
+  'resourceRequirementsJson',
+  'resourceRequirementPlanJson',
+  'resourceRequirementsSource',
+  'resolvedReservationJson',
+  'placementExplanationJson',
+  'capacityPoolId',
+  'capacityPoolScope',
+  'capacityPoolRevision',
+  'capacitySourceId',
+  'capacityPoolCandidateId',
+  'placementCredentialSource',
+  'placementCredentialReference',
+  'placementCredentialVersion',
+  'capacityPoolProjectId',
+  'workloadRole',
+  'providerInstanceType',
+  'providerInstanceVcpuCount',
+  'providerInstanceMemoryMb',
+  'providerInstanceDiskGb',
+  'providerInstancePriceDisplay',
+  'providerInstancePriceCurrency',
+  'providerInstancePriceMonthlyCents',
+  'providerInstancePriceHourlyMicros',
+  'admissionState',
+  'admissionReason',
+  'admissionNextRetryAt',
   'createdBy',
   'createdAt',
   'updatedAt',
@@ -73,6 +119,7 @@ const PROJECT_COLUMNS = [
   'defaultBranch',
   'installationId',
   'defaultVmSize',
+  'resourceRequirementsJson',
   'defaultWorkspaceProfile',
   'defaultProvider',
   'defaultAgentType',
@@ -311,6 +358,15 @@ describe('MCP Orchestration Tools', () => {
       providerName: 'hetzner',
     });
     mockCheckQuotaForUser.mockResolvedValue({ allowed: true, used: 0, limit: 100 });
+    // Destructive child control re-derives the caller's CURRENT project
+    // membership before any effect. Default to an active owner so these cases
+    // continue to exercise their own subject; the removed/downgraded actor cases
+    // live in mcp-orchestration-current-authority.test.ts against real rows.
+    mockD1._handlers.push({
+      match: 'from "project_members"',
+      method: 'raw',
+      result: [['owner']],
+    });
     mockDoStub.createSession = vi.fn().mockResolvedValue('session-new');
     mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-1');
     const { mcpRoutes } = await import('../../../src/routes/mcp');
@@ -324,7 +380,10 @@ describe('MCP Orchestration Tools', () => {
     /** Set up all D1 mocks needed for a successful retry */
     function setupRetryHappyPath(
       childOverrides: Partial<Record<string, unknown>> = {},
-      options: { runningAgentSession?: boolean } = {}
+      options: {
+        runningAgentSession?: boolean;
+        deletionFenceRow?: Record<string, unknown> | null;
+      } = {}
     ) {
       const childTask = makeTask(childOverrides);
       const project = makeProjectObj();
@@ -337,6 +396,15 @@ describe('MCP Orchestration Tools', () => {
         result: [toRawRow(TASK_COLUMNS, childTask)],
         once: true,
       });
+
+      if (options.deletionFenceRow !== undefined) {
+        mockD1._handlers.push({
+          match: 'LEFT JOIN workspaces',
+          method: 'first',
+          result: options.deletionFenceRow,
+          once: true,
+        });
+      }
 
       // 2. count(*) for sibling count
       mockD1._handlers.push({
@@ -430,7 +498,18 @@ describe('MCP Orchestration Tools', () => {
     });
 
     it('should retry a failed child task and dispatch replacement', async () => {
-      setupRetryHappyPath();
+      setupRetryHappyPath(
+        {},
+        {
+          deletionFenceRow: {
+            workspaceId: 'workspace-confirmed',
+            workspaceStatus: 'stopping',
+            workspaceErrorMessage: 'Workspace deletion unconfirmed: prior timeout',
+            nodeId: 'node-confirmed',
+            runtimeTerminationConfirmedAt: '2026-09-04T00:00:00.000Z',
+          },
+        }
+      );
 
       const res = await mcpRequest(
         app,
@@ -447,6 +526,52 @@ describe('MCP Orchestration Tools', () => {
       expect(content.newTaskId).toBeDefined();
       expect(content.newSessionId).toBeDefined();
       expect(content.newBranch).toBeDefined();
+    });
+
+    it('rejects an unconfirmed predecessor before creating replacement state', async () => {
+      const childTask = makeTask({
+        id: 'child-unconfirmed',
+        status: 'failed',
+        workspaceId: 'workspace-unconfirmed',
+      });
+      mockD1._handlers.push({
+        match: 'from "tasks"',
+        method: 'raw',
+        result: [toRawRow(TASK_COLUMNS, childTask)],
+        once: true,
+      });
+      mockD1._handlers.push({
+        match: 'LEFT JOIN workspaces',
+        method: 'first',
+        result: {
+          workspaceId: 'workspace-unconfirmed',
+          workspaceStatus: 'stopping',
+          workspaceErrorMessage: 'Workspace deletion unconfirmed: VM request timed out',
+          nodeId: 'node-unconfirmed',
+          runtimeTerminationConfirmedAt: null,
+        },
+        once: true,
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'retry_subtask',
+          arguments: { taskId: 'child-unconfirmed' },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error?.message).toContain(
+        'Replacement is fenced while workspace workspace-unconfirmed deletion is unconfirmed'
+      );
+      expect(mockD1.batch).not.toHaveBeenCalled();
+      expect(mockDoStub.createSession).not.toHaveBeenCalled();
+      expect(mockDoStub.persistMessage).not.toHaveBeenCalled();
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+      expect(
+        mockD1.prepare.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO tasks'))
+      ).toBe(false);
     });
 
     it('should reject newDescription exceeding max length', async () => {

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/bootlog"
-	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/deploy"
 	"github.com/workspace/vm-agent/internal/errorreport"
@@ -247,7 +246,9 @@ func runWorkspaceMode(cfg *config.Config) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Start server in goroutine — HTTP is available immediately.
+	// Register the build barrier before HTTP can accept dynamic workspaces.
+	finishSystemProvisioning := srv.BeginSystemProvisioning()
+	// Start server in goroutine — HTTP liveness and boot logs are available immediately.
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.Start(); err != nil {
@@ -262,6 +263,7 @@ func runWorkspaceMode(cfg *config.Config) {
 		CFIPFetchTimeout: fmt.Sprintf("%.0f", cfg.CFIPFetchTimeout.Seconds()),
 	}, srv.GetEventStore())
 	provisionCancel()
+	finishSystemProvisioning(provisionErr)
 
 	if provisionErr != nil {
 		slog.Error("System provisioning failed", "error", provisionErr,
@@ -272,20 +274,21 @@ func runWorkspaceMode(cfg *config.Config) {
 			"duration", provisionStatus.CompletedAt.Sub(provisionStatus.StartedAt).Round(time.Millisecond))
 	}
 
-	// Send node-ready callback AFTER provisioning.
-	srv.SendNodeReady()
-
-	// Run bootstrap (blocks until workspace is provisioned).
-	bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
-	defer bootstrapCancel()
-
-	if err := bootstrap.Run(bootstrapCtx, cfg, reporter); err != nil {
-		slog.Error("Bootstrap failed", "error", err)
-		os.Exit(1)
+	// Failed host setup must not advertise readiness for workspace builds.
+	if provisionErr == nil {
+		srv.SendNodeReady()
 	}
 
-	// Propagate callback token (obtained during bootstrap) to all subsystems
-	srv.UpdateAfterBootstrap(cfg)
+	// Legacy token bootstrap performs Docker work too. Keep failed hosts available
+	// for diagnostics without letting that path bypass the dynamic-workspace gate.
+	if provisionErr == nil {
+		bootstrapCtx, bootstrapCancel := context.WithTimeout(context.Background(), cfg.BootstrapTimeout)
+		defer bootstrapCancel()
+		if err := srv.BootstrapWorkspace(bootstrapCtx, cfg, reporter); err != nil {
+			slog.Error("Bootstrap failed", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	// Wait for shutdown signal or fatal server error.
 	select {

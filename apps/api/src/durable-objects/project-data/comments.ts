@@ -126,7 +126,23 @@ function ensureMessageAnchor(sql: SqlStorage, sessionId: string, messageId: stri
       sessionId
     )
     .toArray()[0];
-  if (!row) throw new CommentNotFoundError('Message');
+  if (row) return;
+
+  const archiveRow = sql
+    .exec(
+      `SELECT state
+       FROM project_data_archive_source_intents
+       WHERE session_id = ? AND state = 'source_deleted'
+       LIMIT 1`,
+      sessionId
+    )
+    .toArray()[0];
+  if (archiveRow) {
+    throw new CommentValidationError(
+      'Cannot create message comments on a session whose transcript has been moved to a ProjectData archive shard'
+    );
+  }
+  throw new CommentNotFoundError('Message');
 }
 
 function nextThreadSequence(sql: SqlStorage, sessionId: string): number {

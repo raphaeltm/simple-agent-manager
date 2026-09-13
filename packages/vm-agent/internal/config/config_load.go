@@ -165,6 +165,7 @@ func Load() (*Config, error) {
 		ACPTerminalActivityReportAttempts: getEnvInt("ACTIVITY_TERMINAL_REPORT_ATTEMPTS", DefaultACPTerminalActivityReportAttempts),
 		ACPTerminalActivityReportBackoff:  getEnvDuration("ACTIVITY_TERMINAL_REPORT_BACKOFF", DefaultACPTerminalActivityReportBackoff),
 		ACPCredentialSyncTimeout:          getEnvDuration("ACP_CREDENTIAL_SYNC_TIMEOUT", DefaultACPCredentialSyncTimeout),
+		ACPRestartAttemptTimeout:          getEnvDuration("ACP_RESTART_ATTEMPT_TIMEOUT", DefaultACPRestartAttemptTimeout),
 		ACPActivityReportTimeout:          getEnvDuration("ACP_ACTIVITY_REPORT_TIMEOUT", DefaultACPActivityReportTimeout),
 		ACPCheckpointPreemptGrace:         getEnvDuration("ACP_CHECKPOINT_PREEMPT_GRACE", DefaultACPCheckpointPreemptGrace),
 		ACPCheckpointPreemptMaxGrace:      getEnvDuration("ACP_CHECKPOINT_PREEMPT_MAX_GRACE", DefaultACPCheckpointPreemptMaxGrace),
@@ -196,6 +197,9 @@ func Load() (*Config, error) {
 		// Devcontainer build timeout — prevents indefinite hangs on network failures.
 		DevcontainerBuildTimeout: getEnvDuration("DEVCONTAINER_BUILD_TIMEOUT", 15*time.Minute),
 
+		// Per-node build concurrency. Keep the default at one slot for rollout compatibility.
+		WorkspaceBuildQueueDepth: getBoundedPositiveEnvInt("WORKSPACE_BUILD_QUEUE_DEPTH", DefaultWorkspaceBuildQueueDepth, MaxWorkspaceBuildQueueDepth),
+
 		// Devcontainer cache settings — opportunistic image caching.
 		DevcontainerCacheEnabled:     getEnvBool("DEVCONTAINER_CACHE_ENABLED", false),
 		DevcontainerCacheRegistry:    getEnv("DEVCONTAINER_CACHE_REGISTRY", "ghcr.io"),
@@ -220,16 +224,17 @@ func Load() (*Config, error) {
 		MetricsInterval:   getEnvDuration("METRICS_INTERVAL", time.Minute),
 
 		// Active resource monitoring settings - configurable per constitution principle XI
-		PSIPollInterval:                time.Duration(getEnvInt(EnvDefaultPSIPollIntervalSeconds, DefaultPSIPollIntervalSeconds)) * time.Second,
-		ContainerStatsInterval:         time.Duration(getEnvInt(EnvDefaultContainerStatsIntervalSeconds, DefaultContainerStatsIntervalSeconds)) * time.Second,
-		PSIMemorySomeWarningThreshold:  getEnvFloat(EnvDefaultPSIMemorySomeWarningThreshold, DefaultPSIMemorySomeWarningThreshold),
-		PSIMemorySomeCriticalThreshold: getEnvFloat(EnvDefaultPSIMemorySomeCriticalThreshold, DefaultPSIMemorySomeCriticalThreshold),
-		PSIMemoryFullWarningThreshold:  getEnvFloat(EnvDefaultPSIMemoryFullWarningThreshold, DefaultPSIMemoryFullWarningThreshold),
-		PSIMemoryFullCriticalThreshold: getEnvFloat(EnvDefaultPSIMemoryFullCriticalThreshold, DefaultPSIMemoryFullCriticalThreshold),
-		EvictionDebounceWindow:         time.Duration(getEnvInt(EnvDefaultEvictionDebounceSeconds, DefaultEvictionDebounceSeconds)) * time.Second,
-		EvictionSnapshotTimeout:        time.Duration(getEnvInt(EnvDefaultEvictionSnapshotTimeoutSeconds, DefaultEvictionSnapshotTimeoutSeconds)) * time.Second,
-		EvictionDockerStopTimeout:      time.Duration(getEnvInt(EnvDefaultEvictionDockerStopTimeoutSeconds, DefaultEvictionDockerStopTimeoutSeconds)) * time.Second,
-		EvictionResolveTimeout:         time.Duration(getEnvInt(EnvDefaultEvictionResolveTimeoutSeconds, DefaultEvictionResolveTimeoutSeconds)) * time.Second,
+		PSIPollInterval:                  time.Duration(getEnvInt(EnvDefaultPSIPollIntervalSeconds, DefaultPSIPollIntervalSeconds)) * time.Second,
+		ContainerStatsInterval:           time.Duration(getEnvInt(EnvDefaultContainerStatsIntervalSeconds, DefaultContainerStatsIntervalSeconds)) * time.Second,
+		PSIMemorySomeWarningThreshold:    getEnvFloat(EnvDefaultPSIMemorySomeWarningThreshold, DefaultPSIMemorySomeWarningThreshold),
+		PSIMemorySomeCriticalThreshold:   getEnvFloat(EnvDefaultPSIMemorySomeCriticalThreshold, DefaultPSIMemorySomeCriticalThreshold),
+		PSIMemoryFullWarningThreshold:    getEnvFloat(EnvDefaultPSIMemoryFullWarningThreshold, DefaultPSIMemoryFullWarningThreshold),
+		PSIMemoryFullCriticalThreshold:   getEnvFloat(EnvDefaultPSIMemoryFullCriticalThreshold, DefaultPSIMemoryFullCriticalThreshold),
+		EvictionDebounceWindow:           time.Duration(getEnvInt(EnvDefaultEvictionDebounceSeconds, DefaultEvictionDebounceSeconds)) * time.Second,
+		EvictionSnapshotTimeout:          time.Duration(getEnvInt(EnvDefaultEvictionSnapshotTimeoutSeconds, DefaultEvictionSnapshotTimeoutSeconds)) * time.Second,
+		EvictionDockerStopTimeout:        time.Duration(getEnvInt(EnvDefaultEvictionDockerStopTimeoutSeconds, DefaultEvictionDockerStopTimeoutSeconds)) * time.Second,
+		EvictionCallbackRetryMaxInterval: time.Duration(getEnvInt(EnvDefaultEvictionCallbackRetryMaxSeconds, DefaultEvictionCallbackRetryMaxSeconds)) * time.Second,
+		EvictionResolveTimeout:           time.Duration(getEnvInt(EnvDefaultEvictionResolveTimeoutSeconds, DefaultEvictionResolveTimeoutSeconds)) * time.Second,
 
 		// Git integration settings - configurable per constitution principle XI
 		GitCredentialTimeout:     getEnvDuration("GIT_CREDENTIAL_TIMEOUT", DefaultGitCredentialTimeout),
@@ -288,9 +293,12 @@ func Load() (*Config, error) {
 		ErrorReportCollectorJobs:  getEnvInt("ERROR_REPORT_COLLECTOR_CONCURRENCY", DefaultErrorReportCollectorWorkers),
 
 		// System info settings - configurable per constitution principle XI
-		SysInfoDockerTimeout:  getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
-		SysInfoVersionTimeout: getEnvDuration("SYSINFO_VERSION_TIMEOUT", 5*time.Second),
-		SysInfoCacheTTL:       getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
+		SysInfoDockerTimeout:                    getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
+		SysInfoVersionTimeout:                   getEnvDuration("SYSINFO_VERSION_TIMEOUT", 5*time.Second),
+		SysInfoCacheTTL:                         getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
+		HeartbeatDockerStatsTimeout:             getEnvDuration("HEARTBEAT_DOCKER_STATS_TIMEOUT", 2*time.Second),
+		HeartbeatWorkspaceMetricsMaxContainers:  getEnvInt("HEARTBEAT_WORKSPACE_METRICS_MAX_CONTAINERS", 8),
+		HeartbeatWorkspaceMetricsMaxOutputBytes: getEnvInt64("HEARTBEAT_WORKSPACE_METRICS_MAX_OUTPUT_BYTES", 64*1024),
 
 		// Log reader/stream settings - configurable per constitution principle XI
 		LogReaderTimeout:          getEnvDuration("LOG_READER_TIMEOUT", 30*time.Second),

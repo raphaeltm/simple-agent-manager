@@ -43,6 +43,7 @@ export interface Project {
   /** Cloudflare Artifacts repo ID. Null for GitHub/GitLab-backed projects. */
   artifactsRepoId?: string | null;
   defaultVmSize?: VMSize | null;
+  resourceRequirementsJson?: string | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = auto-discover default. */
@@ -63,6 +64,8 @@ export interface Project {
   maxWorkspacesPerNode?: number | null;
   nodeCpuThresholdPercent?: number | null;
   nodeMemoryThresholdPercent?: number | null;
+  /** Per-project max triggers override. null = use platform default (MAX_TRIGGERS_PER_PROJECT). */
+  maxTriggers?: number | null;
   status?: ProjectStatus;
   /** Server-computed shared-project transition state. False for solo projects. */
   multiplayerActive?: boolean;
@@ -125,6 +128,7 @@ export interface UpdateProjectRequest {
   description?: string;
   defaultBranch?: string;
   defaultVmSize?: VMSize | null;
+  resourceRequirementsJson?: string | null;
   defaultAgentType?: string | null;
   defaultWorkspaceProfile?: WorkspaceProfile | null;
   /** Default devcontainer config name. null = reset to auto-discover. */
@@ -145,6 +149,8 @@ export interface UpdateProjectRequest {
   maxWorkspacesPerNode?: number | null;
   nodeCpuThresholdPercent?: number | null;
   nodeMemoryThresholdPercent?: number | null;
+  /** Per-project max triggers override. null = reset to platform default. */
+  maxTriggers?: number | null;
 }
 
 export interface ProjectRuntimeEnvVarResponse {

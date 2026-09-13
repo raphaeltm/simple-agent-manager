@@ -22,6 +22,14 @@ import (
 
 const localShellPath = "/bin/sh"
 
+const claudeACPInstallPackage = "@agentclientprotocol/claude-agent-acp@0.73.0"
+const claudeCodeMinVersion = "2.1.251"
+const claudeCodeInstallPackage = "@anthropic-ai/claude-code@2.1.260"
+const claudeCodeInstallCommand = "npm install -g " + claudeACPInstallPackage + " " + claudeCodeInstallPackage
+const codexACPInstallPackage = "@agentclientprotocol/codex-acp@1.10.0"
+const codexCLIInstallPackage = "@openai/codex@0.153.4"
+const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.10.0 @openai/codex@0.153.4"
+
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
 type BootLogReporter interface {
@@ -204,6 +212,10 @@ type GatewayConfig struct {
 	ActivityReportTimeout time.Duration
 	// CredentialSyncTimeout bounds auth-file sync-back during shutdown.
 	CredentialSyncTimeout time.Duration
+
+	// RestartAttemptTimeout bounds a single agent restart attempt performed by
+	// the process monitor. Zero uses DefaultACPRestartAttemptTimeout.
+	RestartAttemptTimeout time.Duration
 	// RecoveryWatchdogTimeout bounds crash recovery after a prompt disconnect.
 	// Zero uses DefaultRecoveryWatchdogTimeout.
 	RecoveryWatchdogTimeout time.Duration
@@ -781,7 +793,8 @@ var agentInstallMu sync.Mutex
 // path acquires it, with a double-check after acquisition.
 func installAgentBinary(ctx context.Context, containerID string, info agentCommandInfo) error {
 	// Fast path: check without mutex — avoids contention when already installed.
-	checkArgs := []string{"exec", containerID, "which", info.command}
+	checkScript := agentInstalledCheckScript(info)
+	checkArgs := []string{"exec", containerID, "sh", "-c", checkScript}
 	checkCmd := exec.CommandContext(ctx, "docker", checkArgs...)
 	if err := checkCmd.Run(); err == nil {
 		slog.Info("Agent binary is already installed", "command", info.command)
@@ -845,7 +858,7 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 func installAgentBinaryLocal(ctx context.Context, info agentCommandInfo) error {
 	// Fast path: check without mutex. exec.LookPath matches how startLocalProcess
 	// resolves the command, so this is the correct "already installed" check.
-	if _, err := exec.LookPath(info.command); err == nil {
+	if err := exec.CommandContext(ctx, localShellPath, "-c", agentInstalledCheckScript(info)).Run(); err == nil {
 		slog.Info("Agent binary is already installed (local)", "command", info.command)
 		return nil
 	}
@@ -860,7 +873,7 @@ func installAgentBinaryLocal(ctx context.Context, info agentCommandInfo) error {
 	}
 
 	// Double-check after acquiring mutex — another goroutine may have installed it.
-	if _, err := exec.LookPath(info.command); err == nil {
+	if err := exec.CommandContext(ctx, localShellPath, "-c", agentInstalledCheckScript(info)).Run(); err == nil {
 		slog.Info("Agent binary was installed by another goroutine (local)", "command", info.command)
 		return nil
 	}
@@ -899,6 +912,39 @@ func agentInstallScript(info agentCommandInfo) string {
 	)
 }
 
+func claudeCodeVersionCheckCommand() string {
+	minParts := strings.Split(claudeCodeMinVersion, ".")
+	if len(minParts) != 3 {
+		panic("claudeCodeMinVersion must use major.minor.patch")
+	}
+	return fmt.Sprintf(
+		`command -v claude >/dev/null 2>&1 && version="$(claude --version 2>/dev/null | sed -n 's/.*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | head -n 1)" && set -- $version && [ "$#" -eq 3 ] && { [ "$1" -gt %s ] || { [ "$1" -eq %s ] && { [ "$2" -gt %s ] || { [ "$2" -eq %s ] && [ "$3" -ge %s ]; }; }; }; }`,
+		minParts[0],
+		minParts[0],
+		minParts[1],
+		minParts[1],
+		minParts[2],
+	)
+}
+
+func codexVersionCheckCommand() string {
+	adapterVersion := strings.TrimPrefix(codexACPInstallPackage, "@agentclientprotocol/codex-acp@")
+	cliVersion := strings.TrimPrefix(codexCLIInstallPackage, "@openai/codex@")
+	return fmt.Sprintf(
+		`[ "$(codex-acp --version 2>/dev/null)" = "@agentclientprotocol/codex-acp %s" ] && [ "$(codex --version 2>/dev/null)" = "codex-cli %s" ]`,
+		adapterVersion,
+		cliVersion,
+	)
+}
+
+func agentInstalledCheckScript(info agentCommandInfo) string {
+	checkScript := "command -v " + info.command + " >/dev/null 2>&1"
+	if info.validationCmd != "" {
+		checkScript += " && " + info.validationCmd
+	}
+	return checkScript
+}
+
 // agentCommandInfo holds the command, args, env var, and install command for an agent.
 // SECURITY: installCmd is passed to sh -c inside the container. It must always be a
 // hardcoded literal from getAgentCommandInfo — never derived from external input.
@@ -908,11 +954,10 @@ type agentCommandInfo struct {
 	envVarName    string
 	installCmd    string // shell command to run if binary is missing (npm, pip, etc.)
 	isNpmBased    bool   // true for agents installed via npm; controls prerequisite injection and cleanup
+	validationCmd string // optional shell check for underlying companion CLI/version requirements
 	injectionMode string // "env" (default) or "auth-file" — how the credential is injected
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
-
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.1.2 @openai/codex@0.144.6"
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
@@ -921,12 +966,24 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	switch agentType {
 	case "claude-code":
 		if credentialKind == "oauth-token" {
-			return agentCommandInfo{"claude-agent-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1", true, "", ""}
+			return agentCommandInfo{
+				command:       "claude-agent-acp",
+				envVarName:    "CLAUDE_CODE_OAUTH_TOKEN",
+				installCmd:    claudeCodeInstallCommand,
+				isNpmBased:    true,
+				validationCmd: claudeCodeVersionCheckCommand(),
+			}
 		}
-		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1", true, "", ""}
+		return agentCommandInfo{
+			command:       "claude-agent-acp",
+			envVarName:    "ANTHROPIC_API_KEY",
+			installCmd:    claudeCodeInstallCommand,
+			isNpmBased:    true,
+			validationCmd: claudeCodeVersionCheckCommand(),
+		}
 	case "openai-codex":
 		// Sandbox and approval overrides are injected through CODEX_CONFIG by
-		// writeCodexStartupConfig. codex-acp 1.1.2 does not parse Codex CLI -c
+		// writeCodexStartupConfig. codex-acp (verified through 1.10.0) does not parse Codex CLI -c
 		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
 		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {
@@ -936,21 +993,38 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 				envVarName:    "",
 				installCmd:    codexACPInstallCommand,
 				isNpmBased:    true,
+				validationCmd: codexVersionCheckCommand(),
 				injectionMode: "auth-file",
 				authFilePath:  ".codex/auth.json",
 			}
 		}
-		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", codexACPInstallCommand, true, "", ""}
+		return agentCommandInfo{
+			command:       "codex-acp",
+			envVarName:    "OPENAI_API_KEY",
+			installCmd:    codexACPInstallCommand,
+			isNpmBased:    true,
+			validationCmd: codexVersionCheckCommand(),
+		}
 	case "google-gemini":
-		return agentCommandInfo{"gemini", []string{"--acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli@0.50.0", true, "", ""}
+		return agentCommandInfo{
+			command:    "gemini",
+			args:       []string{"--acp"},
+			envVarName: "GEMINI_API_KEY",
+			installCmd: "npm install -g @google/gemini-cli@0.50.0",
+			isNpmBased: true,
+		}
 	case "mistral-vibe":
-		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet`, false, "", ""}
+		return agentCommandInfo{
+			command:    "vibe-acp",
+			envVarName: "MISTRAL_API_KEY",
+			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet`,
+		}
 	case "opencode":
 		return agentCommandInfo{
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "OPENCODE_API_KEY",
-			installCmd:    "npm install -g opencode-ai@1.17.18",
+			installCmd:    "npm install -g opencode-ai@1.18.27",
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",
@@ -1010,7 +1084,10 @@ print('Patched amp_sdk: visibility default to private')
 			authFilePath:  "",
 		}
 	default:
-		return agentCommandInfo{agentType, nil, "API_KEY", "", false, "", ""}
+		return agentCommandInfo{
+			command:    agentType,
+			envVarName: "API_KEY",
+		}
 	}
 }
 

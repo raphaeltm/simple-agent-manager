@@ -170,9 +170,24 @@ installations must add this policy before their next production deployment.
 | `PREVIEW_URL_TTL_SECONDS`                          | Optional lifetime for signed interactive-preview URLs                                                                                               | `300`                                    |
 | `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource prefix                                                                                                           | `sa379a6`                                |
 | `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime.                                             | `false`                                  |
+| `D1_READ_REPLICATION_MODE`                         | Optional D1 read-replication mode applied on every deploy. Defaults to `auto`; set `disabled` to remove replicas.                                   | `disabled`                               |
+| `D1_SESSION_MODE`                                  | Optional Worker D1 Sessions anchor. Defaults to `first-primary`; set `disabled` to send every query to the primary.                                 | `disabled`                               |
 | `D1_RESTORE_RECOVERY_WINDOW_DAYS`                  | Optional D1 restore window for accounts with narrower retention. Defaults to `30`; range `1`–`30`.                                                  | `7`                                      |
 | `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
 | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
+
+By default, each deploy enables D1 read replication (`read_replication.mode = "auto"`) on the
+main and observability databases, and the API Worker runs each request against a single D1 session so its
+queries after the first can be served by a nearby replica instead of crossing to the primary
+region. This is safe by construction: the session is anchored `first-primary`, so a request never
+sees data older than its own start and cannot miss a write that completed before it began, and
+queries that do not open a session always go to the primary. (It does not promise that a write
+landing *during* a request is visible to that request's later queries — that is the ordinary
+two-non-atomic-reads race, unchanged by replication and now with a shorter window.) Scheduled sweeps and Durable Objects keep the unsessioned binding. Set
+`D1_READ_REPLICATION_MODE=disabled` to remove the replicas (Cloudflare takes up to 24 hours to
+stop routing to them) or `D1_SESSION_MODE=disabled` to keep the replicas but route every Worker
+query at the primary. Replication needs no extra API-token permission beyond the
+**Account → Cloudflare Workers: D1 → Edit** grant the deploy token already requires.
 
 The reviewed default churning selectors are `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
@@ -249,11 +264,16 @@ The workflow:
 1. Validates configuration
 2. Provisions infrastructure via Pulumi (D1, KV, R2, DNS), including private VM diagnostic evidence, ProjectData archived tool payloads, one-day temporary uploads, and thirty-day TTS cache objects (`infra/resources/storage.ts:r2BucketLifecycle`)
 3. Runs database migrations
-4. Deploys API Worker and Web UI
-5. Builds and uploads VM Agent binaries
-6. Runs health check
+4. Builds the VM Agent reproducibly and publishes both architectures under immutable keys containing the deployment commit SHA
+5. On a fresh installation only, bootstraps the API Worker and its Tail Worker binding
+6. Deploys the Web UI, applies API Worker secrets in one bulk revision, and publishes the final API Worker code
+7. Runs health checks
 
-Before deploying the API Worker, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
+On an established installation, the workflow skips the bootstrap Worker revisions. It publishes the immutable VM Agent artifacts before the API Worker can require them, applies secrets in one bulk revision, and then publishes code once. Re-running the same commit reuses an existing artifact only when its digest matches and fails before Worker publication if the bytes differ.
+
+The artifact publisher also initializes missing legacy binaries for unversioned downloads, including later `skip_agent` deployments on a fresh installation. Existing legacy binaries are preserved unchanged so a partial deployment cannot replace bytes still needed by the live Worker.
+
+Before publishing final API Worker code, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
 
 Pulumi also creates or updates the assets bucket lifecycle resource on every deploy.
 The defaults are `sessionSnapshotTtlDays=7`, `diagnosticIncidentTtlDays=7`,
@@ -298,7 +318,7 @@ If deployment stops with a Durable Object migration-state error:
 - **"tag is not present in the checked-in history"** means `apps/api/wrangler.toml` lost migration entries that were already applied to your Worker — usually an upgrade merge that dropped fork-local `[[migrations]]` entries. Restore the missing entries so the deployed tag appears in the history, then redeploy.
 - **Never delete the API Worker to recover.** Deleting a Worker destroys every Durable Object namespace behind it — all chat sessions, messages, and task state. There is no undo.
 
-VM diagnostic evidence and ProjectData archived tool payloads use the existing application R2 bucket; there is no separate bucket or manually generated secret to configure. Pulumi creates an independent lifecycle rule for the private diagnostic prefix and the deployment sync binds the same bucket as `PROJECT_DATA_ARCHIVE_R2` for tool-payload archival. Optional stack settings are `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`, any positive integer). Keep the diagnostic prefix private and distinct from the reserved application namespaces `agents`, `cli`, `compose-image-artifacts`, `library`, `project-data`, `session-snapshots`, `temp-uploads`, and `tts`; Pulumi rejects overrides whose top-level segment would expire objects owned by one of those features.
+VM diagnostic evidence, ProjectData archived tool payloads, and terminal-session archive chunks/manifests use the existing application R2 bucket; there is no separate bucket or manually generated secret to configure. Pulumi creates an independent lifecycle rule for the private diagnostic prefix and the deployment sync binds the same bucket as `PROJECT_DATA_ARCHIVE_R2` for ProjectData archival. Optional stack settings are `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`, any positive integer). Keep the diagnostic prefix private and distinct from the reserved application namespaces `agents`, `cli`, `compose-image-artifacts`, `library`, `project-data`, `session-snapshots`, `temp-uploads`, and `tts`; Pulumi rejects overrides whose top-level segment would expire objects owned by one of those features.
 
 ## Verification
 
@@ -374,7 +394,13 @@ VMs are billed to the cloud provider credential SAM uses for the node. In a typi
 
 When Infrastructure Compute Pools are enabled, the editor uses the provider-native catalog for the
 project, user, or platform credential in scope. The small/medium/large prices below remain useful as
-legacy preset examples, but pool editing is based on concrete provider instance types.
+legacy preset examples, but pool editing is based on concrete provider instance types. Exact native
+offerings carry their own storage/image/architecture request details where the provider API supports
+them; changing a deprecated legacy size label does not change the native provider payload. After a VM
+is created, the provider package returns provider-reported server type and resource fields as
+provenance-labeled observed hardware and leaves omitted resource fields unknown
+(`packages/providers/src/native-vm-config.ts`). Persisting those observations into node-pool
+admission records is part of the parent section C integration.
 
 **Hetzner:**
 
@@ -480,3 +506,7 @@ Use the D1 database name from the deploy workflow's Pulumi stack output.
 Check Hetzner console for VM status. If the VM is running, SSH in and check `systemctl status vm-agent`.
 
 This page is the canonical troubleshooting reference for self-hosted deployments.
+
+### Compact conversation archives
+
+Compact SQLite/R2 archive writes are opt-in (`PROJECT_DATA_ARCHIVE_COMPACT_ENABLED=false`). Deployment supplies the existing private archive bucket; no new credentials are required. Before enabling, validate history, search and copy-back on staging and choose a migration allowance with room for normal account usage. Keep archived R2 objects for as long as their conversations exist. See the [format, cost controls and recovery limits](/docs/reference/configuration/#compact-archive-shards).

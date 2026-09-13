@@ -19,6 +19,8 @@ const (
 	EnvDefaultEvictionSnapshotTimeoutSeconds = "DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS"
 	// EnvDefaultEvictionDockerStopTimeoutSeconds bounds graceful docker stop in seconds.
 	EnvDefaultEvictionDockerStopTimeoutSeconds = "DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS"
+	// EnvDefaultEvictionCallbackRetryMaxSeconds caps durable callback retry backoff.
+	EnvDefaultEvictionCallbackRetryMaxSeconds = "DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS"
 	// EnvDefaultEvictionResolveTimeoutSeconds bounds Docker label resolution before eviction.
 	EnvDefaultEvictionResolveTimeoutSeconds = "DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS"
 )
@@ -42,6 +44,8 @@ const (
 	DefaultEvictionSnapshotTimeoutSeconds = 120
 	// DefaultEvictionDockerStopTimeoutSeconds is the default graceful docker stop deadline.
 	DefaultEvictionDockerStopTimeoutSeconds = 10
+	// DefaultEvictionCallbackRetryMaxSeconds is the maximum callback retry backoff.
+	DefaultEvictionCallbackRetryMaxSeconds = 300
 	// DefaultEvictionResolveTimeoutSeconds is the default pressure target resolution deadline.
 	DefaultEvictionResolveTimeoutSeconds = 5
 )

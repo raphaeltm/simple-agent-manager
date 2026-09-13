@@ -11,13 +11,14 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 | Change                                | What users notice                                                                                                                                              | Where to use it                   |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| **Comments have somewhere to look**   | A **Comments** page in the project nav collects every thread from chat and the library in one place, grouped by whether it is waiting on you. Chat sessions gain a matching count chip and a comments drawer. | Project → **Comments**; chat session header |
-| **Report an issue in-app**            | A **Report** button in the expanded chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context. | Chat session header; crash screen |
+| **Comments have somewhere to look**   | A **Comments** page in the project nav collects every thread from chat and the library in one place, grouped by whether it is waiting on you. Chat sessions gain a matching count chip and a comments drawer. | Project → **Comments**; chat session tool rail |
+| **Report an issue in-app**            | A **Report** button in the session tool rail, and a **Report this issue** link on the crash screen. You choose whether to attach technical context. | Session tool rail; crash screen |
 | **Sessions survive runtime teardown** | Sleeping Instant and VM sessions wake from a seven-day snapshot instead of losing harness context or uncommitted work.                                         | Project chat                      |
 | **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                               | Project chat                      |
 | **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                    | Any task or chat-started work     |
 | **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                       | Any Codex profile                 |
 | **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                               | Project chat timeline             |
+| **Machines come from a compute pool** | Workspaces are provisioned from the exact provider instance types your compute pool allows, and work states what it needs in vCPU, memory, and disk instead of a small/medium/large label. | Project → Settings → **Infrastructure**; [Compute Pools](/docs/guides/compute-pools/) |
 
 ### For self-hosters & admins
 
@@ -27,10 +28,11 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 | **Automated error triage**     | SAM groups recent platform errors hourly and files deduplicated draft Ideas for them.                                                 | `PLATFORM_FEEDBACK_TRIAGE_*`                                       |
 | **Deployment diagnosis agent** | Superadmins can hand an error — or a whole time window — to an AI agent from **Admin → Errors**, and save the result as a draft Idea. | `DEBUG_AGENT_*`                                                    |
 | **Durable diagnosis runs**     | A diagnosis keeps running if you close the tab, with a runs list, status, and retry.                                                  | **Admin → Errors**                                                 |
+| **Canonical compute pools**    | Project, user, and installation pools are reconciled from each credential's live provider catalog, with a placement strategy and an exhaustion policy per pool. | Project/Settings/Admin → **Infrastructure**; `CAPACITY_POOL_*`     |
 
 ## Report an issue without leaving SAM
 
-When an agent misbehaves or a page crashes, you can file a report from where you are. Expand the chat session header (the chevron on the right) and click **Report**, or use **Report this issue** on the crash screen.
+When an agent misbehaves or a page crashes, you can file a report from where you are. Click **Report** in the session tool rail on the right edge of the chat, or use **Report this issue** on the crash screen.
 
 SAM never attaches technical context silently. A consent checkbox lists the exact identifiers it would send — chat session, task, node, error, diagnosis — so you can see them before submitting. Leave it unchecked and only your words are sent. Server-side, references you don't have access to are dropped, and credential-shaped strings and email addresses are redacted from your text.
 
@@ -49,6 +51,21 @@ What you actually see:
 - A terminal **stopped** state, which closes the composer instead of offering retries against a runtime that can never come back.
 
 Starting an Instant chat is now durable too: SAM accepts the session first and finishes the launch in the background, so closing the tab partway through no longer leaves a chat stuck in a queued state.
+
+## Machines come from a compute pool
+
+SAM no longer derives hardware from a `small` / `medium` / `large` label. Each scope — project,
+user, and installation — has a **compute pool**: the concrete provider instance types SAM is
+allowed to rent, discovered from your provider's live catalog. Work states what it needs (vCPU,
+memory, disk, and optionally an exclusive machine) and SAM picks a permitted machine that
+satisfies it.
+
+Two per-pool settings decide the rest: a **strategy** (balanced, pack, spread, or smallest fit)
+for which permitted machine wins, and an **exhaustion policy** (queue, fail, or fallback chain)
+for what happens when your provider has nothing to give. Legacy size labels still work and are
+translated for you.
+
+See [Compute Pools](/docs/guides/compute-pools/).
 
 ## Agent work lands on its own branch
 
@@ -78,7 +95,7 @@ Before anything reaches the model, SAM strips user IDs, IP addresses, user-agent
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | Guided subscription sign-in      | Connect Claude Code or OpenAI Codex to your Claude Max/Pro or ChatGPT subscription with a browser sign-in — no terminal, no token paste. | **Settings → Connections**             |
 | More cloud providers             | Bring your own Vultr, DigitalOcean, UpCloud, or Infomaniak account, alongside Hetzner, Scaleway, and Google Cloud.                       | **Settings → Connections**             |
-| Claude Opus 5                    | Pick Anthropic's newest frontier model (1M-token context) when you configure an agent profile.                                           | Agent profile model picker             |
+| Claude Fable 5.1                 | Pick Anthropic's newest frontier model (1M-token context) when you configure an agent profile.                                           | Agent profile model picker             |
 | Markdown previews in the library | Markdown an agent saves to a project now renders inline instead of downloading as a file.                                                | Project chat & library                 |
 | Shared projects & roles          | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets. Approved teammates join as admins.       | Project **Settings → Access**          |
 | Credential attribution           | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials.                                    | Project navigation (shared projects)   |
@@ -121,9 +138,9 @@ location, vCPU, memory, and price. Removed entries stay removed until you add th
 small/medium/large presets are only used as migration hints for older profiles rather than as the
 editing catalog.
 
-### Claude Opus 5 is available
+### Claude Fable 5.1 is available
 
-Anthropic's **Claude Opus 5** — a frontier model with a 1M-token context window — is now selectable for Claude Code (and through the SAM AI proxy). Choose it in an [agent profile](/docs/guides/agents/#agent-profiles): the model you set on a profile is the model that runs when you pick that profile for a chat or attach it to a trigger.
+Anthropic's **Claude Fable 5.1** — a frontier model with a 1M-token context window — is now selectable for Claude Code (and through the SAM AI proxy). Choose it in an [agent profile](/docs/guides/agents/#agent-profiles): the model you set on a profile is the model that runs when you pick that profile for a chat or attach it to a trigger.
 
 ### Agent-generated markdown previews in place
 

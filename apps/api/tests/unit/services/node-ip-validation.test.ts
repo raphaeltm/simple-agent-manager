@@ -11,57 +11,8 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-describe('provisionNode empty IP guard', () => {
-  const file = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
-  const section = file.slice(
-    file.indexOf('export async function provisionNode'),
-    file.indexOf('export async function stopNodeResources')
-  );
-
-  it('checks for empty IP before creating DNS records', () => {
-    const ipCheckIdx = section.indexOf('if (!vm.ip)');
-    const dnsCreateIdx = section.indexOf('createNodeBackendDNSRecord');
-    expect(ipCheckIdx).toBeGreaterThan(-1);
-    expect(dnsCreateIdx).toBeGreaterThan(-1);
-    // IP check must come before DNS record creation
-    expect(ipCheckIdx).toBeLessThan(dnsCreateIdx);
-  });
-
-  it('keeps node in creating status when IP is empty (awaiting heartbeat backfill)', () => {
-    const ipGuardBlock = section.slice(
-      section.indexOf('if (!vm.ip)'),
-      section.indexOf('let backendDnsRecordId')
-    );
-    expect(ipGuardBlock).toContain("status: 'creating'");
-    expect(ipGuardBlock).toContain('Awaiting IP allocation');
-  });
-
-  it('returns early after setting creating status for empty IP', () => {
-    const ipGuardBlock = section.slice(
-      section.indexOf('if (!vm.ip)'),
-      section.indexOf('let backendDnsRecordId')
-    );
-    expect(ipGuardBlock).toContain('return;');
-  });
-
-  it('stores providerInstanceId even when IP is empty (for cleanup)', () => {
-    const ipGuardBlock = section.slice(
-      section.indexOf('if (!vm.ip)'),
-      section.indexOf('let backendDnsRecordId')
-    );
-    expect(ipGuardBlock).toContain('providerInstanceId: vm.id');
-  });
-
-  it('logs structured info with nodeId and providerInstanceId', () => {
-    const ipGuardBlock = section.slice(
-      section.indexOf('if (!vm.ip)'),
-      section.indexOf('let backendDnsRecordId')
-    );
-    expect(ipGuardBlock).toContain('nodeId: node.id');
-    expect(ipGuardBlock).toContain('providerInstanceId: vm.id');
-    expect(ipGuardBlock).toContain('node_provisioning.awaiting_ip_backfill');
-  });
-});
+// Empty/null provider IP behavior is exercised by the real provisionNode service
+// in provision-node-rethrow.test.ts, including DNS suppression and durable identity.
 
 describe('heartbeat IP backfill', () => {
   const file = readFileSync(resolve(process.cwd(), 'src/routes/node-lifecycle.ts'), 'utf8');

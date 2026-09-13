@@ -169,6 +169,7 @@ export function useAccountMapData({
           label: t.title ?? 'Task',
           status: t.status,
           executionStep: t.executionStep,
+          agentActivityState: t.agentActivityState,
           priority: t.priority,
           isMobile,
         },

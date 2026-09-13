@@ -1,6 +1,7 @@
 import type {
   CapacityPoolScope,
   ProjectDefaultCapacityPoolsResponse,
+  SafeCapacityPoolPlacementSettingsSummary,
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -8,6 +9,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
+import { resolveSafeCapacityPoolPlacementSettingsSummary } from '../services/capacity-pool-placement-settings';
 import { updateDefaultCapacityPool } from '../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
@@ -30,12 +32,14 @@ function parseEnsureQuery(value: string | undefined): boolean {
 
 function buildInstallationDefaultPoolResponse(
   summaries: DefaultCapacityPoolsEnsureResult,
-  ensure: boolean
+  ensure: boolean,
+  placementSettings: SafeCapacityPoolPlacementSettingsSummary
 ): ProjectDefaultCapacityPoolsResponse {
-  const effective = activeDefaultSummary(summaries.installation);
+  const effective = summaries.installation;
   return {
     effective,
     effectiveScope: effective?.pool.scope ?? null,
+    effectiveState: effective?.effectiveState,
     defaults: [
       {
         scope: 'project',
@@ -62,15 +66,8 @@ function buildInstallationDefaultPoolResponse(
     precedence: PRECEDENCE,
     reconciledScopes: ensure ? ['installation'] : [],
     policyMutationSupported: true,
+    placementSettings,
   };
-}
-
-function activeDefaultSummary(
-  summary: DefaultCapacityPoolsEnsureResult[keyof DefaultCapacityPoolsEnsureResult]
-): ProjectDefaultCapacityPoolsResponse['effective'] {
-  if (!summary || summary.pool.status !== 'active' || summary.activeCandidateCount <= 0)
-    return null;
-  return summary;
 }
 
 /**
@@ -88,9 +85,10 @@ adminCapacityPoolsRoutes.get('/defaults', async (c) => {
     includeDisabled: true,
     env: c.env,
   });
+  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
 
   c.header('Cache-Control', 'private, no-store');
-  return c.json(buildInstallationDefaultPoolResponse(summaries, ensure));
+  return c.json(buildInstallationDefaultPoolResponse(summaries, ensure, placementSettings));
 });
 
 /**
@@ -107,9 +105,10 @@ adminCapacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
     includeDisabled: true,
     env: c.env,
   });
+  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
 
   c.header('Cache-Control', 'private, no-store');
-  return c.json(buildInstallationDefaultPoolResponse(summaries, true));
+  return c.json(buildInstallationDefaultPoolResponse(summaries, true, placementSettings));
 });
 
 /**
@@ -144,8 +143,9 @@ adminCapacityPoolsRoutes.patch('/defaults', async (c) => {
     includeDisabled: true,
     env: c.env,
   });
+  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
   c.header('Cache-Control', 'private, no-store');
-  return c.json(buildInstallationDefaultPoolResponse(summaries, false));
+  return c.json(buildInstallationDefaultPoolResponse(summaries, false, placementSettings));
 });
 
 export { adminCapacityPoolsRoutes };

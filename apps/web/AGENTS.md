@@ -1,6 +1,6 @@
 # UI Standards
 
-Full rules: `.claude/rules/04-ui-standards.md`
+Full scoped rules: `apps/web/.claude/rules/`
 
 ## Mobile-First Requirements
 
@@ -24,6 +24,7 @@ ALL UI changes MUST be visually verified on a mobile viewport **before committin
 ### Quick Mobile Check
 
 Before deploying any UI changes:
+
 - [ ] Login button visible and large (min 56px height)
 - [ ] Text readable without zooming (responsive sizing)
 - [ ] Grid layouts collapse to single column on mobile

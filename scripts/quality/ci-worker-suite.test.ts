@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 const CI_WORKFLOW_PATH = new URL('../../.github/workflows/ci.yml', import.meta.url);
@@ -27,7 +28,7 @@ function stepBlock(job: string, stepName: string): string {
 
 function withoutWorkerSuiteStep(workflow: string): string {
   return workflow.replace(
-    /\n      - name: Run Worker and Durable Object suites\n        run: pnpm --filter @simple-agent-manager\/api test:workers\n/,
+    /\n {6}- name: Run Worker and Durable Object suites\n {8}run: pnpm --filter @simple-agent-manager\/api test:workers\n/,
     '\n'
   );
 }
@@ -37,9 +38,21 @@ function expectRequiredWorkerSuiteWiring(workflow: string): void {
   const step = stepBlock(job, 'Run Worker and Durable Object suites');
 
   expect(job).toContain(
-    "if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'"
+    "needs.changes.outputs.api == 'true'"
   );
-  expect(job).toContain('timeout-minutes: 15');
+  expect(job).toContain('needs: [changes]');
+  // The job must carry a JOB-level bound — an unbounded required check can hang
+  // for the 6h GitHub ceiling, and a step-level `timeout-minutes` does not cap
+  // the job's wall time. Anchor to the 4-space job-property indent so a deeper
+  // step-level bound cannot satisfy this while the job-level one is missing.
+  // The exact value is tuning, not contract, so assert the bound exists and
+  // stays sane rather than pinning a magic number (#2016). The <= 30 ceiling is
+  // specific to THIS job; other jobs legitimately run longer (playwright: 45).
+  const timeoutMatch = job.match(/^ {4}timeout-minutes: (\d+)$/m);
+  expect(timeoutMatch).not.toBeNull();
+  const timeoutMinutes = Number(timeoutMatch![1]);
+  expect(timeoutMinutes).toBeGreaterThan(0);
+  expect(timeoutMinutes).toBeLessThanOrEqual(30);
   expect(step).toContain('run: pnpm --filter @simple-agent-manager/api test:workers');
   expect(step).not.toContain('continue-on-error');
 }

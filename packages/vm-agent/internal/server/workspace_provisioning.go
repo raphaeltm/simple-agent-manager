@@ -79,6 +79,9 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	if runtime == nil {
 		return false, fmt.Errorf("workspace runtime is required")
 	}
+	if err := s.waitForSystemProvisioning(ctx); err != nil {
+		return false, err
+	}
 
 	callbackToken := strings.TrimSpace(runtime.CallbackToken)
 	if callbackToken == "" {
@@ -175,8 +178,23 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	if runtime == nil {
 		return fmt.Errorf("workspace runtime is required")
 	}
+	lock := s.workspaceLifecycleLock(runtime.ID)
+	if err := lock.Lock(ctx); err != nil {
+		return err
+	}
+	defer lock.Unlock()
+	snapshot, stateErr := s.refreshWorkspaceEvictionState(runtime)
+	if stateErr != nil {
+		return stateErr
+	}
+	if snapshot.Status == "evicted" {
+		return &workspaceNotRunningError{status: "evicted"}
+	}
 	if !s.config.ContainerMode {
 		return nil
+	}
+	if err := s.waitForSystemProvisioning(ctx); err != nil {
+		return err
 	}
 
 	callbackToken := s.callbackTokenForWorkspace(runtime.ID)

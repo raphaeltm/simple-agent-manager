@@ -22,11 +22,14 @@ import { DurableObject } from 'cloudflare:workers';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
+import { measureArchiveSql } from '../../project-data-archive/sql-metrics';
+import { estimateArchiveWrites } from '../../project-data-archive/write-budget';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import { computeProjectDataAlarmTime } from './alarm-schedule';
+import * as archiveSharding from './archive-sharding';
 import * as attention from './attention';
 import * as attentionExpiry from './attention-expiry';
 import * as commands from './commands';
@@ -34,6 +37,7 @@ import type * as commentContracts from './comment-contracts';
 import * as comments from './comments';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
+import * as groupedFtsCleanup from './grouped-fts-cleanup';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
@@ -56,15 +60,31 @@ import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
 import * as sessions from './sessions';
+import * as storageReliefMeasurement from './storage-relief-measurement';
 import * as storageSafety from './storage-safety';
 import { readTaskAcpLivenessSignals } from './task-runtime-liveness';
 import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
+import * as terminalSessionReconciliation from './terminal-session-reconciliation';
 import * as toolPayloadArchive from './tool-payload-archive';
+import type {
+  ProjectDataManualToolPayloadCleanupInput,
+  ProjectDataManualToolPayloadCleanupResult,
+} from './tool-payload-cleanup-types';
+import * as toolPayloadManualCleanup from './tool-payload-manual-cleanup';
 import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');
+
+/**
+ * Human-readable fallbacks written into the free-text `session_state`
+ * diagnostic columns (`last_stop_reason`, `status_error`) when a terminal
+ * transition carries no caller-supplied reason. Display copy, not a vocabulary
+ * anything branches on.
+ */
+const SESSION_STOPPED_REASON = 'Session stopped';
+const SESSION_FAILED_REASON = 'Session failed';
 
 export type { Env } from './types';
 
@@ -73,6 +93,10 @@ export class ProjectData extends DurableObject<Env> {
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
   private summarySyncLock: Promise<unknown> = Promise.resolve();
+  /** Serializes archive source hash/finalize awaits against local transcript writers (rule 45). */
+  private archiveTranscriptLock: Promise<unknown> = Promise.resolve();
+  /** Serializes cleanup state reads, external R2 work, and final progress writes (rule 45). */
+  private toolPayloadCleanupLock: Promise<unknown> = Promise.resolve();
   private cachedProjectId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -195,7 +219,56 @@ export class ProjectData extends DurableObject<Env> {
     return updated;
   }
 
-  async stopSession(sessionId: string): Promise<boolean> {
+  /**
+   * Terminalize the activity mirror for an ended session and fan the transition
+   * out to every consumer of "is this session mid-prompt".
+   *
+   * `stopSession`/`failSession` previously wrote only `chat_sessions.status`, so
+   * a session ended mid-turn left `session_state.activity` reporting `prompting`
+   * until the 5-minute probe sweep noticed. All three consumers broke together:
+   * the dock kept showing "working", queued durable messages stayed parked
+   * behind a turn that had ended, and idle scheduling was suppressed
+   * (.claude/rules/57). Both keyings are cleared — the chat-session row and every
+   * linked ACP-session row — because the VM writes the latter. That multi-row
+   * clear is the ONLY part unique to a session ending; a turn ending touches one
+   * row. Everything downstream is delegated to the shared `publishTurnEnd`
+   * fan-out so a consumer added there is inherited here automatically, which is
+   * the promise `sessionActivityHooks()` makes.
+   *
+   * The disposition also tells the shared fan-out to leave the idle-cleanup
+   * schedule alone rather than re-arm it — see `TurnEndDisposition`.
+   */
+  private async publishSessionTerminalEnd(
+    chatSessionId: string,
+    disposition: sessionActivityReconciliation.TurnEndDisposition,
+    options: { deferAlarm?: boolean } = {}
+  ): Promise<void> {
+    if (disposition.kind !== 'idle') {
+      sessionState.terminalizeChatSessionActivity(
+        this.sql,
+        chatSessionId,
+        disposition.kind === 'stopped'
+          ? { activity: 'stopped', reason: SESSION_STOPPED_REASON }
+          : { activity: 'error', statusError: disposition.statusError }
+      );
+    }
+
+    await sessionActivityReconciliation.publishTurnEnd(
+      this.sessionActivityHooks(),
+      chatSessionId,
+      disposition,
+      options
+    );
+  }
+
+  /**
+   * @param options.deferAlarm Skip the alarm recomputation, for BATCH callers
+   * that terminalize many sessions in one turn. `recalculateAlarm` re-reads all
+   * nine alarm sources, so paying it per candidate is an N x full recompute
+   * inside a single alarm tick (.claude/rules/47). A deferring caller MUST
+   * recompute once when its batch completes.
+   */
+  async stopSession(sessionId: string, options: { deferAlarm?: boolean } = {}): Promise<boolean> {
     const result = sessions.stopSession(this.sql, sessionId);
     if (result) {
       activity.recordActivityEventInternal(
@@ -215,6 +288,18 @@ export class ProjectData extends DurableObject<Env> {
       }
       this.scheduleSummarySync();
       this.broadcastEvent('session.stopped', { sessionId }, sessionId);
+      // Best-effort: a session IS stopped once `chat_sessions` says so, and the
+      // probe sweep remains the backstop for the mirror. Never turn a mirror
+      // failure into a failed stop.
+      try {
+        await this.publishSessionTerminalEnd(sessionId, { kind: 'stopped' }, options);
+      } catch (e) {
+        log.error('session_terminal_end_publish_failed', {
+          sessionId,
+          outcome: 'stopped',
+          ...serializeError(e),
+        });
+      }
       return true;
     }
     return false;
@@ -267,7 +352,12 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async failSession(sessionId: string, errorMessage: string | null = null): Promise<boolean> {
+  /** @param options.deferAlarm See {@link ProjectData.stopSession}. */
+  async failSession(
+    sessionId: string,
+    errorMessage: string | null = null,
+    options: { deferAlarm?: boolean } = {}
+  ): Promise<boolean> {
     const result = sessions.failSession(this.sql, sessionId);
     if (result) {
       activity.recordActivityEventInternal(
@@ -287,9 +377,48 @@ export class ProjectData extends DurableObject<Env> {
       }
       this.scheduleSummarySync();
       this.broadcastEvent('session.failed', { sessionId }, sessionId);
+      try {
+        await this.publishSessionTerminalEnd(
+          sessionId,
+          { kind: 'failed', statusError: errorMessage ?? SESSION_FAILED_REASON },
+          options
+        );
+      } catch (e) {
+        log.error('session_terminal_end_publish_failed', {
+          sessionId,
+          outcome: 'failed',
+          ...serializeError(e),
+        });
+      }
       return true;
     }
     return false;
+  }
+
+  async reconcileTerminalTaskSessions(
+    input: terminalSessionReconciliation.TerminalSessionReconciliationInput = {}
+  ): Promise<terminalSessionReconciliation.TerminalSessionReconciliationStats> {
+    const projectId = this.getProjectId();
+    if (!projectId) return terminalSessionReconciliation.emptyTerminalSessionReconciliationStats();
+    // This sweep terminalizes up to MAX_TERMINAL_SESSION_RECONCILE_BATCH_SIZE
+    // sessions inside ONE alarm tick, so it defers the alarm recomputation and
+    // pays it once below rather than once per candidate — otherwise every
+    // candidate re-reads all nine alarm sources (.claude/rules/47).
+    const stats = await terminalSessionReconciliation.reconcileTerminalTaskSessions(
+      this.sql,
+      this.env,
+      projectId,
+      {
+        stopSession: (sessionId) => this.stopSession(sessionId, { deferAlarm: true }),
+        failSession: (sessionId, errorMessage) =>
+          this.failSession(sessionId, errorMessage, { deferAlarm: true }),
+      },
+      input
+    );
+    if (stats.stopped > 0 || stats.failed > 0) {
+      await this.recalculateAlarm();
+    }
+    return stats;
   }
 
   async persistMessage(
@@ -299,15 +428,17 @@ export class ProjectData extends DurableObject<Env> {
     toolMetadata: string | null,
     messageId?: string
   ): Promise<string> {
-    return messagePersistence.persistMessageWithSideEffects(
-      this.sql,
-      this.env,
-      this.messagePersistenceHooks(),
-      sessionId,
-      role,
-      content,
-      toolMetadata,
-      messageId
+    return this.withArchiveTranscriptLock(() =>
+      messagePersistence.persistMessageWithSideEffects(
+        this.sql,
+        this.env,
+        this.messagePersistenceHooks(),
+        sessionId,
+        role,
+        content,
+        toolMetadata,
+        messageId
+      )
     );
   }
 
@@ -323,17 +454,21 @@ export class ProjectData extends DurableObject<Env> {
       origin?: string | null;
     }>
   ): Promise<messagePersistence.MessageBatchPersistenceResult> {
-    return messagePersistence.persistMessageBatchWithSideEffects(
-      this.sql,
-      this.env,
-      this.messagePersistenceHooks(),
-      sessionId,
-      batchMessages
+    return this.withArchiveTranscriptLock(() =>
+      messagePersistence.persistMessageBatchWithSideEffects(
+        this.sql,
+        this.env,
+        this.messagePersistenceHooks(),
+        sessionId,
+        batchMessages
+      )
     );
   }
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
-    return durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input);
+    return this.withArchiveTranscriptLock(() =>
+      durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input)
+    );
   }
 
   async registerTaskWait(input: taskWaits.RegisterTaskWaitInput) {
@@ -420,6 +555,15 @@ export class ProjectData extends DurableObject<Env> {
     };
   }
 
+  private async withArchiveTranscriptLock<T>(fn: () => Promise<T> | T): Promise<T> {
+    const run = this.archiveTranscriptLock.then(() => fn());
+    this.archiveTranscriptLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
   async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
     sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId);
     this.recalculateAlarm().catch((err) =>
@@ -481,6 +625,305 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
+  /**
+   * Rows per statement for the streaming terminal-version hash and grouped-row loops.
+   * Resolved here, at the DO boundary, so the coordinator never has to know it: the
+   * memory ceiling this bounds belongs to this object, not to the Worker calling it.
+   */
+  private archiveHashPageRows(): number {
+    return archiveSharding.resolveArchiveHashPageRows(this.env);
+  }
+
+  archiveSourceEstimateWrites(sessionId: string, factor: number, maxMessages: number): number {
+    return estimateArchiveWrites(this.sql, sessionId, factor, maxMessages);
+  }
+
+  async archiveSourcePrepareIntent(
+    input: archiveSharding.ArchiveSourcePrepareInput
+  ): Promise<archiveSharding.ArchiveSourcePrepareOutcome> {
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.prepareArchiveSourceIntentOrRefuse(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
+    );
+  }
+
+  archiveSourceAbandonIntent(
+    input: archiveSharding.ArchiveSourceAbandonIntentInput
+  ): Promise<archiveSharding.ArchiveSourceAbandonIntentResult> {
+    return this.withArchiveTranscriptLock(async () =>
+      this.ctx.storage.transactionSync(() =>
+        archiveSharding.abandonArchiveSourceIntent(this.sql, input)
+      )
+    );
+  }
+
+  archiveSourceInspectIntent(
+    input: archiveSharding.ArchiveSourceInspectIntentInput
+  ): archiveSharding.ArchiveSourceInspectIntentResult {
+    return archiveSharding.inspectArchiveSourceIntent(this.sql, input);
+  }
+
+  async archiveSourceExportChunk(
+    input: archiveSharding.ArchiveSourceExportChunkInput
+  ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.exportArchiveChunk(this.sql, input)
+    );
+  }
+
+  archiveSourceMarkTargetSealed(input: {
+    sessionId: string;
+    migrationId: string;
+    sourceIntentToken: string;
+    targetAggregateSha256: string;
+    now: number;
+  }): boolean {
+    return this.ctx.storage.transactionSync(() =>
+      archiveSharding.markSourceTargetSealed(this.sql, input)
+    );
+  }
+
+  archiveSourceMarkRecoveryManifestPersisted(input: {
+    sessionId: string;
+    migrationId: string;
+    sourceIntentToken: string;
+    targetAggregateSha256: string;
+    r2ManifestKey: string;
+    now: number;
+  }): boolean {
+    return this.ctx.storage.transactionSync(() =>
+      archiveSharding.markSourceRecoveryManifestPersisted(this.sql, input)
+    );
+  }
+
+  async archiveSourceFinalizeDelete(
+    input: archiveSharding.ArchiveSourceFinalizeDeleteInput
+  ): Promise<archiveSharding.ArchiveSourceFinalizeDeleteResult> {
+    return this.withArchiveTranscriptLock(() =>
+      measureArchiveSql(this.sql, input.sessionId, 'source_delete', sql => archiveSharding.finalizeSourceDelete(sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      }))
+    );
+  }
+
+  async archiveSourceRestoreChunk(
+    input: archiveSharding.ArchiveSourceRestoreChunkInput
+  ): Promise<archiveSharding.ArchiveSourceRestoreChunkResult> {
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.restoreSourceArchiveChunk(this.sql, input)
+    );
+  }
+
+  async archiveSourceMarkCopyBackRestored(input: {
+    projectId: string;
+    sessionId: string;
+    migrationId: string;
+    sourceOwnerName: string;
+    targetOwnerName: string;
+    targetGeneration: number;
+    sourceIntentToken: string;
+    expectedTerminalVersionSha256: string;
+    now: number;
+    hashPageRows?: number;
+  }): Promise<boolean> {
+    return this.withArchiveTranscriptLock(() =>
+      archiveSharding.markSourceCopyBackRestored(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
+    );
+  }
+
+  archiveSourceGetMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    limit: number = 1000,
+    before: number | null = null,
+    after: number | null = null,
+    roles?: string[],
+    compact: boolean = false,
+    order: 'asc' | 'desc' = 'desc'
+  ) {
+    return archiveSharding.archiveSourceReadMessages(
+      this.sql,
+      this.env,
+      input,
+      limit,
+      before,
+      after,
+      roles,
+      compact,
+      order
+    );
+  }
+
+  archiveSourceGetMessageCount(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    roles?: string[]
+  ): number {
+    return archiveSharding.archiveSourceReadMessageCount(this.sql, input, roles);
+  }
+
+  async archiveSourceGetMessageToolContent(input: {
+    projectId: string;
+    sessionId: string;
+    ownerName: string;
+    generation: number;
+    migrationId: string | null;
+    messageId: string;
+  }): Promise<toolPayloadArchive.MessageToolContentResult | null> {
+    return archiveSharding.archiveSourceReadMessageToolContent(this.sql, this.env, input);
+  }
+
+  async archiveSourceGetArchivedToolPayloads(input: {
+    owner: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput;
+    query: toolPayloadArchive.ArchivedToolPayloadQuery;
+  }): Promise<toolPayloadArchive.ArchivedToolPayloadListResult> {
+    return archiveSharding.archiveSourceReadArchivedToolPayloads(
+      this.sql,
+      this.env,
+      input.owner.projectId,
+      input.query,
+      input.owner
+    );
+  }
+
+  archiveSourceSearchMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return archiveSharding.archiveSourceSearchMessages(this.sql, input, query, roles, limit);
+  }
+
+  archiveTargetPrepare(
+    input: archiveSharding.ArchiveTargetPrepareInput
+  ): Promise<archiveSharding.ArchiveTargetPrepareResult> {
+    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
+      archiveSharding.prepareArchiveTarget(this.sql, input)
+    ));
+  }
+
+  async archiveTargetCommitChunk(
+    input: archiveSharding.ArchiveTargetCommitChunkInput
+  ): Promise<archiveSharding.ArchiveTargetCommitChunkResult> {
+    return this.withArchiveTranscriptLock(() => measureArchiveSql(this.sql, input.sessionId, 'target_commit', sql => archiveSharding.commitArchiveTargetChunk(sql, input, this.env)));
+  }
+
+  async archiveTargetSeal(
+    input: archiveSharding.ArchiveTargetSealInput
+  ): Promise<archiveSharding.ArchiveTargetSealResult> {
+    return this.withArchiveTranscriptLock(() => measureArchiveSql(this.sql, input.sessionId, 'target_seal', sql => archiveSharding.sealArchiveTarget(sql, {
+      ...input,
+      hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+    }, this.env)));
+  }
+
+  archiveTargetAbandonSession(
+    input: archiveSharding.ArchiveTargetAbandonInput
+  ): Promise<archiveSharding.ArchiveTargetAbandonResult> {
+    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
+      archiveSharding.abandonArchiveTargetSession(this.sql, {
+        ...input,
+        hashPageRows: input.hashPageRows ?? this.archiveHashPageRows(),
+      })
+    ));
+  }
+
+  archiveTargetInspectSession(
+    input: archiveSharding.ArchiveTargetInspectInput
+  ): archiveSharding.ArchiveTargetInspectResult {
+    return archiveSharding.inspectArchiveTargetSession(this.sql, input);
+  }
+
+  async archiveTargetExportChunk(
+    input: archiveSharding.ArchiveTargetExportChunkInput
+  ): Promise<import('../../project-data-archive/contract').ProjectDataArchiveChunk> {
+    return this.withArchiveTranscriptLock(() => archiveSharding.exportArchiveTargetChunk(this.sql, input, this.env));
+  }
+
+  archiveTargetMarkRehomeExported(input: {
+    projectId: string;
+    sessionId: string;
+    migrationId: string | null;
+    targetOwnerName: string;
+    targetGeneration: number;
+    now: number;
+  }): Promise<boolean> {
+    return this.withArchiveTranscriptLock(async () => this.ctx.storage.transactionSync(() =>
+      archiveSharding.markArchiveTargetRehomeExported(this.sql, input)
+    ));
+  }
+
+  archiveTargetGetMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    limit: number = 1000,
+    before: number | null = null,
+    after: number | null = null,
+    roles?: string[],
+    compact: boolean = false,
+    order: 'asc' | 'desc' = 'desc'
+  ) {
+    return archiveSharding.archiveTargetReadMessages(
+      this.sql,
+      this.env,
+      input,
+      { limit, before, after, roles, compact, order }
+    );
+  }
+
+  async archiveTargetGetMessageToolContent(input: {
+    projectId: string;
+    sessionId: string;
+    ownerName: string;
+    generation: number;
+    migrationId: string | null;
+    messageId: string;
+  }): Promise<toolPayloadArchive.MessageToolContentResult | null> {
+    return archiveSharding.archiveTargetReadMessageToolContent(this.sql, this.env, input);
+  }
+
+  archiveTargetGetMessageCount(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    roles?: string[]
+  ): number {
+    return archiveSharding.archiveTargetReadMessageCount(this.sql, input, roles);
+  }
+
+  async archiveTargetGetArchivedToolPayloads(input: {
+    owner: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput;
+    query: toolPayloadArchive.ArchivedToolPayloadQuery;
+  }): Promise<toolPayloadArchive.ArchivedToolPayloadListResult> {
+    return archiveSharding.archiveTargetReadArchivedToolPayloads(
+      this.sql,
+      this.env,
+      input.owner.projectId,
+      input.query,
+      input.owner
+    );
+  }
+
+  archiveTargetSearchMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveExactReadInput,
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return archiveSharding.archiveTargetSearchMessages(this.sql, input, query, roles, limit);
+  }
+
+  archiveTargetSearchProjectMessages(
+    input: import('../../project-data-archive/contract').ProjectDataArchiveOwnerRef,
+    query: string,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
+    return archiveSharding.archiveTargetSearchProjectMessages(this.sql, input, query, roles, limit);
+  }
+
   async getMessageToolContent(
     sessionId: string,
     messageId: string
@@ -494,6 +937,7 @@ export class ProjectData extends DurableObject<Env> {
     const archived = await toolPayloadArchive.readArchivedMessageToolContent(
       this.sql,
       this.env,
+      this.getProjectId() ?? '',
       sessionId,
       messageId
     );
@@ -1070,6 +1514,7 @@ export class ProjectData extends DurableObject<Env> {
     sessionId: string,
     activity: string,
     extra?: {
+      observedAt?: number | null;
       promptStartedAt?: number | null;
       agentType?: string | null;
       restartCount?: number | null;
@@ -1079,7 +1524,7 @@ export class ProjectData extends DurableObject<Env> {
       runtimeWorkSource?: string;
       runtimeWorkProgressAt?: number | null;
     }
-  ): Promise<void> {
+  ): Promise<boolean> {
     return durability.reportActivity(this.sql, this.durabilityHooks(), sessionId, activity, extra);
   }
 
@@ -1100,10 +1545,22 @@ export class ProjectData extends DurableObject<Env> {
       reason: input.reason,
       source: 'control_plane',
       observedAt: input.observedAt,
+      // `observedAt` is a wall-clock instant captured before the caller's slow
+      // VM call, so the question is "did a NEW turn begin since then?" — not
+      // "did this turn make any progress since then?". Same-turn message
+      // persistence advances `activity_at` constantly, which is exactly what
+      // used to void a cancel issued while the agent was still emitting.
+      guard: 'turn_start',
     });
     if (!changed) return false;
     const chatSessionId = sessionState.resolveActivityChatSessionId(this.sql, sessionId);
-    await sessionActivityReconciliation.publishTurnEnd(this.sessionActivityHooks(), chatSessionId);
+    // The TURN ended; the session lives on and may receive another prompt, so it
+    // still wants an idle timer.
+    await sessionActivityReconciliation.publishTurnEnd(
+      this.sessionActivityHooks(),
+      chatSessionId,
+      { kind: 'idle' }
+    );
     return true;
   }
 
@@ -1208,6 +1665,77 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
+  async measureStorageRelief(
+    input: storageReliefMeasurement.ProjectDataStorageReliefMeasureInput = {}
+  ): Promise<storageReliefMeasurement.ProjectDataStorageReliefMeasureResult> {
+    // Read-only, but it shares the cleanup mutex on purpose. The measurement reads a
+    // candidate window and then re-reads each row's tool_metadata across an await to hash
+    // it; a concurrent cleanup pass stripping that row in between would make the preflight
+    // hash and size an already-stripped payload, so the eligible-byte total a human
+    // approves against would be wrong. Execution still re-verifies the live hash, so this
+    // protects evidence accuracy rather than data safety.
+    return await this.withToolPayloadCleanupLock(() =>
+      storageReliefMeasurement.measureProjectDataStorageReliefSlice(
+        this.sql,
+        this.env,
+        storageSafety.resolveStorageSafetyConfig(this.env),
+        input
+      )
+    );
+  }
+
+  async runGroupedFtsCleanup(): Promise<groupedFtsCleanup.ProjectDataGroupedFtsCleanupResult | null> {
+    const config = storageSafety.resolveStorageSafetyConfig(this.env);
+    const result = await groupedFtsCleanup.runProjectDataGroupedFtsCleanup(
+      this.sql,
+      this.env,
+      this.getProjectId(),
+      config,
+      {
+        allowStart: true,
+        classifyStatus: (databaseSizeBytes) =>
+          storageSafety.classifyStorageUsage(databaseSizeBytes, config),
+      }
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  async runManualToolPayloadCleanup(
+    input: ProjectDataManualToolPayloadCleanupInput
+  ): Promise<ProjectDataManualToolPayloadCleanupResult> {
+    const result = await this.withToolPayloadCleanupLock(() =>
+      toolPayloadManualCleanup.runProjectDataManualToolPayloadCleanup(
+        this.sql,
+        this.env,
+        this.getProjectId(),
+        input,
+        {
+          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        }
+      )
+    );
+    await this.recalculateAlarm();
+    return result;
+  }
+
+  private withToolPayloadCleanupLock<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.toolPayloadCleanupLock.then(operation);
+    this.toolPayloadCleanupLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  protected runStorageSafetyAlarmLocked(): Promise<storageSafety.ProjectDataStorageAlarmResult> {
+    return this.withToolPayloadCleanupLock(() =>
+      storageSafety.runProjectDataStorageSafetyAlarm(this.sql, this.env, this.getProjectId(), {
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+      })
+    );
+  }
+
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
@@ -1226,14 +1754,7 @@ export class ProjectData extends DurableObject<Env> {
     // lifecycle maintenance sections so a large project can still reclaim bytes
     // even when idle/reconciliation work has accumulated.
     try {
-      await storageSafety.runProjectDataStorageSafetyAlarm(
-        this.sql,
-        this.env,
-        this.getProjectId(),
-        {
-          transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
-        }
-      );
+      await this.runStorageSafetyAlarmLocked();
     } catch (err) {
       log.error('alarm.storage_safety_failed', {
         error: err instanceof Error ? err.message : String(err),
@@ -1308,28 +1829,13 @@ export class ProjectData extends DurableObject<Env> {
       }
     );
 
-    // Session state staleness: auto-heal stuck "prompting" states
+    // Session state staleness is reconciled only against the authoritative
+    // SessionHost inventory. Local SQL mirrors and VM heartbeats cannot prove a
+    // turn ended.
     const staleThresholdMs = sessionState.parseActivityStaleThreshold(
       this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
     );
-    try {
-      const healedSessionIds = sessionState.reconcileStaleActivity(this.sql, staleThresholdMs);
-      for (const healedId of healedSessionIds) {
-        const healedChatId = sessionState.resolveActivityChatSessionId(this.sql, healedId);
-        await sessionActivityReconciliation.publishTurnEnd(
-          this.sessionActivityHooks(),
-          healedChatId
-        );
-      }
-    } catch (err) {
-      log.error('alarm.stale_activity_reconciliation_failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Probe-backed reconciliation for stale working states the SQL-only heal
-    // cannot resolve (an awake, heartbeating agent that simply is not
-    // prompting). Network I/O stays OFF the alarm's critical path — rule 47.
+    // Network I/O stays OFF the alarm's critical path — rule 47.
     this.ctx.waitUntil(
       sessionActivityReconciliation
         .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {

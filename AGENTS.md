@@ -2,18 +2,43 @@
 
 > This file provides agent-specific context that supplements `CLAUDE.md`. Project structure, commands, deployment, architecture, and development guidelines live in `CLAUDE.md` — do not duplicate them here.
 
+## Context Loading Policy
+
+Use this file as a compact Codex routing layer. `CLAUDE.md` remains Claude Code's baseline and a shared reference for detailed repo guidance, but Codex should read targeted sections instead of loading it wholesale by default.
+
+- Start with this file, then load the nearest path-specific `AGENTS.md` for the files you will edit. Open exact `CLAUDE.md` sections only when this file does not contain enough detail.
+- Use root `.claude/rules/*.md` as routing stubs. Read scoped `.claude/rules/` only beside the app/package you are changing.
+- Prefer Codex skills for large references: `$changelog`, `$api-reference`, `$env-reference`, `$doc-sync-validator`, `$task-completion-validator`, and domain specialists.
+- Search narrowly before opening long task archives, specs, docs folders, or historical rules. Read the exact files needed for the current decision.
+- Measure instruction surface with `pnpm quality:agent-context-budget` when changing Codex/Claude steering docs or scoped rule layout. For Codex, verify active instruction files from a target path with `codex --cd <path> ...` or session logs.
+- Keep new standing guidance concise. If it needs examples, incidents, or long checklists, put those behind a scoped rule, skill, or reference file and link to it.
+- For long `/do` work, keep `.do-state.md` and the PR body current so compaction does not erase phase, reviewer, or CodeRabbit state.
+
+Route common questions to the smallest durable source first:
+
+| Need                                               | Load first                                                           | Avoid                                 |
+| -------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------- |
+| Recent implementation history                      | `$changelog`, then `git log --oneline -20`                           | Long history in startup docs          |
+| API routes or HTTP contracts                       | `$api-reference`, then exact files under `apps/api/`                 | Reading the whole API tree            |
+| Environment variables or secrets                   | `$env-reference` and `apps/api/.env.example`                         | Scanning deploy docs first            |
+| UI behavior or layout                              | Nearest app/package `AGENTS.md`, then scoped UI rules                | Loading API/DO incident rules         |
+| Durable Object, D1, KV, R2, or Cloudflare behavior | `apps/api/AGENTS.md`, scoped API rules, and `$cloudflare-specialist` | Generic root troubleshooting          |
+| Active work state                                  | Current task file, `.do-state.md`, and PR body                       | Reconstructing from full chat history |
+
+Do not raise `project_doc_max_bytes` to hide instruction bloat unless Raphaël explicitly asks for that. Split or route guidance instead.
+
 ## Agent Configuration Cross-Reference
 
-| What                 | Claude Code Location              | Codex Location                                     |
-| -------------------- | --------------------------------- | -------------------------------------------------- |
-| Project instructions | `CLAUDE.md`                       | `AGENTS.md` (this file)                            |
-| Modular rules        | `.claude/rules/*.md`              | Same files (shared)                                |
-| Subagents / skills   | `.claude/agents/*/`               | `.agents/skills/*/SKILL.md` + `agents/openai.yaml` |
-| Reference skills     | `.claude/skills/*/SKILL.md`       | `.agents/skills/*/SKILL.md`                        |
-| Slash commands       | `.claude/commands/*.md`           | `.codex/prompts/*.md`                              |
-| Project config       | `.claude/settings.json`           | `.codex/config.toml`                               |
-| Constitution         | `.specify/memory/constitution.md` | Same file                                          |
-| Feature specs        | `specs/`                          | Same directory                                     |
+| What                 | Claude Code Location                                       | Codex Location                                     |
+| -------------------- | ---------------------------------------------------------- | -------------------------------------------------- |
+| Project instructions | `CLAUDE.md`                                                | `AGENTS.md` (this file)                            |
+| Modular rules        | `.claude/rules/*.md` + path-scoped `.claude/rules/` copies | Same files (shared)                                |
+| Subagents / skills   | `.claude/agents/*/`                                        | `.agents/skills/*/SKILL.md` + `agents/openai.yaml` |
+| Reference skills     | `.claude/skills/*/SKILL.md`                                | `.agents/skills/*/SKILL.md`                        |
+| Slash commands       | `.claude/commands/*.md`                                    | `.codex/prompts/*.md`                              |
+| Project config       | `.claude/settings.json`                                    | `.codex/config.toml`                               |
+| Constitution         | `.specify/memory/constitution.md`                          | Same file                                          |
+| Feature specs        | `specs/`                                                   | Same directory                                     |
 
 ## Skills
 
@@ -44,7 +69,7 @@ Skills are invoked with `$skill-name` (Codex) or dispatched as subagents (Claude
 
 ## Operational Guardrails
 
-These are Codex-facing reminders for recurring SAM workflow failures. The durable source of truth remains `CLAUDE.md` and `.claude/rules/*.md`.
+These are Codex-facing reminders for recurring SAM workflow failures. The durable source of truth remains `CLAUDE.md`, compact root `.claude/rules/*.md`, and any path-scoped `.claude/rules/` files beside the code being changed.
 
 | Situation                                                                                                  | Do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -86,7 +111,7 @@ Per-project data (chat sessions, messages, activity events, and canonical `proje
 
 - **Access**: `env.PROJECT_DATA.idFromName(projectId)` → deterministic DO stub
 - **Service layer**: `apps/api/src/services/project-data.ts` — typed wrapper for all DO RPC calls
-- **DO class**: `apps/api/src/durable-objects/project-data.ts` — extends `DurableObject`, constructor runs migrations
+- **DO class**: `apps/api/src/durable-objects/project-data/` — Durable Object implementation split by concern; constructor/migrations are under this directory
 - **Migrations**: `apps/api/src/durable-objects/migrations.ts` — append-only, tracked in `migrations` table
 - **WebSocket**: Hibernatable WebSockets for real-time event streaming
 - **D1 sync**: `scheduleSummarySync()` debounces summary updates to D1

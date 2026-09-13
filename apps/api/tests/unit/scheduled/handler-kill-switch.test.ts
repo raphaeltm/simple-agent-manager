@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { enabledMock, isolateMock, logInfoMock, sessionSleepMock } = vi.hoisted(() => ({
+const {
+  capacityPoolReconciliationMock,
+  enabledMock,
+  isolateMock,
+  logInfoMock,
+  sessionSleepLifecycleRepairMock,
+  sessionSleepMock,
+} = vi.hoisted(() => ({
+  capacityPoolReconciliationMock: vi.fn(),
   enabledMock: vi.fn(),
   isolateMock: vi.fn(async () => undefined),
   logInfoMock: vi.fn(),
+  sessionSleepLifecycleRepairMock: vi.fn(),
   sessionSleepMock: vi.fn(),
 }));
 
@@ -19,6 +28,12 @@ vi.mock('../../../src/scheduled/sweep-isolation', () => ({
 }));
 vi.mock('../../../src/scheduled/session-sleep', () => ({
   runSessionSleepSweep: sessionSleepMock,
+}));
+vi.mock('../../../src/scheduled/session-sleep-lifecycle-repair', () => ({
+  runSessionSleepLifecycleRepair: sessionSleepLifecycleRepairMock,
+}));
+vi.mock('../../../src/scheduled/capacity-pool-reconciliation', () => ({
+  runScheduledCapacityPoolReconciliation: capacityPoolReconciliationMock,
 }));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
@@ -56,20 +71,103 @@ describe('scheduled operational sweep kill switch', () => {
     expect(isolateMock).toHaveBeenCalled();
     const sweepNames = isolateMock.mock.calls.map(([name]) => name);
     expect(sweepNames).toContain('node_cleanup');
+    expect(sweepNames).toContain('capacity_pool_reconciliation');
+    expect(sweepNames).toContain('session_sleep_lifecycle_repair');
     expect(sweepNames).toContain('deployment_release_retention');
     expect(sweepNames).toContain('session_snapshot_purge');
+    expect(sweepNames).toContain('terminal_session_ledger_reconciliation');
+    expect(sweepNames).toContain('project_data_storage_relief_preflight');
+    expect(sweepNames.indexOf('session_sleep_lifecycle_repair')).toBeLessThan(
+      sweepNames.indexOf('node_cleanup')
+    );
+    expect(sweepNames.indexOf('session_sleep_lifecycle_repair')).toBeLessThan(
+      sweepNames.indexOf('terminal_session_ledger_reconciliation')
+    );
+    expect(sweepNames.indexOf('terminal_session_ledger_reconciliation')).toBeLessThan(
+      sweepNames.indexOf('project_data_archive_sharding')
+    );
+    // Archive sharding copies whole sessions between ProjectData objects when its cadence is
+    // due; it runs after every lifecycle sweep (session_sleep, trial_expire) so that copy budget
+    // cannot push them back (`.claude/rules/47`). Only the relief preflight runs later.
+    expect(sweepNames.indexOf('session_sleep')).toBeLessThan(
+      sweepNames.indexOf('project_data_archive_sharding')
+    );
+    expect(sweepNames.indexOf('trial_expire')).toBeLessThan(
+      sweepNames.indexOf('project_data_archive_sharding')
+    );
+    expect(sweepNames.indexOf('project_data_archive_sharding')).toBe(sweepNames.length - 2);
+    // The relief preflight runs LAST. Its run budget is operator-tuned into the minutes
+    // while an emergency plan converges, so anywhere earlier it would push every later
+    // lifecycle sweep — session_sleep above all — back by that budget on every tick
+    // (`.claude/rules/47`). Pinned as an ordering invariant, not an incidental position.
+    expect(sweepNames.indexOf('project_data_storage_relief_preflight')).toBe(sweepNames.length - 1);
+    expect(sweepNames.indexOf('session_sleep')).toBeLessThan(
+      sweepNames.indexOf('project_data_storage_relief_preflight')
+    );
     expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
       sweepNames.indexOf('compose_artifact_cleanup')
     );
+    const sleepLifecycleRepairCallback = isolateMock.mock.calls.find(
+      ([name]) => name === 'session_sleep_lifecycle_repair'
+    )?.[1];
+    expect(sleepLifecycleRepairCallback).toEqual(expect.any(Function));
+    await sleepLifecycleRepairCallback?.();
+    expect(sessionSleepLifecycleRepairMock).toHaveBeenCalledWith(env, expect.any(Date));
     const sessionSleepCallback = isolateMock.mock.calls.find(
       ([name]) => name === 'session_sleep'
     )?.[1];
     expect(sessionSleepCallback).toEqual(expect.any(Function));
     await sessionSleepCallback?.();
     expect(sessionSleepMock).toHaveBeenCalledWith(env, expect.any(Date), context);
+    capacityPoolReconciliationMock.mockResolvedValue({
+      installationEnsured: true,
+      usersEnsured: 2,
+      projectsEnsured: 3,
+    });
+    const capacityPoolCallback = isolateMock.mock.calls.find(
+      ([name]) => name === 'capacity_pool_reconciliation'
+    )?.[1];
+    expect(capacityPoolCallback).toEqual(expect.any(Function));
+    await capacityPoolCallback?.();
+    expect(capacityPoolReconciliationMock).toHaveBeenCalledWith(env);
     expect(logInfoMock).toHaveBeenCalledWith(
       'cron.completed',
       expect.objectContaining({ type: 'sweep', failedSweeps: [] })
+    );
+  });
+
+  it('carries the archive-sharding refused count into cron.completed', async () => {
+    enabledMock.mockResolvedValue(true);
+    isolateMock.mockImplementation(async (name: string) =>
+      name === 'project_data_archive_sharding'
+        ? {
+            enabled: true,
+            skipped: false,
+            skipReason: null,
+            selected: 3,
+            migrated: 1,
+            recoveredCrashGaps: 0,
+            refused: 2,
+            failed: 0,
+            poisoned: 0,
+            chunksCopied: 4,
+            rowsCopied: 40,
+          }
+        : undefined
+    );
+
+    await scheduled(controller, env, context);
+
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({
+        projectDataArchiveShardingEnabled: true,
+        projectDataArchiveShardingSkipped: false,
+        projectDataArchiveShardingSelected: 3,
+        projectDataArchiveShardingMigrated: 1,
+        projectDataArchiveShardingRefused: 2,
+        projectDataArchiveShardingFailed: 0,
+      })
     );
   });
 });

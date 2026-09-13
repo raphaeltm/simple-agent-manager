@@ -38,6 +38,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
   let mockDB: any;
   let d1PreparedStmt: {
     bind: ReturnType<typeof vi.fn>;
+    first: ReturnType<typeof vi.fn>;
     run: ReturnType<typeof vi.fn>;
   };
   let d1Database: {
@@ -79,6 +80,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     vi.clearAllMocks();
     d1PreparedStmt = {
       bind: vi.fn().mockReturnThis(),
+      first: vi.fn().mockResolvedValue(null),
       run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
     };
     d1Database = {
@@ -126,14 +128,26 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     ...lookupRows: Array<Record<string, unknown> | null>
   ) {
     const chain = mockDB.limit;
-    chain.mockResolvedValueOnce(
-      workspaceRow
-        ? [{ status: 'running', nodeId: 'node-1', nodeStatus: 'running', ...workspaceRow }]
-        : []
-    );
+    const normalizedWorkspace = workspaceRow
+      ? {
+          workspaceId: 'ws-123',
+          userId: 'user-1',
+          projectId: null,
+          chatSessionId: null,
+          status: 'running',
+          nodeId: 'node-1',
+          nodeStatus: 'running',
+          ...workspaceRow,
+        }
+      : null;
+    chain.mockResolvedValueOnce(normalizedWorkspace ? [normalizedWorkspace] : []);
     for (const row of lookupRows) {
       chain.mockResolvedValueOnce(row ? [row] : []);
     }
+    // Successful callback responses re-read the complete workspace incarnation
+    // immediately before returning. Changed-credential writes also re-read after
+    // their exact D1 CAS. Keep those JIT reads on the original incarnation.
+    chain.mockResolvedValue(normalizedWorkspace ? [normalizedWorkspace] : []);
   }
 
   it('returns 401 when Authorization header is missing', async () => {
@@ -243,16 +257,22 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
 
     // Verify encrypt was called with the new credential
     expect(encrypt).toHaveBeenCalledWith(validBody.credential, 'test-key');
-    // Verify db.update was called
-    expect(mockDB.update).toHaveBeenCalled();
-    expect(mockDB.set).toHaveBeenCalledWith(
-      expect.objectContaining({
-        encryptedToken: 'new-encrypted',
-        iv: 'new-iv',
-      })
-    );
+    // Verify the exact workspace-incarnation CAS received the new ciphertext.
     expect(d1Database.prepare).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE cc_credentials')
+      expect.stringContaining('UPDATE credentials')
+    );
+    expect(d1PreparedStmt.bind).toHaveBeenCalledWith(
+      'new-encrypted',
+      'new-iv',
+      expect.any(String),
+      'cred-1',
+      'ws-123',
+      'user-1',
+      null,
+      null,
+      'node-1',
+      'running',
+      'running'
     );
     expect(d1PreparedStmt.run).toHaveBeenCalled();
   });

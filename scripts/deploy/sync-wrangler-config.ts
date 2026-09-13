@@ -18,7 +18,7 @@
 
 import { execSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
@@ -48,10 +48,26 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
   '../../apps/tail-worker/wrangler.toml'
 );
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
-const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
 const SETUP_TOKEN_BYTES = 24;
 const DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES = 6;
 const DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES = 3;
+
+/** API bootstrap and Tail binding repair have independent deployment requirements. */
+export function writeDeploymentMarkers(
+  deployedMigrationTag: string | null,
+  hasTailWorker: boolean,
+  stateDirectory = DEPLOY_STATE_DIR
+): void {
+  mkdirSync(stateDirectory, { recursive: true });
+  for (const [filename, needed] of [
+    ['api-worker-first-deploy', deployedMigrationTag === null],
+    ['tail-worker-first-deploy', !hasTailWorker],
+  ] as const) {
+    const path = resolve(stateDirectory, filename);
+    if (needed) writeFileSync(path, 'true', 'utf-8');
+    else rmSync(path, { force: true });
+  }
+}
 
 const CONTAINER_MAX_INSTANCE_CONFIG = {
   SandboxDO: {
@@ -422,13 +438,56 @@ function getApiWorkerRoutes(baseDomain: string): NonNullable<WranglerEnvConfig['
   ];
 }
 
-function getOptionalProcessEnvVars(names: readonly string[]): Record<string, string> {
+export type EnvironmentVarOverride = {
+  name: string;
+  /** Value checked into the top-level `[vars]` section of wrangler.toml. */
+  checkedIn: string;
+  /** Value the GitHub Environment (process env) supplied instead. */
+  override: string;
+};
+
+/**
+ * Optional process-env vars silently replace the checked-in top-level `[vars]` value. PR #2023
+ * flipped `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` to "true" in wrangler.toml while the
+ * production GitHub Environment still pinned "false"; the deployed Worker kept the override and
+ * the archive sweep never ran, with nothing in the deploy log saying so. List every override whose
+ * value differs from wrangler.toml so the log records what actually shipped. `[vars]` are
+ * non-secret by construction (secrets go through `wrangler secret`), so printing values is safe.
+ * See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ */
+export function listEnvironmentVarOverrides(
+  checkedIn: Record<string, unknown> | undefined,
+  overrides: Record<string, string>
+): EnvironmentVarOverride[] {
+  const listed: EnvironmentVarOverride[] = [];
+  for (const [name, override] of Object.entries(overrides)) {
+    if (!checkedIn || !Object.prototype.hasOwnProperty.call(checkedIn, name)) continue;
+    const checkedInValue = String(checkedIn[name]);
+    if (checkedInValue === override) continue;
+    listed.push({ name, checkedIn: checkedInValue, override });
+  }
+  return listed;
+}
+
+/**
+ * Read the optional GitHub Environment vars that may replace checked-in `[vars]`, and print each
+ * one whose value differs from wrangler.toml so the deploy log shows what actually shipped.
+ */
+function getOptionalProcessEnvVars(
+  checkedIn: Record<string, unknown> | undefined,
+  names: readonly string[]
+): Record<string, string> {
   const vars: Record<string, string> = {};
   for (const name of names) {
     const value = process.env[name];
     if (value) {
       vars[name] = value;
     }
+  }
+  for (const entry of listEnvironmentVarOverrides(checkedIn, vars)) {
+    console.log(
+      `  Environment override: ${entry.name}="${entry.override}" replaces wrangler.toml "${entry.checkedIn}"`
+    );
   }
   return vars;
 }
@@ -456,7 +515,8 @@ function getApiWorkerVars(
     SESSION_SNAPSHOT_TTL_DAYS: String(outputs.sessionSnapshotTtlDays),
     VM_INCIDENT_R2_PREFIX: outputs.diagnosticIncidentPrefix,
     VM_INCIDENT_RETENTION_DAYS: String(outputs.diagnosticIncidentTtlDays),
-    ...getOptionalProcessEnvVars([
+    ...getOptionalProcessEnvVars(topLevel.vars, [
+      'D1_SESSION_MODE',
       'REQUIRE_APPROVAL',
       'CRON_SWEEPS_ENABLED_KV_KEY',
       'DO_ALARMS_ENABLED_KV_KEY',
@@ -496,6 +556,15 @@ function getApiWorkerVars(
       'NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS',
       'NODE_WORKSPACE_IDLE_TIMEOUT_MS',
       'NODE_CLEANUP_FAILURE_BACKOFF_MS',
+      'NODE_AGENT_REQUEST_TIMEOUT_MS',
+      'NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS',
+      'WORKSPACE_DELETION_RETRY_BASE_MS',
+      'WORKSPACE_DELETION_RETRY_MAX_MS',
+      'WORKSPACE_DELETION_MAX_RESIDENCE_MS',
+      'WORKSPACE_DELETION_ALARM_BATCH_SIZE',
+      'WORKSPACE_DELETION_CALLBACK_SIGNAL_TTL_SECONDS',
+      'WORKSPACE_DELETION_CALLBACK_SIGNAL_CLEANUP_LIMIT',
+      'WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH',
       'DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS',
       'ORCHESTRATOR_ZERO_TASK_GRACE_MS',
       'ORCHESTRATOR_MAX_MISSION_LIFETIME_MS',
@@ -505,7 +574,6 @@ function getApiWorkerVars(
       'ORCHESTRATOR_WAIT_MAX_DURATION_MS',
       'ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM',
       'HETZNER_BASE_IMAGE',
-      'VM_AGENT_MEMORY_RESERVE_MB',
       'DEPLOYMENT_RELEASE_RETENTION_ENABLED',
       'DEPLOYMENT_RELEASE_RETENTION_COUNT',
       'DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE',
@@ -534,6 +602,17 @@ function getApiWorkerVars(
       'SESSION_SNAPSHOT_OPERATION_TIMEOUT',
       'SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES',
       'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS',
+      'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT',
       'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO',
       'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO',
       'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS',
@@ -543,11 +622,85 @@ function getApiWorkerVars(
       'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS',
       'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM',
       'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS',
+      'PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS',
       'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS',
       'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS',
       'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX',
       'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS',
       'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES',
+      'PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES',
+      'PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS',
+      'PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES',
+      'PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO',
+      'PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES',
+      'PROJECT_DATA_ARCHIVE_SHARDING_ENABLED',
+      'PROJECT_DATA_ARCHIVE_COMPACT_ENABLED',
+      'PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET',
+      'PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR',
+      'PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS',
+      'PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS',
+      'PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT',
+      'PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED',
+      'PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS',
+      'PROJECT_DATA_ARCHIVE_SHARD_COUNT',
+      'PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS',
+      'PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS',
+      'PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET',
+      'PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS',
+      'PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS',
+      'PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS',
+      'PROJECT_DATA_ARCHIVE_CHUNK_ROWS',
+      'PROJECT_DATA_ARCHIVE_CHUNK_BYTES',
+      'PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS',
+      'PROJECT_DATA_ARCHIVE_LEASE_MS',
+      'PROJECT_DATA_ARCHIVE_WALL_TIME_MS',
+      'PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT',
+      'PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX',
+      'PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_DEFAULT',
+      'PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX',
+      'PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS',
+      'PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS',
+      'PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX',
+      'PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH',
+      'PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS',
+      'PROJECT_DATA_ARCHIVE_R2_PREFIX',
+      'PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS',
+      'PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED',
+      'PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS',
+      'PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS',
+      'PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS',
       'SESSION_SLEEP_AFTER_MS',
       'SESSION_SLEEP_SWEEP_BATCH_SIZE',
       'SESSION_SLEEP_SWEEP_WALL_BUDGET_MS',
@@ -556,6 +709,12 @@ function getApiWorkerVars(
       'SESSION_SLEEP_CLAIM_LEASE_MS',
       'HARNESS_BACKGROUND_WORK_LEASE_MS',
       'HARNESS_BACKGROUND_WORK_MAX_DURATION_MS',
+      'ACP_ACTIVITY_ADMISSION_ENABLED',
+      'ACP_ACTIVITY_COALESCE_WINDOW_MS',
+      'ACP_ACTIVITY_COALESCE_TTL_MS',
+      'ACP_ACTIVITY_COALESCE_MAX_PENDING',
+      'ACP_ACTIVITY_BINDING_CACHE_TTL_MS',
+      'ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES',
       'SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS',
       'SESSION_LIFECYCLE_ERROR_MAX_LENGTH',
       'LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE',
@@ -898,9 +1057,7 @@ async function main(): Promise<void> {
   const hasTailWorker = await checkTailWorkerExists(outputs.cloudflareAccountId, tailWorkerName);
   console.log(`  Tail worker "${tailWorkerName}" exists: ${hasTailWorker}`);
   if (!hasTailWorker) {
-    console.log(
-      `  tail_consumers will be OMITTED (first deploy — will re-add after tail worker is deployed)`
-    );
+    console.log(`  tail_consumers will be OMITTED until the tail worker is deployed`);
   }
 
   // Auto-detect whether this deployment can use Cloudflare Artifacts (probes the
@@ -942,13 +1099,9 @@ async function main(): Promise<void> {
   // Generate env section for tail worker
   syncTailWorkerConfig(stack, outputs.cloudflareAccountId, envKey);
 
-  // Write first-deploy marker for the workflow to detect
-  if (!hasTailWorker) {
-    mkdirSync(DEPLOY_STATE_DIR, { recursive: true });
-    writeFileSync(FIRST_DEPLOY_MARKER, 'true', 'utf-8');
-    console.log(`\nFirst-deploy marker written to ${FIRST_DEPLOY_MARKER}`);
-    console.log('The deploy workflow will re-sync and re-deploy after the tail worker is created.');
-  }
+  // The migration probe returns null only for a confirmed absent API Worker.
+  // A missing Tail Worker must never trigger extra code revisions on a live API.
+  writeDeploymentMarkers(deployedMigrationTag, hasTailWorker);
 
   console.log('\nSync complete.');
 }

@@ -21,6 +21,7 @@ const TASK = {
   projectName: 'Acme',
   title: 'Fix the bug',
   status: 'in_progress',
+  agentActivityState: 'working',
   createdAt: '2026-08-18T10:00:00.000Z',
   updatedAt: '2026-08-18T10:05:00.000Z',
 } as unknown as DashboardTask;

@@ -19,6 +19,8 @@ export interface TerminalTaskCleanupOptions {
   logContext?: Record<string, unknown>;
   /** Archive/delete intent: discard the seven-day restore state. */
   destructiveSessionEnd?: boolean;
+  /** Callback paths revalidate the exact workspace immediately before each side effect. */
+  beforeSideEffect?: () => Promise<unknown>;
 }
 
 export interface TerminalTaskCleanupOrThrowOptions extends TerminalTaskCleanupOptions {
@@ -65,6 +67,7 @@ export async function cleanupTerminalTaskResources(
     .where(eq(schema.tasks.id, taskId))
     .limit(1);
 
+  await options.beforeSideEffect?.();
   await cancelVmTaskAdmission(
     env,
     taskId,
@@ -97,6 +100,7 @@ export async function cleanupTerminalTaskResources(
     workspace?.chatSessionId &&
     !options.destructiveSessionEnd
   ) {
+    await options.beforeSideEffect?.();
     await queueWorkspaceSessionSleep(env, {
       workspaceId: task.workspaceId,
       userId: workspace.userId,
@@ -107,11 +111,13 @@ export async function cleanupTerminalTaskResources(
   }
 
   if (workspace?.chatSessionId && options.destructiveSessionEnd) {
+    await options.beforeSideEffect?.();
     await deleteSessionSnapshotState(db, env, workspace.chatSessionId);
   }
 
   if (workspace?.chatSessionId) {
     try {
+      await options.beforeSideEffect?.();
       if (options.status === 'failed') {
         await projectDataService.failSession(
           env,
@@ -135,5 +141,6 @@ export async function cleanupTerminalTaskResources(
     }
   }
 
+  await options.beforeSideEffect?.();
   await cleanupTaskRun(taskId, env, undefined, options.requiredUserId);
 }

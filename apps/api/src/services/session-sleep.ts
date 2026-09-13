@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -33,7 +33,7 @@ import {
 import { cleanupTaskRun } from './task-runner';
 import { sleepVmAgentContainer } from './vm-agent-container';
 
-async function finishSleepingWorkspaceComputeCleanup(
+export async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
   input: {
@@ -59,7 +59,7 @@ async function finishSleepingWorkspaceComputeCleanup(
   }
 }
 
-async function markWorkspaceNodeWarmIfEmpty(
+export async function markWorkspaceNodeWarmIfEmpty(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
   input: {
@@ -242,6 +242,7 @@ export async function checkAutomaticSessionSleepEligibility(
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
       taskStatus: schema.tasks.status,
+      taskCompletedAt: sql<string | null>`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
     })
     .from(schema.workspaces)
     .leftJoin(
@@ -284,6 +285,7 @@ export async function checkAutomaticSessionSleepEligibility(
   const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
   const idleness = classifySessionIdleness({
     taskStatus: workspace.taskStatus,
+    taskCompletedAt: workspace.taskCompletedAt,
     state,
     now,
     idleAfterMs,
@@ -330,6 +332,7 @@ export async function sleepWorkspaceSession(
       nodeRole: schema.nodes.nodeRole,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
+      taskCompletedAt: sql<string | null>`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
       warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
     })
     .from(schema.workspaces)
@@ -462,6 +465,7 @@ export async function sleepWorkspaceSession(
       const classifyGate = (state: SessionIdlenessActivityState | null) =>
         classifySessionIdleness({
           taskStatus: workspace.taskStatus,
+          taskCompletedAt: workspace.taskCompletedAt,
           state,
           now: new Date(),
           idleAfterMs,

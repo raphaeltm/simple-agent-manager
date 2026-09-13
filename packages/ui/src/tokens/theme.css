@@ -231,6 +231,16 @@
   --sam-shadow-overlay: 0 8px 32px rgba(0, 0, 0, 0.4);
   --sam-shadow-tooltip: 0 2px 8px rgba(0, 0, 0, 0.3);
 
+  /*
+   * Left-cast shadows for right-edge chrome (the session tool rail and its pull-tab).
+   * Every other shadow token casts DOWNWARD, which is wrong for an element flush to the
+   * right edge. These carry the same per-theme weighting as their downward siblings: the
+   * rail previously hardcoded rgba(0,0,0,0.34), roughly 3x the light theme's equivalent,
+   * so it rendered as the heaviest edge on the screen in light mode.
+   */
+  --sam-shadow-rail-tab: -2px 0 12px rgba(0, 0, 0, 0.28);
+  --sam-shadow-rail-overlay: -8px 0 32px rgba(0, 0, 0, 0.5);
+
   /* Z-Index Scale */
   --sam-z-sticky: 10;
   --sam-z-player: 15;
@@ -473,6 +483,10 @@
   --sam-shadow-dropdown: 0 4px 16px rgba(16, 40, 28, 0.12);
   --sam-shadow-overlay: 0 8px 32px rgba(16, 40, 28, 0.16);
   --sam-shadow-tooltip: 0 2px 8px rgba(16, 40, 28, 0.12);
+
+  /* Left-cast rail shadows — see the dark-theme block for why these exist. */
+  --sam-shadow-rail-tab: -2px 0 12px rgba(16, 40, 28, 0.1);
+  --sam-shadow-rail-overlay: -8px 0 32px rgba(16, 40, 28, 0.16);
 
   color: var(--sam-color-fg-primary);
   background-color: var(--sam-color-bg-canvas);

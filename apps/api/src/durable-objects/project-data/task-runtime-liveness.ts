@@ -10,7 +10,10 @@ import {
   getFreshHarnessWorkLeaseExpiry,
   parseHarnessWorkConfig,
 } from '../../services/session-idleness';
-import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../../services/session-snapshot-artifacts';
+import {
+  sessionRecoveryAttemptDecayMs,
+  sessionRecoveryMaxAttempts,
+} from '../../services/session-snapshot-recovery-budget';
 import {
   classifyTaskRuntimeLiveness,
   isSessionResumable,
@@ -158,7 +161,13 @@ export function readTaskAcpLivenessSignals(
 export async function getLocalTaskRuntimeLiveness(
   sql: SqlStorage,
   env: Env,
-  task: { taskId: string; projectId: string; workspaceId: string | null }
+  task: {
+    taskId: string;
+    projectId: string;
+    workspaceId: string | null;
+    chatSessionId?: string | null;
+    acpSessionId?: string | null;
+  }
 ): Promise<TaskRuntimeLiveness> {
   const staleMs =
     positiveInt(env.NODE_HEARTBEAT_STALE_SECONDS, DEFAULT_NODE_HEARTBEAT_STALE_SECONDS) * 1000;
@@ -185,15 +194,15 @@ export async function getLocalTaskRuntimeLiveness(
   // Only probed for a workspace that would otherwise be declared conclusively
   // dead, keeping this off the alarm's hot path (`.claude/rules/47`).
   const nowMs = Date.now();
-  const maxRecoveryAttempts = positiveInt(
-    env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
-    DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
-  );
+  const maxRecoveryAttempts = sessionRecoveryMaxAttempts(env);
+  const recoveryAttemptDecayMs = sessionRecoveryAttemptDecayMs(env);
   let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
   let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
   /** True when resumability alone already yields an inconclusive verdict. */
   let resumabilityResolvedInconclusive = false;
-  if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
+  const workspaceChatMatches =
+    !task.chatSessionId || !workspace || workspace.chatSessionId === task.chatSessionId;
+  if (workspaceChatMatches && needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
     try {
       sessionResumability = await loadSessionResumabilitySnapshot(
         env.DATABASE,
@@ -206,8 +215,7 @@ export async function getLocalTaskRuntimeLiveness(
         sessionResumability,
         task.projectId,
         workspace.id,
-        maxRecoveryAttempts,
-        nowMs
+        { maxRecoveryAttempts, recoveryAttemptDecayMs, nowMs }
       );
     } catch (err) {
       resumabilityProbeOutcome = 'error';
@@ -227,6 +235,7 @@ export async function getLocalTaskRuntimeLiveness(
   let supersessionProbeOutcome: TaskRuntimeLivenessSignals['supersessionProbeOutcome'] = 'not_run';
   let supersession: TaskRuntimeLivenessSignals['supersession'] = 'none';
   if (
+    workspaceChatMatches &&
     !resumabilityResolvedInconclusive &&
     needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
   ) {
@@ -247,6 +256,8 @@ export async function getLocalTaskRuntimeLiveness(
   let livenessSignals: TaskRuntimeLivenessSignals = {
     projectId: task.projectId,
     taskWorkspaceId: task.workspaceId,
+    expectedChatSessionId: task.chatSessionId,
+    expectedAcpSessionId: task.acpSessionId,
     workspace,
     workspaceProbeOutcome,
     supersessionProbeOutcome,
@@ -262,8 +273,10 @@ export async function getLocalTaskRuntimeLiveness(
     resumabilityProbeOutcome,
     sessionResumability,
     resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
+    resumabilityRecoveryAttemptDecayMs: recoveryAttemptDecayMs,
   };
   let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
+  if (!workspaceChatMatches) return initialClassification;
   if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {
     const nodeId = livenessSignals.workspace.nodeId;
     const probe = await probeNodeHealthForTaskLiveness(env, nodeId);
@@ -275,7 +288,7 @@ export async function getLocalTaskRuntimeLiveness(
         outcome: probe.outcome,
         status: probe.status,
         timeoutMs: probe.timeoutMs,
-        action: probe.outcome === 'failed' ? 'terminal_candidate' : 'preserved',
+        action: 'preserved',
         error: probe.error,
       });
     }

@@ -21,6 +21,15 @@ import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
 import { createTrigger, updateTrigger } from '../../lib/api';
 import { useProjectContext } from '../../pages/ProjectContext';
+import {
+  deserializeResourceRequirements,
+  EMPTY_RESOURCE_STATE,
+  hasValidationErrors,
+  type ResourceRequirementsFormState,
+  type ResourceValidationErrors,
+  serializeResourceRequirements,
+  validateResourceState,
+} from '../resource-requirements';
 import { GitHubTriggerFields } from './GitHubTriggerFields';
 import { SchedulePicker } from './SchedulePicker';
 import {
@@ -89,10 +98,14 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
   const [skipIfRunning, setSkipIfRunning] = useState(true);
   const [maxConcurrent, setMaxConcurrent] = useState(1);
   const [vmSizeOverride, setVmSizeOverride] = useState('');
+  const [resourceReqs, setResourceReqs] = useState<ResourceRequirementsFormState>({
+    ...EMPTY_RESOURCE_STATE,
+  });
   const [taskMode, setTaskMode] = useState<'task' | 'conversation'>('task');
   const [agentProfileId, setAgentProfileId] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resourceErrors, setResourceErrors] = useState<ResourceValidationErrors>({});
   const [, setCronDescription] = useState('');
 
   // Agent profiles for the dropdown. Shared with the profiles page, both task forms
@@ -171,6 +184,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
         setSkipIfRunning(editTrigger.skipIfRunning);
         setMaxConcurrent(editTrigger.maxConcurrent);
         setVmSizeOverride(editTrigger.vmSizeOverride ?? '');
+        setResourceReqs(deserializeResourceRequirements(editTrigger.resourceRequirementsJson));
         setTaskMode(editTrigger.taskMode);
         setAgentProfileId(editTrigger.agentProfileId ?? '');
         setAdvancedOpen(false);
@@ -196,6 +210,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
         setSkipIfRunning(true);
         setMaxConcurrent(1);
         setVmSizeOverride('');
+        setResourceReqs({ ...EMPTY_RESOURCE_STATE });
         setTaskMode('task');
         setAgentProfileId('');
         setAdvancedOpen(false);
@@ -244,6 +259,13 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
       return;
     }
 
+    const resErrors = validateResourceState(resourceReqs);
+    setResourceErrors(resErrors);
+    if (hasValidationErrors(resErrors)) {
+      toast.error('Fix resource requirement errors before saving');
+      return;
+    }
+
     setSaving(true);
     try {
       let credential: WebhookCredential | undefined;
@@ -257,6 +279,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
           skipIfRunning,
           maxConcurrent,
           vmSizeOverride: vmSizeOverride || null,
+          resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
           taskMode,
           agentProfileId: agentProfileId || null,
           webhookConfig:
@@ -282,6 +305,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
           skipIfRunning,
           maxConcurrent,
           vmSizeOverride: vmSizeOverride || undefined,
+          resourceRequirementsJson: serializeResourceRequirements(resourceReqs),
           taskMode,
           agentProfileId: agentProfileId || undefined,
           githubConfig:
@@ -347,6 +371,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
     skipIfRunning,
     maxConcurrent,
     vmSizeOverride,
+    resourceReqs,
     taskMode,
     agentProfileId,
     isEdit,
@@ -392,14 +417,17 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="fixed top-0 right-0 bottom-0 glass-modal glass-panel-container glass-composited shadow-lg z-[var(--sam-z-drawer)] overflow-y-auto transition-transform duration-300 ease-out motion-reduce:transition-none translate-x-0"
+        className="fixed top-0 right-0 bottom-0 glass-modal glass-panel-container glass-composited shadow-lg z-[var(--sam-z-drawer)] flex flex-col overflow-hidden transition-transform duration-300 ease-out motion-reduce:transition-none translate-x-0"
         style={{ width: 'min(560px, 95vw)' }}
         role="dialog"
         aria-modal="true"
         aria-label={isEdit ? 'Edit trigger' : 'Create trigger'}
       >
         {/* Header */}
-        <div className="sticky top-0 glass-chrome p-4 flex items-center justify-between z-10">
+        <div
+          className="glass-chrome p-4 flex shrink-0 items-center justify-between z-10"
+          data-testid="trigger-form-header"
+        >
           <h2 className="sam-type-section-heading m-0">
             {isEdit ? 'Edit Trigger' : 'New Trigger'}
           </h2>
@@ -412,15 +440,16 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
           </button>
         </div>
 
-        {editTrigger?.credentialAttribution?.multiplayerActive &&
-          editTrigger.credentialAttribution.hasPersonalWarning && (
-            <div className="px-4 pt-4">
-              <TriggerCredentialWarning trigger={editTrigger} />
-            </div>
-          )}
-
         {/* Form content */}
-        <div className="p-4 space-y-6">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto scroll-pb-28 p-4 space-y-6"
+          data-testid="trigger-form-scroll-body"
+        >
+          {editTrigger?.credentialAttribution?.multiplayerActive &&
+            editTrigger.credentialAttribution.hasPersonalWarning && (
+              <TriggerCredentialWarning trigger={editTrigger} />
+            )}
+
           <TriggerIdentityFields
             description={description}
             name={name}
@@ -506,18 +535,24 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
             onOpenChange={setAdvancedOpen}
             onSkipIfRunningChange={setSkipIfRunning}
             onTaskModeChange={setTaskMode}
-            onVmSizeChange={setVmSizeOverride}
+            onResourceReqsChange={(next) => { setResourceReqs(next); setResourceErrors({}); }}
+            onClearLegacy={() => setVmSizeOverride('')}
             open={advancedOpen}
             profiles={profiles}
+            resourceReqs={resourceReqs}
+            resourceErrors={resourceErrors}
             skipIfRunning={skipIfRunning}
             sourceType={sourceType}
             taskMode={taskMode}
-            vmSize={vmSizeOverride}
+            legacyVmSize={vmSizeOverride}
           />
         </div>
 
         {/* Footer actions */}
-        <div className="sticky bottom-0 bg-surface border-t border-border-default p-4 flex items-center justify-end gap-3">
+        <div
+          className="bg-surface border-t border-border-default p-4 flex shrink-0 items-center justify-end gap-3"
+          data-testid="trigger-form-footer"
+        >
           <button
             onClick={onClose}
             className={`px-4 py-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}

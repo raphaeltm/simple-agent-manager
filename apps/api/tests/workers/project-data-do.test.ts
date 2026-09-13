@@ -92,6 +92,72 @@ describe('ProjectData Durable Object', () => {
       expect(transitioned).toMatchObject({ state: 'preempt_requested', attemptCount: 1 });
     });
 
+    it('rejects stale cross-isolate activity reports through the DO RPC surface', async () => {
+      const stub = getStub('project-durable-activity-cas');
+
+      await expect(
+        stub.reportActivity('acp-cas', 'prompting', {
+          observedAt: 1_000,
+          runtimeWorkState: 'active',
+          runtimeWorkCount: 1,
+          runtimeWorkSource: 'claude_sdk',
+          runtimeWorkProgressAt: 1_000,
+        })
+      ).resolves.toBe(true);
+      await expect(
+        stub.reportActivity('acp-cas', 'idle', {
+          observedAt: 2_000,
+          runtimeWorkState: 'inactive',
+          runtimeWorkCount: 0,
+          runtimeWorkSource: 'claude_sdk',
+          runtimeWorkProgressAt: 2_000,
+        })
+      ).resolves.toBe(true);
+
+      // Simulates a delayed coalesced intermediate from another Worker isolate.
+      // The stale write must not resurrect a working state or active harness work.
+      await expect(
+        stub.reportActivity('acp-cas', 'prompting', {
+          observedAt: 1_500,
+          promptStartedAt: 1_000,
+          runtimeWorkState: 'active',
+          runtimeWorkCount: 1,
+          runtimeWorkSource: 'claude_sdk',
+          runtimeWorkProgressAt: 1_500,
+        })
+      ).resolves.toBe(false);
+
+      expect(await stub.getSessionState('acp-cas')).toMatchObject({
+        activity: 'idle',
+        activityAt: 2_000,
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+      });
+
+      await expect(
+        stub.reportActivity('acp-cas', 'prompting', {
+          observedAt: 2_000,
+          promptStartedAt: 2_000,
+        })
+      ).resolves.toBe(false);
+      expect(await stub.getSessionState('acp-cas')).toMatchObject({
+        activity: 'idle',
+        activityAt: 2_000,
+      });
+
+      await expect(
+        stub.reportActivity('acp-cas', 'error', {
+          observedAt: 2_000,
+          statusError: 'terminal error wins same millisecond',
+        })
+      ).resolves.toBe(true);
+      expect(await stub.getSessionState('acp-cas')).toMatchObject({
+        activity: 'error',
+        activityAt: 2_000,
+        statusError: 'terminal error wins same millisecond',
+      });
+    });
+
     it('lets the durable receipt alarm own terminal expiry instead of the legacy sweep', async () => {
       const stub = getStub('project-durable-alarm-expiry');
       const sessionId = await stub.createSession('workspace-1', 'Durable alarm expiry');

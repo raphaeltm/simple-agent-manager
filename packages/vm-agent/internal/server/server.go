@@ -71,6 +71,7 @@ var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 
 // Server is the HTTP server for the VM Agent.
 type Server struct {
+	systemProvisioning    *systemProvisioningBarrier
 	config                *config.Config
 	httpServer            *http.Server
 	jwtValidator          *auth.JWTValidator
@@ -81,6 +82,7 @@ type Server struct {
 	workspaces            map[string]*WorkspaceRuntime
 	buildQueue            chan struct{}
 	readyRetryMu          sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
+	evictionDeliveryMu    sync.Mutex // One bounded eviction callback delivery at a time.
 	eventMu               sync.RWMutex
 	nodeEvents            []EventRecord
 	workspaceEvents       map[string][]EventRecord
@@ -92,9 +94,11 @@ type Server struct {
 	acpConfig             acp.GatewayConfig
 	sessionHostMu         sync.Mutex
 	sessionHosts          map[string]*acp.SessionHost
-	sessionMcpServers     map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
-	sessionProfileOvr     map[string]profileOverrides     // hostKey → model/permissionMode/effort overrides from agent profiles
-	sessionTaskCtx        map[string]taskCallbackContext  // hostKey → task callback ownership context
+	sessionRestores       map[string]*sessionRestoreAttempt // guarded by sessionHostMu
+	sessionCreations      map[string]chan struct{}          // guarded by sessionHostMu
+	sessionMcpServers     map[string][]acp.McpServerEntry   // hostKey → MCP servers for ACP injection
+	sessionProfileOvr     map[string]profileOverrides       // hostKey → model/permissionMode/effort overrides from agent profiles
+	sessionTaskCtx        map[string]taskCallbackContext    // hostKey → task callback ownership context
 	store                 *persistence.Store
 	executionRuntimeID    string
 	errorReporter         *errorreport.Reporter
@@ -126,6 +130,9 @@ type Server struct {
 	sessionSnapshotLocks  map[string]sessionSnapshotLock
 	sessionSnapshotRunner func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
 
+	workspaceLifecycleMu    sync.Mutex
+	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
+
 	// Deployment mode — one Engine per placed deployment environment.
 	deployMu       sync.Mutex
 	deployEngines  map[string]*deploy.Engine
@@ -136,6 +143,15 @@ type Server struct {
 type cachedWorktreeList struct {
 	worktrees []WorktreeInfo
 	expiresAt time.Time
+}
+
+func configuredWorkspaceBuildQueueDepth(cfg *config.Config) int {
+	if cfg == nil ||
+		cfg.WorkspaceBuildQueueDepth < 1 ||
+		cfg.WorkspaceBuildQueueDepth > config.MaxWorkspaceBuildQueueDepth {
+		return config.DefaultWorkspaceBuildQueueDepth
+	}
+	return cfg.WorkspaceBuildQueueDepth
 }
 
 func (s *Server) controlPlaneHTTPClient(timeout time.Duration) *http.Client {
@@ -172,6 +188,8 @@ type WorkspaceRuntime struct {
 	CallbackToken          string
 	ProjectID              string
 	ChatSessionID          string
+	EvictionGeneration     string // Durable fence for callbacks from a previous workspace run.
+	MetadataUnavailable    bool   // Refuse recovery when the durable eviction state could not be read.
 	TaskID                 string
 	GitUserName            string
 	GitUserEmail           string
@@ -434,6 +452,7 @@ func New(cfg *config.Config) (*Server, error) {
 		TerminalActivityReportBackoff:    cfg.ACPTerminalActivityReportBackoff,
 		ActivityReportTimeout:            cfg.ACPActivityReportTimeout,
 		CredentialSyncTimeout:            cfg.ACPCredentialSyncTimeout,
+		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
 		SAMEnvFallback:                   cfg.BuildSAMEnvFallback(),
@@ -546,7 +565,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ptyManager:          ptyManager,
 		sysInfoCollector:    sysInfoCollector,
 		workspaces:          make(map[string]*WorkspaceRuntime),
-		buildQueue:          make(chan struct{}, 1),
+		buildQueue:          make(chan struct{}, configuredWorkspaceBuildQueueDepth(cfg)),
 		nodeEvents:          make([]EventRecord, 0, 512),
 		workspaceEvents:     make(map[string][]EventRecord),
 		eventStore:          evStore,
@@ -605,26 +624,8 @@ func New(cfg *config.Config) (*Server, error) {
 		)
 	}
 
-	if cfg.WorkspaceID != "" {
-		s.workspaces[cfg.WorkspaceID] = &WorkspaceRuntime{
-			ID:                  cfg.WorkspaceID,
-			Repository:          strings.TrimSpace(cfg.Repository),
-			Branch:              strings.TrimSpace(cfg.Branch),
-			BaseBranch:          strings.TrimSpace(cfg.BaseBranch),
-			Status:              "running",
-			CreatedAt:           time.Now().UTC(),
-			UpdatedAt:           time.Now().UTC(),
-			WorkspaceDir:        strings.TrimSpace(cfg.WorkspaceDir),
-			ContainerLabelValue: strings.TrimSpace(cfg.ContainerLabelValue),
-			ContainerWorkDir:    strings.TrimSpace(cfg.ContainerWorkDir),
-			ContainerUser:       strings.TrimSpace(cfg.ContainerUser),
-			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
-			ProjectID:           strings.TrimSpace(cfg.ProjectID),
-			ChatSessionID:       strings.TrimSpace(cfg.ChatSessionID),
-			TaskID:              strings.TrimSpace(cfg.TaskID),
-			Lightweight:         cfg.IsStandaloneMode(),
-			PTY:                 ptyManager,
-		}
+	if err := s.initializeBootWorkspace(cfg, ptyManager); err != nil {
+		return nil, err
 	}
 	s.configureIncidentCollectors()
 

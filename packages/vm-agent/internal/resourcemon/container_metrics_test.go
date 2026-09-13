@@ -2,6 +2,8 @@ package resourcemon
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -84,5 +86,42 @@ func TestContainerMetricsCollectorPollUsesSharedDockerStatsCollector(t *testing.
 	}
 	if metrics[0].CollectedAt.IsZero() {
 		t.Fatal("CollectedAt should be set")
+	}
+}
+
+// The real Poll boundary must reach the configured Docker executable, parse its
+// native JSON, and retain numeric fields used to rank eviction candidates.
+func TestContainerMetricsCollectorPollDockerBoundary(t *testing.T) {
+	cli := filepath.Join(t.TempDir(), "docker")
+	script := `#!/bin/sh
+[ "$1" = "stats" ] && [ "$2" = "--no-stream" ] || exit 64
+printf '%s\n' '{"ID":"worker-b","Name":"/workspace-b","CPUPerc":"12.5%","MemUsage":"512MiB / 2GiB","MemPerc":"25%","PIDs":"42"}' '{"ID":"worker-a","Name":"/workspace-a","CPUPerc":"2.5%","MemUsage":"128MiB / 2GiB","MemPerc":"6.25%","PIDs":"7"}'
+`
+	if err := os.WriteFile(cli, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SAM_DOCKER_CLI_PATH", cli)
+	t.Setenv("PATH", t.TempDir())
+	collector := NewContainerMetricsCollector(ContainerMetricsCollectorConfig{DockerStatsTimeout: time.Second})
+	before := time.Now().UTC()
+	metrics, err := collector.Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metrics) != 2 || metrics[0].ID != "worker-a" || metrics[1].ID != "worker-b" {
+		t.Fatalf("unexpected sorted container metrics: %#v", metrics)
+	}
+	b := metrics[1]
+	if b.Name != "workspace-b" || b.CPUPercent != 12.5 || b.MemUsageBytes != 512*1024*1024 || b.MemLimitBytes != 2*1024*1024*1024 || b.MemPercent != 25 || b.PIDs != 42 {
+		t.Fatalf("lost resource metrics across Docker boundary: %#v", b)
+	}
+	if b.CollectedAt.Before(before) || b.CollectedAt.After(time.Now().UTC()) {
+		t.Fatalf("invalid sample time %s", b.CollectedAt)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	metrics, err = collector.Poll(ctx)
+	if err == nil || metrics != nil {
+		t.Fatalf("canceled collection returned metrics: %#v, err: %v", metrics, err)
 	}
 }

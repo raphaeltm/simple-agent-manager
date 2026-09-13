@@ -2,7 +2,6 @@ package resourcemon
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,8 +12,10 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/container"
 )
 
 const (
@@ -38,10 +39,11 @@ type DockerEventCommandFactory func(ctx context.Context) *exec.Cmd
 
 // DockerEventSubscriberConfig configures a DockerEventSubscriber.
 type DockerEventSubscriberConfig struct {
-	OnContainerOOM func(workspaceID, containerID string)
-	CommandFactory DockerEventCommandFactory
-	EventBuffer    int
-	Logger         *slog.Logger
+	OnContainerOOM    func(workspaceID, containerID string)
+	CommandFactory    DockerEventCommandFactory
+	EventBuffer       int
+	Logger            *slog.Logger
+	ReconnectInterval time.Duration
 }
 
 // DockerEventSubscriber subscribes to Docker CLI events and emits OOM events.
@@ -54,8 +56,10 @@ type DockerEventSubscriber struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
-	started atomic.Bool
-	closeMu sync.Mutex
+	started           bool
+	closed            bool
+	closeMu           sync.Mutex
+	reconnectInterval time.Duration
 }
 
 // NewDockerEventSubscriber creates a CLI-backed Docker event subscriber.
@@ -69,18 +73,22 @@ func NewDockerEventSubscriber(cfg DockerEventSubscriberConfig) *DockerEventSubsc
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.ReconnectInterval <= 0 {
+		cfg.ReconnectInterval = time.Duration(config.DefaultPSIPollIntervalSeconds) * time.Second
+	}
 	return &DockerEventSubscriber{
-		onContainerOOM: cfg.OnContainerOOM,
-		commandFactory: cfg.CommandFactory,
-		logger:         cfg.Logger,
-		events:         make(chan ContainerOOMEvent, cfg.EventBuffer),
-		done:           make(chan struct{}),
+		onContainerOOM:    cfg.OnContainerOOM,
+		reconnectInterval: cfg.ReconnectInterval,
+		commandFactory:    cfg.CommandFactory,
+		logger:            cfg.Logger,
+		events:            make(chan ContainerOOMEvent, cfg.EventBuffer),
+		done:              make(chan struct{}),
 	}
 }
 
 func defaultDockerEventCommand(ctx context.Context) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, // NOSONAR: Docker CLI is required here; Env below pins PATH to fixed system directories.
-		"docker",
+	cmd := exec.CommandContext(ctx,
+		container.DockerCLIPath(),
 		"events",
 		"--filter", "event=oom",
 		"--filter", "event=die",
@@ -95,47 +103,60 @@ func (s *DockerEventSubscriber) Start(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if !s.started.CompareAndSwap(false, true) {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+	if s.closed {
+		return errors.New("Docker event subscriber is closed")
+	}
+	if s.started {
 		return nil
 	}
-
 	runCtx, cancel := context.WithCancel(ctx)
-	s.closeMu.Lock()
 	s.cancel = cancel
-	s.closeMu.Unlock()
-
-	cmd := s.commandFactory(runCtx)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		s.started.Store(false)
-		return fmt.Errorf("docker events stdout pipe: %w", err)
-	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		cancel()
-		s.started.Store(false)
-		return fmt.Errorf("start docker events: %w", err)
-	}
-
-	go s.run(runCtx, stdout, cmd, &stderr)
+	s.started = true
+	go s.run(runCtx)
 	return nil
 }
 
-func (s *DockerEventSubscriber) run(ctx context.Context, stdout io.Reader, cmd *exec.Cmd, stderr *bytes.Buffer) {
+// run supervises the stream, including Docker missing during initial bootstrap.
+// Reconnects are paced by configuration so daemon failures cannot spin the agent.
+func (s *DockerEventSubscriber) run(ctx context.Context) {
 	defer close(s.done)
 	defer close(s.events)
+	for ctx.Err() == nil {
+		if err := s.consumeStream(ctx); err != nil && ctx.Err() == nil {
+			s.logger.Warn("resourcemon: Docker event stream unavailable; reconnecting", "error", err)
+		}
+		timer := time.NewTimer(s.reconnectInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}
 
+func (s *DockerEventSubscriber) consumeStream(ctx context.Context) error {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := s.commandFactory(streamCtx)
+	// No raw Docker stderr is retained: a long-running error stream must not
+	// grow an unbounded in-memory buffer on a memory-constrained host.
+	cmd.Stderr = io.Discard
+	cmd.WaitDelay = s.reconnectInterval
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("Docker events stdout pipe: %w", err)
+	}
+	defer stdout.Close()
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start Docker events: %w", err)
+	}
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
-		event, ok, err := ParseDockerOOMEvent(scanner.Text())
-		if err != nil {
-			s.logger.Debug("resourcemon: skipping unparseable Docker event", "error", err)
-			continue
-		}
-		if !ok {
+		event, ok, parseErr := ParseDockerOOMEvent(scanner.Text())
+		if parseErr != nil || !ok {
 			continue
 		}
 		if s.onContainerOOM != nil {
@@ -145,40 +166,36 @@ func (s *DockerEventSubscriber) run(ctx context.Context, stdout io.Reader, cmd *
 		case s.events <- event:
 		default:
 			s.logger.Warn("resourcemon: dropping Docker OOM event because channel is full",
-				"workspaceId", event.WorkspaceID,
-				"containerId", event.ContainerID,
-			)
+				"containerId", event.ContainerID)
 		}
 	}
-
-	if err := scanner.Err(); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
-		s.logger.Warn("resourcemon: Docker event stream read failed", "error", err)
+	// A malformed oversized line must kill the reader's subprocess before
+	// waiting; otherwise Docker may block forever writing to an unread pipe.
+	cancel()
+	waitErr := cmd.Wait()
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read Docker events: %w", err)
 	}
-	if err := cmd.Wait(); err != nil && !errors.Is(ctx.Err(), context.Canceled) {
-		s.logger.Warn("resourcemon: Docker event stream exited with error",
-			"error", err,
-			"stderr", strings.TrimSpace(stderr.String()),
-		)
-	}
+	return waitErr
 }
 
-// Events returns parsed container OOM events.
+// Events returns parsed container OOM events until Close, including reconnects.
 func (s *DockerEventSubscriber) Events() <-chan ContainerOOMEvent {
 	return s.events
 }
 
-// Close stops the Docker events subprocess and waits for it to exit.
+// Close stops the Docker events subprocess and any pending reconnect.
 func (s *DockerEventSubscriber) Close() error {
-	if !s.started.Load() {
-		return nil
-	}
 	s.closeMu.Lock()
-	cancel := s.cancel
-	s.closeMu.Unlock()
-	if cancel != nil {
-		cancel()
+	s.closed = true
+	started := s.started
+	if s.cancel != nil {
+		s.cancel()
 	}
-	<-s.done
+	s.closeMu.Unlock()
+	if started {
+		<-s.done
+	}
 	return nil
 }
 

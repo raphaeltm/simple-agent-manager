@@ -131,6 +131,34 @@ SAM uses a hybrid storage model: **D1** for cross-project queries and **Durable 
 
 D1 stores platform-level data that needs to be queried across projects (e.g., "show all my ideas" on the dashboard).
 
+#### Read replication and request-scoped sessions
+
+A D1 database has one writable primary, pinned to the region it was created in, while the API
+Worker runs at whichever Cloudflare edge location the user reaches. When those are on different
+continents, each D1 round trip costs a wide-area hop, and a single API request issues several
+queries in sequence — which is where the latency of a request like `GET /api/projects/:id/tasks`
+came from, not from the database itself.
+
+Deployments therefore enable D1 **read replication** by default (`read_replication.mode = "auto"`,
+applied idempotently by `scripts/deploy/configure-d1-read-replication.sh`; an operator can set
+`D1_READ_REPLICATION_MODE=disabled` to remove replicas) and the Worker `fetch` handler
+runs every request against a single D1 **session** per database
+(`apps/api/src/lib/d1-session.ts`, `withRequestScopedD1Bindings`). The session is anchored
+`first-primary`: its first query goes to the primary, and every later query in that request may
+be served by any replica that has caught up to the bookmark the first query returned. A request
+therefore pays one long round trip instead of one per query, while still observing a snapshot at
+least as fresh as its own start — so no write that completed before the request began can be
+missed, and writes in a session always go to the primary and are visible to later reads in the
+same session. (It does not promise that a write landing *during* the request is visible to that
+request's later queries; that is the ordinary two-non-atomic-reads race, unchanged by this and
+now with a shorter window.)
+
+Scheduled cron sweeps and Durable Objects deliberately keep the unsessioned binding, so
+reaper, resumer and terminal-verdict paths read exactly what they read before. `D1_SESSION_MODE`
+(`first-primary` by default, `disabled` to opt out) is the operator kill switch. Queries that do
+not open a session are always served by the primary, so enabling replication alone changes
+nothing.
+
 Before a deploy applies D1 migrations, SAM records per-table counts and a time-travel recovery timestamp. Post-migration comparison runs only for databases whose `d1_migrations` ledger advanced. Business tables use zero decrease tolerance; code-reviewed retention/expiry tables use a configurable percentage limit (50% by default), preserving catastrophic-wipe detection without treating routine telemetry churn as migration damage. Configuration may narrow that reviewed table set but cannot add arbitrary tables to it.
 
 ### Durable Objects (Per-Project Data)
@@ -138,7 +166,7 @@ Before a deploy applies D1 migrations, SAM records per-table counts and a time-t
 | Binding                         | Scope       | Purpose                                                                  |
 | ------------------------------- | ----------- | ------------------------------------------------------------------------ |
 | `PROJECT_DATA`                  | Per project | Chat sessions, messages, activity events, ACP sessions (embedded SQLite) |
-| `NODE_LIFECYCLE`                | Per node    | Warm pool state machine (active → warm → destroying)                     |
+| `NODE_LIFECYCLE`                | Per node    | Warm pool state plus durable proof-bearing workspace deletion retries    |
 | `TASK_RUNNER`                   | Per task    | Multi-step task execution orchestration via alarm callbacks              |
 | `ADMIN_LOGS`                    | Singleton   | Real-time log broadcast to admin WebSocket clients                       |
 | `NOTIFICATION`                  | Per user    | Notification delivery and state management                               |
@@ -254,8 +282,14 @@ Knowledge observations do **not** currently carry their `observationId` in this 
 
 ### ProjectData DO
 
+Terminal-session archive shards support two pinned representations. Legacy shards store raw rows in SQLite; compact shards retain session metadata, complete consolidated conversation/search records and tool archive pointers in SQLite, with lossless raw history and bulky tool metadata in private compressed R2 chunks. Exact-owner reads verify object identity, sizes and hashes; recovery can export the original rows back to root. Compact migration admission uses a durable daily write estimate, and the new writer defaults off. See [compact archive configuration](/docs/reference/configuration/#compact-archive-shards).
+
 Each project gets one `ProjectData` Durable Object instance, accessed via `env.PROJECT_DATA.idFromName(projectId)`.
 Every user-visible chat session has exactly one backing D1 Task. `taskMode` controls autonomous task versus human-controlled conversation lifecycle semantics; it never controls whether the Task exists. D1 `tasks.chat_session_id` and ProjectData `chat_sessions.task_id` form a bidirectional soft link. Because the stores cannot share a transaction, creation and legacy repair are idempotent and retain compatibility readers while reconciliation is in progress.
+
+Automatic sleep processes bounded batches of due intents. If the source workspace or its ownership metadata is gone, the scheduler retires that sleep intent while retaining the snapshot artifacts and recovery metadata. It checks the observed record before updating so concurrent recovery or capture takes precedence. Retryable snapshot repairs receive a future deadline, including repairs beyond the ordinary attempt budget, so a persistent failure yields its slot to other due sessions.
+
+Task completion can occur before the final answer finishes streaming. Working activity reports retain the completion sleep intent while releasing any preparing claim. Terminal-session ledger cleanup independently protects the finishing response for the configured `SESSION_SLEEP_AFTER_MS` interval from completion (falling back to the task update time for legacy records), then checks canonical prompt and background-work activity. The D1 session summary follows the authoritative ProjectData session status, so cleanup cannot mark a protected conversation stopped in the UI. Automatic sleep and teardown also measure a completed prompt’s stale interval from the later activity or task-completion time; an old, long-running prompt cannot become immediately sleep-eligible while its final answer streams. A confirmed idle report still releases the teardown safety gate immediately. Stale activity and absent state expire through these existing bounded intervals.
 
 When a sleeping VM conversation needs a replacement runtime, one D1 transaction conditionally creates the recovery task, records `recovery_source_task_id`, and transfers the unique chat-session binding only while the source task is still non-terminal. Parent-wake validation accepts that linked recovery task as the temporary session owner while continuing to require the original parent and child lineage to remain valid. If the parent terminalizes before runner startup, SAM cancels the handoff and restores the original task/workspace bindings.
 
@@ -265,7 +299,7 @@ ProjectData stores the durable foundation for project event subscriptions in the
 
 Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection and checkpoint preemption remain disabled. Task agents can explicitly park on a bounded `wait_for_subtasks` subscription: ProjectData reconciles selected same-project task terminal state and enqueues one immutable caller wake through the existing durable prompt-delivery queue. See [Configuration](/docs/reference/configuration/) for the durable-execution settings and rollout flags.
 
-Conversation and message text stays in ProjectData for long-term searchability. Large
+Complete consolidated conversation text stays in ProjectData for long-term searchability. Large
 tool-call JSON payloads older than the configured retention window are archived first
 to private, project-scoped R2 objects and only then stripped from the embedded SQLite
 row. Existing tool-content expanders read through the ProjectData service and fall
@@ -331,7 +365,23 @@ stateDiagram-v2
 
 - `markIdle(nodeId, userId)` — transitions to warm, schedules cleanup alarm
 - `tryClaim(taskId)` — atomically claims a warm node for reuse (single-threaded, no races)
-- `alarm()` — fires after warm timeout, triggers node destruction
+- `scheduleWorkspaceDeletion(...)` — retains the exact workspace/node/user/project/session/runtime incarnation and the next bounded retry time
+- `claimWorkspaceDeletionAttempt(...)` — atomically records the point of no return before VM network I/O; restart/rebuild cancellation is refused afterward
+- `confirmWorkspaceDeletion(...)` — removes queue state only after VM-confirmed absence/success or strict provider/container termination proof
+- `alarm()` — claims and dispatches due workspace deletions through `waitUntil`, then handles the independent warm-node timeout
+
+A VM timeout, transport error, or unknown response is never deletion proof. The queue keeps
+the workspace quarantined in `stopping` and retries with bounded exponential backoff. Every
+attempt revalidates the complete workspace and node incarnation immediately before the VM
+request and again before a VM-confirmed terminal write. Identity changes and exhausted
+residence are dead-lettered for investigation rather than silently discarded; a plain D1
+`nodes.status = 'deleted'` value is not terminal proof.
+
+Live attempts also maintain a compact lexicographically ordered due-time index. A bounded,
+resumable per-DO backfill makes pre-index attempts discoverable during rollout. Alarm reads
+are limited to the configured batch and the next indexed deadline, so retained dead letters
+never cause an all-payload queue scan. The default batch is three, keeping the worst successful path
+within the Cloudflare Free-plan D1 query budget; paid deployments can override it deliberately.
 
 ### TaskRunner DO
 
@@ -350,6 +400,26 @@ graph LR
 ```
 
 Cross-DO coordination with NodeLifecycle (for warm node claims) and ProjectData (for session linkage). Exponential backoff on transient errors.
+
+VM node reuse is reservation-aware. `resolveTaskStartPlacement()` in
+`apps/api/src/services/placement-resolver.ts` produces one concrete CPU, memory, disk, and
+exclusivity snapshot; TaskRunner carries that same snapshot into the workspace row.
+`findNodeWithCapacity()` in
+`apps/api/src/durable-objects/task-runner/node-selection.ts` subtracts reservations for
+`running`, `creating`, and `recovery` workspaces from trusted observed node capacity. The final
+`reserveWorkspacePlacement()` `INSERT ... SELECT` in
+`apps/api/src/services/workspace-placement.ts` repeats the aggregate check atomically together
+with node state, ownership, and compute-pool scope, so concurrent placements cannot both consume
+the last capacity.
+
+`hasWorkspaceReservationCapacity()` in
+`apps/api/src/services/workspace-resource-capacity.ts` makes legacy capacity intentionally
+conservative: both empty and occupied nodes require verified observed CPU, memory, and disk
+capacity. An occupied node also requires valid active reservations and fresh resource telemetry.
+Host memory reserve and measured pressure further constrain admission. Exclusive requests
+require an empty node, and an active exclusive workspace prevents any additional placement.
+`MAX_WORKSPACES_PER_NODE` remains an
+additional hard safety cap rather than the primary capacity model.
 
 ## ACP Session Lifecycle
 

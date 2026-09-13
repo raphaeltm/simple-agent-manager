@@ -30,6 +30,32 @@ function classify(overrides: Partial<ClassifyInput> = {}) {
 }
 
 describe('classifySessionIdleness', () => {
+  it.each(['prompt-turn-ended', 'idle-interval-elapsed'] as const)(
+    'protects the final response of an old prompt after recent completion under %s',
+    (policy) => {
+      const input = {
+        policy,
+        taskStatus: 'completed',
+        taskCompletedAt: new Date(NOW.getTime() - 1_000).toISOString(),
+        state: idleState({ activity: 'prompting', activityAt: OLD_IDLE_ACTIVITY_AT }),
+      };
+      expect(classify(input)).toMatchObject({
+        idle: false,
+        conclusive: true,
+        reason: 'prompt_turn_active',
+        retryAt: new Date(NOW.getTime() - 1_000 + IDLE_AFTER_MS),
+      });
+      expect(classify({ ...input, now: new Date(NOW.getTime() + IDLE_AFTER_MS) })).toMatchObject({
+        idle: true,
+        reason: 'completed_prompt_stale',
+      });
+      // The confirmed end of a prompt releases the safety gate immediately.
+      expect(classify({ ...input, policy: 'prompt-turn-ended', state: idleState() })).toMatchObject(
+        { idle: true }
+      );
+    }
+  );
+
   it('keeps a session non-idle while normalized runtime work has a fresh finite lease', () => {
     expect(
       classify({

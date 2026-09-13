@@ -41,6 +41,7 @@ export const UpdateProjectSchema = v.object({
   description: v.optional(v.string()),
   defaultBranch: v.optional(v.string()),
   defaultVmSize: v.optional(v.nullable(VMSizeSchema)),
+  resourceRequirementsJson: v.optional(v.nullable(v.string())),
   defaultAgentType: v.optional(v.nullable(v.string())),
   defaultWorkspaceProfile: v.optional(v.nullable(WorkspaceProfileSchema)),
   defaultDevcontainerConfigName: v.optional(v.nullable(v.string())),
@@ -57,6 +58,7 @@ export const UpdateProjectSchema = v.object({
   maxWorkspacesPerNode: v.optional(v.nullable(v.number())),
   nodeCpuThresholdPercent: v.optional(v.nullable(v.number())),
   nodeMemoryThresholdPercent: v.optional(v.nullable(v.number())),
+  maxTriggers: v.optional(v.nullable(v.number())),
 });
 
 export const UpsertProjectRuntimeEnvVarSchema = v.object({

@@ -6,12 +6,12 @@ import type {
   CredentialSource,
   NodeUsageRecord,
 } from '@simple-agent-manager/shared';
-import { getVcpuCount, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
+import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import { getCurrentPeriodBounds } from './compute-usage';
+import { getCurrentPeriodBounds, resolveComputeVcpuCount } from './compute-usage';
 
 // =============================================================================
 // Node status helpers
@@ -62,6 +62,20 @@ function calculateNodeHoursInPeriod(
 export interface NodeUsageCalculationRow {
   vmSize: string;
   cloudProvider: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
+  providerInstancePriceDisplay?: string | null;
   credentialSource: string | null;
   /** Ownership class; user-owned (BYO) nodes accrue $0 regardless of credentialSource. */
   nodeClass: string | null;
@@ -104,16 +118,7 @@ function createEmptyTotals(): NodeUsageTotals {
 
 function addNodeToTotals(
   totals: NodeUsageTotals,
-  node: Pick<
-    NodeUsageRow,
-    | 'vmSize'
-    | 'cloudProvider'
-    | 'credentialSource'
-    | 'nodeClass'
-    | 'status'
-    | 'createdAt'
-    | 'updatedAt'
-  >,
+  node: NodeUsageCalculationRow,
   periodStart: Date,
   periodEnd: Date,
   now: Date
@@ -134,8 +139,10 @@ function addNodeToTotals(
   }
   const endedAt = getNodeEndedAt(node.status, node.updatedAt);
   const hours = calculateNodeHoursInPeriod(node.createdAt, endedAt, periodStart, periodEnd, now);
-  const vcpus = getVcpuCount(node.vmSize, node.cloudProvider);
-  const vcpuHours = hours * vcpus;
+  const { vcpuCount } = resolveComputeVcpuCount(node, { legacyNode: node });
+  // Unknown CPU contributes no invented charge; node uptime remains accounted
+  // and its active/detail record exposes null with source="unknown".
+  const vcpuHours = vcpuCount === null ? 0 : hours * vcpuCount;
   const isPlatform = node.credentialSource === 'platform';
 
   totals.totalNodeHours += hours;
@@ -214,6 +221,20 @@ async function getUserOverlappingNodeRows(
       vmSize: schema.nodes.vmSize,
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
+      providerInstanceType: schema.nodes.providerInstanceType,
+      providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
+      providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: schema.nodes.providerInstanceBootDiskSizeGb,
+      providerInstanceImage: schema.nodes.providerInstanceImage,
+      providerInstanceArchitecture: schema.nodes.providerInstanceArchitecture,
+      observedProviderInstanceType: schema.nodes.observedProviderInstanceType,
+      observedProviderInstanceVcpuCount: schema.nodes.observedProviderInstanceVcpuCount,
+      observedProviderInstanceMemoryMb: schema.nodes.observedProviderInstanceMemoryMb,
+      observedProviderInstanceDiskGb: schema.nodes.observedProviderInstanceDiskGb,
+      observedHardwareJson: schema.nodes.observedHardwareJson,
+      observedHardwareSource: schema.nodes.observedHardwareSource,
+      providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
       credentialSource: schema.nodes.credentialSource,
       nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
@@ -242,6 +263,20 @@ async function getAllOverlappingNodeRows(
       vmSize: schema.nodes.vmSize,
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
+      providerInstanceType: schema.nodes.providerInstanceType,
+      providerInstanceVcpuCount: schema.nodes.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: schema.nodes.providerInstanceMemoryMb,
+      providerInstanceDiskGb: schema.nodes.providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: schema.nodes.providerInstanceBootDiskSizeGb,
+      providerInstanceImage: schema.nodes.providerInstanceImage,
+      providerInstanceArchitecture: schema.nodes.providerInstanceArchitecture,
+      observedProviderInstanceType: schema.nodes.observedProviderInstanceType,
+      observedProviderInstanceVcpuCount: schema.nodes.observedProviderInstanceVcpuCount,
+      observedProviderInstanceMemoryMb: schema.nodes.observedProviderInstanceMemoryMb,
+      observedProviderInstanceDiskGb: schema.nodes.observedProviderInstanceDiskGb,
+      observedHardwareJson: schema.nodes.observedHardwareJson,
+      observedHardwareSource: schema.nodes.observedHardwareSource,
+      providerInstancePriceDisplay: schema.nodes.providerInstancePriceDisplay,
       credentialSource: schema.nodes.credentialSource,
       nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
@@ -264,7 +299,21 @@ function toActiveComputeSession(node: NodeUsageRow): ActiveComputeSession | null
     workspaceId: node.id,
     serverType: node.vmSize,
     vmSize: node.vmSize,
-    vcpuCount: getVcpuCount(node.vmSize, node.cloudProvider),
+    ...resolveComputeVcpuCount(node, { legacyNode: node }),
+    providerInstanceType: node.providerInstanceType,
+    providerInstanceVcpuCount: node.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: node.providerInstanceMemoryMb,
+    providerInstanceDiskGb: node.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: node.providerInstanceImage,
+    providerInstanceArchitecture: node.providerInstanceArchitecture,
+    observedProviderInstanceType: node.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: node.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: node.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: node.observedProviderInstanceDiskGb,
+    observedHardwareJson: node.observedHardwareJson,
+    observedHardwareSource: node.observedHardwareSource,
+    providerInstancePriceDisplay: node.providerInstancePriceDisplay,
     startedAt: node.createdAt,
     createdAt: node.createdAt,
     credentialSource,
@@ -280,7 +329,21 @@ function toNodeUsageRecord(
     nodeId: node.id,
     name: node.name,
     vmSize: node.vmSize,
-    vcpuCount: getVcpuCount(node.vmSize, node.cloudProvider),
+    ...resolveComputeVcpuCount(node, { legacyNode: node }),
+    providerInstanceType: node.providerInstanceType,
+    providerInstanceVcpuCount: node.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: node.providerInstanceMemoryMb,
+    providerInstanceDiskGb: node.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: node.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: node.providerInstanceImage,
+    providerInstanceArchitecture: node.providerInstanceArchitecture,
+    observedProviderInstanceType: node.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: node.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: node.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: node.observedProviderInstanceDiskGb,
+    observedHardwareJson: node.observedHardwareJson,
+    observedHardwareSource: node.observedHardwareSource,
+    providerInstancePriceDisplay: node.providerInstancePriceDisplay,
     vmLocation: node.vmLocation,
     cloudProvider: node.cloudProvider,
     credentialSource: (node.credentialSource ?? 'user') as CredentialSource,

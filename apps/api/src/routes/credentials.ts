@@ -36,6 +36,7 @@ import {
   SaveAgentCredentialSchema,
 } from '../schemas';
 import { saveAgentCredentialForUser } from '../services/agent-credential-save';
+import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import {
   disconnectAgentCredentialFromCC,
   syncAgentCredentialToCC,
@@ -329,6 +330,7 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
       )
       .limit(1);
     const stored = await replaceUserGcpCredential(c.env, userId, credential);
+    await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
     const response: CredentialResponse = {
       id: stored.id,
       provider: 'gcp',
@@ -376,6 +378,7 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
       encryptedToken: ciphertext,
       iv,
     });
+    await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
 
     const response: CredentialResponse = {
       id: existingCred.id,
@@ -407,6 +410,7 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
     encryptedToken: ciphertext,
     iv,
   });
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
 
   const response: CredentialResponse = {
     id,
@@ -468,6 +472,7 @@ credentialsRoutes.delete('/:provider', async (c) => {
         });
       }
     }
+    await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
     return c.json({ success: true });
   }
 
@@ -492,6 +497,7 @@ credentialsRoutes.delete('/:provider', async (c) => {
       userId,
       provider: provider as CredentialProvider,
     });
+    await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
   }
 
   return c.json({ success: true });

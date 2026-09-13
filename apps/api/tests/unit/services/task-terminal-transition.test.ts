@@ -73,6 +73,7 @@ describe('transitionTaskToTerminal', () => {
       triggerExecutionId?: string | null;
       triggeredBy?: string;
       recoverySourceTaskId?: string | null;
+      supersededByTaskId?: string | null;
       createdAt: string;
     }
   ) {
@@ -81,8 +82,8 @@ describe('transitionTaskToTerminal', () => {
         `INSERT INTO tasks
            (id, project_id, user_id, chat_session_id, recovery_source_task_id, parent_task_id,
             workspace_id, title, status, execution_step, task_mode, triggered_by,
-            trigger_execution_id, created_by, created_at, updated_at)
-         VALUES (?, ?, 'user-1', ?, ?, ?, ?, ?, ?, 'awaiting_followup', 'task', ?, ?, 'user-1', ?, ?)`
+            trigger_execution_id, superseded_by_task_id, created_by, created_at, updated_at)
+         VALUES (?, ?, 'user-1', ?, ?, ?, ?, ?, ?, 'awaiting_followup', 'task', ?, ?, ?, 'user-1', ?, ?)`
       )
       .run(
         id,
@@ -95,6 +96,7 @@ describe('transitionTaskToTerminal', () => {
         opts.status ?? 'in_progress',
         opts.triggeredBy ?? 'user',
         opts.triggerExecutionId ?? null,
+        opts.supersededByTaskId ?? null,
         opts.createdAt,
         opts.createdAt
       );
@@ -133,6 +135,26 @@ describe('transitionTaskToTerminal', () => {
       )
       .all(taskId);
   }
+
+  it('records an unstarted launch failure once while preserving its failure phase', async () => {
+    sqlite.prepare("UPDATE tasks SET status = 'queued' WHERE id = 'task-1'").run();
+    const options = {
+      taskId: 'task-1', projectId: PROJECT_ID, status: 'failed' as const,
+      reason: 'Instant acceptance failed', source: 'test.instant_launch',
+      executionStep: 'launch_failed', fillMissingStartedAt: false, stopWorkspace: false,
+    };
+    expect(await transitionTaskToTerminal(env, options)).toBe('transitioned');
+    expect(await transitionTaskToTerminal(env, options)).toBe('already_terminal');
+    expect(taskRow()).toMatchObject({
+      status: 'failed', execution_step: 'launch_failed', started_at: null,
+      error_message: options.reason, completed_at: NOW.toISOString(),
+    });
+    expect(statusEvents()).toEqual([{
+      from_status: 'queued', to_status: 'failed', actor_type: 'system', actor_id: null,
+      reason: options.reason,
+    }]);
+    expect(sqlite.prepare("SELECT status FROM workspaces WHERE id = 'workspace-1'").get()).toEqual({status: 'running'});
+  });
 
   it('records the full terminal contract once and remains idempotent on retry', async () => {
     const first = await transitionTaskToTerminal(env, {
@@ -272,16 +294,19 @@ describe('transitionTaskToTerminal', () => {
     ]);
   });
 
-  it('preserves an active predecessor when a live session-recovery successor owns the wake', async () => {
+  it('preserves an active predecessor when its session-recovery successor has not accepted the wake', async () => {
     seedWorkspace('workspace-2');
     seedTask('task-2', {
       workspaceId: 'workspace-2',
       chatSessionId: 'session-2',
-      status: 'in_progress',
+      status: 'queued',
       triggeredBy: 'session-recovery',
       recoverySourceTaskId: 'task-1',
       createdAt: new Date(NOW.getTime() - 30_000).toISOString(),
     });
+    sqlite
+      .prepare(`UPDATE tasks SET superseded_by_task_id = 'task-2' WHERE id = 'task-1'`)
+      .run();
 
     const outcome = await transitionTaskToTerminal(env, {
       taskId: 'task-1',

@@ -5,25 +5,113 @@ import type {
   ComputeUsageRecord,
   CredentialSource,
 } from '@simple-agent-manager/shared';
-import { getVcpuCount } from '@simple-agent-manager/shared';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { legacyNodeVcpuEstimate } from './legacy-node-pool-compatibility';
 
 // =============================================================================
 // Start / Stop Tracking
 // =============================================================================
 
 export interface StartComputeTrackingInput {
+  /** Stable record identity for a replayable creation continuation. */
+  idempotencyKey?: string;
   userId: string;
   workspaceId: string;
   nodeId: string;
   vmSize: string;
   cloudProvider?: string | null;
+  providerInstanceType?: string | null;
+  providerInstanceVcpuCount?: number | null;
+  providerInstanceMemoryMb?: number | null;
+  providerInstanceDiskGb?: number | null;
+  providerInstanceBootDiskSizeGb?: number | null;
+  providerInstanceImage?: string | null;
+  providerInstanceArchitecture?: string | null;
+  observedProviderInstanceType?: string | null;
+  observedProviderInstanceVcpuCount?: number | null;
+  observedProviderInstanceMemoryMb?: number | null;
+  observedProviderInstanceDiskGb?: number | null;
+  observedHardwareJson?: string | null;
+  observedHardwareSource?: string | null;
+  providerInstancePriceDisplay?: string | null;
+  providerInstancePriceCurrency?: string | null;
+  providerInstancePriceMonthlyCents?: number | null;
+  providerInstancePriceHourlyMicros?: number | null;
   credentialSource?: CredentialSource;
+}
+
+type ComputeHardwareInput = Pick<
+  StartComputeTrackingInput,
+  | 'providerInstanceType'
+  | 'providerInstanceVcpuCount'
+  | 'providerInstanceMemoryMb'
+  | 'providerInstanceDiskGb'
+  | 'providerInstanceBootDiskSizeGb'
+  | 'providerInstanceImage'
+  | 'providerInstanceArchitecture'
+  | 'observedProviderInstanceType'
+  | 'observedProviderInstanceVcpuCount'
+  | 'observedProviderInstanceMemoryMb'
+  | 'observedProviderInstanceDiskGb'
+  | 'observedHardwareJson'
+  | 'observedHardwareSource'
+>;
+
+/** One CPU metering contract for workspace records and node-lifetime accounting. */
+export function resolveComputeVcpuCount(
+  input: ComputeHardwareInput,
+  historical?: {
+    bookedVcpuCount?: number | null;
+    legacyNode?: { vmSize: string; cloudProvider?: string | null };
+  }
+): {
+  vcpuCount: number | null;
+  vcpuCountSource: NonNullable<ActiveComputeSession['vcpuCountSource']>;
+} {
+  const positiveCount = (value: number | null | undefined): number | null =>
+    typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+  const observed = positiveCount(input.observedProviderInstanceVcpuCount);
+  if (observed !== null) return { vcpuCount: observed, vcpuCountSource: 'observed' };
+  const planned = positiveCount(input.providerInstanceVcpuCount);
+  if (planned !== null) return { vcpuCount: planned, vcpuCountSource: 'planned' };
+  const booked = positiveCount(historical?.bookedVcpuCount);
+  if (booked !== null) return { vcpuCount: booked, vcpuCountSource: 'recorded' };
+
+  // Any native plan/observation identifies a modern row. Its missing CPU cannot
+  // be invented from an unrelated compatibility label, even on partial rows.
+  const hasNativeEvidence = Object.values(computeHardwareInput(input)).some(
+    (value) => value !== null && value !== undefined && value !== ''
+  );
+  if (!hasNativeEvidence && historical?.legacyNode) {
+    const estimate = legacyNodeVcpuEstimate(historical.legacyNode);
+    if (estimate !== null)
+      return { vcpuCount: estimate, vcpuCountSource: 'compatibility-estimate' };
+  }
+  return { vcpuCount: null, vcpuCountSource: 'unknown' };
+}
+
+/** Explicit hardware projection: unrelated row fields must not imply native evidence. */
+function computeHardwareInput(input: ComputeHardwareInput): ComputeHardwareInput {
+  return {
+    providerInstanceType: input.providerInstanceType,
+    providerInstanceVcpuCount: input.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: input.providerInstanceMemoryMb,
+    providerInstanceDiskGb: input.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: input.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: input.providerInstanceImage,
+    providerInstanceArchitecture: input.providerInstanceArchitecture,
+    observedProviderInstanceType: input.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: input.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: input.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: input.observedProviderInstanceDiskGb,
+    observedHardwareJson: input.observedHardwareJson,
+    observedHardwareSource: input.observedHardwareSource,
+  };
 }
 
 /** Insert a compute_usage row when a workspace starts running. */
@@ -31,21 +119,44 @@ export async function startComputeTracking(
   db: DrizzleD1Database<typeof schema>,
   input: StartComputeTrackingInput
 ): Promise<string> {
-  const id = ulid();
-  const vcpuCount = getVcpuCount(input.vmSize, input.cloudProvider);
+  const id = input.idempotencyKey ?? ulid();
+  const { vcpuCount } = resolveComputeVcpuCount(input);
+  if (vcpuCount === null) {
+    throw new Error('Compute tracking requires observed or configured native vCPU hardware');
+  }
   const now = new Date().toISOString();
 
-  await db.insert(schema.computeUsage).values({
+  const insert = db.insert(schema.computeUsage).values({
     id,
     userId: input.userId,
     workspaceId: input.workspaceId,
     nodeId: input.nodeId,
     serverType: input.vmSize,
     vcpuCount,
+    providerInstanceType: input.providerInstanceType ?? null,
+    providerInstanceVcpuCount: input.providerInstanceVcpuCount ?? null,
+    providerInstanceMemoryMb: input.providerInstanceMemoryMb ?? null,
+    providerInstanceDiskGb: input.providerInstanceDiskGb ?? null,
+    providerInstanceBootDiskSizeGb: input.providerInstanceBootDiskSizeGb ?? null,
+    providerInstanceImage: input.providerInstanceImage ?? null,
+    providerInstanceArchitecture: input.providerInstanceArchitecture ?? null,
+    observedProviderInstanceType: input.observedProviderInstanceType ?? null,
+    observedProviderInstanceVcpuCount: input.observedProviderInstanceVcpuCount ?? null,
+    observedProviderInstanceMemoryMb: input.observedProviderInstanceMemoryMb ?? null,
+    observedProviderInstanceDiskGb: input.observedProviderInstanceDiskGb ?? null,
+    observedHardwareJson: input.observedHardwareJson ?? null,
+    observedHardwareSource: input.observedHardwareSource ?? null,
+    providerInstancePriceDisplay: input.providerInstancePriceDisplay ?? null,
+    providerInstancePriceCurrency: input.providerInstancePriceCurrency ?? null,
+    providerInstancePriceMonthlyCents: input.providerInstancePriceMonthlyCents ?? null,
+    providerInstancePriceHourlyMicros: input.providerInstancePriceHourlyMicros ?? null,
     credentialSource: input.credentialSource ?? 'user',
     startedAt: now,
     createdAt: now,
   });
+
+  if (input.idempotencyKey) await insert.onConflictDoNothing({ target: schema.computeUsage.id });
+  else await insert;
 
   log.info('compute-usage: started tracking', {
     id,
@@ -224,6 +335,23 @@ export async function getUserUsageSummary(
       workspaceId: schema.computeUsage.workspaceId,
       serverType: schema.computeUsage.serverType,
       vcpuCount: schema.computeUsage.vcpuCount,
+      providerInstanceType: schema.computeUsage.providerInstanceType,
+      providerInstanceVcpuCount: schema.computeUsage.providerInstanceVcpuCount,
+      providerInstanceMemoryMb: schema.computeUsage.providerInstanceMemoryMb,
+      providerInstanceDiskGb: schema.computeUsage.providerInstanceDiskGb,
+      providerInstanceBootDiskSizeGb: schema.computeUsage.providerInstanceBootDiskSizeGb,
+      providerInstanceImage: schema.computeUsage.providerInstanceImage,
+      providerInstanceArchitecture: schema.computeUsage.providerInstanceArchitecture,
+      observedProviderInstanceType: schema.computeUsage.observedProviderInstanceType,
+      observedProviderInstanceVcpuCount: schema.computeUsage.observedProviderInstanceVcpuCount,
+      observedProviderInstanceMemoryMb: schema.computeUsage.observedProviderInstanceMemoryMb,
+      observedProviderInstanceDiskGb: schema.computeUsage.observedProviderInstanceDiskGb,
+      observedHardwareJson: schema.computeUsage.observedHardwareJson,
+      observedHardwareSource: schema.computeUsage.observedHardwareSource,
+      providerInstancePriceDisplay: schema.computeUsage.providerInstancePriceDisplay,
+      providerInstancePriceCurrency: schema.computeUsage.providerInstancePriceCurrency,
+      providerInstancePriceMonthlyCents: schema.computeUsage.providerInstancePriceMonthlyCents,
+      providerInstancePriceHourlyMicros: schema.computeUsage.providerInstancePriceHourlyMicros,
       startedAt: schema.computeUsage.startedAt,
       credentialSource: schema.computeUsage.credentialSource,
     })
@@ -233,7 +361,24 @@ export async function getUserUsageSummary(
   const activeSessions: ActiveComputeSession[] = activeRows.map((r) => ({
     workspaceId: r.workspaceId,
     serverType: r.serverType,
-    vcpuCount: r.vcpuCount,
+    ...resolveComputeVcpuCount(r, { bookedVcpuCount: r.vcpuCount }),
+    providerInstanceType: r.providerInstanceType,
+    providerInstanceVcpuCount: r.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: r.providerInstanceMemoryMb,
+    providerInstanceDiskGb: r.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: r.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: r.providerInstanceImage,
+    providerInstanceArchitecture: r.providerInstanceArchitecture,
+    observedProviderInstanceType: r.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: r.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: r.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: r.observedProviderInstanceDiskGb,
+    observedHardwareJson: r.observedHardwareJson,
+    observedHardwareSource: r.observedHardwareSource,
+    providerInstancePriceDisplay: r.providerInstancePriceDisplay,
+    providerInstancePriceCurrency: r.providerInstancePriceCurrency,
+    providerInstancePriceMonthlyCents: r.providerInstancePriceMonthlyCents,
+    providerInstancePriceHourlyMicros: r.providerInstancePriceHourlyMicros,
     startedAt: r.startedAt,
     credentialSource: r.credentialSource as CredentialSource,
   }));
@@ -379,6 +524,24 @@ export async function getUserDetailedUsage(
     nodeId: r.nodeId,
     serverType: r.serverType,
     vcpuCount: r.vcpuCount,
+    vcpuCountSource: 'recorded',
+    providerInstanceType: r.providerInstanceType,
+    providerInstanceVcpuCount: r.providerInstanceVcpuCount,
+    providerInstanceMemoryMb: r.providerInstanceMemoryMb,
+    providerInstanceDiskGb: r.providerInstanceDiskGb,
+    providerInstanceBootDiskSizeGb: r.providerInstanceBootDiskSizeGb,
+    providerInstanceImage: r.providerInstanceImage,
+    providerInstanceArchitecture: r.providerInstanceArchitecture,
+    observedProviderInstanceType: r.observedProviderInstanceType,
+    observedProviderInstanceVcpuCount: r.observedProviderInstanceVcpuCount,
+    observedProviderInstanceMemoryMb: r.observedProviderInstanceMemoryMb,
+    observedProviderInstanceDiskGb: r.observedProviderInstanceDiskGb,
+    observedHardwareJson: r.observedHardwareJson,
+    observedHardwareSource: r.observedHardwareSource,
+    providerInstancePriceDisplay: r.providerInstancePriceDisplay,
+    providerInstancePriceCurrency: r.providerInstancePriceCurrency,
+    providerInstancePriceMonthlyCents: r.providerInstancePriceMonthlyCents,
+    providerInstancePriceHourlyMicros: r.providerInstancePriceHourlyMicros,
     credentialSource: r.credentialSource as CredentialSource,
     startedAt: r.startedAt,
     endedAt: r.endedAt,

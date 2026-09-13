@@ -1,0 +1,772 @@
+[
+  {
+    "slug": "node-card",
+    "surface": "Node list card hardware",
+    "mock_state_coverage": "Real component harness; native/requested/observed disagreement, legacy fallback, long text, empty, many items, error and Unicode/HTML-like text scenarios. This pair shows normal native hardware.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "node-card-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/node-card-normal-mobile.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "e87ffb86eb52cb8ee82cf97b766c0cdc99a9c8489d07e12072e1b2f4c07b0957"
+      },
+      "desktop": {
+        "path": "node-card-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/node-card-normal-desktop.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "20a772d8603559020f37519d8c79932ba68b6082a8a971cb35eeda108f5d4ebd"
+      }
+    }
+  },
+  {
+    "slug": "node-detail",
+    "surface": "Node overview hardware",
+    "mock_state_coverage": "Real component harness; native/requested/observed disagreement, legacy fallback, long text, empty, many items, error and Unicode/HTML-like text scenarios. This pair shows normal native hardware.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "node-detail-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/node-detail-normal-mobile.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "bb7fd89d3f4190e0a486285a422e109d4f9e1a83bd1ef26c104031a28dbd7397"
+      },
+      "desktop": {
+        "path": "node-detail-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/node-detail-normal-desktop.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "cfdf2b61701be4b4e7837bf060b680eb2fcac89d3f7a38073c6e8906aac7f97d"
+      }
+    }
+  },
+  {
+    "slug": "workspace-card",
+    "surface": "Workspace card hardware",
+    "mock_state_coverage": "Real component harness; native/requested/observed disagreement, legacy fallback, long text, empty, many items, error and Unicode/HTML-like text scenarios. This pair shows normal native hardware.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "workspace-card-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/workspace-card-normal-mobile.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "2b1918a3c5d3a899cd34255a148f1f8489be42f3e62eba57cc9656c63c931521"
+      },
+      "desktop": {
+        "path": "workspace-card-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/workspace-card-normal-desktop.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "0e00e138318a5ac783c7319c17104b11fa1ea8ef1f1e921a0a14f6903b6d65a7"
+      }
+    }
+  },
+  {
+    "slug": "workspace-sidebar",
+    "surface": "Workspace sidebar hardware",
+    "mock_state_coverage": "Real component harness; native/requested/observed disagreement, legacy fallback, long text, empty, many items, error and Unicode/HTML-like text scenarios. This pair shows normal native hardware.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "workspace-sidebar-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/workspace-sidebar-normal-mobile.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          2048
+        ],
+        "sha256": "a77db93385d430c5145e95a7adf74395ff705e96f89cc872cf2da0e1ae1698ec"
+      },
+      "desktop": {
+        "path": "workspace-sidebar-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/workspace-sidebar-normal-desktop.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "df72ce7117e5609a8f50f196610d0201274d160e952c90b71f33aa7372659e68"
+      }
+    }
+  },
+  {
+    "slug": "session-infrastructure",
+    "surface": "Chat session infrastructure and placement",
+    "mock_state_coverage": "Real component harness; native/requested/observed disagreement, legacy fallback, long text, empty, many items, error and Unicode/HTML-like text scenarios. This pair shows normal native hardware.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "session-infrastructure-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/session-infrastructure-normal-mobile.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "262ff415239a5e370c09ca0c9d88723d55c93e8cc8f2de5e094820fe2d397526"
+      },
+      "desktop": {
+        "path": "session-infrastructure-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/session-infrastructure-normal-desktop.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "081853fc6ffaa756ea7d68894a8df7c75e9afc6cbfd0475c46d96d3a3ea043b9"
+      }
+    }
+  },
+  {
+    "slug": "deployment",
+    "surface": "Deployment environment node hardware",
+    "mock_state_coverage": "Real component harness; native/requested/observed disagreement, legacy fallback, long text, empty, many items, error and Unicode/HTML-like text scenarios. This pair shows normal native hardware.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "deployment-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/deployment-normal-mobile.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "c2aed233e1299a8ee403b0d820cf123e91cca337aeda7808357c2939637b259d"
+      },
+      "desktop": {
+        "path": "deployment-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/deployment-normal-desktop.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "a546b1165118c32a55f202851bdd0ca275d2dfbf93b0e8fe6cd0590552671381"
+      }
+    }
+  },
+  {
+    "slug": "usage",
+    "surface": "Personal compute usage active nodes",
+    "mock_state_coverage": "Real component harness; native/requested/observed disagreement, legacy fallback, long text, empty, many items, error and Unicode/HTML-like text scenarios. This pair shows normal native hardware.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "usage-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/usage-hardware-normal-mobile.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          702,
+          406
+        ],
+        "sha256": "1c35fa8705cc1ca33c0a2a1e023df80499f291e322d35fbec2c74611eb5d9c2c"
+      },
+      "desktop": {
+        "path": "usage-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/usage-hardware-normal-desktop.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          1952,
+          324
+        ],
+        "sha256": "e62420d40c00c9cf314a2c9623cbf0635a2ab8a89d6c10bfc65eb53cf28fd75e"
+      }
+    }
+  },
+  {
+    "slug": "admin-usage",
+    "surface": "Admin compute usage node hardware",
+    "mock_state_coverage": "Real component harness; native/requested/observed disagreement, legacy fallback, long text, empty, many items, error and Unicode/HTML-like text scenarios. This pair shows normal native hardware.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "admin-usage-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/admin-usage-normal-mobile.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "bbd774387a2c3f79394fba86998bfde7cd25c51b08739f00b2911086494ace8b"
+      },
+      "desktop": {
+        "path": "admin-usage-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/native-hardware/admin-usage-normal-desktop.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "8a936eddd79dec578a816c20a6e28dff6f719ff9cc4a7462ea078d82115c6200"
+      }
+    }
+  },
+  {
+    "slug": "node-create",
+    "surface": "Nodes creation form",
+    "mock_state_coverage": "Real Nodes page; installation-funded native CX43 selection without a personal credential catalog. Exact native SKU POST, provider/location reset, empty/stale/unavailable offerings, configured-empty/migrating/disabled effective pools, explicit old-catalog compatibility, API error, 35 long/special-character options and 320px overflow cases are exercised.",
+    "reviewer": "merge_review",
+    "capture": "full page at stated viewport",
+    "files": {
+      "mobile": {
+        "path": "node-create-mobile.png",
+        "source": ".codex/tmp/playwright-screenshots/compute-create-node-installation-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1392
+        ],
+        "sha256": "da18bfdcfed5c189bcbaf8a1fe6e89c9a9f1455b29a146af0beed727344d0db3"
+      },
+      "desktop": {
+        "path": "node-create-desktop.png",
+        "source": ".codex/tmp/playwright-screenshots/compute-create-node-installation-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "154aade400f51356e6d49a0f2906cd15df24ac0b59215d67e36b3cd34035711c"
+      }
+    }
+  },
+  {
+    "slug": "workspace-create",
+    "surface": "Create Workspace workload resources",
+    "mock_state_coverage": "Real CreateWorkspace page; no personal credential with installation compute, blank/partial/cleared inheritance, existing-node omission, negative input and API rejection. Pair shows blank inherited requirements.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "workspace-create-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/compute-create-workspace-blank-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          2550
+        ],
+        "sha256": "8851fe6085e2fada8e035ca9da61b747912b5874ba487b341b668d74552fc6ca"
+      },
+      "desktop": {
+        "path": "workspace-create-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/compute-create-workspace-blank-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "1ecd66208f95678dfe0fdd0a3206a81a28005f66a47c8cb4e662c1d700ad82e6"
+      }
+    }
+  },
+  {
+    "slug": "profile-resources",
+    "surface": "Agent profile resource form",
+    "mock_state_coverage": "Real profile dialog; blank resources, modern/legacy mixed precedence, clear inheritance, invalid stored values, long names and Unicode stress. Pair focuses blank Infrastructure controls.",
+    "reviewer": "root",
+    "capture": "focused dialog",
+    "files": {
+      "mobile": {
+        "path": "profile-resources-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/profile-create-infra-mobile-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "1d017d564bf47726bd06124acae98b049eeec41189bdbcb0a69af6a69c2122d0"
+      },
+      "desktop": {
+        "path": "profile-resources-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/profile-create-infra-desktop-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "d50e3cc5b60ffbaca7347f6c101f0851c45ba2c5550afd5b151c3b1cc650a514"
+      }
+    }
+  },
+  {
+    "slug": "skill-resources",
+    "surface": "Skill resource form",
+    "mock_state_coverage": "Real skill dialog; modern 4 vCPU/16 GB plus legacy Large, blank fields inherit profile defaults, clear/save round-trip and long/Unicode stress. Pair shows mixed modern/legacy edit.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "skill-resources-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/skill-edit-resources-mobile-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "2b270bc29fbe13501ee0039187509d9c22da842c7148eb50dc4fab4a361eeb87"
+      },
+      "desktop": {
+        "path": "skill-resources-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/skill-edit-resources-desktop-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "2133dfe1480bb731fffb42c8c41527af0eb29e85cda0d807a2f55861d10adc3f"
+      }
+    }
+  },
+  {
+    "slug": "trigger-resources",
+    "surface": "Trigger advanced resource form",
+    "mock_state_coverage": "Real trigger form and advanced options; profile/resource precedence, trigger creation payload and inheritance, empty/long/Unicode stress. Pair focuses resource controls.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "trigger-resources-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/trigger-create-resources-mobile-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "647cd0bf2d5a84ec0f8ebbbf9126c6c24a9f1c16ecadd0a8cb40344d028dbecd"
+      },
+      "desktop": {
+        "path": "trigger-resources-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/trigger-create-resources-desktop-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "bd08dbe90bf2470c484294706b367ea102123be9be5ae0f003ee8860b0a01b80"
+      }
+    }
+  },
+  {
+    "slug": "project-resources",
+    "surface": "Project default resources",
+    "mock_state_coverage": "Real ProjectSettings Infrastructure tab; blank requirements with legacy Medium, inherit platform default and modern partial/clear/save cases; Unicode project name. Pair shows resource controls.",
+    "reviewer": "root; completion_audit rechecked",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "project-resources-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/rr-proj-settings-infra-mobile-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "d354b02fde5ea7b96fdc3fe880318800895166ec79f75efe97ccf778156c7219"
+      },
+      "desktop": {
+        "path": "project-resources-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/rr-proj-settings-infra-desktop-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "b952a8d7d6eedaf49a072de75394033885b15c2d2f955c9253736af3ee55541b"
+      }
+    }
+  },
+  {
+    "slug": "chat-resources",
+    "surface": "Chat composer resource overrides",
+    "mock_state_coverage": "Real chat composer; resource panel open/fill/clear, invalid input blocks submit, reset after successful request, empty profiles/wizard. Both screenshots show expanded resource overrides; mobile uses 2.5 vCPU and 6 GB and its real submit payload is asserted.",
+    "reviewer": "root desktop; completion_audit expanded mobile",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "chat-resources-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/chat-resource-override-filled-mobile-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "4b5ecaacff34a2007c728757396964078dbea7ee51d0f2be8d948a80ec3189a5"
+      },
+      "desktop": {
+        "path": "chat-resources-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/chat-resource-override-filled-desktop-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "b088c1b8bfce3c408d93827859c2f881ba230aff072ba0235e4e2b99b5ff02b9"
+      }
+    }
+  },
+  {
+    "slug": "profile-wizard",
+    "surface": "Chat profile setup wizard resources",
+    "mock_state_coverage": "Real setup wizard triggered from chat with no profiles; negative/fractional resource input, visible error blocks advancement until corrected. Pair shows invalid-resource feedback.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "profile-wizard-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/profile-wizard-invalid-resources-375-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "d7337460e91776757d984a9afabb93a8d6984161e4bde32df1e5b1f98aaca232"
+      },
+      "desktop": {
+        "path": "profile-wizard-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/profile-wizard-invalid-resources-1280-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "7557db0e3a61bb4bacf495d406925dba99576afb7fe69d995ec888a9510835af"
+      }
+    }
+  },
+  {
+    "slug": "task-submit",
+    "surface": "Standalone TaskSubmitForm (unused production component)",
+    "mock_state_coverage": "Actual TaskSubmitForm in test-only harness; unused by production routes. Negative input rejected; fractional 2.5 vCPU/6 GB/exclusive options emitted to real callback, reset and backlog inheritance. These images do not prove a production entry point.",
+    "reviewer": "root",
+    "capture": "viewport",
+    "files": {
+      "mobile": {
+        "path": "task-submit-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/compute-task-submit-resources-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1366
+        ],
+        "sha256": "3a84aea881fe5e53f8460a638a22789bc0f4eedfea876598c0218b0e43464fde"
+      },
+      "desktop": {
+        "path": "task-submit-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/compute-task-submit-resources-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "7bd8cd9b040cc7516cfd4de54b7c5c4a0da8aa80863e11c346bd90e23027b188"
+      }
+    }
+  },
+  {
+    "slug": "project-pool",
+    "surface": "Project default compute pool",
+    "mock_state_coverage": "Real scoped pool surface with HTTP mocks; 6 sources, 36 offerings, 200+ character Unicode/HTML-like names, selected/removed/stale/unavailable/catalog-only rows, policy changes and add/remove/save/reconcile. Pair shows edit strategy/exhaustion controls; full candidate list requires vertical scrolling.",
+    "reviewer": "completion_audit",
+    "capture": "scrolled viewport",
+    "files": {
+      "mobile": {
+        "path": "project-pool-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-project-edit-iphone-se-375x667--375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "0a3b59cd36be8c4b125cfe3971ca881f35ff1d7ca26cf44dfc9c2d48e6a3c371"
+      },
+      "desktop": {
+        "path": "project-pool-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-project-edit-desktop-1280x800--1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "9b2f88c4c072bd175ca4bb017dd619646559124a77f6d756a249d2e94a04b347"
+      }
+    }
+  },
+  {
+    "slug": "user-pool",
+    "surface": "Personal default compute pool",
+    "mock_state_coverage": "Real scoped pool surface with HTTP mocks; 6 sources, 36 offerings, 200+ character Unicode/HTML-like names, selected/removed/stale/unavailable/catalog-only rows, policy changes and add/remove/save/reconcile. Pair shows edit strategy/exhaustion controls; full candidate list requires vertical scrolling.",
+    "reviewer": "completion_audit",
+    "capture": "scrolled viewport",
+    "files": {
+      "mobile": {
+        "path": "user-pool-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-user-edit-iphone-se-375x667--375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "2df93370c460097e3ae37aed868d8fa98eda9755a5e6fc24aac79162b1dd4bb8"
+      },
+      "desktop": {
+        "path": "user-pool-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-user-edit-desktop-1280x800--1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "d23a42a2d579bdf5a9cf2a7905160308486018853758448feb5f3d5d308db946"
+      }
+    }
+  },
+  {
+    "slug": "installation-pool",
+    "surface": "Installation default compute pool",
+    "mock_state_coverage": "Real scoped pool surface with HTTP mocks; 6 sources, 36 offerings, 200+ character Unicode/HTML-like names, selected/removed/stale/unavailable/catalog-only rows, policy changes and add/remove/save/reconcile. Pair shows edit strategy/exhaustion controls; full candidate list requires vertical scrolling.",
+    "reviewer": "completion_audit",
+    "capture": "scrolled viewport",
+    "files": {
+      "mobile": {
+        "path": "installation-pool-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-installation-edit-iphone-se-375x667--375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "9dda7bc91afb93b3f7733ae4bfecde39d099e3b741662ee2f6fb2076115bbfa7"
+      },
+      "desktop": {
+        "path": "installation-pool-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-installation-edit-desktop-1280x800--1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "c29f69eec6cb97f3195677467242ea3e38128be7dbf2be5c18f3171acec1be2b"
+      }
+    }
+  },
+  {
+    "slug": "pool-catalog",
+    "surface": "Pool catalog filters and availability",
+    "mock_state_coverage": "Real shared pool editor; provider/region/CPU/RAM/price and available/unavailable/stale filters, bulk add/remove, pending addition and save. Selected pair shows a stale result with disabled Add/Stale control and visible Save; desktop also shows filters. Mobile filters are above this capture.",
+    "reviewer": "completion_audit",
+    "capture": "scrolled viewport",
+    "files": {
+      "mobile": {
+        "path": "pool-catalog-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-user-edit-iphone-se-375x667--catalog-results-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          750,
+          1334
+        ],
+        "sha256": "df732652ef00aa230f1c939ead982c92d32874882ec56933fbb990706494df90"
+      },
+      "desktop": {
+        "path": "pool-catalog-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-user-edit-desktop-1280x800--catalog-results-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          2560,
+          1600
+        ],
+        "sha256": "adaf06f32bbbcacd7be96cce89912629aa32baec5dca821d16e73015766d0378"
+      }
+    }
+  },
+  {
+    "slug": "pool-offering",
+    "surface": "Pool offering selection card",
+    "mock_state_coverage": "Real shared offering card under each scope; long native SKU, 48 vCPU/192 GB/960 GB, high mocked price, Not selected with visible Add. This exact-element pair proves long content wraps without hiding the action.",
+    "reviewer": "completion_audit",
+    "capture": "element screenshot at stated viewport",
+    "files": {
+      "mobile": {
+        "path": "pool-offering-mobile.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-user-edit-iphone-se-375x667--catalog-expensive-card-not-selected-375x667.png",
+        "viewport_css_px": [
+          375,
+          667
+        ],
+        "png_px": [
+          522,
+          652
+        ],
+        "sha256": "fcc1ea07d8c9fe831c64c81e970070f244c328a38ffa0a878a49b2e9733b3f73"
+      },
+      "desktop": {
+        "path": "pool-offering-desktop.png",
+        "source": ".codex/tmp/node-pools/screenshots/default-capacity-pools-user-edit-desktop-1280x800--catalog-expensive-card-not-selected-1280x800.png",
+        "viewport_css_px": [
+          1280,
+          800
+        ],
+        "png_px": [
+          1876,
+          284
+        ],
+        "sha256": "aa67bf9d98e1ec6c68f6c1c18e4e002b2a1ca404f5b67e89f173c3a9d1991db2"
+      }
+    }
+  }
+]

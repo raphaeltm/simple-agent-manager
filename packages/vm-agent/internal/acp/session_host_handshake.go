@@ -18,7 +18,7 @@ func (h *SessionHost) establishACPSession(ctx context.Context, agentType string,
 	}
 	loaded, err := h.tryLoadPreviousACPSession(ctx, agentType, settings, previousAcpSessionID, initResp.AgentCapabilities.LoadSession, timeouts.loadSession, !requireLoadSession)
 	if loaded {
-		return nil
+		return err
 	}
 	if requireLoadSession {
 		if err != nil {
@@ -154,7 +154,9 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 	})
 	h.reportEvent("info", "agent.load_session_ok", "Previous conversation restored", map[string]interface{}{"acpSessionId": previousAcpSessionID})
 	h.persistAcpSessionID(agentType)
-	h.applySessionSettings(ctx, settings)
+	if err := h.applySessionSettings(ctx, settings); err != nil {
+		return true, fmt.Errorf("ACP loaded session settings failed: %w", err)
+	}
 	return true, nil
 }
 
@@ -185,7 +187,9 @@ func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, 
 		"acpSessionId": string(h.sessionID),
 	})
 	h.persistAcpSessionID(agentType)
-	h.applySessionSettings(ctx, settings)
+	if err := h.applySessionSettings(ctx, settings); err != nil {
+		return fmt.Errorf("ACP new session settings failed: %w", err)
+	}
 
 	return nil
 }

@@ -4,6 +4,20 @@
 
 If you run specialist local subagents during Phase 5 of the `/do` workflow, **every single reviewer must return results and have its findings addressed before you may merge the PR.** There are no exceptions. Filing findings as backlog tasks does not satisfy this requirement for CRITICAL or HIGH severity issues.
 
+## Rule: CodeRabbit Must Agree Before Agent Merge
+
+For `/do` workflow PRs, once CI and every non-CodeRabbit gate are green, the agent MUST apply the `coderabbit-review` label with `gh pr edit <pr-number> --add-label coderabbit-review`. The label invokes `.github/workflows/coderabbit-bot-review.yml`, which posts the CodeRabbit command through the repository's human-scoped `CODERABBIT_REVIEW_PAT`. The PR is not merge-ready until all CodeRabbit feedback is implemented or explicitly reviewed and closed/resolved, and the latest CodeRabbit review has no unresolved feedback.
+
+If the label-triggered workflow did not run, needs to be retried, or a fresh explicit review is required after fixes, agents MAY dispatch the same trusted workflow directly:
+
+```bash
+gh workflow run coderabbit-bot-review.yml --ref main -f pr_number=<pr-number>
+```
+
+Always dispatch the workflow from `main`; do not execute a workflow definition from the PR branch. Agents MUST NOT post `@coderabbitai review` directly with their own GitHub App token: CodeRabbit ignores bot-authored review commands. The workflow is the human-identity bridge.
+
+This is an iterative gate: keep the `coderabbit-review` label on the PR so CodeRabbit can perform incremental reviews for subsequent commits, and manually dispatch the workflow when an explicit fresh review is needed. Repeat until the agent and CodeRabbit agree there is no unresolved feedback. If CodeRabbit is unavailable, does not respond, or the agent cannot inspect whether feedback remains unresolved, add `needs-human-review` and do not self-merge.
+
 ### Why This Rule Exists
 
 PR #568 (Neko Browser Streaming Sidecar) was merged while the go-specialist and security-auditor were still running. Context compaction caused the agent to lose track of outstanding reviewers. The agent merged the PR, then processed the late-arriving reviews and filed 5 backlog tasks for CRITICAL findings — including JWT tokens exposed in URL query parameters and mutex held during Docker I/O. See the retained incident lesson in this rule.
@@ -25,10 +39,12 @@ PR #568 (Neko Browser Streaming Sidecar) was merged while the go-specialist and 
 ### When to Add `needs-human-review`
 
 Add this label and stop (do NOT merge) when ANY of:
+
 - A local reviewer has not returned results
 - A reviewer errored or timed out
 - You cannot confirm whether all reviewers completed (e.g., after context compaction you've lost track)
 - A reviewer raised CRITICAL findings you cannot fix within the current session
+- CodeRabbit is unavailable, does not respond, or its unresolved-feedback state cannot be inspected
 - You are approaching timeout (75% of max execution time per rule 21) and reviews are incomplete
 
 ### The `needs-human-review` Label
@@ -43,10 +59,13 @@ gh label create needs-human-review --description "Agent could not complete all r
 ### Quick Compliance Check
 
 Before merging any agent-authored PR:
+
 - [ ] PR description has "Specialist Review Evidence" table
 - [ ] Every local reviewer has a row in the table
 - [ ] Every row shows `PASS` or `ADDRESSED` (not `PENDING` or `FAILED`)
 - [ ] All CRITICAL/HIGH findings are fixed in the branch (not deferred to backlog)
+- [ ] PR description has "CodeRabbit Review Evidence" filled out
+- [ ] Latest CodeRabbit review has no unresolved feedback
 - [ ] If any of the above are false: `needs-human-review` label added and merge deferred
 
 ### What This Rule Prevents

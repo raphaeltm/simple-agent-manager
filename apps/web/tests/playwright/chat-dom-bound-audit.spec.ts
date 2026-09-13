@@ -222,18 +222,8 @@ async function openChat(page: Page) {
 }
 
 async function openTimeline(page: Page) {
-  const timelineBtn = page.getByRole('button', { name: /^Timeline$/ });
-  if (
-    !(await timelineBtn
-      .first()
-      .isVisible()
-      .catch(() => false))
-  ) {
-    const detailsBtn = page.getByLabel('Show session details').first();
-    if (await detailsBtn.isVisible().catch(() => false)) {
-      await detailsBtn.click();
-    }
-  }
+  // Timeline lives in the always-visible session tool rail — no disclosure to open.
+  const timelineBtn = page.getByTestId('session-tool-timeline').first();
   await timelineBtn.waitFor({ state: 'visible', timeout: 10_000 });
   await timelineBtn.click();
   await page.getByRole('dialog', { name: 'Session timeline' }).waitFor({ timeout: 10_000 });

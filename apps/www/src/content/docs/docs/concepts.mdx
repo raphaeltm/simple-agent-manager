@@ -49,7 +49,9 @@ For example, if your dev server starts on port 3000 in workspace `abc123`, you c
 
 ## Nodes
 
-A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you.
+A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you, from the machine types your [compute pool](#compute-pools) permits.
+
+Several workspaces can share one node when the node's CPU, memory, and disk reservations all still fit and nothing on it asked for exclusive use. Work can also ask for a node to itself; see [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for).
 
 ### Warm Reuse
 
@@ -59,11 +61,15 @@ After a piece of work finishes, SAM keeps the environment **warm** for a short w
 
 A **provider** is the cloud your compute runs on. For running workspaces, SAM supports **Hetzner**, **Scaleway**, **Vultr**, **Infomaniak**, **DigitalOcean**, **UpCloud**, and **Google Cloud**. SAM follows a **Bring Your Own Cloud (BYOC)** model: you add your own provider credential in **Settings → Connections** (or the **Cloud Provider** tab), and VM costs are billed directly to your account. On the hosted platform, compute can be provided for you, so you may not need your own credential. Cloud credentials are never stored as environment variables.
 
-You can set a **default provider** and **default VM size** per project. The exact machine types, regions, and pricing are shown in the size picker when you start work.
+You can set a **default provider** and **default location** per project, and the resource requirements new work inherits. The exact machine types, regions, and pricing are shown when you start work.
 
-Infrastructure Compute Pools add a lower-level control surface for teams that need it: project,
-user, and installation pools are reconciled from the full provider-native catalog for the available
-credentials, then edited as concrete instance offerings rather than only small/medium/large presets.
+## Compute Pools
+
+A **compute pool** (also called a node pool or capacity pool) is the set of cloud machines SAM is allowed to rent on your behalf. Pools exist at three scopes — **project**, **user**, and **installation** — and SAM uses the first one that exists, in that order.
+
+Each pool holds the credentials that pay for its machines and the list of concrete provider instance types it permits, discovered from your provider's live catalog rather than reduced to small/medium/large presets. Two settings shape what SAM does with that list: a **strategy** (which permitted machine to pick) and an **exhaustion policy** (what to do when none is available).
+
+You normally do not have to configure any of this — SAM creates and maintains a working pool for the credentials it can see. See the [Compute Pools guide](/docs/guides/compute-pools/) for the full picture.
 
 ## Projects
 
@@ -74,12 +80,12 @@ Each project has:
 - A **chat** — the main surface where you describe work and watch agents run it
 - **Agent profiles** and **skills** — reusable configurations you pick from per chat (see below)
 - An **Ideas board** — for capturing and organizing work you haven't started yet
-- A **default VM size** and **default provider** for new workspaces
+- A **default provider**, **default location**, and **default resource requirements** for new workspaces
 - **Runtime configuration** — environment variables and files made available to workspaces
 
 ## Agent Profiles
 
-An **agent profile** is a saved, reusable configuration for running an agent: which agent, which model, VM size, system prompt, and other settings. Instead of configuring everything each time, you create profiles once and pick one when you start a chat (or attach one to a trigger). Profiles are the intended way to choose an agent — you're not limited to a single project-wide default.
+An **agent profile** is a saved, reusable configuration for running an agent: which agent, which model, which runtime, the [resource requirements](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for) its workspaces ask for, the system prompt, and other settings. Instead of configuring everything each time, you create profiles once and pick one when you start a chat (or attach one to a trigger). Profiles are the intended way to choose an agent — you're not limited to a single project-wide default.
 
 ## Skills
 

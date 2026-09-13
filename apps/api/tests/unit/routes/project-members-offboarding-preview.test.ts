@@ -200,6 +200,7 @@ function makeNode(overrides: Partial<schema.Node> = {}): schema.Node {
 describe('project member offboarding preview', () => {
   let app: Hono<{ Bindings: Env }>;
   let selectResults: QueryResult[];
+  let executionPrincipalMembers: QueryResult;
   let insertedRows: Array<{ table: unknown; values: unknown }>;
   let updatedRows: Array<{ table: unknown; values: Record<string, unknown> }>;
 
@@ -213,6 +214,12 @@ describe('project member offboarding preview', () => {
     mocks.currentUserId = 'owner-user';
     mocks.requireProjectCapability.mockResolvedValue(makeProject());
     selectResults = [];
+    // Active members available as a trigger execution principal. Overridden by
+    // the case that asserts reattach is withheld when none remain.
+    executionPrincipalMembers = [
+      { userId: 'owner-user', role: 'owner', status: 'active' },
+      { userId: 'departing-user', role: 'admin', status: 'active' },
+    ];
     insertedRows = [];
     updatedRows = [];
 
@@ -224,13 +231,32 @@ describe('project member offboarding preview', () => {
       chain.where = vi.fn(() => chain);
       chain.limit = vi.fn(() => Promise.resolve(selectResults.shift() ?? []));
       chain.orderBy = vi.fn(() => Promise.resolve(selectResults.shift() ?? []));
-      chain.then = (resolve: (value: QueryResult) => unknown, reject: (reason?: unknown) => unknown) =>
-        Promise.resolve(selectResults.shift() ?? []).then(resolve, reject);
+      chain.then = (
+        resolve: (value: QueryResult) => unknown,
+        reject: (reason?: unknown) => unknown
+      ) => Promise.resolve(selectResults.shift() ?? []).then(resolve, reject);
       return chain;
     };
 
     const mockDb = {
-      select: vi.fn(() => makeSelectBuilder()),
+      // `enumerateOffboardingResources` now also loads the active members who
+      // could serve as a trigger execution principal. That lookup is answered
+      // out-of-band, keyed on its distinctive {userId, role, status} projection,
+      // so it does not shift the positional sequences these cases were written
+      // against. The predicate itself is proven against real project_members
+      // rows in tests/unit/services/offboarding-trigger-execution-principal.test.ts.
+      select: vi.fn((projection?: Record<string, unknown>) => {
+        const keys = projection ? Object.keys(projection).sort().join(',') : '';
+        if (keys === 'role,status,userId') {
+          const chain: Record<string, unknown> = {};
+          chain.from = vi.fn(() => chain);
+          chain.where = vi.fn(() => chain);
+          chain.then = (resolve: (value: QueryResult) => unknown) =>
+            Promise.resolve(executionPrincipalMembers).then(resolve);
+          return chain;
+        }
+        return makeSelectBuilder();
+      }),
       update: vi.fn((table: unknown) => ({
         set: vi.fn((values: Record<string, unknown>) => {
           updatedRows.push({ table, values });
@@ -342,12 +368,9 @@ describe('project member offboarding preview', () => {
       },
     });
     expect(body.offboardingPlanId).toMatch(/^off_/);
-    expect(body.resources.map((resource: { resourceKind: string }) => resource.resourceKind)).toEqual([
-      'trigger',
-      'task_tree',
-      'node',
-      'project_attachment',
-    ]);
+    expect(
+      body.resources.map((resource: { resourceKind: string }) => resource.resourceKind)
+    ).toEqual(['trigger', 'task_tree', 'node', 'project_attachment']);
     expect(
       body.resources.every(
         (resource: { recommendedAction: string }) => resource.recommendedAction === 'break_and_flag'
@@ -450,6 +473,8 @@ describe('project member offboarding preview', () => {
     const values = planInsert?.values as { createdAt: string; expiresAt: string } | undefined;
     expect(values).toBeDefined();
     if (!values) throw new Error('Expected offboarding plan insert');
-    expect(new Date(values.expiresAt).getTime() - new Date(values.createdAt).getTime()).toBe(120_000);
+    expect(new Date(values.expiresAt).getTime() - new Date(values.createdAt).getTime()).toBe(
+      120_000
+    );
   });
 });

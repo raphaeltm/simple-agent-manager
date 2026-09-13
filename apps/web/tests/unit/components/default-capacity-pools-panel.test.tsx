@@ -376,6 +376,41 @@ describe('DefaultCapacityPoolsPanel', () => {
     rendered.unmount();
   });
 
+  it.each([
+    {
+      props: { projectId: 'project-1' } as const,
+      setup: () =>
+        mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
+          response('project', summary('project'))
+        ),
+      assertFetch: () =>
+        expect(mocks.fetchProjectDefaultCapacityPools).toHaveBeenCalledWith('project-1'),
+    },
+    {
+      props: { scope: 'user' } as const,
+      setup: () =>
+        mocks.fetchUserDefaultCapacityPools.mockResolvedValue(response('user', summary('user'))),
+      assertFetch: () => expect(mocks.fetchUserDefaultCapacityPools).toHaveBeenCalledWith(),
+    },
+    {
+      props: { scope: 'installation' } as const,
+      setup: () =>
+        mocks.fetchInstallationDefaultCapacityPools.mockResolvedValue(
+          response('installation', summary('installation'))
+        ),
+      assertFetch: () => expect(mocks.fetchInstallationDefaultCapacityPools).toHaveBeenCalledWith(),
+    },
+  ])(
+    'loads $props.scope defaults without forcing reconciliation',
+    async ({ props, setup, assertFetch }) => {
+      setup();
+
+      renderPanel(props);
+
+      await waitFor(assertFetch);
+    }
+  );
+
   it('renders effective pool policy, sources, and provider-native allowed instances without secret fields', async () => {
     mocks.fetchProjectDefaultCapacityPools.mockResolvedValue(
       response('project', summary('project'))

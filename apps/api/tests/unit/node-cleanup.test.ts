@@ -15,7 +15,12 @@ import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-clea
 // Mock strict external teardown. Scheduled cleanup must fail closed when the
 // provider/container boundary cannot confirm deletion.
 vi.mock('../../src/services/nodes', () => ({
-  deleteNodeResourcesStrict: vi.fn().mockResolvedValue({ providerVm: 'deleted' }),
+  deleteNodeResourcesStrict: vi.fn().mockResolvedValue({
+    providerVm: 'deleted',
+    runtimeTerminationConfirmedAt: '2026-09-04T00:00:00.000Z',
+    runtimeIncarnationId: null,
+    providerInstanceId: null,
+  }),
   stopNodeResources: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -50,10 +55,12 @@ function mockPreparedStatement(results: unknown[] = []) {
   return {
     bind: vi.fn().mockReturnValue({
       all: vi.fn().mockResolvedValue({ results }),
+      raw: vi.fn().mockResolvedValue([]),
       first: vi.fn().mockResolvedValue(results[0] ?? null),
       run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
     }),
     all: vi.fn().mockResolvedValue({ results }),
+    raw: vi.fn().mockResolvedValue([]),
     first: vi.fn().mockResolvedValue(results[0] ?? null),
     run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
   };
@@ -330,7 +337,10 @@ describe('runNodeCleanupSweep', () => {
       const result = await runNodeCleanupSweep(env);
 
       expect(result.lifetimeDestroyed).toBe(1);
-      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-stopped-handoff', 'user-1', env);
+      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-stopped-handoff', 'user-1', env, {
+        providerRequestContext: { signal: expect.any(AbortSignal) },
+        requestDeadlineMs: expect.any(Number),
+      });
     });
 
     it('does not destroy stopped handoff nodes with active workspaces', async () => {
@@ -418,6 +428,7 @@ describe('runNodeCleanupSweep', () => {
         // orphan nodes instead of only writing an observability row.
         orphanedNodesDestroyed: 0,
         orphanedNodesSkipped: 0,
+        stoppedWorkspacesQueued: 0,
         stoppedWorkspacesDeleted: 0,
         cfContainersDestroyed: 0,
         incompatibleDestroyed: 0,

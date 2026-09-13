@@ -107,7 +107,7 @@ async function cleanupDeploymentNodeIfUnassigned(
     return { nodeDeleted: false, warnings: cleanup.errors };
   }
 
-  await retireDeletedDeploymentNodeRecord(db, env, nodeId, userId);
+  await retireDeletedDeploymentNodeRecord(db, env, nodeId, userId, cleanup);
   return { nodeDeleted: cleanup.nodeFound, warnings: [] };
 }
 

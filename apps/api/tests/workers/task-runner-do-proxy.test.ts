@@ -25,6 +25,17 @@ import { seedInstallation, seedNode, seedProject, seedTask, seedUser } from './h
 // Helpers
 // ---------------------------------------------------------------------------
 
+const RESOLVED_RESERVATION = {
+  cpuMillis: 2_000,
+  memoryMb: 4_096,
+  diskMb: 40_960,
+  exclusiveNode: false,
+  maxCoTenants: 4,
+  source: 'task' as const,
+  sourceId: 'task-start-001',
+  version: 1,
+};
+
 function getStub(taskId: string): DurableObjectStub<TaskRunner> {
   const id = env.TASK_RUNNER.idFromName(taskId);
   return env.TASK_RUNNER.get(id) as DurableObjectStub<TaskRunner>;
@@ -77,6 +88,7 @@ function makeStartInput(taskId: string) {
       nodeMemoryThresholdPercent: 85,
       warmNodeTimeoutMs: 60000,
     },
+    resolvedReservation: RESOLVED_RESERVATION,
   };
 }
 
@@ -259,6 +271,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(config.attachments![0]!.filename).toBe('spec.md');
     expect(config.projectScaling?.taskExecutionTimeoutMs).toBe(7200000);
     expect(config.projectScaling?.maxWorkspacesPerNode).toBe(3);
+    expect(config.resolvedReservation).toEqual(RESOLVED_RESERVATION);
   });
 
   it('startTaskRunnerDO defaults optional fields to null', async () => {
@@ -274,6 +287,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
       taskTitle: 'Minimal task',
       repository: 'test-org/test-repo',
       installationId: 'inst-002',
+      resolvedReservation: RESOLVED_RESERVATION,
     });
 
     const stub = getStub(taskId);
@@ -300,6 +314,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(status.config.systemPromptAppend).toBeNull();
     expect(status.config.attachments).toBeNull();
     expect(status.config.projectScaling).toBeNull();
+    expect(status.config.resolvedReservation).toEqual(RESOLVED_RESERVATION);
   });
 
   it('does not let a mismatched capacity candidate override explicit provider or location', async () => {

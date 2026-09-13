@@ -221,3 +221,30 @@ func TestErrorActivityIncludesRedactedStatusError(t *testing.T) {
 		t.Fatal("timed out waiting for error activity report")
 	}
 }
+
+type activityRecorder struct {
+	mu         sync.Mutex
+	activities []string
+	server     *httptest.Server
+}
+
+func (recorder *activityRecorder) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	payload := activityPayload{}
+	decoder := json.NewDecoder(request.Body)
+	if decodeErr := decoder.Decode(&payload); decodeErr != nil {
+		http.Error(w, "invalid activity payload", http.StatusBadRequest)
+		return
+	}
+	recorder.mu.Lock()
+	recorder.activities = append(recorder.activities, payload.Activity)
+	recorder.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func newActivityRecorder(t *testing.T) *activityRecorder {
+	t.Helper()
+	recorder := &activityRecorder{}
+	recorder.server = httptest.NewServer(recorder)
+	t.Cleanup(recorder.server.Close)
+	return recorder
+}

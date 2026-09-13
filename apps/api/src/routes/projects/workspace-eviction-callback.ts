@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
@@ -16,6 +16,7 @@ import {
   nodeStatusTerminatesCallbacks,
 } from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
+import { finalizeWorkspaceEvictionOnNode } from '../../services/workspace-eviction-lifecycle';
 
 const WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUS_VALUES = ['creating', 'running', 'recovery'];
 const WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUSES = new Set(
@@ -28,6 +29,7 @@ const WorkspaceEvictionCallbackSchema = v.object({
   reason: v.picklist(['memory_pressure', 'oom_kill']),
   snapshotCaptured: v.boolean(),
   containerStopped: v.boolean(),
+  evictionGeneration: v.optional(v.nullable(v.pipe(v.string(), v.minLength(1)))),
 });
 
 type WorkspaceEvictionBody = v.InferOutput<typeof WorkspaceEvictionCallbackSchema>;
@@ -35,11 +37,14 @@ type AppDb = ReturnType<typeof drizzle<typeof schema>>;
 
 type WorkspaceEvictionResource = {
   workspaceId: string;
+  userId: string;
   projectId: string | null;
   status: string;
   nodeId: string | null;
   nodeStatus: string | null;
   chatSessionId: string | null;
+  updatedAt: string;
+  evictionGeneration: string | null;
 };
 
 /**
@@ -79,11 +84,14 @@ async function loadWorkspaceEvictionResource(
     (await db
       .select({
         workspaceId: schema.workspaces.id,
+        userId: schema.workspaces.userId,
         projectId: schema.workspaces.projectId,
         status: schema.workspaces.status,
         nodeId: schema.workspaces.nodeId,
         nodeStatus: schema.nodes.status,
         chatSessionId: schema.workspaces.chatSessionId,
+        updatedAt: schema.workspaces.updatedAt,
+        evictionGeneration: schema.workspaces.evictionGeneration,
       })
       .from(schema.workspaces)
       .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
@@ -112,6 +120,110 @@ function workspaceEvictionErrorMessage(reason: WorkspaceEvictionBody['reason']):
     : 'Workspace evicted due to memory pressure';
 }
 
+async function finalizeEvictionLifecycle(env: Env, workspace: WorkspaceEvictionResource) {
+  if (
+    !workspace.nodeId ||
+    !(await finalizeWorkspaceEvictionOnNode(env, {
+      nodeId: workspace.nodeId,
+      workspaceId: workspace.workspaceId,
+      generation: workspace.evictionGeneration,
+    }))
+  ) {
+    throw errors.gone('Workspace eviction identity changed before cleanup');
+  }
+}
+
+function rejectMissingWorkspaceCallback(
+  payload: CallbackTokenPayload,
+  workspaceId: string,
+  nodeId: string
+): never {
+  const expectedIdentity = payload.scope === 'node' ? nodeId : workspaceId;
+  if (payload.workspace !== expectedIdentity) {
+    throw errors.forbidden('Callback token not authorized for this resource');
+  }
+  throw errors.gone('Workspace eviction callback resource is gone');
+}
+
+function assertEvictionIdentity(
+  payload: CallbackTokenPayload,
+  workspace: WorkspaceEvictionResource,
+  body: WorkspaceEvictionBody,
+  projectId: string,
+  workspaceId: string
+): void {
+  if (!tokenMatchesEvictionResource(payload, workspace, body)) {
+    log.warn('workspace_eviction.callback_token_not_bound_to_resource', {
+      projectId,
+      workspaceId,
+      nodeId: body.nodeId,
+      scope: payload.scope,
+      tokenIdentity: payload.workspace,
+      workspaceNodeId: workspace.nodeId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Callback token not authorized for this workspace eviction');
+  }
+
+  if (workspace.nodeId !== body.nodeId) {
+    log.warn('workspace_eviction.node_mismatch', {
+      projectId,
+      workspaceId,
+      expectedNodeId: workspace.nodeId,
+      receivedNodeId: body.nodeId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Node identity verification failed');
+  }
+
+  if (workspace.projectId !== projectId) {
+    log.warn('workspace_eviction.project_mismatch', {
+      projectId,
+      workspaceId,
+      actualProjectId: workspace.projectId,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Workspace is not linked to this project');
+  }
+  if (workspace.evictionGeneration !== (body.evictionGeneration ?? null)) {
+    throw errors.gone('Workspace eviction belongs to an earlier runtime generation');
+  }
+}
+
+async function evictionTerminalResponse(
+  c: Context<{ Bindings: Env }>,
+  workspace: WorkspaceEvictionResource,
+  body: WorkspaceEvictionBody,
+  projectId: string,
+  workspaceId: string
+): Promise<Response | null> {
+  if (
+    !workspace.nodeId ||
+    !workspace.nodeStatus ||
+    nodeStatusTerminatesCallbacks(workspace.nodeStatus)
+  ) {
+    return terminalResourceResponse(c, 'workspace_eviction.terminal_node', {
+      projectId,
+      workspaceId,
+      nodeId: workspace.nodeId ?? body.nodeId,
+      status: workspace.nodeStatus ?? 'missing',
+    });
+  }
+
+  if (!WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUSES.has(workspace.status)) {
+    // A retry after D1 committed must still complete interrupted DO cleanup.
+    if (workspace.status === 'evicted') {
+      await finalizeEvictionLifecycle(c.env, workspace);
+    }
+    return terminalResourceResponse(c, 'workspace_eviction.terminal_workspace', {
+      projectId,
+      workspaceId,
+      status: workspace.status,
+    });
+  }
+  return null;
+}
+
 workspaceEvictionCallbackRoute.post(
   '/:id/workspaces/:workspaceId/eviction',
   jsonValidator(WorkspaceEvictionCallbackSchema),
@@ -128,128 +240,84 @@ workspaceEvictionCallbackRoute.post(
 
     const db = drizzle(c.env.DATABASE, { schema });
     const workspace = await loadWorkspaceEvictionResource(db, workspaceId);
-    if (!workspace) {
-      if (
-        (payload.scope === 'workspace' || payload.scope === undefined) &&
-        payload.workspace !== workspaceId
-      ) {
-        throw errors.forbidden('Callback token not authorized for this workspace');
-      }
-      if (payload.scope === 'node' && payload.workspace !== body.nodeId) {
-        throw errors.forbidden('Callback token not authorized for this node');
-      }
-      return terminalResourceResponse(c, 'workspace_eviction.terminal_workspace', {
-        projectId,
-        workspaceId,
-        status: 'missing',
-      });
-    }
+    if (!workspace) rejectMissingWorkspaceCallback(payload, workspaceId, body.nodeId);
+    assertEvictionIdentity(payload, workspace, body, projectId, workspaceId);
+    const terminal = await evictionTerminalResponse(c, workspace, body, projectId, workspaceId);
+    if (terminal) return terminal;
 
-    if (!tokenMatchesEvictionResource(payload, workspace, body)) {
-      log.warn('workspace_eviction.callback_token_not_bound_to_resource', {
-        projectId,
-        workspaceId,
-        nodeId: body.nodeId,
-        scope: payload.scope,
-        tokenIdentity: payload.workspace,
-        workspaceNodeId: workspace.nodeId,
-        action: 'rejected',
-      });
-      throw errors.forbidden('Callback token not authorized for this workspace eviction');
-    }
-
-    if (workspace.nodeId !== body.nodeId) {
-      log.warn('workspace_eviction.node_mismatch', {
-        projectId,
-        workspaceId,
-        expectedNodeId: workspace.nodeId,
-        receivedNodeId: body.nodeId,
-        action: 'rejected',
-      });
-      throw errors.forbidden('Node identity verification failed');
-    }
-
-    if (workspace.projectId !== projectId) {
-      log.warn('workspace_eviction.project_mismatch', {
-        projectId,
-        workspaceId,
-        actualProjectId: workspace.projectId,
-        action: 'rejected',
-      });
-      throw errors.forbidden('Workspace is not linked to this project');
-    }
-
-    if (
-      !workspace.nodeId ||
-      !workspace.nodeStatus ||
-      nodeStatusTerminatesCallbacks(workspace.nodeStatus)
-    ) {
-      return terminalResourceResponse(c, 'workspace_eviction.terminal_node', {
-        projectId,
-        workspaceId,
-        nodeId: workspace.nodeId ?? body.nodeId,
-        status: workspace.nodeStatus ?? 'missing',
-      });
-    }
-
-    if (!WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUSES.has(workspace.status)) {
-      return terminalResourceResponse(c, 'workspace_eviction.terminal_workspace', {
-        projectId,
-        workspaceId,
-        status: workspace.status,
-      });
+    if (!body.containerStopped) {
+      throw errors.conflict('Workspace container must be stopped before eviction is recorded');
     }
 
     const now = new Date().toISOString();
-    const transition = await db
-      .update(schema.workspaces)
-      .set({
-        status: 'evicted',
-        errorMessage: workspaceEvictionErrorMessage(body.reason),
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(schema.workspaces.id, workspaceId),
-          eq(schema.workspaces.projectId, projectId),
-          eq(schema.workspaces.nodeId, body.nodeId),
-          inArray(schema.workspaces.status, WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUS_VALUES)
-        )
-      )
-      .run();
+    // Keep capacity release and billing/session closure in one D1 transaction.
+    // The exact identity CAS also fences a node teardown or session reassignment
+    // that races authentication. The stopped container and snapshot remain intact.
+    const errorMessage = workspaceEvictionErrorMessage(body.reason);
+    const claimedWorkspace = `SELECT id FROM workspaces
+      WHERE id = ? AND user_id = ? AND project_id = ? AND node_id = ?
+        AND chat_session_id IS ? AND status = 'evicted' AND updated_at = ?`;
+    const claimBindings = [
+      workspaceId,
+      workspace.userId,
+      projectId,
+      body.nodeId,
+      workspace.chatSessionId,
+      now,
+    ];
+    const [transition] = await c.env.DATABASE.batch([
+      c.env.DATABASE.prepare(
+        `UPDATE workspaces SET status = 'evicted', error_message = ?, updated_at = ?, eviction_finalized_at = NULL
+         WHERE id = ? AND user_id = ? AND project_id = ? AND node_id = ?
+           AND chat_session_id IS ? AND status = ? AND eviction_generation IS ? AND runtime_deletion_confirmed_at IS NULL
+           AND EXISTS (SELECT 1 FROM nodes WHERE nodes.id = workspaces.node_id AND nodes.status = ?)`
+      ).bind(
+        errorMessage,
+        now,
+        workspaceId,
+        workspace.userId,
+        projectId,
+        body.nodeId,
+        workspace.chatSessionId,
+        workspace.status,
+        workspace.evictionGeneration,
+        workspace.nodeStatus
+      ),
+      c.env.DATABASE.prepare(
+        `UPDATE agent_sessions SET status = 'stopped', stopped_at = COALESCE(stopped_at, ?),
+           error_message = ?, updated_at = ?
+         WHERE workspace_id IN (${claimedWorkspace}) AND user_id = ?
+           AND status NOT IN ('completed', 'failed', 'stopped', 'error')`
+      ).bind(now, errorMessage, now, ...claimBindings, workspace.userId),
+      c.env.DATABASE.prepare(
+        `UPDATE compute_usage SET ended_at = ?
+         WHERE workspace_id IN (${claimedWorkspace}) AND ended_at IS NULL`
+      ).bind(now, ...claimBindings),
+      c.env.DATABASE.prepare(
+        `UPDATE session_snapshots SET sleep_status = NULL, sleep_after = NULL,
+           sleep_claim_id = NULL, sleep_claimed_at = NULL, sleep_stopping_since = NULL,
+           sleep_error = NULL, updated_at = ?
+         WHERE workspace_id IN (${claimedWorkspace}) AND sleeping_at IS NULL
+           AND sleep_status IN ('scheduled', 'preparing', 'failed')`
+      ).bind(now, ...claimBindings),
+    ]);
 
-    if ((transition.meta.changes ?? 0) === 0) {
+    if ((transition?.meta.changes ?? 0) === 0) {
       const latest = await loadWorkspaceEvictionResource(db, workspaceId);
-      if (!latest) {
-        return terminalResourceResponse(c, 'workspace_eviction.terminal_workspace', {
-          projectId,
-          workspaceId,
-          status: 'missing',
-        });
-      }
-      if (latest.projectId !== projectId) {
-        throw errors.forbidden('Workspace is not linked to this project');
-      }
-      if (latest.nodeId !== body.nodeId) {
-        throw errors.forbidden('Node identity verification failed');
-      }
-      if (!latest.nodeId || !latest.nodeStatus || nodeStatusTerminatesCallbacks(latest.nodeStatus)) {
-        return terminalResourceResponse(c, 'workspace_eviction.terminal_node', {
-          projectId,
-          workspaceId,
-          nodeId: latest.nodeId ?? body.nodeId,
-          status: latest.nodeStatus ?? 'missing',
-        });
-      }
-      if (!WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUSES.has(latest.status)) {
-        return terminalResourceResponse(c, 'workspace_eviction.terminal_workspace', {
-          projectId,
-          workspaceId,
-          status: latest.status,
-        });
-      }
+      if (!latest) rejectMissingWorkspaceCallback(payload, workspaceId, body.nodeId);
+      assertEvictionIdentity(payload, latest, body, projectId, workspaceId);
+      const latestTerminal = await evictionTerminalResponse(
+        c,
+        latest,
+        body,
+        projectId,
+        workspaceId
+      );
+      if (latestTerminal) return latestTerminal;
       throw errors.conflict('Workspace eviction transition was not applied');
     }
+
+    await finalizeEvictionLifecycle(c.env, workspace);
 
     c.executionCtx.waitUntil(
       projectDataService

@@ -55,14 +55,21 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { bridgeAgentActivity } from '../../services/trial/bridge';
+import {
+  signalWorkspaceDeletionUnconfirmedCallback,
+  type WorkspaceDeletionCallbackKind,
+} from '../../services/workspace-deletion-callback-signal';
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
   assertWorkspaceAcceptsCallback,
+  assertWorkspaceCallbackIdentityCurrent,
   assertWorkspaceCallbackResourceById,
   safeParseJson,
+  sameWorkspaceCallbackIdentity,
   verifyWorkspaceCallbackAuth,
+  type WorkspaceCallbackIdentitySnapshot,
 } from './_helpers';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
@@ -119,17 +126,24 @@ const runtimeRoutes = new Hono<{ Bindings: Env }>();
 type RuntimeContext = Context<{ Bindings: Env }>;
 type MessageBatchBody = v.InferOutput<typeof MessageBatchSchema>;
 
+async function callbackJsonWithJit<T extends Record<string, unknown>>(
+  c: RuntimeContext,
+  expected: WorkspaceCallbackIdentitySnapshot,
+  callback: WorkspaceDeletionCallbackKind,
+  body: T
+) {
+  await assertWorkspaceCallbackIdentityCurrent(c.env, expected, callback);
+  return c.json(body);
+}
+
 const DEFAULT_MAX_MESSAGES_PAYLOAD_BYTES = 256 * 1024;
 const DEFAULT_MESSAGE_SIZE_THRESHOLD_BYTES = 102400;
 const ACTIVE_MESSAGE_WORKSPACE_STATUSES = new Set(['creating', 'running', 'recovery']);
 const VALID_MESSAGE_ROLES = new Set(['user', 'assistant', 'system', 'tool', 'thinking', 'plan']);
 
-type MessageWorkspace = {
+type MessageWorkspace = WorkspaceCallbackIdentitySnapshot & {
   projectId: string | null;
   chatSessionId: string | null;
-  status: string;
-  nodeId: string | null;
-  nodeStatus: string | null;
 };
 
 type MessageBatchPersistenceRouteResult = {
@@ -292,6 +306,8 @@ async function loadMessageWorkspace(
   const db = drizzle(env.DATABASE, { schema });
   const workspaceRows = await db
     .select({
+      workspaceId: schema.workspaces.id,
+      userId: schema.workspaces.userId,
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
       status: schema.workspaces.status,
@@ -711,21 +727,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspaceRows = await db
-    .select({
-      userId: schema.workspaces.userId,
-      projectId: schema.workspaces.projectId,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'agent_key');
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'agent_key');
 
   // OpenCode always uses a user-supplied credential (zen/go/custom). It never
   // routes through the SAM platform proxy, so it always requires a dedicated key.
@@ -780,7 +782,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
   }
 
   if (credentialData && opencodeRequiresDedicatedCredential) {
-    return c.json({
+    return callbackJsonWithJit(c, workspace, 'agent_key', {
       apiKey: credentialData.credential,
       credentialKind: credentialData.credentialKind,
     });
@@ -883,13 +885,14 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
         .limit(1);
       const task = taskRows[0];
       if (task) {
+        await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
         await db
           .update(schema.tasks)
           .set({ agentCredentialSource: credentialData.credentialSource })
           .where(eq(schema.tasks.id, task.id));
       }
 
-      return c.json({
+      return callbackJsonWithJit(c, workspace, 'agent_key', {
         apiKey: '__sam_proxy__',
         credentialKind: credentialData.credentialKind,
         credentialSource: credentialData.credentialSource,
@@ -908,7 +911,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
 
     if (credentialData) {
-      return c.json({
+      return callbackJsonWithJit(c, workspace, 'agent_key', {
         apiKey: credentialData.credential,
         credentialKind: credentialData.credentialKind,
       });
@@ -957,13 +960,14 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       .limit(1);
     const task = taskRows[0];
     if (task) {
+      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
       await db
         .update(schema.tasks)
         .set({ agentCredentialSource: 'platform' })
         .where(eq(schema.tasks.id, task.id));
     }
 
-    return c.json({
+    return callbackJsonWithJit(c, workspace, 'agent_key', {
       apiKey: '__platform_proxy__',
       credentialKind: 'api-key' as const,
       credentialSource: 'platform' as const,
@@ -984,6 +988,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       .limit(1);
     const task = taskRows[0];
     if (task) {
+      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_key');
       await db
         .update(schema.tasks)
         .set({ agentCredentialSource: 'platform' })
@@ -991,7 +996,7 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     }
   }
 
-  return c.json({
+  return callbackJsonWithJit(c, workspace, 'agent_key', {
     apiKey: credentialData.credential,
     credentialKind: credentialData.credentialKind,
   });
@@ -1038,21 +1043,11 @@ runtimeRoutes.post(
     const db = drizzle(c.env.DATABASE, { schema });
 
     // Look up the workspace to get the user ID and project ID.
-    const workspaceRows = await db
-      .select({
-        userId: schema.workspaces.userId,
-        projectId: schema.workspaces.projectId,
-        status: schema.workspaces.status,
-        nodeId: schema.workspaces.nodeId,
-        nodeStatus: schema.nodes.status,
-      })
-      .from(schema.workspaces)
-      .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-      .where(eq(schema.workspaces.id, workspaceId))
-      .limit(1);
-
-    const workspace = workspaceRows[0];
-    assertWorkspaceAcceptsCallback(workspace, workspaceId, 'agent_credential_sync');
+    const workspace = await assertWorkspaceCallbackResourceById(
+      c.env,
+      workspaceId,
+      'agent_credential_sync'
+    );
 
     // Find the existing credential row to update. Prefer project-scoped match
     // when the workspace is in a project; fall back to user-scoped only when
@@ -1082,7 +1077,10 @@ runtimeRoutes.post(
         if (projectCredential.isActive) {
           existing = projectCredential;
         } else {
-          return c.json({ success: false, reason: 'credential_not_found' });
+          return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
+            success: false,
+            reason: 'credential_not_found',
+          });
         }
       }
     }
@@ -1105,7 +1103,10 @@ runtimeRoutes.post(
     }
     if (!existing) {
       // No credential found — the user may have deleted it while the session was active.
-      return c.json({ success: false, reason: 'credential_not_found' });
+      return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
+        success: false,
+        reason: 'credential_not_found',
+      });
     }
 
     // Decrypt the current credential to compare.
@@ -1117,20 +1118,51 @@ runtimeRoutes.post(
 
     // Only update if the credential has actually changed.
     if (currentCredential === body.credential) {
-      return c.json({ success: true, updated: false });
+      return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
+        success: true,
+        updated: false,
+      });
     }
 
     // Re-encrypt with a fresh IV and update.
     const { ciphertext, iv } = await encrypt(body.credential, getCredentialEncryptionKey(c.env));
-    await db
-      .update(schema.credentials)
-      .set({
-        encryptedToken: ciphertext,
+    const update = await c.env.DATABASE.prepare(
+      `UPDATE credentials
+          SET encrypted_token = ?, iv = ?, updated_at = ?
+        WHERE id = ?
+          AND EXISTS (
+            SELECT 1
+              FROM workspaces w
+              JOIN nodes n ON n.id = w.node_id
+             WHERE w.id = ?
+               AND w.user_id = ?
+               AND w.project_id IS ?
+               AND w.chat_session_id IS ?
+               AND w.node_id IS ?
+               AND w.status = ?
+               AND n.status = ?
+          )`
+    )
+      .bind(
+        ciphertext,
         iv,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.credentials.id, existing.id));
+        new Date().toISOString(),
+        existing.id,
+        workspace.workspaceId,
+        workspace.userId,
+        workspace.projectId,
+        workspace.chatSessionId,
+        workspace.nodeId,
+        workspace.status,
+        workspace.nodeStatus
+      )
+      .run();
+    if ((update.meta.changes ?? 0) !== 1) {
+      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_credential_sync');
+      throw errors.gone('Workspace callback state changed; callback resource is gone');
+    }
 
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_credential_sync');
     await syncActiveAgentCredentialSecret(c.env.DATABASE, {
       userId: workspace.userId,
       projectId: existing.projectId,
@@ -1147,7 +1179,10 @@ runtimeRoutes.post(
       credentialId: existing.id,
     });
 
-    return c.json({ success: true, updated: true });
+    return callbackJsonWithJit(c, workspace, 'agent_credential_sync', {
+      success: true,
+      updated: true,
+    });
   }
 );
 
@@ -1162,21 +1197,7 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
 
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const workspaceRows = await db
-    .select({
-      userId: schema.workspaces.userId,
-      projectId: schema.workspaces.projectId,
-      status: schema.workspaces.status,
-      nodeId: schema.workspaces.nodeId,
-      nodeStatus: schema.nodes.status,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'agent_settings');
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'agent_settings');
 
   // Fetch user-level agent settings (existing behaviour).
   const settingsRows = await db
@@ -1206,7 +1227,7 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
 
   // Resolution: project.agentDefaults[agentType] > user agent_settings > null.
   // OpenCode-specific provider/baseUrl stay user-scoped (phase 1 does not include them).
-  return c.json({
+  return callbackJsonWithJit(c, workspace, 'agent_settings', {
     model: projectDefaults.model ?? userRow?.model ?? null,
     permissionMode: projectDefaults.permissionMode ?? userRow?.permissionMode ?? null,
     opencodeProvider: userRow?.opencodeProvider ?? null,
@@ -1221,7 +1242,8 @@ runtimeRoutes.get('/:id/runtime', async (c) => {
 
   const workspaceRows = await db
     .select({
-      id: schema.workspaces.id,
+      workspaceId: schema.workspaces.id,
+      userId: schema.workspaces.userId,
       repository: schema.workspaces.repository,
       branch: schema.workspaces.branch,
       projectId: schema.workspaces.projectId,
@@ -1235,11 +1257,16 @@ runtimeRoutes.get('/:id/runtime', async (c) => {
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = workspaceRows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'runtime');
+  const workspace = await assertWorkspaceAcceptsCallback(
+    c.env,
+    workspaceRows[0],
+    workspaceId,
+    'runtime'
+  );
 
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'runtime');
   return c.json({
-    workspaceId: workspace.id,
+    workspaceId: workspace.workspaceId,
     repository: workspace.repository,
     branch: workspace.branch,
     projectId: workspace.projectId,
@@ -1254,12 +1281,13 @@ runtimeRoutes.get('/:id/runtime-assets', async (c) => {
   await verifyWorkspaceCallbackAuth(c, workspaceId);
   const db = drizzle(c.env.DATABASE, { schema });
   const agentSessionId = c.req.query('agentSessionId')?.trim() || null;
-  await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'runtime_assets');
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'runtime_assets');
   const assets = await getWorkspaceRuntimeAssets(
     db,
     { workspaceId, agentSessionId },
     getCredentialEncryptionKey(c.env)
   );
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'runtime_assets');
   return c.json(assets);
 });
 
@@ -1272,9 +1300,10 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   // Look up workspace → project to determine repo provider
   const workspaceRows = await db
     .select({
-      id: schema.workspaces.id,
+      workspaceId: schema.workspaces.id,
       installationId: schema.workspaces.installationId,
       projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
       userId: schema.workspaces.userId,
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
@@ -1285,8 +1314,12 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
 
-  const workspace = workspaceRows[0];
-  assertWorkspaceAcceptsCallback(workspace, workspaceId, 'git_token');
+  const workspace = await assertWorkspaceAcceptsCallback(
+    c.env,
+    workspaceRows[0],
+    workspaceId,
+    'git_token'
+  );
 
   // Look up the project to check repoProvider
   let repoProvider = 'github';
@@ -1331,6 +1364,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     // Use requested scope or default to 'write' (agents need push access)
     const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
     const repo = await c.env.ARTIFACTS.get(artifactsRepoId);
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
     const tokenResult = await repo.createToken(requestedScope, ttl);
 
     // Strip ?expires= suffix from token for git credential use
@@ -1346,7 +1380,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     const cloneUrl = repositoryName || repo.remote || '';
     if (!repo.remote) {
       log.warn('workspace_git_token.artifacts_remote_empty', {
-        workspaceId: workspace.id,
+        workspaceId: workspace.workspaceId,
         projectId: workspace.projectId,
         artifactsRepoId,
         usedStoredRepository: !!repositoryName,
@@ -1355,14 +1389,14 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     }
     if (!cloneUrl) {
       log.error('workspace_git_token.artifacts_clone_url_missing', {
-        workspaceId: workspace.id,
+        workspaceId: workspace.workspaceId,
         projectId: workspace.projectId,
         artifactsRepoId,
         action: 'clone_url_empty',
       });
     }
 
-    return c.json({
+    return callbackJsonWithJit(c, workspace, 'git_token', {
       token: tokenSecret,
       expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
       cloneUrl,
@@ -1382,7 +1416,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       // workspace owner — vending the owner's OAuth token against another
       // user's binding would cross a tenant boundary. Fail closed.
       log.error('workspace_git_token.gitlab_user_mismatch', {
-        workspaceId: workspace.id,
+        workspaceId: workspace.workspaceId,
         projectId: workspace.projectId,
         workspaceUserId: workspace.userId,
         metadataUserId: metadata.userId,
@@ -1390,6 +1424,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       });
       throw errors.forbidden('GitLab repository is not linked for this workspace owner');
     }
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
     const tokenResult = await requireGitLabUserAccessTokenResultForOwner(
       c.env,
       workspace.userId,
@@ -1408,7 +1443,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       throw errors.forbidden('GitLab repository access has changed; repository no longer matches');
     }
 
-    return c.json({
+    return callbackJsonWithJit(c, workspace, 'git_token', {
       provider: 'gitlab',
       token: tokenResult.accessToken,
       expiresAt: tokenResult.accessTokenExpiresAt,
@@ -1448,7 +1483,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   const installation = installations[0];
   if (!installation) {
     log.warn('workspace_git_token_installation_owner_mismatch', {
-      workspaceId: workspace.id,
+      workspaceId: workspace.workspaceId,
       projectId: workspace.projectId,
       installationRowId: workspace.installationId,
       expectedUserId: workspace.userId,
@@ -1458,7 +1493,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   }
   if (installation.userId !== workspace.userId) {
     log.info('workspace_git_token_project_installation_shared', {
-      workspaceId: workspace.id,
+      workspaceId: workspace.workspaceId,
       projectId: workspace.projectId,
       installationRowId: workspace.installationId,
       workspaceUserId: workspace.userId,
@@ -1473,7 +1508,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
 
   const verifiedRepoId = await verifyWorkspaceGitHubOwnerAccess({
     env: c.env,
-    workspaceId: workspace.id,
+    workspaceId: workspace.workspaceId,
     projectId: workspace.projectId,
     userId: workspace.userId,
     repository: repositoryName,
@@ -1487,6 +1522,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   // and scoping uses the rename-stable repositoryIds path. On any failure we fall
   // through to the name-based fallback below (no regression).
   if (!githubRepoId && repositoryName && workspace.projectId) {
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
     const backfill = await backfillProjectGithubRepoId(db, c.env, {
       projectId: workspace.projectId,
       repository: repositoryName,
@@ -1501,7 +1537,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
   let tokenOptions = null;
   try {
     tokenOptions = await resolveWorkspaceGitHubTokenOptions(db, {
-      workspaceId: workspace.id,
+      workspaceId: workspace.workspaceId,
       userId: workspace.userId,
       githubRepoId,
     });
@@ -1519,7 +1555,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       ? await resolveAdditionalRepositoryIds({
           env: c.env,
           db,
-          workspaceId: workspace.id,
+          workspaceId: workspace.workspaceId,
           projectId: workspace.projectId,
           userId: workspace.userId,
           externalInstallationId: getExternalInstallationId(installation),
@@ -1532,12 +1568,16 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       ? { repositoryIds: [githubRepoId, ...additionalRepoIds.filter((id) => id !== githubRepoId)] }
       : { repositories: [repoShortName as string] }),
   };
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'git_token');
   const token = await getInstallationToken(
     getExternalInstallationId(installation),
     c.env,
     scopedTokenOptions
   );
-  return c.json({ token: token.token, expiresAt: token.expiresAt });
+  return callbackJsonWithJit(c, workspace, 'git_token', {
+    token: token.token,
+    expiresAt: token.expiresAt,
+  });
 });
 
 runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c) => {
@@ -1545,7 +1585,7 @@ runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c)
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
   const body = c.req.valid('json');
-  await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'boot_log');
+  const workspace = await assertWorkspaceCallbackResourceById(c.env, workspaceId, 'boot_log');
 
   const entry = {
     step: body.step,
@@ -1555,8 +1595,9 @@ runtimeRoutes.post('/:id/boot-log', jsonValidator(BootLogEntrySchema), async (c)
     timestamp: body.timestamp || new Date().toISOString(),
   };
 
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'boot_log');
   await appendBootLog(c.env.KV, workspaceId, entry, c.env);
-  return c.json({ success: true });
+  return callbackJsonWithJit(c, workspace, 'boot_log', { success: true });
 });
 
 /**
@@ -1568,14 +1609,30 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
 
+  // Authenticate and resolve terminal state before reading an untrusted body.
+  // Late deletion callbacks are discarded without parsing or persisting payloads.
+  const workspace = await loadMessageWorkspace(c.env, workspaceId);
+  const preflightTerminalResponse = maybeTerminalMessageWorkspaceResponse(
+    c,
+    workspace,
+    workspaceId,
+    '',
+    0
+  );
+  if (preflightTerminalResponse) {
+    await signalWorkspaceDeletionUnconfirmedCallback(c.env, workspaceId, 'messages');
+    return preflightTerminalResponse;
+  }
+
   const body = await parseMessageBatchRequest(c);
   const sessionId = validateMessageBatch(c.env, body);
 
-  // Resolve workspace to project and validate session linkage (Principle XIII: Fail-Fast)
-  const workspace = await loadMessageWorkspace(c.env, workspaceId);
+  // Rule 49: re-read immediately before crossing into ProjectData. Deletion or
+  // reassignment that wins while the body is read must suppress all persistence.
+  const currentWorkspace = await loadMessageWorkspace(c.env, workspaceId);
   const terminalResponse = maybeTerminalMessageWorkspaceResponse(
     c,
-    workspace,
+    currentWorkspace,
     workspaceId,
     sessionId,
     body.messages.length
@@ -1583,14 +1640,37 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   if (terminalResponse) {
     return terminalResponse;
   }
-  assertMessageWorkspaceAcceptsBatch(c, workspace, workspaceId, sessionId, body.messages.length);
+  if (
+    !currentWorkspace ||
+    !workspace ||
+    !sameWorkspaceCallbackIdentity(currentWorkspace, workspace)
+  ) {
+    return terminalMessagePersistenceResponse(
+      c,
+      {
+        workspaceId,
+        projectId: currentWorkspace?.projectId ?? null,
+        sessionId,
+        messageCount: body.messages.length,
+      },
+      currentWorkspace?.status ?? 'missing',
+      'workspace_incarnation_changed'
+    );
+  }
+  assertMessageWorkspaceAcceptsBatch(
+    c,
+    currentWorkspace,
+    workspaceId,
+    sessionId,
+    body.messages.length
+  );
 
   // Delegate to ProjectData DO with structured error handling.
   // On failure, return appropriate status codes so the VM agent outbox
   // can distinguish transient (retry) from permanent (discard) errors.
   const context: MessageRouteContext = {
     workspaceId,
-    projectId: workspace.projectId,
+    projectId: currentWorkspace.projectId,
     sessionId,
     messageCount: body.messages.length,
   };
@@ -1598,7 +1678,7 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   try {
     result = await projectDataService.persistMessageBatch(
       c.env,
-      workspace.projectId,
+      currentWorkspace.projectId,
       sessionId,
       toProjectDataMessages(body)
     );
@@ -1613,7 +1693,7 @@ runtimeRoutes.post('/:id/messages', async (c) => {
   // Fire-and-forget: pipe agent activity to the trial SSE feed (if this
   // workspace belongs to a trial project). Non-trial projects short-circuit
   // with a single KV lookup inside the bridge.
-  bridgePersistedAgentActivity(c, workspace.projectId, result, body);
+  bridgePersistedAgentActivity(c, currentWorkspace.projectId, result, body);
 
   return c.json({
     persisted: result.persisted,
@@ -1627,6 +1707,11 @@ runtimeRoutes.post('/:id/messages', async (c) => {
 runtimeRoutes.post('/:id/bootstrap-token', requireAuth(), requireApproved(), async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
+  const workspace = await assertWorkspaceCallbackResourceById(
+    c.env,
+    workspaceId,
+    'bootstrap_token'
+  );
 
   const bootstrapToken = ulid();
   const now = new Date().toISOString();
@@ -1643,6 +1728,7 @@ runtimeRoutes.post('/:id/bootstrap-token', requireAuth(), requireApproved(), asy
     createdAt: now,
   };
 
+  await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'bootstrap_token');
   await registerBootstrapTokenConsume(
     c.env.DATABASE,
     bootstrapToken,
@@ -1653,7 +1739,7 @@ runtimeRoutes.post('/:id/bootstrap-token', requireAuth(), requireApproved(), asy
     expirationTtl: 60,
   });
 
-  return c.json({ token: bootstrapToken });
+  return callbackJsonWithJit(c, workspace, 'bootstrap_token', { token: bootstrapToken });
 });
 
 export { runtimeRoutes };

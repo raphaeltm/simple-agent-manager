@@ -1630,6 +1630,248 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '041-terminal-session-reconcile-marker',
+    run: (sql) => {
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN terminal_reconcile_deferred_until INTEGER');
+      sql.exec('ALTER TABLE chat_sessions ADD COLUMN terminal_reconcile_defer_reason TEXT');
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_terminal_reconcile
+        ON chat_sessions(status, terminal_reconcile_deferred_until, updated_at, id)
+      `);
+    },
+  },
+  {
+    name: '042-chat-search-materialization-state',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE chat_sessions ADD COLUMN search_index_state TEXT`,
+        `ALTER TABLE chat_sessions ADD COLUMN search_index_updated_at INTEGER`,
+        `ALTER TABLE chat_sessions ADD COLUMN search_index_degradation_reason TEXT`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: a partially migrated object may already have the column.
+        }
+      }
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_search_index_state
+        ON chat_sessions(search_index_state, updated_at, id)
+      `);
+    },
+  },
+  {
+    name: '043-project-data-terminal-archive-bridge',
+    run: (sql) => {
+      for (const statement of [
+        `ALTER TABLE chat_sessions ADD COLUMN archive_last_message_at INTEGER`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_owner_name TEXT`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_generation INTEGER`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_migration_id TEXT`,
+        `ALTER TABLE chat_sessions ADD COLUMN archive_state TEXT`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Additive compatibility: a partially migrated object may already have the column.
+        }
+      }
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_source_intents (
+          session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          source_owner_name TEXT NOT NULL,
+          target_owner_name TEXT NOT NULL,
+          target_generation INTEGER NOT NULL CHECK (target_generation > 0),
+          source_intent_token TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN (
+            'intent_prepared',
+            'target_prepared',
+            'copying',
+            'target_sealed',
+            'recovery_manifest_persisted',
+            'source_deleted',
+            'rehome_exported'
+          )),
+          terminal_version_sha256 TEXT NOT NULL,
+          target_aggregate_sha256 TEXT,
+          recovery_manifest_key TEXT,
+          last_message_at INTEGER,
+          message_count INTEGER NOT NULL DEFAULT 0,
+          prepared_at INTEGER NOT NULL,
+          target_sealed_at INTEGER,
+          recovery_manifest_persisted_at INTEGER,
+          source_deleted_at INTEGER,
+          source_database_size_before INTEGER,
+          source_database_size_after INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_data_archive_source_migration
+        ON project_data_archive_source_intents(project_id, migration_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_source_state
+        ON project_data_archive_source_intents(state, updated_at)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_target_sessions (
+          session_id TEXT PRIMARY KEY REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          owner_name TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK (generation > 0),
+          source_owner_name TEXT NOT NULL,
+          source_intent_token TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN (
+            'prepared',
+            'copying',
+            'sealed',
+            'published',
+            'rehome_exported'
+          )),
+          terminal_version_sha256 TEXT NOT NULL,
+          aggregate_sha256 TEXT,
+          expected_message_count INTEGER NOT NULL DEFAULT 0,
+          received_message_count INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          sealed_at INTEGER
+        )
+      `);
+      sql.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_project_data_archive_target_owner
+        ON project_data_archive_target_sessions(project_id, owner_name, generation, session_id)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_target_state
+        ON project_data_archive_target_sessions(state, updated_at)
+      `);
+
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS project_data_archive_target_chunks (
+          chunk_id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          migration_id TEXT NOT NULL,
+          owner_name TEXT NOT NULL,
+          generation INTEGER NOT NULL CHECK (generation > 0),
+          table_name TEXT NOT NULL CHECK (table_name IN (
+            'chat_messages',
+            'chat_messages_grouped',
+            'tool_payload_archives'
+          )),
+          ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+          row_count INTEGER NOT NULL CHECK (row_count >= 0),
+          byte_count INTEGER NOT NULL CHECK (byte_count >= 0),
+          sha256 TEXT NOT NULL,
+          committed_at INTEGER NOT NULL,
+          UNIQUE(session_id, table_name, ordinal)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_project_data_archive_target_chunks_session
+        ON project_data_archive_target_chunks(session_id, table_name, ordinal)
+      `);
+    },
+  },
+  {
+    name: '044-tool-payload-archive-verification-proof',
+    run: (sql) => {
+      const columns = [
+        [
+          'archive_body_bytes',
+          'ALTER TABLE tool_payload_archives ADD COLUMN archive_body_bytes INTEGER',
+        ],
+        [
+          'archive_body_sha256',
+          'ALTER TABLE tool_payload_archives ADD COLUMN archive_body_sha256 TEXT',
+        ],
+        [
+          'root_object_bytes',
+          'ALTER TABLE tool_payload_archives ADD COLUMN root_object_bytes INTEGER',
+        ],
+        [
+          'root_object_sha256',
+          'ALTER TABLE tool_payload_archives ADD COLUMN root_object_sha256 TEXT',
+        ],
+        [
+          'verified_object_count',
+          'ALTER TABLE tool_payload_archives ADD COLUMN verified_object_count INTEGER',
+        ],
+        [
+          'source_tool_metadata_sha256',
+          'ALTER TABLE tool_payload_archives ADD COLUMN source_tool_metadata_sha256 TEXT',
+        ],
+      ] as const;
+      for (const [column, statement] of columns) {
+        try {
+          sql.exec(statement);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!new RegExp(String.raw`duplicate column name:\s*${column}`, 'i').test(message))
+            throw error;
+        }
+      }
+      // SQLite resolves every selected identifier before executing the query, so
+      // this static zero-row projection fails the migration if any proof column
+      // is absent without interpolating identifiers into SQL.
+      sql.exec(`
+        SELECT
+          archive_body_bytes,
+          archive_body_sha256,
+          root_object_bytes,
+          root_object_sha256,
+          verified_object_count,
+          source_tool_metadata_sha256
+        FROM tool_payload_archives
+        LIMIT 0
+      `);
+    },
+  },
+  {
+    name: '045-project-data-compact-archive',
+    run: (sql) => {
+      const columns = sql.exec('PRAGMA table_info(project_data_archive_target_sessions)').toArray();
+      if (!columns.some((column) => column.name === 'storage_format')) {
+        sql.exec(
+          "ALTER TABLE project_data_archive_target_sessions ADD COLUMN storage_format TEXT NOT NULL DEFAULT 'sqlite-v1'"
+        );
+      }
+      sql.exec(`CREATE TABLE IF NOT EXISTS project_data_archive_raw_chunks (
+        session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL,
+        r2_key TEXT NOT NULL,
+        compressed_bytes INTEGER NOT NULL,
+        body_bytes INTEGER NOT NULL,
+        body_sha256 TEXT NOT NULL,
+        first_created_at INTEGER,
+        last_created_at INTEGER,
+        role_counts_json TEXT NOT NULL,
+        row_ids_json TEXT NOT NULL,
+        PRIMARY KEY (session_id, ordinal)
+      )`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_archive_raw_chunk_time
+        ON project_data_archive_raw_chunks(session_id, first_created_at, last_created_at)`);
+    },
+  },
+  {
+    name: '046-prompt-delivery-submit-phase',
+    run: (sql) => {
+      const columns = sql.exec('PRAGMA table_info(session_inbox)').toArray();
+      if (!columns.some((column) => column.name === 'prompt_delivery_phase')) {
+        // Existing claims remain NULL: they may have sent a prompt before this
+        // checkpoint existed, so deployment must not turn them into safe retries.
+        sql.exec('ALTER TABLE session_inbox ADD COLUMN prompt_delivery_phase TEXT');
+      }
+    },
+  },
 ];
 
 /**

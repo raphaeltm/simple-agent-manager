@@ -454,6 +454,17 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'anthropic-standard',
   }),
   anthropicModel({
+    id: 'claude-fable-5-1',
+    label: 'Claude Fable 5.1',
+    tier: 'premium',
+    costPer1kInputTokens: 0.01,
+    costPer1kOutputTokens: 0.05,
+    contextWindow: 1000000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'anthropic-premium',
+  }),
+  anthropicModel({
     id: 'claude-fable-5',
     label: 'Claude Fable 5',
     tier: 'premium',

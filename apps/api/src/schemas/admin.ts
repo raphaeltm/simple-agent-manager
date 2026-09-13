@@ -19,6 +19,61 @@ export const ProjectDataStorageEmergencyPurgeSchema = v.object({
   maxBatches: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100))),
 });
 
+export const ProjectDataStorageReliefMeasureSchema = v.object({
+  limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  cursor: v.optional(
+    v.object({
+      grouped: v.optional(
+        v.object({
+          sessionId: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+          createdAt: v.pipe(v.number(), v.integer(), v.minValue(0)),
+          id: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+        })
+      ),
+      toolPayload: v.optional(
+        v.object({
+          rowId: v.pipe(v.number(), v.integer(), v.minValue(1)),
+          sessionId: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+          createdAt: v.pipe(v.number(), v.integer(), v.minValue(0)),
+          sequence: v.pipe(v.number(), v.integer(), v.minValue(-1)),
+          messageId: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+        })
+      ),
+    })
+  ),
+});
+
+export const ProjectDataManualToolPayloadCleanupSchema = v.object({
+  reason: v.pipe(v.string(), v.minLength(1), v.maxLength(500)),
+  idempotencyKey: v.pipe(v.string(), v.minLength(1), v.maxLength(200)),
+  batchRows: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  batchBytes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  wallTimeMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+});
+
+export const ProjectDataArchiveCanaryControlSchema = v.object({
+  sessionId: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(200))),
+  dryRun: v.optional(v.boolean()),
+  reason: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(500))),
+  limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  wallTimeMs: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  chunkRows: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  chunkBytes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+});
+
+export const ProjectDataArchiveFreezeProjectSchema = v.object({
+  reason: v.pipe(v.string(), v.minLength(1), v.maxLength(500)),
+});
+
+export const ProjectDataArchiveCircuitBreakerSchema = v.object({
+  state: v.picklist(['closed', 'open', 'frozen']),
+  reason: v.pipe(v.string(), v.minLength(1), v.maxLength(500)),
+});
+
+export const ProjectDataArchiveRecoveryControlSchema = v.object({
+  reason: v.pipe(v.string(), v.minLength(1), v.maxLength(500)),
+});
+
 export const AnalyticsForwardSchema = v.object({
   startDate: v.optional(v.string()),
   endDate: v.optional(v.string()),

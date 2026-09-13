@@ -10,15 +10,19 @@ interface FloatingHeaderProps {
   projectId: string;
   lc: ReturnType<typeof useSessionLifecycle>;
   onSessionMutated?: () => void;
-  onRetry?: () => void;
-  onFork?: () => void;
-  onOpenTimeline?: () => void;
   onOpenComments?: () => void;
   unresolvedCommentCount?: number;
   needsAttentionCommentCount?: number;
   sourceContext?: SessionSourceContext;
   onShowHierarchy?: (taskId: string) => void;
   containerRef?: (el: HTMLDivElement | null) => void;
+  /** Details-panel visibility, owned by `useSessionTools` alongside the tool rail. */
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  /** True when the tool rail is beside the header — squares its right corner. */
+  flushRight?: boolean;
+  completeError?: string | null;
+  onDismissCompleteError?: () => void;
 }
 
 /** Floating session header with optional error banner and summary. */
@@ -26,15 +30,17 @@ export function FloatingHeader({
   projectId,
   lc,
   onSessionMutated,
-  onRetry,
-  onFork,
-  onOpenTimeline,
   onOpenComments,
   unresolvedCommentCount,
   needsAttentionCommentCount,
   sourceContext,
   onShowHierarchy,
   containerRef,
+  expanded,
+  onExpandedChange,
+  flushRight,
+  completeError,
+  onDismissCompleteError,
 }: FloatingHeaderProps) {
   if (!lc.session) return null;
 
@@ -44,17 +50,17 @@ export function FloatingHeader({
   const taskStatus = lc.taskEmbed?.status;
   const hasRecoverableTaskError = Boolean(
     lc.taskEmbed?.errorMessage &&
-      lc.taskEmbed?.taskMode === 'conversation' &&
-      taskStatus !== 'failed' &&
-      taskStatus !== 'cancelled' &&
-      taskStatus !== 'completed'
+    lc.taskEmbed?.taskMode === 'conversation' &&
+    taskStatus !== 'failed' &&
+    taskStatus !== 'cancelled' &&
+    taskStatus !== 'completed'
   );
   const failureClassification = lc.taskEmbed?.errorMessage
     ? classifyFailure(lc.taskEmbed.errorMessage, lc.taskEmbed.executionStep ?? undefined)
     : null;
   const failureShellClassName = failureClassification?.diagnosable
     ? "glass-chrome px-3 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
-    : 'glass-chrome px-3 py-2 rounded-b-2xl relative';
+    : `glass-chrome px-3 py-2 ${flushRight ? 'rounded-bl-2xl' : 'rounded-b-2xl'} relative`;
   const failureShellBoxShadow = failureClassification?.diagnosable
     ? '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)'
     : '0 4px 24px rgba(0, 0, 0, 0.4)';
@@ -72,19 +78,19 @@ export function FloatingHeader({
         node={lc.node}
         detectedPorts={lc.detectedPorts}
         onSessionMutated={onSessionMutated}
-        onOpenFiles={lc.handleOpenFileBrowser}
-        onOpenGit={lc.handleOpenGitChanges}
-        onOpenTimeline={onOpenTimeline}
         onOpenComments={onOpenComments}
         unresolvedCommentCount={unresolvedCommentCount}
         needsAttentionCommentCount={needsAttentionCommentCount}
-        onRetry={onRetry}
-        onFork={onFork}
         lineageText={sourceContext?.lineageText}
         initialPromptFallback={initialPromptFallback}
         sourceContext={sourceContext}
         hasContentBelow={!!lc.taskEmbed?.errorMessage}
         onShowHierarchy={onShowHierarchy}
+        expanded={expanded}
+        onExpandedChange={onExpandedChange}
+        flushRight={flushRight}
+        completeError={completeError}
+        onDismissCompleteError={onDismissCompleteError}
       />
       {lc.taskEmbed?.errorMessage && (
         <div

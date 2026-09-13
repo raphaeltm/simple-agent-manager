@@ -147,9 +147,10 @@ func NewResourceGuard(cfg ResourceGuardConfig) (*ResourceGuard, error) {
 		},
 	}
 	guard.dockerEvents = NewDockerEventSubscriber(DockerEventSubscriberConfig{
-		CommandFactory: cfg.DockerEventsCommand,
-		EventBuffer:    cfg.EventBuffer,
-		Logger:         cfg.Logger,
+		CommandFactory:    cfg.DockerEventsCommand,
+		ReconnectInterval: cfg.PSIPollInterval,
+		EventBuffer:       cfg.EventBuffer,
+		Logger:            cfg.Logger,
 	})
 	return guard, nil
 }
@@ -185,8 +186,8 @@ func (g *ResourceGuard) loop(ctx context.Context) {
 	defer containerTicker.Stop()
 
 	psiC := psiTicker.C
-	g.pollPSI(ctx, &psiC, psiTicker)
 	g.pollContainerStats(ctx)
+	g.pollPSI(ctx, &psiC, psiTicker)
 
 	for {
 		select {
@@ -219,18 +220,26 @@ func (g *ResourceGuard) pollPSI(ctx context.Context, psiC *<-chan time.Time, tic
 		}
 		return
 	}
+	// Under critical pressure, choose a victim from a fresh Docker sample
+	// rather than the normal (possibly much slower) stats cadence.
+	if pressure.Level == PressureLevelCritical {
+		if !g.pollContainerStats(ctx) {
+			g.updateContainerMetrics(nil) // Report pressure without a stale victim.
+		}
+	}
 	g.updateMemoryPressure(pressure)
 }
 
-func (g *ResourceGuard) pollContainerStats(ctx context.Context) {
+func (g *ResourceGuard) pollContainerStats(ctx context.Context) bool {
 	metrics, err := g.containerMetrics.Poll(ctx)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			g.logger.Warn("resourcemon: container metrics poll failed", "error", err)
 		}
-		return
+		return false
 	}
 	g.updateContainerMetrics(metrics)
+	return true
 }
 
 func (g *ResourceGuard) consumeDockerEvents(ctx context.Context) {
@@ -258,7 +267,7 @@ func (g *ResourceGuard) updateMemoryPressure(pressure MemoryPressure) {
 	g.current.Level = pressure.Level
 	g.current.UpdatedAt = time.Now().UTC()
 	g.lastPressureLevel = pressure.Level
-	if previous != pressure.Level && pressure.Level != PressureLevelNone {
+	if pressure.Level == PressureLevelCritical || (previous != pressure.Level && pressure.Level != PressureLevelNone) {
 		pressureCopy := pressure
 		emit = &PressureEvent{
 			Type:       PressureEventSystemMemory,

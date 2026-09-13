@@ -14,6 +14,8 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { AppError } from '../middleware/error';
+import { requireProjectCapability } from '../middleware/project-auth';
 import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
 import { generateBranchName } from './branch-name';
 import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
@@ -23,7 +25,14 @@ import {
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from './placement-resolver';
 import * as projectDataService from './project-data';
-import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
+import {
+  collectStoredResourceRequirementLayers,
+  createPersistedTaskResourcePlanJson,
+  firstResourceRequirementLayer,
+  firstResourceRequirementLayerJson,
+  ResourceRequirementsValidationError,
+} from './resource-requirements-input';
+import { resolveSkillProfile } from './skills';
 import { markQueuedTaskFailed } from './task-failure';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
@@ -39,7 +48,7 @@ export interface SubmitTriggeredTaskInput {
   triggerExecutionId: string;
   /** Project this trigger belongs to. */
   projectId: string;
-  /** User who owns the trigger. */
+  /** Current authorized user principal used to execute this trigger. */
   userId: string;
   /** The rendered prompt to use as the task description. */
   renderedPrompt: string;
@@ -53,6 +62,8 @@ export interface SubmitTriggeredTaskInput {
   taskMode: TaskMode;
   /** VM size override from trigger config. */
   vmSizeOverride: string | null;
+  /** Modern workload requirements JSON from trigger config. */
+  resourceRequirementsJson?: string | null;
   /** Trigger name (for branch naming). */
   triggerName: string;
 }
@@ -67,16 +78,18 @@ export async function submitTriggeredTask(
 ): Promise<SubmittedTriggerTask> {
   const db = drizzle(env.DATABASE, { schema });
 
-  // Resolve project config
-  const [project] = await db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.id, input.projectId))
-    .limit(1);
-
-  if (!project) {
-    throw new Error(`Project ${input.projectId} not found`);
-  }
+  const project = await (async () => {
+    try {
+      return await requireProjectCapability(db, input.projectId, input.userId, 'task:write');
+    } catch (err) {
+      if (err instanceof AppError) {
+        throw new Error(
+          'Trigger execution principal is not a current project member with task execution access; reattach or disable the trigger'
+        );
+      }
+      throw err;
+    }
+  })();
 
   // Resolve agent profile if specified
   const resolvedProfile =
@@ -90,9 +103,32 @@ export async function submitTriggeredTask(
           env
         )
       : null;
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(
-    resolvedProfile?.resourceRequirementsJson
-  );
+  const {
+    resourceRequirementLayers,
+    persistedResourceRequirementsJson,
+    taskRunnerResourceRequirements,
+  } = (() => {
+    try {
+      const layers = collectStoredResourceRequirementLayers({
+        trigger: input.resourceRequirementsJson,
+        skill: resolvedProfile?.skillId ? resolvedProfile.resourceRequirementsJson : null,
+        agentProfile:
+          resolvedProfile?.agentProfileResourceRequirementsJson ??
+          (resolvedProfile?.skillId ? null : resolvedProfile?.resourceRequirementsJson),
+        project: project.resourceRequirementsJson,
+      });
+      return {
+        resourceRequirementLayers: layers,
+        persistedResourceRequirementsJson: firstResourceRequirementLayerJson(layers),
+        taskRunnerResourceRequirements: firstResourceRequirementLayer(layers),
+      };
+    } catch (err) {
+      if (err instanceof ResourceRequirementsValidationError) {
+        throw new Error(err.message);
+      }
+      throw err;
+    }
+  })();
 
   const taskId = ulid();
   const placement = (() => {
@@ -112,9 +148,7 @@ export async function submitTriggeredTask(
         },
         credentialProjectPolicy: 'current-project',
         taskModeDefault: 'workspace-profile',
-        resourceRequirements: {
-          skill: skillResourceRequirements,
-        },
+        resourceRequirements: resourceRequirementLayers,
       });
     } catch (err) {
       if (err instanceof PlacementResolutionError) {
@@ -153,6 +187,12 @@ export async function submitTriggeredTask(
     resolvedReservation,
     agentType,
   } = placement;
+  const persistedResourceRequirementPlanJson = createPersistedTaskResourcePlanJson({
+    layers: resourceRequirementLayers,
+    resolvedReservation,
+    requestedVmSize: vmSize,
+    requestedVmSizeSource: vmSizeSource,
+  });
 
   // Generate branch name from trigger name + date
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
@@ -188,7 +228,8 @@ export async function submitTriggeredTask(
     triggerExecutionId: input.triggerExecutionId,
     requestedVmSize: vmSize,
     requestedVmSizeSource: vmSizeSource,
-    resourceRequirementsJson: resolvedProfile?.resourceRequirementsJson ?? null,
+    resourceRequirementsJson: persistedResourceRequirementsJson,
+    resourceRequirementPlanJson: persistedResourceRequirementPlanJson,
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
     credentialAttributionUserId,
@@ -297,6 +338,7 @@ export async function submitTriggeredTask(
         opencodeBaseUrl: null,
         systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
         agentProfileHint: resolvedProfile?.profileId ?? null,
+        resourceRequirements: taskRunnerResourceRequirements,
         projectScaling: {
           taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
           maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,

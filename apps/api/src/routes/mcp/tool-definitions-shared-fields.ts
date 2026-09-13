@@ -5,6 +5,27 @@
  * This module defines the shared JSON Schema properties and valid-values
  * hint so they are written once and imported by both tool-definition files.
  */
+import { AGENT_PROFILE_RUNTIMES } from '@simple-agent-manager/shared';
+
+export const RESOURCE_REQUIREMENTS_FIELD_PROPERTIES = {
+  minVcpu: { type: 'number', exclusiveMinimum: 0 },
+  minMemoryGb: { type: 'number', exclusiveMinimum: 0 },
+  minDiskGb: { type: 'number', minimum: 0 },
+  exclusiveNode: { type: 'boolean' },
+  maxCoTenants: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+} as const;
+
+export function resourceRequirementsMcpProperty(options: {
+  nullable: boolean;
+  description: string;
+}) {
+  return {
+    type: options.nullable ? (['object', 'null'] as const) : ('object' as const),
+    description: options.description,
+    properties: RESOURCE_REQUIREMENTS_FIELD_PROPERTIES,
+    additionalProperties: true,
+  } as const;
+}
 
 /** Shared property schemas for configuration fields common to profiles and skills. */
 export const SHARED_CONFIG_FIELD_PROPERTIES = {
@@ -43,7 +64,20 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
   },
   vmSizeOverride: {
     type: 'string',
-    description: 'VM size override: small, medium, large',
+    description:
+      'Deprecated legacy VM size override: small, medium, large. Prefer resourceRequirements; the canonical compatibility adapter translates legacy tiers.',
+  },
+  resourceRequirements: {
+    ...resourceRequirementsMcpProperty({
+      nullable: true,
+      description:
+        'Modern workload requirements for this configuration layer. Known fields: minVcpu, minMemoryGb, minDiskGb, exclusiveNode, maxCoTenants. CPU and memory must be positive; disk may be zero; maxCoTenants must be a positive safe integer. Omitted fields inherit; explicit false is preserved. Null clears the value on update.',
+    }),
+  },
+  resourceRequirementsJson: {
+    type: ['string', 'null'],
+    description:
+      'Compatibility JSON string for workload requirements. Prefer resourceRequirements; only supported modern fields are persisted.',
   },
   provider: {
     type: 'string',
@@ -56,6 +90,11 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
   workspaceProfile: {
     type: 'string',
     description: 'Workspace profile: full, lightweight',
+  },
+  runtime: {
+    type: ['string', 'null'],
+    enum: [...AGENT_PROFILE_RUNTIMES, null],
+    description: 'Execution runtime: vm or cf-container. Use null to inherit the default.',
   },
   devcontainerConfigName: {
     type: 'string',
@@ -73,6 +112,7 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
 export const VALID_VALUES_HINT =
   'Valid permissionMode values: default, acceptEdits, plan, dontAsk, bypassPermissions. ' +
   'Valid effort values: auto, low, medium, high, xhigh, max. ' +
-  'Valid vmSize values: small, medium, large. ' +
+  'Deprecated vmSize/vmSizeOverride values remain accepted: small, medium, large. Prefer resourceRequirements for workload sizing. ' +
+  'Valid runtime values: vm, cf-container. ' +
   'Valid taskMode values: task, conversation. ' +
   'Valid workspaceProfile values: full, lightweight.';

@@ -214,7 +214,11 @@ describe('workspaces session snapshot callback routes', () => {
     });
     expect(mocks.resolveSessionSnapshotUploadTargets).toHaveBeenCalledWith(
       runtimeBindings,
-      expect.objectContaining({ userId: 'user-1', directUploadSupported: false })
+      expect.objectContaining({
+        userId: 'user-1',
+        directUploadSupported: false,
+        sourceNodeId: 'node-1',
+      })
     );
   });
 
@@ -272,7 +276,7 @@ describe('workspaces session snapshot callback routes', () => {
     });
     expect(mocks.resolveSessionSnapshotUploadTargets).toHaveBeenCalledWith(
       runtimeBindings,
-      expect.objectContaining({ directUploadSupported: true })
+      expect.objectContaining({ directUploadSupported: true, sourceNodeId: 'node-1' })
     );
     expect(mocks.ensureSessionSnapshotUploadRelay).not.toHaveBeenCalled();
   });
@@ -454,8 +458,10 @@ describe('workspaces session snapshot callback routes', () => {
     expect(mocks.verifySessionSnapshotRelayAuthorization).toHaveBeenCalledWith(
       runtimeBindings,
       'user-1',
+      'project-1',
       undefined,
-      undefined
+      undefined,
+      'node-1'
     );
   });
 
@@ -479,8 +485,10 @@ describe('workspaces session snapshot callback routes', () => {
     expect(mocks.verifySessionSnapshotRelayAuthorization).toHaveBeenCalledWith(
       runtimeBindings,
       'user-1',
+      'project-1',
       'relay-node',
-      'Bearer relay-node-token'
+      'Bearer relay-node-token',
+      'node-1'
     );
   });
 

@@ -180,4 +180,26 @@ describe('createSweepIsolator', () => {
     expect(composeCleanup).toEqual({ deletedObjects: 3 });
     expect(sweeps.failedSweeps()).toEqual(['deployment_release_retention']);
   });
+
+  it('a throwing terminal-session ledger repair cannot suppress later session sleep work', async () => {
+    const order: string[] = [];
+    const sweeps = createSweepIsolator(makeEnv());
+
+    const terminalLedger = await sweeps.isolate(
+      'terminal_session_ledger_reconciliation',
+      async () => {
+        order.push('terminal_session_ledger_reconciliation');
+        throw new Error('ProjectData RPC unavailable');
+      }
+    );
+    const sessionSleep = await sweeps.isolate('session_sleep', async () => {
+      order.push('session_sleep');
+      return { selected: 1, slept: 1 };
+    });
+
+    expect(order).toEqual(['terminal_session_ledger_reconciliation', 'session_sleep']);
+    expect(terminalLedger).toBeUndefined();
+    expect(sessionSleep).toEqual({ selected: 1, slept: 1 });
+    expect(sweeps.failedSweeps()).toEqual(['terminal_session_ledger_reconciliation']);
+  });
 });

@@ -6,15 +6,15 @@
  *
  * Category B tools (proxied to VM agent) remain in workspace-tools.ts.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
+import { listAgentActivityTasks } from '../../services/agent-activity';
 import {
-  ACTIVE_STATUSES,
   getMcpLimits,
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -41,42 +41,35 @@ function getDnsCheckTimeout(env: Env): number {
 export async function handleListProjectAgents(
   requestId: string | number | null,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   try {
-    const db = drizzle(env.DATABASE, { schema });
-    const tasks = await db
-      .select({
-        id: schema.tasks.id,
-        title: schema.tasks.title,
-        status: schema.tasks.status,
-        outputBranch: schema.tasks.outputBranch,
-        workspaceId: schema.tasks.workspaceId,
-      })
-      .from(schema.tasks)
-      .where(
-        and(
-          eq(schema.tasks.projectId, tokenData.projectId),
-          inArray(schema.tasks.status, ACTIVE_STATUSES),
-        ),
-      );
+    const tasks = await listAgentActivityTasks(env, {
+      projectId: tokenData.projectId,
+      activeOnly: true,
+      excludeTaskId: tokenData.taskId,
+    });
 
-    // Exclude self
-    const agents = tasks
-      .filter((t) => t.id !== tokenData.taskId)
-      .map((t) => ({
-        taskId: t.id,
-        title: t.title,
-        status: t.status,
-        branch: t.outputBranch,
-        workspaceId: t.workspaceId,
-      }));
+    const agents = tasks.map((t) => ({
+      taskId: t.id,
+      title: t.title,
+      status: t.status,
+      state: t.agentActivityState,
+      branch: t.outputBranch,
+      workspaceId: t.workspaceId,
+    }));
 
     return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({ totalAgents: agents.length, agents }, null, 2) }],
+      content: [
+        { type: 'text', text: JSON.stringify({ totalAgents: agents.length, agents }, null, 2) },
+      ],
     });
   } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to list project agents: ${e instanceof Error ? e.message : String(e)}`);
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to list project agents: ${e instanceof Error ? e.message : String(e)}`
+    );
   }
 }
 
@@ -84,7 +77,7 @@ export async function handleGetPeerAgentOutput(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const taskId = params.taskId;
   if (typeof taskId !== 'string' || !taskId.trim()) {
@@ -103,12 +96,7 @@ export async function handleGetPeerAgentOutput(
         outputBranch: schema.tasks.outputBranch,
       })
       .from(schema.tasks)
-      .where(
-        and(
-          eq(schema.tasks.id, taskId),
-          eq(schema.tasks.projectId, tokenData.projectId),
-        ),
-      )
+      .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, tokenData.projectId)))
       .limit(1);
 
     if (!task) {
@@ -117,27 +105,37 @@ export async function handleGetPeerAgentOutput(
 
     const limits = getMcpLimits(env);
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          id: task.id,
-          title: task.title,
-          status: task.status,
-          description: task.description?.slice(0, limits.taskDescriptionSnippetLength),
-          summary: task.outputSummary,
-          branch: task.outputBranch,
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              id: task.id,
+              title: task.title,
+              status: task.status,
+              description: task.description?.slice(0, limits.taskDescriptionSnippetLength),
+              summary: task.outputSummary,
+              branch: task.outputBranch,
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get peer agent output: ${e instanceof Error ? e.message : String(e)}`);
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to get peer agent output: ${e instanceof Error ? e.message : String(e)}`
+    );
   }
 }
 
 export async function handleGetTaskDependencies(
   requestId: string | number | null,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   if (!tokenData.taskId) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'This tool requires a task-scoped MCP token');
@@ -186,39 +184,65 @@ export async function handleGetTaskDependencies(
       .where(
         and(
           eq(schema.tasks.parentTaskId, tokenData.taskId),
-          eq(schema.tasks.projectId, tokenData.projectId),
-        ),
+          eq(schema.tasks.projectId, tokenData.projectId)
+        )
       )
       .limit(50);
 
     // Siblings: tasks with the same parent (excluding self)
     const siblings = currentTask.parentTaskId
-      ? (await db
-          .select(taskSelect)
-          .from(schema.tasks)
-          .where(
-            and(
-              eq(schema.tasks.parentTaskId, currentTask.parentTaskId),
-              eq(schema.tasks.projectId, tokenData.projectId),
-            ),
-          )
-          .limit(51))
-          .filter((t) => t.id !== tokenData.taskId)
+      ? (
+          await db
+            .select(taskSelect)
+            .from(schema.tasks)
+            .where(
+              and(
+                eq(schema.tasks.parentTaskId, currentTask.parentTaskId),
+                eq(schema.tasks.projectId, tokenData.projectId)
+              )
+            )
+            .limit(51)
+        ).filter((t) => t.id !== tokenData.taskId)
       : [];
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          currentTask: { id: currentTask.id, title: currentTask.title },
-          upstream: upstream.map((t) => ({ id: t.id, title: t.title, status: t.status, branch: t.outputBranch })),
-          downstream: downstream.map((t) => ({ id: t.id, title: t.title, status: t.status, branch: t.outputBranch })),
-          siblings: siblings.map((t) => ({ id: t.id, title: t.title, status: t.status, branch: t.outputBranch })),
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              currentTask: { id: currentTask.id, title: currentTask.title },
+              upstream: upstream.map((t) => ({
+                id: t.id,
+                title: t.title,
+                status: t.status,
+                branch: t.outputBranch,
+              })),
+              downstream: downstream.map((t) => ({
+                id: t.id,
+                title: t.title,
+                status: t.status,
+                branch: t.outputBranch,
+              })),
+              siblings: siblings.map((t) => ({
+                id: t.id,
+                title: t.title,
+                status: t.status,
+                branch: t.outputBranch,
+              })),
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (e) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to get task dependencies: ${e instanceof Error ? e.message : String(e)}`);
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to get task dependencies: ${e instanceof Error ? e.message : String(e)}`
+    );
   }
 }
 
@@ -226,7 +250,7 @@ export async function handleReportEnvironmentIssue(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const category = params.category;
   const severity = params.severity;
@@ -236,7 +260,11 @@ export async function handleReportEnvironmentIssue(
     return jsonRpcError(requestId, INVALID_PARAMS, 'category is required');
   }
   if (typeof severity !== 'string' || !['low', 'medium', 'high', 'critical'].includes(severity)) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'severity must be one of: low, medium, high, critical');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'severity must be one of: low, medium, high, critical'
+    );
   }
   if (typeof description !== 'string' || !description.trim()) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'description is required');
@@ -248,7 +276,7 @@ export async function handleReportEnvironmentIssue(
       // Cap diagnostic data to prevent unbounded D1 writes
       const maxDiagnosticBytes = parsePositiveInt(
         env.WORKSPACE_TOOL_DIAGNOSTIC_MAX_BYTES,
-        DEFAULT_DIAGNOSTIC_MAX_BYTES,
+        DEFAULT_DIAGNOSTIC_MAX_BYTES
       );
       let diagnosticData = params.diagnosticData;
       if (diagnosticData) {
@@ -260,7 +288,7 @@ export async function handleReportEnvironmentIssue(
 
       await env.OBSERVABILITY_DATABASE.prepare(
         `INSERT INTO errors (id, source, level, message, context, created_at)
-         VALUES (?, 'workspace-agent', ?, ?, ?, datetime('now'))`,
+         VALUES (?, 'workspace-agent', ?, ?, ?, datetime('now'))`
       )
         .bind(
           crypto.randomUUID(),
@@ -271,7 +299,7 @@ export async function handleReportEnvironmentIssue(
             projectId: tokenData.projectId,
             taskId: tokenData.taskId,
             diagnosticData,
-          }),
+          })
         )
         .run();
     }
@@ -282,7 +310,15 @@ export async function handleReportEnvironmentIssue(
   } catch (e) {
     log.warn('workspace_tools.report_issue_failed', { error: String(e) });
     return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify({ status: 'report_failed', note: 'Issue was logged but storage failed' }) }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            status: 'report_failed',
+            note: 'Issue was logged but storage failed',
+          }),
+        },
+      ],
     });
   }
 }
@@ -292,7 +328,7 @@ export async function handleReportEnvironmentIssue(
 export async function handleCheckDnsStatus(
   requestId: string | number | null,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
@@ -310,36 +346,48 @@ export async function handleCheckDnsStatus(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          hostname,
-          workspaceUrl,
-          dnsResolved: true,
-          tlsValid: true,
-          httpStatus: res.status,
-          note: 'Confirms Cloudflare edge reachability. Does not verify VM agent health.',
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              hostname,
+              workspaceUrl,
+              dnsResolved: true,
+              tlsValid: true,
+              httpStatus: res.status,
+              note: 'Confirms Cloudflare edge reachability. Does not verify VM agent health.',
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (e) {
     // Distinguish TLS errors from DNS/network errors
     const errorMsg = e instanceof Error ? e.message : String(e);
-    const isTlsError = errorMsg.includes('SSL') || errorMsg.includes('TLS') || errorMsg.includes('certificate');
+    const isTlsError =
+      errorMsg.includes('SSL') || errorMsg.includes('TLS') || errorMsg.includes('certificate');
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          hostname,
-          workspaceUrl,
-          dnsResolved: isTlsError, // TLS error means DNS resolved but cert failed
-          tlsValid: false,
-          status: isTlsError ? 'tls_error' : 'dns_not_resolved',
-          error: errorMsg,
-        }, null, 2),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              hostname,
+              workspaceUrl,
+              dnsResolved: isTlsError, // TLS error means DNS resolved but cert failed
+              tlsValid: false,
+              status: isTlsError ? 'tls_error' : 'dns_not_resolved',
+              error: errorMsg,
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   }
 }
-

@@ -4,17 +4,44 @@
  * Extracted from the original tasks.ts to avoid duplication across sub-routers.
  */
 import type { TaskActorType, TaskSortOrder, TaskStatus } from '@simple-agent-manager/shared';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
+import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
+import { getBlockedTaskIds, isTaskBlocked } from '../../services/task-graph';
 import {
-  getBlockedTaskIds,
-  isTaskBlocked,
-} from '../../services/task-graph';
+  assertWorkspaceCallbackIdentityCurrent,
+  type WorkspaceCallbackIdentitySnapshot,
+} from '../workspaces/_helpers';
+
+interface TaskWorkspaceCallbackFence {
+  env: Env;
+  expected: WorkspaceCallbackIdentitySnapshot;
+}
+
+function taskWorkspaceCallbackCondition(expected: WorkspaceCallbackIdentitySnapshot) {
+  return sql`EXISTS (
+    SELECT 1
+      FROM workspaces AS callback_workspace
+      INNER JOIN nodes AS callback_node ON callback_node.id = callback_workspace.node_id
+     WHERE callback_workspace.id = ${expected.workspaceId}
+       AND callback_workspace.user_id IS ${expected.userId}
+       AND callback_workspace.project_id IS ${expected.projectId}
+       AND callback_workspace.chat_session_id IS ${expected.chatSessionId}
+       AND callback_workspace.node_id IS ${expected.nodeId}
+       AND callback_workspace.status IS ${expected.status}
+       AND callback_node.status IS ${expected.nodeStatus}
+  )`;
+}
+
+async function rejectChangedTaskCallbackFence(fence: TaskWorkspaceCallbackFence): Promise<never> {
+  await assertWorkspaceCallbackIdentityCurrent(fence.env, fence.expected, 'task_status');
+  throw errors.gone('Workspace callback state changed; callback resource is gone');
+}
 
 export function parseTaskSortOrder(value: string | undefined): TaskSortOrder {
   if (value === 'updatedAtDesc' || value === 'priorityDesc') {
@@ -160,6 +187,32 @@ export async function computeBlockedSet(
   return getBlockedTaskIds(taskIds, dependencies, statusMap);
 }
 
+/** Exact callback CAS: task state and its active workspace incarnation must still match. */
+export async function updateTaskExecutionStepFromCallback(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  task: schema.Task,
+  values: Partial<schema.NewTask>,
+  fence: TaskWorkspaceCallbackFence
+): Promise<schema.Task> {
+  const rows = await db
+    .update(schema.tasks)
+    .set(values)
+    .where(
+      and(
+        eq(schema.tasks.id, task.id),
+        eq(schema.tasks.projectId, task.projectId),
+        eq(schema.tasks.userId, task.userId),
+        eq(schema.tasks.workspaceId, fence.expected.workspaceId),
+        eq(schema.tasks.status, task.status),
+        taskWorkspaceCallbackCondition(fence.expected)
+      )
+    )
+    .returning();
+  const updatedTask = rows[0];
+  if (!updatedTask) return rejectChangedTaskCallbackFence(fence);
+  return updatedTask;
+}
+
 export async function setTaskStatus(
   db: ReturnType<typeof drizzle<typeof schema>>,
   task: schema.Task,
@@ -172,6 +225,7 @@ export async function setTaskStatus(
     outputBranch?: string;
     outputPrUrl?: string;
     errorMessage?: string;
+    callbackFence?: TaskWorkspaceCallbackFence;
   } = {}
 ): Promise<schema.Task> {
   const now = new Date().toISOString();
@@ -216,12 +270,32 @@ export async function setTaskStatus(
     nextValues.errorMessage = options.errorMessage?.trim() || null;
   }
 
-  // project_id is defence-in-depth (rule 11): callers already resolved `task` through
-  // requireProjectTaskById, but the write predicate must not depend on that alone.
-  await db
-    .update(schema.tasks)
-    .set(nextValues)
-    .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.projectId, task.projectId)));
+  let updatedTask: schema.Task | undefined;
+  if (options.callbackFence) {
+    const rows = await db
+      .update(schema.tasks)
+      .set(nextValues)
+      .where(
+        and(
+          eq(schema.tasks.id, task.id),
+          eq(schema.tasks.projectId, task.projectId),
+          eq(schema.tasks.userId, task.userId),
+          eq(schema.tasks.workspaceId, options.callbackFence.expected.workspaceId),
+          eq(schema.tasks.status, task.status),
+          taskWorkspaceCallbackCondition(options.callbackFence.expected)
+        )
+      )
+      .returning();
+    updatedTask = rows[0];
+    if (!updatedTask) return rejectChangedTaskCallbackFence(options.callbackFence);
+  } else {
+    // project_id is defence-in-depth (rule 11): callers already resolved `task` through
+    // requireProjectTaskById, but the write predicate must not depend on that alone.
+    await db
+      .update(schema.tasks)
+      .set(nextValues)
+      .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.projectId, task.projectId)));
+  }
 
   await appendStatusEvent(
     db,
@@ -233,12 +307,10 @@ export async function setTaskStatus(
     options.reason
   );
 
-  const rows = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, task.id))
-    .limit(1);
-  const updatedTask = rows[0];
+  if (!updatedTask) {
+    const rows = await db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).limit(1);
+    updatedTask = rows[0];
+  }
   if (!updatedTask) {
     throw errors.notFound('Task');
   }
@@ -254,7 +326,7 @@ export async function setTaskStatus(
       .set({
         status: execStatus,
         completedAt: now,
-        errorMessage: toStatus === 'failed' ? (options.errorMessage?.trim() || 'Task failed') : null,
+        errorMessage: toStatus === 'failed' ? options.errorMessage?.trim() || 'Task failed' : null,
       })
       .where(eq(schema.triggerExecutions.id, updatedTask.triggerExecutionId))
       .catch((err: unknown) => {

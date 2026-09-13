@@ -40,18 +40,23 @@ export async function wakeVmAdmissionWaiters(
   binds.push(config.wakeBatchSize);
   const rows = await env.DATABASE.prepare(
     `
-      SELECT task_id
+      SELECT vm_task_admissions.task_id, tasks.id AS live_task_id
       FROM vm_task_admissions
+      LEFT JOIN tasks ON tasks.id = vm_task_admissions.task_id
       WHERE ${filters.join(' AND ')}
-      ORDER BY enqueued_at ASC
+      ORDER BY vm_task_admissions.enqueued_at ASC
       LIMIT ?
     `
   )
     .bind(...binds)
-    .all<{ task_id: string }>();
+    .all<{ task_id: string; live_task_id: string | null }>();
 
   let nudged = 0;
   for (const row of rows.results ?? []) {
+    if (!row.live_task_id) {
+      await cancelOrphanedAdmission(env, row.task_id, input.reason);
+      continue;
+    }
     try {
       if (await nudgeTaskRunner(env, row.task_id, input.reason)) nudged++;
     } catch (err) {
@@ -63,6 +68,32 @@ export async function wakeVmAdmissionWaiters(
     }
   }
   return nudged;
+}
+
+async function cancelOrphanedAdmission(env: Env, taskId: string, wakeReason: string): Promise<void> {
+  const now = new Date().toISOString();
+  try {
+    await env.DATABASE.batch([
+      env.DATABASE.prepare(
+        `UPDATE vm_task_admissions
+         SET state = 'cancelled',
+           reason = 'task_deleted_cleanup',
+           next_retry_at = NULL,
+           completed_at = COALESCE(completed_at, ?),
+           updated_at = ?
+         WHERE task_id = ?
+           AND state IN ('queued', 'waiting')`
+      ).bind(now, now, taskId),
+      env.DATABASE.prepare(`DELETE FROM vm_provisioning_leases WHERE owner_task_id = ?`).bind(taskId),
+    ]);
+    log.warn('vm_admission.orphaned_waiter_cancelled', { taskId, wakeReason });
+  } catch (err) {
+    log.warn('vm_admission.orphaned_waiter_cancel_failed', {
+      taskId,
+      wakeReason,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export async function getVmAdmissionDiagnostics(

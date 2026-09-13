@@ -7,6 +7,7 @@ import {
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getNodeBackendBaseUrl } from './node-agent-readiness';
 import { isRestorableSnapshot } from './session-snapshot-artifacts';
+import { sessionRecoveryBudgetAvailable } from './session-snapshot-recovery-budget';
 import type {
   RuntimeWorkspaceSnapshot,
   SessionResumabilitySnapshot,
@@ -42,6 +43,44 @@ export type {
  */
 export const SUPERSEDED_TERMINAL_REASON_SUFFIX = '_superseded_by_completed_wake';
 
+const PROBEABLE_DELIVERY_REASONS = new Set([
+  'task_acp_session_missing',
+  'task_acp_session_stale',
+  'task_acp_session_suspect',
+]);
+
+export type TaskRuntimeDeliveryDisposition =
+  | { kind: 'deliverable'; target: { nodeId: string; userId: string } }
+  | { kind: 'terminal'; reason: string; nodeId: string | null }
+  | { kind: 'inconclusive'; reason: string };
+
+/**
+ * Convert the shared task-runtime verdict into a reconciliation delivery gate.
+ *
+ * Task-scoped ACP absence/staleness is allowed to make one bounded delivery
+ * attempt: acceptance is positive reachability evidence, while timeout/error is
+ * still inconclusive. Every other uncertain verdict stays deferred. Keeping
+ * this adapter beside the classifier prevents reconciliation from growing a
+ * second D1-heartbeat death policy.
+ */
+export function classifyTaskRuntimeDelivery(
+  liveness: TaskRuntimeLiveness
+): TaskRuntimeDeliveryDisposition {
+  if (liveness.conclusive && !liveness.live) {
+    return { kind: 'terminal', reason: liveness.reason, nodeId: liveness.nodeId };
+  }
+
+  const target = liveness.deliveryTarget;
+  if (
+    target &&
+    (liveness.live || (!liveness.conclusive && PROBEABLE_DELIVERY_REASONS.has(liveness.reason)))
+  ) {
+    return { kind: 'deliverable', target };
+  }
+
+  return { kind: 'inconclusive', reason: liveness.reason };
+}
+
 /** True when a conclusive verdict was reached because the wake moved on. */
 export function isSupersededTerminalReason(reason: string): boolean {
   return reason.endsWith(SUPERSEDED_TERMINAL_REASON_SUFFIX);
@@ -54,6 +93,7 @@ const TERMINAL_CONTAINER_STATUSES = new Set(['stopping', 'stopped', 'expired', '
 const TERMINAL_NODE_STATUSES = new Set(['stopped', 'deleted', 'destroyed', 'destroying', 'error']);
 /** `session_snapshots.sleep_status` value meaning "asleep right now". */
 const RESUMABLE_SLEEP_STATUS = 'sleeping';
+const MAX_TASK_SUPERSESSION_CHAIN_DEPTH = 32;
 
 export function getTaskLivenessNodeHealthProbeTimeoutMs(
   env: Pick<TaskLivenessNodeHealthProbeEnv, 'TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS'>
@@ -78,8 +118,8 @@ function isVmNodeHeartbeatStale(
 
 /**
  * A stale D1 heartbeat/health field is a weak self-signal, not proof of VM
- * death. Both liveness adapters must make the same bounded authority probe
- * before converting that stale signal into a terminal `node_not_live` verdict
+ * death. Both liveness adapters make the same bounded authority probe, but a
+ * failed request still cannot manufacture terminal ownership evidence
  * (`.claude/rules/61`).
  */
 export function needsNodeHealthProbe(signals: TaskRuntimeLivenessSignals): boolean {
@@ -131,7 +171,7 @@ export async function probeNodeHealthForTaskLiveness(
     };
   } catch (err) {
     return {
-      outcome: isNodeHealthProbeTimeout(err) ? 'timeout' : 'failed',
+      outcome: isNodeHealthProbeTimeout(err) ? 'timeout' : 'error',
       timeoutMs,
       url,
       status: null,
@@ -161,8 +201,7 @@ export function isSessionResumable(
   snapshot: SessionResumabilitySnapshot | null,
   projectId: string,
   workspaceId: string,
-  maxRecoveryAttempts: number,
-  nowMs: number
+  budget: { maxRecoveryAttempts: number; recoveryAttemptDecayMs: number; nowMs: number }
 ): boolean {
   if (!snapshot) return false;
   // Defence in depth: the loader is already project+workspace scoped, so these
@@ -176,14 +215,28 @@ export function isSessionResumable(
   if (snapshot.sleepStatus !== RESUMABLE_SLEEP_STATUS) return false;
   // Mirrors `restorableSnapshotCondition()` in the claim's WHERE clause.
   if (!isRestorableSnapshot(snapshot.status, snapshot.degradation)) return false;
-  // Mirrors `recovery_attempts < maxAttempts`. Once wake attempts are spent the
-  // resumer refuses the claim, so preserving the task would strand it until the
-  // snapshot TTL — the second bounded escape (`.claude/rules/47`).
-  if (snapshot.recoveryAttempts >= maxRecoveryAttempts) return false;
+  // Mirrors the resumer's attempt budget exactly, decay included
+  // (`session-snapshot-recovery-budget.ts`). A budget that is merely spent is NOT
+  // conclusive: the resumer will release it once the last clean failure ages past
+  // the decay window, so declaring the task dead here would destroy a session the
+  // resumer can still wake (`.claude/rules/58`). Only a budget that is spent AND
+  // undecayed refuses the claim, at which point preserving the task would strand
+  // it until the snapshot TTL — the second bounded escape (`.claude/rules/47`).
+  if (
+    !sessionRecoveryBudgetAvailable({
+      recoveryAttempts: snapshot.recoveryAttempts,
+      recoveryFailedAtMs: snapshot.recoveryFailedAtMs,
+      maxAttempts: budget.maxRecoveryAttempts,
+      decayMs: budget.recoveryAttemptDecayMs,
+      nowMs: budget.nowMs,
+    })
+  ) {
+    return false;
+  }
   // An absent or unparseable expiry is treated as NOT resumable so a snapshot
   // can never make a task immortal (`.claude/rules/47` bounded escape path).
   if (snapshot.expiresAtMs === null) return false;
-  return snapshot.expiresAtMs > nowMs;
+  return snapshot.expiresAtMs > budget.nowMs;
 }
 
 /**
@@ -288,6 +341,9 @@ function result(
     ...values,
     workspaceStatus: workspace?.status ?? null,
     nodeId: workspace?.nodeId ?? null,
+    ...(workspace?.nodeId && workspace.userId
+      ? { deliveryTarget: { nodeId: workspace.nodeId, userId: workspace.userId } }
+      : {}),
   };
 }
 
@@ -320,6 +376,15 @@ export function classifyTaskRuntimeLiveness(
     );
   }
 
+  if (signals.expectedChatSessionId && workspace.chatSessionId !== signals.expectedChatSessionId) {
+    return result(workspace, {
+      live: false,
+      conclusive: false,
+      reason: 'workspace_chat_session_mismatch',
+      activeAcpSessionId: null,
+    });
+  }
+
   if (INCONCLUSIVE_WORKSPACE_STATUSES.has(workspace.status)) {
     return result(workspace, {
       live: false,
@@ -342,13 +407,11 @@ export function classifyTaskRuntimeLiveness(
       });
     }
     if (
-      isSessionResumable(
-        signals.sessionResumability,
-        signals.projectId,
-        workspace.id,
-        signals.resumabilityMaxRecoveryAttempts,
-        signals.nowMs
-      )
+      isSessionResumable(signals.sessionResumability, signals.projectId, workspace.id, {
+        maxRecoveryAttempts: signals.resumabilityMaxRecoveryAttempts,
+        recoveryAttemptDecayMs: signals.resumabilityRecoveryAttemptDecayMs,
+        nowMs: signals.nowMs,
+      })
     ) {
       return result(workspace, {
         live: false,
@@ -441,8 +504,8 @@ export function classifyTaskRuntimeLiveness(
     if (signals.nodeHealthProbeOutcome === 'failed') {
       return result(workspace, {
         live: false,
-        conclusive: true,
-        reason: 'node_not_live',
+        conclusive: false,
+        reason: 'node_health_probe_failed',
         activeAcpSessionId: null,
       });
     }
@@ -495,7 +558,11 @@ export function classifyTaskRuntimeLiveness(
     });
   }
 
-  if (signals.sessionWork?.active) {
+  if (
+    signals.sessionWork?.active &&
+    (!signals.expectedAcpSessionId ||
+      signals.sessionWork.activeAcpSessionId === signals.expectedAcpSessionId)
+  ) {
     return result(workspace, {
       live: true,
       conclusive: true,
@@ -505,6 +572,7 @@ export function classifyTaskRuntimeLiveness(
   }
 
   const active = signals.acpSessions.find((session) => {
+    if (signals.expectedAcpSessionId && session.id !== signals.expectedAcpSessionId) return false;
     if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== workspace.id) {
       return false;
     }
@@ -522,9 +590,13 @@ export function classifyTaskRuntimeLiveness(
   }
 
   const taskWorkspaceSessions = signals.acpSessions.filter(
-    (session) => session.workspaceId === workspace.id
+    (session) =>
+      session.workspaceId === workspace.id &&
+      (!signals.expectedAcpSessionId || session.id === signals.expectedAcpSessionId)
   );
-  const terminal = taskWorkspaceSessions.find((session) => TERMINAL_ACP_STATUSES.has(session.status));
+  const terminal = taskWorkspaceSessions.find((session) =>
+    TERMINAL_ACP_STATUSES.has(session.status)
+  );
   if (terminal) {
     return result(workspace, {
       live: false,
@@ -558,7 +630,7 @@ export async function loadRuntimeWorkspaceSnapshot(
 ): Promise<RuntimeWorkspaceSnapshot | null> {
   const row = await db
     .prepare(
-      `SELECT w.id, w.status AS workspace_status, w.chat_session_id, w.node_id,
+      `SELECT w.id, w.status AS workspace_status, w.chat_session_id, w.node_id, w.user_id,
             n.status AS node_status, n.health_status, n.last_heartbeat_at,
             n.runtime AS node_runtime,
             (SELECT COUNT(*) FROM workspaces nw WHERE nw.node_id = w.node_id AND nw.status = 'running') AS running_workspaces_on_node
@@ -573,6 +645,7 @@ export async function loadRuntimeWorkspaceSnapshot(
       workspace_status: string;
       chat_session_id: string | null;
       node_id: string | null;
+      user_id: string | null;
       node_status: string | null;
       health_status: string | null;
       last_heartbeat_at: string | null;
@@ -587,6 +660,7 @@ export async function loadRuntimeWorkspaceSnapshot(
     status: row.workspace_status,
     chatSessionId: row.chat_session_id,
     nodeId: row.node_id,
+    userId: row.user_id,
     nodeRuntime: row.node_runtime,
     nodeStatus: row.node_status,
     nodeHealthStatus: row.health_status,
@@ -602,20 +676,10 @@ function parseTimestamp(value: string | null): number | null {
 }
 
 /**
- * True when a newer, non-terminal `session-recovery` task in this task's recovery
- * family owns the conversation now — i.e. this task was superseded by a
- * *successful* wake rather than losing its runtime.
- *
- * The family is keyed on both the ROOT and the direct successor edge.
- * `session-recovery.ts:createRecoveryTask` resolves its source as
- * `guard ?? sourceTask.recoverySourceTaskId ?? sourceTask.id`: unguarded wakes
- * can collapse to the root, while guarded wakes point at the exact source task
- * the wake guard protects. A root-only check misses direct children of recovery
- * middle links; a direct-child-only check misses root-collapsed siblings.
- *
- * `triggered_by = 'session-recovery'` is what makes this supersession rather than
- * an unrelated sibling task, and `created_at >` keeps the relation directional so
- * a predecessor can never be treated as superseding its own successor.
+ * Follow the exact persisted ownership handoff marker to decide whether this
+ * task has been superseded. This deliberately does not infer from family
+ * topology: guarded parent wakes can create depth-2+ chains, and the marker on
+ * each predecessor is the only durable "who replaced me" edge.
  *
  * Project-scoped per `.claude/rules/11`.
  */
@@ -624,48 +688,39 @@ export async function loadTaskSupersession(
   projectId: string,
   taskId: string
 ): Promise<TaskSupersession> {
-  // Two existence checks rather than one aggregate, deliberately: `live` is the
-  // HOT case — a preserved predecessor is re-probed on every sweep tick for as
-  // long as its successor runs — and `LIMIT 1` lets it stop at the first match
-  // instead of scanning the project's whole post-candidate history. The planner
-  // resolves this against `idx_tasks_project_created_at`, so cost is bounded by
-  // tasks created after the candidate, and a superseding wake is almost always
-  // among the newest. The `terminal`/`none` answers cost a second read but are
-  // reached once per task, after which it leaves the candidate set entirely
-  // (`.claude/rules/47`).
-  const familyClause = `
-         FROM tasks self
-         JOIN tasks owner
-           ON owner.project_id = self.project_id
-          -- Redundant with the strict created_at inequality below in every
-          -- realistic case, but kept as defence in depth against a
-          -- same-millisecond created_at collision between two family members.
-          AND owner.id <> self.id
-          AND (
-                owner.id = COALESCE(self.recovery_source_task_id, self.id)
-             OR owner.recovery_source_task_id = COALESCE(self.recovery_source_task_id, self.id)
-             OR owner.recovery_source_task_id = self.id
-              )
-        WHERE self.id = ?
-          AND self.project_id = ?
-          AND owner.triggered_by = 'session-recovery'
-          AND owner.created_at > self.created_at`;
-
-  const live = await db
+  // Bounded recursive walk (`.claude/rules/47`): this function is only called
+  // for tasks already about to receive a terminal verdict, and the recursion is
+  // capped so a corrupt cycle cannot make the sweep unbounded.
+  const row = await db
     .prepare(
-      `SELECT 1 AS found ${familyClause}
-          AND owner.status NOT IN ('completed', 'failed', 'cancelled')
-        LIMIT 1`
+      `WITH RECURSIVE supersession_chain(id, status, superseded_by_task_id, depth) AS (
+          SELECT id, status, superseded_by_task_id, 0
+            FROM tasks
+           WHERE id = ? AND project_id = ?
+          UNION ALL
+          SELECT successor.id, successor.status, successor.superseded_by_task_id, chain.depth + 1
+            FROM supersession_chain chain
+            JOIN tasks successor
+              ON successor.id = chain.superseded_by_task_id
+             AND successor.project_id = ?
+           WHERE chain.superseded_by_task_id IS NOT NULL
+             AND chain.depth < ?
+        )
+        SELECT id, status, depth
+          FROM supersession_chain
+         WHERE depth > 0
+         ORDER BY depth DESC
+         LIMIT 1`
     )
-    .bind(taskId, projectId)
-    .first<{ found: number }>();
-  if (live) return 'live';
+    .bind(taskId, projectId, projectId, MAX_TASK_SUPERSESSION_CHAIN_DEPTH)
+    .first<{ id: string; status: string; depth: number }>();
+  if (!row) return 'none';
 
-  const any = await db
-    .prepare(`SELECT 1 AS found ${familyClause} LIMIT 1`)
-    .bind(taskId, projectId)
-    .first<{ found: number }>();
-  return any ? 'terminal' : 'none';
+  // Before the exact successor has accepted runtime ownership, preserve the
+  // predecessor. Once the exact successor is `in_progress` or later, the
+  // predecessor can leave the sweep candidate set via a benign cancellation; the
+  // guard predicates are marker-aware and still authorize the live chain.
+  return row.status === 'queued' || row.status === 'delegated' ? 'live' : 'terminal';
 }
 
 /**
@@ -682,7 +737,7 @@ export async function loadSessionResumabilitySnapshot(
   const row = await db
     .prepare(
       `SELECT chat_session_id, project_id, workspace_id, sleeping_at, sleep_status, expires_at,
-            status, degradation, recovery_attempts
+            status, degradation, recovery_attempts, recovery_failed_at
      FROM session_snapshots
      WHERE chat_session_id = ? AND project_id = ? AND workspace_id = ?
      LIMIT 1`
@@ -698,6 +753,7 @@ export async function loadSessionResumabilitySnapshot(
       status: string | null;
       degradation: string | null;
       recovery_attempts: number | null;
+      recovery_failed_at: string | null;
     }>();
   if (!row) return null;
 
@@ -713,5 +769,6 @@ export async function loadSessionResumabilitySnapshot(
     // NOT NULL DEFAULT 0 in schema; coalesce defensively so a null can never
     // read as "attempts remaining" via NaN comparison.
     recoveryAttempts: row.recovery_attempts ?? 0,
+    recoveryFailedAtMs: parseTimestamp(row.recovery_failed_at),
   };
 }

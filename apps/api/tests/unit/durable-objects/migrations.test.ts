@@ -11,6 +11,7 @@ import { createSqlStorage } from './sql-storage-test-utils';
 class MockSqlStorage {
   private tables = new Map<string, Record<string, unknown>[]>();
   private execLog: string[] = [];
+  private toolPayloadArchiveColumns = new Set(['message_id']);
 
   exec(query: string, ...params: unknown[]): { toArray: () => Record<string, unknown>[] } {
     this.execLog.push(query.trim());
@@ -32,6 +33,17 @@ class MockSqlStorage {
         this.tables.set(tableMatch[1], []);
       }
       return { toArray: () => [] };
+    }
+
+    if (normalized.startsWith('ALTER TABLE TOOL_PAYLOAD_ARCHIVES ADD COLUMN')) {
+      const column = query.match(/ADD COLUMN\s+(\w+)/i)?.[1];
+      if (column) this.toolPayloadArchiveColumns.add(column);
+      return { toArray: () => [] };
+    }
+
+    if (normalized.startsWith('PRAGMA TABLE_INFO(TOOL_PAYLOAD_ARCHIVES)')) {
+      const columns = [...this.toolPayloadArchiveColumns].map((name) => ({ name }));
+      return { toArray: () => columns };
     }
 
     // Handle SELECT name FROM migrations
@@ -61,6 +73,27 @@ class MockSqlStorage {
 }
 
 describe('DO Migrations', () => {
+  it('adds the submission checkpoint without reclassifying an existing in-flight prompt', () => {
+    const db = new Database(':memory:');
+    try {
+      const sql = createSqlStorage(db);
+      sql.exec(`CREATE TABLE session_inbox (
+        id TEXT PRIMARY KEY, delivery_state TEXT, attempt_id TEXT, runtime_identity TEXT
+      )`);
+      sql.exec(`INSERT INTO session_inbox VALUES ('existing', 'delivering', 'attempt-before-deploy', 'runtime-before-deploy')`);
+      const migration = MIGRATIONS.find((entry) => entry.name === '046-prompt-delivery-submit-phase');
+      expect(migration).toBeDefined();
+      migration!.run(sql);
+      migration!.run(sql);
+      expect(db.prepare('SELECT * FROM session_inbox').get()).toEqual({
+        id: 'existing', delivery_state: 'delivering', attempt_id: 'attempt-before-deploy',
+        runtime_identity: 'runtime-before-deploy', prompt_delivery_phase: null,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   describe('MIGRATIONS array', () => {
     it('has at least one migration defined', () => {
       expect(MIGRATIONS.length).toBeGreaterThanOrEqual(1);
@@ -82,6 +115,48 @@ describe('DO Migrations', () => {
         expect(migration.name.length).toBeGreaterThan(0);
         expect(typeof migration.run).toBe('function');
       }
+    });
+  });
+
+  describe('044-tool-payload-archive-verification-proof migration', () => {
+    const migration = MIGRATIONS.find(
+      (candidate) => candidate.name === '044-tool-payload-archive-verification-proof'
+    );
+
+    it('is idempotent only for exact duplicate-column errors', () => {
+      expect(migration).toBeDefined();
+      const db = new Database(':memory:');
+      try {
+        const sql = createSqlStorage(db);
+        db.exec('CREATE TABLE tool_payload_archives (message_id TEXT PRIMARY KEY)');
+        migration!.run(sql);
+        expect(() => migration!.run(sql)).not.toThrow();
+        const columns = db.prepare('PRAGMA table_info(tool_payload_archives)').all() as Array<{
+          name: string;
+        }>;
+        expect(columns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'archive_body_bytes',
+            'archive_body_sha256',
+            'root_object_bytes',
+            'root_object_sha256',
+            'verified_object_count',
+            'source_tool_metadata_sha256',
+          ])
+        );
+      } finally {
+        db.close();
+      }
+    });
+
+    it('rethrows unrelated ALTER TABLE failures', () => {
+      expect(migration).toBeDefined();
+      const sql = {
+        exec: () => {
+          throw new Error('database or disk is full');
+        },
+      } as unknown as SqlStorage;
+      expect(() => migration!.run(sql)).toThrow('database or disk is full');
     });
   });
 
@@ -197,6 +272,9 @@ describe('DO Migrations', () => {
           'project_event_delivery_batches',
           'project_event_delivery_attempts',
           'project_event_storage_accounting',
+          'project_data_archive_source_intents',
+          'project_data_archive_target_sessions',
+          'project_data_archive_target_chunks',
         ]) {
           expect(
             db
@@ -234,6 +312,18 @@ describe('DO Migrations', () => {
             'acked_by_type',
             'acked_by_id',
             'acked_by_name',
+          ])
+        );
+        const chatSessionColumns = db.prepare('PRAGMA table_info(chat_sessions)').all() as Array<{
+          name: string;
+        }>;
+        expect(chatSessionColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'archive_last_message_at',
+            'archive_owner_name',
+            'archive_generation',
+            'archive_migration_id',
+            'archive_state',
           ])
         );
       } finally {
@@ -457,7 +547,12 @@ describe('DO Migrations', () => {
       // project event subscriptions: 15 from migration 038
       // project event delivery decisions: 0 from migration 039 (additive column only)
       // project event pull ack: 1 replay index from migration 040
-      expect(indexes).toHaveLength(85);
+      // terminal session reconcile marker: 1 from migration 041
+      // chat search materialization state: 1 from migration 042
+      // terminal archive sharding bridge: 3 from migration 043
+      // compact raw chunk time ranges: 1 from migration 045
+      expect(indexes).toHaveLength(91);
+      expect(indexes.some((query) => query.includes('idx_archive_raw_chunk_time'))).toBe(true);
     });
   });
 });

@@ -49,6 +49,53 @@ func TestParseArgsReportsMalformedFlags(t *testing.T) {
 	}
 }
 
+func TestParseArgsTreatsExclusiveNodeAsBareBoolBeforePositionals(t *testing.T) {
+	parsed, err := parseArgs([]string{"tasks", "dispatch", "--exclusive-node", "compile", "now"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !parsed.Bools["exclusive-node"] {
+		t.Fatalf("bool flags = %#v", parsed.Bools)
+	}
+	assertStringSlice(t, parsed.Positionals, []string{"tasks", "dispatch", "compile", "now"})
+	if len(parsed.FlagOccurrences) != 1 || parsed.FlagOccurrences[0].Name != "exclusive-node" || parsed.FlagOccurrences[0].HasValue {
+		t.Fatalf("flag occurrences = %#v", parsed.FlagOccurrences)
+	}
+}
+
+func TestParseArgsConsumesExplicitExclusiveNodeBooleanValue(t *testing.T) {
+	parsed, err := parseArgs([]string{"tasks", "dispatch", "--exclusive-node", "false", "compile"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Bools["exclusive-node"] {
+		t.Fatalf("bool flags = %#v", parsed.Bools)
+	}
+	if parsed.Flags["exclusive-node"] != "false" {
+		t.Fatalf("flags = %#v", parsed.Flags)
+	}
+	assertStringSlice(t, parsed.Positionals, []string{"tasks", "dispatch", "compile"})
+}
+
+func TestParseArgsRecordsRepeatedFlagOccurrencesWithoutChangingValueParsing(t *testing.T) {
+	parsed, err := parseArgs([]string{"task", "submit", "--agent", "claude-code", "--exclusive-node=false", "--exclusive-node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flagValue(parsed.Flags, "agent") != "claude-code" {
+		t.Fatalf("agent flag = %q", flagValue(parsed.Flags, "agent"))
+	}
+	if len(parsed.FlagOccurrences) != 3 {
+		t.Fatalf("flag occurrences = %#v", parsed.FlagOccurrences)
+	}
+	if parsed.FlagOccurrences[1].Name != "exclusive-node" || !parsed.FlagOccurrences[1].HasValue || parsed.FlagOccurrences[1].Value != "false" {
+		t.Fatalf("explicit occurrence = %#v", parsed.FlagOccurrences[1])
+	}
+	if parsed.FlagOccurrences[2].Name != "exclusive-node" || parsed.FlagOccurrences[2].HasValue {
+		t.Fatalf("bare occurrence = %#v", parsed.FlagOccurrences[2])
+	}
+}
+
 func assertStringSlice(t *testing.T, got []string, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

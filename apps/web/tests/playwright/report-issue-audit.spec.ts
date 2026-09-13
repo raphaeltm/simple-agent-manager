@@ -238,10 +238,12 @@ async function assertNoOverflow(page: Page) {
   expect(overflow).toBe(false);
 }
 
+/** Report now lives in the always-visible session tool rail — nothing to expand. */
 async function expandHeader(page: Page) {
-  const expandBtn = page.locator('button[aria-label="Show session details"]').first();
-  await expandBtn.waitFor({ state: 'visible', timeout: 10000 });
-  await expandBtn.click();
+  await page
+    .getByTestId('session-tool-report')
+    .first()
+    .waitFor({ state: 'visible', timeout: 10000 });
   await page.waitForTimeout(300);
 }
 

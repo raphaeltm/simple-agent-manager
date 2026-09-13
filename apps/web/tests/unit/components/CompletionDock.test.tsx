@@ -241,6 +241,72 @@ describe('CompletionDock', () => {
     expect(alert).toHaveTextContent('Snapshot is not ready yet');
   });
 
+  // -------------------------------------------------------------------------
+  // Interrupt in-flight state + failure feedback
+  //
+  // The in-flight guard used to be a bare ref inside useSessionLifecycle, so
+  // every press during the request was dropped with no feedback at all — the
+  // button looked idle, nothing happened, and users pressed it again.
+  // -------------------------------------------------------------------------
+
+  it('disables the Interrupt button while the cancel request is in flight', () => {
+    renderDock({ working: true, cancelling: true });
+    const btn = screen.getByRole('button', { name: 'Interrupting agent' });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'Interrupting…');
+    expect(btn).toHaveAttribute('aria-busy', 'true');
+  });
+
+  it('leaves the Interrupt button usable when no cancel is in flight', () => {
+    // Control for the test above: without it, "disabled" would also pass if the
+    // button were disabled unconditionally.
+    renderDock({ working: true, cancelling: false });
+    const btn = screen.getByRole('button', { name: 'Interrupt agent' });
+    expect(btn).toBeEnabled();
+    expect(btn).toHaveAttribute('title', 'Interrupt');
+  });
+
+  it('does not disable Sleep while a cancel is in flight', () => {
+    // Mirrors the existing "archiving does not disable Interrupt" control in the
+    // other direction: the three in-flight flags must stay independent.
+    renderDock({ working: false, centerAction: 'sleep', cancelling: true });
+    expect(screen.getByRole('button', { name: 'Sleep session' })).toBeEnabled();
+  });
+
+  it('does not disable Archive while a cancel is in flight', () => {
+    renderDock({ working: false, centerAction: 'archive', cancelling: true });
+    expect(screen.getByRole('button', { name: 'Archive conversation' })).toBeEnabled();
+  });
+
+  it('renders the cancel error message with an alert role', () => {
+    renderDock({ working: true, cancelError: 'Failed to interrupt the agent' });
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Failed to interrupt the agent');
+  });
+
+  it('does not leak a cancel error into the sleep slot', () => {
+    renderDock({
+      working: false,
+      centerAction: 'sleep',
+      cancelError: 'Failed to interrupt the agent',
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // Liveness assertion beside the absence assertion (.claude/rules/62 §5).
+    expect(screen.getByRole('button', { name: 'Sleep session' })).toBeInTheDocument();
+  });
+
+  it('announces the interrupting state to assistive tech', () => {
+    renderDock({ working: true, cancelling: true });
+    expect(screen.getByRole('status')).toHaveTextContent('Interrupting agent');
+  });
+
+  it('does not fire onInterrupt when the button is disabled mid-cancel', async () => {
+    const user = userEvent.setup();
+    const { props } = renderDock({ working: true, cancelling: true });
+    await user.click(screen.getByRole('button', { name: 'Interrupting agent' }));
+    expect(props.onInterrupt).not.toHaveBeenCalled();
+  });
+
   it('renders the elapsed slot while working and hides it while idle', () => {
     const elapsed = <span data-testid="elapsed">01:23</span>;
     const { rerender } = render(

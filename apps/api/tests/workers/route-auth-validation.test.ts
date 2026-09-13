@@ -560,13 +560,14 @@ describe('workspace eviction callback', () => {
 
     expect(response.status).toBe(204);
     const workspace = await env.DATABASE.prepare(
-      'SELECT status, error_message FROM workspaces WHERE id = ?'
+      'SELECT status, error_message, eviction_finalized_at FROM workspaces WHERE id = ?'
     )
       .bind(EVICTION_WORKSPACE_ID)
       .first<{ status: string; error_message: string | null }>();
     expect(workspace).toMatchObject({
       status: 'evicted',
       error_message: 'Workspace evicted due to memory pressure',
+      eviction_finalized_at: expect.any(String),
     });
 
     const activity = await waitForWorkspaceEvictionActivity(EVICTION_WORKSPACE_ID);

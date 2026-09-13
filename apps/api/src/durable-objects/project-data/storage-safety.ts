@@ -13,6 +13,10 @@ import {
   type ProjectDataEventLogCleanupResult,
   readProjectDataEventLogCleanupRecheckAt,
 } from './event-log-cleanup';
+import {
+  type ProjectDataGroupedFtsCleanupResult,
+  readProjectDataGroupedFtsCleanupRecheckAt,
+} from './grouped-fts-cleanup';
 import { runProjectDataStorageSafetyAlarmCore } from './storage-alarm';
 import {
   type ProjectDataStorageCategoryBreakdown,
@@ -40,6 +44,10 @@ import {
   readProjectDataToolPayloadArchiveLastRunAt,
   readProjectDataToolPayloadCleanupRecheckAt,
 } from './tool-payload-cleanup';
+import {
+  DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
+  DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
+} from './tool-payload-cleanup-manifest';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.storage_safety');
@@ -71,16 +79,39 @@ export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS = 500;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES = 1024 * 1024;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
-export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = 60 * 1000;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM = 25;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS = 20 * 1000;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS =
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES =
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS =
+  DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS = 5;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS = 5 * 1000;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS = 1_500;
 export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS = 5 * 60 * 1000;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES = 512 * 1024;
+export const DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES = 1_900_000;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS = 500;
+export const DEFAULT_PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS = 5_000;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED = false;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO = 0.9;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO = 0.85;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS = 2;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS = 1_000;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS = 5 * 1000;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO = 0.98;
+export const DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = 1;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS = 500;
 export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS = 7;
-export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS = 60 * 1000;
+export const DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS = 24 * 60 * 60 * 1000;
 
 export interface ProjectDataStorageTelemetry {
   projectId: string;
@@ -125,6 +156,7 @@ export interface ProjectDataStorageEmergencyPurgeResult {
 export interface ProjectDataStorageAlarmResult {
   measurement: ProjectDataStorageTelemetry | null;
   cleanup: ProjectDataToolPayloadCleanupResult | null;
+  groupedFtsCleanup: ProjectDataGroupedFtsCleanupResult | null;
   eventLogCleanup: ProjectDataEventLogCleanupResult | null;
   cleanupHealth: ProjectDataStorageCleanupHealth | null;
   durationMs: number;
@@ -144,6 +176,18 @@ export interface StorageSafetyConfig {
   emergencyMaxBatches: number;
   growthLookbackMs: number;
   toolPayloadCleanupEnabled: boolean;
+  toolPayloadCleanupExactConfigValid: boolean;
+  toolPayloadCleanupPlanId: string | null;
+  toolPayloadCleanupManifestKey: string | null;
+  toolPayloadCleanupManifestSha256: string | null;
+  toolPayloadCleanupBatchManifestMaxBytes: number;
+  toolPayloadCleanupRootManifestMaxBytes: number;
+  toolPayloadCleanupMaxTotalRows: number | null;
+  toolPayloadCleanupMaxTotalBytes: number | null;
+  toolPayloadCleanupMaxTotalR2Operations: number | null;
+  toolPayloadCleanupMaxTotalWallTimeMs: number | null;
+  toolPayloadCleanupProjectIds: string[] | null;
+  toolPayloadCleanupCutoffCreatedAt: number | null;
   toolPayloadCleanupTriggerRatio: number;
   toolPayloadCleanupTargetRatio: number;
   toolPayloadCleanupBatchRows: number;
@@ -153,11 +197,31 @@ export interface StorageSafetyConfig {
   toolPayloadCleanupRecheckMs: number;
   toolPayloadCleanupMaxSessionsPerAlarm: number;
   toolPayloadCleanupWallTimeMs: number;
+  toolPayloadManualCleanupMaxBatchRows: number;
+  toolPayloadManualCleanupMaxBatchBytes: number;
+  toolPayloadManualCleanupMaxWallTimeMs: number;
+  toolPayloadManualCleanupRecheckMs: number;
   toolPayloadArchiveRetentionMs: number;
   toolPayloadArchiveIntervalMs: number;
   toolPayloadArchiveR2Prefix: string;
   toolPayloadArchiveWriteTimeoutMs: number;
+  toolPayloadArchiveMaxOperations: number;
   toolPayloadArchiveRetryDelayMs: number;
+  toolPayloadArchiveChunkBytes: number;
+  toolPayloadArchiveMaxMetadataBytes: number;
+  storageReliefMeasureBatchRows: number;
+  storageReliefMeasureMaxBatchRows: number;
+  groupedFtsCleanupEnabled: boolean;
+  groupedFtsCleanupTriggerRatio: number;
+  groupedFtsCleanupTargetRatio: number;
+  groupedFtsCleanupBatchSessions: number;
+  groupedFtsCleanupBatchRows: number;
+  groupedFtsCleanupBatchBytes: number;
+  groupedFtsCleanupMinSessionAgeMs: number;
+  groupedFtsCleanupRecheckMs: number;
+  groupedFtsCleanupWallTimeMs: number;
+  groupedFtsCleanupWallUnsafeRatio: number;
+  groupedFtsCleanupWeakReclaimBytes: number;
   eventLogCleanupEnabled: boolean;
   eventLogCleanupBatchRows: number;
   eventLogCleanupMinSessionAgeMs: number;
@@ -168,6 +232,46 @@ function parsePositiveInteger(value: string | undefined, fallback: number): numb
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function optionalPositiveIntegerIsValid(value: string | undefined): boolean {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) return true;
+  if (!/^[1-9]\d*$/.test(normalized)) return false;
+  return Number.isSafeInteger(Number(normalized));
+}
+
+function parseOptionalPositiveInteger(value: string | undefined): number | null {
+  const normalized = value?.trim() ?? '';
+  if (!normalized || !/^[1-9]\d*$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function optionalRatioIsValid(value: string | undefined): boolean {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) return true;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed > 0 && parsed < 1;
+}
+
+function parseOptionalIdList(value: string | undefined): string[] | null {
+  const ids = [
+    ...new Set(
+      (value ?? '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    ),
+  ].sort((a, b) => a.localeCompare(b));
+  return ids.length > 0 ? ids : null;
+}
+
+function parseOptionalTimestamp(value: string | undefined): number | null {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : -1;
 }
 
 function parseNonNegativeInteger(value: string | undefined, fallback: number): number {
@@ -229,6 +333,14 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO
   );
   const cleanupRatiosAreOrdered = cleanupTargetRatio < cleanupTriggerRatio;
+  const cleanupBatchBytes = parsePositiveInteger(
+    env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES,
+    DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES
+  );
+  const cleanupMaxRowBytes = parsePositiveInteger(
+    env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES,
+    DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES
+  );
   const cleanupMinSessionAgeDays = parseNonNegativeInteger(
     env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS,
     DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS
@@ -244,6 +356,28 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
   const eventLogCleanupMinSessionAgeDays = parseNonNegativeInteger(
     env.PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS,
     DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS
+  );
+  const groupedFtsCleanupTriggerRatio = parseBoundedRatio(
+    env.PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO,
+    DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO
+  );
+  const groupedFtsCleanupTargetRatio = parseBoundedRatio(
+    env.PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO,
+    DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO
+  );
+  const groupedFtsCleanupRatiosAreOrdered =
+    groupedFtsCleanupTargetRatio < groupedFtsCleanupTriggerRatio;
+  const groupedFtsCleanupMinSessionAgeDays = parseNonNegativeInteger(
+    env.PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS,
+    DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS
+  );
+  const storageReliefMeasureMaxBatchRows = parsePositiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS
+  );
+  const storageReliefMeasureBatchRows = parsePositiveInteger(
+    env.PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS,
+    DEFAULT_PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS
   );
 
   return {
@@ -282,6 +416,60 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     ),
     growthLookbackMs: growthLookbackDays * 24 * 60 * 60 * 1000,
     toolPayloadCleanupEnabled: envFlagEnabled(env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED),
+    toolPayloadCleanupExactConfigValid:
+      optionalRatioIsValid(env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO) &&
+      optionalRatioIsValid(env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO) &&
+      cleanupRatiosAreOrdered &&
+      cleanupMaxRowBytes <= cleanupBatchBytes &&
+      [
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES,
+        env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
+        env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
+      ].every(optionalPositiveIntegerIsValid),
+    toolPayloadCleanupPlanId: env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID?.trim() || null,
+    toolPayloadCleanupManifestKey:
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY?.trim() || null,
+    toolPayloadCleanupManifestSha256:
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256?.trim() || null,
+    toolPayloadCleanupBatchManifestMaxBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
+      DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES
+    ),
+    toolPayloadCleanupRootManifestMaxBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
+      DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES
+    ),
+    toolPayloadCleanupMaxTotalRows: parseOptionalPositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS
+    ),
+    toolPayloadCleanupMaxTotalBytes: parseOptionalPositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES
+    ),
+    toolPayloadCleanupMaxTotalR2Operations: parseOptionalPositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS
+    ),
+    toolPayloadCleanupMaxTotalWallTimeMs: parseOptionalPositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS
+    ),
+    toolPayloadCleanupProjectIds: parseOptionalIdList(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS
+    ),
+    toolPayloadCleanupCutoffCreatedAt: parseOptionalTimestamp(
+      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT
+    ),
     toolPayloadCleanupTriggerRatio: cleanupRatiosAreOrdered
       ? cleanupTriggerRatio
       : DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO,
@@ -292,14 +480,8 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS
     ),
-    toolPayloadCleanupBatchBytes: parsePositiveInteger(
-      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES,
-      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES
-    ),
-    toolPayloadCleanupMaxRowBytes: parsePositiveInteger(
-      env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES,
-      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES
-    ),
+    toolPayloadCleanupBatchBytes: cleanupBatchBytes,
+    toolPayloadCleanupMaxRowBytes: cleanupMaxRowBytes,
     toolPayloadCleanupMinSessionAgeMs: cleanupMinSessionAgeDays * 24 * 60 * 60 * 1000,
     toolPayloadCleanupRecheckMs: parsePositiveInteger(
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS,
@@ -312,6 +494,22 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
     toolPayloadCleanupWallTimeMs: parsePositiveInteger(
       env.PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS
+    ),
+    toolPayloadManualCleanupMaxBatchRows: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS
+    ),
+    toolPayloadManualCleanupMaxBatchBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES
+    ),
+    toolPayloadManualCleanupMaxWallTimeMs: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS
+    ),
+    toolPayloadManualCleanupRecheckMs: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS
     ),
     toolPayloadArchiveRetentionMs: archiveRetentionDays * 24 * 60 * 60 * 1000,
     toolPayloadArchiveIntervalMs: parsePositiveInteger(
@@ -326,11 +524,66 @@ export function resolveStorageSafetyConfig(env: Env): StorageSafetyConfig {
       env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS
     ),
+    toolPayloadArchiveMaxOperations: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS
+    ),
     toolPayloadArchiveRetryDelayMs: parsePositiveInteger(
       env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS,
       DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS
     ),
-    eventLogCleanupEnabled: envFlagEnabled(env.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED),
+    toolPayloadArchiveChunkBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES
+    ),
+    toolPayloadArchiveMaxMetadataBytes: parsePositiveInteger(
+      env.PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES,
+      DEFAULT_PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES
+    ),
+    storageReliefMeasureBatchRows: Math.min(
+      storageReliefMeasureBatchRows,
+      storageReliefMeasureMaxBatchRows
+    ),
+    storageReliefMeasureMaxBatchRows,
+    groupedFtsCleanupEnabled:
+      (env.PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED ?? '').trim().toLowerCase() === 'true',
+    groupedFtsCleanupTriggerRatio: groupedFtsCleanupRatiosAreOrdered
+      ? groupedFtsCleanupTriggerRatio
+      : DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO,
+    groupedFtsCleanupTargetRatio: groupedFtsCleanupRatiosAreOrdered
+      ? groupedFtsCleanupTargetRatio
+      : DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO,
+    groupedFtsCleanupBatchSessions: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS
+    ),
+    groupedFtsCleanupBatchRows: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS
+    ),
+    groupedFtsCleanupBatchBytes: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES
+    ),
+    groupedFtsCleanupMinSessionAgeMs: groupedFtsCleanupMinSessionAgeDays * 24 * 60 * 60 * 1000,
+    groupedFtsCleanupRecheckMs: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS
+    ),
+    groupedFtsCleanupWallTimeMs: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS
+    ),
+    groupedFtsCleanupWallUnsafeRatio: parseBoundedRatio(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO
+    ),
+    groupedFtsCleanupWeakReclaimBytes: parsePositiveInteger(
+      env.PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES,
+      DEFAULT_PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES
+    ),
+    eventLogCleanupEnabled:
+      (env.PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED ?? '').trim().toLowerCase() === 'true',
     eventLogCleanupBatchRows: parsePositiveInteger(
       env.PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS,
       DEFAULT_PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS
@@ -406,14 +659,20 @@ export function computeStorageSafetyAlarmTime(
     archiveRunAt =
       archiveLastRunAt === null ? now : archiveLastRunAt + config.toolPayloadArchiveIntervalMs;
   }
+  const groupedFtsCleanupRecheckAt = config.groupedFtsCleanupEnabled
+    ? readProjectDataGroupedFtsCleanupRecheckAt(sql)
+    : null;
   const eventLogCleanupRecheckAt = config.eventLogCleanupEnabled
     ? readProjectDataEventLogCleanupRecheckAt(sql)
     : null;
   return Math.min(
     measureAt,
-    ...[cleanupRecheckAt, archiveRunAt, eventLogCleanupRecheckAt].filter(
-      (value): value is number => value !== null
-    )
+    ...[
+      cleanupRecheckAt,
+      archiveRunAt,
+      groupedFtsCleanupRecheckAt,
+      eventLogCleanupRecheckAt,
+    ].filter((value): value is number => value !== null)
   );
 }
 

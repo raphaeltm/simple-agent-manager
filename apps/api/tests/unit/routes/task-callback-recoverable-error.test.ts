@@ -110,6 +110,11 @@ vi.mock('../../../src/services/task-status', () => ({
 
 vi.mock('../../../src/routes/tasks/_helpers', () => ({
   computeBlockedForTask: vi.fn().mockResolvedValue(false),
+  updateTaskExecutionStepFromCallback: vi.fn(async (_db, task, values) => {
+    mocks.updateSets.push(values);
+    Object.assign(mocks.task, values);
+    return { ...task, ...values };
+  }),
   setTaskStatus: vi.fn(async (_db, task, toStatus, _source, _workspace, options) => ({
     ...task,
     status: toStatus,
@@ -266,6 +271,7 @@ describe('task callback recoverable errors', () => {
         projectId: 'proj-recoverable',
         failureLogEvent: 'task.callback_terminal_cleanup_failed',
         logContext: { projectId: 'proj-recoverable', source: 'task.callback' },
+        beforeSideEffect: expect.any(Function),
       }
     );
     expect(projectDataService.stopSession).not.toHaveBeenCalled();
@@ -294,6 +300,7 @@ describe('task callback recoverable errors', () => {
         projectId: 'proj-recoverable',
         failureLogEvent: 'task.callback_terminal_cleanup_failed',
         logContext: { projectId: 'proj-recoverable', source: 'task.callback.idempotent' },
+        beforeSideEffect: expect.any(Function),
       }
     );
     // Idempotency invariant: the already-terminal row is NOT written again.

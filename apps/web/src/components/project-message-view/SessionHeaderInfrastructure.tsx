@@ -2,8 +2,10 @@ import type { DetectedPort, NodeResponse, WorkspaceResponse } from '@simple-agen
 import { Box, Cloud, Cpu, GitBranch, MapPin, Server } from 'lucide-react';
 
 import type { ChatSessionResponse } from '../../lib/api';
+import { EffectivePoolSummary } from '../hardware/EffectivePoolSummary';
+import { HardwareDetails, requestedResources } from '../hardware/HardwareDetails';
+import { PlacementDecisionSummary } from '../hardware/PlacementDecisionSummary';
 import { PortsContextItem } from './SessionHeaderBadges';
-import { formatVmSize } from './SessionHeaderFormatters';
 
 function ContextItem({
   icon,
@@ -20,7 +22,7 @@ function ContextItem({
         {icon}
       </span>
       <span className="font-medium shrink-0">{label}:</span>
-      <span className="text-fg-primary truncate min-w-0">{children}</span>
+      <span className="text-fg-primary [overflow-wrap:anywhere] min-w-0">{children}</span>
     </div>
   );
 }
@@ -42,23 +44,36 @@ export function SessionHeaderInfrastructure({
 }) {
   return (
     <>
+      {!workspace && taskEmbed?.placementExplanationJson && (
+        <PlacementDecisionSummary explanationJson={taskEmbed.placementExplanationJson} />
+      )}
       {session.workspaceId && (workspace || node) && (
         <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
           {workspace && (
             <>
+              {/*
+                Plain text, deliberately. Workspaces are an implementation detail —
+                `/workspaces/:id` survives for debugging but nothing in the chat routes a
+                user there. The name and status still earn their place here because they
+                are what you quote when something is wrong; the Node row below is the
+                link worth having, since that is the machine you would actually go look at.
+              */}
               <ContextItem icon={<Box size={12} />} label="Workspace">
-                <a
-                  href={`/workspaces/${workspace.id}`}
-                  className="no-underline hover:underline"
-                  style={{ color: 'var(--sam-color-accent-primary)' }}
-                >
-                  {workspace.displayName || workspace.name}
-                </a>
+                {workspace.displayName || workspace.name}
                 <span className="text-fg-muted ml-1">({workspace.status})</span>
               </ContextItem>
-              <ContextItem icon={<Cpu size={12} />} label="VM Size">
-                {formatVmSize(workspace.vmSize)}
+              <ContextItem icon={<Cpu size={12} />} label="Requested">
+                {requestedResources(workspace)}
               </ContextItem>
+              <HardwareDetails
+                hardware={node ?? workspace.hardware ?? workspace}
+                showProvider={!node}
+              />
+              <EffectivePoolSummary projectId={workspace.projectId} />
+              <PlacementDecisionSummary
+                explanationJson={workspace.placementExplanationJson}
+                showRequested={false}
+              />
             </>
           )}
           {node && (

@@ -4,11 +4,21 @@
 import { buildSafeFtsQuery } from '../../lib/fts5';
 import { log } from '../../lib/logger';
 import {
+  PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES,
+  type ProjectDataArchiveSourceIntentState,
+} from '../../project-data-archive/contract';
+import {
+  insertNewMessage,
+  nextSequence,
+  resolveDuplicateMessage,
+  resolveMaxMessagesPerSession,
+  SessionMessageLimitExceededError,
+} from './messages-persist-helpers';
+import {
   type CompactMessageOptions,
   parseChatMessageRow,
   parseChatMessageRowCompact,
   parseCount,
-  parseMaxSeq,
   parseMessageCount,
   parseSearchResultRow,
   parseWorkspaceId,
@@ -19,41 +29,61 @@ import type { Env } from './types';
 import { generateId } from './types';
 
 export {
+  DEFAULT_MAX_MESSAGES_PER_SESSION,
+  nextSequence,
+  resolveMaxMessagesPerSession,
+  SESSION_MESSAGE_LIMIT_EXCEEDED,
+  SessionMessageLimitExceededError,
+} from './messages-persist-helpers';
+export {
   boundToolMetadataForStorage,
   DEFAULT_PROJECT_DATA_TOOL_METADATA_MAX_BYTES,
   resolveCompactMessageOptions,
 } from './tool-metadata-storage';
 
-export const DEFAULT_MAX_MESSAGES_PER_SESSION = 100000;
-export const SESSION_MESSAGE_LIMIT_EXCEEDED = 'SESSION_MESSAGE_LIMIT_EXCEEDED';
+export const PROJECT_DATA_TRANSCRIPT_WRITE_FENCED = 'PROJECT_DATA_TRANSCRIPT_WRITE_FENCED';
 
-export class SessionMessageLimitExceededError extends Error {
-  readonly code = SESSION_MESSAGE_LIMIT_EXCEEDED;
-  readonly maxMessages: number;
+export class ProjectDataTranscriptWriteFencedError extends Error {
+  readonly code = PROJECT_DATA_TRANSCRIPT_WRITE_FENCED;
 
-  constructor(maxMessages: number) {
-    super(`Session message limit of ${maxMessages} messages exceeded`);
-    this.name = 'SessionMessageLimitExceededError';
-    this.maxMessages = maxMessages;
+  constructor(
+    readonly sessionId: string,
+    readonly operation: string,
+    readonly archiveState: ProjectDataArchiveSourceIntentState
+  ) {
+    super(
+      `ProjectData transcript write ${operation} for session ${sessionId} is fenced by archive source intent ${archiveState}`
+    );
+    this.name = 'ProjectDataTranscriptWriteFencedError';
   }
 }
 
-function resolveMaxMessagesPerSession(env: Env): number {
-  const parsed = Number.parseInt(env.MAX_MESSAGES_PER_SESSION || '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_MESSAGES_PER_SESSION;
+function parseArchiveSourceIntentState(value: unknown): ProjectDataArchiveSourceIntentState | null {
+  return typeof value === 'string' &&
+    PROJECT_DATA_ARCHIVE_SOURCE_INTENT_STATES.includes(value as ProjectDataArchiveSourceIntentState)
+    ? (value as ProjectDataArchiveSourceIntentState)
+    : null;
 }
 
-/**
- * Returns the next monotonic sequence number for a session's messages.
- */
-export function nextSequence(sql: SqlStorage, sessionId: string): number {
-  const row = sql
-    .exec(
-      'SELECT COALESCE(MAX(sequence), 0) AS max_seq FROM chat_messages WHERE session_id = ?',
-      sessionId
-    )
-    .toArray()[0];
-  return (row ? parseMaxSeq(row, 'messages.next_sequence') : 0) + 1;
+function assertTranscriptWriteAllowed(sql: SqlStorage, sessionId: string, operation: string): void {
+  let row: Record<string, unknown> | undefined;
+  try {
+    row = sql
+      .exec(
+        `SELECT state
+         FROM project_data_archive_source_intents
+         WHERE session_id = ?
+           AND state != 'rehome_exported'
+         LIMIT 1`,
+        sessionId
+      )
+      .toArray()[0];
+  } catch (error) {
+    if (error instanceof Error && /no such table/i.test(error.message)) return;
+    throw error;
+  }
+  const state = parseArchiveSourceIntentState(row?.state);
+  if (state) throw new ProjectDataTranscriptWriteFencedError(sessionId, operation, state);
 }
 
 export function persistMessage(
@@ -72,97 +102,19 @@ export function persistMessage(
   inserted: boolean;
   toolMetadata: string | null;
 } {
-  const maxMessages = resolveMaxMessagesPerSession(env);
-  const countRow = sql
-    .exec('SELECT message_count FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
-
-  if (!countRow) {
-    throw new Error(`Session ${sessionId} not found`);
-  }
+  assertTranscriptWriteAllowed(sql, sessionId, 'persistMessage');
   const id = messageId ?? generateId();
-  const existing = sql.exec('SELECT id FROM chat_messages WHERE id = ? LIMIT 1', id).toArray()[0];
-  if (existing) {
-    const wsRow = sql
-      .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
-      .toArray()[0];
-    const workspaceId = wsRow
-      ? parseWorkspaceId(wsRow, 'messages.persist_duplicate_workspace')
-      : null;
-    return {
-      id,
-      now: Date.now(),
-      sequence: 0,
-      workspaceId,
-      inserted: false,
-      toolMetadata,
-    };
-  }
-
-  if (parseMessageCount(countRow, 'messages.persist_count') >= maxMessages) {
-    throw new SessionMessageLimitExceededError(maxMessages);
-  }
-
-  const now = Date.now();
-  const sequence = nextSequence(sql, sessionId);
-  const boundedToolMetadata = boundToolMetadataForStorage(toolMetadata, env);
-  if (boundedToolMetadata.truncated) {
-    log.warn('messages.tool_metadata_truncated_for_storage', {
-      sessionId,
-      messageId: id,
-      originalBytes: boundedToolMetadata.originalBytes,
-      storedBytes: boundedToolMetadata.storedBytes,
-    });
-  }
-
-  sql.exec(
-    `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    id,
-    sessionId,
-    role,
-    content,
-    boundedToolMetadata.value,
-    now,
-    sequence
-  );
-
-  sql.exec(
-    `UPDATE chat_sessions SET message_count = message_count + 1, updated_at = ? WHERE id = ?`,
-    now,
-    sessionId
-  );
-
-  // Auto-capture topic from first user message
-  if (role === 'user') {
-    const session = sql
-      .exec('SELECT topic FROM chat_sessions WHERE id = ?', sessionId)
-      .toArray()[0];
-    if (session && !session.topic) {
-      const truncatedTopic = content.length > 100 ? content.substring(0, 97) + '...' : content;
-      sql.exec(
-        'UPDATE chat_sessions SET topic = ?, updated_at = ? WHERE id = ?',
-        truncatedTopic,
-        now,
-        sessionId
-      );
-    }
-  }
-
-  // Get workspace ID for activity tracking
-  const wsRow = sql
-    .exec('SELECT workspace_id FROM chat_sessions WHERE id = ?', sessionId)
+  const existing = sql
+    .exec(
+      `SELECT id, session_id, role, content, tool_metadata, created_at, sequence
+       FROM chat_messages WHERE id = ? LIMIT 1`,
+      id
+    )
     .toArray()[0];
-  const workspaceId = wsRow ? parseWorkspaceId(wsRow, 'messages.persist_workspace') : null;
-
-  return {
-    id,
-    now,
-    sequence,
-    workspaceId,
-    inserted: true,
-    toolMetadata: boundedToolMetadata.value,
-  };
+  if (existing) {
+    return resolveDuplicateMessage(sql, existing, id, sessionId, role, content);
+  }
+  return insertNewMessage(sql, env, sessionId, role, content, toolMetadata, id);
 }
 
 export function persistMessageBatch(
@@ -197,6 +149,7 @@ export function persistMessageBatch(
   maxMessages: number;
   remainingCapacity: number;
 } {
+  assertTranscriptWriteAllowed(sql, sessionId, 'persistMessageBatch');
   const session = sql
     .exec('SELECT id, message_count, topic, status FROM chat_sessions WHERE id = ?', sessionId)
     .toArray()[0];
@@ -372,9 +325,9 @@ export function persistMessageBatch(
  * We leave a 2 MiB margin for the session envelope, pagination metadata,
  * and JSON structural overhead.
  */
-const RPC_SIZE_BUDGET_BYTES = 30 * 1024 * 1024; // 30 MiB
+export const RPC_SIZE_BUDGET_BYTES = 30 * 1024 * 1024; // 30 MiB
 
-function estimateRowBytes(row: Record<string, unknown>): number {
+export function estimateRowBytes(row: Record<string, unknown>): number {
   let size = 64; // object overhead + fixed fields (id, role, created_at, sequence)
   const content = row.content;
   if (typeof content === 'string') size += content.length * 2; // UTF-16 chars
@@ -419,6 +372,30 @@ export function getMessages(
   params.push(limit + 1);
 
   const rows = sql.exec(query, ...params).toArray();
+  return formatMessageRows(rows, sessionId, limit, compact, order, compactOptions);
+}
+
+function parseListedMessage(
+  row: Record<string, unknown>, sessionId: string, compact: boolean, compactOptions?: CompactMessageOptions
+): Record<string, unknown> | null {
+  try {
+    return compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row);
+  } catch (e) {
+    log.warn('messages.list_row_skipped', {
+      rowId: typeof row.id === 'string' ? row.id : null,
+      rowSessionId: typeof row.session_id === 'string' ? row.session_id : null,
+      requestedSessionId: sessionId,
+      compact,
+      error: String(e),
+    });
+  }
+  return null;
+}
+
+export function formatMessageRows(
+  rows: Record<string, unknown>[], sessionId: string, limit: number,
+  compact: boolean, order: 'asc' | 'desc', compactOptions?: CompactMessageOptions
+): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let hasMore = rows.length > limit;
   const candidateRows = hasMore ? rows.slice(0, limit) : rows;
 
@@ -447,25 +424,15 @@ export function getMessages(
 
   const trimmedRows = candidateRows.slice(0, safeCount);
 
-  const orderedRows = order === 'desc' ? trimmedRows.reverse() : trimmedRows;
+  const orderedRows = trimmedRows;
+  if (order === 'desc') orderedRows.reverse();
   const messages: Record<string, unknown>[] = [];
   let skipped = 0;
 
   for (const row of orderedRows) {
-    try {
-      messages.push(
-        compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row)
-      );
-    } catch (e) {
-      skipped++;
-      log.warn('messages.list_row_skipped', {
-        rowId: typeof row.id === 'string' ? row.id : null,
-        rowSessionId: typeof row.session_id === 'string' ? row.session_id : null,
-        requestedSessionId: sessionId,
-        compact,
-        error: String(e),
-      });
-    }
+    const message = parseListedMessage(row, sessionId, compact, compactOptions);
+    if (message) messages.push(message);
+    else skipped++;
   }
 
   if (skipped > 0) {
@@ -696,6 +663,7 @@ export function persistSystemMessage(
   content: string
 ): { id: string; now: number; sequence: number } | null {
   try {
+    assertTranscriptWriteAllowed(sql, sessionId, 'persistSystemMessage');
     const id = generateId();
     const now = Date.now();
     const sequence = nextSequence(sql, sessionId);

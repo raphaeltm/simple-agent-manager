@@ -82,6 +82,7 @@ export async function reportActivity(
   sessionId: string,
   currentActivity: string,
   extra?: {
+    observedAt?: number | null;
     promptStartedAt?: number | null;
     agentType?: string | null;
     restartCount?: number | null;
@@ -91,9 +92,10 @@ export async function reportActivity(
     runtimeWorkSource?: string;
     runtimeWorkProgressAt?: number | null;
   },
-): Promise<void> {
-  sessionState.upsertActivityState(sql, sessionId, {
+): Promise<boolean> {
+  const applied = sessionState.upsertActivityState(sql, sessionId, {
     activity: currentActivity,
+    observedAt: extra?.observedAt,
     promptStartedAt: extra?.promptStartedAt,
     agentType: extra?.agentType,
     restartCount: extra?.restartCount,
@@ -103,6 +105,14 @@ export async function reportActivity(
     runtimeWorkSource: extra?.runtimeWorkSource,
     runtimeWorkProgressAt: extra?.runtimeWorkProgressAt,
   });
+  if (!applied) {
+    log.info('activity_report_stale_rejected', {
+      sessionId,
+      activity: currentActivity,
+      observedAt: extra?.observedAt ?? null,
+    });
+    return false;
+  }
   const acpRow = sql.exec(
     'SELECT chat_session_id FROM acp_sessions WHERE id = ?',
     sessionId,
@@ -119,6 +129,7 @@ export async function reportActivity(
   if (currentActivity === 'idle' && delivery.nudgePromptDeliveriesForTarget(sql, chatSessionId) > 0) {
     await hooks.recalculateAlarm();
   }
+  return true;
 }
 
 export function createCheckpointEpisode(

@@ -16,6 +16,8 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `RESOURCE_PREFIX`                                  | No (default: `sam`)                                                |
 | Variable | `PULUMI_STATE_BUCKET`                              | No (default: `sam-pulumi-state`)                                   |
 | Variable | `CF_CONTAINER_ENABLED`                             | No (default: `true`; set `false` to force VM runtime)              |
+| Variable | `D1_READ_REPLICATION_MODE`                         | No (default: `auto`; `disabled` removes read replicas)             |
+| Variable | `D1_SESSION_MODE`                                  | No (default: `first-primary`; `disabled` pins reads to primary)    |
 | Variable | `D1_MIGRATION_CHURNING_TABLES`                     | No (may narrow the reviewed built-in retention/expiry table list)  |
 | Variable | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | No (default: `50`; range: 0–100)                                   |
 | Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
@@ -77,11 +79,10 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `CF_CONTAINER_VM_AGENT_PORT` — vm-agent standalone HTTP port inside the raw container (default: `8080`)
 - `CF_CONTAINER_PORT_READY_TIMEOUT_MS` — Max wait for vm-agent port readiness (default: `30000`)
 - `CF_CONTAINER_WAKE_TIMEOUT_MS` — Max wait for launch, snapshot restore, and request readiness (default: `120000`)
-- `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS` — Max restore attempts before terminal status reconciliation (default: `2`)
+- `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS` — Max restore attempts before terminal status reconciliation (default and deployment-safety minimum: `2`)
 - `INSTANT_STALE_CALLBACK_MARGIN_MS` — Freshness margin for rejecting destructive callbacks from superseded Instant containers (default: `60000`)
 - `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` — Synchronous workspace creation and clone budget (default: `120000`)
 - `CF_CONTAINER_CLONE_FILTER` — Git partial-clone filter (default: `blob:none`; `off` disables partial clone)
-- `VM_AGENT_MEMORY_RESERVE_MB` — Megabytes reserved for the OS and `vm-agent` on cloud VM nodes before Docker's systemd `MemoryMax` is derived from actual node memory (default: `768`)
 - `SESSION_SNAPSHOT_TTL_DAYS` — Retention from actual sleep; the scheduled Worker terminalizes the chat and deletes R2 state (default: `7`)
 - `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES` — Maximum combined bytes accepted for snapshot artifacts (default: `268435456`)
 - `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` — Per-file threshold before snapshot content is visibly skipped (default: `268435456`)
@@ -103,8 +104,17 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SLEEP_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted automatic-sleep claim (default: `600000`)
 - `HARNESS_BACKGROUND_WORK_LEASE_MS` — Finite sleep-protection lease renewed by normalized harness background-work lifecycle signals (default: `300000`)
 - `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS` — Absolute ceiling, measured from the last harness lifecycle progress edge, on how long background work may defer sleep (default: `1800000`)
+- `ACP_ACTIVITY_ADMISSION_ENABLED` — Enables Worker-side admission control/coalescing for redundant intermediate ACP activity callbacks (default: `true`)
+- `ACP_ACTIVITY_COALESCE_WINDOW_MS` — Minimum interval between redundant intermediate ProjectData activity writes; transitions and terminal/error reports bypass it (default: `2000`)
+- `ACP_ACTIVITY_COALESCE_TTL_MS` — Maximum lifetime for a coalesced activity report before eviction leaves convergence to probe-backed reconciliation (default: `60000`)
+- `ACP_ACTIVITY_COALESCE_MAX_PENDING` — Maximum pending coalesced activity reports retained by one Worker isolate (default: `512`)
+- `ACP_ACTIVITY_BINDING_CACHE_TTL_MS` — Short-lived authorized ACP session binding cache used to avoid ProjectData reads during callback storms (default: `30000`)
+- `ACP_ACTIVITY_BINDING_CACHE_MAX_ENTRIES` — Maximum cached ACP activity bindings retained by one Worker isolate (default: `2048`)
+
+Activity coalescing and binding caches are per Worker isolate. Delayed flushes carry their original observed event time, and ProjectData rejects stale writes so a delayed intermediate report cannot overwrite a newer idle/error state from another isolate.
+
 - `SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted replacement-runtime wake claim (default: `600000`)
-- `SESSION_LIFECYCLE_ERROR_MAX_LENGTH` — Maximum stored sleep/recovery diagnostic length (default: `2048`)
+- `SESSION_LIFECYCLE_ERROR_MAX_LENGTH` — Maximum stored session lifecycle and agent activity failure diagnostic length (default: `2048`)
 - `SESSION_SNAPSHOT_PURGE_ENABLED` — Kill switch for expired snapshot cleanup in D1 and R2 (default: enabled)
 - `SESSION_SNAPSHOT_PURGE_BATCH_SIZE` — Maximum expired snapshot rows deleted per run (default: `250`)
 
@@ -151,6 +161,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `NODE_WORKSPACE_IDLE_TIMEOUT_MS` — Last-workspace-activity window before an auto-provisioned workspace-role node with no active workspaces is destroy-eligible (default: `1800000`; parsed by `buildCleanupConfig()` and enforced by `claimNodeForCleanup()` in `apps/api/src/scheduled/node-cleanup/shared.ts`)
 - `NODE_ORPHAN_IDLE_TIMEOUT_MS` — Legacy alias for `NODE_WORKSPACE_IDLE_TIMEOUT_MS` when the primary variable is unset (resolved by `buildCleanupConfig()` in `apps/api/src/scheduled/node-cleanup/shared.ts`)
 - `NODE_CLEANUP_FAILURE_BACKOFF_MS` — Failed cleanup-candidate exclusion window (default: `3600000`)
+- `NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS` — Wall-clock budget for the stopped-node handoff phase; unstarted candidates remain eligible for the next sweep (default: `20000`)
+- `NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS` — Per-candidate provider/DNS deadline during stopped-node handoff, capped by remaining sweep time; provider failures enter cleanup backoff (default: `5000`)
 - `IDLE_CLEANUP_MAX_RESIDENCE_MS` — Maximum ProjectData idle-cleanup schedule residence before preserved/error outcomes stop re-arming and surface attention (default: `7200000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
@@ -176,24 +188,114 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_DEFAULT` — Default row count for admin ProjectData storage telemetry and history lists (default: `50`)
 - `PROJECT_DATA_STORAGE_TELEMETRY_LIST_LIMIT_MAX` — Max accepted row count for admin ProjectData storage telemetry and history lists (default: `200`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` — Enables automatic ProjectData cleanup that archives expandable `tool_metadata.content` payloads to private R2 before stripping them from old ProjectData message rows (default: enabled)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID` — Immutable operator plan identifier; required with a fixed cleanup cutoff and persisted with continuation state so configuration drift fails closed (default: empty)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY` / `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256` — Verified, immutable R2 target-manifest root required for a fixed cleanup plan (default: empty)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES` / `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES` — Verified approved-plan R2 manifest read/write ceilings, included in exact-plan fingerprints (defaults: `2000000` / `1000000`)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS` / `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES` / `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS` / `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS` — Hard cumulative approval ceilings required for a fixed cleanup plan; exact execution transactionally charges the full per-pass R2-operation and wall-time allowances before external work, without refunds (default: empty)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS` — Optional comma-separated project allowlist for automatic cleanup; empty preserves cleanup eligibility for every project, while an emergency rollout can scope elevated budgets to exact projects (default: empty)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT` — Optional fixed exclusive tool-message creation cutoff in epoch milliseconds; when set, an immutable plan ID and exactly one allowlisted project are required, and malformed/future values fail closed (default: empty, retention-derived cutoff)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TRIGGER_RATIO` — ProjectData storage usage ratio that starts automatic tool payload archival cleanup even before the retention cadence is due (default: `0.8`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_TARGET_RATIO` — ProjectData storage usage ratio below which automatic tool payload cleanup stops (default: `0.75`)
-- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS` — Maximum tool-message rows inspected by one automatic cleanup alarm batch (default: `500`)
-- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES` — Maximum legacy `tool_metadata` bytes read into JS by one automatic archival cleanup alarm batch (default: `2097152`)
-- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES` — Maximum single legacy `tool_metadata` row bytes read into JS by one archival cleanup pass; larger rows fail closed and remain in ProjectData unless this limit is deliberately raised (default: `1048576`)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_ROWS` — Maximum eligible tool-message candidates processed by one automatic cleanup alarm batch; ordinary candidate selection may examine a larger physical row window bounded by `PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS` (default: `500`)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_BATCH_BYTES` — Legacy `tool_metadata` read budget for one automatic cleanup pass; an ordinary retention pass may admit its first oversized candidate up to the archive metadata ceiling to advance the cursor, while a fixed exact plan fails closed unless its per-row ceiling fits this budget (default: `2097152`)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_ROW_BYTES` — Hard maximum single legacy `tool_metadata` row read by cleanup; an approved emergency plan must explicitly raise it to include larger manifest targets, without exceeding `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES` (default: `1048576`)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MIN_SESSION_AGE_DAYS` — Legacy terminal-session age guard retained for storage telemetry compatibility; tool payload archival uses `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS` (default: `7`)
-- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS` — Delay before the next automatic cleanup alarm batch when more candidates remain (default: `60000`)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_RECHECK_MS` — Delay before the next automatic cleanup alarm batch when more candidates remain (default: `86400000`, daily)
 - `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_SESSIONS_PER_ALARM` — Deprecated legacy terminal-session cleanup knob retained for env compatibility; archival cleanup scans tool-message rows directly and is bounded by rows, bytes, and wall time instead (default: `25`)
-- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS` — Soft wall-clock budget for one ProjectData tool payload archival cleanup alarm pass (default: `20000`)
+- `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_WALL_TIME_MS` — Absolute wall-clock deadline shared by candidate processing and every R2 write/read-back operation in one cleanup pass (default: `20000`)
+- `PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_ROWS` — Hard row cap for one explicit superadmin manual ProjectData tool payload archival cleanup pass (default: `500`)
+- `PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_BATCH_BYTES` — Maximum configurable legacy `tool_metadata` read budget for one explicit manual pass; the ordinary-path first-row exception still applies unless a fixed exact plan binds the row ceiling within this budget (default: `2097152`)
+- `PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_MAX_WALL_TIME_MS` — Hard wall-clock cap for one explicit manual cleanup pass (default: `20000`)
+- `PROJECT_DATA_TOOL_PAYLOAD_MANUAL_CLEANUP_RECHECK_MS` — Persisted project-scoped cooldown after an explicit manual cleanup pass (default: `86400000`, daily)
 - `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETENTION_DAYS` — Message age before expandable tool payload JSON may be archived to private R2 and stripped from the ProjectData DO (default: `5`)
 - `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_INTERVAL_MS` — Cadence for the retention-driven ProjectData tool payload archival scan (default: `86400000`)
 - `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_R2_PREFIX` — Private R2 prefix used for archived ProjectData tool payload JSON objects (default: `project-data/tool-payloads`)
-- `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS` — Per-R2-write timeout for automatic archival cleanup; timeout leaves the original payload in ProjectData and defers retry (default: `5000`)
+- `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_WRITE_TIMEOUT_MS` — Per-R2 write/read-back verification timeout for automatic archival cleanup; timeout leaves the original payload in ProjectData and defers retry (default: `5000`)
+- `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_OPERATIONS` — Maximum R2 PUT, GET, and body-read operations reserved by one cleanup pass (default: `1500`)
 - `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_RETRY_DELAY_MS` — Row-level retry deferral after retryable archive/write failures (default: `300000`)
+- `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_CHUNK_BYTES` — R2 chunk size used when archiving legacy tool payload metadata larger than one archive object slice (default: `524288`)
+- `PROJECT_DATA_TOOL_PAYLOAD_ARCHIVE_MAX_METADATA_BYTES` — Absolute bounded read cap for legacy oversized tool payload metadata; larger rows fail closed and remain in ProjectData (default: `1900000`)
+- `PROJECT_DATA_STORAGE_RELIEF_MEASURE_BATCH_ROWS` — Default row budget for superadmin ProjectData relief measurement slices (default: `500`)
+- `PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS` — Maximum physical row window accepted for superadmin/preflight relief measurements and examined by one ordinary cleanup candidate-selection slice (default: `5000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ENABLED` — Enables the scheduled, read-only, fixed-cutoff ProjectData tool-payload relief preflight; requires the exact plan, project, and cutoff variables below (default: disabled)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PLAN_ID` — Immutable operator plan identifier used to resume one preflight without mixing evidence from another run (default: empty)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_PROJECT_ID` — Exact ProjectData project targeted by the enabled preflight (default: empty)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_CUTOFF_CREATED_AT` — Fixed exclusive tool-message creation cutoff in epoch milliseconds; required while preflight is enabled (default: empty)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_BATCH_ROWS` — Maximum physical `chat_messages` rowid-window rows examined by one preflight slice before eligibility filtering (default: `5000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_INTERVAL_MS` — Persisted minimum interval between preflight slices (default: `300000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BATCHES` — Overall claimed-attempt ceiling; an incomplete successful scan becomes truncated at the ceiling, while the final failed attempt becomes failed (default: `100`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_ROWS` — Overall physical `chat_messages` rows-examined ceiling for one preflight plan before eligibility filtering (default: `500000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_BYTES` — Overall projected net reclaimable-byte evidence ceiling for one preflight plan (default: `2000000000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MS` — D1 claim lease that prevents overlapping scheduled slices and must exceed the wall-time budget by the configured lease margin (default: `60000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_WALL_TIME_MS` — Absolute per-slice deadline shared by the bounded ProjectData measurement and verified R2 manifest writes/read-backs; failures retain the prior cursor and fail closed for retry (default: `20000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_SLICES_PER_RUN` — Maximum number of sequential, separately leased preflight slices in one scheduled invocation; later slices bypass only the persisted cadence for that invocation (default: `1`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS` — Aggregate invocation admission budget used to decide whether another full sequential slice can start; must exceed the per-slice wall-time budget by the return margin (default: `25000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_LEASE_MARGIN_MS` — Required lease headroom above the per-slice wall-time budget (default: `5000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RETURN_MARGIN_MS` — Required return headroom inside measurement, slice, and aggregate run budgets (default: `500`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MEASUREMENT_WALL_TIME_MS` — Explicit ProjectData measurement budget within one slice; plus the return margin it must not exceed the slice wall budget (default: `10000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_MAX_STATE_BYTES` — Combined D1 JSON byte ceiling for accumulated session and target-batch proof state in one preflight row (default: `1750000`)
+- `PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_ERROR_MAX_LENGTH` — Character ceiling for a persisted preflight failure diagnostic (default: `1000`)
+
+Implementation of the storage-safety, cleanup and preflight behavior documented above:
+`resolveStorageSafetyConfig()` (`apps/api/src/durable-objects/project-data/storage-safety.ts`)
+validates every value and fails closed on a malformed one;
+`runProjectDataToolPayloadCleanup()` / `scanToolPayloadCleanupBatch()`
+(`.../tool-payload-cleanup.ts`) apply the row/byte/wall-time and approved-plan budgets;
+`runProjectDataManualToolPayloadCleanup()` (`.../tool-payload-manual-cleanup.ts`) owns the
+manual slice, its fingerprint and its cooldown;
+`measureProjectDataStorageReliefSlice()` (`.../storage-relief-measurement.ts`) owns the
+read-only measurement, cursor and byte/deadline bounds; and
+`runProjectDataStorageReliefPreflight()`
+(`apps/api/src/scheduled/project-data-storage-relief-preflight.ts`) owns the lease, the
+per-slice and per-run admission budgets, and the verified R2 manifest writes.
+
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED` — Production-disabled switch for cleanup of old terminal-session grouped message rows and their external-content FTS entries (default: disabled)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_TRIGGER_RATIO` — ProjectData usage ratio that starts grouped/FTS derived-data cleanup when explicitly enabled (default: `0.9`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_TARGET_RATIO` — ProjectData usage ratio below which grouped/FTS cleanup stops (default: `0.85`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_SESSIONS` — Maximum terminal sessions cleaned by one grouped/FTS canary slice (default: `2`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_ROWS` — Maximum grouped message rows deleted by one grouped/FTS canary slice (default: `1000`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_BATCH_BYTES` — Maximum grouped message content bytes deleted by one grouped/FTS canary slice (default: `4194304`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_MIN_SESSION_AGE_DAYS` — Minimum terminal-session age before grouped/FTS derived rows may be cleaned (default: `7`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_RECHECK_MS` — Delay before the next grouped/FTS cleanup slice when more candidates remain (default: `300000`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_TIME_MS` — Soft wall-clock budget for one grouped/FTS cleanup slice (default: `5000`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_WALL_UNSAFE_RATIO` — Refuses grouped/FTS cleanup writes when the object is too close to the configured storage limit (default: `0.98`)
+- `PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES` — Stops grouped/FTS cleanup if a slice deletes rows but `databaseSize` does not drop by at least this many bytes (default: `1`)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` — Enables automatic deletion of old low-value terminal-session `activity_events` and terminal ACP event history when storage remains above the cleanup target (default: enabled)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_BATCH_ROWS` — Maximum terminal `activity_events` rows and terminal `acp_session_events` rows deleted per automatic cleanup alarm batch (default: `500`)
 - `PROJECT_DATA_EVENT_LOG_CLEANUP_MIN_SESSION_AGE_DAYS` — Minimum terminal-session age before automatic event-log cleanup may delete its activity/ACP event history (default: `7`)
-- `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS` — Delay before the next terminal event-log cleanup alarm batch when more candidates remain (default: `60000`)
+- `PROJECT_DATA_EVENT_LOG_CLEANUP_RECHECK_MS` — Delay before the next terminal event-log cleanup alarm batch when more candidates remain (default: `86400000`, daily)
+- `PROJECT_DATA_ARCHIVE_SHARDING_ENABLED` — Production-disabled switch for exact archive read routing (default: disabled)
+- `PROJECT_DATA_ARCHIVE_COMPACT_ENABLED` — Write new archives as compact SQLite + compressed R2; existing formats remain readable. Default: `false`.
+- `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` — Installation-wide daily estimated SQL write allowance for compact migration attempts; 0 pauses admission. Default: `250000`.
+- `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` — Conservative SQL write estimate per row/512 bytes of grouped FTS text; includes source deletion. Default: `32`.
+- `PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS` — R2 I/O deadline shared across each compact read/export/seal operation, or one chunk write, in milliseconds. Default: `10000`.
+- `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS` — Unused reservation receipt retention; minimum one UTC budget day. Default: `604800000` (7 days).
+- `PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT` — Maximum expired receipts removed per unused release; zero disables cleanup. Default: `100`.
+- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_ENABLED` — Separate production-disabled switch for the unscoped scheduled archive-sharding sweep; enabling exact routing alone does not run global migration (default: disabled)
+- `PROJECT_DATA_ARCHIVE_GLOBAL_SWEEP_INTERVAL_MS` — Persisted cadence gate between unscoped scheduled archive-sharding sweeps; the Worker scheduled handler wakes every five minutes and claims the cadence row only when it is due. The code fallback is daily; the checked-in `wrangler.toml` ships 1 hour after the 2026-09-08 billing firebreak (default: `86400000`, shipped: `3600000`)
+- `PROJECT_DATA_ARCHIVE_SHARD_COUNT` — Deterministic archive-shard fanout used when assigning terminal sessions to ProjectData archive Durable Objects (default: `128`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS` — Maximum projects selected by one archive-sharding cron pass (default: `1`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS` — Hard ceiling on sessions (in-flight plus new candidates) one archive-sharding pass may process (default: `10`, shipped: `1`)
+- `PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET` — Cumulative `session_summaries.message_count` of NEW candidates one pass may journal; candidates are selected largest first and a single session above the budget is still selected alone (default: `20000`, shipped: `5000`)
+- `PROJECT_DATA_ARCHIVE_SESSION_GRACE_MS` — Minimum terminal-session age before archive-sharding may consider a session (default: `604800000`)
+- `PROJECT_DATA_ARCHIVE_PRECOPY_REFUSAL_RETRY_MS` — How long a session the root object refused at prepare (a pre-copy eligibility invariant such as `active_session_state`, recorded as a `frozen`/`precopy_refused` journal with the location returned to `root`) stays out of unscoped sweep selection; an operator canary that names the session bypasses it; values below `60000` fall back to the default so a stray value cannot disable the anti-thrash window (default: `604800000`)
+- `PROJECT_DATA_ARCHIVE_FAILED_RETRY_DELAY_MS` — Minimum age of a `failed` archive journal before an unscoped sweep reclaims it, so `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` spans hours rather than consecutive cadence ticks; `0` disables the delay and a session-scoped canary bypasses it (default: `3600000`)
+- `PROJECT_DATA_ARCHIVE_CHUNK_ROWS` — Maximum rows exported in one archive chunk (default: `500`)
+- `PROJECT_DATA_ARCHIVE_CHUNK_BYTES` — Maximum bytes exported in one archive chunk, clamped below Cloudflare's 32MiB RPC ceiling (default: `16777216`)
+- `PROJECT_DATA_ARCHIVE_HASH_PAGE_ROWS` — Rows read per statement while streaming a session's terminal-version hash and grouped-row loops inside the ProjectData DO; bounds object memory by page size instead of session size (default: `500`)
+- `PROJECT_DATA_ARCHIVE_LEASE_MS` — D1 CAS journal lease duration for archive-sharding work (default: `300000`)
+- `PROJECT_DATA_ARCHIVE_WALL_TIME_MS` — Soft wall-clock budget for one archive-sharding cron pass, checked between candidates (a single large session may run past it). Code fallback 5 s; the checked-in `wrangler.toml` ships 10 s after the billing firebreak (default: `5000`, shipped: `10000`)
+- `PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_DEFAULT` — Default row limit for superadmin archive-sharding rollout inspection and failed/poisoned/frozen migration list endpoints (default: `25`)
+- `PROJECT_DATA_ARCHIVE_ROLLOUT_LIST_LIMIT_MAX` — Maximum accepted row limit for superadmin archive-sharding rollout inspection endpoints (default: `100`)
+- `PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_DEFAULT` — Default row limit for frozen-intent detail inspection; each row may perform source and target ProjectData DO RPCs (default: `5`)
+- `PROJECT_DATA_ARCHIVE_FROZEN_INTENT_INSPECTION_LIMIT_MAX` — Maximum accepted frozen-intent detail inspection limit; configured values are hard-clamped to 10 to cap hot-DO fan-out (default: `10`)
+- `PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_SESSIONS` — Maximum sessions selected by one scoped manual archive-sharding canary; dry-run remains flag-independent, non-dry requires exact archive routing enabled (default: `5`)
+- `PROJECT_DATA_ARCHIVE_MANUAL_CANARY_MAX_WALL_TIME_MS` — Maximum wall-clock budget accepted by the scoped manual archive-sharding canary endpoint (default: `15000`)
+- `PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_EXAMPLES_MAX` — Maximum malformed-row warning examples returned by archive rollout read/list endpoints (default: `5`)
+- `PROJECT_DATA_ARCHIVE_ROLLOUT_WARNING_REASON_MAX_LENGTH` — Maximum characters per malformed-row warning reason returned by archive rollout read/list endpoints (default: `300`)
+- `PROJECT_DATA_ARCHIVE_POISON_AFTER_ATTEMPTS` — Failed archive-sharding attempts before the migration is poisoned and the project circuit breaker opens (default: `3`)
+- `PROJECT_DATA_ARCHIVE_R2_PREFIX` — Private R2 prefix for terminal-session archive recovery chunks and manifests (default: `project-data/session-archives`)
+- `PROJECT_DATA_ARCHIVE_SEARCH_MAX_OWNERS` — Maximum archive-shard owners queried for one project-wide message search before results report explicit partial metadata (default: `4`)
 - `PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT` — Maximum active durable event subscriptions in one ProjectData object (default: `200`)
 - `PROJECT_EVENT_FILTER_MAX_VALUES_PER_FIELD` — Maximum exact/set values accepted for one v1 event filter field (default: `20`)
 - `PROJECT_EVENT_FILTER_MAX_MATCH_KEYS` — Maximum deterministic match keys compiled for one event subscription (default: `100`)
@@ -287,6 +389,7 @@ by the read-only cron-liveness check.
 - `VM_ADMISSION_LEASE_TTL_MS` — Fenced VM provisioning claim lease duration (default: `1200000`)
 - `VM_ADMISSION_RETRY_MIN_MS` / `VM_ADMISSION_RETRY_MAX_MS` — Bounds for retrying tasks waiting on VM capacity (defaults: `15000` / `60000`)
 - `VM_ADMISSION_WAIT_TIMEOUT_MS` — Maximum visible wait for VM capacity before failing the task (default: `7200000`)
+- `VM_ADMISSION_BUSY_BUILD_WAIT_TIMEOUT_MS` — Maximum bounded wait for an otherwise-eligible reusable VM node whose only blocker is an active workspace build queue (default: `1200000`)
 - `VM_ADMISSION_PROVIDER_COOLDOWN_MS` — Cooldown after provider/account capacity errors such as Hetzner server limits (default: `600000`)
 - `VM_ADMISSION_WAKE_BATCH_SIZE` — Maximum waiting TaskRunner DOs nudged by one capacity event (default: `25`)
 - `VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH` — Maximum provider diagnostic message persisted on admission/capacity rows (default: `500`)
@@ -315,6 +418,8 @@ by the read-only cron-liveness check.
 
 ### Pagination
 
+- `DASHBOARD_ACTIVE_TASK_LIMIT` — Maximum active tasks returned by `/api/dashboard/active-tasks` (default: `100`)
+- `DASHBOARD_INACTIVE_THRESHOLD_MS` — Last-message freshness threshold for Active vs Idle on `/api/dashboard/active-tasks` (default: `900000`)
 - `TASK_LIST_DEFAULT_PAGE_SIZE` — Default task/project list page size
 - `TASK_LIST_MAX_PAGE_SIZE` — Maximum task/project list page size
 - `CHAT_SESSION_MESSAGE_LIMIT` — Default page size for chat session message REST responses when no limit is requested — used by the 3s poll and load-more (default: 500)
@@ -339,14 +444,32 @@ by the read-only cron-liveness check.
 - `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS` — In-flight prompt hard-stall threshold before SAM requests prompt cancellation and retries check-in later (default: 7200000)
 - `TASK_RECONCILIATION_ACTIVE_WORK_HARD_STALL_MS` — Hard ceiling for deferring an expired check-in because prompt/tool work is still active (default: 7200000)
 - `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS` — Minimum delay before the next reconciliation alarm can fire (default: 10000)
+- `TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP` — Maximum D1/runtime assessments per ProjectData alarm pass (default: 5)
+- `TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS` — Bounded reconciliation check-in/cancel request timeout (default: 5000)
+- `TASK_RECONCILIATION_CANDIDATE_LEASE_MS` — Durable claim floor preventing overlapping alarms from repeating reconciliation; the effective lease covers configured liveness-probe, node-call, and minimum-alarm-delay budgets (default: 30000)
+- `TASK_RECONCILIATION_PROBE_MAX_ATTEMPTS` — Consecutive inconclusive task reconciliation attempts before quarantine (default: 3)
+- `TASK_RECONCILIATION_QUARANTINE_MS` — Cooldown after task reconciliation exhausts its inconclusive-attempt budget (default: 300000)
+- `SESSION_ACTIVITY_PROBE_TIMEOUT_MS` — Bounded authoritative SessionHost inventory request timeout (default: 5000)
+- `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS` — Unreachable probes before the stale activity mirror is quarantined without terminalization (default: 3)
+- `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` — Maximum SessionHost inventory probes per ProjectData alarm pass (default: 10)
 - `SESSION_TASK_REPAIR_BATCH_SIZE` — Maximum legacy taskless chat sessions repaired per 5-minute sweep (default: 25; capped at 200)
+- `TERMINAL_SESSION_RECONCILE_PROJECT_BATCH_SIZE` — Maximum projects inspected for stale active ProjectData session ledgers per 5-minute sweep (default: 25; capped at 200)
+- `TERMINAL_SESSION_RECONCILE_BATCH_SIZE` — Maximum active ProjectData `chat_sessions` candidates reconciled per project per 5-minute sweep (default: 25; capped at 200)
+- `TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE` — Maximum active D1 `session_summaries` candidates reconciled globally per 5-minute sweep (default: 25; capped at 200)
+- `TERMINAL_SESSION_RECONCILE_DEFER_MS` — Retry delay for live-head, snapshot-protected, or temporarily ineligible terminal-session ledger candidates (default: 3600000; capped at 86400000)
 - `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h)
-- `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Evidence-based fallback threshold before stale working activity can be healed to idle (default: 300000)
+- `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Threshold before stale working activity is checked against authoritative SessionHost inventory (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
+- `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
+- `TASK_LIVENESS_MAX_ACP_SESSIONS` — Maximum task-scoped ACP sessions inspected per liveness probe (default: 5)
 - `TASK_LIVENESS_NODE_HEALTH_PROBE_TIMEOUT_MS` — Timeout for stale-VM-node health probes used by ProjectData idle cleanup and stuck-task reconciliation; a timeout is inconclusive and preserves the task/workspace (default: 5000)
+- `NODE_PROVISIONING_REQUEST_TIMEOUT_MS` — Durable direct provisioning allocation/reconciliation request budget, also used for background readiness and workspace dispatch (default: 5000).
+- `NODE_PROVISIONING_RETRY_INTERVAL_MS` — Delay between durable direct provisioning attempts (default: 30000).
+- `NODE_PROVISIONING_MAX_AGE_MS` — Maximum age of a durable direct provisioning intent before retries stop (default: 900000 / 15 min).
+- `NODE_PROVISIONING_MAX_ATTEMPTS` — Maximum durable direct provisioning attempts before retries stop (default: 30). Either allocation age or attempt exhaustion starts a separate bounded diagnostic publication phase using the same retry interval and attempt limit. The age limit applies only to allocation/reconciliation; the unresolved intent is retained. Empty provider inventory never authorizes another create or proves cleanup. All four `NODE_PROVISIONING_*` overrides are optional positive integers; invalid or unset values use their defaults.
 - `NODE_AGENT_READY_TIMEOUT_MS` — Max wait for freshly provisioned node-agent health
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` — Polling interval for fresh-node readiness checks
-- `VM_AGENT_REQUIRED_VERSION` — Deployment-generated required vm-agent build for reusable VM nodes. Official deploys set this from the Git commit SHA after publishing matching binaries; unset disables rollout gating for local/manual or skip-agent deploys.
+- `VM_AGENT_REQUIRED_VERSION` — Deployment-generated required vm-agent build for reusable VM nodes. Official deploys set this from the last commit that changed a vm-agent **build input** (see `scripts/deploy/resolve-vm-agent-release.sh`), not from the deployment commit, so Worker-only deploys leave the existing node pool reusable. Build inputs are `packages/vm-agent/**` minus exactly four pathspecs: `.claude/`, the top-level `AGENTS.md`, `**/*_test.go` and `*_test.go`. A commit touching **only** those paths does not rotate the release and does not drain the node pool. Anything else under the directory does rotate it, including a file that looks like documentation — the list excludes rather than includes on purpose, so an unrecognised new file fails safe by rotating (wasteful) instead of silently serving a stale binary under a current version. If a new non-build file should stop rotating the release, add it to `AGENT_SOURCE_EXCLUDES` rather than assuming its extension exempts it. Unset disables rollout gating for local/manual or skip-agent deploys.
 - `TASK_RUNNER_STEP_MAX_RETRIES` — Max retries per TaskRunner step before failing the task (default: 3)
 - `TASK_RUNNER_RETRY_BASE_DELAY_MS` — Base delay for TaskRunner retry backoff (default: 5000)
 - `TASK_RUNNER_RETRY_MAX_DELAY_MS` — Maximum delay for TaskRunner retry backoff (default: 60000)
@@ -447,6 +570,7 @@ by the read-only cron-liveness check.
 - `WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE` — Default delivery-history page size (default: `25`)
 - `WEBHOOK_DELIVERY_MAX_PAGE_SIZE` — Maximum delivery-history page size (default: `100`)
 - `WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS` — Recovery lease for processing deliveries without a submitted task (default: `300`)
+- `MAX_TRIGGERS_PER_PROJECT` — Platform default trigger cap per project (default: `20`). Editable per project in the Settings → Scaling & Scheduling → Task Limits field; a `NULL` `projects.max_triggers` falls back to this env default.
 
 ### Trial Onboarding (`/try` flow)
 
@@ -469,6 +593,10 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 ### Container/User
 
 - `CONTAINER_USER` — Optional `docker exec -u` override; when unset, auto-detects effective devcontainer user
+
+### Workspace Builds
+
+- `WORKSPACE_BUILD_QUEUE_DEPTH` — Concurrent devcontainer build slots per workspace VM (default: `1`, supported range: `1` through `16`). Generated cloud-init passes this from the Worker env to newly provisioned VM Agent systemd services. Invalid values do not enable additional build slots and fall back to the default one-slot behavior.
 
 ### Git Operations
 
@@ -566,7 +694,8 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD` — Critical threshold for memory `some` PSI `avg10`/`avg60` (default: 50.0)
 - `DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD` — Warning threshold for memory `full` PSI `avg10`/`avg60` (default: 10.0)
 - `DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD` — Critical threshold for memory `full` PSI `avg10`/`avg60` (default: 25.0)
-- `DEFAULT_EVICTION_DEBOUNCE_SECONDS` — Duplicate container eviction debounce window, in seconds (default: 30)
+- `DEFAULT_EVICTION_DEBOUNCE_SECONDS` — Minimum cooldown between ResourceGuard eviction attempts, in seconds (default: 30)
 - `DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS` — Deadline for pre-stop eviction snapshot capture, in seconds (default: 120)
 - `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` — Grace period passed to `docker stop --time` during eviction, in seconds (default: 10)
+- `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` — Maximum durable callback retry backoff, in seconds (default: 300); initial delay uses the eviction cooldown and HTTP callback timeout
 - `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)

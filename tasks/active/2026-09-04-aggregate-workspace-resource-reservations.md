@@ -1,0 +1,231 @@
+# Enforce aggregate workspace reservations during VM node placement
+
+## Context
+
+Production node `01M1M765QGSXG0NKSTRXDR32FF` was a Hetzner `cx23` with 2 vCPU and
+4096 MB RAM. Three workspaces were placed on it while each task carried the same
+resolved reservation (`2000` mCPU, `4096` MB memory, `40960` MB disk). The
+count-only `MAX_WORKSPACES_PER_NODE=3` guard admitted all three; the node later
+reported 98.8% memory and a 40.26 one-minute CPU load before heartbeat starvation
+and two false failures.
+
+The same failure recurred before release on production node
+`01M1PCG91VV30DSSJM9W3K9DBK`: a large deletion-recovery workspace and an
+unrelated medium archive-sharding workspace were both admitted with
+`resolved_reservation_json=NULL`. The node reached CPU load 59.04, memory 98.3%,
+and disk 88.7%, stopped heartbeating at 20:18:21Z, and reconciliation falsely
+failed both active tasks at 20:23:50Z/20:24:07Z with `node_stale_heartbeat`. It
+resumed heartbeats at 20:25:17Z while still at 99.4% memory, confirming that the
+aggregate admission gap—not permanent node loss—remained the release blocker.
+
+This task completes the aggregate-accounting slice of ideas
+`01KWVZKB5K7V02GZT3X3G0CWMZ` and `01KRAHJ0R7Y9N0EVS27JKYT8PF`. It builds on
+merged PR #1876 (`92b485644`, concurrency-safe admission/slot reservation) and
+merged PR #1943 (central placement resolution and provider-native capacity). It
+must not introduce another allocator, resource-requirement resolver, or SKU table.
+
+## Research findings
+
+- `resolveTaskStartPlacement()` is the single resource-requirement resolver. Its
+  exact `resolvedReservation` is persisted on the task and passed through
+  `TaskRunConfig` by submit, run, trigger-submit, SAM dispatch/retry, mission
+  scheduling, session recovery, and both MCP dispatch paths.
+- `createAndProvisionWorkspace()` receives that snapshot but
+  `reserveWorkspacePlacement()` omits `workspaces.resolved_reservation_json`.
+- Reusable-node selection checks one request against the node's total capacity,
+  then uses only an active-workspace count. It does not subtract reservations.
+- The final D1 `INSERT ... SELECT` correctly proves assignment, state, tenant and
+  capacity-pool scope atomically, but its capacity predicate is also count-only.
+- `nodes.provider_instance_vcpu_count`, `provider_instance_memory_mb`, and
+  `provider_instance_disk_gb` are the authoritative concrete capacity snapshot
+  introduced by the compute-pools work. `workspaces.resolved_reservation_json`
+  already exists, so no schema migration is needed.
+- Active placement occupants are `running`, `creating`, and `recovery`;
+  `stopped` and `deleted` release capacity.
+- Other direct `creating` workspace writers are the manual workspace route, the
+  dedicated trial orchestrator, and instant container sessions. They do not pass
+  through TaskRunner reusable-VM packing and must not gain a second requirement
+  resolver in this focused change.
+
+### TaskRunner reservation data flow
+
+All nine task-start entry points resolve once, persist the task snapshot, and pass
+that same object to `startTaskRunnerDO()`:
+
+1. `routes/tasks/submit.ts`
+2. `routes/tasks/run.ts`
+3. `services/trigger-submit.ts`
+4. `durable-objects/sam-session/tools/dispatch-task.ts`
+5. `durable-objects/sam-session/tools/retry-subtask.ts`
+6. `durable-objects/project-orchestrator/scheduling.ts`
+7. `services/session-recovery.ts`
+8. `routes/mcp/orchestration-tools.ts`
+9. `routes/mcp/dispatch-tool.ts`
+
+`startTaskRunnerDO()` stores it in `TaskRunConfig.resolvedReservation`.
+`createAndProvisionWorkspace()` now passes that object directly to
+`reserveWorkspacePlacement()`; the workspace-recovery unit test asserts object
+identity at this seam, and the D1 race test asserts the serialized workspace value
+is byte-for-byte `JSON.stringify()` of the same snapshot. No second resolver exists.
+
+## Required policy
+
+- Provider-native CPU and memory must be known before a node with an existing
+  active workspace can be reused. Provider-native disk is enforced when known;
+  missing disk capacity also blocks co-tenancy conservatively.
+- An empty otherwise-compatible node may accept one workspace even when legacy
+  capacity fields are absent. Once occupied, missing/malformed capacity or any
+  missing/malformed active reservation blocks further reuse.
+- An exclusive request requires an empty node. Any active exclusive reservation
+  blocks another request.
+- `MAX_WORKSPACES_PER_NODE` remains an optional additional hard cap, not the
+  capacity model.
+- The final correctness boundary remains one D1 `INSERT ... SELECT`; advisory
+  preselection must use the same shared capacity semantics.
+
+## Implementation checklist
+
+- [x] Add a shared reservation/capacity accounting helper with explicit parsing
+      and conservative legacy behavior.
+- [x] Persist the exact central `resolvedReservation` on the workspace `creating`
+      row without re-resolving it.
+- [x] Subtract active workspace reservations during reusable-node selection and
+      recheck after warm-node claims.
+- [x] Extend the final atomic placement CAS to prove aggregate CPU, memory, disk,
+      exclusivity, assignment, state, isolation, and the optional count cap.
+- [x] Preserve project/user/capacity-pool isolation predicates from PR #1943.
+- [x] Document the capacity policy and update `MAX_WORKSPACES_PER_NODE` wording.
+- [x] Add a retained process rule requiring aggregate resource invariants to be
+      enforced at the final atomic reservation boundary.
+- [x] Add a bounded single-thread virtual timeline with deterministic event
+      ordering for full-node and final-capacity races, stale/delayed heartbeats,
+      overlapping provisioning, retries, cancellation/failure, legacy data,
+      exclusivity, and exact snapshot persistence.
+- [x] Automate mutation calibration for the final capacity recheck, heartbeat
+      freshness, provisioning serialization, exact snapshot bind, and all three
+      resource predicates in the one-statement D1 CAS.
+- [x] Run lint, typecheck, build, formatting, repository policy checks, the full
+      unit suite, and the complete Workers/D1 suite.
+- [x] Run task-completion, Cloudflare, test-engineer, constitution, doc-sync, full
+      staging, and CI gates.
+- [ ] Run the label-triggered CodeRabbit gate after marking the PR ready, then
+      address or document any feedback.
+- [ ] After merge, verify production deploy and production placement telemetry.
+
+## Local validation evidence
+
+- `pnpm lint`: passed (existing warning-only findings).
+- `pnpm typecheck`: passed.
+- `pnpm test`: implementation packages passed; the parallel monorepo run produced
+  one infra `beforeAll` setup timeout, then `pnpm --dir infra test` passed 68/68 in
+  isolation.
+- `pnpm build`: 9/9 build tasks passed.
+- `pnpm --dir apps/api test:workers`: 65 files and 828 tests passed.
+- Focused API reservation, placement, node-selection, and recovery suites passed
+  26/26 after reconciliation with current main; the split capacity/admission
+  Worker suites passed 19/19, and the Worker-to-TaskRunner proxy passed 15/15
+  with an exact `resolvedReservation` forwarding assertion.
+- Mutation discrimination was verified after reconciliation: replacing all
+  three aggregate CAS resource comparisons with always-true non-negative checks
+  made the cx23 overpacking test admit another workspace and made the concurrent
+  final-capacity race produce two winners; mutating the serialized `sourceId`
+  made the exact-snapshot persistence assertion fail. Restoring the production
+  code returned both Worker suites to green.
+- Recovery validation added `test:scheduler` coverage for both lifecycle and
+  aggregate-capacity simulations: 2 files / 15 tests passed with stable virtual
+  event ordering. The real workerd/D1 capacity suite passed 8/8, including an
+  intercepted one-`prepare()` assertion and automated resource/snapshot mutation
+  calibration. The repaired focused API suite passed 5 files / 173 tests; the
+  previous invalid TaskRunner fixture now supplies the required resolved snapshot.
+- Format ratchet, file-size, source-contract, migration, Durable Object migration,
+  Wrangler binding, AST, runtime-boundary, and type-boundary checks passed.
+- Recovery exact-head CI at `5193f6b78` passed Build, Lint, Type Check,
+  Workspace Quality, Code Quality, Test, and Durable Object Workers. The main
+  API suite collected 658 files / 8,887 tests (up from the 8,849-test failed
+  predecessor head), web collected 302 / 3,600, and workerd collected the same
+  65 files with 869 tests (up from 828); no suite or file collection disappeared.
+- After rebasing onto the #2019 merge, GitHub Actions completed green at
+  `d06ac9880`: Lint, Type Check, Test, Build, Durable Object Workers,
+  VM Agent Smoke, UI Compliance, Workspace Quality Surfaces, Marketing Site,
+  Code Quality Checks, SonarCloud Code Analysis, Secret Scan, Preflight
+  Evidence, Specialist Review Evidence, and CodSpeed/benchmarks.
+- `pnpm quality:observability-noise` passed after staging deployment; available
+  credentials skipped D1 and Workers telemetry subchecks, and no significant
+  log noise was detected.
+
+## Staging validation evidence
+
+- Deploy Staging workflow `33970133289` succeeded on candidate `d06ac9880` for
+  branch `sam/finish-aggregate-capacity-reservation-6j1kap`.
+- Playwright authenticated against `https://api.sammy.party/api/auth/token-login`
+  with `SAM_PLAYWRIGHT_PRIMARY_USER`, loaded `https://app.sammy.party`, navigated
+  to project `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` and `/settings`, verified
+  `https://api.sammy.party/health` returned 200, and observed no browser console
+  errors or page errors.
+- Staging D1 preflight confirmed an enabled Hetzner platform cloud credential
+  (`platform_credentials.id=01KNY6DC06C9QCYQM0389NAGNT`) and zero active
+  workspace-role nodes before VM validation.
+- Whole-small-node live validation used marker
+  `pr2021-capacity-seq-1788618253219` with task-level requirements
+  `{minVcpu:2,minMemoryGb:4,minDiskGb:40,exclusiveNode:false,maxCoTenants:3}`.
+  Task `01M1RZ9J4SG28P9T07WF5QGN7P` created workspace
+  `01M1RZHW5D5ZFG1N4S3YNE4P9Z` on Hetzner `cx23` node
+  `01M1RZ9RW02Z3PN0BRBCVD93HX` with provider capacity `2 vCPU / 4096 MB /
+  40 GB` and exact persisted reservation
+  `{"cpuMillis":2000,"memoryMb":4096,"diskMb":40960,"exclusiveNode":false,"maxCoTenants":3,"source":"task","sourceId":"01M1RZ9J4SG28P9T07WF5QGN7P","version":1}`.
+- While that workspace was active, task `01M1RZJM8VV2A2254EZZF7DVA1` was
+  submitted with the same whole-node reservation. It was not placed on
+  `01M1RZ9RW02Z3PN0BRBCVD93HX`; it created workspace
+  `01M1RZV4V4GGGFWDJ1E1VSAQA1` on a different Hetzner `cx23` node
+  `01M1RZJV1X5PFDDDKAZHX1BP1P` with the same exact reservation shape.
+- Cleanup cancelled both staging tasks, deleted both staging workspaces, and
+  D1 reported zero active workspace-role nodes afterward.
+
+## Acceptance criteria
+
+- [x] A `cx23` fixture admits one `2000` mCPU / `4096` MB reservation and rejects
+      or reselects the second and third even when the count cap is three.
+- [x] A larger node admits exactly the aggregate combinations that fit.
+- [x] Two concurrent final reservations for the last CPU/memory capacity produce
+      exactly one winner.
+- [x] Exclusive-node rules hold in selection and the final CAS in both directions.
+- [x] Null/malformed legacy reservations fail closed for co-tenancy while an empty
+      compatible node still has an explicit single-workspace path.
+- [x] Creating and recovery reservations count; stopped and deleted reservations do
+      not.
+- [x] Capacity placement and resolved reservation snapshots persist unchanged.
+- [x] Existing same-user cross-project and project-pool isolation tests remain green.
+- [x] Staging provisions a real small/`cx23`-equivalent node, submits two whole-node
+      tasks concurrently, proves the second is not placed on that node, and returns
+      all staging VMs to zero.
+- [ ] Production deploy is green; new workspace rows contain reservation snapshots;
+      no active node exceeds its aggregate declared capacity. This is a post-merge
+      verification gate.
+
+## Post-mortem
+
+- **What broke**: reusable-node selection and the final placement CAS treated a
+  workspace as one countable slot instead of a CPU/memory/disk reservation.
+- **Root cause**: the audit snapshot and provider capacity were added on separate
+  paths, but neither was connected to aggregate accounting at the atomic write.
+- **Timeline**: the count-only final CAS landed in August 2026; provider-native
+  capacity followed later that month; the September 4 production incident exposed
+  the remaining composition gap.
+- **Why it was not caught**: race tests proved slot uniqueness and scope isolation,
+  while capacity tests proved only that a single request fit a whole node. No test
+  combined concurrency with aggregate resource exhaustion.
+- **Class of bug**: a concurrency-safe admission check enforced a proxy limit rather
+  than the actual aggregate resource invariant.
+- **Process fix**: `.claude/rules/69-aggregate-capacity-at-final-reservation.md`
+  now requires every reusable-resource
+  preselection invariant to be repeated in the final atomic reservation statement,
+  with a discriminating last-capacity race test.
+
+## References
+
+- `apps/api/src/services/workspace-placement.ts`
+- `apps/api/src/durable-objects/task-runner/node-selection.ts`
+- `apps/api/src/durable-objects/task-runner/workspace-steps.ts`
+- `apps/api/src/services/placement-resolver.ts`
+- `apps/api/tests/workers/vm-admission-control-races.test.ts`
+- PR #1876 and PR #1943

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os/exec"
@@ -109,18 +110,22 @@ func (s *Server) removeWorkspaceContainer(workspaceID string) {
 func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 	prefix := workspaceID + ":"
 
+	var hosts []*acp.SessionHost
 	s.sessionHostMu.Lock()
 	for key, host := range s.sessionHosts {
 		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
-		host.Stop()
+		hosts = append(hosts, host)
 		delete(s.sessionHosts, key)
 		delete(s.sessionMcpServers, key)
 		delete(s.sessionProfileOvr, key)
 		delete(s.sessionTaskCtx, key)
 	}
 	s.sessionHostMu.Unlock()
+	for _, host := range hosts {
+		host.Stop()
+	}
 
 	// Clean up all persisted MCP servers for this workspace (best-effort).
 	if s.store != nil {
@@ -594,7 +599,7 @@ func createWorkspaceRuntimeOptions(body createWorkspaceRequest, devcontainerConf
 		CloneURL:               strings.TrimSpace(body.CloneURL),
 		RepositoryHost:         strings.TrimSpace(body.RepositoryHost),
 		RepositoryPath:         strings.TrimSpace(body.RepositoryPath),
-		Lightweight:            body.Lightweight,
+		Lightweight:            lightweightOpt(body.Lightweight),
 		DevcontainerConfigName: devcontainerConfigName,
 		DefaultBranch:          strings.TrimSpace(body.DefaultBranch),
 		ProjectID:              strings.TrimSpace(body.ProjectID),
@@ -795,6 +800,13 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	lock := s.workspaceLifecycleLock(workspaceID)
+	if err := lock.Lock(r.Context()); err != nil {
+		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
+		return
+	}
+	defer lock.Unlock()
+
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "workspace not found")
@@ -835,6 +847,144 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "stopped"})
 }
 
+type workspaceReprovisionRequest struct {
+	EvictionGeneration         string  `json:"evictionGeneration"`
+	ExpectedEvictionGeneration *string `json:"expectedEvictionGeneration"`
+}
+
+func decodeWorkspaceReprovisionRequest(w http.ResponseWriter, r *http.Request) (workspaceReprovisionRequest, bool) {
+	var body workspaceReprovisionRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid workspace restart request")
+		return body, false
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid workspace restart request")
+		return body, false
+	}
+	return body, true
+}
+
+func validEvictionGeneration(value string) bool {
+	// Canonical ULIDs have 26 Crockford base32 characters and fit in 128 bits.
+	if len(value) != 26 || value[0] > '7' {
+		return false
+	}
+	for _, ch := range value {
+		if !strings.ContainsRune("0123456789ABCDEFGHJKMNPQRSTVWXYZ", ch) {
+			return false
+		}
+	}
+	return true
+}
+
+func validateWorkspaceReprovisionGeneration(runtime *WorkspaceRuntime, body workspaceReprovisionRequest) (int, error) {
+	if body.EvictionGeneration == "" && body.ExpectedEvictionGeneration == nil && runtime.Status != "evicted" && runtime.EvictionGeneration == "" {
+		return 0, nil // Compatibility for management clients predating eviction fencing.
+	}
+	if !validEvictionGeneration(body.EvictionGeneration) || body.ExpectedEvictionGeneration == nil {
+		return http.StatusBadRequest, errors.New("workspace restart requires a valid evictionGeneration and expectedEvictionGeneration")
+	}
+	if *body.ExpectedEvictionGeneration != runtime.EvictionGeneration || body.EvictionGeneration == runtime.EvictionGeneration {
+		return http.StatusConflict, errors.New("workspace eviction generation changed")
+	}
+	return 0, nil
+}
+
+// claimWorkspaceReprovision serializes a restart with eviction and recovery for
+// this workspace. SQLite I/O runs without the global workspace mutex; the active
+// claim prevents ordinary metadata updates from changing the lifecycle state.
+func (s *Server) claimWorkspaceReprovision(ctx context.Context, workspaceID string, body workspaceReprovisionRequest, allowedStatuses []string) (*WorkspaceRuntime, WorkspaceRuntime, int, error) {
+	lock := s.workspaceLifecycleLock(workspaceID)
+	if err := lock.Lock(ctx); err != nil {
+		return nil, WorkspaceRuntime{}, http.StatusRequestTimeout, err
+	}
+	defer lock.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, WorkspaceRuntime{}, http.StatusRequestTimeout, err
+	}
+	if current, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		if _, err := s.refreshWorkspaceEvictionState(current); err != nil {
+			return nil, WorkspaceRuntime{}, http.StatusServiceUnavailable, err
+		}
+	}
+	runtime, previous, statusCode, err := s.prepareWorkspaceReprovision(workspaceID, body, allowedStatuses)
+	if err != nil {
+		return nil, WorkspaceRuntime{}, statusCode, err
+	}
+	statusCode, persistErr := s.persistWorkspaceReprovision(&previous, body.EvictionGeneration)
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	if persistErr != nil {
+		runtime.ProvisioningActive = previous.ProvisioningActive
+		return nil, WorkspaceRuntime{}, statusCode, persistErr
+	}
+	if body.EvictionGeneration != "" {
+		runtime.EvictionGeneration = body.EvictionGeneration
+	}
+	runtime.Status = "creating"
+	runtime.UpdatedAt = nowUTC()
+	return runtime, *runtime, 0, nil
+}
+
+func (s *Server) prepareWorkspaceReprovision(workspaceID string, body workspaceReprovisionRequest, allowedStatuses []string) (*WorkspaceRuntime, WorkspaceRuntime, int, error) {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	runtime := s.workspaces[workspaceID]
+	if runtime == nil {
+		return nil, WorkspaceRuntime{}, http.StatusNotFound, errors.New("workspace not found")
+	}
+	if runtime.MetadataUnavailable {
+		return nil, WorkspaceRuntime{}, http.StatusServiceUnavailable, errWorkspaceMetadataUnavailable
+	}
+	allowed := false
+	for _, status := range allowedStatuses {
+		allowed = allowed || runtime.Status == status
+	}
+	if !allowed || runtime.ProvisioningActive {
+		return nil, WorkspaceRuntime{}, http.StatusConflict, errors.New("workspace cannot be restarted from its current state")
+	}
+	if status, err := validateWorkspaceReprovisionGeneration(runtime, body); err != nil {
+		return nil, WorkspaceRuntime{}, status, err
+	}
+	previous := *runtime
+	runtime.ProvisioningActive = true
+	return runtime, previous, 0, nil
+}
+
+func (s *Server) persistWorkspaceReprovision(previous *WorkspaceRuntime, generation string) (int, error) {
+	if generation == "" {
+		return 0, nil
+	}
+	if s.store == nil {
+		return http.StatusInternalServerError, errors.New("workspace restart persistence is unavailable")
+	}
+	if err := s.writeWorkspaceMetadata(previous); err != nil {
+		slog.Error("Failed to persist workspace before restart", "workspace", previous.ID, "error", err)
+		return http.StatusInternalServerError, errors.New("failed to persist workspace restart")
+	}
+	changed, err := s.store.CompareAndSwapWorkspaceEvictionGeneration(previous.ID, previous.EvictionGeneration, generation)
+	if err != nil {
+		slog.Error("Failed to persist workspace restart generation", "workspace", previous.ID, "error", err)
+		return http.StatusInternalServerError, errors.New("failed to persist workspace restart")
+	}
+	if !changed {
+		return http.StatusConflict, errors.New("workspace eviction generation changed")
+	}
+	return 0, nil
+}
+
+func writeWorkspaceReprovisionError(w http.ResponseWriter, status int, err error) {
+	if status == http.StatusConflict {
+		writeJSON(w, status, map[string]interface{}{"error": "invalid_transition", "message": err.Error()})
+		return
+	}
+	writeError(w, status, err.Error())
+}
+
 func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
@@ -846,25 +996,20 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	body, ok := decodeWorkspaceReprovisionRequest(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-
-	// CAS-style transition: only restart from stopped or error
-	if !s.casWorkspaceStatus(workspaceID, []string{"stopped", "error"}, "creating") {
-		writeJSON(w, http.StatusConflict, map[string]interface{}{
-			"error":   "invalid_transition",
-			"message": "Workspace cannot be restarted from current state: " + runtime.Status,
-		})
+	runtime, snapshot, statusCode, err := s.claimWorkspaceReprovision(r.Context(), workspaceID, body, []string{"stopped", "evicted", "error"})
+	if err != nil {
+		writeWorkspaceReprovisionError(w, statusCode, err)
 		return
 	}
 	s.appendNodeEvent(workspaceID, "info", "workspace.restarting", "Workspace restart started", nil)
 
 	s.startWorkspaceProvision(
 		runtime,
-		s.snapshotWorkspaceRuntime(runtime),
+		snapshot,
 		"workspace.restart_failed",
 		"Workspace restart failed",
 		"workspace.restarted",
@@ -885,25 +1030,20 @@ func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	body, ok := decodeWorkspaceReprovisionRequest(w, r)
 	if !ok {
-		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-
-	// CAS-style transition: only rebuild from running/recovery/error
-	if !s.casWorkspaceStatus(workspaceID, []string{"running", "recovery", "error"}, "creating") {
-		writeJSON(w, http.StatusConflict, map[string]interface{}{
-			"error":   "invalid_transition",
-			"message": "Workspace must be running, recovery, or in error state to rebuild, currently " + runtime.Status,
-		})
+	runtime, snapshot, statusCode, err := s.claimWorkspaceReprovision(r.Context(), workspaceID, body, []string{"running", "recovery", "error"})
+	if err != nil {
+		writeWorkspaceReprovisionError(w, statusCode, err)
 		return
 	}
 	s.appendNodeEvent(workspaceID, "info", "workspace.rebuilding", "Rebuilding devcontainer", nil)
 
 	s.startWorkspaceProvision(
 		runtime,
-		s.snapshotWorkspaceRuntime(runtime),
+		snapshot,
 		"workspace.rebuild_failed",
 		"Workspace rebuild failed",
 		"workspace.rebuilt",
@@ -924,6 +1064,13 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !s.requireNodeManagementAuth(w, r, workspaceID) {
 		return
 	}
+
+	lock := s.workspaceLifecycleLock(workspaceID)
+	if err := lock.Lock(r.Context()); err != nil {
+		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
+		return
+	}
+	defer lock.Unlock()
 
 	s.stopSessionHostsForWorkspace(workspaceID)
 
@@ -1069,8 +1216,48 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Store project/chat session IDs on workspace runtime for ACP heartbeat and
-	// VM-agent-local eviction snapshots.
+	finishCreate, err := s.beginSessionCreation(r.Context(), workspaceID, strings.TrimSpace(body.SessionID))
+	if err != nil {
+		writeError(w, http.StatusConflict, "session creation wait canceled")
+		return
+	}
+	defer finishCreate()
+
+	// A persisted tab does not retain immutable bootstrap provenance. Refuse
+	// automatic replay after restart before changing reporter/routing state.
+	if _, exists := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); !exists && s.store != nil {
+		tabs, err := s.store.ListTabs(workspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot verify persisted session identity")
+			return
+		}
+		for _, tab := range tabs {
+			if _, known := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); tab.ID == strings.TrimSpace(body.SessionID) && !known {
+				writeError(w, http.StatusConflict, "persisted session requires reconnect before bootstrap retry")
+				return
+			}
+		}
+	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	s.sessionHostMu.Lock()
+	if _, exists := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); !exists && s.workspaceRestorePendingLocked(workspaceID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
+		return
+	}
+	session, idempotentHit, err := s.agentSessions.CreateRouted(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey, projectID, chatSID)
+	s.sessionHostMu.Unlock()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if idempotentHit {
+		finishCreate()
+		writeJSON(w, http.StatusCreated, session)
+		return
+	}
+
+	// Store project/chat identity for heartbeat and eviction snapshots.
 	if projectID != "" || chatSID != "" {
 		var updated *WorkspaceRuntime
 		s.workspaceMu.Lock()
@@ -1106,12 +1293,6 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	session, idempotentHit, err := s.agentSessions.Create(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	s.registerSessionMcpServers(workspaceID, session.ID, mcpServers)
 
 	if !idempotentHit {
@@ -1133,6 +1314,7 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	finishCreate()
 	writeJSON(w, http.StatusCreated, session)
 }
 
@@ -1278,11 +1460,14 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	s.registerSessionMcpServers(workspaceID, sessionID, mcpServers)
-
 	// Always store profile overrides so getOrCreateSessionHost can apply them.
 	// Even empty overrides are stored to distinguish "no profile" from "not set".
 	s.sessionHostMu.Lock()
+	if s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusConflict, "workspace session bootstrap is in progress")
+		return
+	}
 	if s.sessionTaskCtx == nil {
 		s.sessionTaskCtx = make(map[string]taskCallbackContext)
 	}
@@ -1313,6 +1498,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		delete(s.sessionTaskCtx, hostKey)
 	}
 	s.sessionHostMu.Unlock()
+	s.registerSessionMcpServers(workspaceID, sessionID, mcpServers)
 	if body.Model != "" || body.PermissionMode != "" || body.Effort != "" || body.OpencodeProvider != "" || body.OpencodeBaseURL != "" {
 		slog.Info("Profile overrides registered for agent session",
 			"workspace", workspaceID, "session", sessionID,
@@ -1323,6 +1509,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 
 	// Create or retrieve the SessionHost for this session.
 	host := s.getOrCreateSessionHost(hostKey, workspaceID, sessionID, session, runtime, "")
+	if host == nil {
+		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
+		return
+	}
 
 	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{
 		"sessionId": sessionID,

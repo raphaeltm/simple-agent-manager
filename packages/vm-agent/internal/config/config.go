@@ -136,6 +136,15 @@ const (
 	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
 	DefaultDeployBuildPublishTimeout = 20 * time.Minute
 
+	// DefaultWorkspaceBuildQueueDepth preserves the historical single devcontainer
+	// build slot per VM while allowing operators to tune the per-node queue depth.
+	// Override via WORKSPACE_BUILD_QUEUE_DEPTH.
+	DefaultWorkspaceBuildQueueDepth = 1
+
+	// MaxWorkspaceBuildQueueDepth bounds the per-node devcontainer build semaphore
+	// so direct env usage cannot allocate an unbounded channel.
+	MaxWorkspaceBuildQueueDepth = 16
+
 	// DefaultDeployTeardownTimeout bounds per-environment deployment teardown.
 	// Override via DEPLOY_TEARDOWN_TIMEOUT.
 	DefaultDeployTeardownTimeout = 2 * time.Minute
@@ -266,6 +275,7 @@ type Config struct {
 	ACPTerminalActivityReportAttempts int           // Retry attempts for terminal activity reports (default: 5, env: ACTIVITY_TERMINAL_REPORT_ATTEMPTS)
 	ACPTerminalActivityReportBackoff  time.Duration // Retry backoff for terminal activity reports (default: 1s, env: ACTIVITY_TERMINAL_REPORT_BACKOFF)
 	ACPCredentialSyncTimeout          time.Duration // Timeout for auth-file sync-back during shutdown (default: 10s, env: ACP_CREDENTIAL_SYNC_TIMEOUT)
+	ACPRestartAttemptTimeout          time.Duration // Bounds one process-monitor agent restart attempt (default: 5m, env: ACP_RESTART_ATTEMPT_TIMEOUT)
 	ACPActivityReportTimeout          time.Duration // Timeout for each ACP activity callback attempt (default: 10s, env: ACP_ACTIVITY_REPORT_TIMEOUT)
 	ACPCheckpointPreemptGrace         time.Duration // Graceful cancel/close wait before force fallback (default: 30s, env: ACP_CHECKPOINT_PREEMPT_GRACE)
 	ACPCheckpointPreemptMaxGrace      time.Duration // Maximum caller-selected grace (default: 2m, env: ACP_CHECKPOINT_PREEMPT_MAX_GRACE)
@@ -298,6 +308,10 @@ type Config struct {
 	// Configurable per constitution principle XI.
 	DevcontainerBuildTimeout time.Duration // Max time for a single devcontainer up call (env: DEVCONTAINER_BUILD_TIMEOUT, default: 15m)
 
+	// WorkspaceBuildQueueDepth limits concurrent devcontainer builds on this VM.
+	// Configurable per constitution principle XI.
+	WorkspaceBuildQueueDepth int // Concurrent build slots (env: WORKSPACE_BUILD_QUEUE_DEPTH, default: 1)
+
 	// Devcontainer cache settings — opportunistic image caching via container registry.
 	// Configurable per constitution principle XI.
 	DevcontainerCacheEnabled     bool          // Enable devcontainer image caching (env: DEVCONTAINER_CACHE_ENABLED, default: false)
@@ -324,16 +338,17 @@ type Config struct {
 	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
 
 	// Active resource monitoring settings - configurable per constitution principle XI
-	PSIPollInterval                time.Duration // PSI memory pressure polling interval (env: DEFAULT_PSI_POLL_INTERVAL_SECONDS, default: 10s)
-	ContainerStatsInterval         time.Duration // Docker stats polling interval (env: DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS, default: 30s)
-	PSIMemorySomeWarningThreshold  float64       // some memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD, default: 25.0)
-	PSIMemorySomeCriticalThreshold float64       // some memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD, default: 50.0)
-	PSIMemoryFullWarningThreshold  float64       // full memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD, default: 10.0)
-	PSIMemoryFullCriticalThreshold float64       // full memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD, default: 25.0)
-	EvictionDebounceWindow         time.Duration // Duplicate eviction debounce window (env: DEFAULT_EVICTION_DEBOUNCE_SECONDS, default: 30s)
-	EvictionSnapshotTimeout        time.Duration // Pre-stop eviction snapshot deadline (env: DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS, default: 120s)
-	EvictionDockerStopTimeout      time.Duration // Graceful docker stop timeout for evictions (env: DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS, default: 10s)
-	EvictionResolveTimeout         time.Duration // Docker label resolution timeout for evictions (env: DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS, default: 5s)
+	PSIPollInterval                  time.Duration // PSI memory pressure polling interval (env: DEFAULT_PSI_POLL_INTERVAL_SECONDS, default: 10s)
+	ContainerStatsInterval           time.Duration // Docker stats polling interval (env: DEFAULT_CONTAINER_STATS_INTERVAL_SECONDS, default: 30s)
+	PSIMemorySomeWarningThreshold    float64       // some memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_SOME_WARNING_THRESHOLD, default: 25.0)
+	PSIMemorySomeCriticalThreshold   float64       // some memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_SOME_CRITICAL_THRESHOLD, default: 50.0)
+	PSIMemoryFullWarningThreshold    float64       // full memory PSI warning threshold (env: DEFAULT_PSI_MEMORY_FULL_WARNING_THRESHOLD, default: 10.0)
+	PSIMemoryFullCriticalThreshold   float64       // full memory PSI critical threshold (env: DEFAULT_PSI_MEMORY_FULL_CRITICAL_THRESHOLD, default: 25.0)
+	EvictionDebounceWindow           time.Duration // Duplicate eviction debounce window (env: DEFAULT_EVICTION_DEBOUNCE_SECONDS, default: 30s)
+	EvictionSnapshotTimeout          time.Duration // Pre-stop eviction snapshot deadline (env: DEFAULT_EVICTION_SNAPSHOT_TIMEOUT_SECONDS, default: 120s)
+	EvictionDockerStopTimeout        time.Duration // Graceful docker stop timeout for evictions (env: DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS, default: 10s)
+	EvictionCallbackRetryMaxInterval time.Duration // Durable callback retry backoff cap (env: DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS, default: 300s)
+	EvictionResolveTimeout           time.Duration // Docker label resolution timeout for evictions (env: DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS, default: 5s)
 
 	// Git integration settings - configurable per constitution principle XI
 	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 5s)
@@ -393,9 +408,12 @@ type Config struct {
 	ErrorReportCollectorJobs  int           // Maximum concurrent automatic evidence collectors (default: 1)
 
 	// System info collection settings - configurable per constitution principle XI
-	SysInfoDockerTimeout  time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
-	SysInfoVersionTimeout time.Duration // Timeout for version check commands (default: 5s)
-	SysInfoCacheTTL       time.Duration // Cache TTL for system info responses (default: 5s)
+	SysInfoDockerTimeout                    time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
+	SysInfoVersionTimeout                   time.Duration // Timeout for version check commands (default: 5s)
+	SysInfoCacheTTL                         time.Duration // Cache TTL for system info responses (default: 5s)
+	HeartbeatDockerStatsTimeout             time.Duration // Timeout for heartbeat Docker stats (default: 2s)
+	HeartbeatWorkspaceMetricsMaxContainers  int           // Max workspace containers measured per heartbeat (default: 8)
+	HeartbeatWorkspaceMetricsMaxOutputBytes int64         // Max bytes read from heartbeat Docker metric commands (default: 64 KiB)
 
 	// Log reader/stream settings - configurable per constitution principle XI
 	LogReaderTimeout          time.Duration // Timeout for journalctl read commands (default: 30s)

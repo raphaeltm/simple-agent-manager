@@ -36,6 +36,7 @@ import {
   type SessionSnapshotStatus,
 } from '../../services/session-snapshots';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
+import type { WorkspaceDeletionCallbackKind } from '../../services/workspace-deletion-callback-signal';
 import { assertWorkspaceCallbackResourceById, verifyWorkspaceCallbackAuth } from './_helpers';
 
 const sessionSnapshotRoutes = new Hono<{ Bindings: Env }>();
@@ -155,7 +156,7 @@ function containsOnlyRegenerableOpenCodeSkips(manifest: SessionSnapshotManifest)
 async function requireWorkspace(
   c: SnapshotRouteContext,
   workspaceId: string,
-  callback = 'session_snapshot'
+  callback: WorkspaceDeletionCallbackKind = 'session_snapshot'
 ) {
   const db = drizzle(c.env.DATABASE, { schema });
   const rows = await db
@@ -218,10 +219,12 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/prepare', async (c) => {
   const uploadTargets = await resolveSessionSnapshotUploadTargets(c.env, {
     workspaceId,
     userId: workspace.userId,
+    projectId: workspace.projectId,
     chatSessionId,
     generation: prepared.generation,
     directUploadAvailable,
     directUploadSupported,
+    sourceNodeId: workspace.nodeId,
   });
   if (uploadTargets.needsRelayProvisioning && workspace.nodeId) {
     c.executionCtx.waitUntil(
@@ -294,8 +297,10 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/artifacts/:artifact/upload-url
   await verifySessionSnapshotRelayAuthorization(
     c.env,
     workspace.userId,
+    workspace.projectId,
     c.req.header(SESSION_SNAPSHOT_RELAY_NODE_ID_HEADER),
-    c.req.header(SESSION_SNAPSHOT_RELAY_AUTHORIZATION_HEADER)
+    c.req.header(SESSION_SNAPSHOT_RELAY_AUTHORIZATION_HEADER),
+    workspace.nodeId
   );
   const capture = await db
     .select({ generation: schema.sessionSnapshots.captureGeneration })

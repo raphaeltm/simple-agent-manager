@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -31,6 +32,13 @@ func firstNonEmpty(vals ...string) string {
 // workspaceRuntimeOpts holds optional fields for upsertWorkspaceRuntime that
 // must be set under the workspace mutex to avoid data races with concurrent
 // goroutines reading the runtime struct.
+//
+// Every string field uses its zero value to mean "not supplied", so a caller
+// that only refreshes status or a callback token leaves the rest untouched.
+// Lightweight is a pointer for the same reason: a plain bool cannot express
+// "not supplied", and the flag gates cf-container runtime-asset injection
+// (agent_ws.go) plus devcontainer recovery (workspace_provisioning.go), so an
+// unrelated caller must not be able to clear it. Use lightweightOpt to set it.
 type workspaceRuntimeOpts struct {
 	GitUserName            string
 	GitUserEmail           string
@@ -40,14 +48,20 @@ type workspaceRuntimeOpts struct {
 	CloneURL               string
 	RepositoryHost         string
 	RepositoryPath         string
-	Lightweight            bool
+	Lightweight            *bool // nil leaves the runtime's existing flag unchanged
 	DevcontainerConfigName string
 	DevcontainerCache      DevcontainerCacheCredentials
 	DefaultBranch          string // project's actual default branch; used by the push guard
 	ProjectID              string
 	ChatSessionID          string
+	EvictionGeneration     string // Initial hydration only; existing runs advance through explicit restart CAS.
 	TaskID                 string
 }
+
+// lightweightOpt returns an explicit override for workspaceRuntimeOpts.Lightweight.
+// "Not supplied" is expressed by omitting this call entirely, leaving the struct
+// field at its nil zero value.
+func lightweightOpt(v bool) *bool { return &v }
 
 func (s *Server) routedNodeID(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-SAM-Node-Id"))
@@ -164,6 +178,55 @@ func (s *Server) checkWorkspaceRequestAuth(r *http.Request, workspaceID string) 
 	return err == nil
 }
 
+var errWorkspaceMetadataUnavailable = errors.New("workspace metadata is unavailable")
+
+// refreshWorkspaceEvictionState must run under the workspace lifecycle lock.
+// Prepared stop intents are durable before Docker stops, so their marker can be
+// newer than the in-memory lifecycle state after a failed or interrupted stop.
+func (s *Server) refreshWorkspaceEvictionState(runtime *WorkspaceRuntime) (WorkspaceRuntime, error) {
+	snapshot := s.snapshotWorkspaceRuntime(runtime)
+	if snapshot.MetadataUnavailable {
+		return snapshot, errWorkspaceMetadataUnavailable
+	}
+	if s.store == nil || snapshot.Status == "evicted" {
+		return snapshot, nil
+	}
+	meta, err := s.store.GetWorkspaceMetadata(snapshot.ID)
+	if err != nil || (meta != nil && meta.EvictionGeneration != snapshot.EvictionGeneration) {
+		s.workspaceMu.Lock()
+		runtime.MetadataUnavailable = true
+		s.workspaceMu.Unlock()
+		return snapshot, errWorkspaceMetadataUnavailable
+	}
+	if meta != nil && meta.Evicted {
+		s.workspaceMu.Lock()
+		runtime.Status = "evicted"
+		runtime.UpdatedAt = nowUTC()
+		snapshot = *runtime
+		s.workspaceMu.Unlock()
+	}
+	return snapshot, nil
+}
+
+func (s *Server) requireWorkspaceReconnectState(w http.ResponseWriter, r *http.Request, runtime *WorkspaceRuntime) bool {
+	lock := s.workspaceLifecycleLock(runtime.ID)
+	if err := lock.Lock(r.Context()); err != nil {
+		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
+		return false
+	}
+	defer lock.Unlock()
+	snapshot, err := s.refreshWorkspaceEvictionState(runtime)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return false
+	}
+	if snapshot.Status == "evicted" {
+		writeError(w, http.StatusConflict, "workspace was evicted; restart it before reconnecting")
+		return false
+	}
+	return true
+}
+
 func (s *Server) getWorkspaceRuntime(workspaceID string) (*WorkspaceRuntime, bool) {
 	s.workspaceMu.RLock()
 	defer s.workspaceMu.RUnlock()
@@ -200,7 +263,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.Branch = branch
 			metadataChanged = true
 		}
-		if status != "" {
+		if status != "" && runtime.Status != "evicted" && !runtime.ProvisioningActive && !runtime.MetadataUnavailable {
 			runtime.Status = status
 		}
 		if callbackToken != "" {
@@ -251,7 +314,9 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.RepositoryPath = opt.RepositoryPath
 			metadataChanged = true
 		}
-		runtime.Lightweight = opt.Lightweight
+		if opt.Lightweight != nil {
+			runtime.Lightweight = *opt.Lightweight
+		}
 		if opt.DevcontainerConfigName != "" {
 			runtime.DevcontainerConfigName = opt.DevcontainerConfigName
 		}
@@ -274,7 +339,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		}
 		runtime.UpdatedAt = time.Now().UTC()
 
-		if metadataChanged && runtime.Repository != "" {
+		if metadataChanged && runtime.Repository != "" && !runtime.MetadataUnavailable {
 			s.persistWorkspaceMetadata(runtime)
 		}
 		return runtime
@@ -286,16 +351,18 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	effectiveBranch := branch
 	var persistedWorkspaceDir, persistedContainerWorkDir, persistedContainerLabelValue, persistedContainerUser string
 	var persistedCallbackToken string
-	var persistedChatSessionID string
+	var persistedChatSessionID, persistedEvictionGeneration string
 	var persistedBaseBranch, persistedDefaultBranch string
 	var persistedRepoProvider, persistedCloneURL, persistedRepositoryHost, persistedRepositoryPath string
-	var persistedLightweight bool
+	var persistedLightweight, metadataUnavailable bool
 	var persistedDevcontainerConfigName string
 
 	if s.store != nil {
 		meta, err := s.store.GetWorkspaceMetadata(workspaceID)
 		if err != nil {
 			slog.Warn("Failed to read persisted workspace metadata", "workspace", workspaceID, "error", err)
+			metadataUnavailable = true
+			status = "error"
 		} else if meta != nil {
 			slog.Info("Hydrated workspace metadata from SQLite",
 				"workspace", workspaceID, "repository", meta.Repository,
@@ -318,6 +385,10 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			persistedRepositoryHost = meta.RepositoryHost
 			persistedRepositoryPath = meta.RepositoryPath
 			persistedChatSessionID = meta.ChatSessionID
+			persistedEvictionGeneration = meta.EvictionGeneration
+			if meta.Evicted {
+				status = "evicted"
+			}
 			persistedLightweight = meta.Lightweight
 			persistedDevcontainerConfigName = meta.DevcontainerConfigName
 		}
@@ -361,11 +432,13 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		CallbackToken:          firstNonEmpty(strings.TrimSpace(callbackToken), strings.TrimSpace(persistedCallbackToken)),
 		ProjectID:              opt.ProjectID,
 		ChatSessionID:          firstNonEmpty(opt.ChatSessionID, persistedChatSessionID),
+		EvictionGeneration:     firstNonEmpty(persistedEvictionGeneration, opt.EvictionGeneration),
+		MetadataUnavailable:    metadataUnavailable,
 		TaskID:                 opt.TaskID,
 		GitUserName:            opt.GitUserName,
 		GitUserEmail:           opt.GitUserEmail,
 		GitHubID:               opt.GitHubID,
-		Lightweight:            opt.Lightweight || persistedLightweight,
+		Lightweight:            (opt.Lightweight != nil && *opt.Lightweight) || persistedLightweight,
 		DevcontainerConfigName: firstNonEmpty(opt.DevcontainerConfigName, persistedDevcontainerConfigName),
 		DefaultBranch:          firstNonEmpty(opt.DefaultBranch, persistedDefaultBranch),
 		DevcontainerCache:      opt.DevcontainerCache,
@@ -373,7 +446,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	}
 	s.workspaces[workspaceID] = runtime
 
-	if effectiveRepo != "" {
+	if effectiveRepo != "" && !metadataUnavailable {
 		s.persistWorkspaceMetadata(runtime)
 	}
 	return runtime
@@ -502,7 +575,10 @@ func (s *Server) casWorkspaceStatus(workspaceID string, expectedStatuses []strin
 
 func (s *Server) removeWorkspaceRuntime(workspaceID string) {
 	s.workspaceMu.Lock()
-	defer s.workspaceMu.Unlock()
+	defer func() {
+		s.workspaceMu.Unlock()
+		s.clearRemovedWorkspaceRestores(workspaceID)
+	}()
 
 	if runtime, ok := s.workspaces[workspaceID]; ok {
 		runtime.PTY.CloseAllSessions()
@@ -519,13 +595,19 @@ func (s *Server) removeWorkspaceRuntime(workspaceID string) {
 }
 
 // persistWorkspaceMetadata writes workspace runtime state to SQLite for
-// recovery after agent restarts. Called outside the workspace mutex since
-// the store has its own locking.
+// recovery after agent restarts. Callers must pass a snapshot or hold workspaceMu
+// while reading mutable runtime fields.
 func (s *Server) persistWorkspaceMetadata(runtime *WorkspaceRuntime) {
-	if s.store == nil || runtime == nil {
-		return
+	if err := s.writeWorkspaceMetadata(runtime); err != nil {
+		slog.Warn("Failed to persist workspace metadata", "workspace", runtime.ID, "error", err)
 	}
-	if err := s.store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{
+}
+
+func (s *Server) writeWorkspaceMetadata(runtime *WorkspaceRuntime) error {
+	if s.store == nil || runtime == nil {
+		return nil
+	}
+	return s.store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{
 		WorkspaceID:            runtime.ID,
 		Repository:             runtime.Repository,
 		Branch:                 runtime.Branch,
@@ -541,11 +623,11 @@ func (s *Server) persistWorkspaceMetadata(runtime *WorkspaceRuntime) {
 		RepositoryHost:         runtime.RepositoryHost,
 		RepositoryPath:         runtime.RepositoryPath,
 		ChatSessionID:          runtime.ChatSessionID,
+		EvictionGeneration:     runtime.EvictionGeneration,
+		Evicted:                runtime.Status == "evicted",
 		Lightweight:            runtime.Lightweight,
 		DevcontainerConfigName: runtime.DevcontainerConfigName,
-	}); err != nil {
-		slog.Warn("Failed to persist workspace metadata", "workspace", runtime.ID, "error", err)
-	}
+	})
 }
 
 func (s *Server) workspaceSessionCount(workspaceID string) int {

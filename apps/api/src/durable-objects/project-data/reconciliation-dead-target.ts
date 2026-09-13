@@ -2,6 +2,7 @@ import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
 import { transitionTaskToTerminal } from '../../services/task-terminal-transition';
 import { recordActivityEventInternal } from './activity';
+import { terminalizeChatSessionActivity } from './session-state';
 import * as sessions from './sessions';
 import type { Env as DOEnv } from './types';
 
@@ -50,7 +51,7 @@ export async function terminallyFailDeadTarget(
   candidate: DeadTargetCandidate,
   targetResult: DeadTargetResult,
   hooks: ReconciliationProcessingHooks
-): Promise<void> {
+): Promise<boolean> {
   const errorMessage = `Agent workspace unavailable during reconciliation (${targetResult.reason})`;
   const projectId = hooks.projectId ?? targetResult.projectId ?? null;
 
@@ -75,9 +76,19 @@ export async function terminallyFailDeadTarget(
       reason: targetResult.reason,
       transitionOutcome,
     });
-    return;
+    return false;
   }
   sessions.failSession(sql, candidate.sessionId);
+  // This path writes `chat_sessions` directly rather than through the DO's
+  // `failSession` RPC, so it does not inherit that RPC's activity-mirror
+  // clearing. Without this the row stays wedged in a working state until the
+  // probe sweep's staleness bound plus its full attempt budget elapse —
+  // reintroducing, for the dead-target path specifically, the exact wedge this
+  // module's siblings exist to prevent (.claude/rules/44, .claude/rules/57).
+  terminalizeChatSessionActivity(sql, candidate.sessionId, {
+    activity: 'error',
+    statusError: errorMessage,
+  });
   hooks.scheduleSummarySync?.();
   recordActivityEventInternal(
     sql,
@@ -108,6 +119,7 @@ export async function terminallyFailDeadTarget(
     reason: targetResult.reason,
     nodeId: targetResult.nodeId,
   });
+  return true;
 }
 
 async function cleanupTaskRun(env: DOEnv, workspaceId: string, taskId: string): Promise<void> {

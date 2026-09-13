@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  MIN_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS,
   parsePositiveRuntimeSetting,
   resolveRuntimeSettings,
 } from '../../../src/durable-objects/vm-agent-container-runtime';
@@ -69,5 +70,14 @@ describe('resolveRuntimeSettings', () => {
     );
     expect(settings.recoveryMaxAttempts).toBe(DEFAULTS.recoveryMaxAttempts);
     expect(settings.activeWorkMaxMs).toBe(DEFAULTS.activeWorkMaxMs);
+  });
+
+  it('keeps enough recovery attempts to survive the established deployment revisions', () => {
+    const settings = resolveRuntimeSettings(
+      envWith({ CF_CONTAINER_RECOVERY_MAX_ATTEMPTS: '1' }),
+      DEFAULTS
+    );
+
+    expect(settings.recoveryMaxAttempts).toBe(MIN_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS);
   });
 });

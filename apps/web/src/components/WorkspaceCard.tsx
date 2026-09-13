@@ -3,6 +3,7 @@ import { Button, Card, DropdownMenu, type DropdownMenuItem } from '@simple-agent
 import { useNavigate } from 'react-router';
 
 import { useIsStandalone } from '../hooks/useIsStandalone';
+import { WorkspaceHardwareDetails } from './hardware/HardwareDetails';
 import { StatusBadge } from './StatusBadge';
 
 interface WorkspaceCardProps {
@@ -34,7 +35,7 @@ function getWorkspaceActions(
     }
   }
 
-  if (workspace.status === 'stopped') {
+  if (workspace.status === 'stopped' || workspace.status === 'evicted') {
     const onRestart = handlers.onRestart;
     if (onRestart) {
       items.push({
@@ -96,13 +97,13 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
         <div className="flex-1 min-w-0 flex items-center gap-3">
           <StatusBadge status={workspace.status} />
           <div className="flex-1 min-w-0">
-            <div className="flex items-baseline gap-2 min-w-0">
+            <div className="flex flex-col items-start gap-0.5 min-w-0 sm:flex-row sm:items-baseline sm:gap-2">
               {/* Title claims free space and truncates last; a long branch name
                   caps at 40% instead of crushing the title to a few chars. */}
-              <span className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0">
+              <span className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap w-full sm:w-auto sm:flex-1 min-w-0">
                 {workspace.displayName || workspace.name}
               </span>
-              <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap shrink-0 min-w-16 max-w-[40%]">
+              <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap shrink-0 max-w-full sm:min-w-16 sm:max-w-[40%]">
                 {workspace.branch}
               </span>
             </div>
@@ -123,7 +124,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
             </Button>
           </div>
         )}
-        {workspace.status === 'stopped' && onRestart && (
+        {(workspace.status === 'stopped' || workspace.status === 'evicted') && onRestart && (
           <div className="shrink-0">
             <Button variant="secondary" size="sm" onClick={() => onRestart(workspace.id)}>
               Start
@@ -143,6 +144,10 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
             />
           </div>
         )}
+      </div>
+
+      <div className="mt-3 border-t border-border-default pt-2">
+        <WorkspaceHardwareDetails workspace={workspace} />
       </div>
 
       {workspace.errorMessage && (

@@ -69,6 +69,10 @@ const capacityPlacementColumns = () => ({
   capacitySourceId: text('capacity_source_id').references(() => capacitySources.id, {
     onDelete: 'set null',
   }),
+  /** Capacity source row generation used for final authority checks. */
+  capacitySourceGeneration: integer('capacity_source_generation'),
+  /** Non-secret capacity source external reference snapshot used for attachment fencing. */
+  capacitySourceExternalRef: text('capacity_source_external_ref'),
   /** Capacity pool candidate selected for placement/provisioning. Snapshot only. */
   capacityPoolCandidateId: text('capacity_pool_candidate_id'),
   /** Credential provenance snapshot used for placement/provisioning, without secret material. */
@@ -77,6 +81,10 @@ const capacityPlacementColumns = () => ({
   placementCredentialReference: text('placement_credential_reference'),
   /** Optional credential version snapshot for future rotating credential records. */
   placementCredentialVersion: integer('placement_credential_version'),
+  /** Effective placement settings generation used to derive the selected authority. */
+  selectionSettingsVersion: integer('selection_settings_version'),
+  /** Stable semantic authority for the selected pool/source/candidate/settings plan. */
+  capacityAuthorityGeneration: integer('capacity_authority_generation'),
   /** Project scope snapshot for project-scoped pools. */
   capacityPoolProjectId: text('capacity_pool_project_id').references(() => projects.id, {
     onDelete: 'set null',
@@ -88,6 +96,9 @@ const capacityPlacementColumns = () => ({
   providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
   providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
   providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+  providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+  providerInstanceImage: text('provider_instance_image'),
+  providerInstanceArchitecture: text('provider_instance_architecture'),
   providerInstancePriceDisplay: text('provider_instance_price_display'),
   providerInstancePriceCurrency: text('provider_instance_price_currency'),
   providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
@@ -391,6 +402,8 @@ export const projects = sqliteTable(
     // Per-project defaults (null = use platform defaults from env vars).
     // Resolved via `resolveProjectScalingConfig()` in task-runner and node services.
     defaultVmSize: text('default_vm_size'),
+    /** Project-layer modern workload requirements JSON. Null = inherit lower layers. */
+    resourceRequirementsJson: text('resource_requirements_json'),
     defaultAgentType: text('default_agent_type'),
     defaultWorkspaceProfile: text('default_workspace_profile'),
     /** Default devcontainer config name for new workspaces. null = auto-discover default. */
@@ -413,6 +426,8 @@ export const projects = sqliteTable(
     maxWorkspacesPerNode: integer('max_workspaces_per_node'),
     nodeCpuThresholdPercent: integer('node_cpu_threshold_percent'),
     nodeMemoryThresholdPercent: integer('node_memory_threshold_percent'),
+    /** Per-project max triggers override. null = use platform default (MAX_TRIGGERS_PER_PROJECT). */
+    maxTriggers: integer('max_triggers'),
     status: text('status').notNull().default('active'),
     lastActivityAt: text('last_activity_at'),
     activeSessionCount: integer('active_session_count').notNull().default(0),
@@ -856,6 +871,8 @@ export const tasks = sqliteTable(
     chatSessionId: text('chat_session_id'),
     /** Soft link from a sleeping-session recovery task to the live task whose conversation it resumes. */
     recoverySourceTaskId: text('recovery_source_task_id'),
+    /** Soft link from a superseded predecessor to the recovery task that took over its conversation. */
+    supersededByTaskId: text('superseded_by_task_id'),
     /** Null for top-level tasks; set for agent-dispatched sub-tasks (dispatch depth > 0). No FK — parent may be in another project's scope. */
     parentTaskId: text('parent_task_id'),
     /** Null until a workspace is assigned during task execution. Set by TaskRunner DO. */
@@ -925,6 +942,8 @@ export const tasks = sqliteTable(
     provisionedVmSize: text('provisioned_vm_size'),
     /** JSON snapshot of ResourceRequirements as resolved from the precedence chain. */
     resourceRequirementsJson: text('resource_requirements_json'),
+    /** Versioned persisted resource intent and resolved reservation plan. */
+    resourceRequirementPlanJson: text('resource_requirement_plan_json'),
     /** Which level of the precedence chain provided the resource requirements. */
     resourceRequirementsSource: text('resource_requirements_source'),
     /** JSON snapshot of ResolvedResourceReservation (scheduler-facing units). */
@@ -966,6 +985,9 @@ export const tasks = sqliteTable(
     recoverySourceTaskIdx: index('idx_tasks_recovery_source_task_id')
       .on(table.recoverySourceTaskId)
       .where(sql`recovery_source_task_id IS NOT NULL`),
+    supersededByTaskIdx: index('idx_tasks_superseded_by_task_id')
+      .on(table.supersededByTaskId)
+      .where(sql`superseded_by_task_id IS NOT NULL`),
     claimedWarmNodeUnique: uniqueIndex('idx_tasks_claimed_warm_node_unique')
       .on(table.claimedWarmNodeId)
       .where(
@@ -1181,6 +1203,12 @@ export const nodes = sqliteTable(
     vmLocation: text('vm_location').notNull().default('nbg1'),
     cloudProvider: text('cloud_provider'),
     providerInstanceId: text('provider_instance_id'),
+    observedProviderInstanceType: text('observed_provider_instance_type'),
+    observedProviderInstanceVcpuCount: integer('observed_provider_instance_vcpu_count'),
+    observedProviderInstanceMemoryMb: integer('observed_provider_instance_memory_mb'),
+    observedProviderInstanceDiskGb: integer('observed_provider_instance_disk_gb'),
+    observedHardwareJson: text('observed_hardware_json'),
+    observedHardwareSource: text('observed_hardware_source'),
     ipAddress: text('ip_address'),
     backendDnsRecordId: text('backend_dns_record_id'),
     lastHeartbeatAt: text('last_heartbeat_at'),
@@ -1233,6 +1261,16 @@ export const nodes = sqliteTable(
     /** Cloudflare Tunnel display name for user-owned tunnel nodes. Null otherwise. */
     tunnelName: text('tunnel_name'),
     errorMessage: text('error_message'),
+    /** Written only after strict provider/container teardown confirms the runtime is absent. */
+    runtimeTerminationConfirmedAt: text('runtime_termination_confirmed_at'),
+    /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
+    runtimeIncarnationId: text('runtime_incarnation_id'),
+    /**
+     * SHA-256 fingerprint of the encrypted provider credential used for this runtime. The
+     * fingerprint is pinned before provider I/O so strict deletion cannot follow a mutable
+     * credential row into a different provider account.
+     */
+    placementCredentialFingerprint: text('placement_credential_fingerprint'),
     /** Candidate-page escape after cleanup failure; ISO-8601 UTC timestamp. */
     cleanupBackoffUntil: text('cleanup_backoff_until'),
     createdAt: text('created_at')
@@ -1298,6 +1336,14 @@ export const workspaces = sqliteTable(
       .notNull()
       .default(false),
     errorMessage: text('error_message'),
+    /** Set only after VM-agent absence/success or strict node-runtime termination proof. */
+    runtimeDeletionConfirmedAt: text('runtime_deletion_confirmed_at'),
+    /** Proof classifier paired with runtimeDeletionConfirmedAt. */
+    runtimeDeletionProof: text('runtime_deletion_proof'),
+    /** Rotated for runtime recreation; stale eviction callbacks cannot affect its successor. */
+    evictionGeneration: text('eviction_generation'),
+    /** Restart may reserve capacity only after serialized eviction cleanup completes. */
+    evictionFinalizedAt: text('eviction_finalized_at'),
     dispatchedAt: text('dispatched_at'),
     /** Agent profile ID used for this workspace's task — drives GitHub CLI policy enforcement. */
     agentProfileHint: text('agent_profile_hint'),
@@ -1330,6 +1376,11 @@ export const workspaces = sqliteTable(
       table.status
     ),
     nodeStatusIdx: index('idx_workspaces_node_status').on(table.nodeId, table.status),
+    statusUpdatedNodeIdx: index('idx_workspaces_status_updated_node').on(
+      table.status,
+      table.updatedAt,
+      table.nodeId
+    ),
     chatSessionIdUnique: uniqueIndex('idx_workspaces_chat_session_id_unique')
       .on(table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
@@ -1345,6 +1396,25 @@ export const workspaces = sqliteTable(
     capacityPoolProjectIdx: index('idx_workspaces_capacity_pool_project')
       .on(table.capacityPoolProjectId)
       .where(sql`capacity_pool_project_id IS NOT NULL`),
+  })
+);
+
+/** Atomic throttle claims for payload-free callbacks observed during deletion quarantine. */
+export const workspaceCallbackSignalClaims = sqliteTable(
+  'workspace_callback_signal_claims',
+  {
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    callbackKind: text('callback_kind').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.callbackKind] }),
+    expiresAtIdx: index('idx_workspace_callback_signal_claims_expires_at').on(table.expiresAt),
   })
 );
 
@@ -1430,12 +1500,24 @@ export const sessionSnapshots = sqliteTable(
     recoveryAttempts: integer('recovery_attempts').notNull().default(0),
     recoveryError: text('recovery_error'),
     recoveryClaimedAt: text('recovery_claimed_at'),
+    /**
+     * When a wake attempt last reported failure, as a canonical
+     * `toISOString()` value — the decay predicate compares it lexicographically
+     * against another `toISOString()` cutoff, so a non-canonical string would
+     * silently misbehave. Written by both writers of `recovery_status='failed'`
+     * (`failSessionSnapshotRecovery` and `failAndRestoreSessionRecoveryHandoff`,
+     * pinned by `session-snapshot-failed-writer-coverage.test.ts`), and cleared
+     * by every path that resets `recoveryAttempts`. Drives the attempt-budget
+     * decay in `session-snapshot-recovery-budget.ts`.
+     */
+    recoveryFailedAt: text('recovery_failed_at'),
     sleepStatus: text('sleep_status'),
     sleepAfter: text('sleep_after'),
     sleepAttempts: integer('sleep_attempts').notNull().default(0),
     sleepError: text('sleep_error'),
     sleepClaimId: text('sleep_claim_id'),
     sleepClaimedAt: text('sleep_claimed_at'),
+    sleepStoppingSince: text('sleep_stopping_since'),
     snapshotGeneration: text('snapshot_generation'),
     captureGeneration: text('capture_generation'),
     captureError: text('capture_error'),
@@ -1470,6 +1552,10 @@ export const sessionSnapshots = sqliteTable(
     sleepClaimIdx: index('idx_session_snapshots_sleep_claim').on(
       table.sleepStatus,
       table.sleepClaimedAt
+    ),
+    sleepStoppingSinceIdx: index('idx_session_snapshots_sleep_stopping_since').on(
+      table.sleepStatus,
+      table.sleepStoppingSince
     ),
     sleepExpiryIdx: index('idx_session_snapshots_sleep_expiry').on(
       table.sleepStatus,
@@ -1545,6 +1631,7 @@ export const agentProfiles = sqliteTable(
     maxTurns: integer('max_turns'),
     timeoutMinutes: integer('timeout_minutes'),
     vmSizeOverride: text('vm_size_override'),
+    resourceRequirementsJson: text('resource_requirements_json'),
     provider: text('provider'),
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
@@ -2178,6 +2265,14 @@ export const triggers = sqliteTable(
     cronTimezone: text('cron_timezone').default('UTC'),
     skipIfRunning: integer('skip_if_running', { mode: 'boolean' }).notNull().default(true),
     promptTemplate: text('prompt_template').notNull(),
+    /** Current authorized execution principal. Null means legacy owner-based execution. */
+    executionUserId: text('execution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Audit timestamp for execution principal assignment/transfer. */
+    executionUserAuthorizedAt: text('execution_user_authorized_at'),
+    /** Actor who authorized execution principal assignment/transfer. */
+    executionUserAuthorizedBy: text('execution_user_authorized_by').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     /** Optional agent profile for triggered tasks. set null on profile delete — trigger continues with defaults. */
     agentProfileId: text('agent_profile_id').references(() => agentProfiles.id, {
       onDelete: 'set null',
@@ -2186,6 +2281,7 @@ export const triggers = sqliteTable(
     skillId: text('skill_id').references(() => skills.id, { onDelete: 'set null' }),
     taskMode: text('task_mode').default('task'),
     vmSizeOverride: text('vm_size_override'),
+    resourceRequirementsJson: text('resource_requirements_json'),
     maxConcurrent: integer('max_concurrent').notNull().default(1),
     lastTriggeredAt: text('last_triggered_at'),
     triggerCount: integer('trigger_count').notNull().default(0),
@@ -2466,6 +2562,8 @@ export const capacitySources = sqliteTable(
     credentialReference: text('credential_reference'),
     credentialVersion: integer('credential_version'),
     externalSourceRef: text('external_source_ref'),
+    authorityGeneration: integer('authority_generation').notNull().default(0),
+    sourceGeneration: integer('source_generation').notNull().default(0),
     status: text('status').notNull().default('active'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: text('created_at')
@@ -2488,6 +2586,15 @@ export const capacitySources = sqliteTable(
     platformCredentialIdx: index('idx_capacity_sources_platform_credential')
       .on(table.platformCredentialId)
       .where(sql`platform_credential_id IS NOT NULL`),
+    scopeGenerationIdx: index('idx_capacity_sources_scope_generation').on(
+      table.scope,
+      table.ownerUserId,
+      table.ownerProjectId,
+      table.sourceGeneration
+    ),
+    authorityGenerationIdx: index('idx_capacity_sources_authority_generation').on(
+      table.authorityGeneration
+    ),
   })
 );
 
@@ -2508,8 +2615,19 @@ export const capacityPools = sqliteTable(
     isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
     revision: integer('revision').notNull().default(1),
     status: text('status').notNull().default('active'),
+    configurationState: text('configuration_state').notNull().default('configured-ready'),
     strategy: text('strategy').notNull().default('balanced'),
     exhaustionPolicy: text('exhaustion_policy').notNull().default('queue'),
+    lastReconciledAt: text('last_reconciled_at'),
+    /**
+     * Digest of the pool's selection-affecting candidate state. Reconciliation bumps
+     * `revision` only when this changes, so an identical catalog refresh is stable while a
+     * ranking-affecting change (e.g. two comparable offerings swapping cheapest position)
+     * invalidates prior placement authority. NULL = not yet computed.
+     */
+    selectionDigest: text('selection_digest'),
+    migrationVersion: text('migration_version'),
+    migrationState: text('migration_state').notNull().default('complete'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: text('created_at')
       .notNull()
@@ -2529,6 +2647,9 @@ export const capacityPools = sqliteTable(
       .on(table.ownerProjectId)
       .where(sql`scope = 'project' AND is_default = 1`),
     scopeStatusIdx: index('idx_capacity_pools_scope_status').on(table.scope, table.status),
+    configurationStateIdx: index('idx_capacity_pools_configuration_state').on(
+      table.configurationState
+    ),
   })
 );
 
@@ -2557,12 +2678,20 @@ export const capacityPoolCandidates = sqliteTable(
     providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
     providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
     providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+    providerInstanceImage: text('provider_instance_image'),
+    providerInstanceArchitecture: text('provider_instance_architecture'),
     providerInstancePriceDisplay: text('provider_instance_price_display'),
     providerInstancePriceCurrency: text('provider_instance_price_currency'),
     providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
     providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     providerInstanceCatalogSource: text('provider_instance_catalog_source'),
     providerInstanceCatalogLastSeenAt: text('provider_instance_catalog_last_seen_at'),
+    catalogAvailability: text('catalog_availability').notNull().default('available'),
+    catalogUnavailableAt: text('catalog_unavailable_at'),
+    catalogReturnedAt: text('catalog_returned_at'),
+    catalogGeneration: integer('catalog_generation').notNull().default(0),
+    authorityGeneration: integer('authority_generation').notNull().default(0),
     priority: integer('priority').notNull().default(0),
     candidateOrder: integer('candidate_order').notNull().default(0),
     status: text('status').notNull().default('active'),
@@ -2581,6 +2710,17 @@ export const capacityPoolCandidates = sqliteTable(
       table.candidateOrder
     ),
     sourceIdx: index('idx_capacity_pool_candidates_source').on(table.capacitySourceId),
+    catalogAvailabilityIdx: index('idx_capacity_pool_candidates_catalog_availability').on(
+      table.catalogAvailability
+    ),
+    sourceGenerationIdx: index('idx_capacity_pool_candidates_source_generation').on(
+      table.capacitySourceId,
+      table.catalogGeneration
+    ),
+    authorityGenerationIdx: index('idx_capacity_pool_candidates_authority_generation').on(
+      table.capacitySourceId,
+      table.authorityGeneration
+    ),
   })
 );
 
@@ -2636,6 +2776,23 @@ export const computeUsage = sqliteTable(
     nodeId: text('node_id').notNull(),
     serverType: text('server_type').notNull(),
     vcpuCount: integer('vcpu_count').notNull(),
+    providerInstanceType: text('provider_instance_type'),
+    providerInstanceVcpuCount: integer('provider_instance_vcpu_count'),
+    providerInstanceMemoryMb: integer('provider_instance_memory_mb'),
+    providerInstanceDiskGb: integer('provider_instance_disk_gb'),
+    providerInstanceBootDiskSizeGb: integer('provider_instance_boot_disk_size_gb'),
+    providerInstanceImage: text('provider_instance_image'),
+    providerInstanceArchitecture: text('provider_instance_architecture'),
+    observedProviderInstanceType: text('observed_provider_instance_type'),
+    observedProviderInstanceVcpuCount: integer('observed_provider_instance_vcpu_count'),
+    observedProviderInstanceMemoryMb: integer('observed_provider_instance_memory_mb'),
+    observedProviderInstanceDiskGb: integer('observed_provider_instance_disk_gb'),
+    observedHardwareJson: text('observed_hardware_json'),
+    observedHardwareSource: text('observed_hardware_source'),
+    providerInstancePriceDisplay: text('provider_instance_price_display'),
+    providerInstancePriceCurrency: text('provider_instance_price_currency'),
+    providerInstancePriceMonthlyCents: integer('provider_instance_price_monthly_cents'),
+    providerInstancePriceHourlyMicros: integer('provider_instance_price_hourly_micros'),
     credentialSource: text('credential_source').notNull().default('user'),
     startedAt: text('started_at').notNull(),
     /** ISO-8601 timestamp. Null while workspace is still running (open-ended usage record). */
@@ -2802,6 +2959,10 @@ export const sessionSummaries = sqliteTable(
     attentionJson: text('attention_json'),
     /** When the DO last wrote this row — the freshness signal, not session activity. */
     syncedAt: integer('synced_at'),
+    /** Next time the terminal-ledger repair sweep may reconsider this D1 index row. */
+    terminalReconcileDeferredUntil: integer('terminal_reconcile_deferred_until'),
+    /** Machine-readable reason this row was deferred by the terminal-ledger repair sweep. */
+    terminalReconcileDeferReason: text('terminal_reconcile_defer_reason'),
   },
   (table) => ({
     userRecentIdx: index('idx_session_summaries_user_recent').on(
@@ -2814,6 +2975,12 @@ export const sessionSummaries = sqliteTable(
       table.projectId,
       table.createdByUserId,
       table.updatedAt
+    ),
+    terminalReconcileIdx: index('idx_session_summaries_terminal_reconcile').on(
+      table.status,
+      table.terminalReconcileDeferredUntil,
+      table.updatedAt,
+      table.id
     ),
   })
 );
@@ -2839,9 +3006,267 @@ export const sessionIndexCoverage = sqliteTable('session_index_coverage', {
   syncedAt: integer('synced_at').notNull(),
   sessionCount: integer('session_count').notNull().default(0),
   complete: integer('complete').notNull().default(0),
+  backfillCursorUpdatedAt: integer('backfill_cursor_updated_at'),
+  backfillCursorId: text('backfill_cursor_id'),
+  backfillStartedAt: integer('backfill_started_at'),
+  backfillCompletedAt: integer('backfill_completed_at'),
 });
 
 export type SessionIndexCoverageRow = typeof sessionIndexCoverage.$inferSelect;
+
+export const projectDataArchiveCircuitBreakers = sqliteTable(
+  'project_data_archive_circuit_breakers',
+  {
+    projectId: text('project_id')
+      .primaryKey()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    state: text('state', { enum: ['closed', 'open', 'frozen'] })
+      .notNull()
+      .default('closed'),
+    reason: text('reason'),
+    openedAt: integer('opened_at'),
+    updatedAt: integer('updated_at').notNull(),
+  }
+);
+
+export type ProjectDataArchiveCircuitBreakerRow =
+  typeof projectDataArchiveCircuitBreakers.$inferSelect;
+
+export const projectDataArchiveGlobalSweepCadence = sqliteTable(
+  'project_data_archive_global_sweep_cadence',
+  {
+    sweepName: text('sweep_name', {
+      enum: ['archive_sharding_global_sweep'],
+    }).primaryKey(),
+    lastStartedAt: integer('last_started_at'),
+    lastCompletedAt: integer('last_completed_at'),
+    nextEligibleAt: integer('next_eligible_at').notNull().default(0),
+    lastStatus: text('last_status', {
+      enum: ['never', 'running', 'succeeded', 'failed', 'partial'],
+    })
+      .notNull()
+      .default('never'),
+    lastSkipReason: text('last_skip_reason'),
+    lastError: text('last_error'),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    runCount: integer('run_count').notNull().default(0),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    nextEligibleIdx: index('idx_project_data_archive_global_sweep_cadence_next_eligible').on(
+      table.nextEligibleAt
+    ),
+  })
+);
+
+export type ProjectDataArchiveGlobalSweepCadenceRow =
+  typeof projectDataArchiveGlobalSweepCadence.$inferSelect;
+
+export const projectDataStorageReliefPreflights = sqliteTable(
+  'project_data_storage_relief_preflights',
+  {
+    planId: text('plan_id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: ['running', 'complete', 'truncated', 'failed'] })
+      .notNull()
+      .default('running'),
+    cutoffCreatedAt: integer('cutoff_created_at').notNull(),
+    configJson: text('config_json').notNull(),
+    cursorJson: text('cursor_json'),
+    batchesStarted: integer('batches_started').notNull().default(0),
+    rowsExamined: integer('rows_examined').notNull().default(0),
+    eligibleRows: integer('eligible_rows').notNull().default(0),
+    eligibleBytes: integer('eligible_bytes').notNull().default(0),
+    legacyOversizedRows: integer('legacy_oversized_rows').notNull().default(0),
+    legacyOversizedBytes: integer('legacy_oversized_bytes').notNull().default(0),
+    rearchivableOversizedRows: integer('rearchivable_oversized_rows').notNull().default(0),
+    rearchivableOversizedBytes: integer('rearchivable_oversized_bytes').notNull().default(0),
+    oversizedRows: integer('oversized_rows').notNull().default(0),
+    oversizedBytes: integer('oversized_bytes').notNull().default(0),
+    archivedRows: integer('archived_rows').notNull().default(0),
+    skippedRows: integer('skipped_rows').notNull().default(0),
+    sessionCount: integer('session_count').notNull().default(0),
+    sessionsJson: text('sessions_json').notNull().default('{}'),
+    sessionsSha256: text('sessions_sha256'),
+    targetBatchesJson: text('target_batches_json').notNull().default('[]'),
+    targetManifestKey: text('target_manifest_key'),
+    targetManifestBytes: integer('target_manifest_bytes'),
+    targetManifestSha256: text('target_manifest_sha256'),
+    databaseSizeBytes: integer('database_size_bytes'),
+    nextEligibleAt: integer('next_eligible_at').notNull().default(0),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: integer('lease_expires_at'),
+    startedAt: integer('started_at').notNull(),
+    completedAt: integer('completed_at'),
+    lastError: text('last_error'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    projectStatusIdx: index('idx_project_data_storage_relief_preflights_project_status').on(
+      table.projectId,
+      table.status,
+      table.updatedAt
+    ),
+    nextEligibleIdx: index('idx_project_data_storage_relief_preflights_next_eligible').on(
+      table.status,
+      table.nextEligibleAt
+    ),
+  })
+);
+
+export type ProjectDataStorageReliefPreflightRow =
+  typeof projectDataStorageReliefPreflights.$inferSelect;
+
+export const projectDataArchiveUnusedReservations = sqliteTable(
+  'project_data_archive_unused_reservations',
+  {
+    reservationId: text('reservation_id').primaryKey(),
+    windowStartedAt: integer('window_started_at').notNull(),
+    estimatedWrites: integer('estimated_writes').notNull(),
+    released: integer('released').notNull().default(0),
+  },
+  (table) => ({
+    windowIdx: index('idx_archive_unused_reservation_window').on(table.windowStartedAt),
+  })
+);
+
+export const projectDataArchiveWriteBudget = sqliteTable('project_data_archive_write_budget', {
+  id: text('id').primaryKey(),
+  windowStartedAt: integer('window_started_at').notNull(),
+  reservedWrites: integer('reserved_writes').notNull(),
+});
+
+export const projectDataArchiveMigrations = sqliteTable(
+  'project_data_archive_migrations',
+  {
+    migrationId: text('migration_id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    storageFormat: text('storage_format', { enum: ['sqlite-v1', 'r2-gzip-v1'] })
+      .notNull()
+      .default('sqlite-v1'),
+    state: text('state', {
+      enum: [
+        'candidate',
+        'leased',
+        'intent_prepared',
+        'target_prepared',
+        'copying',
+        'target_sealed',
+        'recovery_manifest_persisted',
+        'source_deleted',
+        'published',
+        'failed',
+        'poisoned',
+        'frozen',
+      ],
+    }).notNull(),
+    sourceOwnerName: text('source_owner_name').notNull(),
+    targetOwnerName: text('target_owner_name').notNull(),
+    sourceGeneration: integer('source_generation').notNull().default(0),
+    targetGeneration: integer('target_generation').notNull(),
+    sourceIntentToken: text('source_intent_token'),
+    terminalVersionSha256: text('terminal_version_sha256'),
+    targetAggregateSha256: text('target_aggregate_sha256'),
+    r2ManifestKey: text('r2_manifest_key'),
+    leaseOwner: text('lease_owner'),
+    leaseEpoch: integer('lease_epoch').notNull().default(0),
+    leaseExpiresAt: integer('lease_expires_at'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    candidateAt: integer('candidate_at'),
+    intentPreparedAt: integer('intent_prepared_at'),
+    targetPreparedAt: integer('target_prepared_at'),
+    copyingStartedAt: integer('copying_started_at'),
+    targetSealedAt: integer('target_sealed_at'),
+    recoveryManifestPersistedAt: integer('recovery_manifest_persisted_at'),
+    sourceDeletedAt: integer('source_deleted_at'),
+    publishedAt: integer('published_at'),
+    poisonedAt: integer('poisoned_at'),
+    frozenAt: integer('frozen_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    stateLeaseIdx: index('idx_project_data_archive_migrations_state_lease').on(
+      table.state,
+      table.leaseExpiresAt,
+      table.updatedAt
+    ),
+    projectStateIdx: index('idx_project_data_archive_migrations_project_state').on(
+      table.projectId,
+      table.state,
+      table.updatedAt
+    ),
+    sessionIdx: index('idx_project_data_archive_migrations_session').on(
+      table.projectId,
+      table.sessionId,
+      table.state
+    ),
+  })
+);
+
+export type ProjectDataArchiveMigrationRow = typeof projectDataArchiveMigrations.$inferSelect;
+
+export const projectDataSessionLocations = sqliteTable(
+  'project_data_session_locations',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    sessionId: text('session_id').notNull(),
+    locationState: text('location_state', {
+      enum: ['root', 'migrating', 'archive_shard', 'frozen'],
+    }).notNull(),
+    ownerKind: text('owner_kind', { enum: ['root', 'archive_shard'] }).notNull(),
+    ownerName: text('owner_name').notNull(),
+    generation: integer('generation').notNull(),
+    migrationId: text('migration_id').references(() => projectDataArchiveMigrations.migrationId, {
+      onDelete: 'set null',
+    }),
+    sourceOwnerName: text('source_owner_name'),
+    targetOwnerName: text('target_owner_name'),
+    targetAggregateSha256: text('target_aggregate_sha256'),
+    routingSchemaVersion: integer('routing_schema_version').notNull().default(1),
+    publishedAt: integer('published_at'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.projectId, table.sessionId] }),
+    ownerIdx: index('idx_project_data_session_locations_owner').on(
+      table.ownerKind,
+      table.ownerName,
+      table.generation
+    ),
+    stateIdx: index('idx_project_data_session_locations_state').on(
+      table.locationState,
+      table.updatedAt
+    ),
+  })
+);
+
+export type ProjectDataSessionLocationRow = typeof projectDataSessionLocations.$inferSelect;
+
+export const projectDataSessionIndexCursors = sqliteTable('project_data_session_index_cursors', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  cursorUpdatedAt: integer('cursor_updated_at'),
+  cursorId: text('cursor_id'),
+  fullSyncStartedAt: integer('full_sync_started_at'),
+  lastProgressAt: integer('last_progress_at'),
+  observedSessionCount: integer('observed_session_count').notNull().default(0),
+  complete: integer('complete').notNull().default(0),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type ProjectDataSessionIndexCursorRow = typeof projectDataSessionIndexCursors.$inferSelect;
 
 export const projectDataStorageTelemetry = sqliteTable(
   'project_data_storage_telemetry',

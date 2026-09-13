@@ -132,3 +132,13 @@ ordinary containers.
   `[vars]` default with no Cloudflare binding, secret, D1, KV, or R2 changes.
 - `task-completion-validator`: PASS — task checklist, acceptance criteria, diff,
   tests, and branch base were cross-checked before PR creation.
+
+## Integration reconciliation (2026-09-13)
+
+The implementation above describes the historical component PR. Current `main`
+already supplies a more complete replacement: `sam-workload.slice` is Docker's
+cgroup parent, `sam-infra.slice` retains protected CPU/memory priority, and boot
+verification checks actual cgroup ancestry and limits. PR #1980 completion
+preserves that implementation and its shared admission/provisioning memory reserve.
+The old Docker-service-only MemoryMax and fixed 768 MB default are not reapplied.
+Final combined verification is tracked in the active resource-monitoring task.

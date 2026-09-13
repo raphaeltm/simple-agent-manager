@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
+	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/ports"
 	"github.com/workspace/vm-agent/internal/pty"
 	"github.com/workspace/vm-agent/internal/resourcemon"
@@ -28,23 +32,24 @@ func newEvictionTestServer() *Server {
 	})
 	return &Server{
 		config: &config.Config{
-			NodeID:                    "node-1",
-			WorkspaceID:               "workspace-1",
-			ProjectID:                 "project-1",
-			ChatSessionID:             "boot-chat-session",
-			CallbackToken:             "node-callback-token",
-			ControlPlaneURL:           "https://api.example.com",
-			EvictionDockerStopTimeout: time.Second,
-			EvictionSnapshotTimeout:   time.Second,
-			EvictionDebounceWindow:    time.Second,
-			EvictionResolveTimeout:    time.Second,
-			ContainerMode:             true,
-			ContainerLabelKey:         "devcontainer.local_folder",
-			ContainerStatsInterval:    time.Second,
-			PSIPollInterval:           time.Second,
-			MaxNodeEvents:             500,
-			MaxWorkspaceEvents:        500,
-			HTTPCallbackTimeout:       time.Second,
+			NodeID:                           "node-1",
+			WorkspaceID:                      "workspace-1",
+			ProjectID:                        "project-1",
+			ChatSessionID:                    "boot-chat-session",
+			CallbackToken:                    "node-callback-token",
+			ControlPlaneURL:                  "https://api.example.com",
+			EvictionDockerStopTimeout:        time.Second,
+			EvictionSnapshotTimeout:          time.Second,
+			EvictionDebounceWindow:           time.Second,
+			EvictionResolveTimeout:           time.Second,
+			EvictionCallbackRetryMaxInterval: time.Minute,
+			ContainerMode:                    true,
+			ContainerLabelKey:                "devcontainer.local_folder",
+			ContainerStatsInterval:           time.Second,
+			PSIPollInterval:                  time.Second,
+			MaxNodeEvents:                    500,
+			MaxWorkspaceEvents:               500,
+			HTTPCallbackTimeout:              time.Second,
 		},
 		workspaces: map[string]*WorkspaceRuntime{
 			"workspace-1": {
@@ -75,6 +80,7 @@ func newEvictionTestServer() *Server {
 
 func TestCaptureEvictionSessionSnapshotUsesSynchronousHibernateInput(t *testing.T) {
 	s := newEvictionTestServer()
+	setupEvictionDocker(t, evictionTestContainerID)
 	session, _, err := s.agentSessions.Create("workspace-1", "agent-session-1", "Agent", "")
 	if err != nil {
 		t.Fatal(err)
@@ -91,15 +97,19 @@ func TestCaptureEvictionSessionSnapshotUsesSynchronousHibernateInput(t *testing.
 	}
 
 	err = s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
-		WorkspaceID: "workspace-1",
-		ContainerID: "container-1",
-		Reason:      resourcemon.EvictionReasonMemoryPressure,
+		WorkspaceID:    "workspace-1",
+		ContainerID:    evictionTestContainerID,
+		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Reason:         resourcemon.EvictionReasonMemoryPressure,
 	})
 	if err != nil {
 		t.Fatalf("captureEvictionSessionSnapshot: %v", err)
 	}
 	if captured == nil {
 		t.Fatal("snapshot runner was not called")
+	}
+	if captured.containerTarget == nil || captured.containerTarget.containerID != evictionTestContainerID {
+		t.Fatalf("snapshot identity was not pinned: %#v", captured.containerTarget)
 	}
 	if captured.background {
 		t.Fatal("eviction snapshot used background capture; want synchronous capture")
@@ -124,9 +134,10 @@ func TestCaptureEvictionSessionSnapshotRequiresChatSessionID(t *testing.T) {
 	}
 
 	err := s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
-		WorkspaceID: "workspace-1",
-		ContainerID: "container-1",
-		Reason:      resourcemon.EvictionReasonMemoryPressure,
+		WorkspaceID:    "workspace-1",
+		ContainerID:    evictionTestContainerID,
+		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Reason:         resourcemon.EvictionReasonMemoryPressure,
 	})
 	if err == nil {
 		t.Fatal("captureEvictionSessionSnapshot returned nil error without chat session ID")
@@ -135,6 +146,7 @@ func TestCaptureEvictionSessionSnapshotRequiresChatSessionID(t *testing.T) {
 
 func TestMarkWorkspaceEvictedUpdatesRuntimeAndAgentSessions(t *testing.T) {
 	s := newEvictionTestServer()
+	initializeEvictionTestStore(t, s)
 	session, _, err := s.agentSessions.Create("workspace-1", "agent-session-1", "Agent", "")
 	if err != nil {
 		t.Fatal(err)
@@ -145,9 +157,10 @@ func TestMarkWorkspaceEvictedUpdatesRuntimeAndAgentSessions(t *testing.T) {
 
 	s.markWorkspaceEvicted(resourcemon.EvictionResult{
 		Target: resourcemon.EvictionTarget{
-			WorkspaceID: "workspace-1",
-			ContainerID: "container-1",
-			Reason:      resourcemon.EvictionReasonOOMKill,
+			WorkspaceID:    "workspace-1",
+			ContainerID:    evictionTestContainerID,
+			RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
+			Reason:         resourcemon.EvictionReasonOOMKill,
 		},
 		SnapshotCaptured: true,
 		ContainerStopped: true,
@@ -175,11 +188,12 @@ func TestMarkWorkspaceEvictedUpdatesRuntimeAndAgentSessions(t *testing.T) {
 func TestNotifyWorkspaceEvictedPostsCallbackPayload(t *testing.T) {
 	s := newEvictionTestServer()
 	type callbackBody struct {
-		NodeID           string `json:"nodeId"`
-		WorkspaceID      string `json:"workspaceId"`
-		Reason           string `json:"reason"`
-		SnapshotCaptured bool   `json:"snapshotCaptured"`
-		ContainerStopped bool   `json:"containerStopped"`
+		NodeID             string `json:"nodeId"`
+		WorkspaceID        string `json:"workspaceId"`
+		Reason             string `json:"reason"`
+		SnapshotCaptured   bool   `json:"snapshotCaptured"`
+		ContainerStopped   bool   `json:"containerStopped"`
+		EvictionGeneration string `json:"evictionGeneration"`
 	}
 	type callbackRequest struct {
 		Method        string
@@ -210,17 +224,24 @@ func TestNotifyWorkspaceEvictedPostsCallbackPayload(t *testing.T) {
 	}))
 	defer controlPlane.Close()
 	s.config.ControlPlaneURL = controlPlane.URL
+	s.workspaces["workspace-1"].EvictionGeneration = "generation-at-selection"
+	initializeEvictionTestStore(t, s)
 
-	err := s.notifyWorkspaceEvicted(context.Background(), resourcemon.EvictionResult{
+	result := resourcemon.EvictionResult{
 		Target: resourcemon.EvictionTarget{
-			WorkspaceID: "workspace-1",
-			ContainerID: "container-1",
-			Reason:      resourcemon.EvictionReasonOOMKill,
+			WorkspaceID:        "workspace-1",
+			ContainerID:        "container-1",
+			EvictionGeneration: "generation-at-selection",
+			Reason:             resourcemon.EvictionReasonOOMKill,
 		},
 		SnapshotCaptured: false,
 		ContainerStopped: true,
-	})
-	if err != nil {
+	}
+	if applied, err := s.store.RecordWorkspaceEviction(context.Background(), s.workspaceEvictionDelivery(result)); err != nil || !applied {
+		t.Fatalf("queue callback: %v %v", applied, err)
+	}
+	s.workspaces["workspace-1"].EvictionGeneration = "generation-after-restart"
+	if err := s.notifyWorkspaceEvicted(context.Background(), result); err != nil {
 		t.Fatalf("notifyWorkspaceEvicted: %v", err)
 	}
 
@@ -242,11 +263,12 @@ func TestNotifyWorkspaceEvictedPostsCallbackPayload(t *testing.T) {
 			t.Fatalf("Content-Type = %q, want application/json", got.ContentType)
 		}
 		wantBody := callbackBody{
-			NodeID:           "node-1",
-			WorkspaceID:      "workspace-1",
-			Reason:           string(resourcemon.EvictionReasonOOMKill),
-			SnapshotCaptured: false,
-			ContainerStopped: true,
+			NodeID:             "node-1",
+			WorkspaceID:        "workspace-1",
+			Reason:             string(resourcemon.EvictionReasonOOMKill),
+			SnapshotCaptured:   false,
+			ContainerStopped:   true,
+			EvictionGeneration: "generation-at-selection",
 		}
 		if got.Body != wantBody {
 			t.Fatalf("body = %#v, want %#v", got.Body, wantBody)
@@ -274,4 +296,144 @@ func TestEvictionDockerStopCommandTimeoutAllowsDockerClientToReturn(t *testing.T
 	if got := evictionDockerStopCommandTimeout(stopTimeout); got <= stopTimeout {
 		t.Fatalf("evictionDockerStopCommandTimeout = %s, want greater than docker --time %s", got, stopTimeout)
 	}
+}
+
+const evictionTestContainerID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func setupEvictionDocker(t *testing.T, currentID string) string {
+	t.Helper()
+	dir := t.TempDir()
+	command := filepath.Join(dir, "docker")
+	logPath := filepath.Join(dir, "calls")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$SAM_EVICTION_TEST_CALLS"
+case "$1" in
+  ps) printf '%s\n' "$SAM_EVICTION_TEST_CURRENT_ID" ;;
+  stop)
+    if [ -n "$SAM_EVICTION_TEST_STOP_STARTED" ]; then
+      touch "$SAM_EVICTION_TEST_STOP_STARTED"
+      while [ ! -e "$SAM_EVICTION_TEST_STOP_RELEASE" ]; do sleep 0.01; done
+    fi
+    exit "${SAM_EVICTION_TEST_STOP_EXIT:-0}" ;;
+  inspect) printf '%s\n' "$SAM_EVICTION_TEST_STARTED_AT" ;;
+  *) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(command, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SAM_DOCKER_CLI_PATH", command)
+	t.Setenv("SAM_EVICTION_TEST_CURRENT_ID", currentID)
+	t.Setenv("SAM_EVICTION_TEST_CALLS", logPath)
+	return logPath
+}
+
+func TestEvictionResolverUsesActualLabelAndIncludesExitedVictim(t *testing.T) {
+	s := newEvictionTestServer()
+	logPath := setupEvictionDocker(t, evictionTestContainerID)
+	got, ok := s.resolveEvictionWorkspaceForMetric(context.Background(), resourcemon.ContainerMetric{ID: evictionTestContainerID[:12]})
+	if !ok || got.WorkspaceID != "workspace-1" || got.ContainerID != evictionTestContainerID {
+		t.Fatalf("resolution = %#v, %v", got, ok)
+	}
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--all", "--latest", "--no-trunc", "label=devcontainer.local_folder=/workspace/repo"} {
+		if !strings.Contains(string(calls), want) {
+			t.Fatalf("missing %s in Docker call %s", want, calls)
+		}
+	}
+}
+
+func TestEvictionRejectsReplacementBeforeSnapshotAndStop(t *testing.T) {
+	s := newEvictionTestServer()
+	logPath := setupEvictionDocker(t, strings.Repeat("b", 64))
+	target := resourcemon.EvictionTarget{WorkspaceID: "workspace-1", ContainerID: evictionTestContainerID,
+		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano)}
+	if err := s.captureEvictionSessionSnapshot(context.Background(), target); err == nil {
+		t.Fatal("snapshotted replacement")
+	}
+	if err := s.stopEvictedWorkspaceContainer(context.Background(), target); err == nil {
+		t.Fatal("stopped replacement")
+	}
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(calls), "stop ") {
+		t.Fatalf("unexpected stop: %s", calls)
+	}
+}
+
+func TestEvictionRejectsRuntimeChangedDuringSnapshot(t *testing.T) {
+	s := newEvictionTestServer()
+	setupEvictionDocker(t, evictionTestContainerID)
+	target := resourcemon.EvictionTarget{WorkspaceID: "workspace-1", ContainerID: evictionTestContainerID,
+		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano)}
+	s.workspaces["workspace-1"].UpdatedAt = time.Now()
+	if err := s.stopEvictedWorkspaceContainer(context.Background(), target); err == nil {
+		t.Fatal("stopped newer runtime")
+	}
+	if s.markWorkspaceEvicted(resourcemon.EvictionResult{Target: target, ContainerStopped: true}) {
+		t.Fatal("marked newer runtime")
+	}
+	if s.workspaces["workspace-1"].Status != "running" {
+		t.Fatal("changed newer runtime status")
+	}
+}
+
+func TestMarkWorkspaceEvictedRejectsStopFailure(t *testing.T) {
+	s := newEvictionTestServer()
+	if s.markWorkspaceEvicted(resourcemon.EvictionResult{Target: resourcemon.EvictionTarget{WorkspaceID: "workspace-1"}}) {
+		t.Fatal("marked failed eviction")
+	}
+	if s.workspaces["workspace-1"].Status != "running" {
+		t.Fatal("failed stop changed runtime status")
+	}
+}
+
+func TestEvictionRejectsOOMFromPreviousRunOfSameContainer(t *testing.T) {
+	s := newEvictionTestServer()
+	initializeEvictionTestStore(t, s)
+	logPath := setupEvictionDocker(t, evictionTestContainerID)
+	now := time.Now().UTC()
+	t.Setenv("SAM_EVICTION_TEST_STARTED_AT", now.Format(time.RFC3339Nano))
+	target := resourcemon.EvictionTarget{WorkspaceID: "workspace-1", ContainerID: evictionTestContainerID,
+		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Event:          resourcemon.PressureEvent{Type: resourcemon.PressureEventContainerOOM, OccurredAt: now.Add(-time.Minute)}}
+	if err := s.stopEvictedWorkspaceContainer(context.Background(), target); err == nil {
+		t.Fatal("stopped container restarted after OOM event")
+	}
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(calls), "stop ") {
+		t.Fatalf("stopped newer run: %s", calls)
+	}
+	target.Event.OccurredAt = now.Add(time.Second)
+	if err := s.stopEvictedWorkspaceContainer(context.Background(), target); err != nil {
+		t.Fatalf("current OOM could not stop: %v", err)
+	}
+}
+
+func initializeEvictionTestStore(t *testing.T, s *Server) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "eviction.db")
+	store, err := persistence.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetCallbackTokenEncryptionSecret("eviction-test-encryption-key"); err != nil {
+		t.Fatal(err)
+	}
+	s.store = store
+	t.Cleanup(func() { _ = store.Close() })
+	for _, runtime := range s.workspaces {
+		if err := s.writeWorkspaceMetadata(runtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return path
 }

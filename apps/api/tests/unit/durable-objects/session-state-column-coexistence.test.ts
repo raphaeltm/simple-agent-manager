@@ -20,7 +20,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
   getSessionState,
-  reconcileStaleActivity,
   upsertActivityState,
 } from '../../../src/durable-objects/project-data/session-state';
 import { createSqlStorage } from './sql-storage-test-utils';
@@ -116,7 +115,7 @@ describe('session_state: #1840 reconciliation columns coexist with harness-work 
     expect(state!.runtimeWorkSource).toBe('claude_sdk');
   });
 
-  it("#1840's stale-activity reconciliation leaves the harness columns untouched", () => {
+  it('an authoritative activity transition leaves the harness columns untouched', () => {
     upsertActivityState(sql, SESSION, {
       activity: 'prompting',
       source: 'vm_report',
@@ -127,10 +126,15 @@ describe('session_state: #1840 reconciliation columns coexist with harness-work 
       now: now - 10 * 60 * 1000,
     });
 
-    // Drive #1840's own repair path over the same row.
-    reconcileStaleActivity(sql, 60_000, now);
+    upsertActivityState(sql, SESSION, {
+      activity: 'idle',
+      source: 'probe',
+      now,
+    });
 
     const state = getSessionState(sql, SESSION);
+    expect(state!.activity).toBe('idle');
+    expect(state!.activitySource).toBe('probe');
     expect(state!.runtimeWorkState).toBe('active');
     expect(state!.runtimeWorkCount).toBe(4);
     expect(state!.runtimeWorkSource).toBe('claude_sdk');

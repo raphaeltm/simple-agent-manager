@@ -8,7 +8,6 @@ import type {
 import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
-  DEFAULT_MAX_TRIGGERS_PER_PROJECT,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
@@ -35,6 +34,11 @@ import {
   clearProjectMultiplayerStateCache,
   getProjectMultiplayerState,
 } from '../../services/project-multiplayer';
+import {
+  ResourceRequirementsValidationError,
+  serializeResourceRequirementsInput,
+} from '../../services/resource-requirements-input';
+import { resolveMaxTriggersPerProject } from '../../services/trigger-limits';
 import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
 import {
   getWebhookTriggerLimits,
@@ -86,6 +90,26 @@ async function attribution(
 function clearTriggerPageCaches(projectId: string): void {
   clearCredentialAttributionHealthCache(projectId);
   clearProjectMultiplayerStateCache(projectId);
+}
+
+function triggerResourceRequirementsJson(body: {
+  resourceRequirements?: unknown;
+  resourceRequirementsJson?: string | null;
+}): string | null {
+  try {
+    if (body.resourceRequirements !== undefined) {
+      return serializeResourceRequirementsInput(body.resourceRequirements);
+    }
+    return serializeResourceRequirementsInput(
+      body.resourceRequirementsJson,
+      'resourceRequirementsJson'
+    );
+  } catch (err) {
+    if (err instanceof ResourceRequirementsValidationError) {
+      throw errors.badRequest(err.message);
+    }
+    throw err;
+  }
 }
 
 async function enrichTrigger(
@@ -211,11 +235,12 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
       .get(),
   ]);
   if (sameName) throw errors.conflict(`Trigger "${name}" already exists in this project`);
-  if (
-    (total?.count ?? 0) >=
-    parsePositiveInt(c.env.MAX_TRIGGERS_PER_PROJECT, DEFAULT_MAX_TRIGGERS_PER_PROJECT)
-  ) {
-    throw errors.badRequest('Maximum triggers per project reached');
+  const maxTriggers = resolveMaxTriggersPerProject(
+    project.maxTriggers,
+    c.env.MAX_TRIGGERS_PER_PROJECT
+  );
+  if ((total?.count ?? 0) >= maxTriggers) {
+    throw errors.badRequest(`Maximum triggers per project (${maxTriggers}) reached`);
   }
   const maxConcurrent = body.maxConcurrent ?? DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT;
   const maxConcurrentLimit = parsePositiveInt(
@@ -260,6 +285,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     skillId: body.skillId ?? null,
     taskMode: body.taskMode ?? 'task',
     vmSizeOverride: body.vmSizeOverride ?? null,
+    resourceRequirementsJson: triggerResourceRequirementsJson(body),
     maxConcurrent,
     nextFireAt,
     createdAt: now,
@@ -419,6 +445,9 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   if (body.skillId !== undefined) updates.skillId = body.skillId;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
   if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
+  if (body.resourceRequirements !== undefined || body.resourceRequirementsJson !== undefined) {
+    updates.resourceRequirementsJson = triggerResourceRequirementsJson(body);
+  }
   if (body.maxConcurrent !== undefined) {
     const maxConcurrentLimit = parsePositiveInt(
       c.env.TRIGGER_MAX_CONCURRENT_LIMIT,

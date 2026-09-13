@@ -70,6 +70,9 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runtime := s.upsertWorkspaceRuntime(workspaceID, "", "", "running", "")
+	if !s.requireWorkspaceReconnectState(w, r, runtime) {
+		return
+	}
 
 	requestedSessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
 	idempotencyKey := strings.TrimSpace(r.URL.Query().Get("idempotencyKey"))
@@ -150,6 +153,10 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	hostKey := workspaceID + ":" + requestedSessionID
 	requestedWorktree := strings.TrimSpace(r.URL.Query().Get("worktree"))
 	host := s.getOrCreateSessionHost(hostKey, workspaceID, requestedSessionID, session, runtime, requestedWorktree)
+	if host == nil {
+		writeSessionError(w, http.StatusConflict, "session_initializing", "Workspace session bootstrap is in progress")
+		return
+	}
 
 	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -215,8 +222,16 @@ func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 
 // getOrCreateSessionHost returns an existing SessionHost or creates a new one.
 func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string) *acp.SessionHost {
+	return s.getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionID, session, runtime, requestedWorktree, false)
+}
+
+func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionID string, session agentsessions.Session, runtime *WorkspaceRuntime, requestedWorktree string, restoreOwner bool) *acp.SessionHost {
 	// Fast path: check if host already exists.
 	s.sessionHostMu.Lock()
+	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+		s.sessionHostMu.Unlock()
+		return nil
+	}
 	if host, ok := s.sessionHosts[hostKey]; ok {
 		s.sessionHostMu.Unlock()
 		return host
@@ -240,6 +255,9 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 
 	s.sessionHostMu.Lock()
 	defer s.sessionHostMu.Unlock()
+	if !restoreOwner && (s.workspaceRestorePendingLocked(workspaceID) || s.workspaceCreationPendingLocked(workspaceID)) {
+		return nil
+	}
 
 	// Re-check after re-acquiring lock (double-checked locking).
 	if host, ok := s.sessionHosts[hostKey]; ok {
@@ -368,7 +386,15 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
 			cfg.ContainerResolver = resolver
 		}
-		if runtime.Lightweight && s.config != nil && s.config.IsStandaloneMode() {
+		// Standalone mode is the whole condition: with no devcontainer there is no
+		// /etc/sam/project-env for resolveAgentEnvVars to read (session_host_startup.go),
+		// so this provider is the only path by which project/profile/skill env vars and
+		// runtime files reach the agent process. Do NOT re-add a runtime.Lightweight
+		// conjunct here: Lightweight is a per-workspace *provisioning* choice (skip the
+		// devcontainer build) that VM workspaces also use, not a statement about whether
+		// a container exists. Gating on it made a caller that forgot to thread
+		// lightweight=true silently disable env injection — see .claude/rules/73.
+		if s.config != nil && s.config.IsStandaloneMode() {
 			runtimeAssetsProvider = s.runtimeAssetsProviderForWorkspaceSession(workspaceID, sessionID)
 		}
 	}

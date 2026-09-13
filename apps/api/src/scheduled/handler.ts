@@ -9,6 +9,7 @@ import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runAnalyticsForwardJob } from './analytics-forward';
+import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
@@ -24,12 +25,17 @@ import {
   isHourlyPlatformMaintenanceCron,
   scheduleHourlyPlatformMaintenance,
 } from './platform-feedback-hourly';
+import { runProjectDataArchiveSharding } from './project-data-archive-sharding';
+import { runProjectDataStorageReliefPreflight } from './project-data-storage-relief-preflight';
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
 import { runSessionSleepSweep } from './session-sleep';
+import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
 import { createSweepIsolator } from './sweep-isolation';
+import { runTerminalNodeLifecycleRepair } from './terminal-node-lifecycle-repair';
+import { runTerminalSessionLedgerReconciliation } from './terminal-session-ledger-reconciliation';
 import { runTrialExpireSweep } from './trial-expire';
 import { runTrialRolloverAudit } from './trial-rollover';
 import { runTrialWaitlistCleanup } from './trial-waitlist-cleanup';
@@ -132,9 +138,18 @@ export async function scheduled(
   const migrated = await sweeps.isolate('orphaned_workspace_migration', () =>
     migrateOrphanedWorkspaces(db)
   );
+  const sessionSleepLifecycleRepair = await sweeps.isolate('session_sleep_lifecycle_repair', () =>
+    runSessionSleepLifecycleRepair(env, new Date())
+  );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
+  const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
+    runTerminalNodeLifecycleRepair(env)
+  );
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
     runProviderOrphanReconciliation(env)
+  );
+  const capacityPools = await sweeps.isolate('capacity_pool_reconciliation', () =>
+    runScheduledCapacityPoolReconciliation(env)
   );
   const observabilityPurge = await sweeps.isolate('observability_purge', () =>
     runObservabilityPurge(env)
@@ -148,6 +163,9 @@ export async function scheduled(
   );
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
+  );
+  const terminalSessionLedger = await sweeps.isolate('terminal_session_ledger_reconciliation', () =>
+    runTerminalSessionLedgerReconciliation(env)
   );
   const sessionSleep = await sweeps.isolate('session_sleep', () =>
     runSessionSleepSweep(env, new Date(), ctx)
@@ -170,6 +188,27 @@ export async function scheduled(
     runComputeUsageCleanup(env)
   );
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
+
+  // Runs after every lifecycle sweep on purpose. When its persisted cadence is due it copies
+  // whole terminal sessions between ProjectData objects under PROJECT_DATA_ARCHIVE_WALL_TIME_MS
+  // (checked only between candidates, so one large session can run well past it). Earlier in
+  // the chain that budget would delay session_sleep and the other lifecycle sweeps on every
+  // tick the cadence fires (`.claude/rules/47`); on the ticks it is not due it costs two D1
+  // statements.
+  const projectDataArchiveSharding = await sweeps.isolate('project_data_archive_sharding', () =>
+    runProjectDataArchiveSharding(env)
+  );
+
+  // Runs LAST on purpose. The relief preflight is read-only, but it is the only
+  // sweep whose run budget is operator-tuned into the minutes
+  // (PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_RUN_WALL_TIME_MS / _SLICES_PER_RUN) while an
+  // emergency plan is converging. Anywhere earlier in the chain it would push every
+  // later lifecycle sweep — session_sleep above all — back by its whole run budget on
+  // every tick (`.claude/rules/47`).
+  const projectDataStorageReliefPreflight = await sweeps.isolate(
+    'project_data_storage_relief_preflight',
+    () => runProjectDataStorageReliefPreflight(env)
+  );
 
   const failedSweeps = sweeps.failedSweeps();
   const failureNotifications = await notifyFailedSweeps(env, failedSweeps).catch((err) => {
@@ -195,6 +234,11 @@ export async function scheduled(
     diagnosticIncidentMetadataRepaired: incidentRecovery?.incidentMetadataRepaired,
     provisioningTimedOut: timedOut,
     workspacesMigrated: migrated,
+    sleepLifecycleRepairSelected: sessionSleepLifecycleRepair?.selected,
+    sleepLifecycleRepairRepaired: sessionSleepLifecycleRepair?.repaired,
+    sleepLifecycleRepairSkipped: sessionSleepLifecycleRepair?.skipped,
+    sleepLifecycleRepairProjectDataErrors: sessionSleepLifecycleRepair?.projectDataErrors,
+    sleepLifecycleRepairErrors: sessionSleepLifecycleRepair?.errors,
     staleNodesDestroyed: nodeCleanup?.staleDestroyed,
     lifetimeNodesDestroyed: nodeCleanup?.lifetimeDestroyed,
     lifetimeNodesSkipped: nodeCleanup?.lifetimeSkipped,
@@ -202,6 +246,7 @@ export async function scheduled(
     orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
     orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
     orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
+    stoppedWorkspacesQueued: nodeCleanup?.stoppedWorkspacesQueued,
     stoppedWorkspacesDeleted: nodeCleanup?.stoppedWorkspacesDeleted,
     cfContainersDestroyed: nodeCleanup?.cfContainersDestroyed,
     providerOrphansScanned: providerOrphans?.scanned,
@@ -218,6 +263,12 @@ export async function scheduled(
     providerOrphansSkippedAmbiguousClaim: providerOrphans?.skippedAmbiguousClaim,
     providerOrphanSkipReason: providerOrphans?.skipReason,
     providerOrphanErrors: providerOrphans?.errors,
+    capacityPoolInstallationEnsured: capacityPools?.installationEnsured,
+    capacityPoolUsersEnsured: capacityPools?.usersEnsured,
+    capacityPoolProjectsEnsured: capacityPools?.projectsEnsured,
+    capacityPoolReconciliationSkipped: capacityPools?.skipped,
+    capacityPoolReconciliationSkipReason: capacityPools?.skipReason,
+    capacityPoolReconciliationNextEligibleAt: capacityPools?.nextEligibleAt,
     stuckTasksFailedQueued: stuckTasks?.failedQueued,
     stuckTasksFailedDelegated: stuckTasks?.failedDelegated,
     stuckTasksFailedInProgress: stuckTasks?.failedInProgress,
@@ -249,6 +300,56 @@ export async function scheduled(
     sessionTaskRepairReused: sessionTaskRepair?.reused,
     sessionTaskRepairErrors: sessionTaskRepair?.errors,
     sessionTaskRepairResidual: sessionTaskRepair?.residual,
+    terminalSessionLedgerProjectsScanned: terminalSessionLedger?.projectsScanned,
+    terminalSessionLedgerProjectsReconciled: terminalSessionLedger?.projectsReconciled,
+    terminalSessionLedgerProjectErrors: terminalSessionLedger?.projectErrors,
+    terminalSessionLedgerSelected: terminalSessionLedger?.selected,
+    terminalSessionLedgerStopped: terminalSessionLedger?.stopped,
+    terminalSessionLedgerFailed: terminalSessionLedger?.failed,
+    terminalSessionLedgerDeferred: terminalSessionLedger?.deferred,
+    terminalSessionLedgerSkipped: terminalSessionLedger?.skipped,
+    terminalSessionLedgerErrors: terminalSessionLedger?.errors,
+    terminalNodeLifecycleRepairSelected: terminalNodeLifecycleRepair?.selected,
+    terminalNodeLifecycleRepairSkippedProtectedSleep:
+      terminalNodeLifecycleRepair?.skippedProtectedSleep,
+    terminalNodeLifecycleRepairWorkspacesTerminalized:
+      terminalNodeLifecycleRepair?.workspacesTerminalized,
+    terminalNodeLifecycleRepairAgentSessionsClosed:
+      terminalNodeLifecycleRepair?.agentSessionsClosed,
+    terminalNodeLifecycleRepairComputeUsageClosed: terminalNodeLifecycleRepair?.computeUsageClosed,
+    terminalNodeLifecycleRepairProjectSessionsClosed:
+      terminalNodeLifecycleRepair?.projectSessionsClosed,
+    terminalNodeLifecycleRepairErrors: terminalNodeLifecycleRepair?.errors,
+    terminalSessionLedgerRemainingProjects: terminalSessionLedger?.remainingCandidateProjects,
+    terminalSessionSummarySelected: terminalSessionLedger?.summarySelected,
+    terminalSessionSummaryStopped: terminalSessionLedger?.summaryStopped,
+    terminalSessionSummaryFailed: terminalSessionLedger?.summaryFailed,
+    terminalSessionSummaryDeferred: terminalSessionLedger?.summaryDeferred,
+    terminalSessionSummarySkipped: terminalSessionLedger?.summarySkipped,
+    terminalSessionSummaryErrors: terminalSessionLedger?.summaryErrors,
+    terminalSessionSummaryRemaining: terminalSessionLedger?.remainingCandidateSummaries,
+    projectDataStorageReliefPreflightEnabled: projectDataStorageReliefPreflight?.enabled,
+    projectDataStorageReliefPreflightSkipped: projectDataStorageReliefPreflight?.skipped,
+    projectDataStorageReliefPreflightSkipReason: projectDataStorageReliefPreflight?.skipReason,
+    projectDataStorageReliefPreflightPlanId: projectDataStorageReliefPreflight?.planId,
+    projectDataStorageReliefPreflightStatus: projectDataStorageReliefPreflight?.status,
+    projectDataStorageReliefPreflightRowsExamined: projectDataStorageReliefPreflight?.rowsExamined,
+    projectDataStorageReliefPreflightEligibleRows: projectDataStorageReliefPreflight?.eligibleRows,
+    projectDataStorageReliefPreflightEligibleBytes:
+      projectDataStorageReliefPreflight?.eligibleBytes,
+    projectDataStorageReliefPreflightSessionCount: projectDataStorageReliefPreflight?.sessionCount,
+    projectDataStorageReliefPreflightSessionManifestSha256:
+      projectDataStorageReliefPreflight?.sessionManifestSha256,
+    projectDataArchiveShardingEnabled: projectDataArchiveSharding?.enabled,
+    projectDataArchiveShardingSkipped: projectDataArchiveSharding?.skipped,
+    projectDataArchiveShardingSkipReason: projectDataArchiveSharding?.skipReason,
+    projectDataArchiveShardingSelected: projectDataArchiveSharding?.selected,
+    projectDataArchiveShardingMigrated: projectDataArchiveSharding?.migrated,
+    projectDataArchiveShardingRecoveredCrashGaps: projectDataArchiveSharding?.recoveredCrashGaps,
+    projectDataArchiveShardingRefused: projectDataArchiveSharding?.refused,
+    projectDataArchiveShardingFailed: projectDataArchiveSharding?.failed,
+    projectDataArchiveShardingChunksCopied: projectDataArchiveSharding?.chunksCopied,
+    projectDataArchiveShardingRowsCopied: projectDataArchiveSharding?.rowsCopied,
     sessionSleepSelected: sessionSleep?.selected,
     sessionSleepReconciled: sessionSleep?.reconciled,
     sessionSleepClaimed: sessionSleep?.claimed,

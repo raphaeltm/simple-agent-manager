@@ -41,6 +41,7 @@ import { requireProjectCapability } from '../../middleware/project-auth';
 import { rateLimitCredentialUpdate } from '../../middleware/rate-limit';
 import { CreateCredentialSchema, jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
+import { reconcileCapacityPoolsForCredentialMutation } from '../../services/capacity-pool-credential-lifecycle';
 import { disconnectAgentCredentialFromCC } from '../../services/composable-credentials/agent-sync';
 import {
   disconnectComputeCredentialFromCC,
@@ -325,6 +326,11 @@ projectCredentialsRoutes.put(
         encryptedToken: ciphertext,
         iv,
       });
+      await reconcileCapacityPoolsForCredentialMutation(c.env, {
+        scope: 'project',
+        userId,
+        projectId,
+      });
 
       const response: CredentialResponse = {
         id: existingCred.id,
@@ -356,6 +362,11 @@ projectCredentialsRoutes.put(
       provider: providerName,
       encryptedToken: ciphertext,
       iv,
+    });
+    await reconcileCapacityPoolsForCredentialMutation(c.env, {
+      scope: 'project',
+      userId,
+      projectId,
     });
 
     const response: CredentialResponse = {
@@ -405,6 +416,7 @@ projectCredentialsRoutes.delete('/:id/cloud-credentials/:provider', async (c) =>
     projectId,
     provider: providerName,
   });
+  await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'project', userId, projectId });
 
   return c.json({ success: true });
 });

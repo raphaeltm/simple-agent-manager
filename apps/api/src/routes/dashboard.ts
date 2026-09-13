@@ -7,56 +7,41 @@
 import {
   type DashboardActiveTasksResponse,
   type DashboardTask,
+  DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT,
   DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS,
   type TaskExecutionStep,
   type TaskStatus,
 } from '@simple-agent-manager/shared';
-import { and, eq, inArray } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { listAgentActivityTasks } from '../services/agent-activity';
 import * as projectDataService from '../services/project-data';
 
 const dashboardRoutes = new Hono<{ Bindings: Env }>();
 
 dashboardRoutes.use('/*', requireAuth(), requireApproved());
 
-const ACTIVE_TASK_STATUSES: TaskStatus[] = ['queued', 'delegated', 'in_progress'];
-
 dashboardRoutes.get('/active-tasks', async (c) => {
   const userId = getUserId(c);
-  const db = drizzle(c.env.DATABASE, { schema });
 
-  const inactiveThresholdMs = parseInt(
-    c.env.DASHBOARD_INACTIVE_THRESHOLD_MS ?? '',
-    10
-  ) || DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS;
+  const inactiveThresholdMs = parsePositiveInt(
+    c.env.DASHBOARD_INACTIVE_THRESHOLD_MS,
+    DEFAULT_DASHBOARD_INACTIVE_THRESHOLD_MS
+  );
+  const activeTaskLimit = parsePositiveInt(
+    c.env.DASHBOARD_ACTIVE_TASK_LIMIT,
+    DEFAULT_DASHBOARD_ACTIVE_TASK_LIMIT
+  );
 
-  // Fetch all tasks in active states for this user, joined with project names
-  const rows = await db
-    .select({
-      id: schema.tasks.id,
-      title: schema.tasks.title,
-      status: schema.tasks.status,
-      executionStep: schema.tasks.executionStep,
-      projectId: schema.tasks.projectId,
-      projectName: schema.projects.name,
-      createdAt: schema.tasks.createdAt,
-      startedAt: schema.tasks.startedAt,
-    })
-    .from(schema.tasks)
-    .innerJoin(schema.projects, eq(schema.tasks.projectId, schema.projects.id))
-    .where(
-      and(
-        eq(schema.tasks.userId, userId),
-        inArray(schema.tasks.status, ACTIVE_TASK_STATUSES)
-      )
-    )
-    .limit(100);
+  const rows = await listAgentActivityTasks(c.env, {
+    userId,
+    activeOnly: true,
+    limit: activeTaskLimit,
+  });
 
   if (rows.length === 0) {
     return c.json({ tasks: [] } satisfies DashboardActiveTasksResponse);
@@ -71,7 +56,10 @@ dashboardRoutes.get('/active-tasks', async (c) => {
   }
 
   // Fetch session data from each project's DO in parallel
-  const sessionMap = new Map<string, { sessionId: string; lastMessageAt: number | null; messageCount: number }>();
+  const sessionMap = new Map<
+    string,
+    { sessionId: string; lastMessageAt: number | null; messageCount: number }
+  >();
 
   const doResults = await Promise.allSettled(
     Array.from(tasksByProject.entries()).map(async ([projectId, tasks]) => {
@@ -103,7 +91,7 @@ dashboardRoutes.get('/active-tasks', async (c) => {
   const dashboardTasks: DashboardTask[] = rows.map((row) => {
     const sessionInfo = sessionMap.get(row.id);
     const lastMessageAt = sessionInfo?.lastMessageAt ?? null;
-    const isActive = lastMessageAt != null && (now - lastMessageAt) < inactiveThresholdMs;
+    const isActive = lastMessageAt != null && now - lastMessageAt < inactiveThresholdMs;
 
     return {
       id: row.id,
@@ -118,6 +106,7 @@ dashboardRoutes.get('/active-tasks', async (c) => {
       lastMessageAt,
       messageCount: sessionInfo?.messageCount ?? 0,
       isActive,
+      agentActivityState: row.agentActivityState,
     };
   });
 

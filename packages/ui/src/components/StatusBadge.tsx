@@ -5,6 +5,7 @@ const statusConfig: Record<string, { label: string; bg: string; fg: string }> = 
   running: { label: 'Running', bg: 'var(--sam-status-success-bg)', fg: 'var(--sam-status-success-fg)' },
   recovery: { label: 'Recovery', bg: 'var(--sam-status-warning-bg)', fg: 'var(--sam-status-warning-fg)' },
   stopping: { label: 'Stopping', bg: 'var(--sam-status-warning-bg)', fg: 'var(--sam-status-warning-fg)' },
+  evicted: { label: 'Evicted', bg: 'var(--sam-status-warning-bg)', fg: 'var(--sam-status-warning-fg)' },
   stopped: { label: 'Stopped', bg: 'var(--sam-status-muted-bg)', fg: 'var(--sam-status-muted-fg)' },
   deleted: { label: 'Deleted', bg: 'var(--sam-status-neutral-bg)', fg: 'var(--sam-status-neutral-fg)' },
   error: { label: 'Error', bg: 'var(--sam-status-danger-bg)', fg: 'var(--sam-status-danger-fg)' },

@@ -8,12 +8,14 @@
  * or the whole node was destroyed.
  */
 import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
+import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
-import { deleteWorkspaceOnNode } from '../services/node-agent';
 import { deleteNodeResourcesStrict } from '../services/nodes';
 import { persistError } from '../services/observability';
+import { cleanupWorkspaceForDeletion } from '../services/workspace-cleanup';
 import { finalizeWorkspaceLifecycleClosure } from '../services/workspace-lifecycle-finalizer';
 
 const DEFAULT_TRIAL_EXPIRE_BATCH_SIZE = 1000;
@@ -213,17 +215,25 @@ async function cleanupExpiredTrialResources(
       const byNode = new Map<string, TrialWorkspaceCleanupRow[]>();
       for (const workspace of workspaces.results) {
         if (!workspace.node_id) {
-          const deleted = await markWorkspaceDeletedIfTrialStillExpired(
+          const outcome = await cleanupWorkspaceForDeletion({
+            db: drizzle(env.DATABASE, { schema }),
             env,
-            row,
-            workspace,
-            anonymousUserId,
-            now,
-            nowIso
-          );
-          result.workspacesDeleted += deleted;
-          if (deleted > 0) {
+            workspace: {
+              id: workspace.id,
+              nodeId: null,
+              userId: workspace.user_id,
+              projectId: workspace.project_id,
+              chatSessionId: workspace.chat_session_id,
+              status: workspace.status,
+            } as schema.Workspace,
+            userId: workspace.user_id,
+            logContext: { closePath: 'trial_expire_no_node' },
+          });
+          if (outcome.status === 'confirmed') {
+            result.workspacesDeleted++;
             await cleanupWorkspaceReferences(env, row.trial_id, workspace, nowIso);
+          } else {
+            result.cleanupErrors++;
           }
           continue;
         }
@@ -255,7 +265,6 @@ async function cleanupExpiredTrialResources(
             row,
             nodeWorkspaces,
             anonymousUserId,
-            now,
             nowIso,
             deadlineAt,
             cleanupBatchSize,
@@ -300,7 +309,6 @@ async function cleanupExpiredTrialResources(
               row,
               nodeWorkspaces,
               anonymousUserId,
-              now,
               nowIso,
               deadlineAt,
               cleanupBatchSize,
@@ -326,8 +334,9 @@ async function cleanupExpiredTrialResources(
           continue;
         }
 
+        let strictDeletion;
         try {
-          await deleteNodeResourcesStrict(nodeId, anonymousUserId, env);
+          strictDeletion = await deleteNodeResourcesStrict(nodeId, anonymousUserId, env);
         } catch (err) {
           result.cleanupErrors++;
           await releaseNodeDeletionClaim(env, nodeId, anonymousUserId, nowIso, err);
@@ -344,6 +353,10 @@ async function cleanupExpiredTrialResources(
           );
           continue;
         }
+        if (!strictDeletion.runtimeTerminationConfirmedAt) {
+          result.cleanupErrors++;
+          continue;
+        }
 
         for (const workspace of nodeWorkspaces) {
           const deleted = await markWorkspaceDeletedIfTrialStillExpired(
@@ -352,7 +365,8 @@ async function cleanupExpiredTrialResources(
             workspace,
             anonymousUserId,
             now,
-            nowIso
+            nowIso,
+            strictDeletion.runtimeTerminationConfirmedAt
           );
           result.workspacesDeleted += deleted;
           if (deleted > 0) {
@@ -372,6 +386,8 @@ async function cleanupExpiredTrialResources(
              WHERE id = ?
                AND user_id = ?
                AND status = 'destroying'
+               AND runtime_termination_confirmed_at IS ?
+               AND runtime_incarnation_id IS ?
                AND NOT EXISTS (
                  SELECT 1
                  FROM workspaces
@@ -379,7 +395,14 @@ async function cleanupExpiredTrialResources(
                    AND status IN (${ACTIVE_WORKSPACE_STATUS_SQL})
                )`
           )
-            .bind(nowIso, nodeId, anonymousUserId, nodeId)
+            .bind(
+              nowIso,
+              nodeId,
+              anonymousUserId,
+              strictDeletion.runtimeTerminationConfirmedAt,
+              strictDeletion.runtimeIncarnationId,
+              nodeId
+            )
             .run();
           result.nodesDeleted += getRunChanges(nodeDeleteResult);
         }
@@ -407,13 +430,13 @@ async function cleanupWorkspacesOnLiveNode(
   row: ExpiredTrialProjectRow,
   workspaces: TrialWorkspaceCleanupRow[],
   anonymousUserId: string,
-  now: number,
   nowIso: string,
   deadlineAt: number,
   cleanupBatchSize: number,
   deadlineMs: number
 ): Promise<{ workspacesDeleted: number; cleanupErrors: number }> {
   const result = { workspacesDeleted: 0, cleanupErrors: 0 };
+  const db = drizzle(env.DATABASE, { schema });
 
   for (const workspace of workspaces) {
     if (Date.now() >= deadlineAt) {
@@ -427,7 +450,23 @@ async function cleanupWorkspacesOnLiveNode(
     if (!workspace.node_id) continue;
 
     try {
-      await deleteWorkspaceOnNode(workspace.node_id, workspace.id, env, workspace.user_id);
+      const outcome = await cleanupWorkspaceForDeletion({
+        db,
+        env,
+        workspace: {
+          id: workspace.id,
+          nodeId: workspace.node_id,
+          userId: workspace.user_id,
+          projectId: workspace.project_id,
+          chatSessionId: workspace.chat_session_id,
+        } as schema.Workspace,
+        userId: workspace.user_id,
+        logContext: { closePath: 'trial_expire' },
+      });
+      if (outcome.status !== 'confirmed') {
+        result.cleanupErrors++;
+        continue;
+      }
     } catch (err) {
       result.cleanupErrors++;
       await recordCleanupError(
@@ -445,18 +484,8 @@ async function cleanupWorkspacesOnLiveNode(
       continue;
     }
 
-    const deleted = await markWorkspaceDeletedIfTrialStillExpired(
-      env,
-      row,
-      workspace,
-      anonymousUserId,
-      now,
-      nowIso
-    );
-    result.workspacesDeleted += deleted;
-    if (deleted > 0) {
-      await cleanupWorkspaceReferences(env, row.trial_id, workspace, nowIso);
-    }
+    result.workspacesDeleted++;
+    await cleanupWorkspaceReferences(env, row.trial_id, workspace, nowIso);
   }
 
   return result;
@@ -468,7 +497,8 @@ async function markWorkspaceDeletedIfTrialStillExpired(
   workspace: TrialWorkspaceCleanupRow,
   anonymousUserId: string,
   now: number,
-  nowIso: string
+  nowIso: string,
+  requiredRuntimeProof: string
 ): Promise<number> {
   const updateResult = await env.DATABASE.prepare(
     `UPDATE workspaces
@@ -477,7 +507,7 @@ async function markWorkspaceDeletedIfTrialStillExpired(
      WHERE id = ?
        AND user_id = ?
        AND project_id = ?
-       AND status != 'deleted'
+       AND runtime_deletion_confirmed_at IS ?
        AND EXISTS (
          SELECT 1
          FROM trials t
@@ -487,7 +517,16 @@ async function markWorkspaceDeletedIfTrialStillExpired(
            AND (t.project_id = ? OR t.project_id IS NULL)
        )`
   )
-    .bind(nowIso, workspace.id, anonymousUserId, row.project_id, row.trial_id, now, row.project_id)
+    .bind(
+      nowIso,
+      workspace.id,
+      anonymousUserId,
+      row.project_id,
+      requiredRuntimeProof,
+      row.trial_id,
+      now,
+      row.project_id
+    )
     .run();
 
   return getRunChanges(updateResult);

@@ -1,6 +1,7 @@
 import {
   MAX_ORCHESTRATOR_WAIT_CHILDREN,
   TASK_TERMINAL_STATUSES,
+  type VmPromptDeliveryCapabilities,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
@@ -10,6 +11,7 @@ import * as activity from './activity';
 import type { DurableExecutionConfig } from './durable-execution-config';
 import {
   applyPromptDeliveryResult,
+  markPromptDeliverySubmitting,
   type PromptDeliveryClaim,
   type PromptDeliveryResult,
 } from './prompt-delivery';
@@ -69,12 +71,19 @@ async function invalidParentWakeTargetResult(
   const taskIds = [claim.message.sourceTaskId, ...childTaskIds];
   const placeholders = taskIds.map(() => '?').join(', ');
   const response = await env.DATABASE.prepare(
-    `SELECT id, status, chat_session_id,
+    `SELECT id, status, chat_session_id, superseded_by_task_id,
             recovery_source_task_id, triggered_by
      FROM tasks
      WHERE project_id = ?
        AND (
          id IN (${placeholders})
+         OR id = (
+           SELECT superseded_by_task_id
+             FROM tasks
+            WHERE project_id = ?
+              AND id = ?
+              AND superseded_by_task_id IS NOT NULL
+         )
          OR (
            recovery_source_task_id = ?
            AND chat_session_id = ?
@@ -82,11 +91,19 @@ async function invalidParentWakeTargetResult(
          )
        )`
   )
-    .bind(projectId, ...taskIds, claim.message.sourceTaskId, claim.message.targetSessionId)
+    .bind(
+      projectId,
+      ...taskIds,
+      projectId,
+      claim.message.sourceTaskId,
+      claim.message.sourceTaskId,
+      claim.message.targetSessionId
+    )
     .all<{
       id: string;
       status: string;
       chat_session_id: string | null;
+      superseded_by_task_id: string | null;
       recovery_source_task_id: string | null;
       triggered_by: string;
     }>();
@@ -94,14 +111,20 @@ async function invalidParentWakeTargetResult(
   const parent = tasks.get(claim.message.sourceTaskId);
   const liveRecoveryOwner = (response.results ?? []).find(
     (task) =>
-      task.recovery_source_task_id === claim.message.sourceTaskId &&
+      (task.recovery_source_task_id === claim.message.sourceTaskId ||
+        task.id === parent?.superseded_by_task_id) &&
       task.chat_session_id === claim.message.targetSessionId &&
       task.triggered_by === 'session-recovery' &&
       !(TASK_TERMINAL_STATUSES as readonly string[]).includes(task.status)
   );
+  const parentIsTerminal = parent
+    ? (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status)
+    : false;
+  const parentIsWakeable =
+    parent && (!parentIsTerminal || (parent.status === 'cancelled' && Boolean(liveRecoveryOwner)));
   if (
     !parent ||
-    (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status) ||
+    !parentIsWakeable ||
     (parent.chat_session_id !== claim.message.targetSessionId && !liveRecoveryOwner)
   ) {
     return {
@@ -109,7 +132,7 @@ async function invalidParentWakeTargetResult(
       reason: 'terminal_target',
       error: !parent
         ? 'Parent task no longer exists'
-        : (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status)
+        : parentIsTerminal
           ? `Parent task is ${parent.status}`
           : 'Parent task session binding changed',
       runtimeIdentity: claim.message.runtimeIdentity,
@@ -188,6 +211,8 @@ export async function runPromptDeliveryClaim(
       allowLegacyVm: config.legacyVmCompatEnabled,
       requestTimeoutMs: config.backgroundTimeoutMs,
       beforeSideEffect: validateParentWakeTarget,
+      beforeSubmit: (capabilities: VmPromptDeliveryCapabilities) =>
+        markPromptDeliverySubmitting(sql, claim, capabilities),
       sourceTaskGuard:
         claim.message.sourceKind === 'parent_wakeup' && claim.message.sourceTaskId
           ? {

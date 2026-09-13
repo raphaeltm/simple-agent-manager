@@ -27,20 +27,24 @@ type PressureSource interface {
 
 // WorkspaceContainer binds a Docker container metrics row to a VM-agent workspace.
 type WorkspaceContainer struct {
-	WorkspaceID   string
-	ContainerID   string
-	ContainerName string
+	WorkspaceID        string
+	ContainerID        string
+	ContainerName      string
+	RuntimeVersion     string
+	EvictionGeneration string
 }
 
 // EvictionTarget is the selected workspace/container for one eviction attempt.
 type EvictionTarget struct {
-	WorkspaceID   string
-	ContainerID   string
-	ContainerName string
-	Reason        EvictionReason
-	Event         PressureEvent
-	Metric        *ContainerMetric
-	TriggeredAt   time.Time
+	WorkspaceID        string
+	ContainerID        string
+	ContainerName      string
+	Reason             EvictionReason
+	Event              PressureEvent
+	Metric             *ContainerMetric
+	TriggeredAt        time.Time
+	RuntimeVersion     string
+	EvictionGeneration string
 }
 
 // EvictionResult captures all side effects attempted for one eviction.
@@ -64,7 +68,7 @@ type EvictionControllerConfig struct {
 	ResolveWorkspace     func(context.Context, ContainerMetric) (WorkspaceContainer, bool)
 	SnapshotWorkspace    func(context.Context, EvictionTarget) error
 	StopContainer        func(context.Context, EvictionTarget) error
-	MarkWorkspaceEvicted func(EvictionResult)
+	MarkWorkspaceEvicted func(EvictionResult) bool
 	NotifyEviction       func(context.Context, EvictionResult) error
 	Clock                func() time.Time
 	Logger               *slog.Logger
@@ -84,6 +88,9 @@ func (c EvictionControllerConfig) Validate() error {
 	}
 	if c.ResolveTimeout <= 0 {
 		errs = append(errs, fmt.Errorf("ResolveTimeout must be > 0, got %s", c.ResolveTimeout))
+	}
+	if c.ResolveWorkspace == nil {
+		errs = append(errs, errors.New("ResolveWorkspace is required"))
 	}
 	if c.SnapshotWorkspace == nil {
 		errs = append(errs, errors.New("SnapshotWorkspace is required"))
@@ -113,9 +120,10 @@ type EvictionController struct {
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
 
-	evictionMu sync.Mutex
-	debounceMu sync.Mutex
-	lastByKey  map[string]time.Time
+	evictionMu        sync.Mutex
+	debounceMu        sync.Mutex
+	lastByKey         map[string]time.Time
+	lastSystemAttempt time.Time
 }
 
 // NewEvictionController creates a controller for ResourceGuard pressure events.
@@ -185,6 +193,15 @@ func (c *EvictionController) handleEvent(ctx context.Context, event PressureEven
 		return
 	}
 
+	c.evictionMu.Lock()
+	defer c.evictionMu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	// Queued PSI events may outlive the pressure that caused them.
+	if event.Type == PressureEventSystemMemory && !c.systemPressureReady() {
+		return
+	}
 	resolveCtx, cancel := context.WithTimeout(ctx, c.cfg.ResolveTimeout)
 	target, ok := c.selectTarget(resolveCtx, event)
 	cancel()
@@ -198,8 +215,6 @@ func (c *EvictionController) handleEvent(ctx context.Context, event PressureEven
 		return
 	}
 
-	c.evictionMu.Lock()
-	defer c.evictionMu.Unlock()
 	if c.debounced(target) {
 		c.logger.Info("resourcemon: eviction skipped by debounce",
 			"workspaceId", target.WorkspaceID,
@@ -211,7 +226,25 @@ func (c *EvictionController) handleEvent(ctx context.Context, event PressureEven
 		return
 	}
 
-	c.performEviction(context.WithoutCancel(ctx), target)
+	c.performEviction(ctx, target)
+	if event.Type == PressureEventSystemMemory {
+		c.lastSystemAttempt = c.now()
+	}
+}
+
+// One eviction gets a full configured settling window before another workload
+// can be selected. A sample from before the previous stop cannot prove ongoing
+// pressure, even if an old critical event remains buffered.
+func (c *EvictionController) systemPressureReady() bool {
+	pressure := c.cfg.Source.CurrentPressure()
+	if pressure.Level != PressureLevelCritical {
+		return false
+	}
+	if c.lastSystemAttempt.IsZero() {
+		return true
+	}
+	return c.now().Sub(c.lastSystemAttempt) >= c.cfg.DebounceWindow &&
+		pressure.System.Memory.CollectedAt.After(c.lastSystemAttempt)
 }
 
 func (c *EvictionController) logWarning(event PressureEvent) {
@@ -264,78 +297,50 @@ func (c *EvictionController) selectTarget(ctx context.Context, event PressureEve
 	}
 
 	pressure := c.cfg.Source.CurrentPressure()
-	if event.WorkspaceID != "" && (event.ContainerID != "" || event.ContainerName != "") {
-		metric := metricForEvent(event, pressure.Containers)
-		return EvictionTarget{
-			WorkspaceID:   event.WorkspaceID,
-			ContainerID:   event.ContainerID,
-			ContainerName: event.ContainerName,
-			Reason:        reason,
-			Event:         event,
-			Metric:        cloneMetricPointer(metric),
-			TriggeredAt:   triggeredAt,
-		}, true
-	}
-
-	metrics := sortedMemoryConsumers(pressure.Containers)
-	if len(metrics) == 0 {
-		if event.WorkspaceID != "" {
-			return EvictionTarget{
-				WorkspaceID:   event.WorkspaceID,
-				ContainerID:   event.ContainerID,
-				ContainerName: event.ContainerName,
-				Reason:        reason,
-				Event:         event,
-				TriggeredAt:   triggeredAt,
-			}, true
-		}
-		return EvictionTarget{}, false
-	}
-
+	metrics := evictionMetricsForEvent(event, pressure.Containers)
 	for _, metric := range metrics {
-		if event.ContainerID != "" && !containerIDMatches(event.ContainerID, metric.ID) {
-			continue
-		}
-		if event.ContainerName != "" && !containerNameMatches(event.ContainerName, metric.Name) {
-			continue
+		if ctx.Err() != nil {
+			break
 		}
 		workspace, ok := c.resolveWorkspace(ctx, metric)
-		if !ok {
+		if !ok || workspace.WorkspaceID == "" || !containerIDMatches(workspace.ContainerID, metric.ID) {
 			continue
 		}
 		if event.WorkspaceID != "" && workspace.WorkspaceID != event.WorkspaceID {
 			continue
 		}
-		if workspace.ContainerID == "" {
-			workspace.ContainerID = metric.ID
-		}
-		if workspace.ContainerName == "" {
-			workspace.ContainerName = metric.Name
-		}
-		metricCopy := metric
 		return EvictionTarget{
-			WorkspaceID:   workspace.WorkspaceID,
-			ContainerID:   workspace.ContainerID,
-			ContainerName: workspace.ContainerName,
-			Reason:        reason,
-			Event:         event,
-			Metric:        &metricCopy,
-			TriggeredAt:   triggeredAt,
-		}, true
-	}
-
-	if event.WorkspaceID != "" {
-		return EvictionTarget{
-			WorkspaceID:   event.WorkspaceID,
-			ContainerID:   event.ContainerID,
-			ContainerName: event.ContainerName,
-			Reason:        reason,
-			Event:         event,
-			TriggeredAt:   triggeredAt,
+			WorkspaceID:        workspace.WorkspaceID,
+			ContainerID:        workspace.ContainerID,
+			ContainerName:      workspace.ContainerName,
+			RuntimeVersion:     workspace.RuntimeVersion,
+			EvictionGeneration: workspace.EvictionGeneration,
+			Reason:             reason,
+			Event:              event,
+			Metric:             cloneMetricPointer(&metric),
+			TriggeredAt:        triggeredAt,
 		}, true
 	}
 
 	return EvictionTarget{}, false
+}
+
+func evictionMetricsForEvent(event PressureEvent, containers []ContainerMetric) []ContainerMetric {
+	metrics := sortedMemoryConsumers(containers)
+	if event.Type == PressureEventContainerOOM {
+		// An exited OOM victim is absent from docker stats. Resolve its immutable
+		// ID directly; Docker labels supplied by the event are only hints.
+		if strings.TrimSpace(event.ContainerID) == "" {
+			return nil
+		}
+		metric := ContainerMetric{ID: event.ContainerID, Name: event.ContainerName}
+		if sampled := metricForEvent(event, metrics); sampled != nil {
+			metric = *sampled
+			metric.ID = event.ContainerID // Never substitute a same-name replacement.
+		}
+		metrics = []ContainerMetric{metric}
+	}
+	return metrics
 }
 
 func (c *EvictionController) resolveWorkspace(ctx context.Context, metric ContainerMetric) (WorkspaceContainer, bool) {
@@ -354,6 +359,11 @@ func (c *EvictionController) debounced(target EvictionTarget) bool {
 	now := c.now()
 	c.debounceMu.Lock()
 	defer c.debounceMu.Unlock()
+	for previousKey, last := range c.lastByKey {
+		if now.Sub(last) >= c.cfg.DebounceWindow {
+			delete(c.lastByKey, previousKey)
+		}
+	}
 	if last, ok := c.lastByKey[key]; ok && now.Sub(last) < c.cfg.DebounceWindow {
 		return true
 	}
@@ -382,6 +392,12 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 	}
 	cancel()
 
+	if ctx.Err() != nil {
+		return // Shutdown must not start new destructive side effects.
+	}
+	if target.Reason == EvictionReasonMemoryPressure && c.cfg.Source.CurrentPressure().Level != PressureLevelCritical {
+		return // Pressure can recover while a slow snapshot is being captured.
+	}
 	if err := c.cfg.StopContainer(ctx, target); err != nil {
 		result.ContainerStopError = err
 		c.logger.Warn("resourcemon: eviction docker stop failed",
@@ -391,12 +407,14 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 			"reason", target.Reason,
 			"error", err,
 		)
-	} else {
-		result.ContainerStopped = true
+		return // Leave the workspace eligible for a later pressure retry.
 	}
+	result.ContainerStopped = true
 
 	result.CompletedAt = c.now()
-	c.cfg.MarkWorkspaceEvicted(result)
+	if !c.cfg.MarkWorkspaceEvicted(result) {
+		return // A concurrent lifecycle change superseded this eviction.
+	}
 	if err := c.cfg.NotifyEviction(ctx, result); err != nil {
 		result.NotifyError = err
 		c.logger.Warn("resourcemon: eviction callback failed",

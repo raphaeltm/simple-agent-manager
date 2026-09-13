@@ -294,7 +294,11 @@ describe('deployment workflow safety wiring', () => {
     expect(reusable).toContain('- name: Resolve and Verify Deployment SHA');
     expect(reusable).toContain('ACTUAL_DEPLOY_SHA=$(git rev-parse HEAD)');
     expect(reusable).toContain('echo "agent_version=" >> "$GITHUB_OUTPUT"');
-    expect(reusable).toContain('echo "agent_version=$ACTUAL_DEPLOY_SHA" >> "$GITHUB_OUTPUT"');
+    // The agent version tracks VM-agent content, not the deployment commit, so a
+    // Worker-only deploy does not make every running node ineligible for reuse.
+    expect(reusable).toContain('echo "agent_version=$AGENT_RELEASE" >> "$GITHUB_OUTPUT"');
+    expect(reusable).toContain('bash scripts/deploy/resolve-vm-agent-release.sh');
+    expect(reusable).toContain('fetch-depth: 0');
     expect(reusable).toContain(
       'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
     );

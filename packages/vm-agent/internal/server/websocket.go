@@ -194,6 +194,9 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runtime := s.upsertWorkspaceRuntime(workspaceID, "", "", "running", "")
+	if !s.requireWorkspaceReconnectState(w, r, runtime) {
+		return
+	}
 
 	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -335,6 +338,9 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runtime := s.upsertWorkspaceRuntime(workspaceID, "", "", "running", "")
+	if !s.requireWorkspaceReconnectState(w, r, runtime) {
+		return
+	}
 
 	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)

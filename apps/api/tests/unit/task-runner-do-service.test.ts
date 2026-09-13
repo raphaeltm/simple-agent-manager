@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
+import { resolveReusableNodeCapacitySnapshot } from '../../src/services/placement-resolver';
 import { startTaskRunnerDO } from '../../src/services/task-runner-do';
 
 const serviceSource = readFileSync(
@@ -282,9 +283,37 @@ describe('task-runner-do service', () => {
     });
     expect(candidates[1]).toMatchObject({
       providerInstanceType: 'cx24',
-      providerInstancePriceCurrency: null,
-      providerInstancePriceMonthlyCents: null,
-      providerInstancePriceHourlyMicros: null,
+      providerInstancePriceDisplay: '€6.00/mo',
+      providerInstancePriceCurrency: 'EUR',
+      providerInstancePriceMonthlyCents: 501,
+      providerInstancePriceHourlyMicros: 8001,
+    });
+    const selection = forwarded.config.capacityPoolSelection!;
+    const candidate = candidates[1]!;
+    const snapshot = resolveReusableNodeCapacitySnapshot({
+      selection,
+      projectId: minimalStartInput.projectId,
+      requestedVmSize: 'medium',
+      node: {
+        capacityPoolId: selection.poolId,
+        capacityPoolScope: selection.scope,
+        capacityPoolProjectId: selection.capacityPoolProjectId,
+        capacitySourceId: candidate.capacitySourceId,
+        capacityPoolCandidateId: candidate.id,
+        workloadRole: candidate.workloadRole,
+        cloudProvider: candidate.provider,
+        vmLocation: candidate.location,
+        vmSize: 'medium',
+        providerInstanceType: candidate.providerInstanceType,
+        providerInstanceVcpuCount: candidate.providerInstanceVcpuCount,
+        providerInstanceMemoryMb: candidate.providerInstanceMemoryMb,
+        providerInstanceDiskGb: candidate.providerInstanceDiskGb,
+      },
+    });
+    expect(snapshot).toMatchObject({ providerInstancePriceCurrency: 'EUR', providerInstancePriceHourlyMicros: 8001 });
+    expect(JSON.parse(snapshot!.placementExplanationJson!)).toMatchObject({
+      providerInstancePriceDisplay: '€6.00/mo', providerInstancePriceCurrency: 'EUR',
+      providerInstancePriceMonthlyCents: 501, providerInstancePriceHourlyMicros: 8001,
     });
   });
 

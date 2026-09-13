@@ -1,6 +1,5 @@
 import {
-  CREDENTIAL_PROVIDERS,
-  type CredentialProvider,
+  type AgentProfileRuntime,
   type CredentialSource,
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
@@ -9,9 +8,8 @@ import {
   type VMSize,
   type WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, exists, notInArray, or } from 'drizzle-orm';
+import { desc, eq, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -23,8 +21,27 @@ import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS,
   capacityPlacementSnapshotSqlValues,
 } from './capacity-placement-snapshot';
-import { toCapacityPlacementSnapshot } from './capacity-pools';
+import {
+  resolveTaskStartPlacement,
+  resolveTaskStartPlacementCredentialAttributionFromPlacement,
+  type TaskStartPlacementWithCredential,
+} from './placement-resolver';
+import {
+  assertReplacementDeletionConfirmed,
+  WorkspaceDeletionUnconfirmedError,
+} from './replacement-deletion-fence';
+import {
+  parseLegacyVmSize,
+  type PersistedTaskResourcePlanReadResult,
+  readPersistedTaskResourcePlan,
+  ResourceRequirementsValidationError,
+} from './resource-requirements-input';
 import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
+import {
+  type Db,
+  sourceTaskGuardIsWakeable,
+  SourceTaskNotWakeableError,
+} from './session-recovery-task-guard';
 import {
   claimSessionSnapshotRecovery,
   failSessionSnapshotRecovery,
@@ -32,8 +49,6 @@ import {
   type SessionRecoverySourceTaskGuard,
 } from './session-snapshots';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
-
-type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 export type SessionRecoveryResult =
   | { status: 'waking'; taskId: string }
@@ -47,49 +62,7 @@ type RecoveryContext = {
   sourceTask: schema.Task | null;
 };
 
-class SourceTaskNotWakeableError extends Error {
-  constructor() {
-    super('source task is no longer wakeable');
-    this.name = 'SourceTaskNotWakeableError';
-  }
-}
-
-async function sourceTaskGuardIsWakeable(
-  db: Db,
-  guard: SessionRecoverySourceTaskGuard | undefined
-): Promise<boolean> {
-  if (!guard) return true;
-  const recoveryOwner = alias(schema.tasks, 'recovery_owner');
-  const task = await db
-    .select({ id: schema.tasks.id })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, guard.taskId),
-        eq(schema.tasks.projectId, guard.projectId),
-        notInArray(schema.tasks.status, ['completed', 'failed', 'cancelled']),
-        or(
-          eq(schema.tasks.chatSessionId, guard.chatSessionId),
-          exists(
-            db
-              .select({ id: recoveryOwner.id })
-              .from(recoveryOwner)
-              .where(
-                and(
-                  eq(recoveryOwner.recoverySourceTaskId, guard.taskId),
-                  eq(recoveryOwner.projectId, guard.projectId),
-                  eq(recoveryOwner.chatSessionId, guard.chatSessionId),
-                  eq(recoveryOwner.triggeredBy, 'session-recovery'),
-                  notInArray(recoveryOwner.status, ['completed', 'failed', 'cancelled'])
-                )
-              )
-          )
-        )
-      )
-    )
-    .get();
-  return Boolean(task);
-}
+type RecoveryPlacementResolution = TaskStartPlacementWithCredential;
 
 export const SESSION_RECOVERY_INITIAL_PROMPT =
   'Resume this sleeping conversation from the persisted transcript. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
@@ -104,14 +77,12 @@ function asWorkspaceProfile(value: string | null | undefined): WorkspaceProfile 
     : DEFAULT_WORKSPACE_PROFILE;
 }
 
-function asCredentialProvider(value: string | null | undefined): CredentialProvider | null {
-  return (CREDENTIAL_PROVIDERS as readonly string[]).includes(value ?? '')
-    ? (value as CredentialProvider)
-    : null;
-}
-
 function asCredentialSource(value: string | null | undefined): CredentialSource {
   return value === 'project' || value === 'platform' || value === 'self-hosted' ? value : 'user';
+}
+
+function asAgentProfileRuntime(value: string | null | undefined): AgentProfileRuntime | null {
+  return value === 'vm' || value === 'cf-container' ? value : null;
 }
 
 function snapshotAgentType(snapshot: schema.SessionSnapshot): string | null {
@@ -170,6 +141,7 @@ async function createRecoveryTask(
   context: RecoveryContext,
   chatSessionId: string,
   taskId: string,
+  placementResolution: RecoveryPlacementResolution,
   sourceTaskGuard?: SessionRecoverySourceTaskGuard
 ): Promise<schema.Task> {
   const sourceTaskId =
@@ -194,7 +166,7 @@ async function createRecoveryTask(
   }
 
   const now = new Date().toISOString();
-  const capacityPlacementSnapshot = toCapacityPlacementSnapshot(context.workspace);
+  const capacityPlacementSnapshot = placementResolution.capacityPlacementSnapshot;
   try {
     // D1 batches are transactional. The INSERT ... SELECT is the parent-state
     // compare-and-set: if the source is terminal or no longer owns this
@@ -221,15 +193,30 @@ async function createRecoveryTask(
                   COALESCE(source.requested_vm_size_source, 'session-recovery'),
                   source.resource_requirements_json, source.resource_requirements_source,
                   source.resolved_reservation_json,
-                  COALESCE(source.credential_attribution_user_id, ?),
-                  source.credential_attribution_project_id,
-                  COALESCE(source.credential_attribution_source, 'user'),
+                  ?,
+                  ?,
+                  ?,
                   ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_PLACEHOLDERS},
                   'session-recovery', ?, ?, ?
              FROM tasks source
             WHERE source.id = ?
               AND source.project_id = ?
-              AND (? = 0 OR source.status NOT IN ('completed', 'failed', 'cancelled'))
+              AND (
+                ? = 0
+                OR source.status NOT IN ('completed', 'failed', 'cancelled')
+                OR (
+                  source.status = 'cancelled'
+                  AND source.superseded_by_task_id IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM tasks marked_successor
+                     WHERE marked_successor.id = source.superseded_by_task_id
+                       AND marked_successor.project_id = source.project_id
+                       AND marked_successor.chat_session_id = ?
+                       AND marked_successor.triggered_by = 'session-recovery'
+                       AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
+                  )
+                )
+              )
               AND (
                 source.chat_session_id = ?
                 OR EXISTS (
@@ -247,11 +234,11 @@ async function createRecoveryTask(
           context.snapshot.userId,
           SESSION_RECOVERY_INITIAL_PROMPT,
           context.workspace.agentProfileHint,
-          context.workspace.vmSize,
-          context.snapshot.userId,
-          ...capacityPlacementSnapshotSqlValues(
-            capacityPlacementSnapshot.capacityPoolId ? capacityPlacementSnapshot : null
-          ),
+          placementResolution.placement.vmSize,
+          placementResolution.credentialAttributionUserId,
+          placementResolution.credentialAttributionProjectId,
+          placementResolution.credentialAttributionSource,
+          ...capacityPlacementSnapshotSqlValues(capacityPlacementSnapshot),
           context.snapshot.userId,
           now,
           now,
@@ -260,12 +247,15 @@ async function createRecoveryTask(
           requiresLiveSource,
           chatSessionId,
           chatSessionId,
+          chatSessionId,
           taskId
         ),
       database
         .prepare(
           `UPDATE tasks
-              SET chat_session_id = NULL, updated_at = ?
+              SET chat_session_id = NULL,
+                  superseded_by_task_id = ?,
+                  updated_at = ?
             WHERE chat_session_id = ?
               AND (id = ? OR recovery_source_task_id = ?)
               AND EXISTS (
@@ -275,7 +265,7 @@ async function createRecoveryTask(
                    AND recovery.chat_session_id IS NULL
               )`
         )
-        .bind(now, chatSessionId, sourceTaskId, sourceTaskId, taskId, sourceTaskId),
+        .bind(taskId, now, chatSessionId, sourceTaskId, sourceTaskId, taskId, sourceTaskId),
       database
         .prepare(
           `UPDATE workspaces
@@ -300,7 +290,22 @@ async function createRecoveryTask(
                 SELECT 1 FROM tasks source
                  WHERE source.id = ?
                    AND source.project_id = ?
-                   AND (? = 0 OR source.status NOT IN ('completed', 'failed', 'cancelled'))
+                   AND (
+                     ? = 0
+                     OR source.status NOT IN ('completed', 'failed', 'cancelled')
+                     OR (
+                       source.status = 'cancelled'
+                       AND source.superseded_by_task_id IS NOT NULL
+                       AND EXISTS (
+                         SELECT 1 FROM tasks marked_successor
+                          WHERE marked_successor.id = source.superseded_by_task_id
+                            AND marked_successor.project_id = source.project_id
+                            AND marked_successor.chat_session_id = ?
+                            AND marked_successor.triggered_by = 'session-recovery'
+                            AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
+                       )
+                     )
+                   )
               )`
         )
         .bind(
@@ -310,7 +315,8 @@ async function createRecoveryTask(
           sourceTaskId,
           sourceTaskId,
           context.project.id,
-          requiresLiveSource
+          requiresLiveSource,
+          chatSessionId
         ),
       database
         .prepare(
@@ -376,7 +382,9 @@ async function abandonRecoveryHandoff(
     database
       .prepare(
         `UPDATE tasks
-            SET chat_session_id = ?, updated_at = ?
+            SET chat_session_id = ?,
+                superseded_by_task_id = NULL,
+                updated_at = ?
           WHERE id = ?
             AND project_id = ?
             AND chat_session_id IS NULL
@@ -421,6 +429,7 @@ async function startRecoveryTask(
   context: RecoveryContext,
   task: schema.Task,
   chatSessionId: string,
+  placementResolution: RecoveryPlacementResolution,
   sourceTaskGuard?: SessionRecoverySourceTaskGuard
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
@@ -476,10 +485,11 @@ async function startRecoveryTask(
       null,
     workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
     devcontainerConfigName: context.workspace.devcontainerConfigName,
-    cloudProvider: asCredentialProvider(profile?.provider ?? context.project.defaultProvider),
-    credentialAttributionUserId: task.credentialAttributionUserId ?? context.snapshot.userId,
-    credentialAttributionProjectId: task.credentialAttributionProjectId,
-    credentialAttributionSource: asCredentialSource(task.credentialAttributionSource),
+    cloudProvider: placementResolution.placement.provider ?? placementResolution.effectiveProvider,
+    explicitVmLocation: placementResolution.placement.explicitVmLocation === true,
+    credentialAttributionUserId: placementResolution.credentialAttributionUserId,
+    credentialAttributionProjectId: placementResolution.credentialAttributionProjectId,
+    credentialAttributionSource: placementResolution.credentialAttributionSource,
     taskMode: 'conversation',
     model: profile?.model ?? null,
     effort:
@@ -499,8 +509,138 @@ async function startRecoveryTask(
       nodeMemoryThresholdPercent: context.project.nodeMemoryThresholdPercent,
       warmNodeTimeoutMs: context.project.warmNodeTimeoutMs,
     },
+    resolvedReservation: placementResolution.placement.resolvedReservation,
+    capacityPoolSelection: placementResolution.capacityPoolSelection,
+    vmSizeSource: placementResolution.placement.vmSizeSource,
     resumeSnapshotChatSessionId: chatSessionId,
+    // Unguarded human wakes intentionally do not carry recoverySourceTaskId:
+    // that field grants the live-parent revocable-authority contract. Keep the
+    // predecessor deletion lineage separately so every TaskRunner boundary can
+    // still revalidate that the old runtime is gone before allocating a node.
     recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
+    retrySourceTaskId: task.recoverySourceTaskId ?? null,
+  });
+}
+
+async function resolveRecoveryPlacement(
+  db: Db,
+  env: Env,
+  context: RecoveryContext,
+  taskId: string
+): Promise<
+  RecoveryPlacementResolution | { error: string; errorKind: 'placement' | 'credentials' }
+> {
+  const profile = context.workspace.agentProfileHint
+    ? await db
+        .select()
+        .from(schema.agentProfiles)
+        .where(eq(schema.agentProfiles.id, context.workspace.agentProfileHint))
+        .get()
+    : null;
+  const sourceTask = context.sourceTask;
+
+  // Wake reuses the ORIGINAL run's canonical resource plan, read through the
+  // one shared reader. It used to `JSON.parse(sourceTask.resourceRequirementsJson)`
+  // into the `task` layer alone, which silently dropped every inherited layer
+  // (trigger / skill / agent-profile / project / user), ignored the persisted
+  // `resolvedReservation`, discarded the compatibility provenance recorded when
+  // a legacy size was translated, and threw an unhandled SyntaxError on a
+  // malformed stored value. Recomputing the layers from TODAY's project and
+  // profile defaults would also let a default changed since the session went to
+  // sleep silently re-size the woken workspace.
+  let storedPlan: PersistedTaskResourcePlanReadResult;
+  try {
+    storedPlan = readPersistedTaskResourcePlan({
+      taskId: sourceTask?.id ?? taskId,
+      triggerId: sourceTask?.triggerId ?? null,
+      skillId: sourceTask?.skillId ?? null,
+      agentProfileId: sourceTask?.agentProfileHint ?? context.workspace.agentProfileHint ?? null,
+      projectId: context.project.id,
+      userId: context.snapshot.userId,
+      resourceRequirementPlanJson: sourceTask?.resourceRequirementPlanJson ?? null,
+      resourceRequirementsJson: sourceTask?.resourceRequirementsJson ?? null,
+      resourceRequirementsSource: sourceTask?.resourceRequirementsSource ?? null,
+      resolvedReservationJson: sourceTask?.resolvedReservationJson ?? null,
+      requestedVmSize: sourceTask?.requestedVmSize ?? null,
+      requestedVmSizeSource: sourceTask?.requestedVmSizeSource ?? null,
+    });
+  } catch (error) {
+    // A malformed stored intent must fail visibly. Silently falling back to
+    // "no requirements" would wake the session onto whatever the current
+    // defaults happen to be, which is a scope change the user never asked for.
+    if (error instanceof ResourceRequirementsValidationError) {
+      log.warn('session_recovery.stored_resource_plan_invalid', {
+        projectId: context.project.id,
+        taskId,
+        sourceTaskId: sourceTask?.id ?? null,
+        reason: error.message,
+      });
+      return {
+        error: `Stored resource requirements for this session are invalid: ${error.message}`,
+        errorKind: 'placement',
+      };
+    }
+    throw error;
+  }
+
+  // The size the ORIGINAL run resolved to, not whatever the current project
+  // default resolves to now. `workspace.vmSize` is the size actually running.
+  const persistedVmSize =
+    storedPlan.requestedVmSize ??
+    parseLegacyVmSize(sourceTask?.requestedVmSize ?? null) ??
+    asVmSize(context.workspace.vmSize);
+  const persistedVmSizeSource = storedPlan.requestedVmSizeSource ?? 'task';
+
+  const placement = resolveTaskStartPlacement({
+    entryPoint: 'session-recovery',
+    taskId,
+    projectId: context.project.id,
+    userId: context.snapshot.userId,
+    project: context.project,
+    profile: profile
+      ? {
+          profileId: profile.id,
+          agentType: profile.agentType,
+          vmSizeOverride: profile.vmSizeOverride,
+          provider: profile.provider,
+          vmLocation: profile.vmLocation,
+          workspaceProfile: profile.workspaceProfile,
+          runtime: asAgentProfileRuntime(profile.runtime),
+          devcontainerConfigName: profile.devcontainerConfigName,
+          taskMode: profile.taskMode,
+        }
+      : null,
+    explicit: {
+      vmSize: persistedVmSize,
+      vmSizeSource: persistedVmSizeSource,
+      provider: null,
+      vmLocation: context.workspace.vmLocation,
+      workspaceProfile: asWorkspaceProfile(context.workspace.workspaceProfile),
+      devcontainerConfigName: context.workspace.devcontainerConfigName,
+      taskMode: 'conversation',
+      agentType: snapshotAgentType(context.snapshot),
+      runtime: 'vm',
+    },
+    inheritedCredentialAttribution: {
+      userId: sourceTask?.credentialAttributionUserId ?? context.snapshot.userId,
+      projectId: sourceTask?.credentialAttributionProjectId ?? null,
+      source: asCredentialSource(sourceTask?.credentialAttributionSource),
+    },
+    credentialProjectPolicy: 'current-project-unless-inherited',
+    taskModeDefault: 'workspace-profile',
+    // Every persisted layer, at its ORIGINAL precedence — not just `task`, and
+    // not re-derived from today's project/profile rows.
+    resourceRequirements: storedPlan.layers,
+    // The reservation the original run actually allocated against. Reusing it
+    // keeps a wake byte-identical to the run it resumes; recomputing could
+    // silently re-size the workspace under a changed default.
+    resolvedReservationOverride: storedPlan.resolvedReservation,
+  });
+
+  return resolveTaskStartPlacementCredentialAttributionFromPlacement(db, placement, {
+    credentialsRequiredMessage:
+      'Cloud provider credentials required. Connect an account in Settings or enable a platform credential.',
+    env,
   });
 }
 
@@ -522,10 +662,47 @@ export async function ensureSessionRecovery(
     return { status: 'unavailable', reason: 'container_runtime_wakes_in_place' };
   }
 
+  const deletionSourceTaskId =
+    sourceTaskGuard?.taskId ??
+    context.sourceTask?.recoverySourceTaskId ??
+    context.sourceTask?.id ??
+    null;
+  if (deletionSourceTaskId) {
+    try {
+      await assertReplacementDeletionConfirmed(env, {
+        sourceTaskId: deletionSourceTaskId,
+        projectId,
+        userId: context.snapshot.userId,
+      });
+    } catch (error) {
+      if (error instanceof WorkspaceDeletionUnconfirmedError) {
+        return { status: 'unavailable', reason: 'workspace_deletion_unconfirmed' };
+      }
+      throw error;
+    }
+  }
+
+  const recoveryTaskId = ulid();
+  let placementResolution: RecoveryPlacementResolution;
+  try {
+    const resolved = await resolveRecoveryPlacement(db, env, context, recoveryTaskId);
+    if ('error' in resolved) {
+      return { status: 'unavailable', reason: `session_recovery_placement_${resolved.errorKind}` };
+    }
+    placementResolution = resolved;
+  } catch (error) {
+    log.warn('session_recovery.placement_resolution_deferred', {
+      projectId,
+      chatSessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { status: 'unavailable', reason: 'session_recovery_placement_transient' };
+  }
+
   const claim = await claimSessionSnapshotRecovery(db, env, {
     chatSessionId,
     userId: context.snapshot.userId,
-    taskId: ulid(),
+    taskId: recoveryTaskId,
     sourceTaskGuard,
   });
   if (claim.status === 'unavailable') return claim;
@@ -539,9 +716,17 @@ export async function ensureSessionRecovery(
       context,
       chatSessionId,
       claim.taskId,
+      placementResolution,
       sourceTaskGuard
     );
-    await startRecoveryTask(env, context, recoveryTask, chatSessionId, sourceTaskGuard);
+    await startRecoveryTask(
+      env,
+      context,
+      recoveryTask,
+      chatSessionId,
+      placementResolution,
+      sourceTaskGuard
+    );
     log.info('session_recovery.waking', {
       projectId,
       chatSessionId,

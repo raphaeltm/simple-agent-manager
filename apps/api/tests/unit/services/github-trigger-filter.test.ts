@@ -106,6 +106,84 @@ describe('evaluateFilters', () => {
 
   // --- Command prefix filter ---
   describe('commandPrefix filter', () => {
+    it('does not reject realistic issues/opened events with a stray stored commandPrefix', () => {
+      const filters: GitHubTriggerFilters = {
+        actions: ['opened'],
+        ignoreActors: ['dependabot[bot]', 'simple-agent-manager[bot]'],
+        commandPrefix: '/sam',
+      };
+      const event = parseWebhookPayload('issues', {
+        action: 'opened',
+        sender: { login: 'raphaeltm', type: 'User' },
+        repository: { full_name: 'raphaeltm/simple-agent-manager', default_branch: 'main' },
+        issue: {
+          number: 1611,
+          title: 'Potato',
+          body: 'Manual smoke test for the Issue Reviewer trigger.',
+          labels: [],
+        },
+      });
+
+      const result = evaluateFilters(event, filters);
+
+      expect(result).toEqual({ matched: true });
+    });
+
+    it('does not reject pull_request events with a stray stored commandPrefix', () => {
+      const filters: GitHubTriggerFilters = {
+        actions: ['opened'],
+        branches: ['fix/github-trigger'],
+        commandPrefix: '/sam',
+      };
+      const event = parseWebhookPayload('pull_request', {
+        action: 'opened',
+        sender: { login: 'contributor', type: 'User' },
+        repository: { full_name: 'raphaeltm/simple-agent-manager', default_branch: 'main' },
+        pull_request: {
+          number: 2020,
+          title: 'Fix GitHub triggers',
+          body: 'This PR should be evaluated without comment command filters.',
+          draft: false,
+          labels: [{ name: 'bug' }],
+          head: { ref: 'fix/github-trigger' },
+          base: { ref: 'main' },
+        },
+      });
+
+      const result = evaluateFilters(event, filters);
+
+      expect(result).toEqual({ matched: true });
+    });
+
+    it('does not reject push events with a stray stored commandPrefix', () => {
+      const filters: GitHubTriggerFilters = {
+        branches: ['main'],
+        commandPrefix: '/sam',
+      };
+      const event = parseWebhookPayload('push', {
+        ref: 'refs/heads/main',
+        sender: { login: 'release-bot', type: 'Bot' },
+        repository: { full_name: 'raphaeltm/simple-agent-manager', default_branch: 'main' },
+        head_commit: { id: 'abc123', message: 'Deploy trigger fix' },
+      });
+
+      const result = evaluateFilters(event, filters);
+
+      expect(result).toEqual({ matched: true });
+    });
+
+    it('gates commandPrefix by event type, not by accidental comment presence', () => {
+      const filters: GitHubTriggerFilters = { commandPrefix: '/sam' };
+      const event = makeEvent({
+        event: 'issues',
+        comment: { body: 'Please fix this' },
+      });
+
+      const result = evaluateFilters(event, filters);
+
+      expect(result).toEqual({ matched: true });
+    });
+
     it('matches when comment starts with prefix', () => {
       const filters: GitHubTriggerFilters = { commandPrefix: '/sam' };
       const event = makeEvent({
@@ -126,7 +204,7 @@ describe('evaluateFilters', () => {
       });
       const result = evaluateFilters(event, filters);
       expect(result.matched).toBe(false);
-      expect(result.reason).toContain('/sam');
+      expect(result.reason).toBe("comment does not start with '/sam'");
     });
 
     it('rejects when comment body is empty', () => {

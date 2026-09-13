@@ -390,14 +390,20 @@ describe('ProfileFormDialog', () => {
     expect(defaultOnSave).not.toHaveBeenCalled();
   });
 
-  it('shows provider catalog details for VM size overrides', async () => {
+  it('saves workload resource overrides without selecting a legacy VM size', async () => {
+    const user = userEvent.setup();
     render(
       <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
     );
-
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Medium — cx32 (4 vCPU, 8 GB RAM, 80 GB storage) €7.69/mo' })).toBeInTheDocument();
-    });
+    await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Custom resources');
+    await user.click(screen.getByText('Infrastructure'));
+    await user.type(screen.getByRole('spinbutton', { name: 'vCPU' }), '2.5');
+    await user.type(screen.getByRole('spinbutton', { name: 'Memory (GB)' }), '6');
+    await user.click(screen.getByText('Create Profile'));
+    await waitFor(() => expect(defaultOnSave).toHaveBeenCalledOnce());
+    const payload = defaultOnSave.mock.calls[0]?.[0];
+    expect(payload.vmSizeOverride).toBeNull();
+    expect(JSON.parse(payload.resourceRequirementsJson)).toMatchObject({ minVcpu: 2.5, minMemoryGb: 6 });
   });
 
   it('calls onSave with correct payload in create mode', async () => {

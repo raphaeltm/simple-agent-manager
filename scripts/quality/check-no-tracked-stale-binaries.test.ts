@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { afterEach, describe, expect, it } from 'vitest';
 
 const ROOT = join(import.meta.dirname, '../..');
 const SCRIPT = join(ROOT, 'scripts/quality/check-no-tracked-stale-binaries.ts');
+const TSX_CLI = join(ROOT, 'node_modules/tsx/dist/cli.mjs');
 const GIT_BINARY = '/usr/bin/git';
 const tempDirs: string[] = [];
 
@@ -17,7 +19,7 @@ function makeGitRepo(): string {
 }
 
 function runCheck(cwd: string): string {
-  return execFileSync('npx', ['tsx', SCRIPT], {
+  return execFileSync(process.execPath, [TSX_CLI, SCRIPT], {
     cwd,
     encoding: 'utf-8',
     stderr: 'pipe',

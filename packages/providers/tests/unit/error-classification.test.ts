@@ -41,8 +41,13 @@ describe('classifyHetznerError', () => {
       expect(classifyHetznerError(409, 'conflict', 'action conflict')).toBe('invalid_config');
     });
 
-    it('placement_error → invalid_config', () => {
-      expect(classifyHetznerError(412, 'placement_error', 'error during placement')).toBe('invalid_config');
+    // Was `invalid_config` until 2026-09-09. Nothing about the request is invalid: Hetzner
+    // cannot place THIS server type in THIS location right now, which is capacity scarcity.
+    // The old mapping made the capacity-pool fallback chain terminalize on its first offering.
+    it('placement_error → transient_capacity', () => {
+      expect(classifyHetznerError(412, 'placement_error', 'error during placement')).toBe(
+        'transient_capacity'
+      );
     });
   });
 

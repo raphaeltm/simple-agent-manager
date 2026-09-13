@@ -1,7 +1,14 @@
 package resourcemon
 
 import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"os/exec"
 	"sync"
+
+	"github.com/workspace/vm-agent/internal/sysinfo"
 	"testing"
 	"time"
 )
@@ -97,5 +104,91 @@ func TestResourceGuardValidateRejectsInvalidThresholdOrder(t *testing.T) {
 	cfg.PSIThresholds.MemorySomeCriticalThreshold = 50
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() should reject warning threshold above critical threshold")
+	}
+}
+
+func TestResourceGuardRepeatsCriticalPressureUntilRecovery(t *testing.T) {
+	guard, err := NewResourceGuard(testResourceGuardConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer guard.Close()
+	for i := 0; i < 3; i++ {
+		guard.updateMemoryPressure(MemoryPressure{Available: true, Level: PressureLevelCritical, CollectedAt: time.Now()})
+		select {
+		case event := <-guard.PressureEvents():
+			if event.Level != PressureLevelCritical {
+				t.Fatalf("event = %#v", event)
+			}
+		default:
+			t.Fatal("sustained critical pressure lost retry")
+		}
+	}
+	guard.updateMemoryPressure(MemoryPressure{Available: true, Level: PressureLevelNone, CollectedAt: time.Now()})
+	select {
+	case event := <-guard.PressureEvents():
+		t.Fatalf("unexpected recovery event %#v", event)
+	default:
+	}
+}
+
+func TestResourceGuardInitialPressureHasContainerMetrics(t *testing.T) {
+	cfg := testResourceGuardConfig()
+	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg.DockerEventsCommand = func(ctx context.Context) *exec.Cmd { return exec.CommandContext(ctx, "/nonexistent-sam-test-docker") }
+	cfg.PressureReadFile = func(string) ([]byte, error) {
+		return []byte("some avg10=90 avg60=90 avg300=90 total=100\nfull avg10=90 avg60=90 avg300=90 total=100\n"), nil
+	}
+	cfg.CollectDockerStats = func(context.Context, time.Duration, ...string) (map[string]sysinfo.DockerStatsEntry, error) {
+		return map[string]sysinfo.DockerStatsEntry{"victim": {ID: "victim"}}, nil
+	}
+	guard, err := NewResourceGuard(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := guard.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer guard.Close()
+	select {
+	case <-guard.PressureEvents():
+		if len(guard.CurrentPressure().Containers) != 1 {
+			t.Fatal("initial critical event had no metrics")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("initial pressure event missing")
+	}
+}
+
+func TestResourceGuardCriticalPressureRefreshesVictimsAndDropsStaleMetricsOnFailure(t *testing.T) {
+	cfg := testResourceGuardConfig()
+	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg.PressureReadFile = func(string) ([]byte, error) {
+		return []byte("some avg10=90 avg60=90 avg300=90 total=100\nfull avg10=90 avg60=90 avg300=90 total=100\n"), nil
+	}
+	fail := false
+	cfg.CollectDockerStats = func(context.Context, time.Duration, ...string) (map[string]sysinfo.DockerStatsEntry, error) {
+		if fail {
+			return nil, errors.New("Docker unavailable")
+		}
+		return map[string]sysinfo.DockerStatsEntry{"fresh": {ID: "fresh"}}, nil
+	}
+	guard, err := NewResourceGuard(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer guard.Close()
+	guard.updateContainerMetrics([]ContainerMetric{{ID: "stale"}})
+	ticker := time.NewTicker(time.Hour)
+	defer ticker.Stop()
+	psiC := ticker.C
+	guard.pollPSI(context.Background(), &psiC, ticker)
+	if got := guard.CurrentPressure().Containers; len(got) != 1 || got[0].ID != "fresh" {
+		t.Fatalf("victims = %#v", got)
+	}
+	fail = true
+	guard.pollPSI(context.Background(), &psiC, ticker)
+	if got := guard.CurrentPressure(); len(got.Containers) != 0 || got.Level != PressureLevelCritical {
+		t.Fatalf("failed sample retained stale victim or hid pressure: %#v", got)
 	}
 }

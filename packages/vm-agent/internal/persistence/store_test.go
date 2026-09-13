@@ -598,29 +598,19 @@ func TestUpsertAndGetWorkspaceMetadata(t *testing.T) {
 	if meta == nil {
 		t.Fatal("expected non-nil metadata")
 	}
-	if meta.Repository != "octo/my-repo" {
-		t.Errorf("expected repository 'octo/my-repo', got %q", meta.Repository)
-	}
-	if meta.Branch != "main" {
-		t.Errorf("expected branch 'main', got %q", meta.Branch)
-	}
-	if meta.ContainerWorkDir != "/workspaces/my-repo" {
-		t.Errorf("expected ContainerWorkDir '/workspaces/my-repo', got %q", meta.ContainerWorkDir)
-	}
-	if meta.ContainerUser != "vscode" {
-		t.Errorf("expected ContainerUser 'vscode', got %q", meta.ContainerUser)
-	}
-	if meta.ContainerLabelVal != "/workspace/ws-1" {
-		t.Errorf("expected ContainerLabelVal '/workspace/ws-1', got %q", meta.ContainerLabelVal)
-	}
-	if meta.WorkspaceDir != "/workspace/ws-1" {
-		t.Errorf("expected WorkspaceDir '/workspace/ws-1', got %q", meta.WorkspaceDir)
-	}
-	if meta.CallbackToken != "workspace-callback-token" {
-		t.Errorf("expected CallbackToken to round-trip, got %q", meta.CallbackToken)
-	}
-	if meta.ChatSessionID != "chat-session-1" {
-		t.Errorf("expected ChatSessionID to round-trip, got %q", meta.ChatSessionID)
+	for _, field := range []struct{ name, got, want string }{
+		{"Repository", meta.Repository, "octo/my-repo"},
+		{"Branch", meta.Branch, "main"},
+		{"ContainerWorkDir", meta.ContainerWorkDir, "/workspaces/my-repo"},
+		{"ContainerUser", meta.ContainerUser, "vscode"},
+		{"ContainerLabelVal", meta.ContainerLabelVal, "/workspace/ws-1"},
+		{"WorkspaceDir", meta.WorkspaceDir, "/workspace/ws-1"},
+		{"CallbackToken", meta.CallbackToken, "workspace-callback-token"},
+		{"ChatSessionID", meta.ChatSessionID, "chat-session-1"},
+	} {
+		if field.got != field.want {
+			t.Errorf("%s = %q, want %q", field.name, field.got, field.want)
+		}
 	}
 	var rawCallbackToken string
 	if err := store.db.QueryRow("SELECT callback_token FROM workspace_metadata WHERE workspace_id = ?", "ws-1").Scan(&rawCallbackToken); err != nil {
