@@ -30,6 +30,11 @@ const preparationMocks = vi.hoisted(() => ({
   recover: vi.fn(),
   capabilities: vi.fn(),
   send: vi.fn(),
+  sign: vi.fn(),
+}));
+vi.mock('../../../src/services/jwt', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/jwt')>()),
+  signNodeManagementToken: preparationMocks.sign,
 }));
 vi.mock('../../../src/services/session-recovery', () => ({
   ensureSessionRecovery: preparationMocks.recover,
@@ -528,6 +533,55 @@ describe('ProjectData durable prompt delivery', () => {
       deliveryState: 'failed',
       terminalReason: 'terminal_target',
     });
+  });
+
+  it('blocks a cancelled event wake at the real VM fetch boundary after token signing stalls', async () => {
+    const claim = acceptProjectEventWake('event-wake-transport-cancel');
+    const env = {
+      BASE_DOMAIN: 'example.com', PROJECT_EVENT_WAKE_ENABLED: 'true',
+      DATABASE: {
+        prepare: () => ({ bind: () => ({
+          first: async () => ({ id: 'source-task-1' }),
+          raw: async () => [['vm']],
+        }) }),
+      },
+    } as never;
+    const realNodeAgent = await vi.importActual<typeof import('../../../src/services/node-agent')>(
+      '../../../src/services/node-agent'
+    );
+    preparationMocks.send.mockImplementationOnce(realNodeAgent.sendPromptToAgentOnNode);
+    preparationMocks.capabilities.mockResolvedValue(capabilities);
+    let signingStarted!: () => void;
+    let releaseSigning!: () => void;
+    const started = new Promise<void>((resolve) => { signingStarted = resolve; });
+    const barrier = new Promise<void>((resolve) => { releaseSigning = resolve; });
+    preparationMocks.sign.mockImplementationOnce(async () => {
+      signingStarted();
+      await barrier;
+      return { token: 'test-management-token' };
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const realAdapter = new DefaultVmPromptDeliveryAdapter(env);
+    const adapter: VmPromptDeliveryAdapter = {
+      submit: (input) => realAdapter.submit({ ...input, resolvedTarget: {
+        projectId: 'project-1', chatSessionId: 'chat-1', workspaceId: 'workspace-1',
+        nodeId: 'node-1', agentSessionId: 'acp-1', userId: 'user-1',
+        runtimeIdentity: 'runtime-1', runtime: 'vm',
+      } }),
+      reconcile: (input) => realAdapter.reconcile(input),
+    };
+    try {
+      const pending = runPromptDeliveryClaim(sql, env, config, claim, adapter, hooks);
+      await started;
+      sql.exec("UPDATE project_event_subscriptions SET lifecycle_state = 'cancelled' WHERE id = ?", 'sub-event-wake');
+      releaseSigning();
+      expect(await pending).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mailbox.getMessage(sql, claim.message.id)?.deliveryState).toBe('failed');
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('fails an event wake claim before adapter side effects when source authority is revoked', async () => {

@@ -137,6 +137,36 @@ describe('VM prompt delivery adapter', () => {
     });
   });
 
+  it('returns a terminal denial when source authority is revoked during transport preparation', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    let transportStarted!: () => void;
+    let releaseTransport!: () => void;
+    const started = new Promise<void>((resolve) => { transportStarted = resolve; });
+    const barrier = new Promise<void>((resolve) => { releaseTransport = resolve; });
+    const injected = vi.fn();
+    mocks.sendPromptToAgentOnNode.mockImplementationOnce(async (...args: unknown[]) => {
+      transportStarted();
+      await barrier;
+      const options = args[7] as { beforeExternalMutation?: () => Promise<void> };
+      await options.beforeExternalMutation?.();
+      injected();
+      return protocolFixture.newPrompt;
+    });
+    let authorized = true;
+    const adapterInput = input(false);
+    adapterInput.beforeSideEffect = async () => authorized ? null : ({
+      kind: 'failed', reason: 'terminal_target', error: 'Source membership revoked',
+      runtimeIdentity: 'vm-01', capabilities: null,
+    });
+    const pending = new DefaultVmPromptDeliveryAdapter(envWithTarget()).submit(adapterInput);
+    await started;
+    authorized = false;
+    releaseTransport();
+    expect(await pending).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(injected).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
+  });
+
   it('fails closed for an old VM unless compatibility is explicitly enabled', async () => {
     mocks.nodeAgentRequest.mockRejectedValue(new Error('Node Agent request failed: 404'));
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
@@ -458,7 +488,7 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'user-1',
       'delivery-1',
-      { requestTimeoutMs: 1_234 }
+      { requestTimeoutMs: 1_234, beforeExternalMutation: expect.any(Function) }
     );
   });
 
@@ -515,7 +545,7 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'user-1',
       'delivery-1',
-      { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-1' }
+      { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-1', beforeExternalMutation: expect.any(Function) }
     );
   });
 

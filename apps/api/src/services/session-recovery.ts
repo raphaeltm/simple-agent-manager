@@ -31,16 +31,15 @@ import {
   WorkspaceDeletionUnconfirmedError,
 } from './replacement-deletion-fence';
 import {
-  failAndRestoreSessionRecoveryHandoff,
-  isSessionRecoverySourceTaskGuardValid,
-} from './session-recovery-authority';
-import {
   parseLegacyVmSize,
   type PersistedTaskResourcePlanReadResult,
   readPersistedTaskResourcePlan,
   ResourceRequirementsValidationError,
 } from './resource-requirements-input';
-
+import {
+  failAndRestoreSessionRecoveryHandoff,
+  isSessionRecoverySourceTaskGuardValid,
+} from './session-recovery-authority';
 import { type Db, SourceTaskNotWakeableError } from './session-recovery-task-guard';
 import {
   claimSessionSnapshotRecovery,

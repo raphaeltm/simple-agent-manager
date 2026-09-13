@@ -41,12 +41,14 @@ function fixture() {
   const sqlite = new Database(':memory:');
   databases.push(sqlite);
   createSchemaTables(sqlite, [
+    schema.nodes,
     schema.tasks,
     schema.sessionSnapshots,
     schema.users,
     schema.projectMembers,
   ]);
   sqlite.exec(`
+    INSERT INTO nodes (id, status) VALUES ('warm-node', 'running');
     INSERT INTO users (id, status) VALUES ('user', 'active');
     INSERT INTO project_members (project_id, user_id, role, status)
       VALUES ('project', 'user', 'maintainer', 'active');

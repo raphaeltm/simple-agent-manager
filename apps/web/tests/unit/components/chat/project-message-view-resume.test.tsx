@@ -18,7 +18,7 @@ import {
   within,
 } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectMessageView } from '../../../../src/components/project-message-view';

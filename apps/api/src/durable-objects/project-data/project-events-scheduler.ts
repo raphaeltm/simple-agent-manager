@@ -1,6 +1,6 @@
-import { isProjectEventWakeEnabled } from './project-events-wake-config';
 import { resolveProjectEventLimits } from './project-events-limits';
 import type { ProjectEventOrphanScanCursor } from './project-events-orphan-retention';
+import { isProjectEventWakeEnabled } from './project-events-wake-config';
 import type { Env } from './types';
 
 export type ProjectEventSchedulerPhase = 'materialization' | 'retention';

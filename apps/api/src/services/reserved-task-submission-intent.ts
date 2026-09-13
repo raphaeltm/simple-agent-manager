@@ -33,7 +33,6 @@ import type {
   ReservedTaskSubmissionResult,
   ResolvedReservedTaskSubmissionDependencies,
 } from './reserved-task-submission-contracts';
-import { resolveSkillProfile } from './skills';
 import {
   collectStoredResourceRequirementLayers,
   createPersistedTaskResourcePlanJson,
@@ -41,6 +40,7 @@ import {
   firstResourceRequirementLayerJson,
   ResourceRequirementsValidationError,
 } from './resource-requirements-input';
+import { resolveSkillProfile } from './skills';
 import { type startTaskRunnerDO } from './task-runner-do';
 import {
   assertReservedTaskCreatorAuthority,

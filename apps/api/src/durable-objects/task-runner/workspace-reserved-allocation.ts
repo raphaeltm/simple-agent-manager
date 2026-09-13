@@ -143,6 +143,8 @@ export async function claimWorkspaceAllocationForTask(
   const guard =
     state.config.startGuard?.kind === 'reserved_submission' ? state.config.startGuard : null;
   const reservedIntentFingerprint = guard?.intentFingerprint ?? null;
+  // Ordinary starts link their new session during ensureSessionLinked after this
+  // claim. Reserved submissions already committed that identity with the checkpoint.
   const result = await rc.env.DATABASE.prepare(
     `UPDATE tasks
         SET workspace_id = ?, ${CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS}, updated_at = ?
@@ -151,7 +153,10 @@ export async function claimWorkspaceAllocationForTask(
         AND user_id = ?
         AND status = 'queued'
         AND workspace_id IS NULL
-        AND (? IS NULL OR chat_session_id = ?)
+        AND (
+          ? IS NULL OR chat_session_id = ?
+          OR (? = 0 AND chat_session_id IS NULL)
+        )
         AND EXISTS (
           SELECT 1
             FROM workspaces guarded_workspace
@@ -187,6 +192,7 @@ export async function claimWorkspaceAllocationForTask(
       state.userId,
       chatSessionId,
       chatSessionId,
+      guard ? 1 : 0,
       workspaceId,
       chatSessionId,
       chatSessionId,

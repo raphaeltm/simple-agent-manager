@@ -11,10 +11,10 @@ import {
 import { resolveProjectEventLimits } from './project-events-limits';
 import {
   insertPromptQueueBatch,
-  recordQueueCheckpoint,
-  readSubscription,
-  selectMatchesForSubscription,
   readEvents,
+  readSubscription,
+  recordQueueCheckpoint,
+  selectMatchesForSubscription,
 } from './project-events-materialization-storage';
 import {
   isProjectEventWakeEnabled,
