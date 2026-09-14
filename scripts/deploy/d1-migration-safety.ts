@@ -46,6 +46,24 @@ const APPS_API_DIR = resolve(import.meta.dirname, '../../apps/api');
 const WRANGLER_COMMAND = 'pnpm';
 const D1_MIGRATIONS_TABLE = 'd1_migrations';
 
+interface D1MigrationAliasRepair {
+  binding: string;
+  table: string;
+  legacyName: string;
+  currentName: string;
+  requiredColumns: readonly string[];
+}
+
+const D1_MIGRATION_ALIAS_REPAIRS: readonly D1MigrationAliasRepair[] = [
+  {
+    binding: 'DATABASE',
+    table: 'workspaces',
+    legacyName: '0157_workspace_eviction_fencing.sql',
+    currentName: '0164_workspace_eviction_fencing.sql',
+    requiredColumns: ['eviction_generation', 'eviction_finalized_at', 'stop_runtime_confirmed_at'],
+  },
+] as const;
+
 const SYSTEM_TABLES = new Set(['_cf_KV', D1_MIGRATIONS_TABLE, 'sqlite_sequence']);
 
 export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
@@ -122,6 +140,10 @@ export function parseWranglerJsonOutput(output: string): unknown {
 
 function quoteSqlIdentifier(identifier: string): string {
   return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+function quoteSqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 export class ExecD1MigrationSafetyRunner implements D1MigrationSafetyRunner {
@@ -255,22 +277,30 @@ export function normalizeDiscoveredTables(rows: Record<string, unknown>[]): stri
     .sort((a, b) => a.localeCompare(b));
 }
 
+function executeD1Rows(
+  runner: D1MigrationSafetyRunner,
+  environment: string,
+  db: D1DatabaseTarget,
+  command: string,
+  cwd = APPS_API_DIR
+): Record<string, unknown>[] {
+  return parseD1Rows(
+    runner.executeJson(WRANGLER_COMMAND, wranglerArgs(environment, db.name, command), { cwd })
+  );
+}
+
 function discoverDatabaseTableNames(
   runner: D1MigrationSafetyRunner,
   environment: string,
   db: D1DatabaseTarget,
   cwd = APPS_API_DIR
 ): string[] {
-  const rows = parseD1Rows(
-    runner.executeJson(
-      WRANGLER_COMMAND,
-      wranglerArgs(
-        environment,
-        db.name,
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-      ),
-      { cwd }
-    )
+  const rows = executeD1Rows(
+    runner,
+    environment,
+    db,
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    cwd
   );
 
   return rows
@@ -334,6 +364,112 @@ export function countProtectedTables(
       count: parseCountValue(rows[0].count, db, table),
     };
   });
+}
+
+function readAppliedMigrationNames(
+  runner: D1MigrationSafetyRunner,
+  environment: string,
+  db: D1DatabaseTarget,
+  names: readonly string[],
+  cwd = APPS_API_DIR
+): Set<string> {
+  if (names.length === 0) return new Set();
+
+  const rows = executeD1Rows(
+    runner,
+    environment,
+    db,
+    `SELECT name FROM ${quoteSqlIdentifier(D1_MIGRATIONS_TABLE)} WHERE name IN (${names
+      .map(quoteSqlLiteral)
+      .join(', ')})`,
+    cwd
+  );
+
+  return new Set(rows.map((row) => String(row.name ?? '')).filter((name) => name.length > 0));
+}
+
+function readTableColumnNames(
+  runner: D1MigrationSafetyRunner,
+  environment: string,
+  db: D1DatabaseTarget,
+  table: string,
+  cwd = APPS_API_DIR
+): Set<string> {
+  const rows = executeD1Rows(
+    runner,
+    environment,
+    db,
+    `PRAGMA table_info(${quoteSqlIdentifier(table)})`,
+    cwd
+  );
+
+  return new Set(rows.map((row) => String(row.name ?? '')).filter((name) => name.length > 0));
+}
+
+function recordAppliedMigrationAlias(
+  runner: D1MigrationSafetyRunner,
+  environment: string,
+  db: D1DatabaseTarget,
+  currentName: string,
+  cwd = APPS_API_DIR
+): void {
+  runner.execute(
+    WRANGLER_COMMAND,
+    wranglerArgs(
+      environment,
+      db.name,
+      `INSERT INTO ${quoteSqlIdentifier(D1_MIGRATIONS_TABLE)} (name, applied_at)
+       SELECT ${quoteSqlLiteral(currentName)}, CURRENT_TIMESTAMP
+       WHERE NOT EXISTS (
+         SELECT 1 FROM ${quoteSqlIdentifier(D1_MIGRATIONS_TABLE)} WHERE name = ${quoteSqlLiteral(
+           currentName
+         )}
+       )`
+    ),
+    { cwd, stdio: 'inherit' }
+  );
+}
+
+function repairKnownAppliedMigrationAliases(
+  runner: D1MigrationSafetyRunner,
+  environment: string,
+  db: D1DatabaseTarget,
+  allTables: readonly string[],
+  cwd = APPS_API_DIR
+): string[] {
+  const repaired: string[] = [];
+
+  for (const repair of D1_MIGRATION_ALIAS_REPAIRS) {
+    if (db.binding !== repair.binding || !allTables.includes(repair.table)) {
+      continue;
+    }
+
+    const appliedNames = readAppliedMigrationNames(
+      runner,
+      environment,
+      db,
+      [repair.legacyName, repair.currentName],
+      cwd
+    );
+    if (!appliedNames.has(repair.legacyName) || appliedNames.has(repair.currentName)) {
+      continue;
+    }
+
+    const columns = readTableColumnNames(runner, environment, db, repair.table, cwd);
+    const missingColumns = repair.requiredColumns.filter((column) => !columns.has(column));
+    if (missingColumns.length > 0) {
+      continue;
+    }
+
+    console.log(
+      `Recording ${repair.currentName} as applied for ${db.binding} (${db.name}); ` +
+        `${repair.legacyName} is already in the D1 migration ledger and ${repair.table} has the expected columns.`
+    );
+    recordAppliedMigrationAlias(runner, environment, db, repair.currentName, cwd);
+    repaired.push(repair.currentName);
+  }
+
+  return repaired;
 }
 
 function countAppliedMigrationRecords(
@@ -507,6 +643,10 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
         throw new MigrationSafetyError(
           `No protected tables discovered for initialized ${db.binding} (${db.name}); refusing to treat an upgrade as a clean install`
         );
+      }
+
+      if (hasMigrationLedger) {
+        repairKnownAppliedMigrationAliases(options.runner, options.environment, db, allTables, cwd);
       }
 
       migrationCountsBefore.set(
