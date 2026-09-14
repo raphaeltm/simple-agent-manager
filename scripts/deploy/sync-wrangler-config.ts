@@ -18,7 +18,7 @@
 
 import { execSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import * as TOML from '@iarna/toml';
@@ -555,8 +555,67 @@ export function listEnvironmentVarOverrides(
 }
 
 /**
- * Read the optional GitHub Environment vars that may replace checked-in `[vars]`, and print each
- * one whose value differs from wrangler.toml so the deploy log shows what actually shipped.
+ * Emit the override report where a human will actually see it.
+ *
+ * A `console.log` line is buried in thousands of lines of deploy output, which is how
+ * `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` stayed pinned `false` in production for eleven days
+ * after `684f99d60` set it `true` here. A GitHub Actions `::warning::` annotation surfaces on the
+ * run page and in the PR checks list, and the step summary keeps a durable table of what actually
+ * shipped. Both are no-ops outside Actions, so local runs keep the plain log line.
+ *
+ * `[vars]` are non-secret by construction — secrets go through `wrangler secret` — so printing
+ * values is safe. See `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`.
+ */
+export function reportEnvironmentVarOverrides(
+  overrides: readonly EnvironmentVarOverride[],
+  io: {
+    log: (message: string) => void;
+    appendSummary: (markdown: string) => void;
+    isGitHubActions: boolean;
+  }
+): void {
+  if (overrides.length === 0) return;
+  for (const entry of overrides) {
+    const message = `Environment override: ${entry.name}="${entry.override}" replaces wrangler.toml "${entry.checkedIn}"`;
+    io.log(`  ${message}`);
+    if (io.isGitHubActions) io.log(`::warning title=Environment override::${message}`);
+  }
+  if (!io.isGitHubActions) return;
+  io.appendSummary(
+    [
+      '### GitHub Environment overrides applied to `wrangler.toml`',
+      '',
+      'These deployed values come from the GitHub Environment, NOT from the repository.',
+      'An override that is not deliberate should be reconciled or deleted.',
+      '',
+      '| Variable | wrangler.toml | deployed |',
+      '| --- | --- | --- |',
+      ...overrides.map((entry) => `| \`${entry.name}\` | \`${entry.checkedIn}\` | \`${entry.override}\` |`),
+      '',
+    ].join('\n')
+  );
+}
+
+function defaultOverrideReportIo(): Parameters<typeof reportEnvironmentVarOverrides>[1] {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  return {
+    log: (message) => console.log(message),
+    appendSummary: (markdown) => {
+      if (!summaryPath) return;
+      try {
+        appendFileSync(summaryPath, markdown);
+      } catch (error) {
+        // A summary write must never fail a deploy; the annotation already carried the signal.
+        console.log(`  (could not append to GITHUB_STEP_SUMMARY: ${String(error)})`);
+      }
+    },
+    isGitHubActions: process.env.GITHUB_ACTIONS === 'true',
+  };
+}
+
+/**
+ * Read the optional GitHub Environment vars that may replace checked-in `[vars]`, and report each
+ * one whose value differs from wrangler.toml so the deploy shows what actually shipped.
  */
 function getOptionalProcessEnvVars(
   checkedIn: Record<string, unknown> | undefined,
@@ -569,11 +628,10 @@ function getOptionalProcessEnvVars(
       vars[name] = value;
     }
   }
-  for (const entry of listEnvironmentVarOverrides(checkedIn, vars)) {
-    console.log(
-      `  Environment override: ${entry.name}="${entry.override}" replaces wrangler.toml "${entry.checkedIn}"`
-    );
-  }
+  reportEnvironmentVarOverrides(
+    listEnvironmentVarOverrides(checkedIn, vars),
+    defaultOverrideReportIo()
+  );
   return vars;
 }
 

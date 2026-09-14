@@ -9,6 +9,7 @@ import {
   ensureTomlMap,
   generateApiWorkerEnv,
   listEnvironmentVarOverrides,
+  reportEnvironmentVarOverrides,
   resolveArtifactsBindingEnabled,
   writeDeploymentMarkers,
 } from '../deploy/sync-wrangler-config.js';
@@ -140,6 +141,64 @@ describe('sync wrangler config', () => {
       listEnvironmentVarOverrides({ A: 'true', B: 'same' }, { A: 'false', B: 'same', C: 'added' })
     ).toEqual([{ name: 'A', checkedIn: 'true', override: 'false' }]);
     expect(listEnvironmentVarOverrides(undefined, { A: 'false' })).toEqual([]);
+  });
+
+  it('annotates and summarises overrides inside GitHub Actions so they are not buried in logs', () => {
+    // A plain log line did not work: `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` was "true" in
+    // wrangler.toml from 2026-09-03 and "false" in the production Environment, and the
+    // resulting deployed no-op went unnoticed for eleven days. An Actions `::warning::`
+    // annotation surfaces on the run page and in the checks list; the step summary keeps a
+    // durable table of what actually shipped.
+    const lines: string[] = [];
+    const summaries: string[] = [];
+    reportEnvironmentVarOverrides(
+      [
+        { name: 'PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED', checkedIn: 'true', override: 'false' },
+      ],
+      {
+        log: (message) => lines.push(message),
+        appendSummary: (markdown) => summaries.push(markdown),
+        isGitHubActions: true,
+      }
+    );
+
+    expect(lines).toContainEqual(
+      expect.stringContaining(
+        '::warning title=Environment override::Environment override: PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED="false" replaces wrangler.toml "true"'
+      )
+    );
+    expect(summaries.join('\n')).toContain(
+      '| `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` | `true` | `false` |'
+    );
+  });
+
+  it('keeps local runs quiet and writes no summary when there is nothing to report', () => {
+    // Two controls for the annotation above. Outside Actions the plain line is all a developer
+    // gets (no `::warning::` syntax leaking into terminal output), and a deploy whose config
+    // agrees must produce no annotation at all — otherwise "no warning" would carry no
+    // information (`.claude/rules/62`: an absence assertion needs a positive one beside it).
+    const localLines: string[] = [];
+    const localSummaries: string[] = [];
+    reportEnvironmentVarOverrides(
+      [{ name: 'A', checkedIn: 'true', override: 'false' }],
+      {
+        log: (message) => localLines.push(message),
+        appendSummary: (markdown) => localSummaries.push(markdown),
+        isGitHubActions: false,
+      }
+    );
+    expect(localLines).toEqual(['  Environment override: A="false" replaces wrangler.toml "true"']);
+    expect(localSummaries).toEqual([]);
+
+    const agreedLines: string[] = [];
+    const agreedSummaries: string[] = [];
+    reportEnvironmentVarOverrides([], {
+      log: (message) => agreedLines.push(message),
+      appendSummary: (markdown) => agreedSummaries.push(markdown),
+      isGitHubActions: true,
+    });
+    expect(agreedLines).toEqual([]);
+    expect(agreedSummaries).toEqual([]);
   });
 
   it('propagates the top-level CPU limit into generated deployment environments', () => {

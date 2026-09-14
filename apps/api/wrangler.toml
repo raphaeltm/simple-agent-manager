@@ -19,6 +19,25 @@ cpu_ms = 30000
 "unicorn-magic" = "./src/shims/unicorn-magic.ts"
 
 [vars]
+# WARNING: a value here is only the DEFAULT. Every name listed in the `getOptionalProcessEnvVars`
+# call in `scripts/deploy/sync-wrangler-config.ts` is REPLACED by a GitHub Environment variable of
+# the same name when that variable is non-empty, so editing this file can ship nothing. Always
+# confirm the deployed value from the Cloudflare API after a flag change
+# (.claude/rules/70-flag-flips-must-verify-the-deployed-value.md). The deploy log and the job
+# summary now list every Environment override that disagrees with this file.
+#
+# DELIBERATE production divergences, as of 2026-09-14 — an override NOT listed here is either an
+# accident or a stale rollout knob, and should be reconciled or deleted:
+#   PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED   here "true", production "false".
+#       Event-log cleanup is proven on staging (which takes this file's value) but stays GATED in
+#       production until Raphaël approves it separately. Do not "reconcile" by flipping this to
+#       "false" — that would also disable it on staging and for self-hosters.
+#   PROJECT_DATA_ARCHIVE_COMPACT_ENABLED     here "false", production "true".
+#       Compact archive shards were approved for production on 2026-09-08. This default is
+#       deliberately conservative for fresh self-host installs.
+#   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_*  production runs a one-shot P0 measurement plan
+#       (plan id prod-p0-projectdata-...-20260904, completed 2026-09-04 and now terminal).
+#       These overrides size that single run and do not belong in this file.
 BASE_DOMAIN = "workspaces.example.com"
 VERSION = "0.1.0"
 # D1 Sessions API anchor for the Worker fetch handler. "first-primary" routes the first query
@@ -149,13 +168,24 @@ PROJECT_DATA_GROUPED_FTS_CLEANUP_WEAK_RECLAIM_BYTES = "1"
 PROJECT_DATA_ARCHIVE_SHARDING_ENABLED = "true"
 # Compact format stays off until the staged rollout and production mutation approval.
 PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
-# Sized to reclaim ~100k messages/day against a measured 4.6-6.7x write amplification.
-# 800k writes/day keeps the account under the 50M/month included rows-written allowance
-# (~0.7M baseline + 0.8M archive ≈ 1.5M/day, 46M/month). The GitHub `production`
-# Environment override (set 2026-09-08 at 100000) must be updated or deleted to match
-# (.claude/rules/70); the deploy log prints the override if it differs.
+# Sized to reclaim ~100k messages/day. 800k estimate-units/day keeps the account under the
+# 50M/month included rows-written allowance. The GitHub `production` Environment sets the
+# same 800000, so the two agree; the deploy log prints any override that differs
+# (.claude/rules/70).
 PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "800000"
-PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "8"
+# Safety multiplier applied to the row inventory `estimateArchiveWrites` already counts, NOT
+# an independent amplification factor. MEASURED 2026-09-14 in production (Cloudflare
+# `durableObjectsPeriodicGroups`, 5-minute buckets isolating four archive ticks in namespace
+# fb36fe21): ~6,000-9,500 rowsWritten actually billed per migration against an estimate of
+# 7,442 units, i.e. an actual/units ratio of ~1.0. At factor 8 the budget therefore charged
+# ~8x what the work costs, capping production at 800000/60534 = 13 migrations/day while the
+# hourly cadence allows 24 — so ~11 ticks/day ran and reclaimed nothing.
+#
+# 2 keeps a 100% safety margin over that measurement and moves the ceiling to ~50/day, at
+# which point the per-tick bound (one ~4,849-message candidate per hourly tick) binds first
+# at 24/day. Re-measure before changing this again: the condition it stands for is "rows this
+# migration will actually write", and only telemetry says what that is (.claude/rules/74).
+PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "2"
 PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS = "10000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_CLEANUP_LIMIT = "100"
@@ -178,6 +208,14 @@ PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "4"
 # 120k msgs/day capacity, 20% above the 100k/day target. With _DAILY_WRITE_BUDGET=800000
 # and factor 8, the derived affordability ceiling is ~49937 messages, so no production
 # session exceeds it.
+#
+# This budget is ALSO the per-candidate ceiling (`sweepMessageCeiling` = min(this, derived
+# affordability)), so raising it to fit more sessions per tick simultaneously admits larger
+# sessions, and largest-first selection will take them. As of 2026-09-14 the largest eligible
+# candidate carries 4,849 messages, so one candidate consumes 97% of this budget and
+# _SWEEP_SESSIONS is inert. That resolves on its own as the backlog drains (3,136 eligible
+# sessions are under 1,000 messages); do not "fix" it by raising this number without first
+# re-measuring what selection would then pick.
 PROJECT_DATA_ARCHIVE_SWEEP_MESSAGE_BUDGET = "5000"
 # Assumed percentage by which a session's write estimate exceeds its message_count (archived
 # tool payloads, grouped rows and FTS units). Reserved as headroom when the per-candidate
