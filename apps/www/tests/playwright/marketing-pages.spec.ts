@@ -1,7 +1,7 @@
 import { expect, expectNoOverflowOrSeriousAxeViolations, test } from './fixtures';
 
 const PAGES: { path: string; slug: string; heading: string | RegExp }[] = [
-  { path: '/', slug: 'home', heading: /Run coding agents as a team/i },
+  { path: '/', slug: 'home', heading: /The open-source platform for/i },
   {
     path: '/features/',
     slug: 'features-index',

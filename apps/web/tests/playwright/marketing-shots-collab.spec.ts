@@ -18,10 +18,12 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 import { assertNoOverflow, seedTheme, setupAuditRoutes } from './audit-helpers';
 import {
   dismissOnboarding,
+  MARKETING_THEME,
   MARKETING_USER,
   MARKETING_VIEWPORT,
   marketingShot,
   NORTHWIND,
+  OPAQUE_BACKDROP_COLOR,
 } from './marketing-shots-helpers';
 
 test.use(MARKETING_VIEWPORT);
@@ -844,7 +846,7 @@ const LIBRARY_FILES = [LIBRARY_FILE_LEDGER, LIBRARY_FILE_REFUND];
 
 async function setupWorldMocks(page: Page) {
   await dismissOnboarding(page);
-  await seedTheme(page, 'dark');
+  await seedTheme(page, MARKETING_THEME);
 
   // Hold live-update sockets open with no server behind them (comments,
   // notifications, chat session ws) — accepting without echoing avoids a
@@ -1050,7 +1052,7 @@ async function marketingShotPadded(
     ? resolve(process.cwd(), '../www/public/images/features')
     : resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots');
   mkdirSync(dir, { recursive: true });
-  await page.screenshot({ path: `${dir}/${name}.png`, clip });
+  await page.screenshot({ path: `${dir}/${name}${MARKETING_THEME === 'light' ? '-light' : ''}.png`, clip });
 }
 
 // ---------------------------------------------------------------------------
@@ -1163,12 +1165,12 @@ test.describe('Marketing shots — collaboration & comments', () => {
     await page.addStyleTag({
       content: `
         .glass-modal {
-          background-color: #0a0e0c !important;
+          background-color: ${OPAQUE_BACKDROP_COLOR} !important;
           backdrop-filter: none !important;
           -webkit-backdrop-filter: none !important;
         }
         [aria-label="Close credential health"] {
-          background-color: #0a0e0c !important;
+          background-color: ${OPAQUE_BACKDROP_COLOR} !important;
           opacity: 1 !important;
         }
       `,

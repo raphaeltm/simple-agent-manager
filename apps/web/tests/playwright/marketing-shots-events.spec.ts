@@ -22,6 +22,7 @@ import {
   MARKETING_VIEWPORT,
   marketingShot,
   NORTHWIND,
+  OPAQUE_BACKDROP_COLOR,
 } from './marketing-shots-helpers';
 
 test.use(MARKETING_VIEWPORT);
@@ -1063,7 +1064,7 @@ test('sam-webhook-deliveries, sam-webhook-credential', async ({ page }) => {
 
   await page.addStyleTag({
     content:
-      '.glass-backdrop-dim{background:#0a0e0c !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}',
+      `.glass-backdrop-dim{background:${OPAQUE_BACKDROP_COLOR} !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}`,
   });
   await marketingShot(page, 'sam-webhook-credential', dialog);
 });

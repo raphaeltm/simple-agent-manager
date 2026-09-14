@@ -101,3 +101,8 @@ Images generated but not used on the site were deleted with their spec captures:
 ## SonarCloud (2026-09-14)
 
 First run failed the quality gate on 10.6% duplicated new code. Cause: the ten feature-section TypeScript files were shape-identical object literals (Sonar anonymizes literals for CPD), plus three repeated fixture blocks in the screenshot specs and the overflow/axe check copied between two www specs. Fix: feature content moved to `apps/www/src/data/features/<slug>.json` with a validating barrel in `index.ts`; spec fixtures built through small helpers (`agentProfile`, `subscription`, shared `HERO_SESSION`); shared `expectNoOverflowOrSeriousAxeViolations` in `apps/www/tests/playwright/fixtures.ts`.
+
+## Round 2 (Raphaël feedback, 2026-09-14)
+
+- Hero: keep "The open-source platform for multi-agent workflows"; new subtitle text supplied by Raphaël.
+- Every UI screenshot must also exist in light mode and be shown when the site is in light mode. Implemented as `<name>-light.png` siblings (specs run with `MARKETING_THEME=light`; `marketingShot` adds the suffix; `OPAQUE_BACKDROP_COLOR` keeps modal backdrops theme-correct) and `OptimizedFeatureImage.astro` renders both `<picture>`s with CSS switching on `html[data-theme]`. The 12 older screenshots (dashboard, notifications, ideas, library, document viewer, settings, agent-context tabs, new chat, tool stream) are being regenerated from specs in both themes (`marketing-shots-workspace.spec.ts`, `marketing-shots-context.spec.ts`) so no page shows a dark screenshot in light mode; legacy files and the name map are removed once they land.

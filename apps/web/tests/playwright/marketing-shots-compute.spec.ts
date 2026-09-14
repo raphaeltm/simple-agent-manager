@@ -35,6 +35,7 @@ import {
 } from './audit-helpers';
 import {
   dismissOnboarding,
+  MARKETING_THEME,
   MARKETING_USER,
   MARKETING_VIEWPORT,
   marketingShot,
@@ -136,7 +137,8 @@ async function marketingSpanShot(
   const dir = process.env.MARKETING_SHOTS ? FEATURE_IMAGE_DIR : TMP_SCREENSHOT_DIR;
   mkdirSync(dir, { recursive: true });
   await page.waitForTimeout(300);
-  await page.screenshot({ path: `${dir}/${name}.png`, clip, fullPage: true });
+  const fileName = `${name}${MARKETING_THEME === 'light' ? '-light' : ''}.png`;
+  await page.screenshot({ path: `${dir}/${fileName}`, clip, fullPage: true });
 }
 
 /**

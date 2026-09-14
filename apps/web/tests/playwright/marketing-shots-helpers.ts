@@ -19,13 +19,25 @@ import type { Page } from '@playwright/test';
 
 import { makeMockUser } from './audit-helpers';
 
+/**
+ * Theme to capture. The marketing site shows dark screenshots in dark mode and
+ * `-light` siblings in light mode, so every spec is run twice:
+ *   MARKETING_SHOTS=1 npx playwright test ...            → <name>.png
+ *   MARKETING_SHOTS=1 MARKETING_THEME=light npx playwright test ... → <name>-light.png
+ */
+export const MARKETING_THEME: 'dark' | 'light' =
+  process.env.MARKETING_THEME === 'light' ? 'light' : 'dark';
+
+/** Page background used to make modal backdrops opaque in element captures. */
+export const OPAQUE_BACKDROP_COLOR = MARKETING_THEME === 'light' ? '#eef3ef' : '#0a0e0c';
+
 /** Spacious desktop viewport shared by every marketing capture (2x → 2880x1800). */
 export const MARKETING_VIEWPORT = {
   viewport: { width: 1440, height: 900 },
   deviceScaleFactor: 2,
   isMobile: false,
   hasTouch: false,
-  colorScheme: 'dark' as const,
+  colorScheme: MARKETING_THEME,
 };
 
 const FEATURE_IMAGE_DIR = resolve(process.cwd(), '../www/public/images/features');
@@ -75,12 +87,13 @@ export async function marketingShot(
 ) {
   await page.waitForTimeout(700);
   const target = locator ?? page;
+  const fileName = `${name}${MARKETING_THEME === 'light' ? '-light' : ''}.png`;
   if (process.env.MARKETING_SHOTS) {
     mkdirSync(FEATURE_IMAGE_DIR, { recursive: true });
-    await target.screenshot({ path: `${FEATURE_IMAGE_DIR}/${name}.png` });
+    await target.screenshot({ path: `${FEATURE_IMAGE_DIR}/${fileName}` });
     return;
   }
   const tmp = resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots');
   mkdirSync(tmp, { recursive: true });
-  await target.screenshot({ path: `${tmp}/${name}.png` });
+  await target.screenshot({ path: `${tmp}/${fileName}` });
 }

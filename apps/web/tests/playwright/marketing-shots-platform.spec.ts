@@ -27,10 +27,12 @@ import { expect, test } from '@playwright/test';
 import { assertNoOverflow } from './audit-helpers';
 import {
   dismissOnboarding,
+  MARKETING_THEME,
   MARKETING_USER,
   MARKETING_VIEWPORT,
   marketingShot,
   NORTHWIND,
+  OPAQUE_BACKDROP_COLOR,
 } from './marketing-shots-helpers';
 
 test.use(MARKETING_VIEWPORT);
@@ -65,7 +67,7 @@ async function marketingShotPadded(
     ? resolve(process.cwd(), '../www/public/images/features')
     : resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots');
   mkdirSync(dir, { recursive: true });
-  await page.screenshot({ path: `${dir}/${name}.png`, clip });
+  await page.screenshot({ path: `${dir}/${name}${MARKETING_THEME === 'light' ? '-light' : ''}.png`, clip });
 }
 
 const PROJECT_ID = NORTHWIND.projectId;
@@ -1302,7 +1304,7 @@ test('sam-agents-orchestration', async ({ page }) => {
   // and element-crop the panel itself with padding, instead of the page.
   await page.addStyleTag({
     content:
-      '.glass-backdrop-dim{background:#0a0e0c !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}',
+      `.glass-backdrop-dim{background:${OPAQUE_BACKDROP_COLOR} !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}`,
   });
   const panel = dialog.locator('.glass-panel-container');
   await expect(panel).toBeVisible();
