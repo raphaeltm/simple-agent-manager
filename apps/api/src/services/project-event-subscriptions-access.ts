@@ -158,10 +158,16 @@ export function resolveDeliveryPreference(
   requested: ProjectEventRequestedDeliveryMode,
   target: ProjectEventDeliveryPreference['target']
 ): ProjectEventDeliveryPreference {
+  // Phase 1 of urgent delivery (idea 01M2EPH9WGDYFDQBZCP9QY1FDE):
+  // runtime_interrupt rides the durable prompt queue with the `interrupt`
+  // mailbox class, so its wakes stop a busy target turn (stop-and-deliver)
+  // instead of being recorded as never-injected. A true in-harness runtime
+  // interrupt adapter can later claim the mode through the delivery resolver's
+  // runtime_interrupt capability path.
   const resolved =
     requested === 'record_only'
       ? 'record_only'
-      : requested === 'existing_session_prompt'
+      : requested === 'existing_session_prompt' || requested === 'runtime_interrupt'
         ? 'queued_for_prompt_delivery'
         : 'recorded_not_injected';
   return {

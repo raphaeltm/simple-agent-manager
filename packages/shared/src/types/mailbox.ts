@@ -25,6 +25,31 @@ export const DURABLE_MESSAGE_CLASSES: readonly MessageClass[] = [
   'shutdown_with_final_prompt',
 ];
 
+/**
+ * Numeric urgency rank per message class. Mirrors the SQL CASE ordering used by
+ * the delivery claim engine (`prompt-delivery.ts` / `mailbox.ts`) so TypeScript
+ * callers and SQL ordering can never drift apart.
+ */
+export const MESSAGE_CLASS_URGENCY: Record<MessageClass, number> = {
+  notify: 1,
+  deliver: 2,
+  interrupt: 3,
+  preempt_and_replan: 4,
+  shutdown_with_final_prompt: 5,
+};
+
+/**
+ * The lowest urgency rank that authorizes stop-and-deliver: a message of this
+ * class or above may cancel the target's in-flight turn so it is delivered as
+ * the very next prompt instead of parking in `retry_wait` behind the busy turn.
+ */
+export const TURN_STOP_URGENCY_THRESHOLD = MESSAGE_CLASS_URGENCY.interrupt;
+
+/** True when a message class is urgent enough to trigger stop-and-deliver. */
+export function isUrgentMessageClass(messageClass: MessageClass): boolean {
+  return MESSAGE_CLASS_URGENCY[messageClass] >= TURN_STOP_URGENCY_THRESHOLD;
+}
+
 // ─── Delivery State Machine ────────────────────────────────────────────────
 
 export const DELIVERY_STATES = [

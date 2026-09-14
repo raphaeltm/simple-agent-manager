@@ -171,6 +171,8 @@ function fixture(overrides: ProjectEventScheduleEnv = {}) {
     recalculateAlarm: vi.fn(async () => undefined),
     scheduleSummarySync: vi.fn(),
     broadcastEvent: vi.fn(),
+    armIdleCleanup: vi.fn(),
+    nudgeDeliveries: vi.fn(() => 0),
   };
   const create = (key: string, action = messageAction, extra: Record<string, unknown> = {}) =>
     hooks.transactionSync(() =>

@@ -97,7 +97,9 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
           type: 'string',
           enum: PROJECT_EVENT_REQUESTED_DELIVERY_MODES,
           description:
-            'Requested delivery policy. record_only stays pull-only. existing_session_prompt resolves to a durable same-chat prompt queue when the caller target supports it; other injection modes are recorded_not_injected until their adapters are enabled.',
+            'Requested delivery policy. record_only stays pull-only. existing_session_prompt resolves to a durable same-chat prompt queue when the caller target supports it. ' +
+            'runtime_interrupt also rides that prompt queue but with the interrupt mailbox class: its wakes may stop an in-flight turn on the target chat so the batch is delivered immediately (stop-and-deliver). ' +
+            'Other injection modes are recorded_not_injected until their adapters are enabled.',
         },
         target: DELIVERY_TARGET_SCHEMA,
         reason: {

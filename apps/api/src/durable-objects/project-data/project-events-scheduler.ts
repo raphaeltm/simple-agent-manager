@@ -1,6 +1,9 @@
 import { resolveProjectEventLimits } from './project-events-limits';
 import type { ProjectEventOrphanScanCursor } from './project-events-orphan-retention';
-import { isProjectEventWakeEnabled } from './project-events-wake-config';
+import {
+  isProjectEventWakeEnabled,
+  PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL,
+} from './project-events-wake-config';
 import type { Env } from './types';
 
 export type ProjectEventSchedulerPhase = 'materialization' | 'retention';
@@ -61,7 +64,7 @@ export function computeProjectEventMaterializationAlarmTime(
          AND (s.expires_at IS NULL OR s.expires_at > ?)
          AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)
          AND s.prompt_delivery_count < ?
-         AND s.requested_delivery = 'existing_session_prompt'
+         AND ${PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL}
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
          AND s.target_session_id IS NOT NULL
          AND s.wake_due_at IS NOT NULL

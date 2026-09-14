@@ -511,6 +511,62 @@ describe('ProjectData event subscription core', () => {
     }
   });
 
+  it('materializes runtime_interrupt wakes as interrupt-class prompt deliveries', async () => {
+    const projectId = 'project-events-wake-runtime-interrupt';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await disableProjectEventWakeOnStub(projectId);
+    const sessionId = await stub.createSession(null, 'Runtime interrupt target', 'task-1');
+    const restoreWake = setEventEnvForTest('PROJECT_EVENT_WAKE_ENABLED', 'false');
+    try {
+      let subscription!: Awaited<ReturnType<typeof svc.createProjectEventSubscription>>;
+      let admitted!: Awaited<ReturnType<typeof svc.admitProjectEvent>>;
+      await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
+        subscription = await svc.createProjectEventSubscription(
+          testEnv,
+          projectId,
+          {
+            ...subscriptionInput('sub-wake-runtime-interrupt'),
+            deliveryPreference: {
+              requested: 'runtime_interrupt' as const,
+              resolved: 'queued_for_prompt_delivery' as const,
+              target: { sessionId, taskId: 'task-1', agentId: 'agent-1' },
+            },
+          }
+        );
+        admitted = await svc.admitProjectEvent(testEnv, projectId, eventInput({}));
+      });
+
+      const materialized = await materializeEventWakeForTest(projectId, Date.now());
+      expect(materialized).toMatchObject({ status: 'materialized', materialized: 1 });
+      const batchId = materialized.accepted[0].accepted.message.id;
+
+      const snapshot = await runInDurableObject(stub, async (_instance, state) => {
+        const inbox = state.storage.sql
+          .exec('SELECT * FROM session_inbox WHERE id = ?', batchId)
+          .toArray()[0];
+        const transcript = state.storage.sql
+          .exec('SELECT content FROM chat_messages WHERE id = ?', batchId)
+          .toArray()[0] as { content?: unknown } | undefined;
+        return { inbox, transcript };
+      });
+      // The wake rides the prompt queue with the interrupt mailbox class so
+      // stop-and-deliver may cancel an in-flight turn on the target chat.
+      expect(snapshot.inbox).toMatchObject({
+        id: batchId,
+        target_session_id: sessionId,
+        source_kind: 'project_event_wake',
+        delivery_state: 'queued',
+        message_class: 'interrupt',
+      });
+      expect(String(snapshot.transcript?.content)).toContain('runtime_interrupt');
+      expect(String(snapshot.transcript?.content)).toContain(admitted.event.id);
+      expect(snapshot.inbox).toMatchObject({ content: String(snapshot.transcript?.content) });
+    } finally {
+      restoreWake();
+    }
+  });
+
   it('defers same-project wake materialization at cross-chat mailbox capacity without partial writes', async () => {
     const projectId = 'project-events-wake-cross-chat-mailbox-cap';
     const stub = getStub(projectId);

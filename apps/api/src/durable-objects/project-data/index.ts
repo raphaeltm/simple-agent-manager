@@ -653,6 +653,11 @@ export class ProjectData extends DurableObject<Env> {
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
       broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
+      armIdleCleanup: (chatSessionId) => {
+        idleCleanup.resetIdleCleanup(this.sql, this.env, chatSessionId);
+      },
+      nudgeDeliveries: (chatSessionId) =>
+        promptDelivery.nudgePromptDeliveriesForTarget(this.sql, chatSessionId),
     };
   }
 

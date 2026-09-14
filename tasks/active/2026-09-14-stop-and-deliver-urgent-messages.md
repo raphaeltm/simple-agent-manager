@@ -96,41 +96,41 @@ byte-for-byte today's behavior for them.
 
 ## Implementation checklist
 
-- [ ] Shared: add `MESSAGE_CLASS_URGENCY` rank map + `isUrgentMessageClass()` to
+- [x] Shared: add `MESSAGE_CLASS_URGENCY` rank map + `isUrgentMessageClass()` to
       `packages/shared/src/types/mailbox.ts` (interrupt and above), exported through the types
       index; unit tests for the helper.
-- [ ] Adapter: add optional `onBusyTurn?: (target: VmPromptDeliveryTarget) => Promise<void>` to
+- [x] Adapter: add optional `onBusyTurn?: (target: VmPromptDeliveryTarget) => Promise<void>` to
       `VmPromptDeliveryAdapterInput`; in the 409-busy branch of `submit`, invoke it (guarded
       try/catch, log on failure) only when `isUrgentMessageClass(claim.message.messageClass)`.
-- [ ] Runner: new `stopBusyTurnForUrgentDelivery` helper (new module
+- [x] Runner: new `stopBusyTurnForUrgentDelivery` helper (new module
       `prompt-delivery-interrupt.ts`) implementing the hook body: rule-49 `observedAt`,
       `cancelAgentSessionOnNode`, `sessionState.recordTurnEnd` (reason `cancelled`, source
       `control_plane`, guard `turn_start`), `resolveActivityChatSessionId`,
       `publishTurnEnd({kind:'idle'})` with session-activity hooks, and an activity event
       (`prompt_delivery.turn_interrupted`) for diagnosability.
-- [ ] Runner: extend `PromptDeliveryRunnerHooks` with `armIdleCleanup` + `nudgeDeliveries`; wire
+- [x] Runner: extend `PromptDeliveryRunnerHooks` with `armIdleCleanup` + `nudgeDeliveries`; wire
       `onBusyTurn` into the adapter input for urgent claims only.
-- [ ] durability-foundation: extend `DurabilityFoundationHooks` with `armIdleCleanup` +
+- [x] durability-foundation: extend `DurabilityFoundationHooks` with `armIdleCleanup` +
       `nudgeDeliveries`; pass through in `processPromptDeliveryAlarm`; wire in
       `index.ts durabilityHooks()` (idleCleanup.resetIdleCleanup /
       promptDelivery.nudgePromptDeliveriesForTarget); update `project-schedules.test.ts` hook
       helper.
-- [ ] MCP send path: for urgent classes compose `deliveryContent` with a context preamble
+- [x] MCP send path: for urgent classes compose `deliveryContent` with a context preamble
       (why the turn stopped + sender identity) while `displayContent` stays the raw message; new
       composer in `apps/api/src/services/urgent-delivery-content.ts` + tests.
-- [ ] Event wake mapping: `resolveDeliveryPreference` maps `runtime_interrupt` →
+- [x] Event wake mapping: `resolveDeliveryPreference` maps `runtime_interrupt` →
       `queued_for_prompt_delivery`; update the 8 wake-pipeline SQL predicates to
       `requested_delivery IN ('existing_session_prompt', 'runtime_interrupt')`;
       `buildWakePromptInput` uses `messageClass: 'interrupt'` + an interrupt notice in the wake
       content for `runtime_interrupt` subscriptions.
-- [ ] Tool schema text: `create_project_event_subscription` requestedDelivery description and
+- [x] Tool schema text: `create_project_event_subscription` requestedDelivery description and
       `send_durable_message` description document stop-and-deliver semantics.
-- [ ] Tests: adapter busy-hook (urgent vs informational, hook failure isolation); runner
+- [x] Tests: adapter busy-hook (urgent vs informational, hook failure isolation); runner
       stop-and-deliver (cancel success / 409 / error; turn-end CAS + nudge fan-out; retry state
       still applied); mailbox MCP urgent send (composed deliveryContent, raw displayContent);
       resolveDeliveryPreference runtime_interrupt mapping; materializer interrupt-class wake
       delivery.
-- [ ] Docs sync: grep for stale `recorded_not_injected` claims about injection modes and message
+- [x] Docs sync: grep for stale `recorded_not_injected` claims about injection modes and message
       class behavior; update api-reference skill / www docs where they describe these surfaces.
 
 ## Acceptance criteria

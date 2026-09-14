@@ -1,6 +1,7 @@
 import {
   buildVmPromptDeliveryCapabilitiesPath,
   buildVmPromptDeliveryReceiptPath,
+  isUrgentMessageClass,
   VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
   type VmPromptDeliveryCapabilities,
   type VmPromptDeliveryReceipt,
@@ -101,6 +102,15 @@ export interface VmPromptDeliveryAdapterInput {
   beforeSubmit?: (capabilities: VmPromptDeliveryCapabilities) => boolean;
   /** Makes snapshot recovery's D1 claim conditional on the source parent. */
   sourceTaskGuard?: VmPromptDeliverySourceTaskGuard;
+  /**
+   * Stop-and-deliver hook, invoked (best-effort) when the target rejects the
+   * submit because a prompt turn is already in flight AND the claim's message
+   * class is urgent (`interrupt` or above). The adapter supplies the resolved
+   * target; the caller owns the cancel + turn-end bookkeeping. A hook failure
+   * never changes the busy retry result — it only degrades to parking in
+   * `retry_wait` behind the busy turn, which is today's behaviour.
+   */
+  onBusyTurn?: (target: VmPromptDeliveryTarget) => Promise<void>;
 }
 
 export interface VmPromptDeliveryAdapter {
@@ -302,6 +312,23 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         conflict.receipt.deliveryId === input.claim.message.id &&
         conflict.receipt.runtimeIdentity === capabilities.runtimeIdentity
       ) {
+        // Urgent classes are allowed to stop the busy turn so they are
+        // delivered as the very next prompt instead of parking in retry_wait.
+        // The VM's 409 is the only authoritative "turn in flight" evidence —
+        // never gate this on the session_state mirror.
+        if (isUrgentMessageClass(input.claim.message.messageClass) && input.onBusyTurn) {
+          try {
+            await input.onBusyTurn(target);
+          } catch (error) {
+            log.warn('prompt_delivery.urgent_busy_turn_stop_failed', {
+              deliveryId: input.claim.message.id,
+              targetSessionId: input.claim.message.targetSessionId,
+              workspaceId: target.workspaceId,
+              agentSessionId: target.agentSessionId,
+              error: errorMessage(error),
+            });
+          }
+        }
         return {
           kind: 'retry',
           reason: 'busy',

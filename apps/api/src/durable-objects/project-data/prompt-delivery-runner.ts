@@ -1,4 +1,5 @@
 import {
+  isUrgentMessageClass,
   MAX_ORCHESTRATOR_WAIT_CHILDREN,
   TASK_TERMINAL_STATUSES,
   type VmPromptDeliveryCapabilities,
@@ -10,7 +11,7 @@ import {
   type SessionRecoverySourceTaskGuard,
 } from '../../services/session-recovery-authority';
 import { recordDurableExecutionMetric } from '../../services/telemetry';
-import type { VmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
+import type { VmPromptDeliveryAdapter, VmPromptDeliveryTarget } from '../../services/vm-prompt-delivery-adapter';
 import * as activity from './activity';
 import type { DurableExecutionConfig } from './durable-execution-config';
 import { invalidScheduledDeliveryTarget } from './project-event-schedules-delivery';
@@ -18,6 +19,7 @@ import {
   advanceProjectEventPromptAttemptCheckpoint,
   invalidProjectEventWakeDeliveryTargetResult,
 } from './project-events-wake-delivery';
+import { stopBusyTurnForUrgentDelivery } from './prompt-delivery-interrupt';
 import {
   applyPromptDeliveryResult,
   markPromptDeliverySubmitting,
@@ -34,6 +36,10 @@ export interface PromptDeliveryRunnerHooks {
   projectId: string | null;
   recalculateAlarm: () => Promise<void>;
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
+  /** Re-arm the idle timer for a chat session whose turn just ended. */
+  armIdleCleanup: (chatSessionId: string) => void;
+  /** Release durable messages queued behind the (now ended) turn. */
+  nudgeDeliveries: (chatSessionId: string) => number;
 }
 
 function parentWakeChildTaskIds(claim: PromptDeliveryClaim): string[] | null {
@@ -336,6 +342,16 @@ export async function runPromptDeliveryClaim(
       beforeSubmit: (capabilities: VmPromptDeliveryCapabilities) =>
         markPromptDeliverySubmitting(sql, claim, capabilities),
       sourceTaskGuard,
+      // Stop-and-deliver: an urgent class rejected because the target is
+      // mid-turn may cancel that turn so this delivery becomes the next
+      // prompt. Informational classes never stop anything — for them the
+      // busy retry path below is byte-for-byte the pre-existing behaviour.
+      ...(isUrgentMessageClass(claim.message.messageClass)
+        ? {
+            onBusyTurn: (target: VmPromptDeliveryTarget) =>
+              stopBusyTurnForUrgentDelivery(sql, env, hooks, claim, target),
+          }
+        : {}),
     };
     result =
       (await validateDeliveryTarget()) ??

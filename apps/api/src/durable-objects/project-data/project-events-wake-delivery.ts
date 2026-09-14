@@ -4,6 +4,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { isProjectEventWakeEnabled } from './project-events-scheduler';
+import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL } from './project-events-wake-config';
 import { nextPhysicalAttemptNumber } from './project-events-storage-helpers';
 import { stableStringify } from './project-events-values';
 import { isProjectEventWakeBatchAudienceAuthorized } from './project-events-wake-targets';
@@ -37,7 +38,7 @@ export function readProjectEventWakeLeaseUntil(
          AND s.owner_chat_session_id = s.target_session_id
          AND s.owner_task_id IS NOT NULL
          AND s.lifecycle_state = 'active'
-         AND s.requested_delivery = 'existing_session_prompt'
+         AND ${PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL}
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
          AND (s.expires_at IS NULL OR s.expires_at > ?)
          AND s.delivery_lifetime_expires_at IS NOT NULL
@@ -127,7 +128,7 @@ export function validateProjectEventWakeRecoveryAuthority(
          AND s.lifecycle_state = 'active'
          AND s.owner_task_id = ?
          AND s.target_session_id = ?
-         AND s.requested_delivery = 'existing_session_prompt'
+         AND ${PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL}
          AND s.resolved_delivery = 'queued_for_prompt_delivery'
          AND (s.expires_at IS NULL OR s.expires_at > ?)
          AND (s.delivery_lifetime_expires_at IS NULL OR s.delivery_lifetime_expires_at > ?)

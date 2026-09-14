@@ -3,6 +3,7 @@ import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
 import { isMailboxAtCapacity } from './mailbox-capacity';
 import { resolveMaxMessagesPerSession } from './messages-persist-helpers';
 import { mapProjectEvent, mapProjectEventSubscription } from './project-events-mappers';
+import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL } from './project-events-wake-config';
 import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
 import type { Env } from './types';
 
@@ -74,7 +75,7 @@ export function deferWakeTarget(
        AND target_session_id = ?
        AND contract_version >= 2
        AND lifecycle_state = 'active'
-       AND requested_delivery = 'existing_session_prompt'
+       AND ${PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL}
        AND resolved_delivery = 'queued_for_prompt_delivery'`,
     nextAt,
     nextAt,

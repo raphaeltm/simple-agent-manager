@@ -26,6 +26,10 @@ export interface DurabilityFoundationHooks {
   recalculateAlarm(): Promise<void>;
   scheduleSummarySync(): void;
   broadcastEvent(type: string, payload: Record<string, unknown>, sessionId?: string): void;
+  /** Re-arm the idle timer for a chat session whose turn just ended. */
+  armIdleCleanup(chatSessionId: string): void;
+  /** Release durable messages queued behind the (now ended) turn. */
+  nudgeDeliveries(chatSessionId: string): number;
 }
 
 export async function acceptPromptDelivery(
@@ -321,6 +325,8 @@ export function processPromptDeliveryAlarm(
           projectId: hooks.getProjectId(),
           recalculateAlarm: hooks.recalculateAlarm,
           broadcastEvent: hooks.broadcastEvent,
+          armIdleCleanup: hooks.armIdleCleanup,
+          nudgeDeliveries: hooks.nudgeDeliveries,
         }).catch((error) => {
           log.error('alarm.prompt_delivery_claim_failed', {
             messageId: claim.message.id,

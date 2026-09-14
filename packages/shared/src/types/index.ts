@@ -690,9 +690,12 @@ export {
   DURABLE_MESSAGE_CLASSES,
   MAILBOX_DEFAULTS,
   MESSAGE_CLASSES,
+  MESSAGE_CLASS_URGENCY,
   PROMPT_DELIVERY_SOURCES,
   SENDER_TYPES,
+  TURN_STOP_URGENCY_THRESHOLD,
   VM_PROMPT_RECEIPT_STATES,
+  isUrgentMessageClass,
 } from './mailbox';
 
 // Durable execution checkpoint foundation

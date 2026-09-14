@@ -8,7 +8,10 @@ import {
   DURABLE_MESSAGE_CLASSES,
   MAILBOX_DEFAULTS,
   MESSAGE_CLASSES,
+  MESSAGE_CLASS_URGENCY,
   SENDER_TYPES,
+  TURN_STOP_URGENCY_THRESHOLD,
+  isUrgentMessageClass,
 } from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -136,5 +139,22 @@ describe('Migration 025 mailbox TTL backfill', () => {
       expect.stringMatching(/UPDATE session_inbox[\s\S]*WHERE expires_at IS NULL/i),
       MAILBOX_DEFAULTS.TTL_MS,
     );
+  });
+});
+
+describe('Urgent message classes (stop-and-deliver)', () => {
+  it('ranks every class in escalating urgency order', () => {
+    expect(MESSAGE_CLASSES.map((messageClass) => MESSAGE_CLASS_URGENCY[messageClass])).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
+  });
+
+  it('treats interrupt and above as urgent and never the informational classes', () => {
+    expect(TURN_STOP_URGENCY_THRESHOLD).toBe(MESSAGE_CLASS_URGENCY.interrupt);
+    expect(isUrgentMessageClass('notify')).toBe(false);
+    expect(isUrgentMessageClass('deliver')).toBe(false);
+    expect(isUrgentMessageClass('interrupt')).toBe(true);
+    expect(isUrgentMessageClass('preempt_and_replan')).toBe(true);
+    expect(isUrgentMessageClass('shutdown_with_final_prompt')).toBe(true);
   });
 });
