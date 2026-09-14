@@ -105,6 +105,29 @@ export function describeToolPayloadCleanupConfigRefusal(
 }
 
 /**
+ * Whether `projectId` is in scope for tool-payload cleanup at all.
+ *
+ * `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS` unset means "every project"; set means exactly
+ * the listed ones. An operator-initiated run (`forceStart`) is an explicit request for this
+ * project and bypasses the allowlist, which is why the admin route can clean a project the
+ * automatic sweep would skip.
+ *
+ * Shared deliberately: `createToolPayloadCleanupPlan` uses it to decide whether to RUN, and
+ * `shouldReportToolPayloadCleanupConfigRefusal` uses it to decide whether to WARN. Two copies of
+ * the same predicate would drift into warning about projects that are not in scope, or staying
+ * silent about ones that are — and a warning that does not track the thing it describes is worse
+ * than no warning.
+ */
+export function isProjectInToolPayloadCleanupScope(
+  projectId: string,
+  projectIds: string[] | null,
+  forceStart: boolean
+): boolean {
+  if (forceStart) return true;
+  return projectIds === null || projectIds.includes(projectId);
+}
+
+/**
  * Whether a refusal for `projectId` is worth a log line.
  *
  * `createToolPayloadCleanupPlan` runs on every storage alarm of every ProjectData object, so an
@@ -136,6 +159,5 @@ export function shouldReportToolPayloadCleanupConfigRefusal(
   options: { allowStart?: boolean; forceStart?: boolean }
 ): boolean {
   if (!options.allowStart && !options.forceStart) return false;
-  if (options.forceStart) return true;
-  return projectIds === null || projectIds.includes(projectId);
+  return isProjectInToolPayloadCleanupScope(projectId, projectIds, options.forceStart === true);
 }

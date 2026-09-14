@@ -19,6 +19,7 @@ import {
 } from './tool-payload-cleanup-candidates';
 import {
   describeToolPayloadCleanupConfigRefusal,
+  isProjectInToolPayloadCleanupScope,
   shouldReportToolPayloadCleanupConfigRefusal,
 } from './tool-payload-cleanup-config-refusal';
 import {
@@ -157,9 +158,11 @@ function createToolPayloadCleanupPlan(
     return null;
   }
   if (
-    !options.forceStart &&
-    config.toolPayloadCleanupProjectIds !== null &&
-    !config.toolPayloadCleanupProjectIds.includes(projectId)
+    !isProjectInToolPayloadCleanupScope(
+      projectId,
+      config.toolPayloadCleanupProjectIds,
+      options.forceStart === true
+    )
   ) {
     return null;
   }
