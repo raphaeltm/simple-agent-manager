@@ -36,7 +36,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   computeStorageSafetyAlarmTime,
   STORAGE_SAFETY_MIN_ALARM_SPACING_MS,
-} from '../../../src/durable-objects/project-data/storage-safety';
+} from '../../../src/durable-objects/project-data/storage-safety-alarm-time';
 import { writeStorageSafetyMeta } from '../../../src/durable-objects/project-data/storage-safety-meta';
 import { writeProjectDataToolPayloadArchiveLastRunAt } from '../../../src/durable-objects/project-data/tool-payload-cleanup-state';
 import type { Env } from '../../../src/env';

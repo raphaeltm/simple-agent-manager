@@ -21,7 +21,7 @@ import { computePromptDeliveryAlarmTime } from './prompt-delivery';
 import * as reconciliation from './reconciliation';
 import { parseMetaValue } from './row-schemas';
 import { computeSessionActivityProbeAlarmTime } from './session-activity-reconciliation';
-import { computeStorageSafetyAlarmTime } from './storage-safety';
+import { computeStorageSafetyAlarmTime } from './storage-safety-alarm-time';
 import { computeTaskWaitAlarmTime } from './task-waits';
 import type { Env } from './types';
 
