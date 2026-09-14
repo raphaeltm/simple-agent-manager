@@ -133,6 +133,30 @@ byte-for-byte today's behavior for them.
 - [x] Docs sync: grep for stale `recorded_not_injected` claims about injection modes and message
       class behavior; update api-reference skill / www docs where they describe these surfaces.
 
+## Staging verification (2026-09-14, run 34800694315)
+
+Verified end-to-end on shared staging (project 01KJNR9R3TEN3KX1ETE33852R8, two real task agents
+plus a comment-directive flow):
+
+- **interrupt stops a busy turn**: sender's `send_durable_message` (class `interrupt`) at
+  03:32:40 → `prompt_delivery.retry reason=busy` at 03:32:43 → `prompt_delivery.turn_interrupted`
+  (messageClass interrupt, observedAt 1789356763417) → `prompt_delivery.accepted` attempt 2 at
+  03:32:49 → target's next turn opens on the composed directive at 03:32:54 (its own words:
+  "I received an interrupt message marked as untrusted peer content"). A 300s foreground loop
+  turn was cancelled ~70s in; sender-call-to-delivered latency ~15s.
+- **deliver never stops a turn**: a `deliver`-class comment directive queued while the target
+  ran a 240s loop produced four `reason=busy` retries (03:59:24–04:00:05), ZERO
+  `turn_interrupted` events, the turn ended naturally (~04:00:11), and the directive was
+  delivered as the next prompt 5s later (accepted attempt 5 at 04:00:16).
+- **idle-session delivery unchanged**: an interrupt sent to an idle target was delivered within
+  ~0–3s of acceptance.
+- The `runtime_interrupt` wake mapping is proven by the real-DO workers test (interrupt-class
+  `session_inbox` row) + resolver unit tests; not re-choreographed live (needs an event producer).
+- Evidence detail: `.codex/tmp/staging-stop-and-deliver-evidence.md` (uncommitted scratch);
+  artifacts: tasks 01M2EY9K1FT88PGRS0E9GBPFA2 / 01M2EZ56FA8MPJNZJ36GXS77DT /
+  01M2F0X4Q28J7CG7GM9T3JV7DP left to the platform's normal idle cleanup (no manual node deletion
+  on shared staging).
+
 ## Acceptance criteria
 
 1. Sending a durable message with class `interrupt`, `preempt_and_replan`, or
@@ -156,7 +180,20 @@ byte-for-byte today's behavior for them.
 - `runtime_steer` / true in-harness steering adapters; `spawn_task` execution.
 - Legacy (non-durable) mailbox path stop behavior — durable engine is the production path.
 - Ack-time semantics changes, receipt indicator work, phase 2+ of the idea.
+- Per-(sender, target) interrupt stop budget/cooldown (security review LOW — a same-project
+  peer can repeatedly cancel a target's turns; bounded by mailbox capacity and equal to the
+  user's own stop-button power; revisit with phase 2).
 - Migrating `reconciliation.ts:cancelStalledPrompt` (tracked separately in backlog).
+
+## Review outcomes (2026-09-14, local specialists)
+
+- cloudflare-specialist: 2 HIGH fixed (ast-checks SQL-constant gate; stop-and-deliver priority
+  inversion — post-stop re-nudge so the urgent delivery outranks nudged siblings), 1 MEDIUM fixed
+  (background timeout tier for the cancel call), 409 mirror repair added.
+- security-auditor: PASS; directive fenced + untrusted-labelled.
+- test-engineer: PASS; reconcile-mode and re-nudge tests added.
+- constitution-validator: PASS (protocol constants, not tunables).
+- doc-sync-validator: PASS; env-reference gained the PROJECT_EVENT_WAKE_* surface.
 
 ## References
 

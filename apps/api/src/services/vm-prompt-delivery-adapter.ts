@@ -21,44 +21,17 @@ import { ensureSessionRecovery } from './session-recovery';
 import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import { markSessionSnapshotAwakeInPlace } from './session-snapshots';
 import {
+  CapabilitiesSchema,
+  ReceiptSchema,
+  SubmitResponseSchema,
+} from './vm-prompt-delivery-adapter-schemas';
+import {
   checkpointVmPromptSubmission,
   prepareVmPromptDelivery,
   PromptDeliveryGuardError,
 } from './vm-prompt-delivery-preparation';
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
-const RuntimeIdentitySchema = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(256));
-const CapabilitiesSchema = v.object({
-  protocolVersion: v.number(),
-  runtimeIdentity: RuntimeIdentitySchema,
-  promptReceipts: v.object({
-    supported: v.boolean(),
-    lookup: v.boolean(),
-    states: v.array(v.picklist(['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'])),
-  }),
-  checkpointRollover: v.object({
-    supported: v.boolean(),
-    automatic: v.boolean(),
-    states: v.array(v.string()),
-    defaultGraceMs: v.number(),
-    maxGraceMs: v.number(),
-    operationTimeoutMs: v.number(),
-  }),
-});
-
-const ReceiptSchema = v.object({
-  deliveryId: v.string(),
-  state: v.picklist(['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous']),
-  runtimeIdentity: RuntimeIdentitySchema,
-  acceptedAt: v.nullable(v.number()),
-  completedAt: v.nullable(v.number()),
-});
-
-const SubmitResponseSchema = v.object({
-  status: v.picklist(['accepted', 'duplicate', 'not_ready', 'conflict']),
-  sessionId: v.string(),
-  receipt: ReceiptSchema,
-});
 
 export interface VmPromptDeliveryTarget {
   projectId: string;
