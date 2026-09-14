@@ -1565,7 +1565,7 @@ async function setupDeploymentMocks(page: Page) {
   });
 }
 
-test('sam-app-deployments', async ({ page }) => {
+test('deployments list renders the environment lifecycle', async ({ page }) => {
   await setupDeploymentMocks(page);
   await page.goto(`/projects/${PROJECT_ID}/deployments`);
 
@@ -1583,7 +1583,6 @@ test('sam-app-deployments', async ({ page }) => {
   await expect(page.locator('body')).not.toContainText('Something went wrong');
 
   await assertNoOverflow(page);
-  await marketingShot(page, 'sam-app-deployments');
 });
 
 test('sam-app-deployment-detail', async ({ page }) => {

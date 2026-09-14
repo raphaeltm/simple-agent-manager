@@ -5,11 +5,11 @@ export const eventsSection: FeatureSection = {
   label: 'Event Streams & Triggers',
   title: 'Automation your team\ncan see.',
   subtitle:
-    'Cron schedules, GitHub events, authenticated webhooks, and platform incidents all start work through one trigger system — with delivery history, one-off schedules, standing watches, and an activity stream of everything that happened.',
+    'Cron schedules, GitHub events, and authenticated webhooks all start work through one trigger system — with delivery history, one-off schedules, standing watches, and an activity stream of everything that happened.',
   summary:
     'Cron, GitHub, and webhook triggers, plus one-off schedules, standing watches, and channels for agents.',
   highlights: [
-    'Four trigger sources: cron schedules, GitHub events, authenticated JSON webhooks, and platform incidents',
+    'Three trigger sources: cron schedules, GitHub events, and authenticated JSON webhooks',
     'Webhook triggers get a per-trigger bearer token, payload filters, safe headers, and a prompt template',
     'Delivery history records every attempt — accepted, filtered, duplicate, or held back — with HTTP status and size',
     'One-off schedules message a session or start a new one at a set time; standing watches run a filter → action policy with cooldown and concurrency limits',
@@ -23,26 +23,11 @@ export const eventsSection: FeatureSection = {
       alt: 'Triggers page listing cron, GitHub, and webhook triggers with their status, schedule, last and next run times, and a personal-credential attribution warning on one trigger',
       caption: 'Every trigger source in one list, with its schedule and who is paying for it',
     },
-    {
-      src: '/images/features/sam-webhook-deliveries.png',
-      alt: 'Webhook trigger detail showing the active token’s last four characters with a Rotate token button, a payload preview, and a delivery history with Accepted, Filtered, Duplicate, Still Running, and Concurrent Limit outcomes',
-      caption: 'A full audit trail for every webhook delivery — accepted, filtered, duplicate, or held back',
-    },
-    {
-      src: '/images/features/sam-events-subscriptions.png',
-      alt: 'Events page listing agent event subscriptions, each showing its source and event type, the requested delivery mode next to the resolved delivery mode, expiry, last match, and Inspect delivery and Cancel subscription controls',
-      caption: 'Agents subscribe to project events and get them injected into context',
-    },
-    {
-      src: '/images/features/sam-activity-stream.png',
-      alt: 'Project activity stream listing events across triggers, schedules, watches, and sessions',
-      caption: 'One activity stream records everything that happened across the project',
-    },
   ],
   details: [
     {
-      headline: 'Four ways to start work',
-      body: 'Triggers fire from cron schedules, GitHub issues, comments, pull requests, and pushes, authenticated JSON webhooks, or platform incidents. Each trigger shows its status, schedule, and last and next run, and flags when it is running on someone’s personal credential.',
+      headline: 'Three ways to start work',
+      body: 'Triggers fire from cron schedules, from GitHub issues, comments, pull requests, and pushes, or from authenticated JSON webhooks. Each trigger shows its status, schedule, and last and next run, and flags when it is running on someone’s personal credential.',
       screenshot: {
         src: '/images/features/sam-triggers-sources.png',
         alt: 'Triggers page listing cron, GitHub, and webhook triggers with their status, schedule, last and next run times, and a personal-credential attribution warning on one trigger',
@@ -50,8 +35,17 @@ export const eventsSection: FeatureSection = {
       },
     },
     {
-      headline: 'Webhooks with a real audit trail',
-      body: 'A webhook trigger gets a per-trigger bearer token (shown once, prefixed sam_wh_), payload filters, a prompt template, and a set of safe request headers. Delivery history records every attempt — accepted, filtered, duplicate, still running, or over the concurrency limit — and idempotency keys keep retries safe.',
+      headline: 'Authenticated webhooks, one token per trigger',
+      body: 'A webhook trigger gets its own bearer token (shown once, prefixed sam_wh_), payload filters, a prompt template, and a set of safe request headers. The credential dialog gives you the shared ingest endpoint and a ready-to-paste curl example with an idempotency key, so any service that can send JSON can start agent work.',
+      screenshot: {
+        src: '/images/features/sam-webhook-credential.png',
+        alt: 'Save your webhook credential dialog showing the ingest endpoint URL, a one-time sam_wh_ bearer token, a curl example with an Idempotency-Key header, and an I saved this token checkbox',
+        caption: 'The token is shown once; SAM keeps only a keyed hash',
+      },
+    },
+    {
+      headline: 'Every delivery is audited',
+      body: 'Delivery history records every attempt — accepted with its linked execution, filtered, duplicate, still running, or held back by the concurrency limit — with HTTP status and payload size. Idempotency keys keep retries safe, and rotating the token invalidates the old one immediately.',
       screenshot: {
         src: '/images/features/sam-webhook-deliveries.png',
         alt: 'Webhook trigger detail showing the active token’s last four characters with a Rotate token button, a payload preview, and a delivery history with Accepted, Filtered, Duplicate, Still Running, and Concurrent Limit outcomes',
@@ -74,6 +68,15 @@ export const eventsSection: FeatureSection = {
         src: '/images/features/sam-events-watches.png',
         alt: 'Standing watches page showing an active watch that starts a new session when a CI check suite fails, with 7 of 20 executions used, one concurrent run, and a 30 minute cooldown, plus a paused watch on security-labelled issues',
         caption: 'A standing watch: filter, action, cooldown, concurrency, and a finite execution limit',
+      },
+    },
+    {
+      headline: 'Channels for collaborating agents',
+      body: 'Agents publish to named project channels and follow them with an atomic catch-up-to-follow handoff, so a second agent can pick up a release train or an incident thread with bounded history instead of re-reading a whole conversation. Channel contents are shown as untrusted evidence, never as authority to act.',
+      screenshot: {
+        src: '/images/features/sam-events-channels.png',
+        alt: 'Events page Channels tab listing release-train, incidents, and ledger-migration channels with publication counts, and the release-train history showing three messages published by different agent sessions',
+        caption: 'Channel history: each message names the agent session that published it',
       },
     },
   ],

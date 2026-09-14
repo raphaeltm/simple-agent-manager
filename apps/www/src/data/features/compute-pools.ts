@@ -24,31 +24,15 @@ export const computePoolsSection: FeatureSection = {
       caption:
         'Choose exactly which machines SAM may rent, from every connected provider’s real catalog',
     },
-    {
-      src: '/images/features/sam-compute-placement-decision.png',
-      alt: 'Chat session details showing the requested vCPU, memory, and disk, the observed and configured hardware, the current compute pool with its strategy, and a saved placement decision explaining why a warm Hetzner node was reused',
-      caption: 'Every placement decision is explained, not just made',
-    },
-    {
-      src: '/images/features/sam-nodes-multi-provider.png',
-      alt: 'Nodes page listing Hetzner, Scaleway, and Vultr machines side by side with status, health, observed and configured hardware, offering price, CPU, memory, and disk usage, and the workspaces on each',
-      caption: 'One fleet view across every connected cloud provider',
-    },
-    {
-      src: '/images/features/sam-usage-tokens.png',
-      alt: 'Settings → Usage page showing total cost, requests, and input and output tokens, a per-model breakdown, a daily cost trend, and budget controls with daily token limits and a monthly cost cap',
-      caption: 'Token usage by model and by day, against a monthly budget',
-    },
   ],
   details: [
     {
       headline: 'Real machines, not size labels',
-      body: 'A compute pool lists the actual provider-native offerings it is allowed to rent — cx33, PRO2-S, vc2-4c-8gb, and more — across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP, each with its real vCPU, RAM, disk, and price. You choose the strategy (Balanced, Pack, Spread, Smallest fit) and what happens when a provider runs out (Queue, Fail, Fallback chain).',
+      body: 'A compute pool lists the actual provider-native offerings it is allowed to rent — cx33, PRO2-S, vc2-4c-8gb, and more — across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP, each with its real vCPU, RAM, disk, and price. Browse each provider’s full catalog, filter by provider, region, vCPU, RAM, or price, and add a machine type without leaving the page. You choose the strategy (Balanced, Pack, Spread, Smallest fit) and what happens when a provider runs out (Queue, Fail, Fallback chain).',
       screenshot: {
-        src: '/images/features/sam-compute-pool-editor.png',
-        alt: 'Project Infrastructure compute pool editor showing a pool with strategy Pack, exhaustion policy Fallback Chain, three sources and seven allowed instances, with allowed offerings from Hetzner, Scaleway, and Vultr listing vCPU, RAM, disk, location, and monthly price, and a sold-out Hetzner offering marked unavailable',
-        caption:
-          'Choose exactly which machines SAM may rent, from every connected provider’s real catalog',
+        src: '/images/features/sam-compute-offerings-manager.png',
+        alt: 'Catalog filters for provider, region, minimum vCPU, minimum RAM, maximum price, and availability above the Add instances from catalog list, where Hetzner offerings are marked Already allowed, Region sold out, Catalog only with an Add button, or Not selected',
+        caption: 'Filter a provider’s live catalog and add the exact instance types you want in the pool',
       },
     },
     {

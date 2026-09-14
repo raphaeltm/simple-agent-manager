@@ -21,6 +21,15 @@ for (const { path, slug, heading } of PAGES) {
     await page.goto(path);
     await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible();
 
+    // Scroll-reveal sections fade in over 0.6s once the IntersectionObserver
+    // fires. Neither axe (which samples mid-transition, blended colours) nor a
+    // full-page capture waits for that, so settle every section up front.
+    await page.addStyleTag({
+      content:
+        '.animate-on-scroll{opacity:1 !important;transform:none !important;transition:none !important}',
+    });
+    await page.waitForTimeout(300);
+
     const hasHorizontalOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth
     );
@@ -31,14 +40,6 @@ for (const { path, slug, heading } of PAGES) {
       (violation) => violation.impact === 'critical' || violation.impact === 'serious'
     );
     expect(seriousViolations, JSON.stringify(seriousViolations, null, 2)).toEqual([]);
-
-    // Scroll-reveal sections stay at opacity 0 until the IntersectionObserver
-    // fires, which a full-page capture does not wait for. Reveal them so the
-    // screenshot shows the real page content, not blank sections.
-    await page.addStyleTag({
-      content: '.animate-on-scroll{opacity:1 !important;transform:none !important;transition:none !important}',
-    });
-    await page.waitForTimeout(300);
 
     const project = testInfo.project.name.toLowerCase().replace(/\W+/g, '-');
     await page.screenshot({

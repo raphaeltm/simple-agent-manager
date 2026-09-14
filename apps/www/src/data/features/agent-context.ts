@@ -21,21 +21,6 @@ export const agentContextSection: FeatureSection = {
       alt: 'Agent context overview showing memory entities (25), active policies (12), recent actions (50), and the context stack agents receive',
       caption: 'Overview of the context stack — repo instructions, memory, policies, and profiles',
     },
-    {
-      src: '/images/features/agent-memory.png',
-      alt: 'Agent memory tab with architecture observations, each showing a confidence score (92–95%), source type, and confirmation date',
-      caption: 'Project knowledge with confidence scores and source tracking',
-    },
-    {
-      src: '/images/features/agent-policies.png',
-      alt: 'Agent policies tab showing preference and rule entries like scrolling wrapper handling and Go QA standards, marked instruction-only',
-      caption: 'Project policies injected into agent sessions as instructions',
-    },
-    {
-      src: '/images/features/agent-actions.png',
-      alt: 'Agent actions feed with event types like task.agent_completed, task.execution_step, session.started, and timestamps',
-      caption: 'Activity log of every task, session, and execution event',
-    },
   ],
   details: [
     {

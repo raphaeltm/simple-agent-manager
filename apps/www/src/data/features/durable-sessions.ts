@@ -19,19 +19,9 @@ export const durableSessionsSection: FeatureSection = {
   group: 'run',
   screenshots: [
     {
-      src: '/images/features/sam-session-sleeping.png',
-      alt: 'A finished chat session in the Sleeping state, with the full transcript still visible and a composer that reads Send a message to wake the agent',
-      caption: 'Sessions sleep after idle turns and wake from a seven-day snapshot',
-    },
-    {
-      src: '/images/features/sam-agents-orchestration.png',
-      alt: 'Task Hierarchy view showing a running parent task with three dispatched subtasks: one completed with a PR opened, one queued and blocked on sign-off, and one running',
-      caption: 'A parent task and the subtasks it dispatched, with live status for each',
-    },
-    {
-      src: '/images/features/sam-app-deployment-detail.png',
-      alt: 'Deployment environment detail for staging showing release v14 applied and submitted by an agent task, health checks for app, node, provider, routes, disk, and config, and a public route',
-      caption: 'A release the agent submitted, serving on its own node with health checks and a public route',
+      src: '/images/features/sam-session-waking.png',
+      alt: 'A sleeping chat session being woken: a banner reads Recreating your workspace, the transcript is intact, and the composer reads Waking the agent, your message will be delivered',
+      caption: 'Send a message to a sleeping session and SAM restores the workspace, then delivers it',
     },
   ],
   details: [

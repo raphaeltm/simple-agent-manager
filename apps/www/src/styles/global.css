@@ -169,6 +169,14 @@ a:hover {
   color: var(--color-success);
 }
 
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
 /* --- Utilities --- */
 .container {
   width: 100%;

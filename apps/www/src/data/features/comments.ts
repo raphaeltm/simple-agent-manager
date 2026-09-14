@@ -23,16 +23,6 @@ export const commentsSection: FeatureSection = {
       alt: 'Desktop comment rail beside a chat conversation showing a thread anchored to a quoted sentence, with human replies, an agent reply, and send-to-agent and resolve controls',
       caption: 'Comment on exactly the sentence you mean, then send it to the agent as context',
     },
-    {
-      src: '/images/features/sam-comments-inbox.png',
-      alt: 'Project Comments page with filter chips for All, Needs you, With agent, Open, and Resolved, listing threads from chat sessions and library files grouped by whether they are waiting on you',
-      caption: 'Every comment thread in one inbox, grouped by what needs your attention',
-    },
-    {
-      src: '/images/features/sam-comments-library-file.png',
-      alt: 'Library markdown file preview with a comment panel showing an open thread that quotes a line of the document, a reply, Reply and Resolve buttons, and a resolved thread',
-      caption: 'Comments work on library files too, not just chat messages',
-    },
   ],
   details: [
     {

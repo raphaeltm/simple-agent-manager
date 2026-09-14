@@ -19,25 +19,9 @@ export const multiplayerSection: FeatureSection = {
   group: 'collaborate',
   screenshots: [
     {
-      src: '/images/features/sam-collab-members-access.png',
-      alt: 'Settings → Access showing an owner and four admins, two pending access requests (one GitHub verified, one flagged as having no repo access), and an invite link with its expiry, use count, and Copy, New Link, and Revoke controls',
-      caption:
-        'Members, pending requests, and the invite link — all managed from Settings → Access',
-    },
-    {
-      src: '/images/features/sam-collab-invite-request.png',
-      alt: 'The Request Access card a recipient sees after opening a project invite link',
-      caption: 'Opening an invite link only creates a request — nobody joins automatically',
-    },
-    {
       src: '/images/features/sam-collab-all-sessions.png',
       alt: 'Project chat with the All sessions filter selected, listing eight sessions started by five different team members, each labelled with who started it',
-      caption: 'Switch between my sessions and all sessions to see the whole project’s activity',
-    },
-    {
-      src: '/images/features/sam-collab-credential-attribution.png',
-      alt: 'Credential Attribution panel showing a trigger flagged as running on a personal key with a Fix link, next to resources covered by the project’s shared Hetzner credential',
-      caption: 'See at a glance which shared resources run on a personal key',
+      caption: 'One project, every member’s sessions — switch between my sessions and all sessions',
     },
   ],
   details: [

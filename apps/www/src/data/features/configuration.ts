@@ -22,16 +22,6 @@ export const configurationSection: FeatureSection = {
       alt: 'Library file browser showing a research folder, an uploaded markdown file with tags (architecture, missions, orchestration), and an Upload button',
       caption: 'File browser with folders, tags, sorting, and upload',
     },
-    {
-      src: '/images/features/document-viewer.png',
-      alt: 'Document viewer rendering a markdown file with a Mermaid architecture diagram, plus Rendered/Source/Download toggle buttons',
-      caption: 'Rendered markdown with Mermaid diagrams — toggle between rendered view and source',
-    },
-    {
-      src: '/images/features/settings.png',
-      alt: 'Project settings showing default resource requirements, the default agent type, and per-agent credential configuration',
-      caption: 'Choose default resource requirements and an agent type per project',
-    },
   ],
   details: [
     {

@@ -72,7 +72,15 @@ import OptimizedFeatureImage from '../../components/OptimizedFeatureImage.astro'
             tracked in node-hours against a monthly limit — BYOC users who connect their own
             cloud credentials are exempt, since that spend never touches SAM's billing.
           </p>
-          <div class="detail-table-wrap">
+          <div class="detail-image animate-on-scroll">
+            <OptimizedFeatureImage
+              src="/images/features/sam-usage-compute.png"
+              alt="Settings → Usage compute section showing the monthly quota with hours remaining, node-hours, vCPU-hours, platform vCPU, active nodes, and the active node list with observed and configured hardware"
+              loading="lazy"
+            />
+            <span class="detail-caption">Compute usage in node-hours and vCPU-hours against the monthly quota</span>
+          </div>
+          <div class="detail-table-wrap" tabindex="0" role="region" aria-label="Budget and quota controls table">
             <table class="detail-table">
               <thead>
                 <tr>
@@ -122,6 +130,14 @@ import OptimizedFeatureImage from '../../components/OptimizedFeatureImage.astro'
               loading="lazy"
             />
             <span class="detail-caption">LLM spend by model, day, and user, with a projection, plus compute cost</span>
+          </div>
+          <div class="detail-image animate-on-scroll">
+            <OptimizedFeatureImage
+              src="/images/features/sam-admin-usage-nodes.png"
+              alt="Admin → Usage node usage table listing each user with node-hours, vCPU-hours, platform hours, and active node count for the billing period"
+              loading="lazy"
+            />
+            <span class="detail-caption">Per-user node usage across the installation for the billing period</span>
           </div>
         </div>
 

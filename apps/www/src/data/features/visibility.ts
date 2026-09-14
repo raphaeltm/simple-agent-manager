@@ -21,16 +21,6 @@ export const visibilitySection: FeatureSection = {
       alt: 'Dashboard with Active Tasks cards showing status, project name, and timing, plus a Projects grid with workspace and session counts',
       caption: 'Active tasks across projects, with status and timing at a glance',
     },
-    {
-      src: '/images/features/sam-nodes-multi-provider.png',
-      alt: 'Nodes page listing Hetzner, Scaleway, and Vultr machines side by side with status, health, observed and configured hardware, offering price, CPU, memory, and disk usage, and the workspaces on each',
-      caption: 'Node health with CPU, memory, and disk stats across every connected provider',
-    },
-    {
-      src: '/images/features/notifications.png',
-      alt: 'Notification feed with filter tabs for All, Task Complete, Needs Input, Error, Progress, Session Ended, and PR Created',
-      caption: 'Filterable notifications — errors, completions, progress, and decision points',
-    },
   ],
   details: [
     {

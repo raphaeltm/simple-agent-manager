@@ -140,9 +140,9 @@ const rows = [
           {rows.map((row) => (
             <tr>
               <td class="col-label">{row.label}</td>
-              <td class={`col-sam ${row.samWins ? 'highlight' : ''}`}>{row.sam}</td>
-              <td class="col-other">{row.managed}</td>
-              <td class="col-other">{row.selfHosted}</td>
+              <td class={`col-sam ${row.samWins ? 'highlight' : ''}`} data-label="SAM">{row.sam}</td>
+              <td class="col-other" data-label="Managed AI Platforms">{row.managed}</td>
+              <td class="col-other" data-label="Self-Hosted CDEs">{row.selfHosted}</td>
             </tr>
           ))}
         </tbody>
@@ -229,6 +229,69 @@ const rows = [
     white-space: nowrap;
   }
 
+  /* Below tablet width the four-column table cannot fit: stack each row as a
+     card (label, then SAM / Managed / Self-hosted values with inline headings)
+     so every cell stays readable without horizontal scrolling. */
+  @media (max-width: 767px) {
+    .table-wrapper {
+      overflow-x: visible;
+      padding: 4px;
+    }
+
+    .comparison-table thead {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
+    .comparison-table,
+    .comparison-table tbody,
+    .comparison-table tr,
+    .comparison-table td {
+      display: block;
+    }
+
+    .comparison-table tr {
+      padding: 14px 12px 6px;
+      border-bottom: 1px solid var(--glass-border);
+    }
+
+    .comparison-table tr:last-child {
+      border-bottom: none;
+    }
+
+    .comparison-table td {
+      border-bottom: none;
+      padding: 4px 0;
+    }
+
+    .col-label {
+      white-space: normal;
+      font-family: var(--font-display);
+      font-size: 1rem;
+      color: var(--color-fg-primary);
+      padding-bottom: 8px;
+    }
+
+    .comparison-table td[data-label]::before {
+      content: attr(data-label);
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--color-fg-dim);
+      margin-bottom: 2px;
+    }
+
+    .col-sam[data-label]::before {
+      color: var(--color-accent);
+    }
+  }
+
   .col-sam {
     color: var(--color-fg-primary);
   }
@@ -255,6 +318,8 @@ const rows = [
 
   .comparison-footnote a {
     color: var(--color-accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .comparison-footnote a:hover {

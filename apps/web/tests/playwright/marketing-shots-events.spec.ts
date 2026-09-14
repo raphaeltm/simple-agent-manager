@@ -928,140 +928,6 @@ const RELEASE_TRAIN_HISTORY = {
 // Activity stream
 // ---------------------------------------------------------------------------
 
-const ACTIVITY_EVENTS = [
-  {
-    id: 'act-1',
-    eventType: 'webhook.accepted',
-    actorType: 'system',
-    actorId: WEBHOOK_DATADOG_ID,
-    workspaceId: null,
-    sessionId: null,
-    taskId: null,
-    payload: { sourceLabel: 'Datadog' },
-    createdAt: ts('2026-09-14T08:12:01Z'),
-  },
-  {
-    id: 'act-2',
-    eventType: 'task.agent_completed',
-    actorType: 'workspace_callback',
-    actorId: 'session-nightly-audit-119',
-    workspaceId: 'ws-nightly-audit',
-    sessionId: 'session-nightly-audit-119',
-    taskId: 'task-nightly-audit-119',
-    payload: { title: 'Nightly dependency audit follow-up', toStatus: 'completed' },
-    createdAt: ts('2026-09-14T04:24:00Z'),
-  },
-  {
-    id: 'act-3',
-    eventType: 'session.started',
-    actorType: 'workspace_callback',
-    actorId: 'session-nightly-audit-119',
-    workspaceId: 'ws-nightly-audit',
-    sessionId: 'session-nightly-audit-119',
-    taskId: 'task-nightly-audit-119',
-    payload: { topic: 'Nightly dependency audit follow-up' },
-    createdAt: ts('2026-09-14T04:06:00Z'),
-  },
-  {
-    id: 'act-4',
-    eventType: 'prompt_delivery.accepted',
-    actorType: 'system',
-    actorId: 'sub-ledger-pr',
-    workspaceId: null,
-    sessionId: SESSION_LEDGER,
-    taskId: TASK_LEDGER,
-    payload: {},
-    createdAt: ts('2026-09-14T08:00:02Z'),
-  },
-  {
-    id: 'act-5',
-    eventType: 'github.pull_request.opened',
-    actorType: 'system',
-    actorId: 'github',
-    workspaceId: null,
-    sessionId: null,
-    taskId: null,
-    payload: { number: 482, title: 'Migrate ledger to double-entry schema' },
-    createdAt: ts('2026-09-14T07:58:00Z'),
-  },
-  {
-    id: 'act-6',
-    eventType: 'schedule.admitted',
-    actorType: 'system',
-    actorId: 'sched-nightly-audit-followup',
-    workspaceId: null,
-    sessionId: null,
-    taskId: null,
-    payload: {},
-    createdAt: ts('2026-09-14T04:06:05Z'),
-  },
-  {
-    id: 'act-7',
-    eventType: 'trigger.execution_started',
-    actorType: 'system',
-    actorId: 'trig-nightly-audit',
-    workspaceId: null,
-    sessionId: null,
-    taskId: 'task-nightly-audit-118',
-    payload: {},
-    createdAt: ts('2026-09-14T04:00:00Z'),
-  },
-  {
-    id: 'act-8',
-    eventType: 'github.pull_request.review_requested',
-    actorType: 'user',
-    actorId: 'user-marcus',
-    workspaceId: null,
-    sessionId: null,
-    taskId: null,
-    payload: {},
-    createdAt: ts('2026-09-13T22:10:00Z'),
-  },
-  {
-    id: 'act-9',
-    eventType: 'webhook.accepted',
-    actorType: 'system',
-    actorId: 'trig-webhook-stripe',
-    workspaceId: null,
-    sessionId: null,
-    taskId: null,
-    payload: { sourceLabel: 'Stripe' },
-    createdAt: ts('2026-09-13T18:05:00Z'),
-  },
-  {
-    id: 'act-10',
-    eventType: 'session.stopped',
-    actorType: 'workspace_callback',
-    actorId: SESSION_STRIPE_ROTATION,
-    workspaceId: 'ws-stripe-rotation',
-    sessionId: SESSION_STRIPE_ROTATION,
-    taskId: TASK_STRIPE_ROTATION,
-    payload: { message_count: 24 },
-    createdAt: ts('2026-09-13T14:30:00Z'),
-  },
-  {
-    id: 'act-11',
-    eventType: 'comment.created',
-    actorType: 'user',
-    actorId: 'user-elena',
-    workspaceId: null,
-    sessionId: SESSION_LEDGER,
-    taskId: null,
-    payload: {},
-    createdAt: ts('2026-09-13T11:20:00Z'),
-  },
-  {
-    id: 'act-12',
-    eventType: 'workspace.created',
-    actorType: 'user',
-    actorId: 'user-tomas',
-    workspaceId: 'ws-payment-retry',
-    sessionId: null,
-    taskId: null,
-    payload: { name: 'ws-payment-retry' },
-    createdAt: ts('2026-09-13T09:00:00Z'),
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Route handlers
@@ -1123,13 +989,6 @@ function eventsHandler(path: string, respond: AuditResponder): Promise<void> | u
   return undefined;
 }
 
-function activityHandler(path: string, respond: AuditResponder): Promise<void> | undefined {
-  if (path === `${BASE}/activity`) {
-    const events = [...ACTIVITY_EVENTS].sort((a, b) => b.createdAt - a.createdAt);
-    return respond(200, { events, hasMore: false });
-  }
-  return undefined;
-}
 
 async function setupMocks(
   page: Page,
@@ -1180,7 +1039,7 @@ test('sam-triggers-sources', async ({ page }) => {
 // one-time credential dialog shown on rotation.
 // ---------------------------------------------------------------------------
 
-test('sam-webhook-deliveries, sam-webhook-delivery-history, sam-webhook-credential', async ({ page }) => {
+test('sam-webhook-deliveries, sam-webhook-credential', async ({ page }) => {
   logPageErrors(page);
   await setupMocks(page, (path, respond, route) => triggerHandler(path, respond, route));
 
@@ -1207,13 +1066,11 @@ test('sam-webhook-deliveries, sam-webhook-delivery-history, sam-webhook-credenti
   await expect(page.getByRole('heading', { name: 'Delivery history' })).toBeVisible();
   await marketingShot(page, 'sam-webhook-deliveries');
 
-  // Element-only crop guarantees every delivery row is captured regardless of
-  // viewport height.
+  // Every mocked delivery row rendered (the marketing capture above shows the
+  // first seven; the rest are asserted here).
   const deliveryHeading = page.getByRole('heading', { name: 'Delivery history' });
-  await deliveryHeading.scrollIntoViewIfNeeded();
   const deliverySection = deliveryHeading.locator('xpath=ancestor::section[1]');
   await expect(deliverySection.getByText('rate limited', { exact: true })).toBeVisible();
-  await marketingShot(page, 'sam-webhook-delivery-history', deliverySection);
 
   // Rotate the token to reveal the one-time credential dialog with the full
   // endpoint URL, bearer token, and curl example.
@@ -1236,7 +1093,7 @@ test('sam-webhook-deliveries, sam-webhook-delivery-history, sam-webhook-credenti
 // channels (with one channel's history expanded).
 // ---------------------------------------------------------------------------
 
-test('sam-events-subscriptions, sam-events-schedules, sam-events-watches, sam-events-channels', async ({ page }) => {
+test('sam-events-subscriptions, sam-events-watches, sam-events-channels', async ({ page }) => {
   logPageErrors(page);
   await setupMocks(page, (path, respond) => eventsHandler(path, respond));
 
@@ -1270,7 +1127,6 @@ test('sam-events-subscriptions, sam-events-schedules, sam-events-watches, sam-ev
   await expect(schedulesRegion.getByText('Nightly dependency audit follow-up')).toBeVisible();
   await expect(schedulesRegion.getByText('Confirm the PCI evidence bundle reached compliance')).toBeVisible();
   await assertNoOverflow(page);
-  await marketingShot(page, 'sam-events-schedules');
 
   // --- E (standing watches) ---
   await page.getByRole('button', { name: 'Standing watches', exact: true }).click();
@@ -1296,18 +1152,3 @@ test('sam-events-subscriptions, sam-events-schedules, sam-events-watches, sam-ev
   await marketingShot(page, 'sam-events-channels');
 });
 
-// ---------------------------------------------------------------------------
-// G. Activity stream
-// ---------------------------------------------------------------------------
-
-test('sam-activity-stream', async ({ page }) => {
-  logPageErrors(page);
-  await setupMocks(page, (path, respond) => activityHandler(path, respond));
-
-  await page.goto(`/projects/${PROJECT_ID}/activity`);
-  await expect(page.getByText('webhook accepted', { exact: false }).first()).toBeVisible();
-  await assertNoCrash(page);
-  await assertNoOverflow(page);
-
-  await marketingShot(page, 'sam-activity-stream');
-});

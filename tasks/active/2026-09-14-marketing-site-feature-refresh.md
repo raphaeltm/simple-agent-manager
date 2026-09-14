@@ -2,7 +2,7 @@
 
 **SAM task:** 01M2G89JCFTPMFQ9WQWBSS8VBF
 **Branch:** `sam/marketing-site-feature-pages-ss8vbf` (single **draft** PR — do not merge; merging `apps/www/**` to main deploys the live site via `deploy-www.yml`)
-**Status:** in progress — draft PR #2082 open; 4 screenshot agents + 1 pages agent running (2026-09-14 15:50Z)
+**Status:** in progress — draft PR #2082; site + specs + images committed (03d1f50d7); local ui-ux-specialist review addressed (2 HIGH, 3 MEDIUM); evidence + PR finalized (2026-09-14 18:05Z). Awaiting Raphaël's review; do not merge.
 
 ## Goal
 
@@ -50,13 +50,13 @@ screenshots of every changed www surface) posted on the PR.
 ## Checklist
 
 - [x] Surface map of the real app routes/endpoints/types for the four features (explore agent)
-- [ ] Playwright marketing screenshot specs written + run; PNG/WebP committed
-- [ ] `features.ts` gains new sections; homepage showcase, hero, comparison, roadmap, how-it-works updated
-- [ ] `/features/` index page; header nav updated
-- [ ] Enterprise cost-control page reconciled with real reporting surfaces
-- [ ] `pnpm --filter @simple-agent-manager/www lint/typecheck/build/check:links/test:browser` green
-- [ ] Desktop + mobile Playwright screenshots of every changed www page reviewed and committed under `tasks/evidence/`
-- [ ] Draft PR opened with preflight block, screenshot evidence, and a comment with images
+- [x] Playwright marketing screenshot specs written + run; PNG/WebP committed (4 specs, 30 new images, commit 03d1f50d7)
+- [x] `features/` data gains new sections; homepage showcase, hero, comparison, roadmap, how-it-works updated
+- [x] `/features/` index page; header nav updated
+- [x] Enterprise cost-control page reconciled with real reporting surfaces (BYOC quota exemption verified in apps/api/src/services/compute-quotas.ts)
+- [x] `pnpm --filter @simple-agent-manager/www lint/typecheck/build/check:links/test:browser` green (188 passed; new marketing-pages spec re-run green after review fixes)
+- [x] Desktop + mobile Playwright screenshots of every changed www page reviewed and committed under `tasks/evidence/2026-09-14-marketing-site-refresh/`
+- [x] Draft PR #2082 opened with preflight block, per-surface screenshot evidence, and a comment with images
 
 ## Notes
 
@@ -91,3 +91,9 @@ Platform (spec `marketing-shots-platform.spec.ts`, all approved 2026-09-14):
 - `sam-session-waking` — same session with top banner "Recreating your workspace..." and composer "Waking the agent — your message will be delivered...".
 - `sam-app-deployments` — Deployments: New Environment form; preview-pr-482 (starting · Unknown · v1 created · No routes · payments-deploy-preview · Stale), production (active · Serving · v13 applied · 1 route · payments-deploy-prod · Healthy), staging (active · Serving · v14 applied · payments-deploy-staging · Healthy).
 - `sam-app-deployment-detail` — staging: Release v14 applied, submitted by Claude Code — Opus 5 / task-ship-refund-idempotency; tabs Overview/Domains/Volumes/Logs/Configuration/Policy/Node & Metrics; Serving; health grid App healthy · Node healthy · Provider managed · Routes issued · Disk normal · Config none · Root disk 27.4%; public route staging.payments.northwindlabs.dev; Stop / Destroy Env.
+
+## Review outcome (2026-09-14)
+
+Local `ui-ux-specialist` review: HIGH — "platform incidents" removed as a customer trigger source (SAM-internal sweep only); comparison table reflows to stacked cards below 768px. MEDIUM — unused `screenshots[1..]` data removed (type narrowed to one hero image), proof strip shared via `src/data/proof-strip.ts`, cost-control table wrapper focusable. LOW — focus-visible outline added; roadmap density, comments docs link, dense screenshots at 375px left as-is.
+
+Images generated but not used on the site were deleted with their spec captures: activity stream, deployments list, schedules, delivery-history crop.

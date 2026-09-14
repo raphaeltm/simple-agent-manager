@@ -18,7 +18,6 @@ The same `overflow-x: auto` pattern (without `tabindex="0"` / `role="region"` /
 `aria-label`) also appears in:
 
 - `src/pages/enterprise/index.astro` (`.comp-table-wrap`)
-- `src/pages/enterprise/cost-control.astro` (`.detail-table-wrap`)
 - `src/pages/enterprise/security.astro`
 - `src/pages/enterprise/compliance.astro`
 - `src/pages/self-host/index.astro`

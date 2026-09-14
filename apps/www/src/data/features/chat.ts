@@ -23,11 +23,6 @@ export const chatSection: FeatureSection = {
       caption:
         'A live project chat — plan, tool calls, comments, infrastructure, and task status in one view',
     },
-    {
-      src: '/images/features/live-session.png',
-      alt: 'Live agent session showing MCP tool calls, shell commands, file edits, and a cancel button while the agent works',
-      caption: 'Watch tool calls, shell commands, and file edits stream in real time',
-    },
   ],
   details: [
     {
