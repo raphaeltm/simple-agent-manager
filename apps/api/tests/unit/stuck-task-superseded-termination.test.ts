@@ -187,6 +187,22 @@ function env(
   } as unknown as Env;
 }
 
+/**
+ * A benign lifecycle termination deliberately leaves `tasks.error_message` NULL —
+ * that column is what paints the red failure banner and invites debug diagnosis
+ * (policies `a974b04f`, `486d1dd1`). The reason moves to
+ * `task_status_events.reason`, so assertions about WHY a task ended read this.
+ */
+function statusEventReasonOf(id: string): string | null {
+  const row = sqlite
+    .prepare(
+      `SELECT reason FROM task_status_events WHERE task_id = ?
+         ORDER BY created_at DESC, id DESC LIMIT 1`
+    )
+    .get(id) as { reason: string | null } | undefined;
+  return row?.reason ?? null;
+}
+
 function statusOf(id: string): { status: string; error_message: string | null } {
   return sqlite.prepare(`SELECT status, error_message FROM tasks WHERE id = ?`).get(id) as {
     status: string;
@@ -255,8 +271,9 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
 
     const row = statusOf(PREDECESSOR_ID);
     expect(row.status).toBe('cancelled');
-    expect(row.error_message).toContain('Superseded by a later session wake');
-    expect(row.error_message).not.toContain('no longer live');
+    expect(row.error_message).toBeNull();
+    expect(statusEventReasonOf(PREDECESSOR_ID)).toContain('Superseded by a later session wake');
+    expect(statusEventReasonOf(PREDECESSOR_ID)).not.toContain('no longer live');
   });
 
   /**
@@ -271,8 +288,9 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
 
     const row = statusOf(PREDECESSOR_ID);
     expect(row.status).toBe('cancelled');
-    expect(row.error_message).toContain('Superseded by a later session wake');
-    expect(row.error_message).not.toContain('runaway-cost ceiling');
+    expect(row.error_message).toBeNull();
+    expect(statusEventReasonOf(PREDECESSOR_ID)).toContain('Superseded by a later session wake');
+    expect(statusEventReasonOf(PREDECESSOR_ID)).not.toContain('runaway-cost ceiling');
   });
 
   /**
@@ -291,14 +309,24 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
   });
 
   /** Same control for the ceiling branch. */
-  it('still records failed at the absolute ceiling when never superseded', async () => {
+  /**
+   * The backstop still fires for a never-superseded 30h task — but with the
+   * ACCURATE reason. This fixture's workspace is `deleted`, so no runtime
+   * generation is allocated and the runaway-COST ceiling has no compute to bound;
+   * the liveness branch owns it instead and terminalizes it conclusively on
+   * `workspace_deleted`. The live-runtime ceiling control lives in
+   * `stuck-tasks.test.ts` ("fails a live task past the absolute runaway-cost
+   * ceiling"), where the workspace is `running`.
+   */
+  it('still records failed past the ceiling when never superseded', async () => {
     seedTask(PREDECESSOR_ID, { startedAt: iso(-30 * 60 * 60 * 1000) });
 
     await recoverStuckTasks(env());
 
     const row = statusOf(PREDECESSOR_ID);
     expect(row.status).toBe('failed');
-    expect(row.error_message).toContain('runaway-cost ceiling');
+    expect(row.error_message).toContain('workspace_deleted');
+    expect(row.error_message).not.toContain('Superseded');
   });
 
   /** A live successor still preserves the predecessor entirely — no write at all. */
@@ -538,11 +566,10 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
 
     expect(insertedSuccessor).toBe(true);
     expect(statusOf(rootId).status).toBe('cancelled');
-    expect(statusOf(middleId)).toMatchObject({
-      status: 'cancelled',
-      error_message:
-        'Superseded by a later session wake; the conversation continued in a replacement task and has since ended.',
-    });
+    expect(statusOf(middleId)).toMatchObject({ status: 'cancelled', error_message: null });
+    expect(statusEventReasonOf(middleId)).toBe(
+      'Superseded by a later session wake; the conversation continued in a replacement task and has since ended.'
+    );
     expect(statusOf(siblingSuccessorId).status).toBe('in_progress');
   });
 
@@ -570,11 +597,10 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     const result = await recoverStuckTasks(env());
 
     expect(result.failedInProgress).toBe(1);
-    expect(statusOf(PREDECESSOR_ID)).toMatchObject({
-      status: 'cancelled',
-      error_message:
-        'Superseded by a later session wake; the conversation continued in a replacement task and has since ended.',
-    });
+    expect(statusOf(PREDECESSOR_ID)).toMatchObject({ status: 'cancelled', error_message: null });
+    expect(statusEventReasonOf(PREDECESSOR_ID)).toBe(
+      'Superseded by a later session wake; the conversation continued in a replacement task and has since ended.'
+    );
     expect(statusOf(SUCCESSOR_ID).status).toBe('in_progress');
   });
 
@@ -604,8 +630,9 @@ describe('stuck-task sweep — superseded predecessors are cancelled, never fail
     expect(result.failedInProgress).toBe(1);
     const row = statusOf(PREDECESSOR_ID);
     expect(row.status).toBe('cancelled');
-    expect(row.error_message).toContain('Superseded by a later session wake');
-    expect(row.error_message).not.toContain('workspace_deleted');
+    expect(row.error_message).toBeNull();
+    expect(statusEventReasonOf(PREDECESSOR_ID)).toContain('Superseded by a later session wake');
+    expect(statusEventReasonOf(PREDECESSOR_ID)).not.toContain('workspace_deleted');
   });
 
   it('keeps the write-time supersession fence for direct-child middle-link races', async () => {

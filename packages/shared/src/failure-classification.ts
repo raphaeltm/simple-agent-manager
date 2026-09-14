@@ -66,6 +66,10 @@ const FAILURE_RULES: FailureRule[] = [
       /\bcancell?ed\b/,
       /stopped[ _]by[ _](the[ _])?(user|parent|orchestrator)/,
       /stop_subtask/,
+      // A session wake retires its predecessor; the conversation continued
+      // elsewhere. Historical rows carry this text in `error_message`; new ones
+      // record it only on the status event (`.claude/rules/66`, policy a974b04f).
+      /superseded by a later session wake/,
     ],
   },
   {

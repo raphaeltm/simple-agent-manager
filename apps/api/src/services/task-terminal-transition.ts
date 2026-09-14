@@ -61,6 +61,13 @@ export interface TransitionTaskToTerminalOptions {
    * appears never to have started.
    */
   fillMissingStartedAt?: boolean;
+  /**
+   * This termination is a NORMAL lifecycle outcome, not a malfunction: suppress
+   * `tasks.error_message` (and therefore the red failure banner and the debug
+   * diagnosis it invites) while still recording `reason` on the status event.
+   * See `terminalErrorMessage`.
+   */
+  lifecycleOutcome?: boolean;
 }
 
 function changed(result: D1Result<unknown> | undefined): number {
@@ -73,8 +80,26 @@ function admissionReason(status: TaskTerminalStatus): string {
   return 'task_completed_cleanup';
 }
 
-function terminalErrorMessage(status: TaskTerminalStatus, reason: string | null): string | null {
+/**
+ * `tasks.error_message` is what renders the red "Task failed" block in chat
+ * (`project-message-view/FloatingHeader.tsx` gates the whole failure panel on it
+ * being non-null, and `classifyFailure` runs on its text). A NORMAL lifecycle
+ * outcome must therefore leave it null, or the user is shown a failure for
+ * something that did not fail — policies `a974b04f` ("Do not diagnose normal
+ * lifecycle terminations") and `486d1dd1` ("Parent-stopped tasks are cancelled,
+ * not failed").
+ *
+ * The reason itself is NOT lost: `task_status_events.reason` is written from
+ * `options.reason` independently of this value, so the timeline still explains
+ * why the task ended.
+ */
+function terminalErrorMessage(
+  status: TaskTerminalStatus,
+  reason: string | null,
+  lifecycleOutcome: boolean | undefined
+): string | null {
   if (status === 'completed') return null;
+  if (lifecycleOutcome) return null;
   return reason;
 }
 
@@ -179,7 +204,11 @@ export async function transitionTaskToTerminal(
     source: options.source,
     occurredAt: now,
   });
-  const errorMessage = terminalErrorMessage(options.status, options.reason);
+  const errorMessage = terminalErrorMessage(
+    options.status,
+    options.reason,
+    options.lifecycleOutcome
+  );
   const updateTask = env.DATABASE.prepare(
     `UPDATE tasks
      SET status = ?,

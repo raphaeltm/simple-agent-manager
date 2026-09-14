@@ -13,9 +13,28 @@ export interface TaskRuntimeLiveness {
 export type RuntimeProbeOutcome = 'ok' | 'timeout' | 'error' | 'unknown' | 'not_run';
 export type NodeHealthProbeOutcome = 'ok' | 'failed' | 'timeout' | 'error' | 'not_run';
 
+/**
+ * Result of the task-scoped sleep lookup in `task-sleep-preservation.ts`.
+ *
+ * `preserve` — the wake path would still accept this session; withhold the verdict.
+ * `none`     — no restorable or in-flight sleep record; the caller may terminalize.
+ * `unknown`  — the lookup failed; withhold the verdict, because destroying is the
+ *              irreversible direction (`.claude/rules/58` requirement 4).
+ * `not_run`  — the caller has no chat session to look up, or cannot reach D1.
+ */
+export type TaskSessionSleepOutcome = 'not_run' | 'none' | 'preserve' | 'unknown';
+
 export interface RuntimeWorkspaceSnapshot {
   id: string;
   status: string;
+  /**
+   * `workspaces.created_at` in epoch ms — the start of the CURRENT runtime
+   * generation, which is what the runaway-cost ceiling must age from. A wake
+   * allocates a fresh workspace, so this advances with each incarnation while
+   * `tasks.started_at` does not. Null when the column is absent or unparseable,
+   * which callers must treat as "fall back to the stricter existing signal".
+   */
+  createdAtMs: number | null;
   chatSessionId: string | null;
   nodeId: string | null;
   userId: string | null;
@@ -158,6 +177,19 @@ export interface TaskRuntimeLivenessSignals {
   supersessionProbeOutcome: SupersessionProbeOutcome;
   /** How this task's recovery family relates to it. See `loadTaskSupersession`. */
   supersession: TaskSupersession;
+  /**
+   * Whether the task's own chat session still holds a restorable or in-flight
+   * sleep record. Keyed on `tasks.chat_session_id`, so unlike
+   * `sessionResumability` it survives a NULL `tasks.workspace_id`, a NULL
+   * `workspaces.chat_session_id`, and a snapshot row whose own `workspace_id` is
+   * NULL — the three shapes that made the workspace-scoped probe unreachable for
+   * sleeping conversations in production.
+   *
+   * `not_run` preserves the pre-guard behaviour for callers that cannot reach D1;
+   * `unknown` withholds a conclusive-death verdict. See
+   * `task-sleep-preservation.ts`.
+   */
+  taskSessionSleep: TaskSessionSleepOutcome;
 }
 
 export interface TaskLivenessNodeHealthProbeEnv {

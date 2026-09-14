@@ -201,6 +201,10 @@ export async function terminalizeIdleTaskInD1(
     taskId: task.id,
     projectId: reporter.projectId,
     workspaceId: reporter.workspaceId,
+    // The canonical chat session, so the task-scoped sleep guard can reach a
+    // `session_snapshots` row whose workspace binding has already been cleared
+    // (`.claude/rules/61` — the same guard the cron sweep applies).
+    chatSessionId: reporter.sessionId,
   });
   if (liveness.live || !liveness.conclusive) {
     log.info('runtime_preserved', {
@@ -225,10 +229,17 @@ export async function terminalizeIdleTaskInD1(
   const terminalStatus: 'failed' | 'cancelled' = supersededTermination
     ? 'cancelled'
     : 'failed';
-  const errorMessage = supersededTermination
+  // The reason always lands on the status event so the timeline stays complete.
+  const statusEventReason = supersededTermination
     ? 'Superseded by a later session wake; the conversation continued in a ' +
       'replacement task and has since ended.'
     : diagnosticMessage(reporter, liveness);
+  // `tasks.error_message` is what paints the red failure banner and invites debug
+  // diagnosis, so a benign lifecycle outcome leaves it NULL — the same rule the
+  // cron sweep applies via `transitionTaskToTerminal({ lifecycleOutcome })`
+  // (policies `a974b04f`, `486d1dd1`; `.claude/rules/61` keeps the two runtimes
+  // in lockstep).
+  const errorMessage = supersededTermination ? null : statusEventReason;
   const now = new Date().toISOString();
   const update = env.DATABASE.prepare(
     `UPDATE tasks
@@ -251,12 +262,13 @@ export async function terminalizeIdleTaskInD1(
      SELECT ?, id, ?, ?, 'system', NULL, ?, ?
      FROM tasks
      WHERE id = ? AND project_id = ? AND workspace_id = ? AND chat_session_id = ?
-       AND status = ? AND completed_at = ? AND error_message = ?`
+       AND status = ? AND completed_at = ?
+       AND ((? IS NULL AND error_message IS NULL) OR error_message = ?)`
   ).bind(
     ulid(),
     task.status,
     terminalStatus,
-    errorMessage,
+    statusEventReason,
     now,
     task.id,
     reporter.projectId,
@@ -264,6 +276,7 @@ export async function terminalizeIdleTaskInD1(
     reporter.sessionId,
     terminalStatus,
     now,
+    errorMessage,
     errorMessage
   );
 
@@ -287,6 +300,6 @@ export async function terminalizeIdleTaskInD1(
     throw err;
   }
 
-  await syncTriggerExecutionStatus(env.DATABASE, task.id, terminalStatus, errorMessage);
-  return { outcome: 'failed', taskId: task.id, liveness, errorMessage };
+  await syncTriggerExecutionStatus(env.DATABASE, task.id, terminalStatus, statusEventReason);
+  return { outcome: 'failed', taskId: task.id, liveness, errorMessage: statusEventReason };
 }

@@ -31,6 +31,7 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
       nodeHealthStatus: 'healthy',
       nodeHeartbeatAt: NOW,
       runningWorkspacesOnNode: 1,
+      createdAtMs: NOW - 60_000,
     },
     nowMs: NOW,
     heartbeatStaleMs: STALE_MS,
@@ -60,6 +61,9 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
     // must leave every pre-existing verdict in this file untouched.
     supersessionProbeOutcome: 'not_run',
     supersession: 'none',
+    // Same back-compat proof for the task-scoped sleep signal: `not_run` must
+    // leave every pre-existing verdict in this file untouched.
+    taskSessionSleep: 'not_run',
     ...overrides,
   };
 }

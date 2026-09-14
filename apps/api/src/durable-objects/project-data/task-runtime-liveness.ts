@@ -30,6 +30,7 @@ import {
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
 } from '../../services/task-runtime-liveness';
+import { loadTaskSleepPreservation } from '../../services/task-sleep-preservation';
 import { inspectVmAgentContainerLifecycle } from '../../services/vm-agent-container';
 import { listAcpSessions } from './acp-sessions';
 import { parseActivityStaleThreshold, WORKING_ACTIVITIES } from './session-state';
@@ -229,14 +230,44 @@ export async function getLocalTaskRuntimeLiveness(
     }
   }
 
+  // Task-scoped sleep guard — the same shared predicate the cron sweep uses, so
+  // the two terminalization runtimes cannot disagree about whether a slept
+  // conversation is recoverable (`.claude/rules/61`).
+  let taskSessionSleep: TaskRuntimeLivenessSignals['taskSessionSleep'] = 'not_run';
+  if (
+    workspaceChatMatches &&
+    !resumabilityResolvedInconclusive &&
+    needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
+  ) {
+    const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
+      id: task.taskId,
+      projectId: task.projectId,
+      chatSessionId: task.chatSessionId ?? workspace?.chatSessionId ?? null,
+    });
+    taskSessionSleep = preservation.outcome;
+    if (preservation.outcome === 'preserve') {
+      log.info('preserved_sleeping', {
+        taskId: task.taskId,
+        projectId: task.projectId,
+        workspaceId: task.workspaceId,
+        sleepStatus: preservation.sleepStatus,
+        expiresAt: preservation.expiresAt,
+        action: 'preserved',
+      });
+    }
+  }
+
   // Tighter hot-path gate than the resumability probe (`.claude/rules/47`): skipped
   // entirely when the snapshot already proved the session resumable, because the
   // classifier returns `_snapshot_resumable` before it ever consults supersession.
+  // Also skipped once sleep alone resolved the verdict, for the same reason.
   let supersessionProbeOutcome: TaskRuntimeLivenessSignals['supersessionProbeOutcome'] = 'not_run';
   let supersession: TaskRuntimeLivenessSignals['supersession'] = 'none';
   if (
     workspaceChatMatches &&
     !resumabilityResolvedInconclusive &&
+    taskSessionSleep !== 'preserve' &&
+    taskSessionSleep !== 'unknown' &&
     needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
   ) {
     try {
@@ -262,6 +293,7 @@ export async function getLocalTaskRuntimeLiveness(
     workspaceProbeOutcome,
     supersessionProbeOutcome,
     supersession,
+    taskSessionSleep,
     nowMs,
     heartbeatStaleMs: staleMs,
     acpProbeOutcome: 'not_run',

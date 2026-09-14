@@ -333,6 +333,47 @@ function supersessionVerdict(
   return null;
 }
 
+/**
+ * A conversation that is asleep, or on its way to sleep, is not dead — even when
+ * every workspace/node signal says it is, because sleeping is exactly what
+ * deletes those rows.
+ *
+ * This is the `.claude/rules/58` pairing for the sleep lifecycle, and it is keyed
+ * on the TASK's `chat_session_id` rather than the workspace's, so it still fires
+ * for the three shapes that make `sessionResumability` unreachable: a NULL
+ * `tasks.workspace_id`, a NULL `workspaces.chat_session_id` after a wake handoff,
+ * and a snapshot row whose own `workspace_id` is NULL. The adapters resolve it
+ * through `loadTaskSleepPreservation`, which reuses the resumer's own
+ * `restorableOrInFlightSleepSnapshotPredicateSql` verbatim.
+ *
+ * Returns the inconclusive verdict that must pre-empt a conclusive-death return,
+ * or null when sleep cannot explain the state. Both outcomes are bounded — see
+ * `loadTaskSleepPreservation` — so this can never make a task immortal.
+ */
+function sessionSleepVerdict(
+  signals: TaskRuntimeLivenessSignals,
+  workspace: RuntimeWorkspaceSnapshot | null,
+  reasonPrefix: string
+): TaskRuntimeLiveness | null {
+  if (signals.taskSessionSleep === 'unknown') {
+    return result(workspace, {
+      live: false,
+      conclusive: false,
+      reason: `${reasonPrefix}_session_sleep_unknown`,
+      activeAcpSessionId: null,
+    });
+  }
+  if (signals.taskSessionSleep === 'preserve') {
+    return result(workspace, {
+      live: false,
+      conclusive: false,
+      reason: `${reasonPrefix}_session_sleeping`,
+      activeAcpSessionId: null,
+    });
+  }
+  return null;
+}
+
 function result(
   workspace: RuntimeWorkspaceSnapshot | null,
   values: Omit<TaskRuntimeLiveness, 'workspaceStatus' | 'nodeId'>
@@ -365,7 +406,13 @@ export function classifyTaskRuntimeLiveness(
     });
   }
   if (!signals.taskWorkspaceId || !workspace) {
+    // There is no workspace row to hang a resumability probe off, so the
+    // task-scoped sleep lookup is the ONLY thing standing between a slept
+    // conversation and a `failed` verdict on this branch. Four production
+    // terminalizations in the 2026-09-07..14 window landed here with a `sleeping`
+    // snapshot (`.claude/rules/58`).
     return (
+      sessionSleepVerdict(signals, workspace, 'workspace_missing') ??
       supersessionVerdict(signals, workspace, 'workspace_missing') ??
       result(workspace, {
         live: false,
@@ -420,10 +467,16 @@ export function classifyTaskRuntimeLiveness(
         activeAcpSessionId: null,
       });
     }
-    // Supersession is checked last among the inconclusive escapes so a genuinely
-    // restorable snapshot still reports the more specific `_snapshot_resumable`
-    // reason, but before any conclusive-death return.
+    // Second-chance sleep escape, after `_snapshot_resumable` so the more
+    // specific reason still wins when the workspace-scoped probe DID run. It
+    // catches the cases that probe structurally cannot see — a NULL
+    // `workspaces.chat_session_id`, or a snapshot whose `workspace_id` does not
+    // match this incarnation (`.claude/rules/63`).
+    //
+    // Supersession stays last among the inconclusive escapes, but still before
+    // any conclusive-death return.
     return (
+      sessionSleepVerdict(signals, workspace, `workspace_${workspace.status}`) ??
       supersessionVerdict(signals, workspace, `workspace_${workspace.status}`) ??
       result(workspace, {
         live: false,
@@ -630,7 +683,8 @@ export async function loadRuntimeWorkspaceSnapshot(
 ): Promise<RuntimeWorkspaceSnapshot | null> {
   const row = await db
     .prepare(
-      `SELECT w.id, w.status AS workspace_status, w.chat_session_id, w.node_id, w.user_id,
+      `SELECT w.id, w.status AS workspace_status, w.created_at AS workspace_created_at,
+            w.chat_session_id, w.node_id, w.user_id,
             n.status AS node_status, n.health_status, n.last_heartbeat_at,
             n.runtime AS node_runtime,
             (SELECT COUNT(*) FROM workspaces nw WHERE nw.node_id = w.node_id AND nw.status = 'running') AS running_workspaces_on_node
@@ -643,6 +697,7 @@ export async function loadRuntimeWorkspaceSnapshot(
     .first<{
       id?: string;
       workspace_status: string;
+      workspace_created_at?: string | null;
       chat_session_id: string | null;
       node_id: string | null;
       user_id: string | null;
@@ -658,6 +713,7 @@ export async function loadRuntimeWorkspaceSnapshot(
   return {
     id: row.id ?? workspaceId,
     status: row.workspace_status,
+    createdAtMs: parseTimestamp(row.workspace_created_at ?? null),
     chatSessionId: row.chat_session_id,
     nodeId: row.node_id,
     userId: row.user_id,
