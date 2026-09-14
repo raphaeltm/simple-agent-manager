@@ -85,6 +85,10 @@
       "registryUrl": "https://www.npmjs.com/package/oxlint",
       "necessity": "Measures native lint findings in shadow mode."
     },
+    "sharp": {
+      "registryUrl": "https://www.npmjs.com/package/sharp",
+      "necessity": "Downscales marketing feature screenshots and writes their WebP siblings (apps/www optimize:features)."
+    },
     "storybook": {
       "registryUrl": "https://www.npmjs.com/package/storybook",
       "necessity": "Provides the Storybook build and test CLI."
