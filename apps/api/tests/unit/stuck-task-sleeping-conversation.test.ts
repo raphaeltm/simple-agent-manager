@@ -73,10 +73,12 @@ const PAST_HARD_TIMEOUT = -9 * HOUR;
 
 let sqlite: Database.Database;
 
+/** An ISO timestamp `offsetMs` from now; negative is in the past. */
 function iso(offsetMs: number): string {
   return new Date(Date.now() + offsetMs).toISOString();
 }
 
+/** An `in_progress` conversation task, defaulting to the 25h-past-ceiling shape. */
 function seedTask(
   o: {
     id?: string;
@@ -108,6 +110,7 @@ function seedTask(
     );
 }
 
+/** The task's workspace. Defaults to `deleted` — what sleeping does to it. */
 function seedWorkspace(
   o: { status?: string; createdAt?: string; chatSessionId?: string | null } = {}
 ): void {
@@ -139,6 +142,7 @@ function seedNode(o: { heartbeatAt?: string; runtime?: string } = {}): void {
     .run(NODE_ID, o.heartbeatAt ?? iso(0), o.runtime ?? 'vm', iso(PAST_CEILING), iso(0));
 }
 
+/** The `session_snapshots` row. Defaults to a restorable, unexpired `sleeping` record. */
 function seedSnapshot(
   o: {
     projectId?: string;
@@ -182,6 +186,7 @@ function seedSnapshot(
     );
 }
 
+/** A sweep env with the production 4h / 8h / 24h thresholds. */
 function env(overrides: Partial<Record<string, unknown>> = {}): Env {
   const kv = new Map<string, string>();
   return {
@@ -220,6 +225,7 @@ function brokenSnapshotEnv(): Env {
   });
 }
 
+/** The persisted verdict: what the sweep actually wrote, if anything. */
 function taskRow(id = TASK_ID): { status: string; error_message: string | null } {
   return sqlite.prepare(`SELECT status, error_message FROM tasks WHERE id = ?`).get(id) as {
     status: string;

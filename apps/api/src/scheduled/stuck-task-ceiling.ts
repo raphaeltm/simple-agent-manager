@@ -255,6 +255,18 @@ async function ceilingSupersessionGate(
   return { verdict: null, superseded: supersession === 'terminal' };
 }
 
+/**
+ * Decide whether the runaway-cost ceiling terminalizes this task.
+ *
+ * Sequences four stages and nothing else: resolve the allocated runtime
+ * generation, compare it against the ceiling, then the sleep and supersession
+ * gates. Each stage lives in its own helper above.
+ *
+ * Deliberately pays no ProjectData DO / container / ACP round-trips — a property
+ * pinned by `stuck-tasks.test.ts` "without probing liveness". Every lookup here is
+ * a single indexed D1 read, reached only by tasks already past the soft execution
+ * timeout (`.claude/rules/47`).
+ */
 export async function evaluateRunawayCostCeiling(
   env: Env,
   task: RunawayCostCeilingInput,
