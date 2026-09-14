@@ -226,9 +226,7 @@ export async function terminalizeIdleTaskInD1(
   // makes, kept in lockstep here so the two terminalization runtimes cannot
   // disagree about what a supersession means (`.claude/rules/61`, `.claude/rules/66`).
   const supersededTermination = isSupersededTerminalReason(liveness.reason);
-  const terminalStatus: 'failed' | 'cancelled' = supersededTermination
-    ? 'cancelled'
-    : 'failed';
+  const terminalStatus: 'failed' | 'cancelled' = supersededTermination ? 'cancelled' : 'failed';
   // The reason always lands on the status event so the timeline stays complete.
   const statusEventReason = supersededTermination
     ? 'Superseded by a later session wake; the conversation continued in a ' +

@@ -57,6 +57,7 @@ import {
   loadRuntimeWorkspaceSnapshot,
   loadSessionResumabilitySnapshot,
   loadTaskSupersession,
+  needsDeferredSessionSleepProbe,
   needsNodeHealthProbe,
   needsSessionResumabilityProbe,
   needsTaskSupersessionProbe,
@@ -462,7 +463,54 @@ export async function probeTaskRunnerStatus(
 }
 
 /** Prove task-scoped liveness. A shared-node heartbeat is never sufficient. */
+/**
+ * Public entry point. Classifies once, and if the verdict is a conclusive death
+ * reached WITHOUT the task-scoped sleep signal — the `node_not_live`,
+ * `cf_container_<terminal>` and `task_acp_session_terminal` paths, all reachable
+ * while `workspaces.status` still reads `running` — pays for one indexed
+ * `session_snapshots` lookup and re-classifies. Same classify → probe →
+ * re-classify shape as the node-health probe, and the same reason: the read is
+ * only worth its cost for a candidate about to be terminalized
+ * (`.claude/rules/47`, `.claude/rules/58` requirement 6).
+ */
 export async function getTaskRuntimeLiveness(
+  env: Env,
+  task: {
+    id: string;
+    project_id: string;
+    workspace_id: string | null;
+    chat_session_id?: string | null;
+  },
+  preloaded?: {
+    snapshot: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>>;
+    outcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'];
+  }
+): Promise<TaskRuntimeLiveness> {
+  const { liveness, signals } = await classifyTaskRuntime(env, task, preloaded);
+  if (!needsDeferredSessionSleepProbe(liveness, signals)) return liveness;
+
+  const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
+    id: task.id,
+    projectId: task.project_id,
+    chatSessionId: task.chat_session_id ?? null,
+  });
+  if (preservation.outcome === 'not_run' || preservation.outcome === 'none') return liveness;
+  log.info('stuck_task.preserved_sleeping', {
+    taskId: task.id,
+    projectId: task.project_id,
+    chatSessionId: task.chat_session_id ?? null,
+    workspaceId: task.workspace_id,
+    livenessReason: liveness.reason,
+    sleepStatus: preservation.sleepStatus,
+    expiresAt: preservation.expiresAt,
+    source: 'deferred_liveness',
+    outcome: preservation.outcome,
+    action: 'preserved',
+  });
+  return classifyTaskRuntimeLiveness({ ...signals, taskSessionSleep: preservation.outcome });
+}
+
+async function classifyTaskRuntime(
   env: Env,
   task: {
     id: string;
@@ -484,7 +532,12 @@ export async function getTaskRuntimeLiveness(
     snapshot: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>>;
     outcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'];
   }
-): Promise<TaskRuntimeLiveness> {
+): Promise<{ liveness: TaskRuntimeLiveness; signals: TaskRuntimeLivenessSignals }> {
+  /** Pair every verdict with the signals that produced it, for the deferred re-probe. */
+  const finish = (signals: TaskRuntimeLivenessSignals) => ({
+    liveness: classifyTaskRuntimeLiveness(signals),
+    signals,
+  });
   const probeTimeoutMs = parseMs(
     env.TASK_LIVENESS_PROBE_TIMEOUT_MS,
     DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS
@@ -647,7 +700,7 @@ export async function getTaskRuntimeLiveness(
     };
     initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
     if (probe.outcome !== 'ok') {
-      return initialClassification;
+      return { liveness: initialClassification, signals: livenessSignals };
     }
   }
   if (
@@ -657,7 +710,7 @@ export async function getTaskRuntimeLiveness(
     !workspace.nodeId ||
     (workspace.nodeRuntime !== 'cf-container' && initialClassification.conclusive)
   ) {
-    return initialClassification;
+    return { liveness: initialClassification, signals: livenessSignals };
   }
 
   if (workspace.nodeRuntime === 'cf-container') {
@@ -671,12 +724,12 @@ export async function getTaskRuntimeLiveness(
         }),
       ]);
       if (probe === TIMEOUT) {
-        return classifyTaskRuntimeLiveness({
+        return finish({
           ...livenessSignals,
           containerProbeOutcome: 'timeout',
         });
       }
-      return classifyTaskRuntimeLiveness({
+      return finish({
         ...livenessSignals,
         containerProbeOutcome: 'ok',
         containerLifecycle: probe,
@@ -687,7 +740,7 @@ export async function getTaskRuntimeLiveness(
         nodeId: workspace.nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return classifyTaskRuntimeLiveness({
+      return finish({
         ...livenessSignals,
         containerProbeOutcome: 'error',
       });
@@ -722,12 +775,12 @@ export async function getTaskRuntimeLiveness(
         workspaceId: task.workspace_id,
         probeTimeoutMs,
       });
-      return classifyTaskRuntimeLiveness({
+      return finish({
         ...livenessSignals,
         acpProbeOutcome: 'timeout',
       });
     }
-    return classifyTaskRuntimeLiveness({
+    return finish({
       ...livenessSignals,
       acpProbeOutcome: 'ok',
       acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
@@ -738,7 +791,7 @@ export async function getTaskRuntimeLiveness(
       workspaceId: task.workspace_id,
       error: err instanceof Error ? err.message : String(err),
     });
-    return classifyTaskRuntimeLiveness({
+    return finish({
       ...livenessSignals,
       acpProbeOutcome: 'error',
     });

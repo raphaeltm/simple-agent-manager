@@ -457,6 +457,68 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
       reason: 'workspace_deleted_resumability_unknown',
     });
   });
+
+  /**
+   * The `node_not_live` window, on the runtime that has NO terminal choke point.
+   *
+   * `NodeLifecycle` destroys the node at sleep and rewrites `workspaces.status` to
+   * `deleted` about five minutes later, so inside that gap the workspace still
+   * reads `running`. `needsSessionResumabilityProbe` and
+   * `needsTaskSupersessionProbe` both decline for a running workspace, so the only
+   * thing that can preserve the session here is the deferred task-scoped sleep
+   * lookup. This is the case that proves the classifier's own escape discriminating
+   * — the cron sweep's choke point cannot mask it, because this test never touches
+   * the sweep (`.claude/rules/61`).
+   *
+   * Production carried the shape: `node_not_live` with a `scheduled` snapshot,
+   * twice in the 30 days to 2026-09-14.
+   */
+  it('preserves a slept session whose node is destroyed while the workspace still reads running', async () => {
+    seedWorkspace('running');
+    sqlite.prepare(`UPDATE nodes SET status = 'destroyed' WHERE id = ?`).run(NODE_ID);
+    seedSnapshot();
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(
+      getLocalTaskRuntimeLiveness(sql, doEnv(), { ...doTask, chatSessionId: CHAT_SESSION_ID })
+    ).resolves.toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_not_live_session_sleeping',
+    });
+  });
+
+  /** The discriminating control: the same destroyed node with no snapshot still dies. */
+  it('still terminalizes a destroyed node when no snapshot row exists', async () => {
+    seedWorkspace('running');
+    sqlite.prepare(`UPDATE nodes SET status = 'destroyed' WHERE id = ?`).run(NODE_ID);
+    const sql = createSqlStorage(new Database(':memory:'));
+
+    await expect(
+      getLocalTaskRuntimeLiveness(sql, doEnv(), { ...doTask, chatSessionId: CHAT_SESSION_ID })
+    ).resolves.toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'node_not_live',
+    });
+  });
+
+  /** `.claude/rules/58` requirement 4, on the deferred lookup specifically. */
+  it('withholds the node_not_live verdict when the deferred sleep lookup fails', async () => {
+    seedWorkspace('running');
+    sqlite.prepare(`UPDATE nodes SET status = 'destroyed' WHERE id = ?`).run(NODE_ID);
+    seedSnapshot();
+    const sql = createSqlStorage(new Database(':memory:'));
+    const broken = brokenSnapshotDb() as unknown as ProjectDataEnv;
+
+    await expect(
+      getLocalTaskRuntimeLiveness(sql, broken, { ...doTask, chatSessionId: CHAT_SESSION_ID })
+    ).resolves.toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'node_not_live_session_sleep_unknown',
+    });
+  });
 });
 
 /**

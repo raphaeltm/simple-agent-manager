@@ -73,7 +73,11 @@ export type RunawayCostCeilingVerdict =
   /** Recoverable or superseded: withhold the verdict, leave the task untouched. */
   | {
       kind: 'preserve';
-      reason: 'session_sleeping' | 'session_sleep_unknown' | 'superseded_live' | 'supersession_unknown';
+      reason:
+        | 'session_sleeping'
+        | 'session_sleep_unknown'
+        | 'superseded_live'
+        | 'supersession_unknown';
     }
   /** Terminalize. `superseded` selects the benign lifecycle label over a failure. */
   | { kind: 'terminalize'; superseded: boolean; runtimeGenerationMs: number };
@@ -125,10 +129,7 @@ export async function evaluateRunawayCostCeiling(
   opts: {
     nowMs: number;
     absoluteCeilingMs: number;
-    preloadWorkspace?: (
-      snapshot: RuntimeWorkspaceSnapshot | null,
-      outcome: 'ok' | 'error'
-    ) => void;
+    preloadWorkspace?: (snapshot: RuntimeWorkspaceSnapshot | null, outcome: 'ok' | 'error') => void;
   }
 ): Promise<RunawayCostCeilingVerdict> {
   let workspace: RuntimeWorkspaceSnapshot | null = null;
