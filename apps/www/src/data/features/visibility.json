@@ -13,8 +13,8 @@
   "group": "run",
   "screenshots": [
     {
-      "src": "/images/features/dashboard.png",
-      "alt": "Dashboard with Active Tasks cards showing status, project name, and timing, plus a Projects grid with workspace and session counts",
+      "src": "/images/features/sam-dashboard-overview.png",
+      "alt": "Dashboard with an Active Tasks grid of six task cards across Payments API and Merchant Portal showing In Progress, Queued, and Completed status with submitted and last-message timing, and a Projects grid with workspace and session counts",
       "caption": "Active tasks across projects, with status and timing at a glance"
     }
   ],
@@ -23,8 +23,8 @@
       "headline": "Multi-project dashboard",
       "body": "See active tasks with their status, project, and timing. Below that, a project grid shows workspace counts, session counts, and last activity for each repo.",
       "screenshot": {
-        "src": "/images/features/dashboard.png",
-        "alt": "Dashboard with In Progress task cards and a Projects grid showing workspace and session counts per repo",
+        "src": "/images/features/sam-dashboard-overview.png",
+        "alt": "Dashboard with six active task cards across two projects and a Projects grid showing workspace and session counts per repository",
         "caption": "Active tasks at the top, all projects below — click any card to jump in"
       }
     },
@@ -41,8 +41,8 @@
       "headline": "Never miss a decision point",
       "body": "Notifications are categorized by type — task completions, errors, progress updates, sessions ended, PRs created, and moments where agents need human input. Filter to focus on what matters.",
       "screenshot": {
-        "src": "/images/features/notifications.png",
-        "alt": "Notification feed with filter tabs: All, Task Complete, Needs Input, Error, Progress, Session Ended, PR Created",
+        "src": "/images/features/sam-notifications-feed.png",
+        "alt": "Project notifications feed with filter chips for All, Task Complete, Needs Input, Error, Progress, Session Ended, PR Created, and Operational Failure, listing nine notifications with several unread",
         "caption": "Filter by type — Task Complete, Needs Input, Error, Progress, and more"
       }
     }

@@ -14,8 +14,8 @@
   "group": "govern",
   "screenshots": [
     {
-      "src": "/images/features/library.png",
-      "alt": "Library file browser showing a research folder, an uploaded markdown file with tags (architecture, missions, orchestration), and an Upload button",
+      "src": "/images/features/sam-library-browser.png",
+      "alt": "Project Library showing research and runbooks folders, five markdown and PDF files tagged architecture, ledger, compliance, and runbooks, a Newest sort control, search, and an Upload button",
       "caption": "File browser with folders, tags, sorting, and upload"
     }
   ],
@@ -24,8 +24,8 @@
       "headline": "Project library",
       "body": "Upload architecture docs, research, and reference material. Files are organized with folders and tags. Agents can access library files as additional context during their work.",
       "screenshot": {
-        "src": "/images/features/library.png",
-        "alt": "Library showing a research folder with 1 subfolder and 1 tagged markdown file, plus filter, folder, and upload controls",
+        "src": "/images/features/sam-library-browser.png",
+        "alt": "Project Library showing research and runbooks folders, five markdown and PDF files tagged architecture, ledger, compliance, and runbooks, a Newest sort control, search, and an Upload button",
         "caption": "Folders, tags, and upload — agents can pull files from the library as context"
       }
     },
@@ -33,18 +33,18 @@
       "headline": "Built-in document viewer",
       "body": "Markdown files render with full formatting, including Mermaid diagrams. Toggle between the rendered view and raw source, or download the file directly.",
       "screenshot": {
-        "src": "/images/features/document-viewer.png",
-        "alt": "Document viewer showing a rendered markdown file with a Mermaid architecture flowchart and Rendered/Source/Download buttons",
+        "src": "/images/features/sam-document-viewer.png",
+        "alt": "File preview modal rendering ledger-migration-plan.md with a Mermaid flowchart and Rendered, Source, Download, and Comments controls",
         "caption": "Rendered markdown with Mermaid diagram support — view source or download"
       }
     },
     {
-      "headline": "Infrastructure and agent defaults",
-      "body": "Set default resource requirements (vCPU, memory, disk) and a default agent type for each project — the baseline every task, trigger, skill, and profile inherits unless it sets its own. Per-agent credential overrides let you configure API keys at the project level.",
+      "headline": "Agent defaults and overrides",
+      "body": "Pick a default agent type for the project, then override credentials and model per agent at the project level — settings fall through to your user-level configuration when left empty. Default resource requirements (vCPU, memory, disk) live on the Infrastructure tab alongside the compute pool.",
       "screenshot": {
-        "src": "/images/features/settings.png",
-        "alt": "Project settings showing default resource requirements, the default agent type, and per-agent credential configuration",
-        "caption": "Default resource requirements, agent selection, and per-agent credential overrides — all per project"
+        "src": "/images/features/sam-project-settings.png",
+        "alt": "Project Settings Agents tab showing six agent types with Claude Code selected as the default and an Agent Overrides section with a project-level API key and model override",
+        "caption": "A default agent type and per-agent credential and model overrides, per project"
       }
     }
   ]

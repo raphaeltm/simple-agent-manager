@@ -13,8 +13,8 @@
   "group": "automate",
   "screenshots": [
     {
-      "src": "/images/features/ideas.png",
-      "alt": "Idea detail page showing a problem description, phased implementation plan, Execute button, and a linked conversations sidebar",
+      "src": "/images/features/sam-ideas-detail.png",
+      "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green Execute button, and a Conversations sidebar listing three linked sessions",
       "caption": "Structured ideas with problem, plan, and an Execute button to dispatch an agent"
     }
   ],
@@ -23,8 +23,8 @@
       "headline": "Structured idea capture",
       "body": "Write down the problem, sketch a plan, and link related chat conversations for context. When you are ready, hit Execute to dispatch an agent that picks up the idea as a task.",
       "screenshot": {
-        "src": "/images/features/ideas.png",
-        "alt": "Idea detail page with problem description, phased plan, green Execute button, and conversations sidebar",
+        "src": "/images/features/sam-ideas-detail.png",
+        "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green Execute button, and a Conversations sidebar listing three linked sessions",
         "caption": "Each idea has a problem statement, plan, and a button to dispatch an agent"
       }
     },
@@ -32,8 +32,8 @@
       "headline": "Link chat context",
       "body": "Attach related conversations to an idea before you dispatch it, so the agent that picks it up starts with the discussion that shaped the plan instead of a bare problem statement.",
       "screenshot": {
-        "src": "/images/features/ideas.png",
-        "alt": "Idea detail page showing linked conversations in the sidebar alongside the problem statement and plan",
+        "src": "/images/features/sam-ideas-detail.png",
+        "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green Execute button, and a Conversations sidebar listing three linked sessions",
         "caption": "Linked conversations sit beside the plan, so context travels with the idea"
       }
     }
