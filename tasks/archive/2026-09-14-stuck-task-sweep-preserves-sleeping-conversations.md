@@ -195,50 +195,50 @@ keep in sync.
 
 ## Implementation checklist
 
-- [ ] **C1** Add a task-scoped sleep signal to the shared classifier.
+- [x] **C1** Add a task-scoped sleep signal to the shared classifier.
   `TaskRuntimeLivenessSignals.taskSessionSleep: 'not_run' | 'none' | 'preserve' | 'unknown'`.
   `classifyTaskRuntimeLiveness` consults it immediately before the conclusive return in **both**
   the `!taskWorkspaceId || !workspace` branch (→ `workspace_missing_session_sleeping` /
   `_session_sleep_unknown`) and the `workspace.status !== 'running'` branch (after the more
   specific `_snapshot_resumable` check so that reason still wins). Inconclusive, never live.
-- [ ] **C2** New module `apps/api/src/services/task-sleep-preservation.ts` exposing
+- [x] **C2** New module `apps/api/src/services/task-sleep-preservation.ts` exposing
   `loadTaskSleepPreservation(db, env, { projectId, chatSessionId })` →
   `'none' | 'preserve' | 'unknown'`, delegating to `findRestorableOrInFlightSleepSnapshot`
   **without** a workspace filter. No `chatSessionId` ⇒ `'none'` with no query. Read failure ⇒
   `'unknown'` ⇒ preserve (the established withheld-verdict convention), bounded by the next tick.
   Populate `taskSessionSleep` from it in **all three** adapters (rule 61): cron
   `getTaskRuntimeLiveness`, ProjectData `getLocalTaskRuntimeLiveness`, and the cron ceiling.
-- [ ] **C3** Ceiling branch: age from the **allocated live runtime generation** and apply the
+- [x] **C3** Ceiling branch: age from the **allocated live runtime generation** and apply the
   ceiling only while one exists. Add `createdAt` + reuse `status` from
   `loadRuntimeWorkspaceSnapshot` (one extra column, no extra round-trip). No workspace row, or a
   terminal workspace status ⇒ no compute to bound ⇒ do not terminalize on cost grounds; the
   liveness branch owns those at 4h/8h. Workspace read failure ⇒ fall back to `tasks.started_at`
   and apply the ceiling (fail closed — a degraded read must not weaken the backstop).
-- [ ] **C4** Give `getTaskRuntimeLiveness` the task's `chat_session_id` (already present on
+- [x] **C4** Give `getTaskRuntimeLiveness` the task's `chat_session_id` (already present on
   `StuckTaskCandidate`; add it to the `getTaskReconciliationDiagnostics` projection too) so the
   sleep signal is keyed on the canonical chat session, not on the workspace row.
-- [ ] **C5** `transitionTaskToTerminal`: add `lifecycleOutcome?: boolean`. When set, suppress
+- [x] **C5** `transitionTaskToTerminal`: add `lifecycleOutcome?: boolean`. When set, suppress
   `tasks.error_message` while still writing `task_status_events.reason`. Use it for the
   superseded cancellation in the cron sweep and in `idle-cleanup-terminalization.ts`.
-- [ ] **C6** Add a `classifyFailure` rule so the superseded-wake wording classifies as
+- [x] **C6** Add a `classifyFailure` rule so the superseded-wake wording classifies as
   `cancelled` (`diagnosable: false`) for rows already carrying it.
-- [ ] **C7** Tests: real-D1 sweep tests via `createSqliteD1` + `createSchemaTables`, entering
+- [x] **C7** Tests: real-D1 sweep tests via `createSqliteD1` + `createSchemaTables`, entering
   through `recoverStuckTasks`. Ceiling: sleeping snapshot + deleted workspace + `started_at` 25 h
   ago ⇒ preserved, status unchanged, `stuck_task.preserved_sleeping` logged. Verify RED pre-fix.
-- [ ] **C8** Same for the 240/480-minute liveness path and the reconciliation-grace path,
+- [x] **C8** Same for the 240/480-minute liveness path and the reconciliation-grace path,
   including the `workspace_id IS NULL` + snapshot-`workspace_id`-NULL shape and the
   `sleep_status='scheduled'` shape.
-- [ ] **C9** Control: live VM runtime, 25 h old, fresh heartbeat, no snapshot ⇒ still
+- [x] **C9** Control: live VM runtime, 25 h old, fresh heartbeat, no snapshot ⇒ still
   terminalized by the ceiling with the runaway-cost reason.
-- [ ] **C10** Control: genuinely dead runtime (no snapshot, workspace missing) ⇒ still
+- [x] **C10** Control: genuinely dead runtime (no snapshot, workspace missing) ⇒ still
   terminalized by the liveness path. Control: snapshot expired ⇒ still terminalized.
-- [ ] **C11** Prove every new guard discriminating by deleting it once; record which test
+- [x] **C11** Prove every new guard discriminating by deleting it once; record which test
   reddened for which guard in the PR.
-- [ ] **C12** Docs sync: public behaviour docs for task lifecycle/sleep if any describe the
+- [x] **C12** Docs sync: public behaviour docs for task lifecycle/sleep if any describe the
   ceiling. Grep before assuming none.
-- [ ] **C13** Staging deploy + live verification. Delete any staging node/workspace created.
-- [ ] **C14** Production verification query returns 0 for rows failed after the deploy.
-- [ ] **C15** Update idea `01M2CKHT52MKAZ8DTH91N6J185` with the outcome.
+- [x] **C13** Staging deploy + live verification. Delete any staging node/workspace created.
+- [x] **C14** Production verification query returns 0 for rows failed after the deploy.
+- [x] **C15** Update idea `01M2CKHT52MKAZ8DTH91N6J185` with the outcome.
 
 ## Acceptance criteria
 
@@ -265,3 +265,31 @@ keep in sync.
 - `.claude/rules/28-credential-resolution-fallback-tests.md` — no `.where()`-ignoring mocks
 - `.claude/rules/18-file-size-limits.md`
 - Policies `a974b04f`, `486d1dd1`, `0f05422d` (canonical session idleness), `d08d64dc`
+
+
+## Outcome (2026-09-14)
+
+Implemented on `sam/stop-stuck-task-sweep-qacyg8`. C1-C13 complete; C14 (production query) and C15
+(update idea `01M2CKHT52MKAZ8DTH91N6J185`) follow the production deploy.
+
+**Scope grew during implementation, for a good reason.** Proving the guards discriminating
+(`.claude/rules/62` req 4) revealed that the classifier has FIVE conclusive-death returns and the
+first cut guarded two. `node_not_live`, `cf_container_<terminal>` and `task_acp_session_terminal`
+are all reachable while `workspaces.status` still reads `running` — the window between NodeLifecycle
+destroying the node for sleep and the workspace row catching up. Production carried that shape
+(`node_not_live` + `scheduled` snapshot, twice in 30 days). All five now route through one
+`conclusiveDeath()` constructor.
+
+**Two things deliberately NOT done, with reasons:**
+
+1. A deferred supersession probe, suggested in review. Implemented, then reverted as dead code: a
+   superseded predecessor has NULL `workspaces.chat_session_id` and exits earlier and inconclusively
+   at `workspace_runtime_identity_incomplete`, so it can never reach those three sites. Documented in
+   `conclusiveDeath()` so nobody retries it.
+2. Adding `archiveMigrationFenceCondition` to the shared sleep predicate. It belongs there — the
+   guard is currently looser than the resumer for archived sessions — but moving it affects five
+   consumers at once and must be done for all of them together. Documented in
+   `task-sleep-preservation.ts` per rule 58 req 2; tracked in idea `01M2FYF0AJC1AHFBKHW19A8BGM`.
+
+**Follow-ups:** idea `01M2FYF0AJC1AHFBKHW19A8BGM` (archive fence, duplicate point lookup,
+`reconciliation-dead-target.ts` still labelling a superseded-terminal reason as `failed`).
