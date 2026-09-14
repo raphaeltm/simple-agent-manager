@@ -1,0 +1,267 @@
+# Enable ProjectData tool-payload cleanup in production and raise archive sweep throughput
+
+**Status:** backlog
+**SAM task:** `01M2FT7WD9P50E06KHAFBV0AE6`
+**Branch:** `sam/enable-projectdata-tool-payload-bv0ae6`
+**Related ideas:** `01M0YZNBKSKQZ47NC0K7M8N5AX` (storage tracker), `01M2A5BCJZR4SAZ78XYEJTNFPR` (deadlock post-mortem)
+
+## Problem
+
+The production ProjectData Durable Object (project `01KHRJGANBBWGDY1NZ0KVF0D4J`) sits at
+**9,747,591,168 bytes = 97.48 %** of the configured `PROJECT_DATA_STORAGE_LIMIT_BYTES` (10^10),
+status `degraded` (measured 2026-09-14 11:14Z, `project_data_storage_telemetry_history`).
+Headroom is ~250 MB to the configured alert and ~960 MB to the physical ~10 GiB Cloudflare
+ceiling. The object hit `SQLITE_FULL` once already, on 2026-08-18.
+
+Two reclaimers exist and neither is doing enough:
+
+1. **Tool-payload cleanup is off in production.** `apps/api/wrangler.toml` has said
+   `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED = "true"` since `684f99d60` (2026-09-03), but a
+   GitHub `production` Environment variable pins it `false`, and the Environment wins
+   (`getOptionalProcessEnvVars`, `scripts/deploy/sync-wrangler-config.ts`). Nobody noticed for
+   11 days. This is the exact trap `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`
+   describes.
+2. **The archive sweep publishes ~13 sessions/day** against a ~3,300-session root backlog.
+
+Raphaël explicitly approved enabling **tool-payload cleanup only** on 2026-09-14 (project policy
+`66060db4`). `PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED` and
+`PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` remain gated and MUST NOT be enabled by this work.
+
+## Research findings (all measured 2026-09-14 against production, not inferred)
+
+### R1 — Flipping the flag alone is a no-op. This is the headline finding.
+
+`createToolPayloadCleanupPlan` (`apps/api/src/durable-objects/project-data/tool-payload-cleanup.ts:126-156`)
+branches on `fixedCutoffConfigured = config.toolPayloadCleanupCutoffCreatedAt !== null`.
+
+Production Environment has `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT = 1788061500000`
+(2026-08-30 03:45Z). `parseOptionalTimestamp` returns that value, so `fixedCutoffConfigured` is
+**true**, which arms the strict approved-manifest gate. That gate additionally requires all of:
+
+| Required by the gate | Production Environment value | Parsed |
+|---|---|---|
+| `MANIFEST_KEY` | `""` | `null` |
+| `MANIFEST_SHA256` | `""` | `null` |
+| `MAX_TOTAL_ROWS` | `""` | `null` |
+| `MAX_TOTAL_BYTES` | `""` | `null` |
+| `MAX_TOTAL_R2_OPERATIONS` | `""` | `null` |
+| `MAX_TOTAL_WALL_TIME_MS` | `""` | `null` |
+
+So the gate returns `null` — **silently, with no log line**. Setting `ENABLED=true` on top of this
+config would deploy a flag whose deployed value reads `true` while the feature does nothing, and
+the only way to notice would be the absence of reclaim. That is the same failure mode as the
+11-day Environment override, one layer deeper.
+
+### R2 — The one-shot preflight completed on 2026-09-04 and was never wired up
+
+D1 `project_data_storage_relief_preflights` (production), single row:
+
+| field | value |
+|---|---|
+| `plan_id` | `prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904` |
+| `status` | `complete` (2026-09-04 15:42:05Z) |
+| `eligible_rows` | 15,539 |
+| `eligible_bytes` | 165,879,666 (~158 MB) |
+| `session_count` | 3,922 |
+| `target_manifest_sha256` | `c90fca2c…4e7bd3` |
+| `target_manifest_bytes` | 6,002 |
+
+A completed preflight is terminal (`project-data-storage-relief-preflight.ts:706`,
+`row.status !== 'running'` → `'terminal'`), so it will not re-run. The manifest exists in R2 but
+the Environment was never given the key, hash, or the four cumulative caps.
+
+**The total tool-payload opportunity is only ~158 MB.** It is worth enabling, but it is not the
+main storage lever — see R3.
+
+### R3 — The archive sweep's day ceiling is the write budget, not wall time
+
+| observation | value | source |
+|---|---|---|
+| Writes reserved today | 726,408 / 800,000 | `project_data_archive_write_budget` |
+| Publishes today | 12 | `project_data_archive_migrations` |
+| Estimated writes per migration | 60,534 | 726,408 / 12 |
+| **Implied day ceiling** | **13 migrations/day** | 800,000 / 60,534 |
+
+Confirmed behaviourally: on 09-13 publishes stopped at 13:12Z and did not resume until 00:35Z on
+09-14 — the UTC budget-window reset (`ARCHIVE_BUDGET_WINDOW_MS`), not a cadence gap.
+
+Each tick publishes exactly **one** session, for two independent reasons:
+
+- `wallTimeMs = 10000`, but one migration takes **26.6 s** (cadence row: started 11:06:17.866Z,
+  completed 11:06:44.503Z). `outOfTime()` is evaluated *before* each session, so session 2 never
+  starts.
+- `createMessageBudgetPacker(sweepMessageBudget = 5000)`: the largest eligible candidate carries
+  **4,849** messages, consuming 97 % of the per-tick budget, so every following candidate is
+  refused. `PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = 4` is therefore **dead config today**.
+
+Because the daily write budget binds first at 13/day, raising `WALL_TIME_MS`, `SWEEP_SESSIONS`,
+`SWEEP_PROJECTS`, or the sweep cadence **changes nothing**. The write budget has to move first.
+
+### R4 — `WRITE_ESTIMATE_FACTOR = 8` over-charges the budget ~8x
+
+Cloudflare GraphQL `durableObjectsPeriodicGroups`, namespace `fb36fe2173534537b0f0a9a0efb17777`,
+five-minute buckets on 2026-09-14 isolate each archive tick cleanly:
+
+| bucket | rowsRead | rowsWritten | publish |
+|---|---|---|---|
+| 08:00Z | 584,391 | 7,942 | 08:01:25Z |
+| 09:00Z | 580,405 | 5,950 | 09:01:42Z |
+| 10:05Z | 573,377 | 6,436 | 10:06:15Z |
+| 11:05Z | 609,124 | 9,823 | 11:06:17Z |
+| quiet baseline | ~96,000 | ~300 | — |
+
+Net of baseline: **~480,000 rowsRead and ~6,000-9,500 rowsWritten per migration** (mean ~7,200),
+against an estimate of `units = (60,534 − 1000) / 8 = 7,442`. The measured ratio of actual rows
+written to estimate units is therefore **≈ 1.0** — `estimateArchiveWrites` already counts the row
+inventory directly, and `factor` is pure safety multiplier on top of it.
+
+Lowering `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` from 8 to **2** retains a 100 % safety
+margin over the measurement and moves the day ceiling to `800,000 / (1000 + 2×7,442) = 50/day`,
+at which point the hourly per-tick cap binds at **24/day** — a 1.85x increase that adds **no new
+ticks**, **no new contention window**, and **no extra allowance**. It simply stops wasting the
+~11 hourly ticks per day that currently run and reclaim nothing.
+
+This is also the lever idea `01M2A5BCJZR4SAZ78XYEJTNFPR` named: *"lower `WRITE_ESTIMATE_FACTOR`
+from 32 to a measured value"*. It was lowered to 8 without a measurement; this is the measurement.
+
+### R5 — The change is free, which matters because the previous drain rate was rejected
+
+Production DO namespace `fb36fe21`, 7-day GraphQL totals: `rowsRead` 2,089,474,394;
+`rowsWritten` 10,454,143. Excluding the 09-07 drain spike the run rate is **~0.67 M rowsWritten/day
+(~20 M/month)** and **~298 M rowsRead/day (~8.9 B/month)**, against free allowances of 50 M and
+25 B respectively.
+
+At 24 migrations/day the archive sweep adds ~174 k rowsWritten/day (~5.2 M/month) and
+~11.5 M rowsRead/day (~346 M/month). Both stay comfortably inside the free tier, so the
+incremental Cloudflare cost is **$0**. This respects Raphaël's 2026-09-08 rejection of the
+projected ~$100/month bill from sustaining the pre-#2033 drain rate — that rate was ~81
+publishes/day, roughly 6x what this change permits.
+
+### R6 — Reclaim per archived session, measured
+
+Telemetry 09-05 18:14Z (10,255,826,944) → 09-08 12:14Z (9,407,541,248) = **−848 MB** over 2.75
+days across ~155 publishes, against ~70 MB/day live growth. Gross reclaim ≈ **6.7 MB per
+archived session**.
+
+- At 13/day: ~87 MB/day reclaimed vs ~70 MB/day growth → net ≈ −17 MB/day (roughly flat, which
+  matches the observed telemetry).
+- At 24/day: ~161 MB/day → **net ≈ −91 MB/day**, which converges decisively.
+
+Throughput should also self-accelerate as the backlog drains: eligible candidates are
+3,136 under 1,000 messages, 1,178 at 1,000-2,999, 344 at 3,000-4,999, so once largest-first
+selection works below ~1,250 messages/session the existing `SWEEP_SESSIONS = 4` and the 10 s wall
+time start admitting multiple sessions per tick without any further config change.
+
+### R7 — Staging already runs exactly the production configuration being proposed
+
+Deployed `sam-api-staging` bindings: `TOOL_PAYLOAD_CLEANUP_ENABLED=true`, `MANIFEST_KEY=""`,
+`PLAN_ID=""`, `PROJECT_IDS=""`, `RECHECK_MS=86400000`. Staging therefore runs the **automatic
+retention path** with the 24 h recheck — the configuration this task intends to restore in
+production. Staging verification is a true parity proof rather than an approximation
+(`.claude/rules/62-tests-must-observe-the-real-trigger.md`).
+
+### R8 — Archive-then-delete is fail-closed (policy constraint verified, not assumed)
+
+`archiveToolPayloadCandidate` (`tool-payload-archive.ts:421-500`) writes the R2 object, requires a
+non-null `prepared.verification` proof, re-checks the wall-time deadline, logs
+`archive_verified_before_strip`, and only then runs `writeArchiveBookkeeping`. Every failure path
+returns `failedArchiveUpdate` with no strip. No DO delete can occur without a confirmed and
+verified R2 write. Conversation/message text is untouched — only `tool_metadata` payloads are
+tiered, and `get_archived_tool_payloads` remains the retrieval path.
+
+### R9 — Which production divergences are accidental and which are intentional
+
+| flag | wrangler.toml | `production` Environment | deployed | verdict |
+|---|---|---|---|---|
+| `TOOL_PAYLOAD_CLEANUP_ENABLED` | `true` | `false` | `false` | **accidental** — eliminate |
+| `EVENT_LOG_CLEANUP_ENABLED` | `true` | `false` | `false` | **intentional** — staging-on, production-gated pending approval |
+| `GROUPED_FTS_CLEANUP_ENABLED` | `false` | `false` | `false` | no divergence |
+
+`EVENT_LOG_CLEANUP_ENABLED` must NOT be reconciled by flipping `wrangler.toml` to `false`:
+staging's deployed value is `true` and that is where the feature is being proven, and the repo
+value is also the self-hoster default. The correct treatment is to document the divergence as
+deliberate and make the deploy surface it loudly.
+
+## Implementation checklist
+
+### Code and config (this PR)
+
+- [ ] `apps/api/wrangler.toml`: `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` `"8"` → `"2"`, with a
+      comment citing the measurement in R4 (per `.claude/rules/74`, name the condition the signal
+      stands for).
+- [ ] `apps/api/wrangler.toml`: add a `KNOWN PRODUCTION ENVIRONMENT OVERRIDES` comment block
+      recording that `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` is deliberately pinned `false` in
+      the `production` Environment pending separate approval, so a future reader is not misled by
+      the repo value (R9).
+- [ ] `tool-payload-cleanup.ts`: when `toolPayloadCleanupEnabled` is true but the approved-plan
+      gate refuses for a **configuration** reason, emit a structured `log.warn` naming the missing
+      or mismatched fields instead of returning `null` silently. This is the durable fix for R1 —
+      it converts an invisible no-op into an observable one.
+- [ ] `scripts/deploy/sync-wrangler-config.ts`: escalate `listEnvironmentVarOverrides` reporting
+      from a plain `console.log` to a GitHub Actions `::warning::` annotation plus a
+      `$GITHUB_STEP_SUMMARY` table, so an Environment override that contradicts `wrangler.toml`
+      appears in the run summary instead of being buried in deploy logs.
+- [ ] Tests:
+      - [ ] Regression test proving the R1 gate: flag on + fixed cutoff + missing manifest ⇒ no
+            plan AND a warning is emitted. Delete the guard once and confirm the test reddens.
+      - [ ] Control test: flag on + no fixed cutoff (the staging/production retention path) ⇒ a
+            plan IS produced. Without this the first test also passes when cleanup is broken
+            outright (`.claude/rules/62`, absence assertions need a liveness assertion).
+      - [ ] `sync-wrangler-config` test covering annotation output for a differing override and
+            silence for a matching one.
+      - [ ] Write-budget test pinning that `factor = 2` with an 800,000 allowance admits a
+            ~7,442-unit session that `factor = 8` refuses, resolved through the real
+            `archiveWriteBudgetConfig` env resolver rather than a hand-passed number
+            (`.claude/rules/62`, defaults must be exercised through the real resolver).
+
+### Production Environment changes (applied after the PR merges and deploys)
+
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED`: `false` → `true`
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT`: clear (removes the inert one-shot
+      arming so the proven retention path runs)
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID`: clear (same reason)
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS`: **keep** `01KHRJGANBBWGDY1NZ0KVF0D4J` as a
+      deliberate blast-radius limit for the first production pass
+- [ ] Do NOT touch `GROUPED_FTS_CLEANUP_ENABLED` or `EVENT_LOG_CLEANUP_ENABLED`
+
+### Verification
+
+- [ ] Staging deploy + live verification that the archive sweep publishes under `factor = 2` and
+      that tool-payload cleanup produces a plan and strips rows with an R2 archive first.
+- [ ] Quote the deployed `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` and
+      `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` from the Cloudflare API for `sam-api-prod`,
+      not from a diff (`.claude/rules/70`).
+- [ ] 24 h of post-rollout telemetry: DO `rowsRead`/`rowsWritten`, `exceededCpuErrors`,
+      `exceededMemoryErrors`, `fatalInternalErrors`, `platform_errors`, and net storage movement.
+- [ ] Update idea `01M0YZNBKSKQZ47NC0K7M8N5AX` with the measured outcome.
+
+## Rollback
+
+| symptom | action |
+|---|---|
+| DO `rowsRead` for `fb36fe21` exceeds **600 M/day** (2x the ~298 M/day baseline) or any `exceededCpuErrors`/`exceededMemoryErrors`/`fatalInternalErrors` appears | `gh variable set PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED --env production --body false`, then re-run Deploy Production |
+| Archive sweep contends with live chat (ProjectData alarm P99 regression, or `platform_errors` shows storage timeouts) | revert `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` to `"8"` via a PR, or set it as a `production` Environment variable for an immediate pin |
+| Any tool-payload strip without a preceding `archive_verified_before_strip` log | disable immediately and treat as a P0 |
+
+## Acceptance criteria
+
+- [ ] Deployed `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED` in `sam-api-prod` reads `true`, quoted
+      from the Cloudflare API.
+- [ ] Tool-payload cleanup demonstrably **produces a plan and reclaims** in production — not
+      merely that the flag reads `true` (`.claude/rules/30`).
+- [ ] Archive sweep reclaim measurably increased, with before/after counts from
+      `project_data_archive_migrations` and bytes from `project_data_storage_telemetry_history`.
+- [ ] 24 h post-rollout telemetry shows no DO overload, CPU-limit reset, or storage-timeout
+      regression, and net storage movement flat or negative.
+- [ ] `wrangler.toml` and the `production` Environment no longer disagree accidentally; the one
+      remaining divergence is documented as deliberate and surfaced by the deploy.
+- [ ] Idea `01M0YZNBKSKQZ47NC0K7M8N5AX` updated with measured numbers.
+
+## References
+
+- `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`
+- `.claude/rules/74-proxy-signals-must-match-the-condition.md`
+- `.claude/rules/62-tests-must-observe-the-real-trigger.md`
+- `.claude/rules/39-debug-before-redesign.md`
+- `.claude/rules/30-never-ship-broken-features.md`
+- Project policy `66060db4` (ProjectData rollout: stage first, production mutations last)
