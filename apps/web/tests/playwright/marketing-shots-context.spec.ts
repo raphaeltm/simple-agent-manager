@@ -26,6 +26,7 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow } from './audit-helpers';
 import {
+  AGENT_PROFILES,
   dismissOnboarding,
   MARKETING_USER,
   MARKETING_VIEWPORT,
@@ -594,87 +595,6 @@ const AGENT_INFO = [
   },
 ];
 
-function agentProfile(fixture: {
-  id: string;
-  name: string;
-  description: string;
-  agentType: string;
-  model: string;
-  effort: string;
-  permissionMode: string;
-  workspaceProfile: string;
-  taskMode: string;
-}) {
-  return {
-    projectId: PROJECT_ID,
-    userId: NORTHWIND.owner.id,
-    vmSizeOverride: null,
-    provider: 'hetzner',
-    vmLocation: null,
-    runtime: null,
-    devcontainerConfigName: null,
-    isBuiltin: false,
-    ...fixture,
-  };
-}
-
-const AGENT_PROFILES = [
-  agentProfile({
-    id: 'profile-opus',
-    name: 'Claude Code — Opus 5',
-    description: 'Deep reasoning for schema changes and payment-critical code paths',
-    agentType: 'claude-code',
-    model: 'claude-opus-5',
-    effort: 'high',
-    permissionMode: 'workspace-write',
-    workspaceProfile: 'full',
-    taskMode: 'task',
-  }),
-  agentProfile({
-    id: 'profile-codex',
-    name: 'Codex 5.5 High',
-    description: 'Fast autonomous implementation for well-scoped tasks',
-    agentType: 'openai-codex',
-    model: 'gpt-5.5-codex',
-    effort: 'high',
-    permissionMode: 'workspace-write',
-    workspaceProfile: 'full',
-    taskMode: 'task',
-  }),
-  agentProfile({
-    id: 'profile-gemini-reviewer',
-    name: 'Gemini CLI Reviewer',
-    description: 'Read-only second opinion — review diffs before merge',
-    agentType: 'google-gemini',
-    model: 'gemini-2.5-pro',
-    effort: 'medium',
-    permissionMode: 'read-only',
-    workspaceProfile: 'lightweight',
-    taskMode: 'conversation',
-  }),
-  agentProfile({
-    id: 'profile-brainstormer',
-    name: 'Brainstormer',
-    description: 'Conversational planning — no code changes, no PRs',
-    agentType: 'claude-code',
-    model: 'claude-sonnet-5',
-    effort: 'medium',
-    permissionMode: 'read-only',
-    workspaceProfile: 'lightweight',
-    taskMode: 'conversation',
-  }),
-  agentProfile({
-    id: 'profile-picky-cto',
-    name: 'Picky CTO',
-    description: 'Blunt architectural review before anything ships',
-    agentType: 'claude-code',
-    model: 'claude-opus-5',
-    effort: 'high',
-    permissionMode: 'read-only',
-    workspaceProfile: 'lightweight',
-    taskMode: 'conversation',
-  }),
-];
 
 // ---------------------------------------------------------------------------
 // Chat fixtures — sessions

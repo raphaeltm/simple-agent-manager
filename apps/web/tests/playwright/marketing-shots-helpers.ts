@@ -60,6 +60,92 @@ export const NORTHWIND = {
   ],
 } as const;
 
+type AgentProfileFixture = {
+  id: string;
+  name: string;
+  description: string;
+  agentType: string;
+  model: string;
+  effort: string;
+  permissionMode: string;
+  workspaceProfile: string;
+  taskMode: string;
+};
+
+/** Project-scoped agent profile row with the fields every fixture shares. */
+export function agentProfile(fixture: AgentProfileFixture) {
+  return {
+    projectId: NORTHWIND.projectId,
+    userId: NORTHWIND.owner.id,
+    vmSizeOverride: null,
+    provider: 'hetzner',
+    vmLocation: null,
+    runtime: null,
+    devcontainerConfigName: null,
+    isBuiltin: false,
+    ...fixture,
+  };
+}
+
+/** The Northwind project's agent profiles, shared by every chat capture. */
+export const AGENT_PROFILES = [
+  agentProfile({
+    id: 'profile-opus',
+    name: 'Claude Code — Opus 5',
+    description: 'Deep reasoning for schema changes and payment-critical code paths',
+    agentType: 'claude-code',
+    model: 'claude-opus-5',
+    effort: 'high',
+    permissionMode: 'workspace-write',
+    workspaceProfile: 'full',
+    taskMode: 'task',
+  }),
+  agentProfile({
+    id: 'profile-codex',
+    name: 'Codex 5.5 High',
+    description: 'Fast autonomous implementation for well-scoped tasks',
+    agentType: 'openai-codex',
+    model: 'gpt-5.5-codex',
+    effort: 'high',
+    permissionMode: 'workspace-write',
+    workspaceProfile: 'full',
+    taskMode: 'task',
+  }),
+  agentProfile({
+    id: 'profile-gemini-reviewer',
+    name: 'Gemini CLI Reviewer',
+    description: 'Read-only second opinion — review diffs before merge',
+    agentType: 'google-gemini',
+    model: 'gemini-2.5-pro',
+    effort: 'medium',
+    permissionMode: 'read-only',
+    workspaceProfile: 'lightweight',
+    taskMode: 'conversation',
+  }),
+  agentProfile({
+    id: 'profile-brainstormer',
+    name: 'Brainstormer',
+    description: 'Conversational planning — no code changes, no PRs',
+    agentType: 'claude-code',
+    model: 'claude-sonnet-5',
+    effort: 'medium',
+    permissionMode: 'read-only',
+    workspaceProfile: 'lightweight',
+    taskMode: 'conversation',
+  }),
+  agentProfile({
+    id: 'profile-picky-cto',
+    name: 'Picky CTO',
+    description: 'Blunt architectural review before anything ships',
+    agentType: 'claude-code',
+    model: 'claude-opus-5',
+    effort: 'high',
+    permissionMode: 'read-only',
+    workspaceProfile: 'lightweight',
+    taskMode: 'conversation',
+  }),
+];
+
 /** The signed-in user for every marketing capture: the project owner. */
 export const MARKETING_USER = makeMockUser({
   email: NORTHWIND.owner.email,
