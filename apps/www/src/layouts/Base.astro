@@ -72,6 +72,13 @@ const apiUrl = `https://api.${baseDomain}`;
     <!-- Preload font -->
     <link rel="preload" href="/fonts/Chillax-Variable.woff2" as="font" type="font/woff2" crossorigin />
 
+    <!-- Scroll-reveal content must stay readable without JavaScript -->
+    <noscript>
+      <style>
+        .animate-on-scroll { opacity: 1; transform: none; }
+      </style>
+    </noscript>
+
     <!-- Analytics -->
     <script src="/scripts/tracker.js" data-api={`${apiUrl}/api/t`} defer></script>
   </head>

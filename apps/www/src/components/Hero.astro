@@ -1,6 +1,13 @@
 ---
 import NodeGrid from './NodeGrid.astro';
 import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
+
+const proofStrip = [
+  '7 cloud providers',
+  '6 agent harnesses',
+  'AGPL-3.0',
+  'Self-hosted on Cloudflare',
+];
 ---
 
 <section class="hero">
@@ -13,12 +20,13 @@ import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
     </div>
 
     <h1 class="hero-title animate-on-scroll">
-      The open-source platform for<br /><span class="gradient-text">multi-agent workflows</span>
+      Run coding agents as a team,<br /><span class="gradient-text">on your own cloud</span>
     </h1>
 
     <p class="hero-subtitle animate-on-scroll">
-      Every agent runs in an isolated workspace: an Instant container for fast starts,
-      or a cloud VM when it needs your full dev environment. SAM handles provisioning, scheduling, and cleanup.
+      SAM is an open-source control plane for AI coding agents: shared projects with comments
+      that feed straight into the agent, multi-cloud compute pools with cost reporting, and
+      event-driven automation — self-hosted on Cloudflare, running on your infrastructure.
     </p>
 
     <div class="hero-actions animate-on-scroll">
@@ -32,11 +40,20 @@ import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
       </a>
     </div>
 
+    <div class="hero-proof animate-on-scroll">
+      {proofStrip.map((item, i) => (
+        <>
+          {i > 0 && <span class="hero-proof-dot" aria-hidden="true">·</span>}
+          <span class="hero-proof-item">{item}</span>
+        </>
+      ))}
+    </div>
+
     <!-- App screenshot -->
     <div class="screenshot-preview animate-on-scroll">
       <OptimizedFeatureImage
-        src="/images/features/live-session.png"
-        alt="SAM project chat showing an agent working on a task — tool calls, code execution, and real-time progress"
+        src="/images/features/sam-hero-live-session.png"
+        alt="A busy SAM project chat showing a user prompt, the agent’s plan, grouped tool calls, header chips for comments, infrastructure, and task status, a profile bar, and a session sidebar with several topics"
         loading="eager"
       />
     </div>
@@ -131,7 +148,27 @@ import OptimizedFeatureImage from './OptimizedFeatureImage.astro';
     flex-wrap: wrap;
     justify-content: center;
     gap: 12px;
-    margin-bottom: 64px;
+    margin-bottom: 28px;
+  }
+
+  .hero-proof {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--color-fg-dim);
+    margin-bottom: 56px;
+  }
+
+  .hero-proof-item {
+    white-space: nowrap;
+  }
+
+  .hero-proof-dot {
+    color: var(--color-accent);
   }
 
   .btn-hero {

@@ -15,12 +15,12 @@
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { type AuditResponder, assertNoOverflow, makeMockUser, setupAuditRoutes } from './audit-helpers';
+import { assertNoOverflow, type AuditResponder, setupAuditRoutes } from './audit-helpers';
 import {
   dismissOnboarding,
-  marketingShot,
   MARKETING_USER,
   MARKETING_VIEWPORT,
+  marketingShot,
   NORTHWIND,
 } from './marketing-shots-helpers';
 

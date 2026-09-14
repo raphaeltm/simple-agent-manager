@@ -43,6 +43,48 @@ const rows = [
     samWins: true,
   },
   {
+    label: 'Shared projects & roles',
+    sam: 'Invite link, approval, owner/admin roles, credential attribution',
+    managed: 'Seat-based team plans',
+    selfHosted: 'Workspace access control; no agent-level sharing',
+    samWins: true,
+  },
+  {
+    label: 'Comments that become agent context',
+    sam: 'Comment on chat or files, send to agent, agent replies and resolves',
+    managed: 'Bundled or unavailable',
+    selfHosted: 'No agent-level comments',
+    samWins: true,
+  },
+  {
+    label: 'Compute pools across clouds',
+    sam: '7 providers, real SKUs, strategy + exhaustion policy per pool',
+    managed: 'Single vendor, opaque sizing',
+    selfHosted: 'You wire it yourself',
+    samWins: true,
+  },
+  {
+    label: 'Token & compute usage reporting',
+    sam: 'Per-user usage by model/day + monthly budget, node-hours, admin cost summary',
+    managed: 'Bundled into one bill',
+    selfHosted: 'No built-in reporting',
+    samWins: true,
+  },
+  {
+    label: 'Event triggers & webhooks',
+    sam: 'Cron, GitHub events, authenticated webhooks, standing watches',
+    managed: 'Vendor-defined integrations only',
+    selfHosted: 'No agent-level triggers',
+    samWins: true,
+  },
+  {
+    label: 'Durable sleep/wake sessions',
+    sam: '7-day snapshot resumes agent state and repo work',
+    managed: 'Varies, usually opaque',
+    selfHosted: 'Workspace volumes persist; agent session state does not',
+    samWins: true,
+  },
+  {
     label: 'Setup effort',
     sam: 'Deploy to Cloudflare + connect cloud',
     managed: 'Zero config',
@@ -69,7 +111,7 @@ const rows = [
       </p>
     </div>
 
-    <div class="table-wrapper animate-on-scroll">
+    <div class="table-wrapper animate-on-scroll" tabindex="0" role="region" aria-label="Comparison table">
       <table class="comparison-table">
         <thead>
           <tr>

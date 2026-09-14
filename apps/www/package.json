@@ -16,7 +16,8 @@
     "typecheck": "tsx ../../scripts/quality/check-astro-templates.ts",
     "build": "pnpm build:assets && astro build",
     "preview": "astro preview",
-    "check:links": "python3 scripts/check-doc-links.py"
+    "check:links": "python3 scripts/check-doc-links.py",
+    "optimize:features": "tsx scripts/optimize-feature-images.ts"
   },
   "dependencies": {
     "@astrojs/sitemap": "3.7.4",
@@ -30,6 +31,7 @@
     "@playwright/test": "1.62.1",
     "@vitest/coverage-v8": "catalog:",
     "esbuild": "0.28.1",
+    "sharp": "0.35.2",
     "tsx": "catalog:",
     "typescript": "catalog:",
     "wrangler": "catalog:"

@@ -15,7 +15,7 @@ const { feature, prevFeature, nextFeature } = Astro.props;
 
 <section class="feature-hero">
   <div class="container">
-    <a href="/#features" class="back-link animate-on-scroll">
+    <a href="/features/" class="back-link animate-on-scroll">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
       All Features
     </a>
@@ -23,6 +23,24 @@ const { feature, prevFeature, nextFeature } = Astro.props;
     <span class="section-label animate-on-scroll">{feature.label}</span>
     <h1 class="feature-hero-title animate-on-scroll" set:html={feature.title.replace('\n', '<br />')} />
     <p class="feature-hero-subtitle animate-on-scroll">{feature.subtitle}</p>
+
+    {feature.highlights.length > 0 && (
+      <ul class="feature-highlights animate-on-scroll">
+        {feature.highlights.map((highlight) => (
+          <li>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+            <span>{highlight}</span>
+          </li>
+        ))}
+      </ul>
+    )}
+
+    {feature.docsHref && (
+      <a href={feature.docsHref} class="docs-link animate-on-scroll">
+        Read the guide
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      </a>
+    )}
 
     <div class="feature-hero-image animate-on-scroll">
       <OptimizedFeatureImage src={feature.screenshots[0].src} alt={feature.screenshots[0].alt} loading="eager" />
@@ -133,6 +151,54 @@ const { feature, prevFeature, nextFeature } = Astro.props;
     max-width: 640px;
     margin: 0 auto 48px;
     line-height: 1.7;
+  }
+
+  .feature-highlights {
+    list-style: none;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    max-width: 640px;
+    margin: 0 auto 32px;
+    padding: 0;
+    text-align: left;
+  }
+
+  @media (min-width: 640px) {
+    .feature-highlights {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .feature-highlights li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 0.9375rem;
+    color: var(--color-fg-muted);
+    line-height: 1.5;
+  }
+
+  .feature-highlights li svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: var(--color-accent);
+  }
+
+  .docs-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-accent);
+    margin-bottom: 40px;
+    transition: gap 0.2s ease, color 0.2s ease;
+  }
+
+  .docs-link:hover {
+    color: var(--color-accent-hover);
+    gap: 10px;
   }
 
   .feature-hero-image {
