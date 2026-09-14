@@ -76,9 +76,11 @@ async function optimizeOne(pngPath: string): Promise<void> {
 
   const beforeSize = (await stat(pngPath)).size;
   const webpSize = (await stat(webpPath)).size;
+  const resizeNote = needsResize ? ` (resized to ${MAX_WIDTH}px wide)` : '';
+  const pngKb = (beforeSize / 1024).toFixed(0);
+  const webpKb = (webpSize / 1024).toFixed(0);
   console.log(
-    `${relName}${needsResize ? ` (resized to ${MAX_WIDTH}px wide)` : ''} -> ` +
-      `${path.basename(webpPath)} (png ${(beforeSize / 1024).toFixed(0)}KB, webp ${(webpSize / 1024).toFixed(0)}KB)`
+    `${relName}${resizeNote} -> ${path.basename(webpPath)} (png ${pngKb}KB, webp ${webpKb}KB)`
   );
 }
 
@@ -106,7 +108,9 @@ async function main(): Promise<void> {
   console.log('Done.');
 }
 
-main().catch((error) => {
+try {
+  await main();
+} catch (error) {
   console.error('optimize-feature-images failed:', error);
   process.exitCode = 1;
-});
+}
