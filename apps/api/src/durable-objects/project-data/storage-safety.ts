@@ -44,6 +44,7 @@ import {
   readProjectDataToolPayloadArchiveLastRunAt,
   readProjectDataToolPayloadCleanupRecheckAt,
 } from './tool-payload-cleanup';
+import { isProjectInToolPayloadCleanupScope } from './tool-payload-cleanup-config-refusal';
 import {
   DEFAULT_TOOL_PAYLOAD_CLEANUP_BATCH_MANIFEST_MAX_BYTES,
   DEFAULT_TOOL_PAYLOAD_CLEANUP_ROOT_MANIFEST_MAX_BYTES,
@@ -648,16 +649,40 @@ export function computeStorageSafetyAlarmTime(
   if (!readMeta(sql, 'projectId')) return null;
   const lastMeasuredAt = readMetaNumber(sql, META_LAST_MEASURED_AT);
   const measureAt = lastMeasuredAt === null ? now : lastMeasuredAt + config.measureIntervalMs;
-  const cleanupRecheckAt = config.toolPayloadCleanupEnabled
+  // Scope, not just the global flag. `runProjectDataToolPayloadCleanup` refuses any project
+  // outside PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS one call later, so scheduling a
+  // cleanup alarm for one is scheduling work that cannot happen. On 2026-09-14 that put every
+  // ProjectData object in the installation into a hot alarm loop: ~20 objects the allowlist
+  // excluded each ran 200-380x their normal read volume. Sharing one predicate with the
+  // executor is what stops the two drifting apart again.
+  const cleanupInScope =
+    config.toolPayloadCleanupEnabled &&
+    isProjectInToolPayloadCleanupScope(
+      readMeta(sql, 'projectId') ?? '',
+      config.toolPayloadCleanupProjectIds,
+      false
+    );
+  const cleanupRecheckAt = cleanupInScope
     ? readProjectDataToolPayloadCleanupRecheckAt(sql)
     : null;
-  const archiveLastRunAt = config.toolPayloadCleanupEnabled
-    ? readProjectDataToolPayloadArchiveLastRunAt(sql)
-    : null;
+  const archiveLastRunAt = cleanupInScope ? readProjectDataToolPayloadArchiveLastRunAt(sql) : null;
   let archiveRunAt: number | null = null;
-  if (config.toolPayloadCleanupEnabled) {
+  if (cleanupInScope) {
+    // "Never run" must NOT mean "overdue now". `writeProjectDataToolPayloadArchiveLastRunAt` is
+    // called from exactly one place (tool-payload-cleanup.ts, the success path, and only when a
+    // pass both built a plan AND finished it), so every refusal — pending recheck window,
+    // incomplete approved-manifest config, database already under target — leaves this null.
+    // Returning `now` for a condition the refused pass cannot clear is self-perpetuating: the
+    // object reschedules immediately, forever. Measured 2026-09-14: ~5.6 alarm firings per
+    // second per object, a ~50x invocation increase, with per-invocation cost unchanged.
+    //
+    // Flooring at one interval does NOT delay the first pass, because the return below is a
+    // `Math.min` against `measureAt`, which is at most `measureIntervalMs` (1h) away and itself
+    // drives a cleanup attempt via `allowStart`. It only removes the zero-length backoff.
     archiveRunAt =
-      archiveLastRunAt === null ? now : archiveLastRunAt + config.toolPayloadArchiveIntervalMs;
+      archiveLastRunAt === null
+        ? now + config.toolPayloadArchiveIntervalMs
+        : archiveLastRunAt + config.toolPayloadArchiveIntervalMs;
   }
   const groupedFtsCleanupRecheckAt = config.groupedFtsCleanupEnabled
     ? readProjectDataGroupedFtsCleanupRecheckAt(sql)
