@@ -1165,7 +1165,7 @@ test('sam-context-memory', async ({ page }) => {
   // shared marketing viewport gives — use a taller viewport for this capture
   // only, matching the pattern `marketing-shots-platform.spec.ts` uses for its
   // hero capture.
-  await page.setViewportSize({ width: 1440, height: 1700 });
+  await page.setViewportSize({ width: 1440, height: 1150 });
   await setupMocks(page);
   await page.goto(`/projects/${PROJECT_ID}/agent-context`);
 

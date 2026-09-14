@@ -24,17 +24,17 @@
       "headline": "Multiple agents, one interface",
       "body": "Switch between Claude Code, Codex, Gemini CLI, Amp, and more — each configured with their own API key or OAuth token. Choose the right agent for the task without leaving the chat.",
       "screenshot": {
-        "src": "/images/features/project-chat.png",
-        "alt": "Project chat with agent selector bar showing Brainstormer, Codex 5.5 Chat, Opus 4.6 Chat, Picky CTO, and more profiles",
+        "src": "/images/features/sam-chat-new-session.png",
+        "alt": "Project chat with no session selected: a What do you want to build composer with four starter prompts, an agent profile bar listing Claude Code — Opus 5, Codex 5.5 High, Gemini CLI Reviewer, Brainstormer, and Picky CTO, and a sidebar of seven sessions",
         "caption": "Agent profiles listed at the bottom of the chat — click to switch"
       }
     },
     {
       "headline": "Real-time visibility into agent work",
-      "body": "Tool calls, file edits, and shell commands are streamed to your browser as they happen. You can read every step the agent takes and cancel at any time.",
+      "body": "Tool calls, file edits, and shell commands are streamed to your browser as they happen — MCP calls, file reads and edits with their paths, and commands with their output size. You can read every step the agent takes and stop it at any time.",
       "screenshot": {
-        "src": "/images/features/live-session.png",
-        "alt": "Live chat session showing MCP tool calls, shell commands with output, file edits, and a cancel button",
+        "src": "/images/features/sam-chat-tool-stream.png",
+        "alt": "Live chat session showing a user prompt, the agent's plan, and six tool rows: an MCP get_instructions call, Read and Edit file rows with paths, an alembic upgrade command, and a running pytest command with a stop button",
         "caption": "Every MCP tool call, shell command, and file edit — streamed live with the ability to cancel"
       }
     }

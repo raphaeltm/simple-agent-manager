@@ -8,22 +8,7 @@ interface Props {
   loading?: 'eager' | 'lazy';
 }
 
-const { src: requestedSrc, alt, loading = 'lazy' } = Astro.props;
-
-// Older screenshots keep their original short names in content; map them to the
-// optimized files on disk.
-const optimizedFeatureImages: Record<string, string> = {
-  'agent-actions.png': 'sam-agent-actions-activity-log.png',
-  'agent-context-overview.png': 'sam-agent-context-overview.png',
-  'agent-memory.png': 'sam-agent-memory-knowledge.png',
-  'agent-policies.png': 'sam-agent-policies-instructions.png',
-  'live-session.png': 'sam-live-agent-session-tool-stream.png',
-  'project-chat.png': 'sam-project-chat-agent-selector.png',
-};
-const pathParts = requestedSrc.split('/');
-const fileName = pathParts[pathParts.length - 1] ?? '';
-pathParts[pathParts.length - 1] = optimizedFeatureImages[fileName] ?? fileName;
-const src = pathParts.join('/');
+const { src, alt, loading = 'lazy' } = Astro.props;
 
 // Screenshots are generated in both themes (`<name>.png` and `<name>-light.png`,
 // see apps/web/tests/playwright/marketing-shots-helpers.ts). When a light
