@@ -33,7 +33,10 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { computeStorageSafetyAlarmTime } from '../../../src/durable-objects/project-data/storage-safety';
+import {
+  computeStorageSafetyAlarmTime,
+  STORAGE_SAFETY_MIN_ALARM_SPACING_MS,
+} from '../../../src/durable-objects/project-data/storage-safety';
 import { writeStorageSafetyMeta } from '../../../src/durable-objects/project-data/storage-safety-meta';
 import { writeProjectDataToolPayloadArchiveLastRunAt } from '../../../src/durable-objects/project-data/tool-payload-cleanup-state';
 import type { Env } from '../../../src/env';
@@ -120,12 +123,12 @@ describe('computeStorageSafetyAlarmTime', () => {
     // scheduler reads that marker whenever the global flag is on, and an out-of-scope project is
     // then dragged to an early alarm to do work the executor refuses one call later.
     seedProject(OUT_OF_SCOPE, NOW);
-    writeStorageSafetyMeta(sql, 'storageSafetyToolCleanupRecheckAt', String(NOW + 60_000));
+    writeStorageSafetyMeta(sql, 'storageSafetyToolCleanupRecheckAt', String(NOW + 30 * 60_000));
 
     const at = computeStorageSafetyAlarmTime(sql, productionEnv(), NOW);
 
     // The only thing due for an out-of-scope project is its next measurement. If the marker were
-    // honoured this would be NOW + 60_000.
+    // honoured this would be NOW + 30 minutes.
     expect(at).toBe(NOW + HOUR);
   });
 
@@ -133,11 +136,14 @@ describe('computeStorageSafetyAlarmTime', () => {
     // Owner-path control for the case above: the gate must narrow by scope, not disable the
     // recheck mechanism outright.
     seedProject(IN_SCOPE, NOW);
-    writeStorageSafetyMeta(sql, 'storageSafetyToolCleanupRecheckAt', String(NOW + 60_000));
+    // Half an hour, comfortably past STORAGE_SAFETY_MIN_ALARM_SPACING_MS and comfortably inside
+    // the 1h measure interval, so this value is the one Math.min returns and the assertion can
+    // only pass if the term participated.
+    writeStorageSafetyMeta(sql, 'storageSafetyToolCleanupRecheckAt', String(NOW + 30 * 60_000));
 
     const at = computeStorageSafetyAlarmTime(sql, productionEnv(), NOW);
 
-    expect(at).toBe(NOW + 60_000);
+    expect(at).toBe(NOW + 30 * 60_000);
   });
 
   it('honours a recorded archive run instead of re-arming immediately', () => {
@@ -174,6 +180,88 @@ describe('computeStorageSafetyAlarmTime', () => {
       );
       expect(at).toBe(NOW + HOUR);
     }
+  });
+
+  it('does not spin on a stale recheck marker left by a pass that can no longer complete', () => {
+    // THE CRITICAL CASE, and the one the first cut of this fix missed. Found by review, not by me.
+    //
+    // `createToolPayloadCleanupPlan` has eight distinct `return null` refusal paths and
+    // `writeProjectDataToolPayloadArchiveLastRunAt` is reachable from none of them. So the scope
+    // gate alone closes only one door: a project that is IN scope, was mid-continuation (a normal
+    // outcome — batches cap at 500 rows / 20s), and then regressed into a config refusal leaves a
+    // recheck marker nothing will ever advance. Once real time walks past it, an unclamped
+    // scheduler returns it on every call and the object re-arms forever — the identical mechanism
+    // as the incident, reached through a different meta key.
+    //
+    // This is exactly the production config of 2026-09-14: a fixed cutoff armed with a blank
+    // manifest.
+    seedProject(IN_SCOPE, NOW);
+    writeStorageSafetyMeta(sql, 'storageSafetyToolCleanupRecheckAt', String(NOW - 6 * HOUR));
+
+    const at = computeStorageSafetyAlarmTime(
+      sql,
+      productionEnv({
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: String(NOW - 30 * DAY),
+      } as Partial<Env>),
+      NOW
+    );
+
+    expect(at).toBeGreaterThan(NOW);
+  });
+
+  it('does not spin on a completed archive whose next run has already fallen into the past', () => {
+    // The second symptom the scope gate does not cover. A project that DID complete an archive
+    // pass has a non-null `archiveLastRunAt`; if it later refuses, `archiveLastRunAt + interval`
+    // is a fixed point that real time simply walks past. Flooring only the null branch would
+    // leave this one spinning.
+    seedProject(IN_SCOPE, NOW);
+    writeProjectDataToolPayloadArchiveLastRunAt(sql, NOW - 10 * DAY);
+
+    const at = computeStorageSafetyAlarmTime(sql, productionEnv(), NOW);
+
+    expect(at).toBeGreaterThan(NOW);
+  });
+
+  it('does not spin on a stale grouped-FTS or event-log recheck marker either', () => {
+    // Both flags are gated today but slated to be enabled, and both read a marker only their own
+    // successful pass advances. Before this, two of the five Math.min terms had no coverage at
+    // all — so a regression reintroducing the loop through either would have shipped green.
+    for (const [flag, metaKey] of [
+      ['PROJECT_DATA_GROUPED_FTS_CLEANUP_ENABLED', 'storageSafetyGroupedFtsCleanupRecheckAt'],
+      ['PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED', 'storageSafetyEventLogCleanupRecheckAt'],
+    ] as const) {
+      db.exec('DELETE FROM do_meta');
+      seedProject(IN_SCOPE, NOW);
+      writeStorageSafetyMeta(sql, metaKey, String(NOW - 6 * HOUR));
+
+      const at = computeStorageSafetyAlarmTime(
+        sql,
+        productionEnv({ [flag]: 'true' } as unknown as Partial<Env>),
+        NOW
+      );
+
+      expect(at, `${flag} must not schedule at or before now`).toBeGreaterThan(NOW);
+    }
+  });
+
+  it('pins the magnitude of the never-run floor, not just its sign', () => {
+    // Case 1 asserts only `> NOW`, which a one-millisecond floor would satisfy. Widening the
+    // measure interval makes the archive term the one Math.min returns, so the floor's actual
+    // value is observable rather than masked by measureAt.
+    //
+    // It must be a full archive interval, NOT the generic minimum spacing: scheduling every
+    // never-run in-scope object a minute out is no longer a spin but is still ~60 wasted alarms
+    // an hour each, which is what an earlier draft of this fix did.
+    seedProject(IN_SCOPE, NOW);
+
+    const at = computeStorageSafetyAlarmTime(
+      sql,
+      productionEnv({ PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: String(30 * DAY) } as Partial<Env>),
+      NOW
+    );
+
+    expect(at).toBe(NOW + DAY);
+    expect(at).toBeGreaterThan(NOW + STORAGE_SAFETY_MIN_ALARM_SPACING_MS);
   });
 
   it('treats an empty allowlist as every project, and still does not spin', () => {
