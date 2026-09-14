@@ -493,7 +493,7 @@ by the read-only cron-liveness check.
 - `TERMINAL_SESSION_RECONCILE_BATCH_SIZE` — Maximum active ProjectData `chat_sessions` candidates reconciled per project per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE` — Maximum active D1 `session_summaries` candidates reconciled globally per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_RECONCILE_DEFER_MS` — Retry delay for live-head, snapshot-protected, or temporarily ineligible terminal-session ledger candidates (default: 3600000; capped at 86400000)
-- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h)
+- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h). Aged from the current runtime generation (`workspaces.created_at`), not `tasks.started_at`, and skipped entirely when no runtime generation is allocated or the chat session holds a restorable/in-flight sleep record
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Threshold before stale working activity is checked against authoritative SessionHost inventory (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
 - `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
