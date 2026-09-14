@@ -519,10 +519,9 @@ describe('ProjectData event subscription core', () => {
     const sessionId = await stub.createSession(null, 'Runtime interrupt target', 'task-1');
     const restoreWake = setEventEnvForTest('PROJECT_EVENT_WAKE_ENABLED', 'false');
     try {
-      let subscription!: Awaited<ReturnType<typeof svc.createProjectEventSubscription>>;
       let admitted!: Awaited<ReturnType<typeof svc.admitProjectEvent>>;
       await withEventEnv({ PROJECT_EVENT_WAKE_ENABLED: 'false' }, async () => {
-        subscription = await svc.createProjectEventSubscription(
+        await svc.createProjectEventSubscription(
           testEnv,
           projectId,
           {

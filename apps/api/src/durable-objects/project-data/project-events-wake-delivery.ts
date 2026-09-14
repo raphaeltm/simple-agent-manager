@@ -4,9 +4,9 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { isProjectEventWakeEnabled } from './project-events-scheduler';
-import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL } from './project-events-wake-config';
 import { nextPhysicalAttemptNumber } from './project-events-storage-helpers';
 import { stableStringify } from './project-events-values';
+import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL } from './project-events-wake-config';
 import { isProjectEventWakeBatchAudienceAuthorized } from './project-events-wake-targets';
 import { type PromptDeliveryClaim, type PromptDeliveryResult } from './prompt-delivery';
 import type { Env } from './types';

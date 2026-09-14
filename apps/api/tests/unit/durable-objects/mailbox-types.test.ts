@@ -6,12 +6,12 @@ import {
   DELIVERY_STATES,
   DELIVERY_TERMINAL_STATES,
   DURABLE_MESSAGE_CLASSES,
+  isUrgentMessageClass,
   MAILBOX_DEFAULTS,
-  MESSAGE_CLASSES,
   MESSAGE_CLASS_URGENCY,
+  MESSAGE_CLASSES,
   SENDER_TYPES,
   TURN_STOP_URGENCY_THRESHOLD,
-  isUrgentMessageClass,
 } from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
 

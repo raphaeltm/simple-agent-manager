@@ -28,9 +28,9 @@ import {
   mapProjectEventSubscription,
 } from './project-events-mappers';
 import { filterMatchesProjectEvent, projectEventKeys } from './project-events-normalization';
-import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL } from './project-events-wake-config';
 import { normalizeNullableText, normalizeText } from './project-events-values';
 import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
+import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL } from './project-events-wake-config';
 import { generateId } from './types';
 
 const log = createModuleLogger('project_data.project_events.storage');

@@ -7,6 +7,7 @@
  */
 import type { MessageClass } from '@simple-agent-manager/shared';
 import { MESSAGE_CLASSES } from '@simple-agent-manager/shared';
+import { isUrgentMessageClass } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
@@ -19,7 +20,6 @@ import { sendPromptToAgentOnNode } from '../../services/node-agent';
 import { persistOrchestrationPrompt } from '../../services/orchestration-prompts';
 import * as projectDataService from '../../services/project-data';
 import { composeUrgentDeliveryContent } from '../../services/urgent-delivery-content';
-import { isUrgentMessageClass } from '@simple-agent-manager/shared';
 import {
   ACTIVE_STATUSES,
   getMcpLimits,

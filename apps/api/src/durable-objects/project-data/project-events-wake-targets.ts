@@ -3,8 +3,8 @@ import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
 import { isMailboxAtCapacity } from './mailbox-capacity';
 import { resolveMaxMessagesPerSession } from './messages-persist-helpers';
 import { mapProjectEvent, mapProjectEventSubscription } from './project-events-mappers';
-import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL } from './project-events-wake-config';
 import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
+import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_UNALIASED_SQL } from './project-events-wake-config';
 import type { Env } from './types';
 
 export function isTargetAtWakeCapacity(sql: SqlStorage, env: Env, sessionId: string): boolean {

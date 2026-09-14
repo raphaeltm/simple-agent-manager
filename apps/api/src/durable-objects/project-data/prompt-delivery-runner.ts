@@ -19,13 +19,13 @@ import {
   advanceProjectEventPromptAttemptCheckpoint,
   invalidProjectEventWakeDeliveryTargetResult,
 } from './project-events-wake-delivery';
-import { stopBusyTurnForUrgentDelivery } from './prompt-delivery-interrupt';
 import {
   applyPromptDeliveryResult,
   markPromptDeliverySubmitting,
   type PromptDeliveryClaim,
   type PromptDeliveryResult,
 } from './prompt-delivery';
+import { stopBusyTurnForUrgentDelivery } from './prompt-delivery-interrupt';
 import * as sessionState from './session-state';
 import type { Env } from './types';
 

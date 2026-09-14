@@ -26,8 +26,8 @@ import {
   claimProjectEventMatchesForBatch,
 } from './project-events-storage-helpers';
 import { subscriptionCanMatchProjectEvent } from './project-events-visibility';
-import { EVENT_WAKE_ADAPTER_ID } from './project-events-wake-delivery';
 import { PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_SQL } from './project-events-wake-config';
+import { EVENT_WAKE_ADAPTER_ID } from './project-events-wake-delivery';
 import {
   deferWakeTarget,
   isTargetAtWakeCapacity,

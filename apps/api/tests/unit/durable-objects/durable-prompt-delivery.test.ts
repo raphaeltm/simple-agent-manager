@@ -19,12 +19,12 @@ import {
   nudgePromptDeliveriesForTarget,
 } from '../../../src/durable-objects/project-data/prompt-delivery';
 import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
+import * as sessionState from '../../../src/durable-objects/project-data/session-state';
+import { NodeAgentHttpError } from '../../../src/services/node-agent';
 import {
   DefaultVmPromptDeliveryAdapter,
   type VmPromptDeliveryAdapter,
 } from '../../../src/services/vm-prompt-delivery-adapter';
-import { NodeAgentHttpError } from '../../../src/services/node-agent';
-import * as sessionState from '../../../src/durable-objects/project-data/session-state';
 import { acceptedPromptResponse } from '../../helpers/vm-prompt-delivery-fixtures';
 import { createSqlStorage } from './sql-storage-test-utils';
 
