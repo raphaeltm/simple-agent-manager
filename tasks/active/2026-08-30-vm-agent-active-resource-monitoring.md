@@ -176,8 +176,8 @@ failure left `error` status so retry skipped evicted admission and billing.
 - [x] Restore the original evicted identity only before dispatch under the generation
       CAS; retain the new reservation and billing when dispatch outcome is uncertain.
 - [x] Include boot-log and metering setup in failure handling; fail closed if metering fails.
-- [ ] Finish fresh local full gates and independent API/completion re-review.
-- [ ] Document and resolve every inherited CodeRabbit thread with exact evidence.
+- [x] Finish fresh root lint/typecheck/test/build, Go race/vet and independent API/completion re-review. Full Workers run tracked separately below.
+- [x] Document and resolve every inherited CodeRabbit thread with exact evidence.
 - [ ] Push the existing PR branch and observe fresh CI and CodeRabbit follow-up.
 - [ ] Verify the final candidate on serialized staging and clean up owned resources.
 - [ ] Prove provider-side zero VMs for the relevant prior user credential inventory;

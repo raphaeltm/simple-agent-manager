@@ -125,3 +125,23 @@ and platform-only inventory cannot prove zero VMs in that relevant account.
 Keep `needs-human-review` and do not merge unless that provider inventory is
 actually proven clear. No staging resources were created or modified during the
 read-only inventory investigation.
+
+Fresh local gates for implementation `214aa4f5d`:
+
+- Root lint: 13 tasks passed; root typecheck: 19 tasks passed.
+- Root test: 21 tasks passed, including API 734 files / 9,989 tests and web
+  308 files / 3,749 tests. Root build: 9 tasks passed.
+- Full VM-agent `go test -race ./...` and `go vet ./...` passed using Go 1.26.6.
+- Fresh Playwright workspace-card audit: 5 passed, 1 existing narrow-long skip.
+  Desktop/mobile Evicted/Start and long-text screenshots were inspected; no clipping,
+  overflow or unreadable status/action was found.
+- Checksum-verified Gitleaks 8.30.1: current tree 50 reviewed / 0 new findings;
+  PR range 0 findings. Agent-context budget measured after the reference correction.
+- Preflight evidence passed with a real pull-request event payload. Specialist
+  evidence fails only because the required `needs-human-review` label remains.
+- All eight GitHub threads were replied to with evidence and resolved. CodeRabbit
+  skipped the pushed commit with “Bot user detected”; its successful status is not
+  a new approval. The latest substantive review remains the September 13 review.
+- Full Workers suite is still running. Its overlapping TaskRunner start test hit
+  the previously recorded intermediate-step timing assertion; the entire affected
+  file passed unchanged on isolated retry (31 tests, 63.17 seconds).
