@@ -510,6 +510,138 @@ export async function getTaskRuntimeLiveness(
   return classifyTaskRuntimeLiveness({ ...signals, taskSessionSleep: preservation.outcome });
 }
 
+/**
+ * The recoverability-probe stage of task-runtime classification.
+ *
+ * All three probes share one gate — "this candidate would otherwise be declared
+ * conclusively dead" — so the sweep pays these extra point lookups only when it
+ * is about to terminalize a task (`.claude/rules/47`). Extracted from
+ * `classifyTaskRuntime` to keep that function a readable sequencer.
+ */
+async function probeRecoverabilitySignals(
+  env: Env,
+  task: {
+    id: string;
+    project_id: string;
+    workspace_id: string | null;
+    chat_session_id?: string | null;
+  },
+  workspace: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>>,
+  workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'],
+  nowMs: number
+): Promise<
+  Pick<
+    TaskRuntimeLivenessSignals,
+    | 'resumabilityProbeOutcome'
+    | 'sessionResumability'
+    | 'resumabilityMaxRecoveryAttempts'
+    | 'resumabilityRecoveryAttemptDecayMs'
+    | 'taskSessionSleep'
+    | 'supersessionProbeOutcome'
+    | 'supersession'
+  >
+> {
+  const maxRecoveryAttempts = sessionRecoveryMaxAttempts(env);
+  const recoveryAttemptDecayMs = sessionRecoveryAttemptDecayMs(env);
+  let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
+  let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
+  /** True when resumability alone already yields an inconclusive verdict. */
+  let resumabilityResolvedInconclusive = false;
+
+  if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
+    try {
+      sessionResumability = await loadSessionResumabilitySnapshot(
+        env.DATABASE,
+        task.project_id,
+        workspace.id,
+        workspace.chatSessionId
+      );
+      resumabilityProbeOutcome = 'ok';
+      resumabilityResolvedInconclusive = isSessionResumable(
+        sessionResumability,
+        task.project_id,
+        workspace.id,
+        { maxRecoveryAttempts, recoveryAttemptDecayMs, nowMs }
+      );
+    } catch (err) {
+      resumabilityProbeOutcome = 'error';
+      resumabilityResolvedInconclusive = true;
+      log.warn('stuck_task.session_resumability_query_failed', {
+        workspaceId: task.workspace_id,
+        projectId: task.project_id,
+        action: 'preserved',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Task-scoped sleep guard. Gated on the same "about to be declared dead"
+  // condition, but deliberately NOT on `workspace.chatSessionId` — the shapes
+  // this exists to catch are exactly the ones where that column is null or the
+  // workspace row is absent.
+  let taskSessionSleep: TaskRuntimeLivenessSignals['taskSessionSleep'] = 'not_run';
+  if (
+    !resumabilityResolvedInconclusive &&
+    needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
+  ) {
+    const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
+      id: task.id,
+      projectId: task.project_id,
+      chatSessionId: task.chat_session_id ?? null,
+    });
+    taskSessionSleep = preservation.outcome;
+    if (preservation.outcome === 'preserve') {
+      log.info('stuck_task.preserved_sleeping', {
+        taskId: task.id,
+        projectId: task.project_id,
+        chatSessionId: task.chat_session_id ?? null,
+        workspaceId: task.workspace_id,
+        workspaceStatus: workspace?.status ?? null,
+        sleepStatus: preservation.sleepStatus,
+        expiresAt: preservation.expiresAt,
+        source: 'liveness',
+        action: 'preserved',
+      });
+    }
+  }
+
+  // Tighter hot-path gate still (`.claude/rules/47`): skipped entirely once the
+  // snapshot or the sleep record already resolved the verdict, because the
+  // classifier returns those more specific reasons before it ever consults
+  // supersession.
+  let supersessionProbeOutcome: TaskRuntimeLivenessSignals['supersessionProbeOutcome'] = 'not_run';
+  let supersession: TaskRuntimeLivenessSignals['supersession'] = 'none';
+  if (
+    !resumabilityResolvedInconclusive &&
+    taskSessionSleep !== 'preserve' &&
+    taskSessionSleep !== 'unknown' &&
+    needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
+  ) {
+    try {
+      supersession = await loadTaskSupersession(env.DATABASE, task.project_id, task.id);
+      supersessionProbeOutcome = 'ok';
+    } catch (err) {
+      supersessionProbeOutcome = 'error';
+      log.warn('stuck_task.task_supersession_query_failed', {
+        taskId: task.id,
+        projectId: task.project_id,
+        action: 'preserved',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return {
+    resumabilityProbeOutcome,
+    sessionResumability,
+    resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
+    resumabilityRecoveryAttemptDecayMs: recoveryAttemptDecayMs,
+    taskSessionSleep,
+    supersessionProbeOutcome,
+    supersession,
+  };
+}
+
 async function classifyTaskRuntime(
   env: Env,
   task: {
@@ -566,107 +698,21 @@ async function classifyTaskRuntime(
     }
   }
 
-  // Only probed for a workspace that would otherwise be declared conclusively
-  // dead, so the sweep pays one extra point lookup only when it is about to
-  // terminalize a task (`.claude/rules/47`).
   const nowMs = Date.now();
-  const maxRecoveryAttempts = sessionRecoveryMaxAttempts(env);
-  const recoveryAttemptDecayMs = sessionRecoveryAttemptDecayMs(env);
-  let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
-  let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
-  /** True when resumability alone already yields an inconclusive verdict. */
-  let resumabilityResolvedInconclusive = false;
-  if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
-    try {
-      sessionResumability = await loadSessionResumabilitySnapshot(
-        env.DATABASE,
-        task.project_id,
-        workspace.id,
-        workspace.chatSessionId
-      );
-      resumabilityProbeOutcome = 'ok';
-      resumabilityResolvedInconclusive = isSessionResumable(
-        sessionResumability,
-        task.project_id,
-        workspace.id,
-        { maxRecoveryAttempts, recoveryAttemptDecayMs, nowMs }
-      );
-    } catch (err) {
-      resumabilityProbeOutcome = 'error';
-      resumabilityResolvedInconclusive = true;
-      log.warn('stuck_task.session_resumability_query_failed', {
-        workspaceId: task.workspace_id,
-        projectId: task.project_id,
-        action: 'preserved',
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  // Task-scoped sleep guard. Gated on the same "about to be declared dead"
-  // condition as the probes above (`.claude/rules/47`), but deliberately NOT on
-  // `workspace.chatSessionId` — the shapes this exists to catch are exactly the
-  // ones where that column is null or the workspace row is absent.
-  let taskSessionSleep: TaskRuntimeLivenessSignals['taskSessionSleep'] = 'not_run';
-  if (
-    !resumabilityResolvedInconclusive &&
-    needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
-  ) {
-    const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
-      id: task.id,
-      projectId: task.project_id,
-      chatSessionId: task.chat_session_id ?? null,
-    });
-    taskSessionSleep = preservation.outcome;
-    if (preservation.outcome === 'preserve') {
-      log.info('stuck_task.preserved_sleeping', {
-        taskId: task.id,
-        projectId: task.project_id,
-        chatSessionId: task.chat_session_id ?? null,
-        workspaceId: task.workspace_id,
-        workspaceStatus: workspace?.status ?? null,
-        sleepStatus: preservation.sleepStatus,
-        expiresAt: preservation.expiresAt,
-        source: 'liveness',
-        action: 'preserved',
-      });
-    }
-  }
-
-  // Tighter hot-path gate than the resumability probe (`.claude/rules/47`): skipped
-  // entirely when the snapshot already proved the session resumable, because the
-  // classifier returns `_snapshot_resumable` before it ever consults supersession.
-  // Also skipped once sleep alone resolved the verdict, for the same reason.
-  let supersessionProbeOutcome: TaskRuntimeLivenessSignals['supersessionProbeOutcome'] = 'not_run';
-  let supersession: TaskRuntimeLivenessSignals['supersession'] = 'none';
-  if (
-    !resumabilityResolvedInconclusive &&
-    taskSessionSleep !== 'preserve' &&
-    taskSessionSleep !== 'unknown' &&
-    needsTaskSupersessionProbe(workspace, workspaceProbeOutcome)
-  ) {
-    try {
-      supersession = await loadTaskSupersession(env.DATABASE, task.project_id, task.id);
-      supersessionProbeOutcome = 'ok';
-    } catch (err) {
-      supersessionProbeOutcome = 'error';
-      log.warn('stuck_task.task_supersession_query_failed', {
-        taskId: task.id,
-        projectId: task.project_id,
-        action: 'preserved',
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  const recoverability = await probeRecoverabilitySignals(
+    env,
+    task,
+    workspace,
+    workspaceProbeOutcome,
+    nowMs
+  );
 
   let livenessSignals: TaskRuntimeLivenessSignals = {
     projectId: task.project_id,
     taskWorkspaceId: task.workspace_id,
     workspace,
     workspaceProbeOutcome,
-    supersessionProbeOutcome,
-    supersession,
-    taskSessionSleep,
+    ...recoverability,
     nowMs,
     heartbeatStaleMs: staleSeconds * 1000,
     acpProbeOutcome: 'not_run',
@@ -675,10 +721,6 @@ async function classifyTaskRuntime(
     sessionWork: null,
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
-    resumabilityProbeOutcome,
-    sessionResumability,
-    resumabilityMaxRecoveryAttempts: maxRecoveryAttempts,
-    resumabilityRecoveryAttemptDecayMs: recoveryAttemptDecayMs,
   };
   let initialClassification = classifyTaskRuntimeLiveness(livenessSignals);
   if (needsNodeHealthProbe(livenessSignals) && livenessSignals.workspace?.nodeId) {

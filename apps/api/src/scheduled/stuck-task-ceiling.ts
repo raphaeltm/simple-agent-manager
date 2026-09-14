@@ -123,17 +123,21 @@ function resolveRuntimeGenerationStart(
  * caller's liveness probe can reuse it instead of issuing a second identical
  * point lookup.
  */
-export async function evaluateRunawayCostCeiling(
+/**
+ * Load the workspace snapshot the ceiling ages from, handing it to the caller's
+ * liveness probe so the fall-through path does not repeat the same point lookup.
+ *
+ * A read failure is reported, not swallowed: the caller falls back to
+ * `tasks.started_at` and still applies the ceiling, because a degraded input must
+ * not weaken a cost backstop (`.claude/rules/74` requirement 5).
+ */
+async function loadCeilingWorkspace(
   env: Env,
   task: RunawayCostCeilingInput,
-  opts: {
-    nowMs: number;
-    absoluteCeilingMs: number;
-    preloadWorkspace?: (snapshot: RuntimeWorkspaceSnapshot | null, outcome: 'ok' | 'error') => void;
-  }
-): Promise<RunawayCostCeilingVerdict> {
+  preloadWorkspace?: (snapshot: RuntimeWorkspaceSnapshot | null, outcome: 'ok' | 'error') => void
+): Promise<{ workspace: RuntimeWorkspaceSnapshot | null; readFailed: boolean }> {
   let workspace: RuntimeWorkspaceSnapshot | null = null;
-  let workspaceReadFailed = false;
+  let readFailed = false;
   if (task.workspace_id) {
     try {
       workspace = await loadRuntimeWorkspaceSnapshot(
@@ -142,7 +146,7 @@ export async function evaluateRunawayCostCeiling(
         task.workspace_id
       );
     } catch (err) {
-      workspaceReadFailed = true;
+      readFailed = true;
       log.warn('stuck_task.ceiling_workspace_query_failed', {
         taskId: task.id,
         projectId: task.project_id,
@@ -152,9 +156,117 @@ export async function evaluateRunawayCostCeiling(
       });
     }
   }
-  opts.preloadWorkspace?.(workspace, workspaceReadFailed ? 'error' : 'ok');
+  preloadWorkspace?.(workspace, readFailed ? 'error' : 'ok');
+  return { workspace, readFailed };
+}
 
-  const generationStartMs = workspaceReadFailed
+/**
+ * A live runtime generation past the ceiling still must not destroy a session the
+ * wake path would accept — a sleep capture in flight keeps the workspace alive
+ * while `session_snapshots` already owns the conversation (`.claude/rules/58`).
+ * Bounded by the in-flight sleep age ceiling.
+ *
+ * Returns the preserve verdict, or null when sleep cannot explain the state.
+ */
+async function ceilingSleepGate(
+  env: Env,
+  task: RunawayCostCeilingInput,
+  workspace: RuntimeWorkspaceSnapshot | null,
+  runtimeGenerationMs: number
+): Promise<RunawayCostCeilingVerdict | null> {
+  const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
+    id: task.id,
+    projectId: task.project_id,
+    chatSessionId: task.chat_session_id,
+  });
+  if (preservation.outcome !== 'preserve' && preservation.outcome !== 'unknown') return null;
+
+  log.info('stuck_task.preserved_sleeping', {
+    taskId: task.id,
+    projectId: task.project_id,
+    chatSessionId: task.chat_session_id,
+    workspaceId: task.workspace_id,
+    workspaceStatus: workspace?.status ?? null,
+    sleepStatus: preservation.sleepStatus,
+    expiresAt: preservation.expiresAt,
+    runtimeGenerationMs,
+    source: 'ceiling',
+    outcome: preservation.outcome,
+    action: 'preserved',
+  });
+  return {
+    kind: 'preserve',
+    reason: preservation.outcome === 'preserve' ? 'session_sleeping' : 'session_sleep_unknown',
+  };
+}
+
+/**
+ * A superseded predecessor holds no compute at all, so it must not be recorded as
+ * a runaway failure (`.claude/rules/66`).
+ *
+ * Returns the preserve verdict, the benign-cancellation flag, or null when
+ * supersession cannot explain the state.
+ */
+async function ceilingSupersessionGate(
+  env: Env,
+  task: RunawayCostCeilingInput,
+  runtimeGenerationMs: number
+): Promise<{ verdict: RunawayCostCeilingVerdict | null; superseded: boolean }> {
+  let supersession: TaskSupersession | 'unknown' = 'none';
+  try {
+    supersession = await loadTaskSupersession(env.DATABASE, task.project_id, task.id);
+  } catch (err) {
+    log.warn('stuck_task.ceiling_supersession_query_failed', {
+      taskId: task.id,
+      projectId: task.project_id,
+      action: 'withheld_terminal_verdict',
+      error: err instanceof Error ? err.message : String(err),
+    });
+    supersession = 'unknown';
+  }
+
+  if (supersession === 'unknown') {
+    log.info('stuck_task.ceiling_preserved_supersession_unknown', {
+      taskId: task.id,
+      projectId: task.project_id,
+      runtimeGenerationMs,
+      action: 'preserved',
+    });
+    return { verdict: { kind: 'preserve', reason: 'supersession_unknown' }, superseded: false };
+  }
+
+  if (supersession === 'live') {
+    // Preserve, do NOT terminalize. `cancelled` is a member of
+    // TERMINAL_TASK_STATUSES, so terminalizing would revoke the recovery guard
+    // its LIVE successor still depends on, and `abortRevokedSourceTaskWake`
+    // turns that into stopping a running container. `'live'` is inconclusive
+    // everywhere else in the system and must be inconclusive here too.
+    // Bounded escape (`.claude/rules/47`): once the successor ends this reads
+    // `'terminal'` on the next tick and the task is cancelled.
+    log.info('stuck_task.ceiling_preserved_superseded', {
+      taskId: task.id,
+      projectId: task.project_id,
+      runtimeGenerationMs,
+      action: 'preserved',
+    });
+    return { verdict: { kind: 'preserve', reason: 'superseded_live' }, superseded: false };
+  }
+
+  return { verdict: null, superseded: supersession === 'terminal' };
+}
+
+export async function evaluateRunawayCostCeiling(
+  env: Env,
+  task: RunawayCostCeilingInput,
+  opts: {
+    nowMs: number;
+    absoluteCeilingMs: number;
+    preloadWorkspace?: (snapshot: RuntimeWorkspaceSnapshot | null, outcome: 'ok' | 'error') => void;
+  }
+): Promise<RunawayCostCeilingVerdict> {
+  const { workspace, readFailed } = await loadCeilingWorkspace(env, task, opts.preloadWorkspace);
+
+  const generationStartMs = readFailed
     ? task.startedAtMs
     : resolveRuntimeGenerationStart(workspace, task);
 
@@ -175,74 +287,11 @@ export async function evaluateRunawayCostCeiling(
     return { kind: 'not_applicable', reason: 'below_ceiling' };
   }
 
-  // A live runtime generation past the ceiling still must not destroy a session
-  // the wake path would accept — a sleep capture in flight keeps the workspace
-  // alive while `session_snapshots` already owns the conversation
-  // (`.claude/rules/58`). Bounded by the in-flight sleep age ceiling.
-  const preservation = await loadTaskSleepPreservation(env.DATABASE, env, {
-    id: task.id,
-    projectId: task.project_id,
-    chatSessionId: task.chat_session_id,
-  });
-  if (preservation.outcome === 'preserve' || preservation.outcome === 'unknown') {
-    log.info('stuck_task.preserved_sleeping', {
-      taskId: task.id,
-      projectId: task.project_id,
-      chatSessionId: task.chat_session_id,
-      workspaceId: task.workspace_id,
-      workspaceStatus: workspace?.status ?? null,
-      sleepStatus: preservation.sleepStatus,
-      expiresAt: preservation.expiresAt,
-      runtimeGenerationMs,
-      source: 'ceiling',
-      outcome: preservation.outcome,
-      action: 'preserved',
-    });
-    return {
-      kind: 'preserve',
-      reason: preservation.outcome === 'preserve' ? 'session_sleeping' : 'session_sleep_unknown',
-    };
-  }
+  const sleepVerdict = await ceilingSleepGate(env, task, workspace, runtimeGenerationMs);
+  if (sleepVerdict) return sleepVerdict;
 
-  // A superseded predecessor holds no compute at all, so it must not be recorded
-  // as a runaway failure (`.claude/rules/66`).
-  let supersession: TaskSupersession | 'unknown' = 'none';
-  try {
-    supersession = await loadTaskSupersession(env.DATABASE, task.project_id, task.id);
-  } catch (err) {
-    log.warn('stuck_task.ceiling_supersession_query_failed', {
-      taskId: task.id,
-      projectId: task.project_id,
-      action: 'withheld_terminal_verdict',
-      error: err instanceof Error ? err.message : String(err),
-    });
-    supersession = 'unknown';
-  }
-  if (supersession === 'unknown') {
-    log.info('stuck_task.ceiling_preserved_supersession_unknown', {
-      taskId: task.id,
-      projectId: task.project_id,
-      runtimeGenerationMs,
-      action: 'preserved',
-    });
-    return { kind: 'preserve', reason: 'supersession_unknown' };
-  }
-  if (supersession === 'live') {
-    // Preserve, do NOT terminalize. `cancelled` is a member of
-    // TERMINAL_TASK_STATUSES, so terminalizing would revoke the recovery guard
-    // its LIVE successor still depends on, and `abortRevokedSourceTaskWake`
-    // turns that into stopping a running container. `'live'` is inconclusive
-    // everywhere else in the system and must be inconclusive here too.
-    // Bounded escape (`.claude/rules/47`): once the successor ends this reads
-    // `'terminal'` on the next tick and the task is cancelled.
-    log.info('stuck_task.ceiling_preserved_superseded', {
-      taskId: task.id,
-      projectId: task.project_id,
-      runtimeGenerationMs,
-      action: 'preserved',
-    });
-    return { kind: 'preserve', reason: 'superseded_live' };
-  }
+  const { verdict, superseded } = await ceilingSupersessionGate(env, task, runtimeGenerationMs);
+  if (verdict) return verdict;
 
-  return { kind: 'terminalize', superseded: supersession === 'terminal', runtimeGenerationMs };
+  return { kind: 'terminalize', superseded, runtimeGenerationMs };
 }
