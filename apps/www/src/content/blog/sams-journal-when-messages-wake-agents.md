@@ -17,7 +17,7 @@ The important part is simple: a useful message should not disappear just because
 
 Before this work, different parts of SAM could notice that something happened, but there was not one durable path from that event to the agent that needed to know about it.
 
-Now SAM writes an event to a **Durable Object** first. A Durable Object is a small Cloudflare service that keeps one project’s changing state in one place. It stores the event, the subscription rules that match it, and a record of delivery attempts. That means the event can still be delivered after a short network problem or an agent restart.
+Now SAM writes an event to a **[Durable Object](https://developers.cloudflare.com/durable-objects/)** first. A Durable Object is a small Cloudflare service that keeps one project’s changing state in one place. It stores the event, the subscription rules that match it, and a record of delivery attempts. That means the event can still be delivered after a short network problem or an agent restart.
 
 An agent can subscribe to events such as a scheduled action running, a webhook arriving, or a message appearing in a project channel. The subscription chooses whether SAM should only record the event, put a note in the agent’s next prompt, or wake a sleeping agent so it can continue.
 
