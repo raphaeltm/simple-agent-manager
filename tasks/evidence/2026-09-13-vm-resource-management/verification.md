@@ -36,7 +36,7 @@ Deployment [34747674165](https://github.com/raphaeltm/simple-agent-manager/actio
 
 Inherited cgroup boot configuration is supported by pinned provisioning, matching main templates/generator, 176 cloud-init tests, and host survival under load. This is not a claim that the installed host cgroup verifier or a direct ancestry inspection ran. PSI logic has automated coverage; the live eviction exercised Docker OOM.
 
-Global zero remains unproven: previous run's node `01M2CX7B90KKPSJFPWJGX0JP6M` is still destroying with no provider instance ID or termination proof. Preserve it. Both this and the own allocation used user credentials; a platform-only orphan scan cannot prove that account's inventory. Historical deleted rows predating termination-proof tracking are not evidence of live VMs. An unrelated sleeping Cloudflare Container is preserved.
+Historical state recorded on 2026-09-13 (superseded by the follow-up below): global zero remained unproven; previous run's node `01M2CX7B90KKPSJFPWJGX0JP6M` was still destroying with no provider instance ID or termination proof. Both this and the own allocation used user credentials; a platform-only orphan scan cannot prove that account's inventory. Historical deleted rows predating termination-proof tracking are not evidence of live VMs. An unrelated sleeping Cloudflare Container is preserved.
 
 ## Merge gate
 
@@ -70,3 +70,58 @@ git diff --check
 ```
 
 Playwright result: 5 passed and 1 skipped by the existing 320px long-scenario matrix. Fresh reviewed screenshots are in [`../2026-09-14-pr1980-review-fixes/`](../2026-09-14-pr1980-review-fixes/).
+
+## Shepherd follow-up — 2026-09-14 after 18:00 UTC
+
+Independent review of `a44d14e93` confirmed the eight fixes were already present,
+while GitHub still had eight unresolved threads (five with outdated anchors).
+The restart fix required additional hardening: workspace-wide usage closure could
+end a successor interval, and a failed restart left `error` status so another
+restart skipped eviction admission and metering.
+
+The follow-up uses a runtime-generation-specific usage ID. Before VM dispatch,
+failure closes only that interval and restores the original evicted identity under
+the attempt's identity/generation CAS. Retry performs fresh admission and billing.
+An ambiguous failure after dispatch retains the new generation, reservation and
+metering because the runtime may have started. Boot-log and metering setup share
+the failure handler; a metering insert failure prevents dispatch.
+
+Fresh validation: four new regressions failed against the inherited implementation;
+83 focused SQL/admission tests pass after the fix. Independent API reviewer ran
+37 SQL tests and passed Cloudflare/test/constitution review. Go/security reviewer
+passed 10 focused race tests plus 2 subtests. Completion validator passed all six
+implementation checks. Full gates, final staging and downstream CI are pending.
+
+### Inherited CodeRabbit thread audit
+
+All findings were valid when made. “Outdated” describes GitHub's old source anchor,
+not a reason to dismiss a finding. None is being waived as obsolete behavior.
+
+| Review comment | GitHub anchor at triage | Disposition and verification |
+| --- | --- | --- |
+| 4000469562: callback errors | Outdated | Addressed in `1606e7749`: `terminalResourceResponse` throws `errors.gone`; real SQL route tests retain standard error handling. |
+| 4000469565: eviction finalization | Outdated | Addressed in `1606e7749`: evicted replay/finalization precedes terminal-node rejection; real SQL test covers terminal node after interrupted cleanup. |
+| 4000469567: restart billing | Current | Further hardened in this follow-up: exact attempt interval, retryable pre-dispatch rollback, preserved reservation/billing after uncertain dispatch. Real SQL tests prove actual row state instead of mocking the cleanup helper. |
+| 4000469568: cleanup-only Stop | Current | Addressed in `1606e7749`: operational-node guard skipped only with confirmed Stop proof. Regression moves node to stopped/unhealthy and verifies cleanup without a repeated VM stop. |
+| 4000469571: Start target size | Current | Addressed in `1606e7749`: actual shared Button uses `size="lg"` (56 px). Existing component tests and September 14 reviewed desktop/mobile screenshots retained. |
+| 4000469575: discovery deadline | Outdated | Addressed in `1606e7749`: compatibility resolver creates a configured timeout context. Focused discovery race tests passed again. |
+| 4000469578: payload upgrade fence | Outdated | Addressed in `1606e7749`: monotonic payload revision joins attempts in completion DELETE predicate; stale completion after upgrade remains queued. Focused persistence race tests passed again. |
+| 4000469579: evidence spacing | Outdated | Addressed in `1606e7749`: timestamp and quantity examples in this verification file have spaces. |
+
+### Exact remaining provider evidence gap
+
+Read-only staging checks after first checking deploy-staging runs found no active
+deployment, no non-deleted VM node rows, and no row for prior allocation
+`01M2CX7B90KKPSJFPWJGX0JP6M`. Its workspace `01M2CX7BFQ64E1KY2E91148Y5C`
+remains `stopping` with a null node attachment. No retained termination marker,
+event-outbox receipt or observability deletion receipt establishes provider cleanup.
+The available orphan reconciliation path inventories platform credentials only;
+the prior allocation used user credentials. No authenticated inventory of that
+user/provider account is available through the existing read paths. Zero D1 rows
+and platform-only inventory cannot prove zero VMs in that relevant account.
+
+**credential/infra blocker; provider-side confirmation of user-credential Hetzner VM cleanup is unavailable to agents.**
+
+Keep `needs-human-review` and do not merge unless that provider inventory is
+actually proven clear. No staging resources were created or modified during the
+read-only inventory investigation.

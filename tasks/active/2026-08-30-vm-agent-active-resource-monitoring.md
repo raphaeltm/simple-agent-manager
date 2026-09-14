@@ -163,3 +163,27 @@ pass the gates below against current `main` before merge.
   fresh snapshot capture, UI restart, overlay preservation and own cleanup passed.
   See [integration verification](../evidence/2026-09-13-vm-resource-management/verification.md).
   Global zero-VM proof remains pending for the previous run’s unresolved allocation.
+
+### Shepherd completion follow-up (2026-09-14, after 18:00 UTC)
+
+The eight CodeRabbit threads were still unresolved despite implementation fixes in
+`1606e7749`. Independent API review found two remaining failure-path gaps: broad
+workspace billing cleanup could close a successor interval, and a pre-dispatch
+failure left `error` status so retry skipped evicted admission and billing.
+
+- [x] Add real SQL regressions proving attempt-specific billing cleanup, successor
+      preservation, failure/retry admission and metering, and ambiguous dispatch safety.
+- [x] Restore the original evicted identity only before dispatch under the generation
+      CAS; retain the new reservation and billing when dispatch outcome is uncertain.
+- [x] Include boot-log and metering setup in failure handling; fail closed if metering fails.
+- [ ] Finish fresh local full gates and independent API/completion re-review.
+- [ ] Document and resolve every inherited CodeRabbit thread with exact evidence.
+- [ ] Push the existing PR branch and observe fresh CI and CodeRabbit follow-up.
+- [ ] Verify the final candidate on serialized staging and clean up owned resources.
+- [ ] Prove provider-side zero VMs for the relevant prior user credential inventory;
+      otherwise retain `needs-human-review` and the credential/infra blocker.
+
+At 18:10 UTC the prior node row `01M2CX7B90KKPSJFPWJGX0JP6M` was absent and all
+remaining VM node rows were deleted. Its workspace remains `stopping` with no node
+attachment. An absent/deleted database row does not prove provider termination.
+The earlier evidence's claim that the node is still destroying is historical.

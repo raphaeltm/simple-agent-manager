@@ -6,9 +6,11 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { lifecycleRoutes } from '../../../src/routes/workspaces/lifecycle';
-import { stopComputeTracking } from '../../../src/services/compute-usage';
 import { stopWorkspaceOnNode } from '../../../src/services/node-agent';
-import { finalizeWorkspaceEvictionInNode, type WorkspaceEvictionIdentity } from '../../../src/services/workspace-eviction-lifecycle';
+import {
+  finalizeWorkspaceEvictionInNode,
+  type WorkspaceEvictionIdentity,
+} from '../../../src/services/workspace-eviction-lifecycle';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
@@ -37,10 +39,6 @@ vi.mock('../../../src/routes/projects/_helpers', () => ({
 }));
 vi.mock('../../../src/services/boot-log', () => ({
   writeBootLogs: (...args: unknown[]) => mocks.writeBootLogs(...args),
-}));
-vi.mock('../../../src/services/compute-usage', async (importActual) => ({
-  ...await importActual<typeof import('../../../src/services/compute-usage')>(),
-  stopComputeTracking: vi.fn(),
 }));
 vi.mock('../../../src/services/jwt', () => ({
   signCallbackToken: vi.fn(),
@@ -132,7 +130,6 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.signNodeManagementToken.mockResolvedValue({ token: 'signed-test-token' });
     mocks.writeBootLogs.mockResolvedValue(undefined);
-    vi.mocked(stopComputeTracking).mockResolvedValue(0);
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(null, { status: 204 }))
@@ -145,7 +142,8 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
         idFromName: (name: string) => name,
         get: () => ({
           cancelWorkspaceDeletion: mocks.cancelWorkspaceDeletion,
-          finalizeWorkspaceEviction: (identity: WorkspaceEvictionIdentity) => finalizeWorkspaceEvictionInNode(env, identity),
+          finalizeWorkspaceEviction: (identity: WorkspaceEvictionIdentity) =>
+            finalizeWorkspaceEvictionInNode(env, identity),
         }),
       } as unknown as DurableObjectNamespace,
     } as Env;
@@ -165,40 +163,70 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
   });
 
   function prepareEvictedRestart() {
-    sqlite.prepare(`UPDATE workspaces SET status = 'evicted', eviction_generation = 'old-generation',
-      eviction_finalized_at = '2026-09-13T00:00:00.000Z', resolved_reservation_json = ? WHERE id = ?`)
-      .run(JSON.stringify({ version: 1, cpuMillis: 1000, memoryMb: 1024, diskMb: 1024,
-        maxCoTenants: 4, exclusiveNode: false, source: 'platform', sourceId: 'platform' }), WORKSPACE_ID);
-    sqlite.prepare(`UPDATE nodes SET provider_instance_id = 'vm-1', credential_source = 'user',
+    sqlite
+      .prepare(
+        `UPDATE workspaces SET status = 'evicted', eviction_generation = 'old-generation',
+      eviction_finalized_at = '2026-09-13T00:00:00.000Z', resolved_reservation_json = ? WHERE id = ?`
+      )
+      .run(
+        JSON.stringify({
+          version: 1,
+          cpuMillis: 1000,
+          memoryMb: 1024,
+          diskMb: 1024,
+          maxCoTenants: 4,
+          exclusiveNode: false,
+          source: 'platform',
+          sourceId: 'platform',
+        }),
+        WORKSPACE_ID
+      );
+    sqlite
+      .prepare(
+        `UPDATE nodes SET provider_instance_id = 'vm-1', credential_source = 'user',
       observed_hardware_source = 'observed', observed_provider_instance_vcpu_count = 2,
       observed_provider_instance_memory_mb = 4096, observed_provider_instance_disk_gb = 80,
-      last_heartbeat_at = ?, last_metrics = ? WHERE id = ?`)
-      .run(new Date().toISOString(), JSON.stringify({ version: 1, cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }), NODE_ID);
-    sqlite.prepare(`INSERT INTO project_members (project_id, user_id, role, status)
-      VALUES (?, ?, 'owner', 'active')`).run(PROJECT_ID, USER_ID);
+      last_heartbeat_at = ?, last_metrics = ? WHERE id = ?`
+      )
+      .run(
+        new Date().toISOString(),
+        JSON.stringify({ version: 1, cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+        NODE_ID
+      );
+    sqlite
+      .prepare(
+        `INSERT INTO project_members (project_id, user_id, role, status)
+      VALUES (?, ?, 'owner', 'active')`
+      )
+      .run(PROJECT_ID, USER_ID);
   }
 
   it('snapshots the current generation for an internal VM Stop before a delayed network request', async () => {
-    sqlite.prepare("UPDATE workspaces SET eviction_generation = 'observed-generation' WHERE id = ?")
+    sqlite
+      .prepare("UPDATE workspaces SET eviction_generation = 'observed-generation' WHERE id = ?")
       .run(WORKSPACE_ID);
     mocks.signNodeManagementToken.mockImplementationOnce(async () => {
-      sqlite.prepare("UPDATE workspaces SET eviction_generation = 'successor-generation' WHERE id = ?")
+      sqlite
+        .prepare("UPDATE workspaces SET eviction_generation = 'successor-generation' WHERE id = ?")
         .run(WORKSPACE_ID);
       return { token: 'signed-test-token' };
     });
     await stopWorkspaceOnNode(NODE_ID, WORKSPACE_ID, env, USER_ID);
-    expect(JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body as string))
-      .toEqual({ expectedEvictionGeneration: 'observed-generation' });
+    expect(JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body as string)).toEqual({
+      expectedEvictionGeneration: 'observed-generation',
+    });
   });
 
   it('preserves an explicit Stop claim generation instead of refreshing it from a successor', async () => {
-    sqlite.prepare("UPDATE workspaces SET eviction_generation = 'successor-generation' WHERE id = ?")
+    sqlite
+      .prepare("UPDATE workspaces SET eviction_generation = 'successor-generation' WHERE id = ?")
       .run(WORKSPACE_ID);
     await stopWorkspaceOnNode(NODE_ID, WORKSPACE_ID, env, USER_ID, {
       expectedEvictionGeneration: 'claimed-generation',
     });
-    expect(JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body as string))
-      .toEqual({ expectedEvictionGeneration: 'claimed-generation' });
+    expect(JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body as string)).toEqual({
+      expectedEvictionGeneration: 'claimed-generation',
+    });
   });
 
   it('refuses an internal Stop after workspace attachment identity changes', async () => {
@@ -211,25 +239,41 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
 
   it('restarts an evicted workspace with a fresh reservation, metering row and exact generation pair', async () => {
     prepareEvictedRestart();
-    sqlite.prepare('UPDATE workspaces SET stop_runtime_confirmed_at = ? WHERE id = ?')
+    sqlite
+      .prepare('UPDATE workspaces SET stop_runtime_confirmed_at = ? WHERE id = ?')
       .run('2026-09-01T00:00:00.000Z', WORKSPACE_ID);
     const response = await requestLifecycle('restart');
     expect(response.status).toBe(200);
     await Promise.all(waitUntilPromises);
     expect(workspaceStatus()).toBe('creating');
-    const row = sqlite.prepare('SELECT eviction_generation, eviction_finalized_at FROM workspaces WHERE id = ?').get(WORKSPACE_ID) as { eviction_generation: string };
-    expect(row).toEqual({ eviction_generation: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/), eviction_finalized_at: null });
-    expect(sqlite.prepare('SELECT stop_runtime_confirmed_at FROM workspaces WHERE id = ?')
-      .get(WORKSPACE_ID)).toEqual({ stop_runtime_confirmed_at: null });
+    const row = sqlite
+      .prepare('SELECT eviction_generation, eviction_finalized_at FROM workspaces WHERE id = ?')
+      .get(WORKSPACE_ID) as { eviction_generation: string };
+    expect(row).toEqual({
+      eviction_generation: expect.stringMatching(/^[0-9A-HJKMNP-TV-Z]{26}$/),
+      eviction_finalized_at: null,
+    });
+    expect(
+      sqlite
+        .prepare('SELECT stop_runtime_confirmed_at FROM workspaces WHERE id = ?')
+        .get(WORKSPACE_ID)
+    ).toEqual({ stop_runtime_confirmed_at: null });
     const request = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
-    expect(JSON.parse(request?.body as string)).toEqual({ evictionGeneration: row.eviction_generation, expectedEvictionGeneration: 'old-generation' });
-    expect(sqlite.prepare('SELECT workspace_id, ended_at FROM compute_usage').all()).toEqual([{ workspace_id: WORKSPACE_ID, ended_at: null }]);
+    expect(JSON.parse(request?.body as string)).toEqual({
+      evictionGeneration: row.eviction_generation,
+      expectedEvictionGeneration: 'old-generation',
+    });
+    expect(sqlite.prepare('SELECT workspace_id, ended_at FROM compute_usage').all()).toEqual([
+      { workspace_id: WORKSPACE_ID, ended_at: null },
+    ]);
   });
 
   it('refuses eviction restart after another placement consumes the available node memory', async () => {
     prepareEvictedRestart();
     mocks.cancelWorkspaceDeletion.mockImplementation(async () => {
-      sqlite.prepare('UPDATE nodes SET observed_provider_instance_memory_mb = 1024 WHERE id = ?').run(NODE_ID);
+      sqlite
+        .prepare('UPDATE nodes SET observed_provider_instance_memory_mb = 1024 WHERE id = ?')
+        .run(NODE_ID);
       return true;
     });
     expect((await requestLifecycle('restart')).status).toBe(409);
@@ -246,24 +290,129 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     expect(response.status).toBe(200);
     await Promise.all(waitUntilPromises);
 
-    expect(workspaceStatus()).toBe('error');
+    expect(workspaceStatus()).toBe('evicted');
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(stopComputeTracking).toHaveBeenCalledWith(expect.anything(), WORKSPACE_ID);
+    expect(sqlite.prepare('SELECT ended_at FROM compute_usage').all()).toEqual([
+      { ended_at: expect.any(String) },
+    ]);
+    expect(
+      sqlite.prepare('SELECT eviction_generation FROM workspaces WHERE id = ?').get(WORKSPACE_ID)
+    ).toEqual({ eviction_generation: 'old-generation' });
+
+    expect((await requestLifecycle('restart')).status).toBe(200);
+    await Promise.all(waitUntilPromises);
+    expect(sqlite.prepare('SELECT ended_at FROM compute_usage ORDER BY rowid').all()).toEqual([
+      { ended_at: expect.any(String) },
+      { ended_at: null },
+    ]);
+    expect(
+      JSON.parse(vi.mocked(globalThis.fetch).mock.calls[0]?.[1]?.body as string)
+    ).toMatchObject({ expectedEvictionGeneration: 'old-generation' });
   });
 
-  it.each(['restart', 'rebuild'] as const)('clears earlier Stop proof when %s creates a new runtime generation', async (action) => {
-    sqlite.prepare(`UPDATE workspaces SET status = 'error', eviction_generation = 'old-generation',
-      stop_runtime_confirmed_at = '2026-09-01T00:00:00.000Z' WHERE id = ?`).run(WORKSPACE_ID);
-    expect((await requestLifecycle(action)).status).toBe(action === 'rebuild' ? 202 : 200);
+  it('restores the eviction when boot-log setup fails before metering and dispatch', async () => {
+    prepareEvictedRestart();
+    mocks.writeBootLogs.mockRejectedValueOnce(new Error('KV unavailable'));
+    expect((await requestLifecycle('restart')).status).toBe(200);
     await Promise.all(waitUntilPromises);
-    expect(sqlite.prepare('SELECT stop_runtime_confirmed_at FROM workspaces WHERE id = ?')
-      .get(WORKSPACE_ID)).toEqual({ stop_runtime_confirmed_at: null });
+    expect(workspaceStatus()).toBe('evicted');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT id FROM compute_usage').all()).toEqual([]);
   });
+
+  it('fails closed when compute tracking cannot start', async () => {
+    prepareEvictedRestart();
+    sqlite.exec(`CREATE TRIGGER reject_usage BEFORE INSERT ON compute_usage
+      BEGIN SELECT RAISE(ABORT, 'metering unavailable'); END`);
+    expect((await requestLifecycle('restart')).status).toBe(200);
+    await Promise.all(waitUntilPromises);
+    expect(workspaceStatus()).toBe('evicted');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT id FROM compute_usage').all()).toEqual([]);
+  });
+
+  it('rechecks admission after an evicted restart fails before dispatch', async () => {
+    prepareEvictedRestart();
+    mocks.signNodeManagementToken.mockRejectedValueOnce(new Error('token signing failed'));
+    expect((await requestLifecycle('restart')).status).toBe(200);
+    await Promise.all(waitUntilPromises);
+    sqlite
+      .prepare('UPDATE nodes SET observed_provider_instance_memory_mb = 1024 WHERE id = ?')
+      .run(NODE_ID);
+    expect((await requestLifecycle('restart')).status).toBe(409);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT ended_at FROM compute_usage').all()).toEqual([
+      { ended_at: expect.any(String) },
+    ]);
+  });
+
+  it('does not close successor metering when an older restart loses its lifecycle fence', async () => {
+    prepareEvictedRestart();
+    mocks.signNodeManagementToken.mockImplementationOnce(async () => {
+      sqlite
+        .prepare(
+          "UPDATE workspaces SET status = 'running', eviction_generation = 'successor' WHERE id = ?"
+        )
+        .run(WORKSPACE_ID);
+      sqlite
+        .prepare(
+          `INSERT INTO compute_usage (id, user_id, workspace_id, node_id, server_type, vcpu_count, started_at, created_at)
+        VALUES ('successor-usage', ?, ?, ?, 'small', 2, ?, ?)`
+        )
+        .run(USER_ID, WORKSPACE_ID, NODE_ID, new Date().toISOString(), new Date().toISOString());
+      return { token: 'signed-test-token' };
+    });
+    expect((await requestLifecycle('restart')).status).toBe(200);
+    await Promise.all(waitUntilPromises);
+    expect(workspaceStatus()).toBe('running');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT ended_at FROM compute_usage ORDER BY rowid').all()).toEqual([
+      { ended_at: expect.any(String) },
+      { ended_at: null },
+    ]);
+  });
+
+  it('preserves metering and the new generation when runtime dispatch has an ambiguous failure', async () => {
+    prepareEvictedRestart();
+    vi.mocked(globalThis.fetch).mockRejectedValue(new Error('connection reset after request sent'));
+    expect((await requestLifecycle('restart')).status).toBe(200);
+    await Promise.all(waitUntilPromises);
+    expect(globalThis.fetch).toHaveBeenCalled();
+    expect(workspaceStatus()).toBe('creating');
+    expect((await requestLifecycle('restart')).status).toBe(400);
+    expect(sqlite.prepare('SELECT ended_at FROM compute_usage').all()).toEqual([
+      { ended_at: null },
+    ]);
+    expect(
+      sqlite.prepare('SELECT eviction_generation FROM workspaces WHERE id = ?').get(WORKSPACE_ID)
+    ).not.toEqual({ eviction_generation: 'old-generation' });
+  });
+
+  it.each(['restart', 'rebuild'] as const)(
+    'clears earlier Stop proof when %s creates a new runtime generation',
+    async (action) => {
+      sqlite
+        .prepare(
+          `UPDATE workspaces SET status = 'error', eviction_generation = 'old-generation',
+      stop_runtime_confirmed_at = '2026-09-01T00:00:00.000Z' WHERE id = ?`
+        )
+        .run(WORKSPACE_ID);
+      expect((await requestLifecycle(action)).status).toBe(action === 'rebuild' ? 202 : 200);
+      await Promise.all(waitUntilPromises);
+      expect(
+        sqlite
+          .prepare('SELECT stop_runtime_confirmed_at FROM workspaces WHERE id = ?')
+          .get(WORKSPACE_ID)
+      ).toEqual({ stop_runtime_confirmed_at: null });
+    }
+  );
 
   it('refuses platform eviction restart when its user quota is exhausted', async () => {
     prepareEvictedRestart();
     sqlite.prepare("UPDATE nodes SET credential_source = 'platform' WHERE id = ?").run(NODE_ID);
-    sqlite.prepare('INSERT INTO user_quotas (id, user_id, monthly_vcpu_hours_limit) VALUES (?, ?, 0)').run('quota', USER_ID);
+    sqlite
+      .prepare('INSERT INTO user_quotas (id, user_id, monthly_vcpu_hours_limit) VALUES (?, ?, 0)')
+      .run('quota', USER_ID);
     expect((await requestLifecycle('restart')).status).toBe(403);
     expect(workspaceStatus()).toBe('evicted');
     expect(globalThis.fetch).not.toHaveBeenCalled();

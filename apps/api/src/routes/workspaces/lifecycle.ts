@@ -97,12 +97,27 @@ async function recordWorkspaceRuntimeRecreationFailure(
   nodeId: string,
   operation: WorkspaceRuntimeRecreationOperation,
   evictionGeneration: string,
-  error: unknown
+  error: unknown,
+  runtimeDispatchStarted?: boolean
 ): Promise<void> {
   const result = await db
     .update(schema.workspaces)
     .set({
-      status: 'error',
+      // An uncertain dispatch must retain admission and billing until the VM
+      // reports its outcome. Before dispatch, the original eviction is retryable.
+      status:
+        workspace.status === 'evicted'
+          ? runtimeDispatchStarted
+            ? 'creating'
+            : 'evicted'
+          : 'error',
+      ...(workspace.status === 'evicted' && !runtimeDispatchStarted
+        ? {
+            evictionGeneration: workspace.evictionGeneration,
+            evictionFinalizedAt: workspace.evictionFinalizedAt,
+            stopRuntimeConfirmedAt: workspace.stopRuntimeConfirmedAt,
+          }
+        : {}),
       errorMessage: error instanceof Error ? error.message : `Failed to ${operation} workspace`,
       updatedAt: new Date().toISOString(),
     })
@@ -299,22 +314,23 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
         : 'Workspace changed while restart cancellation was being claimed'
     );
   }
-  await writeBootLogs(c.env.KV, workspace.id, [], c.env);
-
-  if (workspace.status === 'evicted') {
-    await startComputeTrackingForNode(db, {
-      userId,
-      workspaceId: workspace.id,
-      nodeId,
-      vmSize: workspace.vmSize,
-      idempotencyKey: `evicted-restart:${workspace.id}:${workspace.updatedAt}`,
-    });
-  }
-
+  const computeUsageId = `evicted-restart:${workspace.id}:${evictionGeneration}`;
   c.executionCtx.waitUntil(
     (async () => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
+      let runtimeDispatchStarted = false;
       try {
+        await writeBootLogs(c.env.KV, workspace.id, [], c.env);
+        if (workspace.status === 'evicted') {
+          await startComputeTrackingForNode(innerDb, {
+            userId,
+            workspaceId: workspace.id,
+            nodeId,
+            vmSize: workspace.vmSize,
+            idempotencyKey: computeUsageId,
+            propagateFailure: true,
+          });
+        }
         await restartWorkspaceOnNode(nodeId, workspace.id, c.env, userId, {
           evictionGeneration,
           expectedEvictionGeneration: workspace.evictionGeneration ?? '',
@@ -342,16 +358,27 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
               )
               .first<{ id: string }>();
             if (!current) throw new WorkspaceRuntimeRecreationFenceError('restart');
+            runtimeDispatchStarted = true;
           },
         });
       } catch (err) {
-        if (workspace.status === 'evicted') {
-          await stopComputeTracking(innerDb, workspace.id).catch((cleanupError) => {
-            log.warn('workspace.evicted_restart_compute_tracking_stop_failed', {
-              workspaceId: workspace.id,
-              error: String(cleanupError),
+        if (workspace.status === 'evicted' && !runtimeDispatchStarted) {
+          await innerDb
+            .update(schema.computeUsage)
+            .set({ endedAt: new Date().toISOString() })
+            .where(
+              and(
+                eq(schema.computeUsage.id, computeUsageId),
+                sql`${schema.computeUsage.endedAt} IS NULL`
+              )
+            )
+            .run()
+            .catch((cleanupError) => {
+              log.warn('workspace.evicted_restart_compute_tracking_stop_failed', {
+                workspaceId: workspace.id,
+                error: String(cleanupError),
+              });
             });
-          });
         }
         await recordWorkspaceRuntimeRecreationFailure(
           c.env,
@@ -361,7 +388,8 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
           nodeId,
           'restart',
           evictionGeneration,
-          err
+          err,
+          runtimeDispatchStarted
         );
       }
     })()
