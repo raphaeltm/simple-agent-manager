@@ -77,13 +77,18 @@ main storage lever — see R3.
 
 | observation | value | source |
 |---|---|---|
-| Writes reserved today | 726,408 / 800,000 | `project_data_archive_write_budget` |
-| Publishes today | 12 | `project_data_archive_migrations` |
-| Estimated writes per migration | 60,534 | 726,408 / 12 |
-| **Implied day ceiling** | **13 migrations/day** | 800,000 / 60,534 |
+| Writes reserved by 11:28Z | 726,408 / 800,000 across 11 publishes | `project_data_archive_write_budget` |
+| Writes reserved by 12:15Z | 780,016 / 800,000 across 12 publishes | same, sampled again |
+| Estimated writes per migration | 53,608-66,037, mean ~65,001 | difference between the two samples |
+| **Implied day ceiling** | **12-13 migrations/day** | 800,000 / ~65,001 |
 
-Confirmed behaviourally: on 09-13 publishes stopped at 13:12Z and did not resume until 00:35Z on
-09-14 — the UTC budget-window reset (`ARCHIVE_BUDGET_WINDOW_MS`), not a cadence gap.
+Confirmed behaviourally, twice:
+
+- On 09-13 publishes stopped at 13:12Z and did not resume until 00:35Z on 09-14 — the UTC
+  budget-window reset (`ARCHIVE_BUDGET_WINDOW_MS`), not a cadence gap.
+- Predicted forward and checked: at 12:15Z only 19,984 units remained, less than any observed
+  per-migration estimate, so the 13:00Z tick must be refused with `window_exhausted`. Sampling
+  the budget an hour apart is what turns "the budget looks like the ceiling" into a measurement.
 
 Each tick publishes exactly **one** session, for two independent reasons:
 
@@ -115,11 +120,15 @@ against an estimate of `units = (60,534 − 1000) / 8 = 7,442`. The measured rat
 written to estimate units is therefore **≈ 1.0** — `estimateArchiveWrites` already counts the row
 inventory directly, and `factor` is pure safety multiplier on top of it.
 
-Lowering `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` from 8 to **2** retains a 100 % safety
-margin over the measurement and moves the day ceiling to `800,000 / (1000 + 2×7,442) = 50/day`,
-at which point the hourly per-tick cap binds at **24/day** — a 1.85x increase that adds **no new
-ticks**, **no new contention window**, and **no extra allowance**. It simply stops wasting the
-~11 hourly ticks per day that currently run and reclaim nothing.
+Lowering `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` from 8 to **2** retains a ~100 % safety
+margin over the measurement and moves the day ceiling to roughly `800,000 / (1000 + 2×8,000) =
+47/day`, at which point the hourly per-tick cap binds at **24/day** — a ~2x increase that adds
+**no new ticks**, **no new contention window**, and **no extra allowance**. It simply stops
+wasting the ~11 hourly ticks per day that currently run and reclaim nothing.
+
+Sanity check on the margin using the second sample: units per migration ≈ (65,001 − 1000)/8 =
+8,000, against 6,000-9,500 rows actually billed, so billed-per-unit lands in 0.75-1.19. Factor 2
+covers the top of that range twice over.
 
 This is also the lever idea `01M2A5BCJZR4SAZ78XYEJTNFPR` named: *"lower `WRITE_ESTIMATE_FACTOR`
 from 32 to a measured value"*. It was lowered to 8 without a measurement; this is the measurement.
