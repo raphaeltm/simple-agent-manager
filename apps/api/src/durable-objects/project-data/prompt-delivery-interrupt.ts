@@ -33,6 +33,16 @@ export interface PromptDeliveryInterruptHooks {
 }
 
 /**
+ * What the stop attempt actually accomplished. The runner uses this after
+ * parking the urgent delivery in `retry_wait`: when a stop signal reached the
+ * VM (or the busy turn had already ended), the parked delivery is re-nudged so
+ * it is due immediately and — thanks to the claim engine's urgency ordering —
+ * ahead of any sibling the turn-end nudge released. A transport failure keeps
+ * the ordinary backoff so a broken node cannot be hot-looped.
+ */
+export type UrgentBusyTurnStopOutcome = 'stopped' | 'already_idle' | 'skipped';
+
+/**
  * Cancel the target's in-flight turn so the urgent delivery behind it can
  * proceed. Best-effort by design: the delivery is already durably queued, so
  * any failure here only degrades to today's behaviour (parked in `retry_wait`
@@ -44,39 +54,41 @@ export async function stopBusyTurnForUrgentDelivery(
   env: Env,
   hooks: PromptDeliveryInterruptHooks,
   claim: PromptDeliveryClaim,
-  target: VmPromptDeliveryTarget
-): Promise<void> {
+  target: VmPromptDeliveryTarget,
+  options: { requestTimeoutMs?: number } = {}
+): Promise<UrgentBusyTurnStopOutcome> {
   // Capture the observation instant BEFORE the slow VM call, so a prompt that
   // starts while the cancel is in flight is never terminalized by this cancel's
   // own result (.claude/rules/49 — same contract as routes/chat-cancel.ts).
   const observedAt = Date.now();
 
+  let stopSignalReachedVm = false;
   try {
     const result = await cancelAgentSessionOnNode(
       target.nodeId,
       target.workspaceId,
       target.agentSessionId,
       env as unknown as import('../../env').Env,
-      target.userId
+      target.userId,
+      // Background tier: this runs inside the DO alarm's waitUntil context, so
+      // a hung node must not hold it for the interactive 30s default.
+      options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}
     );
-    if (!result.success) {
-      if (result.status === 409) {
-        // The turn ended between the rejected submit and the cancel. The VM's
-        // own idle report nudges the queued delivery; nothing left to stop.
-        log.info('prompt_delivery.urgent_turn_already_ended', {
-          deliveryId: claim.message.id,
-          targetSessionId: claim.message.targetSessionId,
-          agentSessionId: target.agentSessionId,
-        });
-      } else {
-        log.warn('prompt_delivery.urgent_turn_cancel_failed', {
-          deliveryId: claim.message.id,
-          targetSessionId: claim.message.targetSessionId,
-          agentSessionId: target.agentSessionId,
-          status: result.status,
-        });
-      }
-      return;
+    if (result.success) {
+      stopSignalReachedVm = true;
+    } else if (result.status === 409) {
+      // The turn ended between the rejected submit and the cancel. Nothing left
+      // to stop, but the stop-button flow still records the turn end on 409 so
+      // a lost VM `idle` report cannot leave a stale `prompting` mirror
+      // (.claude/rules/57) — do the same repair below.
+    } else {
+      log.warn('prompt_delivery.urgent_turn_cancel_failed', {
+        deliveryId: claim.message.id,
+        targetSessionId: claim.message.targetSessionId,
+        agentSessionId: target.agentSessionId,
+        status: result.status,
+      });
+      return 'skipped';
     }
   } catch (error) {
     log.warn('prompt_delivery.urgent_turn_cancel_error', {
@@ -85,7 +97,7 @@ export async function stopBusyTurnForUrgentDelivery(
       agentSessionId: target.agentSessionId,
       error: error instanceof Error ? error.message : String(error),
     });
-    return;
+    return 'skipped';
   }
 
   // The VM finishes a cancelled prompt as `cancelled`; reuse that terminal
@@ -99,34 +111,38 @@ export async function stopBusyTurnForUrgentDelivery(
     guard: 'turn_start',
   });
   if (!changed) {
-    // A newer turn already started (or the row was never working) — the CAS
-    // refused the stomp, which is exactly the guard's job.
+    // A newer turn already started (or the row was never/idle-working) — the CAS
+    // refused the stomp, which is exactly the guard's job. When a newer turn is
+    // in flight the delivery still wants a fast retry so it can stop THAT turn.
     log.info('prompt_delivery.urgent_turn_end_cas_refused', {
       deliveryId: claim.message.id,
       targetSessionId: claim.message.targetSessionId,
       agentSessionId: target.agentSessionId,
     });
-    return;
+    return stopSignalReachedVm ? 'stopped' : 'already_idle';
   }
 
-  activity.recordActivityEventInternal(
-    sql,
-    'prompt_delivery.turn_interrupted',
-    'system',
-    null,
-    target.workspaceId,
-    claim.message.targetSessionId,
-    claim.message.sourceTaskId,
-    JSON.stringify({
-      deliveryId: claim.message.id,
-      messageClass: claim.message.messageClass,
-      targetAgentSessionId: target.agentSessionId,
-      observedAt,
-    })
-  );
+  if (stopSignalReachedVm) {
+    activity.recordActivityEventInternal(
+      sql,
+      'prompt_delivery.turn_interrupted',
+      'system',
+      null,
+      target.workspaceId,
+      claim.message.targetSessionId,
+      claim.message.sourceTaskId,
+      JSON.stringify({
+        deliveryId: claim.message.id,
+        messageClass: claim.message.messageClass,
+        targetAgentSessionId: target.agentSessionId,
+        observedAt,
+      })
+    );
+  }
 
   const chatSessionId = sessionState.resolveActivityChatSessionId(sql, target.agentSessionId);
   // The TURN ended; the session lives on and will receive the urgent delivery
   // as its next prompt, so it still wants an idle timer.
   await publishTurnEnd(hooks, chatSessionId, { kind: 'idle' });
+  return stopSignalReachedVm ? 'stopped' : 'already_idle';
 }

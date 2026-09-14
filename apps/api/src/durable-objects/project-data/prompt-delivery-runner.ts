@@ -25,7 +25,7 @@ import {
   type PromptDeliveryClaim,
   type PromptDeliveryResult,
 } from './prompt-delivery';
-import { stopBusyTurnForUrgentDelivery } from './prompt-delivery-interrupt';
+import { stopBusyTurnForUrgentDelivery, type UrgentBusyTurnStopOutcome } from './prompt-delivery-interrupt';
 import * as sessionState from './session-state';
 import type { Env } from './types';
 
@@ -300,6 +300,10 @@ export async function runPromptDeliveryClaim(
   );
 
   let result: PromptDeliveryResult;
+  // Stop-and-deliver outcome captured by the onBusyTurn hook below; read after
+  // the retry result is applied so a stopped turn's parked delivery can be
+  // re-nudged due immediately (see the comment at the nudge site).
+  let urgentStopOutcome: UrgentBusyTurnStopOutcome | null = null;
   try {
     const sourceTaskGuard = sourceTaskGuardForClaim(claim, hooks.projectId);
     const validateParentWakeTarget = async (): Promise<PromptDeliveryResult | null> => {
@@ -333,6 +337,10 @@ export async function runPromptDeliveryClaim(
       (await validateParentWakeTarget()) ??
       (await validateProjectEventWakeTarget()) ??
       (await invalidScheduledDeliveryTarget(sql, env, hooks.projectId, claim));
+    // Stop-and-deliver: an urgent class rejected because the target is
+    // mid-turn may cancel that turn so this delivery becomes the next
+    // prompt. Informational classes never stop anything — for them the
+    // busy retry path below is byte-for-byte the pre-existing behaviour.
     const input = {
       projectId: hooks.projectId ?? '',
       claim,
@@ -342,14 +350,18 @@ export async function runPromptDeliveryClaim(
       beforeSubmit: (capabilities: VmPromptDeliveryCapabilities) =>
         markPromptDeliverySubmitting(sql, claim, capabilities),
       sourceTaskGuard,
-      // Stop-and-deliver: an urgent class rejected because the target is
-      // mid-turn may cancel that turn so this delivery becomes the next
-      // prompt. Informational classes never stop anything — for them the
-      // busy retry path below is byte-for-byte the pre-existing behaviour.
       ...(isUrgentMessageClass(claim.message.messageClass)
         ? {
-            onBusyTurn: (target: VmPromptDeliveryTarget) =>
-              stopBusyTurnForUrgentDelivery(sql, env, hooks, claim, target),
+            onBusyTurn: async (target: VmPromptDeliveryTarget) => {
+              urgentStopOutcome = await stopBusyTurnForUrgentDelivery(
+                sql,
+                env,
+                hooks,
+                claim,
+                target,
+                { requestTimeoutMs: config.backgroundTimeoutMs }
+              );
+            },
           }
         : {}),
     };
@@ -370,6 +382,17 @@ export async function runPromptDeliveryClaim(
   const applied = applyPromptDeliveryResult(sql, claim, result, config);
   if (applied) {
     advanceProjectEventPromptAttemptCheckpoint(sql, hooks.projectId, claim, result);
+  }
+  if (applied && result.kind === 'retry' && urgentStopOutcome && urgentStopOutcome !== 'skipped') {
+    // The stop reached the VM (or the busy turn had already ended), but this
+    // delivery was still `delivering` when the turn-end fan-out nudged the
+    // queue, so its own release never happened — it just parked with ordinary
+    // backoff. Pull it due immediately: the claim engine orders by message
+    // class, so the urgent delivery now outranks any sibling the turn-end nudge
+    // released and becomes the target's next prompt instead of being jumped.
+    // A skipped stop (transport failure) keeps the backoff so a broken node
+    // cannot be hot-looped.
+    hooks.nudgeDeliveries(claim.message.targetSessionId);
   }
   if (applied && result.kind === 'accepted') {
     sessionState.markPromptAccepted(

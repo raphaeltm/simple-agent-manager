@@ -1156,14 +1156,16 @@ describe('ProjectData durable prompt delivery', () => {
       reason: 'busy',
     });
 
-    // The stop used the existing cancel transport against the resolved target.
+    // The stop used the existing cancel transport against the resolved target,
+    // with the background timeout tier (this runs in the DO alarm context).
     expect(preparationMocks.cancel).toHaveBeenCalledTimes(1);
     expect(preparationMocks.cancel).toHaveBeenCalledWith(
       'node-1',
       'workspace-1',
       'acp-1',
       expect.anything(),
-      'user-1'
+      'user-1',
+      { requestTimeoutMs: config.backgroundTimeoutMs }
     );
 
     // The turn end was recorded from the control plane with the turn_start
@@ -1175,7 +1177,8 @@ describe('ProjectData durable prompt delivery', () => {
       promptStartedAt: null,
     });
 
-    // Provenance for this specific path stays diagnosable.
+    // Provenance for this specific path stays diagnosable, including the
+    // rule-49 observation instant captured before the VM call.
     expect(
       db
         .prepare(
@@ -1184,6 +1187,21 @@ describe('ProjectData durable prompt delivery', () => {
         )
         .get()
     ).toEqual({ count: 1 });
+    const provenance = db
+      .prepare(
+        `SELECT payload FROM activity_events
+           WHERE event_type = 'prompt_delivery.turn_interrupted' AND session_id = 'chat-1'`
+      )
+      .get() as { payload: string };
+    expect(JSON.parse(provenance.payload)).toMatchObject({
+      deliveryId: 'delivery-1',
+      messageClass: 'interrupt',
+      targetAgentSessionId: 'acp-1',
+      observedAt: expect.any(Number),
+    });
+    expect((JSON.parse(provenance.payload) as { observedAt: number }).observedAt).toBeLessThanOrEqual(
+      Date.now()
+    );
 
     // The turn-end fan-out released the queue surface and re-armed idle.
     expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
@@ -1194,11 +1212,16 @@ describe('ProjectData durable prompt delivery', () => {
       'chat-1'
     );
 
-    // The urgent delivery itself parked in retry_wait — it becomes the target's
-    // next prompt once the VM reports ready.
+    // The urgent delivery parked in retry_wait and was then re-nudged due
+    // immediately: it was still `delivering` when the turn-end fan-out ran, so
+    // without this release a nudged lower-urgency sibling could be claimed as
+    // the next prompt ahead of the urgent message that caused the stop.
     expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
       deliveryState: 'retry_wait',
       terminalReason: null,
+      // The runner settles at t=10_000 before the advanced clock reaches
+      // t=15_000, so the re-nudge pins the attempt to the stop instant.
+      nextAttemptAt: 10_000,
     });
   });
 
@@ -1220,8 +1243,12 @@ describe('ProjectData durable prompt delivery', () => {
         .prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`)
         .get()
     ).toEqual({ count: 0 });
+    // No turn ended and no stop happened, so nothing nudged the queue: the
+    // informational delivery keeps its ordinary backoff.
+    expect(hooks.nudgeDeliveries).not.toHaveBeenCalled();
     expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
       deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000 + config.retryBaseMs,
     });
   });
 
@@ -1237,16 +1264,19 @@ describe('ProjectData durable prompt delivery', () => {
 
     expect(preparationMocks.cancel).toHaveBeenCalledTimes(1);
     // No turn end was recorded — the busy turn is untouched and the delivery
-    // degrades to today's parked-in-retry_wait behaviour.
+    // degrades to today's parked-in-retry_wait behaviour with ordinary backoff
+    // (a broken node must not be hot-looped by immediate retries).
     expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
       activity: 'prompting',
     });
+    expect(hooks.nudgeDeliveries).not.toHaveBeenCalled();
     expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
       deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000 + config.retryBaseMs,
     });
   });
 
-  it('treats a 409 from the cancel transport as an already-ended turn', async () => {
+  it('treats a 409 from the cancel transport as an already-ended turn and repairs the mirror', async () => {
     seedBusyTargetSession();
     mockBusySubmit();
     preparationMocks.cancel.mockResolvedValue({ success: false, status: 409 });
@@ -1256,16 +1286,27 @@ describe('ProjectData durable prompt delivery', () => {
       reason: 'busy',
     });
 
-    // The CAS never ran: the mirror still holds the (stale) prompting report
-    // and the VM's own idle report owns the reconciliation.
+    // Like the user stop button on 409, the control plane still records the
+    // turn end so a lost VM `idle` report cannot wedge a stale prompting
+    // mirror (.claude/rules/57).
     expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
-      activity: 'prompting',
+      activity: 'idle',
+      activitySource: 'control_plane',
+      activityReason: 'cancelled',
     });
+    // No stop signal reached the VM, so this is a repair, not an interruption.
     expect(
       db
         .prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`)
         .get()
     ).toEqual({ count: 0 });
+    // The busy turn already ended, so the parked urgent delivery is due
+    // immediately.
+    expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000,
+    });
   });
 
   it('does not stomp a newer turn that started after the stop was observed', async () => {
@@ -1305,5 +1346,13 @@ describe('ProjectData durable prompt delivery', () => {
         .prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`)
         .get()
     ).toEqual({ count: 0 });
+    // A stop signal still reached the VM, so the parked delivery re-nudges due
+    // immediately — it will stop the newer turn on its next claim if that turn
+    // is still in flight when it lands.
+    expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000,
+    });
   });
 });

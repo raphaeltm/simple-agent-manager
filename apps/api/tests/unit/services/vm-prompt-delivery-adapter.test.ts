@@ -896,4 +896,21 @@ describe('VM prompt delivery adapter — urgent busy-turn stop hook', () => {
     expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
     expect(onBusyTurn).toHaveBeenCalledTimes(1);
   });
+
+  it('never invokes onBusyTurn while reconciling an urgent claim', async () => {
+    // Reconcile mode re-reads receipts for an attempt that may already have
+    // sent; it must never gain stop powers, so a busy classification there
+    // would be a bug. Pin the invariant.
+    const onBusyTurn = vi.fn(async () => {});
+    const claim = urgentInput('interrupt');
+    claim.claim.mode = 'reconcile';
+    claim.claim.message.runtimeIdentity = 'runtime-vm-01';
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.reconcile({ ...claim, onBusyTurn });
+
+    expect(result.kind).toBeOneOf(['accepted', 'ambiguous', 'retry']);
+    expect(onBusyTurn).not.toHaveBeenCalled();
+  });
 });

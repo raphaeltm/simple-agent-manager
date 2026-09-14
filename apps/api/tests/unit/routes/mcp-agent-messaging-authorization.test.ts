@@ -396,11 +396,13 @@ describe('project-scoped MCP agent messaging authorization', () => {
     const input = mockAcceptPromptDelivery.mock.calls[0][2] as Record<string, string>;
     // The transcript row keeps the sender's raw message...
     expect(input.displayContent).toBe('stop the staging deploy immediately');
-    // ...while the submitted prompt carries the stop context and the directive.
+    // ...while the submitted prompt carries the stop context and the fenced,
+    // untrusted-labelled directive.
     expect(input.deliveryContent).toContain('[Urgent agent message — class: interrupt]');
     expect(input.deliveryContent).toContain('from task task-caller');
     expect(input.deliveryContent).toContain('stops any in-flight turn');
-    expect(input.deliveryContent).toContain('stop the staging deploy immediately');
+    expect(input.deliveryContent).toContain('untrusted peer content');
+    expect(input.deliveryContent).toContain('<<<\nstop the staging deploy immediately\n>>>');
     expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
