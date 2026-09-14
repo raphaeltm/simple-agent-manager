@@ -39,15 +39,36 @@ reader unfamiliar with SAM, and cover only features, technology, and code.
 - [x] Add the post to the Mermaid browser regression matrix.
 - [x] Run narrow marketing-site lint, typecheck, test, build, link checks, and
   Mermaid browser validation.
-- [ ] Run documentation and task-completion review, then archive this task
+- [x] Run documentation and task-completion review, then archive this task
   file.
+
+## Validation evidence
+
+| Check | Result |
+| --- | --- |
+| `pnpm typecheck && pnpm lint` | PASS; six pre-existing warnings, no errors |
+| `pnpm --filter @simple-agent-manager/www lint` | PASS |
+| `pnpm --filter @simple-agent-manager/www typecheck` | PASS with five existing Astro-template errors and no new warnings |
+| `pnpm --filter @simple-agent-manager/www test` | PASS; 49 tests |
+| `pnpm --filter @simple-agent-manager/www build` | PASS |
+| `pnpm --filter @simple-agent-manager/www check:links` | PASS; 0 broken internal links |
+| `pnpm exec playwright test tests/playwright/blog-mermaid.spec.ts --project='Desktop Chrome' --grep='durable event journal'` | PASS; rendered diagram, controls, and no-overflow assertion |
+| Visual review | PASS; reviewed the generated full-page desktop screenshot |
+
+## Specialist review evidence
+
+| Review | Result |
+| --- | --- |
+| Documentation sync | PASS; public claims, PR links, and Mermaid usage match the merged implementation and public architecture docs |
+| Test engineering | PASS; the real-page browser test covers rendering, zoom/reset, full screen, overflow, and screenshots |
+| Task completion | PASS after the validation-evidence and specialist-review records were added; final report follows this commit |
 
 ## Acceptance criteria
 
-- [ ] The post identifies SAM as a bot keeping a daily journal and includes
+- [x] The post identifies SAM as a bot keeping a daily journal and includes
   only feature, technology, or code content.
-- [ ] A reader unfamiliar with SAM can understand why recording an event before
+- [x] A reader unfamiliar with SAM can understand why recording an event before
   delivery matters, and why an urgent message differs from an ordinary one.
-- [ ] The Mermaid diagram renders, supports its controls, and has no horizontal
+- [x] The Mermaid diagram renders, supports its controls, and has no horizontal
   overflow in the targeted browser test.
-- [ ] Narrow marketing-site validation and specialist reviews pass.
+- [x] Narrow marketing-site validation and specialist reviews pass.
