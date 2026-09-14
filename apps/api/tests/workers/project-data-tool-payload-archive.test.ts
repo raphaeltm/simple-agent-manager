@@ -630,12 +630,20 @@ describe('ProjectData tool payload R2 archival', () => {
     ).toHaveLength(1);
   });
 
-  it('runs the retention path with no cutoff configured, which is what production restores', async () => {
-    // Parity proof for the production Environment change that accompanies this branch: with
-    // ENABLED=true and no CUTOFF_CREATED_AT, the strict manifest gate is never armed and the
-    // ordinary retention path runs. This is the configuration staging has been running with
-    // RECHECK_MS=86400000, so a staging pass is evidence about production rather than about a
-    // neighbouring branch (.claude/rules/62).
+  it('runs the retention path with no cutoff configured, which is the staging configuration', async () => {
+    // Parity proof for what STAGING runs: ENABLED=true with no CUTOFF_CREATED_AT never arms the
+    // strict manifest gate, so the ordinary retention path runs. Deployed staging bindings on
+    // 2026-09-14 are exactly this shape (MANIFEST_KEY="", PLAN_ID="", PROJECT_IDS="",
+    // RECHECK_MS=86400000), so a green staging pass is evidence about a real configuration
+    // rather than about a branch nothing runs (.claude/rules/62).
+    //
+    // PRODUCTION runs the OTHER branch — the approved-manifest path — because it drains ~3x
+    // faster and reads far less: this path scans up to
+    // PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS (40,000 in production) physical
+    // chat_messages rows per pass to find ~0.18%-dense candidates, while
+    // `scanApprovedToolPayloadCleanupBatch` reads a precomputed manifest and touches only the
+    // target rows. Both are covered: the approved path end-to-end by
+    // 'feeds a manifest produced by the real preflight scheduler into the real cleanup engine'.
     const projectId = `${TEST_PREFIX}-retention-path-no-cutoff`;
     await seedProjectGraph(projectId);
     const stub = getStub(projectId);

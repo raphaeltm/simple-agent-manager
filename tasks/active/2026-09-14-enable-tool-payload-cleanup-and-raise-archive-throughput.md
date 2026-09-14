@@ -214,14 +214,63 @@ deliberate and make the deploy surface it loudly.
             `archiveWriteBudgetConfig` env resolver rather than a hand-passed number
             (`.claude/rules/62`, defaults must be exercised through the real resolver).
 
+### R10 — Which cleanup path production should run (decision, with the rejected option)
+
+Two coherent configurations exist, and the choice was initially made the wrong way round.
+
+**Rejected: clear the cutoff and run the automatic retention path** (the configuration staging
+runs). `selectToolPayloadCandidates` walks `chat_messages` by physical `rowid`, bounded by
+`PROJECT_DATA_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS` — **40,000 rows per pass in production**.
+Eligible density is 15,539 / 8,773,156 = 0.18 %, so a 40,000-row window yields ~71 eligible rows,
+and one pass per `RECHECK_MS` (24 h) means ~219 days to traverse the table once: **~0.7 MB/day**.
+
+**Chosen: complete the approved-manifest plan.** `scanApprovedToolPayloadCleanupBatch` performs
+**no `chat_messages` scan at all** — it reads the preflight's manifest from R2 and touches only
+the enumerated targets. Per pass it is bounded by `BATCH_ROWS = 500` and `BATCH_BYTES = 2 MB`
+against `toolMetadataBytes`; at the measured average of 165,879,666 / 15,539 = 10,675 bytes per
+row the byte bound binds first at ~196 rows/pass, so the plan completes in ~80 passes ≈ 80 days
+at **~2 MB/day**.
+
+The manifest path therefore wins on every axis that matters here:
+
+| | retention path | approved-manifest path |
+|---|---|---|
+| DO rows read per pass | ~40,000 (physical scan) | ~196 (manifest targets only) |
+| Passes to drain | ~219 | ~80 |
+| Cumulative row/byte/R2/wall ceilings | none | four hard caps |
+| Scope | project allowlist | allowlist **and** a SHA-256-pinned manifest **and** a fixed cutoff |
+
+Lower read volume is decisive for a rollout whose entire monitored risk is a DO read spike, and
+the hard caps are the right blast-radius control for the first production run of a destructive
+path. It also requires no change to the already-armed cutoff/plan config — only filling in the
+six values a previous operator left blank.
+
+**Honest sizing:** tool-payload cleanup is worth ~158 MB in total and ~2 MB/day at the deployed
+24 h recheck. It is NOT where the storage relief comes from — the archive sweep at 24/day is
+(~161 MB/day, R6). Enabling it matters because it was explicitly approved, because it must
+actually work rather than read `true` and do nothing, and because a clean read profile is what
+unblocks the still-gated grouped-FTS and event-log cleanups later. Do NOT lower `RECHECK_MS` in
+this change: it IS the 2026-09-03 read-spike fix, and validating it is the point.
+
 ### Production Environment changes (applied after the PR merges and deploys)
 
+Complete the approved-manifest plan that the 2026-09-04 preflight produced (R2, R10):
+
 - [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED`: `false` → `true`
-- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT`: clear (removes the inert one-shot
-      arming so the proven retention path runs)
-- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PLAN_ID`: clear (same reason)
-- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS`: **keep** `01KHRJGANBBWGDY1NZ0KVF0D4J` as a
-      deliberate blast-radius limit for the first production pass
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY`: `""` → the preflight's
+      `target_manifest_key`
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256`: `""` → `c90fca2c…4e7bd3`
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS`: `""` → `15539` (the manifest gate
+      throws when `root.eligibleRows > maxTotalRows`, so this is the tightest cap that admits
+      exactly the measured plan and nothing more)
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_BYTES`: `""` → `165879666`
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_R2_OPERATIONS`: `""` → `225000`
+      (150 passes × the 1,500 `ARCHIVE_MAX_OPERATIONS` each pass reserves — ~1.9x the ~80 passes
+      the plan needs)
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_WALL_TIME_MS`: `""` → `3000000`
+      (the same 150 passes × the 20,000 ms each pass reserves)
+- [ ] **Keep** `CUTOFF_CREATED_AT`, `PLAN_ID` and `PROJECT_IDS` exactly as they are — they are
+      the plan's identity and its blast-radius limit
 - [ ] Do NOT touch `GROUPED_FTS_CLEANUP_ENABLED` or `EVENT_LOG_CLEANUP_ENABLED`
 
 ### Verification
