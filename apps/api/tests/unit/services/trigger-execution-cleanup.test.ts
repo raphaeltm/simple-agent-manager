@@ -223,6 +223,8 @@ describe('runTriggerExecutionCleanup', () => {
         staleQueuedRecovered: 0,
         retentionPurged: 0,
         webhookDeliveriesPurged: 0,
+        projectEventSourceOutboxAdmitted: 0,
+        credentialLimitWindowsPurged: 0,
         errors: 0,
       });
       expect(
@@ -246,7 +248,7 @@ describe('runTriggerExecutionCleanup', () => {
 
       await runTriggerExecutionCleanup(createMockEnv({ DATABASE: db }));
 
-      expect(db._calls[0]?.sql).toContain('FROM webhook_deliveries d');
+      expect(db._calls.some(({ sql }) => sql.includes('FROM webhook_deliveries d'))).toBe(true);
       const staleQueries = db._calls.filter(
         ({ sql }) => sql.includes('FROM trigger_executions') && sql.includes('WHERE status = ?')
       );

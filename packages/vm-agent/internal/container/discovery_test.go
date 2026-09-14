@@ -155,6 +155,24 @@ func TestFindContainerByLabelPassesCancellationToDockerQuery(t *testing.T) {
 	}
 }
 
+func TestGetContainerIDBoundsCompatibilityLookup(t *testing.T) {
+	restore := stubDockerDiscovery(
+		func(ctx context.Context, _, _ string) ([]containerCandidate, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+		func(context.Context, string) bool { return true },
+		func(string) (string, error) { return "172.17.0.2", nil },
+	)
+	defer restore()
+
+	discovery := NewDiscovery(Config{CompatibilityResolverTimeout: 10 * time.Millisecond})
+	_, err := discovery.GetContainerID()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("GetContainerID error = %v, want context deadline exceeded", err)
+	}
+}
+
 func TestGetBridgeIPIsScopedToCurrentContainer(t *testing.T) {
 	current := "first"
 	restore := stubDockerDiscovery(

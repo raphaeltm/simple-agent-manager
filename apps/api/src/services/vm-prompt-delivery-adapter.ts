@@ -1,6 +1,7 @@
 import {
   buildVmPromptDeliveryCapabilitiesPath,
   buildVmPromptDeliveryReceiptPath,
+  isUrgentMessageClass,
   VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
   type VmPromptDeliveryCapabilities,
   type VmPromptDeliveryReceipt,
@@ -17,47 +18,20 @@ import { createModuleLogger } from '../lib/logger';
 import { NodeAgentHttpError, nodeAgentRequest, sendPromptToAgentOnNode } from './node-agent';
 import * as projectDataService from './project-data';
 import { ensureSessionRecovery } from './session-recovery';
+import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import { markSessionSnapshotAwakeInPlace } from './session-snapshots';
+import {
+  CapabilitiesSchema,
+  ReceiptSchema,
+  SubmitResponseSchema,
+} from './vm-prompt-delivery-adapter-schemas';
 import {
   checkpointVmPromptSubmission,
   prepareVmPromptDelivery,
+  PromptDeliveryGuardError,
 } from './vm-prompt-delivery-preparation';
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
-
-const RuntimeIdentitySchema = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(256));
-
-const CapabilitiesSchema = v.object({
-  protocolVersion: v.number(),
-  runtimeIdentity: RuntimeIdentitySchema,
-  promptReceipts: v.object({
-    supported: v.boolean(),
-    lookup: v.boolean(),
-    states: v.array(v.picklist(['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'])),
-  }),
-  checkpointRollover: v.object({
-    supported: v.boolean(),
-    automatic: v.boolean(),
-    states: v.array(v.string()),
-    defaultGraceMs: v.number(),
-    maxGraceMs: v.number(),
-    operationTimeoutMs: v.number(),
-  }),
-});
-
-const ReceiptSchema = v.object({
-  deliveryId: v.string(),
-  state: v.picklist(['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous']),
-  runtimeIdentity: RuntimeIdentitySchema,
-  acceptedAt: v.nullable(v.number()),
-  completedAt: v.nullable(v.number()),
-});
-
-const SubmitResponseSchema = v.object({
-  status: v.picklist(['accepted', 'duplicate', 'not_ready', 'conflict']),
-  sessionId: v.string(),
-  receipt: ReceiptSchema,
-});
 
 export interface VmPromptDeliveryTarget {
   projectId: string;
@@ -80,6 +54,8 @@ export interface VmPromptDeliverySourceTaskGuard {
   taskId: string;
   projectId: string;
   chatSessionId: string;
+  projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+  requiredProjectMemberId?: string | null;
 }
 
 export interface VmPromptDeliveryAdapterInput {
@@ -99,6 +75,15 @@ export interface VmPromptDeliveryAdapterInput {
   beforeSubmit?: (capabilities: VmPromptDeliveryCapabilities) => boolean;
   /** Makes snapshot recovery's D1 claim conditional on the source parent. */
   sourceTaskGuard?: VmPromptDeliverySourceTaskGuard;
+  /**
+   * Stop-and-deliver hook, invoked (best-effort) when the target rejects the
+   * submit because a prompt turn is already in flight AND the claim's message
+   * class is urgent (`interrupt` or above). The adapter supplies the resolved
+   * target; the caller owns the cancel + turn-end bookkeeping. A hook failure
+   * never changes the busy retry result — it only degrades to parking in
+   * `retry_wait` behind the busy turn, which is today's behaviour.
+   */
+  onBusyTurn?: (target: VmPromptDeliveryTarget) => Promise<void>;
 }
 
 export interface VmPromptDeliveryAdapter {
@@ -229,17 +214,17 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         this.env,
         target.userId,
         input.claim.message.promptMessageId,
-        capabilities.protocolVersion === VM_PROMPT_DELIVERY_PROTOCOL_VERSION
-          ? {
-              requestTimeoutMs: input.requestTimeoutMs,
-              protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
-              deliveryId: input.claim.message.id,
-              ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
-            }
-          : {
-              requestTimeoutMs: input.requestTimeoutMs,
-              ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
-            }
+        {
+          requestTimeoutMs: input.requestTimeoutMs,
+          ...(capabilities.protocolVersion === VM_PROMPT_DELIVERY_PROTOCOL_VERSION
+            ? { protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION, deliveryId: input.claim.message.id }
+            : {}),
+          ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
+          beforeExternalMutation: async () => {
+            const denied = await this.runSideEffectGuard(input);
+            if (denied) throw new PromptDeliveryGuardError(denied);
+          },
+        }
       );
       if (capabilities.protocolVersion === 0 && input.allowLegacyVm) {
         return {
@@ -290,6 +275,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         receipt,
       };
     } catch (error) {
+      if (error instanceof PromptDeliveryGuardError) return error.result;
       const status = httpStatus(error);
       const conflict = this.parseConflictResponse(error);
       if (
@@ -299,6 +285,23 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         conflict.receipt.deliveryId === input.claim.message.id &&
         conflict.receipt.runtimeIdentity === capabilities.runtimeIdentity
       ) {
+        // Urgent classes are allowed to stop the busy turn so they are
+        // delivered as the very next prompt instead of parking in retry_wait.
+        // The VM's 409 is the only authoritative "turn in flight" evidence —
+        // never gate this on the session_state mirror.
+        if (isUrgentMessageClass(input.claim.message.messageClass) && input.onBusyTurn) {
+          try {
+            await input.onBusyTurn(target);
+          } catch (error) {
+            log.warn('prompt_delivery.urgent_busy_turn_stop_failed', {
+              deliveryId: input.claim.message.id,
+              targetSessionId: input.claim.message.targetSessionId,
+              workspaceId: target.workspaceId,
+              agentSessionId: target.agentSessionId,
+              error: errorMessage(error),
+            });
+          }
+        }
         return {
           kind: 'retry',
           reason: 'busy',

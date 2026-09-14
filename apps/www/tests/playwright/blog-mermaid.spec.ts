@@ -36,6 +36,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-a-busy-machine-can-still-help/',
     screenshotName: 'reusable-machine',
   },
+  {
+    name: 'the affordable-archive journal',
+    path: '/blog/sams-journal-the-archive-learned-to-skip-ahead/',
+    screenshotName: 'affordable-archive',
+  },
 ];
 
 for (const post of mermaidPosts) {

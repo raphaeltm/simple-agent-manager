@@ -81,7 +81,7 @@ describe('WorkspaceCard', () => {
 
   it('shows "Start" primary action for stopped workspace', () => {
     renderCard(makeWorkspace({ status: 'stopped' }), { onRestart, onDelete });
-    expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start' })).toHaveClass('min-h-14');
   });
 
   it('lets an evicted workspace restart without opening its stopped runtime', async () => {

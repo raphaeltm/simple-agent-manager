@@ -6,6 +6,7 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { lifecycleRoutes } from '../../../src/routes/workspaces/lifecycle';
+import { stopComputeTracking } from '../../../src/services/compute-usage';
 import { stopWorkspaceOnNode } from '../../../src/services/node-agent';
 import { finalizeWorkspaceEvictionInNode, type WorkspaceEvictionIdentity } from '../../../src/services/workspace-eviction-lifecycle';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -131,6 +132,7 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.signNodeManagementToken.mockResolvedValue({ token: 'signed-test-token' });
     mocks.writeBootLogs.mockResolvedValue(undefined);
+    vi.mocked(stopComputeTracking).mockResolvedValue(0);
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response(null, { status: 204 }))
@@ -234,6 +236,19 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
     expect(workspaceStatus()).toBe('evicted');
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(sqlite.prepare('SELECT id FROM compute_usage').all()).toEqual([]);
+  });
+
+  it('closes evicted restart metering when runtime start fails before dispatch', async () => {
+    prepareEvictedRestart();
+    mocks.signNodeManagementToken.mockRejectedValueOnce(new Error('token signing failed'));
+
+    const response = await requestLifecycle('restart');
+    expect(response.status).toBe(200);
+    await Promise.all(waitUntilPromises);
+
+    expect(workspaceStatus()).toBe('error');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(stopComputeTracking).toHaveBeenCalledWith(expect.anything(), WORKSPACE_ID);
   });
 
   it.each(['restart', 'rebuild'] as const)('clears earlier Stop proof when %s creates a new runtime generation', async (action) => {

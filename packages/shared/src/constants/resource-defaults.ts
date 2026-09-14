@@ -23,7 +23,7 @@ import type { VMSize } from '../types/workspace';
 export const RESOURCE_RESERVATION_VERSION = 2;
 
 export const LEGACY_VM_SIZE_WORKLOAD_ADAPTER = 'legacy-vm-size-workload';
-export const LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION = 1;
+export const LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION = 2;
 
 // =============================================================================
 // Platform Defaults (bottom of the precedence chain)
@@ -50,22 +50,22 @@ export const DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS: Record<
   Required<ResourceRequirements>
 > = {
   small: {
-    minVcpu: 1,
-    minMemoryGb: 2,
-    minDiskGb: 20,
-    exclusiveNode: false,
-    maxCoTenants: 4,
-  },
-  medium: {
-    minVcpu: 2,
-    minMemoryGb: 4,
-    minDiskGb: 40,
+    minVcpu: 0.625,
+    minMemoryGb: 1.125,
+    minDiskGb: 13,
     exclusiveNode: false,
     maxCoTenants: 3,
   },
+  medium: {
+    minVcpu: 2,
+    minMemoryGb: 3.625,
+    minDiskGb: 40,
+    exclusiveNode: false,
+    maxCoTenants: 2,
+  },
   large: {
     minVcpu: 4,
-    minMemoryGb: 8,
+    minMemoryGb: 7.625,
     minDiskGb: 80,
     exclusiveNode: false,
     maxCoTenants: 2,

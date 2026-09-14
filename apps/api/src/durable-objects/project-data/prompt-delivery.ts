@@ -48,7 +48,7 @@ export interface AcceptedPromptDelivery {
   workspaceId: string | null;
 }
 
-export function acceptPromptDelivery(
+export function acceptPromptDeliveryInTransaction(
   sql: SqlStorage,
   env: Env,
   input: AcceptPromptDeliveryInput,
@@ -123,6 +123,8 @@ export function acceptPromptDelivery(
     workspaceId: persisted.workspaceId,
   };
 }
+
+export const acceptPromptDelivery = acceptPromptDeliveryInTransaction;
 
 export type DeliveryClaimMode = 'submit' | 'reconcile';
 

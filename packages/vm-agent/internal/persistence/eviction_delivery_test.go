@@ -49,7 +49,7 @@ func TestEvictionIntentSurvivesRestartAndFinalizationIsAtomic(t *testing.T) {
 	if err != nil || ready == nil || !ready.ContainerStopped || !ready.SnapshotCaptured {
 		t.Fatalf("ready=%#v err=%v", ready, err)
 	}
-	if err := store.CompleteEvictionDelivery(context.Background(), ready.ID, ready.Attempts); err != nil {
+	if err := store.CompleteEvictionDelivery(context.Background(), ready.ID, ready.Attempts, ready.PayloadRevision); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.ClaimEvictionDelivery(context.Background(), "", time.Now().Add(time.Hour), time.Second, time.Minute, time.Second)
@@ -106,7 +106,7 @@ func TestEvictionDeliveryBackoffLeaseAndAckAreBounded(t *testing.T) {
 	if err != nil || second == nil {
 		t.Fatalf("retry=%#v err=%v", second, err)
 	}
-	if err := store.CompleteEvictionDelivery(context.Background(), first.ID, first.Attempts); err != nil {
+	if err := store.CompleteEvictionDelivery(context.Background(), first.ID, first.Attempts, first.PayloadRevision); err != nil {
 		t.Fatal(err)
 	}
 	third, err := store.ClaimEvictionDelivery(context.Background(), "", now.Add(time.Hour), time.Second, 4*time.Second, 2*time.Second)
@@ -115,5 +115,39 @@ func TestEvictionDeliveryBackoffLeaseAndAckAreBounded(t *testing.T) {
 	}
 	if got := evictionRetryDelay(1<<30, time.Second, time.Minute); got != time.Minute {
 		t.Fatalf("unbounded retry delay=%s", got)
+	}
+}
+
+func TestEvictionDeliveryCompletionIsFencedByPayloadRevision(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "eviction.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.UpsertWorkspaceMetadata(WorkspaceMetadata{WorkspaceID: "workspace-1", EvictionGeneration: "run-1"}); err != nil {
+		t.Fatal(err)
+	}
+	d := evictionDeliveryFixture()
+	if _, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	stale, err := store.ClaimEvictionDelivery(context.Background(), "", now, time.Minute, time.Minute, time.Minute)
+	if err != nil || stale == nil || stale.PayloadRevision != 0 {
+		t.Fatalf("stale claim=%#v err=%v", stale, err)
+	}
+	d.ContainerStopped, d.SnapshotCaptured = true, true
+	if applied, err := store.RecordWorkspaceEviction(context.Background(), d); err != nil || !applied {
+		t.Fatalf("upgrade=%v,%v", applied, err)
+	}
+	if err := store.CompleteEvictionDelivery(context.Background(), stale.ID, stale.Attempts, stale.PayloadRevision); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := store.ClaimEvictionDelivery(context.Background(), "", now.Add(time.Millisecond), time.Minute, time.Minute, time.Minute)
+	if err != nil || upgraded == nil {
+		t.Fatalf("upgraded claim=%#v err=%v", upgraded, err)
+	}
+	if !upgraded.ContainerStopped || !upgraded.SnapshotCaptured || upgraded.PayloadRevision != 1 {
+		t.Fatalf("stale completion deleted upgraded payload: %#v", upgraded)
 	}
 }

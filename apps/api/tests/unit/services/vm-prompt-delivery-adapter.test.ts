@@ -137,6 +137,36 @@ describe('VM prompt delivery adapter', () => {
     });
   });
 
+  it('returns a terminal denial when source authority is revoked during transport preparation', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    let transportStarted!: () => void;
+    let releaseTransport!: () => void;
+    const started = new Promise<void>((resolve) => { transportStarted = resolve; });
+    const barrier = new Promise<void>((resolve) => { releaseTransport = resolve; });
+    const injected = vi.fn();
+    mocks.sendPromptToAgentOnNode.mockImplementationOnce(async (...args: unknown[]) => {
+      transportStarted();
+      await barrier;
+      const options = args[7] as { beforeExternalMutation?: () => Promise<void> };
+      await options.beforeExternalMutation?.();
+      injected();
+      return protocolFixture.newPrompt;
+    });
+    let authorized = true;
+    const adapterInput = input(false);
+    adapterInput.beforeSideEffect = async () => authorized ? null : ({
+      kind: 'failed', reason: 'terminal_target', error: 'Source membership revoked',
+      runtimeIdentity: 'vm-01', capabilities: null,
+    });
+    const pending = new DefaultVmPromptDeliveryAdapter(envWithTarget()).submit(adapterInput);
+    await started;
+    authorized = false;
+    releaseTransport();
+    expect(await pending).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(injected).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledOnce();
+  });
+
   it('fails closed for an old VM unless compatibility is explicitly enabled', async () => {
     mocks.nodeAgentRequest.mockRejectedValue(new Error('Node Agent request failed: 404'));
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
@@ -458,7 +488,7 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'user-1',
       'delivery-1',
-      { requestTimeoutMs: 1_234 }
+      { requestTimeoutMs: 1_234, beforeExternalMutation: expect.any(Function) }
     );
   });
 
@@ -515,7 +545,7 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'user-1',
       'delivery-1',
-      { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-1' }
+      { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-1', beforeExternalMutation: expect.any(Function) }
     );
   });
 
@@ -773,5 +803,114 @@ describe('VM prompt delivery adapter', () => {
       );
     const unproven = await adapter.reconcile(input(false));
     expect(unproven).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
+  });
+});
+
+describe('VM prompt delivery adapter — urgent busy-turn stop hook', () => {
+  function urgentInput(messageClass: 'interrupt' | 'deliver'): VmPromptDeliveryAdapterInput {
+    const base = input(false);
+    base.claim.message.messageClass = messageClass;
+    return base;
+  }
+
+  function busyRejection(): Error {
+    return new mocks.NodeAgentHttpError(
+      409,
+      JSON.stringify({
+        ...protocolFixture.notReadyPrompt,
+        sessionId: 'acp-1',
+        receipt: {
+          ...(protocolFixture.notReadyPrompt.receipt as Record<string, unknown>),
+          deliveryId: 'delivery-1',
+        },
+      })
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.ensureSessionRecovery.mockResolvedValue({
+      status: 'unavailable',
+      reason: 'snapshot_missing',
+    });
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(busyRejection());
+  });
+
+  it('invokes onBusyTurn with the resolved target for an interrupt-class claim', async () => {
+    const onBusyTurn = vi.fn(async () => {});
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit({ ...urgentInput('interrupt'), onBusyTurn });
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+    expect(onBusyTurn).toHaveBeenCalledTimes(1);
+    expect(onBusyTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: 'node-1',
+        workspaceId: 'workspace-1',
+        agentSessionId: 'acp-1',
+        userId: 'user-1',
+      })
+    );
+  });
+
+  it('invokes onBusyTurn for every urgent class', async () => {
+    for (const messageClass of ['preempt_and_replan', 'shutdown_with_final_prompt'] as const) {
+      const onBusyTurn = vi.fn(async () => {});
+      const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+      const result = await adapter.submit({ ...urgentInput(messageClass), onBusyTurn });
+
+      expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+      expect(onBusyTurn).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('never invokes onBusyTurn for informational classes', async () => {
+    const onBusyTurn = vi.fn(async () => {});
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit({ ...urgentInput('deliver'), onBusyTurn });
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+    expect(onBusyTurn).not.toHaveBeenCalled();
+  });
+
+  it('never invokes onBusyTurn when no hook is supplied', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit(urgentInput('interrupt'));
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+  });
+
+  it('keeps the busy retry result even when the hook throws', async () => {
+    const onBusyTurn = vi.fn(async () => {
+      throw new Error('stop-and-deliver bookkeeping failed');
+    });
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit({ ...urgentInput('interrupt'), onBusyTurn });
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
+    expect(onBusyTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('never invokes onBusyTurn while reconciling an urgent claim', async () => {
+    // Reconcile mode re-reads receipts for an attempt that may already have
+    // sent; it must never gain stop powers, so a busy classification there
+    // would be a bug. Pin the invariant.
+    const onBusyTurn = vi.fn(async () => {});
+    const claim = urgentInput('interrupt');
+    claim.claim.mode = 'reconcile';
+    claim.claim.message.runtimeIdentity = 'runtime-vm-01';
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.reconcile({ ...claim, onBusyTurn });
+
+    expect(result.kind).toBeOneOf(['accepted', 'ambiguous', 'retry']);
+    expect(onBusyTurn).not.toHaveBeenCalled();
   });
 });

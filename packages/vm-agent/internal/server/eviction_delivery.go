@@ -168,7 +168,7 @@ func (s *Server) deliverPendingWorkspaceEvictionAt(parent context.Context, id st
 			return reconcileErr
 		}
 		if obsolete {
-			return s.store.CompleteEvictionDelivery(ctx, delivery.ID, delivery.Attempts)
+			return s.store.CompleteEvictionDelivery(ctx, delivery.ID, delivery.Attempts, delivery.PayloadRevision)
 		}
 	}
 	terminal, err := s.sendWorkspaceEvictionDelivery(ctx, *delivery)
@@ -176,7 +176,7 @@ func (s *Server) deliverPendingWorkspaceEvictionAt(parent context.Context, id st
 		return err
 	}
 	if terminal {
-		return s.store.CompleteEvictionDelivery(ctx, delivery.ID, delivery.Attempts)
+		return s.store.CompleteEvictionDelivery(ctx, delivery.ID, delivery.Attempts, delivery.PayloadRevision)
 	}
 	return nil
 }

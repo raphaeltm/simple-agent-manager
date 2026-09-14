@@ -16,6 +16,7 @@ import {
   MessageSquareQuote,
   Monitor,
   PlayCircle,
+  Radio,
   Rocket,
   Server,
   Settings,
@@ -62,6 +63,7 @@ export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Deployments', path: 'deployments', icon: <Rocket size={18} /> },
   { label: 'Agent Context', path: 'agent-context', icon: <Brain size={18} /> },
   { label: 'Notifications', path: 'notifications', icon: <Bell size={18} /> },
+  { label: 'Events', path: 'events', icon: <Radio size={18} /> },
   { label: 'Triggers', path: 'triggers', icon: <Clock size={18} /> },
   { label: 'Profiles', path: 'profiles', icon: <UserCog size={18} /> },
   { label: 'Skills', path: 'skills', icon: <Zap size={18} /> },
@@ -89,12 +91,15 @@ function isProjectSubActive(subPath: string, projectId: string, pathname: string
   return pathname === fullPath || pathname.startsWith(`${fullPath}/`);
 }
 
-const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+const FOCUS_RING =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 const NAV_ITEM_BASE = `flex items-center gap-3 pl-[10px] pr-3 py-2 rounded-sm no-underline text-sm font-medium border-l-2 transition-all duration-150 ${FOCUS_RING}`;
 const NAV_ITEM_BASE_ICON = `flex items-center justify-center px-0 py-2 rounded-sm no-underline text-sm font-medium border-l-2 transition-all duration-150 ${FOCUS_RING}`;
 const NAV_ITEM_ACTIVE = 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]';
-const NAV_ITEM_INACTIVE = 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]';
-const SECTION_DIVIDER = 'mt-2 pt-2 before:content-[\'\'] before:block before:h-px before:mb-2 before:bg-[linear-gradient(90deg,transparent,var(--sam-chrome-accent-divider),transparent)]';
+const NAV_ITEM_INACTIVE =
+  'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]';
+const SECTION_DIVIDER =
+  "mt-2 pt-2 before:content-[''] before:block before:h-px before:mb-2 before:bg-[linear-gradient(90deg,transparent,var(--sam-chrome-accent-divider),transparent)]";
 
 interface NavSidebarProps {
   className?: string;
@@ -108,7 +113,15 @@ interface NavSidebarProps {
   iconOnly?: boolean;
 }
 
-export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlobalNav, projectListSection, projectHealthElement, iconOnly }: NavSidebarProps) {
+export function NavSidebar({
+  className,
+  projectName,
+  showGlobalNav,
+  onToggleGlobalNav,
+  projectListSection,
+  projectHealthElement,
+  iconOnly,
+}: NavSidebarProps) {
   const location = useLocation();
   const { isSuperadmin } = useAuth();
   const { needsOnboarding, openOnboarding } = useOnboarding();
@@ -168,9 +181,7 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
                 key={item.path}
                 to={item.path}
                 aria-current={active ? 'page' : undefined}
-                className={`${NAV_ITEM_BASE} ml-2 ${
-                  active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-                }`}
+                className={`${NAV_ITEM_BASE} ml-2 ${active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE}`}
               >
                 {item.icon}
                 {item.label}
@@ -234,16 +245,15 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
 
             {/* Project name header */}
             {!iconOnly && (
-              <div className="px-3 py-2 text-xs font-semibold text-fg-muted uppercase tracking-wider truncate" title={projectName}>
+              <div
+                className="px-3 py-2 text-xs font-semibold text-fg-muted uppercase tracking-wider truncate"
+                title={projectName}
+              >
                 {projectName || 'Project'}
               </div>
             )}
 
-            {projectHealthElement && (
-              <div className="px-1 pb-1">
-                {projectHealthElement}
-              </div>
-            )}
+            {projectHealthElement && <div className="px-1 pb-1">{projectHealthElement}</div>}
 
             {/* Project sub-nav */}
             {PROJECT_NAV_ITEMS.map((item) => {

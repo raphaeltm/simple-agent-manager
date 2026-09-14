@@ -5,6 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import type { DurableExecutionConfig } from '../../../src/durable-objects/project-data/durable-execution-config';
 import * as mailbox from '../../../src/durable-objects/project-data/mailbox';
+import { admitProjectEvent } from '../../../src/durable-objects/project-data/project-events';
+import {
+  insertMatchIfAbsent,
+  readSubscriptionById,
+} from '../../../src/durable-objects/project-data/project-events-storage-helpers';
 import {
   acceptPromptDelivery,
   applyPromptDeliveryResult,
@@ -14,6 +19,8 @@ import {
   nudgePromptDeliveriesForTarget,
 } from '../../../src/durable-objects/project-data/prompt-delivery';
 import { runPromptDeliveryClaim } from '../../../src/durable-objects/project-data/prompt-delivery-runner';
+import * as sessionState from '../../../src/durable-objects/project-data/session-state';
+import { NodeAgentHttpError } from '../../../src/services/node-agent';
 import {
   DefaultVmPromptDeliveryAdapter,
   type VmPromptDeliveryAdapter,
@@ -25,6 +32,12 @@ const preparationMocks = vi.hoisted(() => ({
   recover: vi.fn(),
   capabilities: vi.fn(),
   send: vi.fn(),
+  sign: vi.fn(),
+  cancel: vi.fn(),
+}));
+vi.mock('../../../src/services/jwt', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/jwt')>()),
+  signNodeManagementToken: preparationMocks.sign,
 }));
 vi.mock('../../../src/services/session-recovery', () => ({
   ensureSessionRecovery: preparationMocks.recover,
@@ -33,6 +46,7 @@ vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/node-agent')>()),
   nodeAgentRequest: preparationMocks.capabilities,
   sendPromptToAgentOnNode: preparationMocks.send,
+  cancelAgentSessionOnNode: preparationMocks.cancel,
 }));
 
 const config: DurableExecutionConfig = {
@@ -133,6 +147,87 @@ describe('ProjectData durable prompt delivery', () => {
     return claimDuePromptDeliveries(sql, config, Date.now())[0];
   }
 
+  function acceptProjectEventWake(
+    deliveryId: string,
+    options: { sourceTaskId?: string; targetTaskId?: string } = {}
+  ) {
+    const sourceTaskId = options.sourceTaskId ?? 'source-task-1';
+    const targetTaskId = options.targetTaskId ?? sourceTaskId;
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId,
+        targetSessionId: 'chat-1',
+        displayContent: 'Project event wake batch is ready. Event IDs: event-1.',
+        sourceTaskId,
+        senderType: 'system',
+        sourceKind: 'project_event_wake',
+        metadata: {
+          projectEventWake: true,
+          batchId: deliveryId,
+          subscriptionId: 'sub-event-wake',
+          eventIds: ['event-1'],
+        },
+      },
+      Date.now()
+    );
+    sql.exec(
+      `INSERT INTO project_event_subscriptions
+       (id, project_id, contract_version, owner_type, owner_id, owner_name,
+        idempotency_key, idempotency_fingerprint, filter_version, filter_json,
+        filter_fingerprint, match_key_count, requested_delivery, resolved_delivery,
+        target_session_id, target_task_id, target_runtime_id, target_agent_id,
+        lifecycle_state, reason, created_at, updated_at, expires_at,
+        owner_version, owner_project_id, owner_chat_session_id, owner_task_id,
+        owner_runtime_id, prompt_delivery_count, prompt_delivery_last_at,
+        delivery_cooldown_until, delivery_lifetime_expires_at)
+       VALUES ('sub-event-wake', 'project-1', 2, 'agent', 'project-1:chat-1', NULL,
+        'idem-event-wake', 'fp-event-wake', 1, '{"version":1}', 'filter-event-wake', 0,
+        'existing_session_prompt', 'queued_for_prompt_delivery', 'chat-1', ?,
+        NULL, 'agent-1', 'active', NULL, 10000, 10000, NULL, 2, 'project-1', 'chat-1',
+        ?, NULL, 0, NULL, NULL, 70000)`,
+      targetTaskId,
+      sourceTaskId
+    );
+    sql.exec(
+      `INSERT INTO project_event_delivery_batches
+       (id, project_id, subscription_id, idempotency_key, idempotency_fingerprint, state,
+        delivery_channel, delivery_expires_at, readable_until, ack_required,
+        requested_delivery, resolved_delivery, adapter_decision_json,
+       target_session_id, target_task_id, target_runtime_id, target_agent_id,
+       match_ids_json, event_count, created_at, updated_at, terminal_reason)
+       VALUES (?, 'project-1', 'sub-event-wake', ?, ?, 'pending', 'prompt_queue',
+        70000, 70000, 1, 'existing_session_prompt', 'queued_for_prompt_delivery', '{}',
+        'chat-1', ?, NULL, 'agent-1', '[]', 1, 10000, 10000, NULL)`,
+      deliveryId,
+      `event-wake:${deliveryId}`,
+      `fp:event-wake:${deliveryId}`,
+      targetTaskId
+    );
+    const event = admitProjectEvent(sql, {}, 'project-1', {
+      projectId: 'project-1',
+      source: 'sam.lifecycle',
+      eventType: 'task.completed',
+      subject: { type: 'task', id: sourceTaskId },
+      deliveryKey: `event:${deliveryId}`,
+      payloadFingerprint: `event-fingerprint:${deliveryId}`,
+    }).event;
+    const subscription = readSubscriptionById(sql, 'project-1', 'sub-event-wake');
+    const match = insertMatchIfAbsent(sql, event, subscription, Date.now());
+    sql.exec(
+      `UPDATE project_event_matches SET batch_id = ?, state = 'batch_created' WHERE id = ?`,
+      deliveryId,
+      match.id
+    );
+    sql.exec(
+      `UPDATE project_event_delivery_batches SET match_ids_json = ? WHERE id = ?`,
+      JSON.stringify([match.id]),
+      deliveryId
+    );
+    return claimDuePromptDeliveries(sql, config, Date.now())[0];
+  }
+
   function taskRow(
     id: string,
     status: string,
@@ -168,6 +263,17 @@ describe('ProjectData durable prompt delivery', () => {
     } as never;
   }
 
+  function envWithSourceGuard(first: () => Promise<{ id: string } | null>) {
+    return {
+      PROJECT_EVENT_WAKE_ENABLED: 'true',
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({ first })),
+        })),
+      },
+    } as never;
+  }
+
   function acceptedSubmit() {
     return vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
       kind: 'accepted',
@@ -183,6 +289,10 @@ describe('ProjectData durable prompt delivery', () => {
     projectId: 'project-1',
     recalculateAlarm: vi.fn(async () => {}),
     broadcastEvent: vi.fn(),
+    armIdleCleanup: vi.fn(),
+    nudgeDeliveries: vi.fn((chatSessionId: string) =>
+      nudgePromptDeliveriesForTarget(sql, chatSessionId)
+    ),
   };
 
   it('keeps a slow recovery retryable and sends once after the late preparation finishes', async () => {
@@ -431,6 +541,164 @@ describe('ProjectData durable prompt delivery', () => {
       deliveryState: 'failed',
       terminalReason: 'terminal_target',
     });
+  });
+
+  it('blocks a cancelled event wake at the real VM fetch boundary after token signing stalls', async () => {
+    const claim = acceptProjectEventWake('event-wake-transport-cancel');
+    const env = {
+      BASE_DOMAIN: 'example.com', PROJECT_EVENT_WAKE_ENABLED: 'true',
+      DATABASE: {
+        prepare: () => ({ bind: () => ({
+          first: async () => ({ id: 'source-task-1' }),
+          raw: async () => [['vm']],
+        }) }),
+      },
+    } as never;
+    const realNodeAgent = await vi.importActual<typeof import('../../../src/services/node-agent')>(
+      '../../../src/services/node-agent'
+    );
+    preparationMocks.send.mockImplementationOnce(realNodeAgent.sendPromptToAgentOnNode);
+    preparationMocks.capabilities.mockResolvedValue(capabilities);
+    let signingStarted!: () => void;
+    let releaseSigning!: () => void;
+    const started = new Promise<void>((resolve) => { signingStarted = resolve; });
+    const barrier = new Promise<void>((resolve) => { releaseSigning = resolve; });
+    preparationMocks.sign.mockImplementationOnce(async () => {
+      signingStarted();
+      await barrier;
+      return { token: 'test-management-token' };
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const realAdapter = new DefaultVmPromptDeliveryAdapter(env);
+    const adapter: VmPromptDeliveryAdapter = {
+      submit: (input) => realAdapter.submit({ ...input, resolvedTarget: {
+        projectId: 'project-1', chatSessionId: 'chat-1', workspaceId: 'workspace-1',
+        nodeId: 'node-1', agentSessionId: 'acp-1', userId: 'user-1',
+        runtimeIdentity: 'runtime-1', runtime: 'vm',
+      } }),
+      reconcile: (input) => realAdapter.reconcile(input),
+    };
+    try {
+      const pending = runPromptDeliveryClaim(sql, env, config, claim, adapter, hooks);
+      await started;
+      sql.exec("UPDATE project_event_subscriptions SET lifecycle_state = 'cancelled' WHERE id = ?", 'sub-event-wake');
+      releaseSigning();
+      expect(await pending).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mailbox.getMessage(sql, claim.message.id)?.deliveryState).toBe('failed');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('fails an event wake claim before adapter side effects when source authority is revoked', async () => {
+    const claim = acceptProjectEventWake('event-wake-revoked-source');
+    const first = vi.fn().mockResolvedValue(null);
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task authority was revoked',
+    });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-revoked-source')).toMatchObject({
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('validates event wake delivery against the original source task when target task differs', async () => {
+    const claim = acceptProjectEventWake('event-wake-recovery-target-revoked-source', {
+      sourceTaskId: 'source-task-1',
+      targetTaskId: 'recovery-task-1',
+    });
+    const first = vi.fn().mockResolvedValue(null);
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task authority was revoked',
+    });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-recovery-target-revoked-source')).toMatchObject({
+      sourceTaskId: 'source-task-1',
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('rejects event wake delivery when the subscription source binding changes', async () => {
+    const claim = acceptProjectEventWake('event-wake-source-binding-changed', {
+      sourceTaskId: 'recovery-task-1',
+      targetTaskId: 'recovery-task-1',
+    });
+    sql.exec(
+      `UPDATE project_event_subscriptions
+       SET owner_task_id = 'source-task-1'
+       WHERE id = 'sub-event-wake'`
+    );
+    const first = vi.fn().mockResolvedValue({ id: 'recovery-task-1' });
+    const env = envWithSourceGuard(first);
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Project event wake source task binding changed',
+    });
+    expect(first).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'event-wake-source-binding-changed')).toMatchObject({
+      sourceTaskId: 'recovery-task-1',
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
+  it('passes an event wake source guard through adapter boundaries when D1 authority is live', async () => {
+    const claim = acceptProjectEventWake('event-wake-live-source');
+    const first = vi.fn().mockResolvedValue({ id: 'source-task-1' });
+    const env = envWithSourceGuard(first);
+    const expectedGuard = {
+      taskId: 'source-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+      projectEventWake: {
+        batchId: 'event-wake-live-source',
+        subscriptionId: 'sub-event-wake',
+      },
+    };
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>(async (input) => {
+      expect(input.sourceTaskGuard).toEqual(expectedGuard);
+      await expect(input.beforeSideEffect?.()).resolves.toBeNull();
+      return {
+        kind: 'accepted',
+        acpSessionId: 'acp-1',
+        promptEpoch: Date.now(),
+        runtimeIdentity: 'runtime-1',
+        capabilities,
+        receipt: null,
+      };
+    });
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'accepted' });
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(submit).toHaveBeenCalledTimes(1);
   });
 
   it('accepts the recovery task as session owner while preserving the live source parent', async () => {
@@ -787,5 +1055,304 @@ describe('ProjectData durable prompt delivery', () => {
     expect(mailbox.getMessage(sql, 'durable-exhausted')?.terminalReason).toBe(
       'max_attempts_exceeded'
     );
+  });
+
+  // ─── Stop-and-deliver (urgent delivery phase 1) ────────────────────────────
+
+  const busyTargetRow = {
+    workspace_id: 'workspace-1',
+    user_id: 'user-1',
+    workspace_status: 'running',
+    node_id: 'node-1',
+    node_status: 'running',
+    node_health_status: 'healthy',
+    agent_version: 'v1',
+    node_runtime: 'vm',
+    agent_session_id: 'acp-1',
+    agent_session_status: 'running',
+    agent_session_updated_at: '2026-08-09T00:00:00Z',
+  };
+
+  function seedBusyTargetSession() {
+    sql.exec(
+      `INSERT INTO acp_sessions (id, chat_session_id, status)
+       VALUES ('acp-1', 'chat-1', 'running')`
+    );
+    sessionState.upsertActivityState(sql, 'acp-1', {
+      activity: 'prompting',
+      observedAt: 9_000,
+      promptStartedAt: 9_000,
+      source: 'vm_report',
+    });
+  }
+
+  function busyEnv() {
+    return {
+      DATABASE: {
+        prepare: () => ({ bind: () => ({ first: async () => busyTargetRow }) }),
+      },
+    } as never;
+  }
+
+  function mockBusySubmit() {
+    preparationMocks.capabilities.mockResolvedValue(capabilities);
+    preparationMocks.send.mockRejectedValue(
+      new NodeAgentHttpError(
+        409,
+        JSON.stringify({
+          status: 'not_ready',
+          sessionId: 'acp-1',
+          receipt: {
+            deliveryId: 'delivery-1',
+            state: 'accepted',
+            runtimeIdentity: 'runtime-1',
+            acceptedAt: 1_786_312_800_123,
+            completedAt: null,
+          },
+        })
+      )
+    );
+  }
+
+  async function runBusyClaim(messageClass: 'interrupt' | 'deliver') {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'delivery-1',
+        targetSessionId: 'chat-1',
+        displayContent: 'stop doing that',
+        deliveryContent: 'stop doing that',
+        sourceTaskId: 'task-2',
+        senderType: 'agent',
+        senderId: 'workspace-2',
+        messageClass,
+        sourceKind: 'agent_mailbox',
+        ttlMs: config.ttlMs,
+      },
+      Date.now()
+    );
+    const claim = claimDuePromptDeliveries(sql, config)[0]!;
+    const env = busyEnv();
+    const attempt = runPromptDeliveryClaim(
+      sql,
+      env,
+      config,
+      claim,
+      new DefaultVmPromptDeliveryAdapter(env),
+      hooks
+    );
+    await vi.advanceTimersByTimeAsync(config.backgroundTimeoutMs);
+    return attempt;
+  }
+
+  it('stops a busy turn for an interrupt-class claim and parks the delivery for retry', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+    preparationMocks.cancel.mockResolvedValue({ success: true, status: 200 });
+
+    await expect(runBusyClaim('interrupt')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    // The stop used the existing cancel transport against the resolved target,
+    // with the background timeout tier (this runs in the DO alarm context).
+    expect(preparationMocks.cancel).toHaveBeenCalledTimes(1);
+    expect(preparationMocks.cancel).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'acp-1',
+      expect.anything(),
+      'user-1',
+      { requestTimeoutMs: config.backgroundTimeoutMs }
+    );
+
+    // The turn end was recorded from the control plane with the turn_start
+    // guard semantics — the session is idle, not stopped.
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'idle',
+      activitySource: 'control_plane',
+      activityReason: 'cancelled',
+      promptStartedAt: null,
+    });
+
+    // Provenance for this specific path stays diagnosable, including the
+    // rule-49 observation instant captured before the VM call.
+    expect(
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM activity_events
+           WHERE event_type = 'prompt_delivery.turn_interrupted' AND session_id = 'chat-1'`
+        )
+        .get()
+    ).toEqual({ count: 1 });
+    const provenance = db
+      .prepare(
+        `SELECT payload FROM activity_events
+           WHERE event_type = 'prompt_delivery.turn_interrupted' AND session_id = 'chat-1'`
+      )
+      .get() as { payload: string };
+    expect(JSON.parse(provenance.payload)).toMatchObject({
+      deliveryId: 'delivery-1',
+      messageClass: 'interrupt',
+      targetAgentSessionId: 'acp-1',
+      observedAt: expect.any(Number),
+    });
+    expect((JSON.parse(provenance.payload) as { observedAt: number }).observedAt).toBeLessThanOrEqual(
+      Date.now()
+    );
+
+    // The turn-end fan-out released the queue surface and re-armed idle.
+    expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
+    expect(hooks.armIdleCleanup).toHaveBeenCalledWith('chat-1');
+    expect(hooks.broadcastEvent).toHaveBeenCalledWith(
+      'session.activity',
+      expect.objectContaining({ sessionId: 'chat-1', activity: 'idle' }),
+      'chat-1'
+    );
+
+    // The urgent delivery parked in retry_wait and was then re-nudged due
+    // immediately: it was still `delivering` when the turn-end fan-out ran, so
+    // without this release a nudged lower-urgency sibling could be claimed as
+    // the next prompt ahead of the urgent message that caused the stop.
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      terminalReason: null,
+      // The runner settles at t=10_000 before the advanced clock reaches
+      // t=15_000, so the re-nudge pins the attempt to the stop instant.
+      nextAttemptAt: 10_000,
+    });
+  });
+
+  it('does not stop a busy turn for informational classes', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+
+    await expect(runBusyClaim('deliver')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    expect(preparationMocks.cancel).not.toHaveBeenCalled();
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'prompting',
+    });
+    expect(
+      db
+        .prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`)
+        .get()
+    ).toEqual({ count: 0 });
+    // No turn ended and no stop happened, so nothing nudged the queue: the
+    // informational delivery keeps its ordinary backoff.
+    expect(hooks.nudgeDeliveries).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000 + config.retryBaseMs,
+    });
+  });
+
+  it('keeps the urgent delivery retryable when the cancel transport fails', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+    preparationMocks.cancel.mockResolvedValue({ success: false, status: 500 });
+
+    await expect(runBusyClaim('interrupt')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    expect(preparationMocks.cancel).toHaveBeenCalledTimes(1);
+    // No turn end was recorded — the busy turn is untouched and the delivery
+    // degrades to today's parked-in-retry_wait behaviour with ordinary backoff
+    // (a broken node must not be hot-looped by immediate retries).
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'prompting',
+    });
+    expect(hooks.nudgeDeliveries).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000 + config.retryBaseMs,
+    });
+  });
+
+  it('treats a 409 from the cancel transport as an already-ended turn and repairs the mirror', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+    preparationMocks.cancel.mockResolvedValue({ success: false, status: 409 });
+
+    await expect(runBusyClaim('interrupt')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    // Like the user stop button on 409, the control plane still records the
+    // turn end so a lost VM `idle` report cannot wedge a stale prompting
+    // mirror (.claude/rules/57).
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'idle',
+      activitySource: 'control_plane',
+      activityReason: 'cancelled',
+    });
+    // No stop signal reached the VM, so this is a repair, not an interruption.
+    expect(
+      db
+        .prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`)
+        .get()
+    ).toEqual({ count: 0 });
+    // The busy turn already ended, so the parked urgent delivery is due
+    // immediately.
+    expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000,
+    });
+  });
+
+  it('does not stomp a newer turn that started after the stop was observed', async () => {
+    seedBusyTargetSession();
+    mockBusySubmit();
+    // The cancel call observes at t=10_000, but a NEWER turn began at t=10_500
+    // while the cancel round-trip was in flight.
+    preparationMocks.cancel.mockImplementation(async () => {
+      // The old turn ends, then a NEW turn begins at t=10_500 while the
+      // cancel round-trip is still in flight (observed at t=10_000).
+      sessionState.upsertActivityState(sql, 'acp-1', {
+        activity: 'idle',
+        observedAt: 10_400,
+        source: 'vm_report',
+      });
+      sessionState.upsertActivityState(sql, 'acp-1', {
+        activity: 'prompting',
+        observedAt: 10_500,
+        promptStartedAt: 10_500,
+        source: 'vm_report',
+      });
+      return { success: true, status: 200 };
+    });
+
+    await expect(runBusyClaim('interrupt')).resolves.toMatchObject({
+      kind: 'retry',
+      reason: 'busy',
+    });
+
+    // The turn_start guard refused the stomp: the newer turn survives.
+    expect(sessionState.getSessionState(sql, 'acp-1')).toMatchObject({
+      activity: 'prompting',
+      promptStartedAt: 10_500,
+    });
+    expect(
+      db
+        .prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE event_type = 'prompt_delivery.turn_interrupted'`)
+        .get()
+    ).toEqual({ count: 0 });
+    // A stop signal still reached the VM, so the parked delivery re-nudges due
+    // immediately — it will stop the newer turn on its next claim if that turn
+    // is still in flight when it lands.
+    expect(hooks.nudgeDeliveries).toHaveBeenCalledWith('chat-1');
+    expect(mailbox.getMessage(sql, 'delivery-1')).toMatchObject({
+      deliveryState: 'retry_wait',
+      nextAttemptAt: 10_000,
+    });
   });
 });

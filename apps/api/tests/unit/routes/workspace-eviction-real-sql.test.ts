@@ -275,6 +275,7 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     expect(sqlite.prepare('SELECT stop_runtime_confirmed_at FROM workspaces').get()).toEqual({
       stop_runtime_confirmed_at: expect.any(String),
     });
+    sqlite.prepare("UPDATE nodes SET status = 'stopped', health_status = 'unhealthy' WHERE id = 'node'").run();
     expect((await stop()).status).toBe(200);
     await Promise.all(pending);
     expect(state().workspace).toEqual({ status: 'stopped' });
@@ -355,6 +356,7 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     mocks.stopSession.mockRejectedValueOnce(new Error('temporary DO failure'));
     expect((await evict()).status).toBe(500);
     expect(state().workspace).toEqual({ status: 'evicted' });
+    sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'node'").run();
     expect((await evict()).status).toBe(410);
     expect(mocks.stopSession).toHaveBeenCalledTimes(2);
   });

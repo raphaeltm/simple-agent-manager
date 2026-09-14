@@ -1,4 +1,7 @@
-import { resolveResourceReservation } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
+  resolveResourceReservation,
+} from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -439,7 +442,9 @@ describe('task run capacity-pool placement', () => {
     };
     expect(reservation.source).toBe('project');
     expect(reservation.cpuMillis).toBe(4000);
-    expect(reservation.memoryMb).toBe(8192);
+    expect(reservation.memoryMb).toBe(
+      DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.minMemoryGb * 1024
+    );
     expect(reservation.fieldProvenance.minVcpu).toMatchObject({
       source: 'project',
       compatibility: expect.objectContaining({ legacyVmSize: 'large' }),
@@ -451,7 +456,7 @@ describe('task run capacity-pool placement', () => {
         vmSizeSource: 'project',
         resolvedReservation: expect.objectContaining({
           source: 'project',
-          memoryMb: 8192,
+          memoryMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.minMemoryGb * 1024,
         }),
       })
     );

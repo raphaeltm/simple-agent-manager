@@ -8,7 +8,7 @@ import {
   type VMSize,
   type WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { desc, eq, or } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -36,12 +36,12 @@ import {
   readPersistedTaskResourcePlan,
   ResourceRequirementsValidationError,
 } from './resource-requirements-input';
-import { failAndRestoreSessionRecoveryHandoff } from './session-recovery-authority';
 import {
-  type Db,
-  sourceTaskGuardIsWakeable,
-  SourceTaskNotWakeableError,
-} from './session-recovery-task-guard';
+  failAndRestoreSessionRecoveryHandoff,
+  isSessionRecoverySourceTaskGuardValid,
+} from './session-recovery-authority';
+import { loadRecoveryContext, type RecoveryContext } from './session-recovery-context';
+import { type Db, SourceTaskNotWakeableError } from './session-recovery-task-guard';
 import {
   claimSessionSnapshotRecovery,
   failSessionSnapshotRecovery,
@@ -53,14 +53,6 @@ import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 export type SessionRecoveryResult =
   | { status: 'waking'; taskId: string }
   | { status: 'unavailable'; reason: string };
-
-type RecoveryContext = {
-  snapshot: schema.SessionSnapshot;
-  project: schema.Project;
-  workspace: schema.Workspace;
-  user: schema.User;
-  sourceTask: schema.Task | null;
-};
 
 type RecoveryPlacementResolution = TaskStartPlacementWithCredential;
 
@@ -98,41 +90,6 @@ function snapshotAgentType(snapshot: schema.SessionSnapshot): string | null {
   } catch {
     return null;
   }
-}
-
-async function loadRecoveryContext(
-  db: Db,
-  projectId: string,
-  chatSessionId: string
-): Promise<RecoveryContext | null> {
-  const snapshot = await db
-    .select()
-    .from(schema.sessionSnapshots)
-    .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
-    .get();
-  if (!snapshot?.workspaceId || snapshot.projectId !== projectId || !snapshot.sleepingAt) {
-    return null;
-  }
-
-  const [project, workspace, user] = await Promise.all([
-    db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).get(),
-    db.select().from(schema.workspaces).where(eq(schema.workspaces.id, snapshot.workspaceId)).get(),
-    db.select().from(schema.users).where(eq(schema.users.id, snapshot.userId)).get(),
-  ]);
-  if (!project || !workspace || !user || workspace.userId !== snapshot.userId) return null;
-
-  const sourceTask = await db
-    .select()
-    .from(schema.tasks)
-    .where(
-      or(
-        eq(schema.tasks.chatSessionId, chatSessionId),
-        eq(schema.tasks.workspaceId, snapshot.workspaceId)
-      )
-    )
-    .orderBy(desc(schema.tasks.updatedAt))
-    .get();
-  return { snapshot, project, workspace, user, sourceTask: sourceTask ?? null };
 }
 
 async function createRecoveryTask(
@@ -256,16 +213,40 @@ async function createRecoveryTask(
               SET chat_session_id = NULL,
                   superseded_by_task_id = ?,
                   updated_at = ?
-            WHERE chat_session_id = ?
-              AND (id = ? OR recovery_source_task_id = ?)
-              AND EXISTS (
+            WHERE EXISTS (
                 SELECT 1 FROM tasks recovery
                  WHERE recovery.id = ?
                    AND recovery.recovery_source_task_id = ?
                    AND recovery.chat_session_id IS NULL
+              )
+              AND (
+                (chat_session_id = ? AND (id = ? OR recovery_source_task_id = ?))
+                OR (
+                  id = ?
+                  AND project_id = ?
+                  AND EXISTS (
+                    SELECT 1 FROM tasks owner
+                     WHERE owner.recovery_source_task_id = tasks.id
+                       AND owner.project_id = tasks.project_id
+                       AND owner.chat_session_id = ?
+                       AND owner.triggered_by = 'session-recovery'
+                       AND owner.status NOT IN ('completed', 'failed', 'cancelled')
+                  )
+                )
               )`
         )
-        .bind(taskId, now, chatSessionId, sourceTaskId, sourceTaskId, taskId, sourceTaskId),
+        .bind(
+          taskId,
+          now,
+          taskId,
+          sourceTaskId,
+          chatSessionId,
+          sourceTaskId,
+          sourceTaskId,
+          sourceTaskId,
+          context.project.id,
+          chatSessionId
+        ),
       database
         .prepare(
           `UPDATE workspaces
@@ -295,14 +276,19 @@ async function createRecoveryTask(
                      OR source.status NOT IN ('completed', 'failed', 'cancelled')
                      OR (
                        source.status = 'cancelled'
-                       AND source.superseded_by_task_id IS NOT NULL
-                       AND EXISTS (
-                         SELECT 1 FROM tasks marked_successor
-                          WHERE marked_successor.id = source.superseded_by_task_id
-                            AND marked_successor.project_id = source.project_id
-                            AND marked_successor.chat_session_id = ?
-                            AND marked_successor.triggered_by = 'session-recovery'
-                            AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
+                       AND (
+                         source.superseded_by_task_id = ?
+                         OR (
+                           source.superseded_by_task_id IS NOT NULL
+                           AND EXISTS (
+                             SELECT 1 FROM tasks marked_successor
+                              WHERE marked_successor.id = source.superseded_by_task_id
+                                AND marked_successor.project_id = source.project_id
+                                AND marked_successor.chat_session_id = ?
+                                AND marked_successor.triggered_by = 'session-recovery'
+                                AND marked_successor.status NOT IN ('completed', 'failed', 'cancelled')
+                           )
+                         )
                        )
                      )
                    )
@@ -316,6 +302,7 @@ async function createRecoveryTask(
           sourceTaskId,
           context.project.id,
           requiresLiveSource,
+          taskId,
           chatSessionId
         ),
       database
@@ -436,12 +423,18 @@ async function startRecoveryTask(
   if (['completed', 'failed', 'cancelled'].includes(task.status)) {
     throw new Error(`Recovery task is already ${task.status}`);
   }
-  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+  if (
+    sourceTaskGuard &&
+    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
+  ) {
     throw new SourceTaskNotWakeableError();
   }
   if (task.status === 'in_progress') return;
   const alreadyStarted = await ensureTaskRunnerStarted(env, task.id);
-  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+  if (
+    sourceTaskGuard &&
+    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
+  ) {
     throw new SourceTaskNotWakeableError();
   }
   if (alreadyStarted) return;
@@ -454,7 +447,10 @@ async function startRecoveryTask(
         .get()
     : null;
 
-  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+  if (
+    sourceTaskGuard &&
+    !(await isSessionRecoverySourceTaskGuardValid(env.DATABASE, sourceTaskGuard))
+  ) {
     throw new SourceTaskNotWakeableError();
   }
 
@@ -519,6 +515,8 @@ async function startRecoveryTask(
     // still revalidate that the old runtime is gone before allocating a node.
     recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
     retrySourceTaskId: task.recoverySourceTaskId ?? null,
+    projectEventWakeGuard: sourceTaskGuard?.projectEventWake ?? null,
+    recoveryRequiredProjectMemberId: sourceTaskGuard?.requiredProjectMemberId ?? null,
   });
 }
 

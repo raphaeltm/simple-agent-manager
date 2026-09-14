@@ -219,6 +219,7 @@ beforeEach(() => {
     schema.sessionSnapshots,
     schema.tasks,
     schema.taskStatusEvents,
+    schema.projectEventSourceOutbox,
     schema.triggerExecutions,
     schema.vmTaskAdmissions,
     schema.vmProvisioningLeases,

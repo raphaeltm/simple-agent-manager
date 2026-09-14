@@ -58,7 +58,7 @@ workspaceStopRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c
     if (!CF_CONTAINER_STOPPABLE_NODE_STATUSES.has(node.status)) {
       throw errors.badRequest(`Cannot stop workspace: node is ${node.status}`);
     }
-  } else {
+  } else if (!retryStopCleanup) {
     assertNodeOperational(node, 'stop workspace');
   }
 

@@ -25,6 +25,7 @@ type EvictionDelivery struct {
 	ContainerStopped bool
 	OccurredAt       time.Time
 	Attempts         int
+	PayloadRevision  int
 	NextAttemptAt    time.Time
 }
 
@@ -49,6 +50,11 @@ func migrateV15(db *sql.DB) error {
 		next_attempt_at INTEGER NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS eviction_deliveries_due ON eviction_deliveries(next_attempt_at, id);`)
+	return err
+}
+
+func migrateV17(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE eviction_deliveries ADD COLUMN payload_revision INTEGER NOT NULL DEFAULT 0`)
 	return err
 }
 
@@ -81,7 +87,16 @@ func (s *Store) RecordWorkspaceEviction(ctx context.Context, delivery EvictionDe
 		(id, workspace_id, project_id, node_id, container_id, generation, reason, snapshot_captured, container_stopped, occurred_at, next_attempt_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET
 		container_stopped=MAX(eviction_deliveries.container_stopped, excluded.container_stopped),
-		snapshot_captured=MAX(eviction_deliveries.snapshot_captured, excluded.snapshot_captured)`,
+		snapshot_captured=MAX(eviction_deliveries.snapshot_captured, excluded.snapshot_captured),
+		payload_revision=eviction_deliveries.payload_revision + CASE
+			WHEN excluded.container_stopped > eviction_deliveries.container_stopped
+			  OR excluded.snapshot_captured > eviction_deliveries.snapshot_captured
+			THEN 1 ELSE 0 END,
+		next_attempt_at=CASE
+			WHEN excluded.container_stopped > eviction_deliveries.container_stopped
+			  OR excluded.snapshot_captured > eviction_deliveries.snapshot_captured
+			THEN MIN(eviction_deliveries.next_attempt_at, excluded.next_attempt_at)
+			ELSE eviction_deliveries.next_attempt_at END`,
 		delivery.ID, delivery.WorkspaceID, delivery.ProjectID, delivery.NodeID, delivery.ContainerID, delivery.Generation,
 		delivery.Reason, delivery.SnapshotCaptured, delivery.ContainerStopped, delivery.OccurredAt.UnixMilli(), delivery.OccurredAt.UnixMilli())
 	if err != nil {
@@ -109,10 +124,10 @@ func (s *Store) ClaimEvictionDelivery(ctx context.Context, id string, now time.T
 	var d EvictionDelivery
 	var occurredAt, nextAt int64
 	err = tx.QueryRowContext(ctx, `SELECT id, workspace_id, project_id, node_id, container_id, generation, reason,
-		snapshot_captured, container_stopped, occurred_at, attempts, next_attempt_at
+		snapshot_captured, container_stopped, occurred_at, attempts, payload_revision, next_attempt_at
 		FROM eviction_deliveries WHERE next_attempt_at <= ? AND (? = '' OR id = ?) ORDER BY next_attempt_at, id LIMIT 1`,
 		now.UnixMilli(), id, id).Scan(&d.ID, &d.WorkspaceID, &d.ProjectID, &d.NodeID, &d.ContainerID, &d.Generation, &d.Reason,
-		&d.SnapshotCaptured, &d.ContainerStopped, &occurredAt, &d.Attempts, &nextAt)
+		&d.SnapshotCaptured, &d.ContainerStopped, &occurredAt, &d.Attempts, &d.PayloadRevision, &nextAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -125,7 +140,7 @@ func (s *Store) ClaimEvictionDelivery(ctx context.Context, id string, now time.T
 		delay = leaseMinimum
 	}
 	d.NextAttemptAt = now.Add(delay)
-	_, err = tx.ExecContext(ctx, `UPDATE eviction_deliveries SET attempts=attempts+1, next_attempt_at=? WHERE id=?`, d.NextAttemptAt.UnixMilli(), d.ID)
+	_, err = tx.ExecContext(ctx, `UPDATE eviction_deliveries SET attempts=attempts+1, next_attempt_at=? WHERE id=? AND payload_revision=?`, d.NextAttemptAt.UnixMilli(), d.ID, d.PayloadRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -150,11 +165,12 @@ func evictionRetryDelay(attempts int, base, maximum time.Duration) time.Duration
 	return delay
 }
 
-// CompleteEvictionDelivery retires acknowledged/terminal callbacks. Attempts are
-// fenced so a slow expired lease cannot delete a newer retry's durable row.
-func (s *Store) CompleteEvictionDelivery(ctx context.Context, id string, attempts int) error {
+// CompleteEvictionDelivery retires acknowledged/terminal callbacks. Attempts and
+// payload revision are fenced so a slow expired lease cannot delete a newer
+// retry or a payload upgraded after the delivery was claimed.
+func (s *Store) CompleteEvictionDelivery(ctx context.Context, id string, attempts int, payloadRevision int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.ExecContext(ctx, `DELETE FROM eviction_deliveries WHERE id=? AND attempts=?`, id, attempts)
+	_, err := s.db.ExecContext(ctx, `DELETE FROM eviction_deliveries WHERE id=? AND attempts=? AND payload_revision=?`, id, attempts, payloadRevision)
 	return err
 }

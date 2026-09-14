@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS,
+  LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
   PLATFORM_RESOURCE_DEFAULTS,
   resolveResourceReservation,
   RESOURCE_RESERVATION_VERSION,
@@ -192,6 +193,30 @@ describe('resolveResourceReservation', () => {
     });
   });
 
+  it('maps legacy sizes through adapter v2 to exact workload reservation units', () => {
+    const cases = [
+      ['small', 625, 1152, 13_312, 3],
+      ['medium', 2_000, 3_712, 40_960, 2],
+      ['large', 4_000, 7_808, 81_920, 2],
+    ] as const;
+
+    for (const [legacySize, cpuMillis, memoryMb, diskMb, maxCoTenants] of cases) {
+      const result = resolveResourceReservation({}, {}, { legacyVmSizes: { task: legacySize } });
+      expect(result).toMatchObject({
+        cpuMillis,
+        memoryMb,
+        diskMb,
+        exclusiveNode: false,
+        maxCoTenants,
+      });
+      expect(result.fieldProvenance?.minVcpu?.compatibility).toMatchObject({
+        adapter: 'legacy-vm-size-workload',
+        version: LEGACY_VM_SIZE_WORKLOAD_ADAPTER_VERSION,
+        legacyVmSize: legacySize,
+      });
+    }
+  });
+
   it('keeps modern fields authoritative over legacy values within the same layer', () => {
     const result = resolveResourceReservation(
       { task: { minMemoryGb: 12 } },
@@ -221,7 +246,9 @@ describe('resolveResourceReservation', () => {
     );
 
     expect(result.cpuMillis).toBe(4000);
-    expect(result.memoryMb).toBe(8 * 1024);
+    expect(result.memoryMb).toBe(
+      DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.minMemoryGb * 1024
+    );
     expect(result.fieldProvenance?.minVcpu).toMatchObject({
       source: 'task',
       sourceId: 'task-legacy',
@@ -284,11 +311,11 @@ describe('resolveResourceReservation', () => {
     );
 
     expect(result).toMatchObject({
-      cpuMillis: 1000,
-      memoryMb: 2 * 1024,
-      diskMb: 20 * 1024,
+      cpuMillis: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minVcpu * 1000,
+      memoryMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minMemoryGb * 1024,
+      diskMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minDiskGb * 1024,
       exclusiveNode: false,
-      maxCoTenants: 4,
+      maxCoTenants: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.maxCoTenants,
       source: 'task',
       sourceId: 'task-id',
     });
@@ -321,10 +348,10 @@ describe('resolveResourceReservation', () => {
 
     expect(result).toMatchObject({
       cpuMillis: 4000,
-      memoryMb: 8 * 1024,
-      diskMb: 80 * 1024,
+      memoryMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.minMemoryGb * 1024,
+      diskMb: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.minDiskGb * 1024,
       exclusiveNode: false,
-      maxCoTenants: 2,
+      maxCoTenants: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.maxCoTenants,
       source: 'skill',
       sourceId: 'skill-id',
     });
@@ -334,7 +361,7 @@ describe('resolveResourceReservation', () => {
     });
     expect(result.fieldProvenance?.minMemoryGb).toMatchObject({
       source: 'skill',
-      value: 8,
+      value: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.large.minMemoryGb,
       compatibility: { legacyVmSize: 'large' },
     });
     expect(result.fieldProvenance?.minDiskGb).toMatchObject({

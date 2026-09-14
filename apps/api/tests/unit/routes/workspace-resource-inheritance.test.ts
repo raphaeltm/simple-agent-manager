@@ -1,3 +1,4 @@
+import { DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,9 +42,9 @@ describe('direct workspace resource inheritance through HTTP and persisted reser
     {
       label: 'explicit legacy',
       body: { vmSize: 'small' },
-      cpu: 1000,
-      memory: 2048,
-      disk: 20480,
+      cpu: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minVcpu * 1000,
+      memory: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minMemoryGb * 1024,
+      disk: DEFAULT_LEGACY_VM_SIZE_WORKLOAD_REQUIREMENTS.small.minDiskGb * 1024,
       source: 'task',
     },
     {

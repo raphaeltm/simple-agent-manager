@@ -7,6 +7,7 @@ import {
   parseJsonRecord,
   readRequestJsonRecord,
   readResponseJson,
+  RequestBodyTooLargeError,
   RuntimeValidationError,
 } from '../../src/lib/runtime-validation';
 
@@ -42,6 +43,29 @@ describe('runtime-validation helpers', () => {
     await expect(readRequestJsonRecord(request, 'unit.request')).resolves.toEqual({
       projectId: 'proj_123',
     });
+  });
+
+  it('rejects request JSON bodies over an explicit byte limit', async () => {
+    const request = new Request('https://example.test', {
+      method: 'POST',
+      headers: { 'Content-Length': '1000' },
+      body: JSON.stringify({ projectId: 'proj_123' }),
+    });
+
+    await expect(readRequestJsonRecord(request, 'unit.request', 8)).rejects.toThrow(
+      RequestBodyTooLargeError
+    );
+  });
+
+  it('rejects streamed request JSON bodies once the byte limit is exceeded', async () => {
+    const request = new Request('https://example.test', {
+      method: 'POST',
+      body: JSON.stringify({ projectId: 'proj_123' }),
+    });
+
+    await expect(readRequestJsonRecord(request, 'unit.request', 12)).rejects.toThrow(
+      RequestBodyTooLargeError
+    );
   });
 
   it('rejects malformed response JSON against a schema', async () => {

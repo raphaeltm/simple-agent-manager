@@ -927,6 +927,8 @@ export async function getDecryptedAgentKey(
   credential: string;
   credentialKind: CredentialKind;
   credentialSource: CredentialSource;
+  credentialReference: string;
+  credentialProvider?: string;
   baseUrl?: string;
   providerDialect?: Dialect;
 } | null> {
@@ -955,6 +957,8 @@ async function resolveAgentKeyViaCC(
       credential: string;
       credentialKind: CredentialKind;
       credentialSource: CredentialSource;
+      credentialReference: string;
+      credentialProvider?: string;
       baseUrl?: string;
       providerDialect?: Dialect;
     }
@@ -1014,6 +1018,8 @@ function mapResolvedToLegacy(
   credential: string;
   credentialKind: CredentialKind;
   credentialSource: CredentialSource;
+  credentialReference: string;
+  credentialProvider?: string;
   baseUrl?: string;
   providerDialect?: Dialect;
 } | null {
@@ -1055,6 +1061,9 @@ function mapResolvedToLegacy(
   }
 
   const credentialSource = mapSourceToLegacy(resolved.source);
+  const credentialReference = resolved.credential.id
+    ? `cc_credentials:${resolved.credential.id}`
+    : `cc_credentials:${resolved.source}`;
   const settings = resolved.configuration?.settings ?? {};
   const settingsBaseUrl =
     typeof settings.baseUrl === 'string' && settings.baseUrl.trim() !== ''
@@ -1071,6 +1080,8 @@ function mapResolvedToLegacy(
     credential,
     credentialKind,
     credentialSource,
+    credentialReference,
+    credentialProvider: providerDialect ?? resolved.consumer.kind,
     ...(baseUrl ? { baseUrl } : {}),
     ...(providerDialect ? { providerDialect } : {}),
   };
@@ -1107,6 +1118,8 @@ async function resolveAgentKeyLegacy(
   credential: string;
   credentialKind: CredentialKind;
   credentialSource: CredentialSource;
+  credentialReference: string;
+  credentialProvider?: string;
 } | null> {
   // 1. Project-scoped credential (Rule 28: inactive blocks fallthrough)
   if (projectId) {
@@ -1131,6 +1144,8 @@ async function resolveAgentKeyLegacy(
           credential,
           credentialKind: projectCred.credentialKind as CredentialKind,
           credentialSource: 'project',
+          credentialReference: `credentials:${projectCred.id}`,
+          credentialProvider: agentType,
         };
       }
       return null;
@@ -1159,6 +1174,8 @@ async function resolveAgentKeyLegacy(
       credential,
       credentialKind: foundCred.credentialKind as CredentialKind,
       credentialSource: 'user',
+      credentialReference: `credentials:${foundCred.id}`,
+      credentialProvider: agentType,
     };
   }
 
@@ -1169,6 +1186,8 @@ async function resolveAgentKeyLegacy(
       credential: platformCred.credential,
       credentialKind: platformCred.credentialKind as CredentialKind,
       credentialSource: 'platform',
+      credentialReference: `platform_credentials:${platformCred.credentialId}`,
+      credentialProvider: agentType,
     };
   }
 
@@ -1184,6 +1203,16 @@ export async function getDecryptedCredential(
   provider: string,
   encryptionKey: string
 ): Promise<string | null> {
+  const credentialRecord = await getDecryptedCredentialRecord(db, userId, provider, encryptionKey);
+  return credentialRecord?.credential ?? null;
+}
+
+export async function getDecryptedCredentialRecord(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  provider: string,
+  encryptionKey: string
+): Promise<{ credential: string; credentialReference: string; credentialProvider: string } | null> {
   const creds = await db
     .select()
     .from(schema.credentials)
@@ -1201,7 +1230,12 @@ export async function getDecryptedCredential(
     return null;
   }
 
-  return decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
+  const credential = await decrypt(foundCred.encryptedToken, foundCred.iv, encryptionKey);
+  return {
+    credential,
+    credentialReference: `credentials:${foundCred.id}`,
+    credentialProvider: provider,
+  };
 }
 
 export { credentialsRoutes };

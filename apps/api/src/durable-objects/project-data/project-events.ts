@@ -16,6 +16,7 @@ import {
   ProjectEventIdempotencyConflictError,
   ProjectEventValidationError,
 } from './project-events-contracts';
+import { findNewerCredentialLimitEvent } from './project-events-credential-supersession';
 import { resolveProjectEventLimits } from './project-events-limits';
 import { mapProjectEventSubscription } from './project-events-mappers';
 import {
@@ -25,6 +26,7 @@ import {
   normalizeProjectId,
   normalizeSubscriptionInput,
 } from './project-events-normalization';
+import { ensureProjectEventRetentionScheduled } from './project-events-scheduler';
 import {
   createMatchesForEvent,
   enforceActiveSubscriptionLimit,
@@ -99,6 +101,16 @@ export {
   type ResolveProjectEventDeliveryInput,
 } from './project-events-delivery-resolver';
 export { resolveProjectEventLimits } from './project-events-limits';
+export {
+  type AcceptedProjectEventWake,
+  cancelProjectEventWakeForRevokedSourceTask,
+  type ProjectEventWakeMaterializationCandidate,
+  type ProjectEventWakeMaterializationResult,
+  type ProjectEventWakeSourceTaskGuard,
+  runProjectEventWakeMaterializationBatch,
+  selectProjectEventWakeMaterializationCandidate,
+  selectProjectEventWakeMaterializationCandidates,
+} from './project-events-materialization';
 export { compileProjectEventFilter } from './project-events-normalization';
 export {
   ackProjectEventDelivery,
@@ -106,16 +118,36 @@ export {
   listProjectEventSubscriptionEvents,
 } from './project-events-pull';
 export {
+  computeProjectEventMaterializationAlarmTime,
+  computeProjectEventRetentionAlarmTime,
+  ensureProjectEventRetentionScheduled,
+  isProjectEventRetentionDue,
+  isProjectEventWakeEnabled,
+  markSchedulerSuccess,
+  readSchedulerState,
+  recordSchedulerFailure,
+} from './project-events-scheduler';
+export {
   getProjectEventRecentStatus,
   refreshProjectEventStorageAccounting,
   runProjectEventRetention,
 } from './project-events-status-retention';
+export {
+  advanceProjectEventPromptAttemptCheckpoint,
+  EVENT_WAKE_ADAPTER_ID,
+  hasProjectEventWakeLease,
+  invalidProjectEventWakeDeliveryTargetResult,
+  readProjectEventWakeLeaseUntil,
+  validateProjectEventWakeRecoveryAuthority,
+  type ValidateProjectEventWakeRecoveryAuthorityInput,
+} from './project-events-wake-delivery';
 
 export function admitProjectEvent(
   sql: SqlStorage,
   env: Env,
   storedProjectId: string | null,
-  input: AdmitProjectEventInput
+  input: AdmitProjectEventInput,
+  requireCompleteFanout = false
 ): ProjectEventAdmissionResult {
   const limits = resolveProjectEventLimits(env);
   const eventInput = normalizeProjectEventInput(input, limits);
@@ -128,6 +160,7 @@ export function admitProjectEvent(
     eventInput.deliveryKey
   );
   if (existing) {
+    ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
     if (existing.payloadFingerprint === eventInput.payloadFingerprint) {
       sql.exec(
         `UPDATE project_events
@@ -171,13 +204,34 @@ export function admitProjectEvent(
     };
   }
 
+  const newerCredentialEvent = findNewerCredentialLimitEvent(sql, eventInput);
+  if (newerCredentialEvent) {
+    ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
+    return {
+      outcome: 'conflict',
+      event: newerCredentialEvent,
+      matches: listMatchesForEvent(
+        sql,
+        eventInput.projectId,
+        newerCredentialEvent.id,
+        limits.listLimitMax
+      ),
+      conflict: {
+        deliveryKey: eventInput.deliveryKey,
+        existingFingerprint: newerCredentialEvent.payloadFingerprint,
+        incomingFingerprint: eventInput.payloadFingerprint,
+      },
+    };
+  }
+
   const eventId = generateId();
   sql.exec(
     `INSERT INTO project_events
      (id, project_id, contract_version, source, event_type, subject_type, subject_id, severity,
-      delivery_key, payload_fingerprint, metadata_json, metadata_bytes, display_json, display_bytes,
+      delivery_key, payload_fingerprint, metadata_json, metadata_bytes,
+      audience_scope, audience_project_id, audience_user_id, display_json, display_bytes,
       raw_payload_ref_json, raw_payload_ref_bytes, occurred_at, received_at, updated_at, state)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     eventId,
     eventInput.projectId,
     eventInput.contractVersion,
@@ -190,6 +244,9 @@ export function admitProjectEvent(
     eventInput.payloadFingerprint,
     eventInput.metadataJson,
     eventInput.metadataBytes,
+    eventInput.audience.scope,
+    eventInput.audience.projectId,
+    eventInput.audience.userId,
     eventInput.displayJson,
     eventInput.displayBytes,
     eventInput.rawPayloadRefJson,
@@ -201,7 +258,14 @@ export function admitProjectEvent(
   );
 
   const event = readEventById(sql, eventInput.projectId, eventId);
-  const matches = createMatchesForEvent(sql, event, eventInput.receivedAt, limits);
+  const matches = createMatchesForEvent(
+    sql,
+    event,
+    eventInput.receivedAt,
+    limits,
+    requireCompleteFanout
+  );
+  ensureProjectEventRetentionScheduled(sql, env, eventInput.projectId, Date.now());
   return { outcome: 'created', event, matches };
 }
 
@@ -241,16 +305,26 @@ export function createProjectEventSubscription(
   );
 
   const subscriptionId = generateId();
+  const deliveryLifetimeExpiresAt =
+    normalized.deliveryPreference.resolved === 'queued_for_prompt_delivery'
+      ? Math.min(
+          normalized.expiresAt ?? now + limits.wakeSubscriptionLifetimeMs,
+          now + limits.wakeSubscriptionLifetimeMs
+        )
+      : normalized.expiresAt;
   sql.exec(
     `INSERT INTO project_event_subscriptions
      (id, project_id, contract_version, owner_type, owner_id, owner_name, idempotency_key,
       idempotency_fingerprint, filter_version, filter_json, filter_fingerprint, match_key_count,
       requested_delivery, resolved_delivery, target_session_id, target_task_id, target_runtime_id,
-      target_agent_id, lifecycle_state, reason, created_at, updated_at, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      target_agent_id, lifecycle_state, reason, created_at, updated_at, expires_at,
+      owner_version, owner_project_id, owner_chat_session_id, owner_task_id, owner_runtime_id,
+      prompt_delivery_count, prompt_delivery_last_at, delivery_cooldown_until,
+      delivery_lifetime_expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     subscriptionId,
     normalized.projectId,
-    1,
+    normalized.deliveryPreference.resolved === 'queued_for_prompt_delivery' ? 2 : 1,
     normalized.owner.type,
     normalized.owner.id,
     normalized.owner.name,
@@ -270,7 +344,18 @@ export function createProjectEventSubscription(
     normalized.reason,
     now,
     now,
-    normalized.expiresAt
+    normalized.expiresAt,
+    normalized.deliveryPreference.resolved === 'queued_for_prompt_delivery' ? 2 : 1,
+    normalized.projectId,
+    normalized.deliveryPreference.target?.sessionId ?? null,
+    normalized.ownerTaskId ?? normalized.deliveryPreference.target?.taskId ?? null,
+    normalized.deliveryPreference.target?.runtimeId ??
+      normalized.deliveryPreference.target?.agentId ??
+      null,
+    0,
+    null,
+    null,
+    deliveryLifetimeExpiresAt
   );
   for (const key of normalized.compiledFilter.matchKeys) {
     sql.exec(
@@ -306,13 +391,30 @@ export function listProjectEventSubscriptions(
   const limit = normalizeListLimit(input.limit, limits);
   const state = input.state ?? 'active';
   const owner = input.owner ? normalizeOwnerForRead(input.owner, limits) : null;
+  const legacyOwners = (input.legacyOwners ?? []).map((legacyOwner) =>
+    normalizeOwnerForRead(legacyOwner, limits)
+  );
   const params: unknown[] = [projectId];
   let where = 'WHERE project_id = ?';
+  if (input.targetSessionId !== undefined && input.targetSessionId !== null) {
+    where += ' AND target_session_id = ?';
+    params.push(
+      normalizeText(input.targetSessionId, 'targetSessionId', limits.maxFilterStringBytes)
+    );
+  }
   if (state !== 'any') {
     where += ' AND lifecycle_state = ?';
     params.push(state);
   }
-  if (owner) {
+  if (owner && legacyOwners.length > 0) {
+    const ownerPredicates = ['(owner_type = ? AND owner_id = ?)'];
+    params.push(owner.type, owner.id);
+    for (const legacyOwner of legacyOwners) {
+      ownerPredicates.push('(owner_version = 1 AND owner_type = ? AND owner_id = ?)');
+      params.push(legacyOwner.type, legacyOwner.id);
+    }
+    where += ` AND (${ownerPredicates.join(' OR ')})`;
+  } else if (owner) {
     where += ' AND owner_type = ? AND owner_id = ?';
     params.push(owner.type, owner.id);
   }
@@ -369,7 +471,7 @@ export function cancelProjectEventSubscription(
   const now = Date.now();
   expireDueSubscriptions(sql, projectId, now, limits.retentionBatchRows);
   const subscription = getRequiredSubscription(sql, projectId, subscriptionId);
-  if (subscription.state !== 'active') {
+  if (subscription.state === 'cancelled') {
     return { subscription, idempotent: true, changed: false };
   }
   sql.exec(
@@ -380,8 +482,9 @@ export function cancelProjectEventSubscription(
          cancelled_by_id = ?,
          cancelled_by_name = ?,
          cancel_reason = ?,
+         wake_due_at = NULL,
          updated_at = ?
-     WHERE project_id = ? AND id = ? AND lifecycle_state = 'active'`,
+     WHERE project_id = ? AND id = ? AND lifecycle_state != 'cancelled'`,
     now,
     cancelledBy.type,
     cancelledBy.id,
@@ -400,6 +503,41 @@ export function cancelProjectEventSubscription(
        AND state = 'matched'`,
     now,
     'subscription cancelled',
+    projectId,
+    subscriptionId
+  );
+  sql.exec(
+    `UPDATE project_event_delivery_batches
+     SET state = 'cancelled',
+         readable_until = NULL,
+         updated_at = ?,
+         terminal_at = COALESCE(terminal_at, ?),
+         terminal_reason = COALESCE(terminal_reason, ?)
+     WHERE project_id = ?
+       AND subscription_id = ?
+       AND delivery_channel = 'prompt_queue'
+       AND state IN ('pending', 'delivered')`,
+    now,
+    now,
+    'subscription cancelled',
+    projectId,
+    subscriptionId
+  );
+  sql.exec(
+    `UPDATE session_inbox
+     SET delivery_state = 'failed',
+         terminal_reason = 'subscription_cancelled',
+         last_error = 'Project event wake subscription was cancelled',
+         next_attempt_at = NULL,
+         attempt_started_at = NULL
+     WHERE source_kind = 'project_event_wake'
+       AND id IN (
+         SELECT id FROM project_event_delivery_batches
+         WHERE project_id = ?
+           AND subscription_id = ?
+           AND delivery_channel = 'prompt_queue'
+       )
+       AND delivery_state IN ('queued', 'retry_wait', 'delivering', 'delivered')`,
     projectId,
     subscriptionId
   );

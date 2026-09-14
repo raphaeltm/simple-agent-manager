@@ -376,6 +376,36 @@ describe('project-scoped MCP agent messaging authorization', () => {
     expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
+  it('send_durable_message composes stop-and-deliver context for urgent classes while keeping the raw transcript message', async () => {
+    const { env } = createMessagingEnv();
+    const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
+
+    const response = await handleSendDurableMessage(
+      1,
+      {
+        targetTaskId: 'task-sibling',
+        message: 'stop the staging deploy immediately',
+        messageClass: 'interrupt',
+      },
+      callerToken,
+      durableEnv
+    );
+
+    expect(response.error).toBeUndefined();
+    expect(mockAcceptPromptDelivery).toHaveBeenCalledTimes(1);
+    const input = mockAcceptPromptDelivery.mock.calls[0][2] as Record<string, string>;
+    // The transcript row keeps the sender's raw message...
+    expect(input.displayContent).toBe('stop the staging deploy immediately');
+    // ...while the submitted prompt carries the stop context and the fenced,
+    // untrusted-labelled directive.
+    expect(input.deliveryContent).toContain('[Urgent agent message — class: interrupt]');
+    expect(input.deliveryContent).toContain('from task task-caller');
+    expect(input.deliveryContent).toContain('stops any in-flight turn');
+    expect(input.deliveryContent).toContain('untrusted peer content');
+    expect(input.deliveryContent).toContain('<<<\nstop the staging deploy immediately\n>>>');
+    expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
   it('send_durable_message rejects cross-project and terminal targets before accepting delivery', async () => {
     const { env } = createMessagingEnv();
     const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;

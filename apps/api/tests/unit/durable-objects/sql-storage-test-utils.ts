@@ -7,7 +7,8 @@ export function createSqlStorage(db: Database.Database): SqlStorage {
       const isSelect =
         trimmed.startsWith('SELECT') ||
         trimmed.startsWith('WITH') ||
-        trimmed.startsWith('PRAGMA TABLE_INFO');
+        trimmed.startsWith('PRAGMA TABLE_INFO') ||
+        /\bRETURNING\b/.test(trimmed);
 
       if (isSelect) {
         const stmt = db.prepare(query);
@@ -16,8 +17,10 @@ export function createSqlStorage(db: Database.Database): SqlStorage {
           toArray() {
             return rows;
           },
-          [Symbol.iterator]() { return rows[Symbol.iterator](); },
-          rowsWritten: 0,
+          [Symbol.iterator]() {
+            return rows[Symbol.iterator]();
+          },
+          rowsWritten: /\bRETURNING\b/.test(trimmed) ? rows.length : 0,
         };
       }
 

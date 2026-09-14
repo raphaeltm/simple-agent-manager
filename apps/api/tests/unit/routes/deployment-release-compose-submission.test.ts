@@ -60,6 +60,7 @@ vi.mock('../../../src/lib/ulid', () => ({
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
+  createModuleLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
   serializeError: vi.fn((e: unknown) => ({ error: String(e) })),
 }));

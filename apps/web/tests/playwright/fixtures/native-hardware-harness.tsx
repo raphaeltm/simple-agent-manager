@@ -131,7 +131,13 @@ function Surface() {
       />
     );
   if (surface === 'node-detail') return <NodeOverviewSection node={node} />;
-  if (surface === 'workspace-card') return <WorkspaceCard workspace={workspace} />;
+  if (surface === 'workspace-card') {
+    const cardWorkspace: WorkspaceResponse =
+      scenario === 'normal'
+        ? { ...workspace, status: 'evicted', errorMessage: 'Stopped after memory pressure' }
+        : workspace;
+    return <WorkspaceCard workspace={cardWorkspace} onRestart={noop} />;
+  }
   if (surface === 'session-infrastructure')
     return (
       <SessionHeaderInfrastructure

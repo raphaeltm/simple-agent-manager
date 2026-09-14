@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  assertWorkerTextBindingLimit,
   checkTailWorkerExists,
+  CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT,
+  countWorkerTextBindings,
   detectArtifactsAvailable,
   ensureTomlMap,
   generateApiWorkerEnv,
@@ -659,6 +662,23 @@ describe('sync wrangler config', () => {
 
     expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, true, null)).toThrow(
       'Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml'
+    );
+  });
+
+  it('fails when generated Worker text bindings exceed the guard limit', () => {
+    const existingTextBindings = countWorkerTextBindings({ vars: {} });
+    const vars = Object.fromEntries(
+      Array.from(
+        {
+          length: CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT - existingTextBindings + 1,
+        },
+        (_, index) => [`TEST_TEXT_BINDING_${index}`, 'value']
+      )
+    );
+
+    expect(countWorkerTextBindings({ vars })).toBe(CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT + 1);
+    expect(() => assertWorkerTextBindingLimit({ vars })).toThrow(
+      'Generated Cloudflare Worker text bindings (341) exceed the 340 guard limit (350 Cloudflare max with 10 headroom)'
     );
   });
 

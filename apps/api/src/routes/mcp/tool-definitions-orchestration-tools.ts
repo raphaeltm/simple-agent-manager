@@ -46,9 +46,11 @@ export const ORCHESTRATION_TOOLS = [
     description:
       'Send a durable message to an active same-project task agent. The message is persisted in the mailbox and will be delivered ' +
       'even if the target agent is busy. Message classes control urgency: "notify" (best-effort), "deliver" (durable, ack optional), ' +
-      '"interrupt" (preempts current work), "preempt_and_replan" (requires ack + replanning), ' +
-      '"shutdown_with_final_prompt" (delivers final message with highest urgency — session termination is a Phase 2 feature). ' +
-      'Returns the message ID and delivery state.',
+      '"interrupt" (may stop the target\'s in-flight turn so the message is delivered as its next prompt), ' +
+      '"preempt_and_replan" (same stop-and-deliver, requires ack + replanning), ' +
+      '"shutdown_with_final_prompt" (same stop-and-deliver with highest urgency — session termination is a Phase 2 feature). ' +
+      'Urgent classes ("interrupt" and above) cancel the target\'s current turn through the same transport as the user stop button, ' +
+      'so use them only when the peer must see the message immediately. Returns the message ID and delivery state.',
     inputSchema: {
       type: 'object' as const,
       properties: {

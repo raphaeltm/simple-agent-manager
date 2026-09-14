@@ -345,6 +345,14 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
           },
         });
       } catch (err) {
+        if (workspace.status === 'evicted') {
+          await stopComputeTracking(innerDb, workspace.id).catch((cleanupError) => {
+            log.warn('workspace.evicted_restart_compute_tracking_stop_failed', {
+              workspaceId: workspace.id,
+              error: String(cleanupError),
+            });
+          });
+        }
         await recordWorkspaceRuntimeRecreationFailure(
           c.env,
           innerDb,

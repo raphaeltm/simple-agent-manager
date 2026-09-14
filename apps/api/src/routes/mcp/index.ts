@@ -139,11 +139,13 @@ import {
   handleRemoveProfileEnvVar,
   handleUpdateAgentProfile,
 } from './profile-tools';
+import { handleChannelTool } from './project-event-channel-tools';
 import {
   handleAckEventDelivery,
   handleGetEvent,
   handleListSubscriptionEvents,
 } from './project-event-tools';
+import { handleScheduleTool } from './project-schedule-tools';
 import {
   handleGetArchivedToolPayloads,
   handleGetSessionMessages,
@@ -328,6 +330,21 @@ mcpRoutes.post('/', async (c) => {
           }
           case 'wait_for_subtasks':
             return c.json(await handleWaitForSubtasks(requestId, toolArgs, tokenData, c.env));
+          case 'create_project_schedule':
+          case 'list_project_schedules':
+          case 'get_project_schedule':
+          case 'reschedule_project_schedule':
+          case 'cancel_project_schedule':
+          case 'reconcile_project_schedule':
+            return c.json(
+              await handleScheduleTool(toolName, requestId, toolArgs, tokenData, c.env)
+            );
+          case 'publish_channel_event':
+          case 'list_event_channels':
+          case 'get_channel_history':
+          case 'follow_event_channel':
+          case 'catch_up_event_channel':
+            return c.json(await handleChannelTool(toolName, requestId, toolArgs, tokenData, c.env));
           case 'create_project_event_subscription':
             return c.json(
               await handleCreateProjectEventSubscription(requestId, toolArgs, tokenData, c.env)

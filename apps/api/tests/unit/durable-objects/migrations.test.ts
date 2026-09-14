@@ -551,7 +551,11 @@ describe('DO Migrations', () => {
       // chat search materialization state: 1 from migration 042
       // terminal archive sharding bridge: 3 from migration 043
       // compact raw chunk time ranges: 1 from migration 045
-      expect(indexes).toHaveLength(91);
+      // project event wake delivery: 6 from migration 047
+      // project event wake retention repair indexes: 9 from migration 048
+      // Additive audience/channel/schedule/wake-seek indexes (049–054): 18.
+      // Active mailbox capacity index (055): 1.
+      expect(indexes).toHaveLength(125);
       expect(indexes.some((query) => query.includes('idx_archive_raw_chunk_time'))).toBe(true);
     });
   });

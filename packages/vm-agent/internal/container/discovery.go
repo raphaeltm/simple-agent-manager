@@ -25,6 +25,8 @@ var (
 	inspectContainerBridgeIP     = dockerInspectContainerBridgeIP
 )
 
+const defaultCompatibilityResolverTimeout = 10 * time.Second
+
 // DockerCLIPath resolves an absolute path to the docker CLI. It prefers the
 // SAM_DOCKER_CLI_PATH override, then a PATH lookup (only if it resolves to an
 // absolute path), and finally falls back to the conventional install location.
@@ -45,10 +47,11 @@ type Discovery struct {
 	labelKey   string
 	labelValue string
 
-	mu          sync.RWMutex
-	containerID string
-	lastCheck   time.Time
-	cacheTTL    time.Duration
+	mu            sync.RWMutex
+	containerID   string
+	lastCheck     time.Time
+	cacheTTL      time.Duration
+	lookupTimeout time.Duration
 
 	bridgeIPMu    sync.RWMutex
 	bridgeIP      string
@@ -90,6 +93,9 @@ type Config struct {
 	// BridgeIPTTL is how long to cache the container bridge IP before re-checking.
 	// Defaults to 30s if not set.
 	BridgeIPTTL time.Duration
+	// CompatibilityResolverTimeout bounds legacy context-free GetContainerID lookups.
+	// Callers that need a different deadline should use GetContainerIDContext.
+	CompatibilityResolverTimeout time.Duration
 }
 
 // NewDiscovery creates a new container discovery instance.
@@ -106,18 +112,24 @@ func NewDiscovery(cfg Config) *Discovery {
 	if cfg.BridgeIPTTL == 0 {
 		cfg.BridgeIPTTL = 30 * time.Second
 	}
+	if cfg.CompatibilityResolverTimeout == 0 {
+		cfg.CompatibilityResolverTimeout = defaultCompatibilityResolverTimeout
+	}
 	return &Discovery{
-		labelKey:    cfg.LabelKey,
-		labelValue:  cfg.LabelValue,
-		cacheTTL:    cfg.CacheTTL,
-		bridgeIPTTL: cfg.BridgeIPTTL,
+		labelKey:      cfg.LabelKey,
+		labelValue:    cfg.LabelValue,
+		cacheTTL:      cfg.CacheTTL,
+		bridgeIPTTL:   cfg.BridgeIPTTL,
+		lookupTimeout: cfg.CompatibilityResolverTimeout,
 	}
 }
 
 // GetContainerID returns the devcontainer's Docker container ID.
 // It caches the result and re-discovers if the cache is stale or the container is gone.
 func (d *Discovery) GetContainerID() (string, error) {
-	return d.GetContainerIDContext(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), d.lookupTimeout)
+	defer cancel()
+	return d.GetContainerIDContext(ctx)
 }
 
 // GetContainerIDContext returns the devcontainer's Docker container ID while

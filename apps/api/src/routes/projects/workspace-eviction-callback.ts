@@ -66,19 +66,9 @@ type WorkspaceEvictionResource = {
  */
 const workspaceEvictionCallbackRoute = new Hono<{ Bindings: Env }>();
 
-function terminalResourceResponse(
-  c: Context<{ Bindings: Env }>,
-  logName: string,
-  payload: Record<string, unknown>
-) {
+function terminalResourceResponse(logName: string, payload: Record<string, unknown>): never {
   log.info(logName, { ...payload, action: 'terminal_gone' });
-  return c.json(
-    {
-      error: 'GONE',
-      message: 'Workspace eviction callback resource is gone',
-    },
-    410
-  );
+  throw errors.gone('Workspace eviction callback resource is gone');
 }
 
 async function loadWorkspaceEvictionResource(
@@ -202,12 +192,24 @@ async function evictionTerminalResponse(
   projectId: string,
   workspaceId: string
 ): Promise<Response | null> {
+  // A committed eviction may still be waiting on DO-side cleanup. Replay that
+  // cleanup before telling the VM agent to stop retrying, even if the node has
+  // already moved into a terminal lifecycle state.
+  if (workspace.status === 'evicted') {
+    await finalizeEvictionLifecycle(c.env, workspace);
+    return terminalResourceResponse('workspace_eviction.terminal_workspace', {
+      projectId,
+      workspaceId,
+      status: workspace.status,
+    });
+  }
+
   if (
     !workspace.nodeId ||
     !workspace.nodeStatus ||
     nodeStatusTerminatesCallbacks(workspace.nodeStatus)
   ) {
-    return terminalResourceResponse(c, 'workspace_eviction.terminal_node', {
+    return terminalResourceResponse('workspace_eviction.terminal_node', {
       projectId,
       workspaceId,
       nodeId: workspace.nodeId ?? body.nodeId,
@@ -216,11 +218,7 @@ async function evictionTerminalResponse(
   }
 
   if (!WORKSPACE_EVICTION_CALLBACK_ACTIVE_STATUSES.has(workspace.status)) {
-    // A retry after D1 committed must still complete interrupted DO cleanup.
-    if (workspace.status === 'evicted') {
-      await finalizeEvictionLifecycle(c.env, workspace);
-    }
-    return terminalResourceResponse(c, 'workspace_eviction.terminal_workspace', {
+    return terminalResourceResponse('workspace_eviction.terminal_workspace', {
       projectId,
       workspaceId,
       status: workspace.status,

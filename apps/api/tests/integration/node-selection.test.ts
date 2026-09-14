@@ -52,6 +52,19 @@ const triggerSubmitSource = readFileSync(
   resolve(process.cwd(), 'src/services/trigger-submit.ts'),
   'utf8'
 );
+const reservedTaskSubmissionSource = readFileSync(
+  resolve(process.cwd(), 'src/services/reserved-task-submission.ts'),
+  'utf8'
+);
+const reservedTaskSubmissionIntentSource = readFileSync(
+  resolve(process.cwd(), 'src/services/reserved-task-submission-intent.ts'),
+  'utf8'
+);
+const triggerSubmitPlacementPathSource = [
+  triggerSubmitSource,
+  reservedTaskSubmissionSource,
+  reservedTaskSubmissionIntentSource,
+].join('\n');
 const retrySubtaskSource = readFileSync(
   resolve(process.cwd(), 'src/durable-objects/sam-session/tools/retry-subtask.ts'),
   'utf8'
@@ -172,7 +185,7 @@ describe('placement resolution entry points', () => {
       { name: 'chat submit route', source: submitRouteSource },
       { name: 'MCP dispatch route', source: mcpDispatchRouteSource },
       { name: 'SAM session dispatch tool', source: samSessionDispatchSource },
-      { name: 'trigger submit bridge', source: triggerSubmitSource },
+      { name: 'trigger submit bridge', source: triggerSubmitPlacementPathSource },
       { name: 'SAM session retry tool', source: retrySubtaskSource },
       { name: 'task run route', source: taskRunSource },
       { name: 'MCP orchestration retry tool', source: mcpOrchestrationToolsSource },
@@ -183,6 +196,9 @@ describe('placement resolution entry points', () => {
       expect(entryPoint.source, entryPoint.name).toContain('resolveTaskStartPlacement');
       expect(entryPoint.source, entryPoint.name).toContain('startTaskRunnerDO');
       expect(entryPoint.source, entryPoint.name).not.toContain('resolveResourceReservation(');
+      if (entryPoint.name === 'trigger submit bridge') {
+        expect(triggerSubmitSource).toContain('submitReservedTask');
+      }
     }
   });
 

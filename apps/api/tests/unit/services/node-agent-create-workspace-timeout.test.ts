@@ -361,6 +361,37 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
   });
 
+  it.each(['vm', 'cf-container'])('withholds a %s prompt when authority is revoked during token signing', async (runtime) => {
+    let releaseSigning!: () => void;
+    let signingStarted!: () => void;
+    const started = new Promise<void>((resolve) => { signingStarted = resolve; });
+    const barrier = new Promise<void>((resolve) => { releaseSigning = resolve; });
+    mocks.jwt.signNodeManagementToken.mockImplementationOnce(async () => {
+      signingStarted();
+      await barrier;
+      return { token: 'mgmt-token' };
+    });
+    mocks.drizzle.mockReturnValue({
+      select: () => ({ from: () => ({ where: () => ({ get: async () => ({ runtime }) }) }) }),
+    });
+    const directFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', directFetch);
+    mocks.container.fetchVmAgentContainer.mockResolvedValue(new Response('{}', { status: 200 }));
+    let authorized = true;
+    const beforeExternalMutation = async () => {
+      if (!authorized) throw new Error('source authority revoked');
+    };
+    const pending = sendPromptToAgentOnNode('node-1', 'ws-1', 'session-1', 'wake', cfContainerEnv,
+      'user-1', 'message-1', { beforeExternalMutation });
+    await started;
+    authorized = false;
+    const rejection = expect(pending).rejects.toThrow('source authority revoked');
+    releaseSigning();
+    await rejection;
+    expect(directFetch).not.toHaveBeenCalled();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
   it('withholds direct VM workspace creation when authority is revoked at the physical boundary', async () => {
     mocks.drizzle.mockReturnValue({
       select: () => ({

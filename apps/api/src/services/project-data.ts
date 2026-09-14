@@ -12,6 +12,7 @@ import type {
   AdmitProjectEventInput,
   AgentMailboxMessage,
   CancelProjectEventSubscriptionInput,
+  CatchUpProjectEventChannelInput,
   CheckpointEpisode,
   CheckpointEpisodeTransitionInput,
   CommentAuthor,
@@ -22,10 +23,13 @@ import type {
   CreateProjectEventSubscriptionInput,
   DeliveryState,
   ExpireProjectEventSubscriptionsInput,
+  FollowProjectEventChannelInput,
+  FollowProjectEventChannelResult,
   GetProjectEventInput,
   GetProjectEventRecentStatusInput,
   GetProjectEventSubscriptionInput,
   LibraryFileCommentMutationResponse,
+  ListProjectEventChannelsInput,
   ListProjectEventDeliveryAttemptsInput,
   ListProjectEventDeliveryBatchesInput,
   ListProjectEventSubscriptionEventsInput,
@@ -36,6 +40,9 @@ import type {
   MessageCommentReplyMutationResponse,
   MessageCommentThread,
   ProjectEventAdmissionResult,
+  ProjectEventChannelHistory,
+  ProjectEventChannelHistoryInput,
+  ProjectEventChannelList,
   ProjectEventDeliveryAckResult,
   ProjectEventDeliveryAttemptListResult,
   ProjectEventDeliveryAttemptMutationResult,
@@ -48,6 +55,8 @@ import type {
   ProjectEventSubscriptionEventListResult,
   ProjectEventSubscriptionListResult,
   ProjectEventSubscriptionMutationResult,
+  PublishProjectEventChannelInput,
+  PublishProjectEventChannelResult,
   RecordProjectEventDeliveryAttemptInput,
   RunProjectEventRetentionInput,
   SessionActivityTerminalReason,
@@ -115,10 +124,16 @@ export {
   ProjectEventNotFoundError,
   ProjectEventValidationError,
 } from '../durable-objects/project-data/project-events-contracts';
+import type { ValidateProjectEventWakeRecoveryAuthorityInput } from '../durable-objects/project-data/project-events-wake-delivery';
 import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
 } from '../durable-objects/project-data/prompt-delivery';
+import type {
+  CreateReservedTaskSessionWithInitialMessageInput,
+  CreateReservedTaskSessionWithInitialMessageResult,
+  SessionIdentityGuard as ProjectDataSessionIdentityGuard,
+} from '../durable-objects/project-data/sessions';
 import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -146,8 +161,11 @@ import {
   buildSessionLifecycleEventInput,
   type SessionLifecycleEventInput,
 } from './project-lifecycle-event-inputs';
+import { recordReservedTaskSessionRevocation } from './reserved-task-session-revocations';
 import { hasAuthorizedRestorableSnapshotWakeClaim } from './session-snapshots';
 import type { TaskAcpLivenessSignals } from './task-runtime-liveness';
+
+export type { ProjectDataSessionIdentityGuard };
 
 function rootExactReadOwner(projectId: string, sessionId: string): ProjectDataArchiveLocation {
   return {
@@ -319,6 +337,12 @@ function normalizeProjectDataEventRpcError(err: unknown): Error | null {
   }
 }
 
+function isFailSessionIdentityGuardDenial(err: unknown, sessionId: string): boolean {
+  return (
+    err instanceof Error && err.message.startsWith(`Session ${sessionId} cannot failed: expected `)
+  );
+}
+
 async function callProjectDataNoRetry<T>(
   env: Env,
   projectId: string,
@@ -450,6 +474,19 @@ function withProjectId<T extends { projectId: string }>(
 }
 
 type ProjectDataEventRpc = {
+  publishProjectEventChannel(
+    input: PublishProjectEventChannelInput
+  ): Promise<PublishProjectEventChannelResult>;
+  listProjectEventChannels(input: ListProjectEventChannelsInput): Promise<ProjectEventChannelList>;
+  getProjectEventChannelHistory(
+    input: ProjectEventChannelHistoryInput
+  ): Promise<ProjectEventChannelHistory>;
+  followProjectEventChannel(
+    input: FollowProjectEventChannelInput
+  ): Promise<FollowProjectEventChannelResult>;
+  catchUpProjectEventChannel(
+    input: CatchUpProjectEventChannelInput
+  ): Promise<FollowProjectEventChannelResult>;
   admitProjectEvent(input: AdmitProjectEventInput): Promise<ProjectEventAdmissionResult>;
   createProjectEventSubscription(
     input: CreateProjectEventSubscriptionInput
@@ -488,6 +525,9 @@ type ProjectDataEventRpc = {
   getProjectEventRecentStatus(
     input: GetProjectEventRecentStatusInput
   ): Promise<ProjectEventRecentStatus>;
+  validateProjectEventWakeRecoveryAuthority(
+    input: ValidateProjectEventWakeRecoveryAuthorityInput
+  ): Promise<boolean> | boolean;
   runProjectEventRetention(
     input: RunProjectEventRetentionInput
   ): Promise<ProjectEventRetentionResult>;
@@ -569,11 +609,47 @@ export async function createSession(
   return sessionId;
 }
 
+export async function createReservedTaskSessionWithInitialMessage(
+  env: Env,
+  projectId: string,
+  input: CreateReservedTaskSessionWithInitialMessageInput
+): Promise<CreateReservedTaskSessionWithInitialMessageResult> {
+  await assertExactWriteAllowedIfArchiveEnabled(
+    env,
+    projectId,
+    input.sessionId,
+    'createReservedTaskSessionWithInitialMessage'
+  );
+  const result = await callProjectDataWithRetry<CreateReservedTaskSessionWithInitialMessageResult>(
+    env,
+    projectId,
+    'createReservedTaskSessionWithInitialMessage',
+    async (stub) =>
+      (await stub.createReservedTaskSessionWithInitialMessage(
+        input
+      )) as CreateReservedTaskSessionWithInitialMessageResult
+  );
+  if (result.outcome === 'created' && result.sessionInserted) {
+    await recordSessionLifecycleEventBestEffort(env, {
+      projectId,
+      sessionId: input.sessionId,
+      lifecycle: 'started',
+      status: 'active',
+      taskId: input.taskId,
+      workspaceId: input.workspaceId,
+      source: 'project_data.create_reserved_task_session',
+      occurredAt: Date.now(),
+    });
+  }
+  return result;
+}
+
 export async function linkSessionToWorkspace(
   env: Env,
   projectId: string,
   sessionId: string,
-  workspaceId: string
+  workspaceId: string,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<void> {
   await assertExactWriteAllowedIfArchiveEnabled(
     env,
@@ -582,7 +658,7 @@ export async function linkSessionToWorkspace(
     'linkSessionToWorkspace'
   );
   return callProjectDataWithRetry(env, projectId, 'linkSessionToWorkspace', (stub) =>
-    stub.linkSessionToWorkspace(sessionId, workspaceId)
+    stub.linkSessionToWorkspace(sessionId, workspaceId, guard ?? null)
   );
 }
 
@@ -592,6 +668,12 @@ export async function stopSession(
   sessionId: string
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'stopSession');
+  await recordReservedTaskSessionRevocation(env, {
+    projectId,
+    chatSessionId: sessionId,
+    reason: 'session_stopped',
+    source: 'project_data.stop_session',
+  });
   const stub = await getStub(env, projectId);
   const stopped = await stub.stopSession(sessionId);
   if (stopped) {
@@ -696,12 +778,33 @@ export async function failSession(
   env: Env,
   projectId: string,
   sessionId: string,
-  errorMessage: string | null = null
+  errorMessage: string | null = null,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<boolean> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'failSession');
   const stub = await getStub(env, projectId);
-  const failed = await stub.failSession(sessionId, errorMessage);
+  let failed: boolean;
+  try {
+    failed = await stub.failSession(sessionId, errorMessage, guard ?? null);
+  } catch (error) {
+    if (guard && isFailSessionIdentityGuardDenial(error, sessionId)) {
+      log.info('project_data.fail_session_identity_guard_denied', {
+        projectId,
+        sessionId,
+        taskId: guard.taskId ?? null,
+      });
+      return false;
+    }
+    throw error;
+  }
   if (failed) {
+    await recordReservedTaskSessionRevocation(env, {
+      projectId,
+      chatSessionId: sessionId,
+      taskId: guard?.taskId ?? null,
+      reason: 'session_failed',
+      source: 'project_data.fail_session',
+    });
     await recordSessionLifecycleEventBestEffort(env, {
       projectId,
       sessionId,
@@ -743,7 +846,8 @@ export async function persistMessage(
   role: string,
   content: string,
   toolMetadata: Record<string, unknown> | null,
-  messageId?: string
+  messageId?: string,
+  guard?: ProjectDataSessionIdentityGuard | null
 ): Promise<string> {
   await assertExactWriteAllowedIfArchiveEnabled(env, projectId, sessionId, 'persistMessage');
   return callProjectDataNoRetry(env, projectId, 'persistMessage', (stub) =>
@@ -752,7 +856,8 @@ export async function persistMessage(
       role,
       content,
       toolMetadata ? JSON.stringify(toolMetadata) : null,
-      messageId
+      messageId,
+      guard ?? null
     )
   );
 }
@@ -1209,6 +1314,46 @@ export async function listProjectCommentInbox(
 // ProjectData Event Subscription Core
 // =========================================================================
 
+export function publishProjectEventChannel(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<PublishProjectEventChannelInput>
+) {
+  return callProjectDataEvent(env, projectId, 'publishProjectEventChannel', input);
+}
+
+export function listProjectEventChannels(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ListProjectEventChannelsInput> = {}
+) {
+  return callProjectDataEvent(env, projectId, 'listProjectEventChannels', input);
+}
+
+export function getProjectEventChannelHistory(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ProjectEventChannelHistoryInput>
+) {
+  return callProjectDataEvent(env, projectId, 'getProjectEventChannelHistory', input);
+}
+
+export function followProjectEventChannel(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<FollowProjectEventChannelInput>
+) {
+  return callProjectDataEvent(env, projectId, 'followProjectEventChannel', input);
+}
+
+export function catchUpProjectEventChannel(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<CatchUpProjectEventChannelInput>
+) {
+  return callProjectDataEvent(env, projectId, 'catchUpProjectEventChannel', input);
+}
+
 export async function admitProjectEvent(
   env: Env,
   projectId: string,
@@ -1319,6 +1464,14 @@ export async function getProjectEventRecentStatus(
   input: ProjectDataEventInput<GetProjectEventRecentStatusInput> = {}
 ): Promise<ProjectEventRecentStatus> {
   return callProjectDataEvent(env, projectId, 'getProjectEventRecentStatus', input);
+}
+
+export async function validateProjectEventWakeRecoveryAuthority(
+  env: Env,
+  projectId: string,
+  input: ProjectDataEventInput<ValidateProjectEventWakeRecoveryAuthorityInput>
+): Promise<boolean> {
+  return callProjectDataEvent(env, projectId, 'validateProjectEventWakeRecoveryAuthority', input);
 }
 
 export async function runProjectEventRetention(
@@ -2376,4 +2529,91 @@ export async function resolveSessionAttentionMarkers(
 ): Promise<number> {
   const stub = await getStub(env, projectId);
   return stub.resolveSessionAttentionMarkers(sessionId, resolvedByMessageId, actorType, reason);
+}
+
+export function createProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['createProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'createProjectSchedule', (stub) =>
+    stub.createProjectSchedule({ ...input, projectId })
+  );
+}
+export function getProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['getProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'getProjectSchedule', (stub) =>
+    stub.getProjectSchedule({ ...input, projectId })
+  );
+}
+export function listProjectSchedules(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['listProjectSchedules']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'listProjectSchedules', (stub) =>
+    stub.listProjectSchedules({ ...input, projectId })
+  );
+}
+export function mutateProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['mutateProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'mutateProjectSchedule', (stub) =>
+    stub.mutateProjectSchedule({ ...input, projectId })
+  );
+}
+
+export function reconcileProjectSchedule(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['reconcileProjectSchedule']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'reconcileProjectSchedule', (stub) =>
+    stub.reconcileProjectSchedule({ ...input, projectId })
+  );
+}
+
+export function createProjectStandingWatch(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['createProjectStandingWatch']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'createProjectStandingWatch', (stub) =>
+    stub.createProjectStandingWatch({ ...input, projectId })
+  );
+}
+
+export function getProjectStandingWatch(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['getProjectStandingWatch']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'getProjectStandingWatch', (stub) =>
+    stub.getProjectStandingWatch({ ...input, projectId })
+  );
+}
+
+export function listProjectStandingWatches(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['listProjectStandingWatches']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'listProjectStandingWatches', (stub) =>
+    stub.listProjectStandingWatches({ ...input, projectId })
+  );
+}
+
+export function mutateProjectStandingWatch(
+  env: Env,
+  projectId: string,
+  input: Omit<Parameters<ProjectData['mutateProjectStandingWatch']>[0], 'projectId'>
+) {
+  return callProjectDataNoRetry(env, projectId, 'mutateProjectStandingWatch', (stub) =>
+    stub.mutateProjectStandingWatch({ ...input, projectId })
+  );
 }

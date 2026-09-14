@@ -126,7 +126,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
         )}
         {(workspace.status === 'stopped' || workspace.status === 'evicted') && onRestart && (
           <div className="shrink-0">
-            <Button variant="secondary" size="sm" onClick={() => onRestart(workspace.id)}>
+            <Button variant="secondary" size="lg" onClick={() => onRestart(workspace.id)}>
               Start
             </Button>
           </div>
