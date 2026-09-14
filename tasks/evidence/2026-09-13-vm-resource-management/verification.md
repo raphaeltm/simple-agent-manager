@@ -24,7 +24,7 @@ GitHub CI run `34747092182`: all applicable jobs passed, including the rerun spe
 
 ## Staging
 
-Deployment [34747674165](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34747674165) and standard smoke passed. Migration `0157_workspace_eviction_fencing.sql` applied 08:32:57 UTC.
+Deployment [34747674165](https://github.com/raphaeltm/simple-agent-manager/actions/runs/34747674165) and standard smoke passed. The workspace eviction fencing migration applied at 08:32:57 UTC; after the 2026-09-14 main merge it was renumbered to `0164_workspace_eviction_fencing.sql` to follow main's `0157`–`0163` migrations.
 
 - One real Hetzner VM ran the exact implementation agent SHA. Independent heartbeat 08:50:29.755 arrived 9.084 seconds after readiness; workspace running by 08:51:55.
 - Terminal passed 09:01:29. A real Claude ACP turn passed 09:02:47 (34.887 seconds, synthetic response marker).

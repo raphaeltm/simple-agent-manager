@@ -135,8 +135,8 @@ pass the gates below against current `main` before merge.
   lease, single-delivery lock and capped backoff. Only confirmed stops reach the API.
 - Persist project identity alongside generation for dynamic-workspace hydration;
   never infer a project or use unverified labels to authorize eviction.
-- Current main was merged through `c2f035b35`; the additive D1 migration is now
-  `0157_workspace_eviction_fencing.sql`, following main's archive-sweep migration.
+- Current main was merged through `c2f035b35`; the additive D1 migration was later renumbered to
+  `0164_workspace_eviction_fencing.sql` after main advanced with D1 migrations `0157`–`0163`.
 
 ### Current validation evidence (2026-09-13, implementation head f03c29e6d)
 
