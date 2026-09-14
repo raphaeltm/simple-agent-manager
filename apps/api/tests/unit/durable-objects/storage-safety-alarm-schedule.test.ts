@@ -266,15 +266,25 @@ describe('computeStorageSafetyAlarmTime', () => {
 
   it('treats an empty allowlist as every project, and still does not spin', () => {
     // An operator who clears PROJECT_IDS means "all projects", which is a legitimate
-    // configuration. It must widen scope WITHOUT reintroducing the zero-length backoff.
+    // configuration — and the one staging runs. It must widen scope WITHOUT reintroducing the
+    // zero-length backoff.
+    //
+    // The measure interval is widened so the ARCHIVE term is what Math.min returns. Asserting
+    // only `> NOW` (as a first draft did) passes just as well when an empty allowlist wrongly
+    // excludes every project, because `measureAt` alone is already NOW + HOUR. Pinning the exact
+    // archive deadline is the only form of this assertion that can tell "in scope" from "out of
+    // scope" — the second time this same non-discriminating shape appeared in this file.
     seedProject(OUT_OF_SCOPE, NOW);
 
     const at = computeStorageSafetyAlarmTime(
       sql,
-      productionEnv({ PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: '' } as Partial<Env>),
+      productionEnv({
+        PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS: '',
+        PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS: String(30 * DAY),
+      } as Partial<Env>),
       NOW
     );
 
-    expect(at).toBeGreaterThan(NOW);
+    expect(at).toBe(NOW + DAY);
   });
 });
