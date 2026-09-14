@@ -18,8 +18,8 @@ export interface FeatureSection {
   /** Link to the relevant public guide, rendered as "Read the guide" on the detail page. */
   docsHref?: string;
   group: FeatureGroup;
-  /** Hero image for the detail page and the /features/ index card (only the first entry is rendered). */
-  screenshots: [FeatureScreenshot];
+  /** Hero image for the detail page and the /features/ index card; only the first entry is rendered. */
+  screenshots: FeatureScreenshot[];
   details: {
     headline: string;
     body: string;

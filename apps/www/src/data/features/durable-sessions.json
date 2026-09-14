@@ -1,0 +1,52 @@
+{
+  "slug": "durable-sessions",
+  "label": "Durable Sessions & Orchestration",
+  "title": "Agents that sleep,\nwake, and coordinate.",
+  "subtitle": "A session sleeps and wakes from a 7-day snapshot without losing context. Agents dispatch subtasks to each other and can interrupt a busy peer. App deployments turn a Compose release into a running, configurable app.",
+  "summary": "Sessions survive runtime teardown, agents coordinate with each other, and Compose releases deploy straight from the project.",
+  "highlights": [
+    "Sessions sleep and wake from a 7-day snapshot of the agent’s home directory and repository state",
+    "Agents dispatch subtasks to peers and send durable messages that can interrupt a busy agent",
+    "Missions coordinate multi-agent work toward a shared goal",
+    "App deployments run Compose releases with environments, configuration, and logs",
+    "Six agent harnesses: Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp"
+  ],
+  "docsHref": "/docs/guides/instant-sessions/",
+  "group": "run",
+  "screenshots": [
+    {
+      "src": "/images/features/sam-session-waking.png",
+      "alt": "A sleeping chat session being woken: a banner reads Recreating your workspace, the transcript is intact, and the composer reads Waking the agent, your message will be delivered",
+      "caption": "Send a message to a sleeping session and SAM restores the workspace, then delivers it"
+    }
+  ],
+  "details": [
+    {
+      "headline": "Close the tab. The session waits.",
+      "body": "SAM checkpoints a session after idle turns and requires a verified final checkpoint before it sleeps. A replacement runtime restores the agent’s home directory and repository work in progress from that snapshot — for up to seven days — instead of starting blank.",
+      "screenshot": {
+        "src": "/images/features/sam-session-sleeping.png",
+        "alt": "A finished chat session in the Sleeping state, with the full transcript still visible and a composer that reads Send a message to wake the agent",
+        "caption": "Sessions sleep after idle turns and wake from a seven-day snapshot"
+      }
+    },
+    {
+      "headline": "Agents that dispatch to each other",
+      "body": "An agent can dispatch a subtask to a peer, send a durable message that interrupts a busy agent instead of waiting behind it, and coordinate multi-step work through missions. Work keeps moving even when one agent is heads-down on something else.",
+      "screenshot": {
+        "src": "/images/features/sam-agents-orchestration.png",
+        "alt": "Task Hierarchy view showing a running parent task with three dispatched subtasks: one completed with a PR opened, one queued and blocked on sign-off, and one running",
+        "caption": "A parent task and the subtasks it dispatched, with live status for each"
+      }
+    },
+    {
+      "headline": "Deploy what the agent built",
+      "body": "App deployments turn a Compose release into a running app. Each environment has its own deployment node, public routes, configuration, logs, and volumes, managed from the same project — and a release can be submitted by an agent task. No separate deployment pipeline to wire up.",
+      "screenshot": {
+        "src": "/images/features/sam-app-deployment-detail.png",
+        "alt": "Deployment environment detail for staging showing release v14 applied and submitted by an agent task, health checks for app, node, provider, routes, disk, and config, and a public route",
+        "caption": "A release the agent submitted, serving on its own node with health checks and a public route"
+      }
+    }
+  ]
+}

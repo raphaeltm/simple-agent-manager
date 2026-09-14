@@ -503,11 +503,22 @@ const TASK_STRIPE_ROTATION = '01K9STRPTASKNW8TWQXCVD42BD';
 const SESSION_PCI_BUNDLE = '01K9PCIBNDLEW8TWNQXCVD43C9';
 const TASK_PCI_BUNDLE = '01K9PCIBNDLTASKW8TWNQXCV44E';
 
-const SUBSCRIPTIONS = [
-  {
-    id: 'sub-ledger-pr',
+/** Subscription row with the bookkeeping fields every fixture shares. */
+function subscription<T extends object>(fixture: T) {
+  return {
     projectId: PROJECT_ID,
     contractVersion: 1,
+    matchKeyCount: 1,
+    cancelledAt: null,
+    cancelledBy: null,
+    cancelReason: null,
+    ...fixture,
+  };
+}
+
+const SUBSCRIPTIONS = [
+  subscription({
+    id: 'sub-ledger-pr',
     owner: { type: 'agent', id: SESSION_LEDGER, name: 'Migrate ledger to double-entry schema' },
     idempotencyKey: 'idem-sub-ledger-pr',
     filter: {
@@ -517,7 +528,6 @@ const SUBSCRIPTIONS = [
       subjectId: 'northwind-labs/payments-api#482',
     },
     filterFingerprint: 'fp-ledger-pr',
-    matchKeyCount: 1,
     deliveryPreference: {
       requested: 'existing_session_prompt',
       resolved: 'queued_for_prompt_delivery',
@@ -528,20 +538,14 @@ const SUBSCRIPTIONS = [
     createdAt: ts('2026-09-10T09:00:00Z'),
     updatedAt: ts('2026-09-14T08:00:00Z'),
     expiresAt: ts('2026-09-24T09:00:00Z'),
-    cancelledAt: null,
-    cancelledBy: null,
-    cancelReason: null,
     lastMatchedAt: ts('2026-09-14T08:00:00Z'),
-  },
-  {
+  }),
+  subscription({
     id: 'sub-stripe-webhook',
-    projectId: PROJECT_ID,
-    contractVersion: 1,
     owner: { type: 'agent', id: SESSION_STRIPE_ROTATION, name: 'Stripe webhook signature rotation' },
     idempotencyKey: 'idem-sub-stripe',
     filter: { version: 1, source: 'webhook', eventType: 'webhook.accepted', subjectId: 'trig-webhook-stripe' },
     filterFingerprint: 'fp-stripe',
-    matchKeyCount: 1,
     deliveryPreference: {
       requested: 'runtime_steer',
       resolved: 'queued_for_prompt_delivery',
@@ -552,60 +556,42 @@ const SUBSCRIPTIONS = [
     createdAt: ts('2026-09-11T13:00:00Z'),
     updatedAt: ts('2026-09-11T13:47:00Z'),
     expiresAt: ts('2026-09-18T13:00:00Z'),
-    cancelledAt: null,
-    cancelledBy: null,
-    cancelReason: null,
     lastMatchedAt: ts('2026-09-11T13:47:00Z'),
-  },
-  {
+  }),
+  subscription({
     id: 'sub-flaky-tests',
-    projectId: PROJECT_ID,
-    contractVersion: 1,
     owner: { type: 'standing_watch', id: 'watch-flaky-tests', name: 'Flaky test triage' },
     idempotencyKey: 'idem-sub-flaky',
     filter: { version: 1, source: 'ci', eventType: 'check_suite.completed' },
     filterFingerprint: 'fp-flaky',
-    matchKeyCount: 1,
     deliveryPreference: { requested: 'spawn_task', resolved: 'spawn_task', target: {} },
     state: 'active',
     reason: 'Flaky test triage',
     createdAt: ts('2026-08-20T10:00:00Z'),
     updatedAt: ts('2026-09-13T22:00:00Z'),
     expiresAt: null,
-    cancelledAt: null,
-    cancelledBy: null,
-    cancelReason: null,
     lastMatchedAt: ts('2026-09-13T22:00:00Z'),
-  },
-  {
+  }),
+  subscription({
     id: 'sub-marcus-comments',
-    projectId: PROJECT_ID,
-    contractVersion: 1,
     owner: { type: 'human', id: 'user-marcus', name: 'Marcus Chen' },
     idempotencyKey: 'idem-sub-marcus',
     filter: { version: 1, source: 'github', eventType: 'issue_comment.created' },
     filterFingerprint: 'fp-marcus',
-    matchKeyCount: 1,
     deliveryPreference: { requested: 'record_only', resolved: 'record_only', target: {} },
     state: 'active',
     reason: 'Keep a record of issue comment activity',
     createdAt: ts('2026-09-05T12:00:00Z'),
     updatedAt: ts('2026-09-12T09:00:00Z'),
     expiresAt: ts('2026-10-05T12:00:00Z'),
-    cancelledAt: null,
-    cancelledBy: null,
-    cancelReason: null,
     lastMatchedAt: ts('2026-09-12T09:00:00Z'),
-  },
-  {
+  }),
+  subscription({
     id: 'sub-pci-bundle',
-    projectId: PROJECT_ID,
-    contractVersion: 1,
     owner: { type: 'agent', id: SESSION_PCI_BUNDLE, name: 'Weekly PCI evidence bundle' },
     idempotencyKey: 'idem-sub-pci',
     filter: { version: 1, source: 'cron', eventType: 'trigger.execution_completed', subjectId: 'trig-pci-bundle' },
     filterFingerprint: 'fp-pci',
-    matchKeyCount: 1,
     deliveryPreference: {
       requested: 'existing_session_prompt',
       resolved: 'queued_for_prompt_delivery',
@@ -616,20 +602,14 @@ const SUBSCRIPTIONS = [
     createdAt: ts('2026-08-31T07:00:00Z'),
     updatedAt: ts('2026-09-07T07:05:00Z'),
     expiresAt: ts('2026-09-08T07:00:00Z'),
-    cancelledAt: null,
-    cancelledBy: null,
-    cancelReason: null,
     lastMatchedAt: ts('2026-09-07T07:05:00Z'),
-  },
-  {
+  }),
+  subscription({
     id: 'sub-old-deploy-watch',
-    projectId: PROJECT_ID,
-    contractVersion: 1,
     owner: { type: 'human', id: NORTHWIND.owner.id, name: NORTHWIND.owner.name },
     idempotencyKey: 'idem-sub-old-deploy',
     filter: { version: 1, source: 'webhook', eventType: 'webhook.accepted', subjectId: 'trig-old-deploy' },
     filterFingerprint: 'fp-old-deploy',
-    matchKeyCount: 1,
     deliveryPreference: { requested: 'record_only', resolved: 'record_only', target: {} },
     state: 'cancelled',
     reason: 'Old deploy webhook watch (superseded)',
@@ -640,7 +620,7 @@ const SUBSCRIPTIONS = [
     cancelledBy: { type: 'human', id: NORTHWIND.owner.id, name: NORTHWIND.owner.name },
     cancelReason: 'Replaced by the Datadog webhook trigger.',
     lastMatchedAt: ts('2026-08-15T09:00:00Z'),
-  },
+  }),
 ];
 
 const LEDGER_DELIVERIES = [

@@ -1,0 +1,52 @@
+{
+  "slug": "comments",
+  "label": "Comments as Context",
+  "title": "Feedback that reaches\nthe agent.",
+  "subtitle": "Leave a comment on a chat message or a library file. Send it to the agent as context, and the agent can reply and resolve it — right from the tool it is using.",
+  "summary": "Comment on chat messages or library files, then send the thread to the agent as context.",
+  "highlights": [
+    "Threads anchor to a quoted sentence in a chat message, or to a library file",
+    "A project Comments page collects every thread, grouped by whether it is waiting on you",
+    "Status moves from open to sent to resolved as context reaches the agent",
+    "Agents reply and resolve threads themselves through MCP tools",
+    "Desktop comment rail beside the chat; a drawer on mobile"
+  ],
+  "docsHref": "/docs/guides/recent-product-changes/",
+  "group": "collaborate",
+  "screenshots": [
+    {
+      "src": "/images/features/sam-comments-chat-thread.png",
+      "alt": "Desktop comment rail beside a chat conversation showing a thread anchored to a quoted sentence, with human replies, an agent reply, and send-to-agent and resolve controls",
+      "caption": "Comment on exactly the sentence you mean, then send it to the agent as context"
+    }
+  ],
+  "details": [
+    {
+      "headline": "Comment on exactly what you mean",
+      "body": "Select text in an agent’s message and leave a comment anchored to it. Comments work on library files too, so reviewers can flag a specific line in a document the agent produced and resolve it once it is fixed.",
+      "screenshot": {
+        "src": "/images/features/sam-comments-library-file.png",
+        "alt": "Library markdown file preview with a comment panel showing an open thread that quotes a line of the document, a reply, Reply and Resolve buttons, and a resolved thread",
+        "caption": "A thread on a library file quotes the exact line under discussion"
+      }
+    },
+    {
+      "headline": "One inbox for every thread",
+      "body": "The project Comments page lists every thread from chat and the library, grouped by whether it is waiting on you. Nothing gets lost in a long session or an old file. Chat sessions carry a matching count chip and a comments drawer of their own.",
+      "screenshot": {
+        "src": "/images/features/sam-comments-inbox.png",
+        "alt": "Project Comments page with filter chips for All, Needs you, With agent, Open, and Resolved, listing threads from chat sessions and library files grouped by whether they are waiting on you",
+        "caption": "Every comment thread in one inbox, grouped by what needs your attention"
+      }
+    },
+    {
+      "headline": "Send it to the agent, then track it",
+      "body": "A thread moves from open to sent once you push it into the agent’s context, and to resolved once it is closed out. Agents can reply and resolve threads themselves through MCP tools, so a review comment can turn into a fix without you relaying it by hand.",
+      "screenshot": {
+        "src": "/images/features/sam-comments-chat-thread.png",
+        "alt": "Desktop comment rail beside a chat conversation showing a thread anchored to a quoted sentence, a reply marked Sent to agent, a reply from the agent, and Reply, Send to agent, and Resolve buttons",
+        "caption": "Send a thread to the agent as context; it replies in the same thread"
+      }
+    }
+  ]
+}

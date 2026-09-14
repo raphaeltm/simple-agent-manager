@@ -97,3 +97,7 @@ Platform (spec `marketing-shots-platform.spec.ts`, all approved 2026-09-14):
 Local `ui-ux-specialist` review: HIGH — "platform incidents" removed as a customer trigger source (SAM-internal sweep only); comparison table reflows to stacked cards below 768px. MEDIUM — unused `screenshots[1..]` data removed (type narrowed to one hero image), proof strip shared via `src/data/proof-strip.ts`, cost-control table wrapper focusable. LOW — focus-visible outline added; roadmap density, comments docs link, dense screenshots at 375px left as-is.
 
 Images generated but not used on the site were deleted with their spec captures: activity stream, deployments list, schedules, delivery-history crop.
+
+## SonarCloud (2026-09-14)
+
+First run failed the quality gate on 10.6% duplicated new code. Cause: the ten feature-section TypeScript files were shape-identical object literals (Sonar anonymizes literals for CPD), plus three repeated fixture blocks in the screenshot specs and the overflow/axe check copied between two www specs. Fix: feature content moved to `apps/www/src/data/features/<slug>.json` with a validating barrel in `index.ts`; spec fixtures built through small helpers (`agentProfile`, `subscription`, shared `HERO_SESSION`); shared `expectNoOverflowOrSeriousAxeViolations` in `apps/www/tests/playwright/fixtures.ts`.

@@ -86,83 +86,78 @@ const MOCK_PROJECT = {
   updatedAt: '2026-09-14T09:00:00.000Z',
 };
 
-const AGENT_PROFILES = [
-  {
-    id: 'profile-opus',
+type AgentProfileFixture = {
+  id: string;
+  name: string;
+  description: string;
+  agentType: string;
+  model: string;
+  effort: string;
+  permissionMode: string;
+  workspaceProfile: string;
+  taskMode: string;
+};
+
+/** Project-scoped agent profile row with the fields every fixture shares. */
+function agentProfile(fixture: AgentProfileFixture) {
+  return {
     projectId: PROJECT_ID,
     userId: NORTHWIND.owner.id,
+    vmSizeOverride: null,
+    provider: 'hetzner',
+    vmLocation: null,
+    runtime: null,
+    devcontainerConfigName: null,
+    isBuiltin: false,
+    ...fixture,
+  };
+}
+
+const AGENT_PROFILES = [
+  agentProfile({
+    id: 'profile-opus',
     name: 'Claude Code — Opus 5',
     description: 'Deep reasoning for schema changes and payment-critical code paths',
     agentType: 'claude-code',
     model: 'claude-opus-5',
     effort: 'high',
     permissionMode: 'workspace-write',
-    vmSizeOverride: null,
-    provider: 'hetzner',
-    vmLocation: null,
     workspaceProfile: 'full',
-    runtime: null,
-    devcontainerConfigName: null,
     taskMode: 'task',
-    isBuiltin: false,
-  },
-  {
+  }),
+  agentProfile({
     id: 'profile-codex',
-    projectId: PROJECT_ID,
-    userId: NORTHWIND.owner.id,
     name: 'Codex 5.5 High',
     description: 'Fast autonomous implementation for well-scoped tasks',
     agentType: 'openai-codex',
     model: 'gpt-5.5-codex',
     effort: 'high',
     permissionMode: 'workspace-write',
-    vmSizeOverride: null,
-    provider: 'hetzner',
-    vmLocation: null,
     workspaceProfile: 'full',
-    runtime: null,
-    devcontainerConfigName: null,
     taskMode: 'task',
-    isBuiltin: false,
-  },
-  {
+  }),
+  agentProfile({
     id: 'profile-gemini-reviewer',
-    projectId: PROJECT_ID,
-    userId: NORTHWIND.owner.id,
     name: 'Gemini CLI Reviewer',
     description: 'Read-only second opinion — review diffs before merge',
     agentType: 'google-gemini',
     model: 'gemini-2.5-pro',
     effort: 'medium',
     permissionMode: 'read-only',
-    vmSizeOverride: null,
-    provider: 'hetzner',
-    vmLocation: null,
     workspaceProfile: 'lightweight',
-    runtime: null,
-    devcontainerConfigName: null,
     taskMode: 'conversation',
-    isBuiltin: false,
-  },
-  {
+  }),
+  agentProfile({
     id: 'profile-brainstormer',
-    projectId: PROJECT_ID,
-    userId: NORTHWIND.owner.id,
     name: 'Brainstormer',
     description: 'Conversational planning — no code changes, no PRs',
     agentType: 'claude-code',
     model: 'claude-sonnet-5',
     effort: 'medium',
     permissionMode: 'read-only',
-    vmSizeOverride: null,
-    provider: 'hetzner',
-    vmLocation: null,
     workspaceProfile: 'lightweight',
-    runtime: null,
-    devcontainerConfigName: null,
     taskMode: 'conversation',
-    isBuiltin: false,
-  },
+  }),
 ];
 
 // ---------------------------------------------------------------------------
@@ -1022,6 +1017,35 @@ async function gotoChat(page: Page, sessionId: string, hash = '') {
 // A. Hero — busy active session
 // ---------------------------------------------------------------------------
 
+/** The hero session row, shared by the live-session and task-hierarchy captures. */
+const HERO_SESSION = {
+  id: HERO_SESSION_ID,
+  projectId: PROJECT_ID,
+  taskId: HERO_TASK_ID,
+  topic: 'Add idempotency keys to refund webhook',
+  status: 'active',
+  workspaceId: HERO_WORKSPACE.id,
+  nodeId: HERO_NODE.id,
+  branch: 'sam/idempotency-keys-refund-webhook',
+  isMine: true,
+  agentType: 'claude-code',
+  startedAt: agoMs(32),
+  createdAt: agoIso(32),
+  updatedAt: agoIso(1),
+  task: {
+    id: HERO_TASK_ID,
+    status: 'in_progress',
+    executionStep: 'agent_session',
+    errorMessage: null,
+    outputBranch: 'sam/idempotency-keys-refund-webhook',
+    outputPrUrl: null,
+    outputSummary: null,
+    finalizedAt: null,
+    taskMode: 'task',
+    agentProfileHint: 'Claude Code — Opus 5',
+  },
+};
+
 test('sam-hero-live-session', async ({ page }) => {
   page.on('console', (msg) => {
     if (msg.type() === 'error') console.log('[console:error]', msg.text());
@@ -1041,33 +1065,7 @@ test('sam-hero-live-session', async ({ page }) => {
     new RegExp(`/api/projects/${PROJECT_ID}/sessions/${HERO_SESSION_ID}(?:\\?.*)?$`),
     (route: Route) =>
       respond(route, 200, {
-        session: {
-          id: HERO_SESSION_ID,
-          projectId: PROJECT_ID,
-          taskId: HERO_TASK_ID,
-          topic: 'Add idempotency keys to refund webhook',
-          status: 'active',
-          workspaceId: HERO_WORKSPACE.id,
-          nodeId: HERO_NODE.id,
-          branch: 'sam/idempotency-keys-refund-webhook',
-          isMine: true,
-          agentType: 'claude-code',
-          startedAt: agoMs(32),
-          createdAt: agoIso(32),
-          updatedAt: agoIso(1),
-          task: {
-            id: HERO_TASK_ID,
-            status: 'in_progress',
-            executionStep: 'agent_session',
-            errorMessage: null,
-            outputBranch: 'sam/idempotency-keys-refund-webhook',
-            outputPrUrl: null,
-            outputSummary: null,
-            finalizedAt: null,
-            taskMode: 'task',
-            agentProfileHint: 'Claude Code — Opus 5',
-          },
-        },
+        session: HERO_SESSION,
         messages: HERO_MESSAGES,
         hasMore: false,
         state: {
@@ -1259,33 +1257,7 @@ test('sam-agents-orchestration', async ({ page }) => {
     new RegExp(`/api/projects/${PROJECT_ID}/sessions/${HERO_SESSION_ID}(?:\\?.*)?$`),
     (route: Route) =>
       respond(route, 200, {
-        session: {
-          id: HERO_SESSION_ID,
-          projectId: PROJECT_ID,
-          taskId: HERO_TASK_ID,
-          topic: 'Add idempotency keys to refund webhook',
-          status: 'active',
-          workspaceId: HERO_WORKSPACE.id,
-          nodeId: HERO_NODE.id,
-          branch: 'sam/idempotency-keys-refund-webhook',
-          isMine: true,
-          agentType: 'claude-code',
-          startedAt: agoMs(32),
-          createdAt: agoIso(32),
-          updatedAt: agoIso(1),
-          task: {
-            id: HERO_TASK_ID,
-            status: 'in_progress',
-            executionStep: 'agent_session',
-            errorMessage: null,
-            outputBranch: 'sam/idempotency-keys-refund-webhook',
-            outputPrUrl: null,
-            outputSummary: null,
-            finalizedAt: null,
-            taskMode: 'task',
-            agentProfileHint: 'Claude Code — Opus 5',
-          },
-        },
+        session: HERO_SESSION,
         messages: HERO_MESSAGES,
         hasMore: false,
         state: {

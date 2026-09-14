@@ -1,6 +1,4 @@
-import AxeBuilder from '@axe-core/playwright';
-
-import { expect, test } from './fixtures';
+import { expect, expectNoOverflowOrSeriousAxeViolations, test } from './fixtures';
 
 const PAGES: { path: string; slug: string; heading: string | RegExp }[] = [
   { path: '/', slug: 'home', heading: /Run coding agents as a team/i },
@@ -30,16 +28,7 @@ for (const { path, slug, heading } of PAGES) {
     });
     await page.waitForTimeout(300);
 
-    const hasHorizontalOverflow = await page.evaluate(
-      () => document.documentElement.scrollWidth > document.documentElement.clientWidth
-    );
-    expect(hasHorizontalOverflow).toBe(false);
-
-    const axeResults = await new AxeBuilder({ page }).analyze();
-    const seriousViolations = axeResults.violations.filter(
-      (violation) => violation.impact === 'critical' || violation.impact === 'serious'
-    );
-    expect(seriousViolations, JSON.stringify(seriousViolations, null, 2)).toEqual([]);
+    await expectNoOverflowOrSeriousAxeViolations(page);
 
     const project = testInfo.project.name.toLowerCase().replace(/\W+/g, '-');
     await page.screenshot({

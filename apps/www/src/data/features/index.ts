@@ -1,32 +1,46 @@
-// Feature section content is split by topic to stay under the repo's 500-line
-// file-size guideline (.claude/rules/18-file-size-limits.md). This barrel
-// assembles the canonical display/navigation order — add new sections to the
-// most relevant topic file, then wire them in here.
-import type { FeatureSection } from './types';
+// Feature section content lives in one JSON file per topic (content, not code),
+// validated here at module load so a typo in a group or a missing hero image
+// fails the build instead of silently dropping a card. This barrel assembles the
+// canonical display/navigation order — add new sections as JSON, then wire them in.
+import type { FeatureGroup, FeatureSection } from './types';
+import { featureGroups } from './types';
 
-import { agentContextSection } from './agent-context';
-import { automationSection } from './automation';
-import { chatSection } from './chat';
-import { commentsSection } from './comments';
-import { computePoolsSection } from './compute-pools';
-import { configurationSection } from './configuration';
-import { durableSessionsSection } from './durable-sessions';
-import { eventsSection } from './events';
-import { multiplayerSection } from './multiplayer';
-import { visibilitySection } from './visibility';
+import agentContext from './agent-context.json';
+import automation from './automation.json';
+import chat from './chat.json';
+import comments from './comments.json';
+import computePools from './compute-pools.json';
+import configuration from './configuration.json';
+import durableSessions from './durable-sessions.json';
+import events from './events.json';
+import multiplayer from './multiplayer.json';
+import visibility from './visibility.json';
 
 export type { FeatureGroup, FeatureScreenshot, FeatureSection } from './types';
 export { featureGroups } from './types';
 
+const groupIds = new Set<string>(featureGroups.map((group) => group.id));
+
+function asFeatureSection(candidate: unknown): FeatureSection {
+  const section = candidate as FeatureSection;
+  if (!groupIds.has(section.group)) {
+    throw new Error(`Feature section "${section.slug}" has unknown group "${section.group}"`);
+  }
+  if (section.screenshots.length === 0 || section.details.length === 0) {
+    throw new Error(`Feature section "${section.slug}" needs a hero screenshot and at least one detail row`);
+  }
+  return { ...section, group: section.group as FeatureGroup };
+}
+
 export const featureSections: FeatureSection[] = [
-  chatSection,
-  multiplayerSection,
-  commentsSection,
-  computePoolsSection,
-  eventsSection,
-  durableSessionsSection,
-  visibilitySection,
-  agentContextSection,
-  automationSection,
-  configurationSection,
-];
+  chat,
+  multiplayer,
+  comments,
+  computePools,
+  events,
+  durableSessions,
+  visibility,
+  agentContext,
+  automation,
+  configuration,
+].map(asFeatureSection);
