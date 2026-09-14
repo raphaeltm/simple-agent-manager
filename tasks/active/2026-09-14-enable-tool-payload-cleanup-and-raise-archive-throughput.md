@@ -1,6 +1,6 @@
 # Enable ProjectData tool-payload cleanup in production and raise archive sweep throughput
 
-**Status:** backlog
+**Status:** active
 **SAM task:** `01M2FT7WD9P50E06KHAFBV0AE6`
 **Branch:** `sam/enable-projectdata-tool-payload-bv0ae6`
 **Related ideas:** `01M0YZNBKSKQZ47NC0K7M8N5AX` (storage tracker), `01M2A5BCJZR4SAZ78XYEJTNFPR` (deadlock post-mortem)
