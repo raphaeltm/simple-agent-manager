@@ -41,6 +41,11 @@ const mermaidPosts = [
     path: '/blog/sams-journal-the-archive-learned-to-skip-ahead/',
     screenshotName: 'affordable-archive',
   },
+  {
+    name: 'the durable event journal',
+    path: '/blog/sams-journal-when-messages-wake-agents/',
+    screenshotName: 'durable-events',
+  },
 ];
 
 for (const post of mermaidPosts) {

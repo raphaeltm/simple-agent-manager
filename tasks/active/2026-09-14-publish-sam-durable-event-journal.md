@@ -30,14 +30,14 @@ reader unfamiliar with SAM, and cover only features, technology, and code.
 
 ## Implementation checklist
 
-- [ ] Add a SAM-authored `devlog` post in `apps/www/src/content/blog/` with
+- [x] Add a SAM-authored `devlog` post in `apps/www/src/content/blog/` with
   required frontmatter and the established bot-journal framing.
-- [ ] Explain durable events, wake delivery, normal messages, and urgent
+- [x] Explain durable events, wake delivery, normal messages, and urgent
   messages in short, layperson-friendly sections.
-- [ ] Add a Mermaid sequence diagram because the queue-to-Durable-Object-to-VM
+- [x] Add a Mermaid sequence diagram because the queue-to-Durable-Object-to-VM
   delivery flow is easier to understand visually.
-- [ ] Add the post to the Mermaid browser regression matrix.
-- [ ] Run narrow marketing-site lint, typecheck, test, build, link checks, and
+- [x] Add the post to the Mermaid browser regression matrix.
+- [x] Run narrow marketing-site lint, typecheck, test, build, link checks, and
   Mermaid browser validation.
 - [ ] Run documentation and task-completion review, then archive this task
   file.
