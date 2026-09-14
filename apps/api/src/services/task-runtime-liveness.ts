@@ -383,6 +383,16 @@ function sessionSleepVerdict(
  * between a node being destroyed for sleep and the workspace row catching up
  * (the five-minute gap in the `.claude/rules/58` incident). Production carried
  * that shape: `node_not_live` with a `scheduled` snapshot, twice in 30 days.
+ *
+ * The SUPERSESSION half is deliberately inert at those same three sites, and that
+ * is not an oversight: they sit downstream of the `workspace.status !== 'running'`
+ * early return, while `needsTaskSupersessionProbe` fires only for the opposite
+ * condition — so `signals.supersession` is always its `'none'` default there.
+ * Nor could a real superseded task reach them: the wake handoff nulls
+ * `workspaces.chat_session_id`, so it exits earlier and inconclusively at
+ * `workspace_runtime_identity_incomplete`. It is kept uniform here as
+ * defence-in-depth against that invariant changing; do not spend time trying to
+ * write a test that proves it discriminating at those three sites.
  */
 function conclusiveDeath(
   signals: TaskRuntimeLivenessSignals,
@@ -399,10 +409,16 @@ function conclusiveDeath(
 
 /**
  * Whether a conclusive-death verdict was reached without the task-scoped sleep
- * signal ever being loaded. Adapters use this to pay for the lookup exactly once
- * and only for a candidate they are otherwise about to terminalize
- * (`.claude/rules/47`, `.claude/rules/58` requirement 6) — the same
- * classify → probe → re-classify shape as `needsNodeHealthProbe`.
+ * signal ever being loaded. Adapters use this to pay for the lookup only for a
+ * candidate they are otherwise about to terminalize (`.claude/rules/47`,
+ * `.claude/rules/58` requirement 6) — the same classify → probe → re-classify
+ * shape as `needsNodeHealthProbe`.
+ *
+ * It fires precisely on the three conclusive-death paths reachable while
+ * `workspaces.status` still reads `running` — `node_not_live`,
+ * `cf_container_<terminal>` and `task_acp_session_terminal` — because
+ * `needsTaskSupersessionProbe` and `needsSessionResumabilityProbe` both decline
+ * for a running workspace, leaving both escapes unpopulated there.
  */
 export function needsDeferredSessionSleepProbe(
   liveness: TaskRuntimeLiveness,

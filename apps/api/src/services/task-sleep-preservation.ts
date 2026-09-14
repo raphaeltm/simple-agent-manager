@@ -7,13 +7,28 @@
  * `deleted` (or gone) and the node is destroyed *by design*.
  *
  * `.claude/rules/58` — the destroyer must read the record the resumer reads. The
- * resumer here is `claimSessionSnapshotRecovery`
- * (`session-snapshot-recovery-lifecycle.ts`), whose authorizing `WHERE` clause is
- * already factored out as `restorableOrInFlightSleepSnapshotPredicateSql`. This
- * module deliberately reuses that exact predicate through
- * `findRestorableOrInFlightSleepSnapshot` rather than re-deriving a second
- * recoverability policy, so the destroyer can never drift looser *or* stricter
- * than the wake path (`.claude/rules/74` — one authority per condition).
+ * resumer is `claimSessionSnapshotRecovery`
+ * (`session-snapshot-recovery-lifecycle.ts`). This module reuses
+ * `findRestorableOrInFlightSleepSnapshot` /
+ * `restorableOrInFlightSleepSnapshotPredicateSql` rather than re-deriving a second
+ * recoverability policy, so the sleep/status/expiry/attempt-budget rules cannot
+ * drift from the wake path (`.claude/rules/74` — one authority per condition).
+ *
+ * KNOWN GAP, per rule 58 requirement 2 (any divergence from the resumer must be
+ * written down here). That shared predicate is NOT the whole of the resumer's
+ * authorizing `WHERE`: `claimSessionSnapshotRecovery` additionally applies
+ * `archiveMigrationFenceCondition`, which refuses to wake a chat session whose
+ * ProjectData ownership has migrated out of the root object
+ * (`project_data_session_locations.location_state != 'root'`). So this guard is
+ * slightly LOOSER than the resumer for an archived session: it will preserve a
+ * task the wake path would refuse, and that task then waits out the snapshot's
+ * `expires_at` instead of failing promptly. That is the bounded, non-destructive
+ * direction of the rule-58 error, and it is pre-existing — three other finalizers
+ * (`workspace-lifecycle-finalizer.ts`, `terminal-node-lifecycle-repair.ts`,
+ * `project-data/terminal-session-reconciliation.ts`) already consume the same
+ * predicate with the same gap, so adding the fence here alone would make four
+ * consumers disagree. Tracked as idea `01M2G2YJ4W2N0RPSY9QKM3XQF1`; the fence
+ * belongs in the shared predicate, for all consumers at once.
  *
  * Scoping differs from `loadSessionResumabilitySnapshot` in one deliberate way:
  * the lookup is keyed on the task's own `chat_session_id` and NOT filtered by
@@ -32,11 +47,20 @@
  *      used it).
  *
  * `chat_session_id` is uniquely indexed (`idx_session_snapshots_chat_session_id`),
- * so this stays a single point lookup and callers only pay it for a candidate
- * they are otherwise about to terminalize (`.claude/rules/47`).
+ * so each call is one point lookup, and callers only pay it for a candidate they
+ * are otherwise about to terminalize (`.claude/rules/47`).
+ *
+ * Note it is NOT the only `session_snapshots` read on that path: the eager gate in
+ * both liveness adapters runs after `loadSessionResumabilitySnapshot` has already
+ * read the same row workspace-scoped, so a candidate past its timeout can pay two
+ * point lookups on the same unique index. They genuinely need different columns —
+ * the in-flight arm reads `sleep_claimed_at` / `sleep_stopping_since` /
+ * `sleep_after`, which `SessionResumabilitySnapshot` does not carry — so merging
+ * them means widening the shared predicate's SELECT for all its consumers. Tracked
+ * as idea `01M2G2YJ4W2N0RPSY9QKM3XQF1`.
  */
 import type { Env } from '../env';
-import { createModuleLogger } from '../lib/logger';
+import { createModuleLogger, log as rootLog } from '../lib/logger';
 import {
   findRestorableOrInFlightSleepSnapshot,
   type SleepLifecyclePredicateResult,
@@ -123,6 +147,10 @@ export async function loadTaskSleepPreservation(
  * Callers use this at the single mutation site so a new terminal branch cannot
  * reintroduce the bug by forgetting to ask. Returns true when the caller must
  * leave the task untouched.
+ *
+ * Emits `stuck_task.preserved_sleeping` — the same event the ceiling gate and
+ * both liveness adapters use, so one query finds every preserve regardless of
+ * which guard fired. `source` discriminates them.
  */
 export async function withholdTerminalVerdictForSleepingSession(
   db: D1Database,
@@ -138,7 +166,7 @@ export async function withholdTerminalVerdictForSleepingSession(
 ): Promise<boolean> {
   const preservation = await loadTaskSleepPreservation(db, env, task);
   if (!withholdsTerminalVerdict(preservation)) return false;
-  log.info('withheld_terminal_verdict', {
+  rootLog.info('stuck_task.preserved_sleeping', {
     taskId: task.id,
     projectId: task.projectId,
     chatSessionId: task.chatSessionId,

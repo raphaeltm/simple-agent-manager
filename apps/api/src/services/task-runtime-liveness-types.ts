@@ -10,6 +10,17 @@ export interface TaskRuntimeLiveness {
   deliveryTarget?: { nodeId: string; userId: string };
 }
 
+/**
+ * Bound on the recursive supersession walk in `loadTaskSupersession`. The query is
+ * only reached for a task already about to receive a terminal verdict, and the cap
+ * stops a corrupt cycle from making the sweep unbounded (`.claude/rules/47`).
+ *
+ * Lives in this dependency-free module because both `task-runtime-liveness.ts` and
+ * `task-runtime-liveness-loaders.ts` need it, and the former re-exports from the
+ * latter — so putting it in either would create an import cycle.
+ */
+export const MAX_TASK_SUPERSESSION_CHAIN_DEPTH = 32;
+
 export type RuntimeProbeOutcome = 'ok' | 'timeout' | 'error' | 'unknown' | 'not_run';
 export type NodeHealthProbeOutcome = 'ok' | 'failed' | 'timeout' | 'error' | 'not_run';
 

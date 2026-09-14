@@ -808,7 +808,8 @@ export async function getTaskReconciliationDiagnostics(
   taskId: string
 ): Promise<TaskReconciliationDiagnostics | null> {
   const task = await env.DATABASE.prepare(
-    `SELECT id, project_id, status, execution_step, started_at, updated_at, workspace_id
+    `SELECT id, project_id, status, execution_step, started_at, updated_at, workspace_id,
+            chat_session_id
      FROM tasks
      WHERE id = ?
      LIMIT 1`
@@ -822,6 +823,10 @@ export async function getTaskReconciliationDiagnostics(
       started_at: string | null;
       updated_at: string;
       workspace_id: string | null;
+      // Without this the read-only diagnostics endpoint reports a conclusive-death
+      // verdict for a sleeping conversation the real sweep preserves — the sleep
+      // guard is keyed on the task's canonical chat session.
+      chat_session_id: string | null;
     }>();
 
   if (!task) return null;

@@ -83,7 +83,19 @@ interface MockWorkspaceRow {
 
 function createMockD1(
   taskRows: Record<string, MockTaskRow> = {},
-  workspaceRows: Record<string, MockWorkspaceRow> = {}
+  workspaceRows: Record<string, MockWorkspaceRow> = {},
+  /**
+   * When set, the terminal-verdict sleep guard's `session_snapshots` lookup
+   * (`task-sleep-preservation.ts`) resolves to a preserving row.
+   *
+   * This is a WIRING fixture, not a predicate fixture: it deliberately ignores the
+   * query's `WHERE`, so it proves only that this runtime honours an inconclusive
+   * `_session_sleeping` verdict. The predicate itself — scoping, expiry, budget,
+   * the in-flight arm — is proven against a real SQL engine in
+   * `stuck-task-sleeping-conversation.test.ts` and `conversation-idle-timeout.test.ts`
+   * (`.claude/rules/28`).
+   */
+  sleepSnapshotRow: Record<string, unknown> | null = null
 ) {
   const runCalls: Array<{ query: string; args: unknown[] }> = [];
   const statusEvents: Array<Record<string, unknown>> = [];
@@ -234,6 +246,9 @@ function createMockD1(
           if (query.includes('FROM acp_sessions')) {
             return { id: `acp-${args[0]}` };
           }
+          if (query.includes('FROM session_snapshots')) {
+            return sleepSnapshotRow;
+          }
           return null;
         }),
         run: vi.fn().mockImplementation(() => runStatement(query, args)),
@@ -344,9 +359,12 @@ describe('Task Reconciliation Module', () => {
 
   function envWithRows(
     taskRows: Record<string, MockTaskRow> = {},
-    workspaceRows: Record<string, MockWorkspaceRow> = {}
+    workspaceRows: Record<string, MockWorkspaceRow> = {},
+    sleepSnapshotRow: Record<string, unknown> | null = null
   ): ProjectDataEnv {
-    return { DATABASE: createMockD1(taskRows, workspaceRows) } as unknown as ProjectDataEnv;
+    return {
+      DATABASE: createMockD1(taskRows, workspaceRows, sleepSnapshotRow),
+    } as unknown as ProjectDataEnv;
   }
 
   async function candidatesForTask(taskMode: string, status: string) {
@@ -1233,6 +1251,53 @@ describe('Task Reconciliation Module', () => {
           .get<{ count: number }>()!.count
       ).toBe(1);
       expect(broadcastEvent.mock.calls.filter(([type]) => type === 'message.new')).toHaveLength(1);
+    });
+
+    /**
+     * `.claude/rules/61`: reconciliation is the THIRD terminalization runtime for
+     * the shared liveness verdict, and it has no choke point of its own — a
+     * conclusive-death verdict goes straight to `terminallyFailDeadTarget`. It
+     * needed no source change in this fix, inheriting the classifier's sleep
+     * escape through `getLocalTaskRuntimeLiveness`; this proves that inheritance
+     * rather than assuming it.
+     *
+     * Same fixture as the dead-node test below, plus a preserving sleep row.
+     */
+    it('preserves a sleeping session instead of failing a dead-node candidate', async () => {
+      setupTaskSession();
+      const env = envWithRows(
+        { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+        {
+          'ws-1': {
+            node_id: 'node-1',
+            user_id: 'user-1',
+            project_id: 'project-1',
+            node_status: 'destroyed',
+            health_status: 'unhealthy',
+            last_heartbeat_at: null,
+          },
+        },
+        {
+          expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          sleep_status: 'sleeping',
+          sleep_claimed_at: null,
+          sleep_stopping_since: null,
+          sleep_after: null,
+          updated_at: new Date().toISOString(),
+          created_at: new Date(Date.now() - 3_600_000).toISOString(),
+        }
+      );
+
+      const processed = await processReconciliationCandidates(sql, env, vi.fn(), {
+        projectId: 'project-1',
+      });
+
+      expect(processed).toBe(0);
+      // Liveness pairing: the session must still be there and untouched, not
+      // missing because the sweep never ran.
+      expect(
+        db.prepare(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).get()
+      ).toMatchObject({ status: 'active' });
     });
 
     it('fails dead-node candidates without attempting VM delivery', async () => {

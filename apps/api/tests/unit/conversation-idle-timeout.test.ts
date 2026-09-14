@@ -29,6 +29,20 @@ const NOW = Date.parse('2026-08-06T12:00:00.000Z');
 const PROJECT_ID = 'project-1';
 const TIMEOUT_MS = 60 * 60 * 1000;
 
+/**
+ * Hand-written D1 schema.
+ *
+ * It drifts: adding `w.created_at` to `loadRuntimeWorkspaceSnapshot` and a
+ * `session_snapshots` lookup to the terminal-verdict path made every query in
+ * this file throw, and the resulting `workspaceProbeOutcome: 'error'` /
+ * withheld-verdict fail-safes turned six assertions red for the wrong reason.
+ *
+ * Prefer `createSchemaTables(sqlite, [schema.workspaces, ...])` from
+ * `tests/helpers/sqlite-d1.ts` for new files — it builds the tables from the
+ * drizzle definitions so this cannot happen (`.claude/rules/28`). Kept inline
+ * here because this file also hand-builds a ProjectData SqlStorage and the two
+ * are seeded together.
+ */
 const D1_SCHEMA = `
   CREATE TABLE projects (
     id TEXT PRIMARY KEY,
@@ -48,7 +62,32 @@ const D1_SCHEMA = `
     chat_session_id TEXT,
     node_id TEXT,
     status TEXT NOT NULL,
+    created_at TEXT,
     updated_at TEXT NOT NULL
+  );
+  -- Read by the terminal-verdict sleep guard in services/task-sleep-preservation.ts.
+  -- Left empty by seed(): these fixtures are NOT sleeping, so the guard must find
+  -- no row and allow terminalization, which is what the 'failed' assertions below
+  -- depend on.
+  CREATE TABLE session_snapshots (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    workspace_id TEXT,
+    chat_session_id TEXT,
+    status TEXT,
+    degradation TEXT,
+    expires_at TEXT,
+    sleeping_at TEXT,
+    sleep_status TEXT,
+    sleep_after TEXT,
+    sleep_attempts INTEGER NOT NULL DEFAULT 0,
+    sleep_claimed_at TEXT,
+    sleep_stopping_since TEXT,
+    capture_generation TEXT,
+    recovery_attempts INTEGER NOT NULL DEFAULT 0,
+    recovery_failed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT
   );
   CREATE TABLE trigger_executions (
     id TEXT PRIMARY KEY,
@@ -647,6 +686,86 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
       },
     });
     expect(task(seeded.taskId).status).toBe('in_progress');
+  });
+
+  /**
+   * `.claude/rules/61` + `.claude/rules/62`: the ProjectData idle-cleanup runtime
+   * has NO terminal choke point of its own — it goes from
+   * `getLocalTaskRuntimeLiveness` straight to its own D1 batch write. So the
+   * classifier's sleep escape is the only thing standing between a slept
+   * conversation and a `failed` verdict here, and it must be proven through the
+   * REAL trigger (`terminalizeIdleTaskInD1` via `processExpiredCleanups`), not
+   * through the adapter.
+   *
+   * `nodeStatus: 'stopped'` with the workspace still `running` is the shape the
+   * cron sweep's `node_not_live` tests use, and the one production carried with a
+   * `scheduled` snapshot twice in 30 days.
+   */
+  function seedSleepingSnapshot(
+    seeded: { sessionId: string; workspaceId: string; projectId: string },
+    o: { sleepStatus?: string; sleepingAt?: string | null; expiresAt?: string } = {}
+  ): void {
+    d1Db
+      .prepare(
+        `INSERT INTO session_snapshots (id, project_id, workspace_id, chat_session_id, status,
+                                     degradation, expires_at, sleeping_at, sleep_status,
+                                     sleep_claimed_at, sleep_attempts, recovery_attempts,
+                                     created_at, updated_at)
+       VALUES ('snapshot-1', ?, ?, ?, 'available', 'none', ?, ?, ?, NULL, 0, 0, ?, ?)`
+      )
+      .run(
+        seeded.projectId,
+        seeded.workspaceId,
+        seeded.sessionId,
+        o.expiresAt ?? new Date(NOW + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        o.sleepingAt === undefined ? new Date(NOW - 60_000).toISOString() : o.sleepingAt,
+        o.sleepStatus ?? 'sleeping',
+        new Date(NOW - 3_600_000).toISOString(),
+        new Date(NOW).toISOString()
+      );
+  }
+
+  it('does not terminalize a sleeping session through the real idle-cleanup trigger', async () => {
+    const seeded = seed({ nodeStatus: 'stopped', withTrigger: true, scheduleExpired: true });
+    seedSleepingSnapshot(seeded);
+    const stopWorkspace = vi.fn().mockResolvedValue(undefined);
+
+    await runPathA(stopWorkspace);
+    await runPathA(stopWorkspace);
+
+    // Preserved with no status change and, critically, no error_message — the
+    // column that paints the red failure banner.
+    expect(task(seeded.taskId)).toMatchObject({
+      status: 'in_progress',
+      error_message: null,
+    });
+    expect(stopWorkspace).not.toHaveBeenCalled();
+    expect(d1Db.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
+  });
+
+  /**
+   * The discriminating control for the test above, on the same runtime: identical
+   * fixture with no snapshot row still terminalizes. Without this, "preserved"
+   * would also be satisfied by idle cleanup being broken outright.
+   */
+  it('still terminalizes through the real idle-cleanup trigger when no snapshot exists', async () => {
+    const seeded = seed({ nodeStatus: 'stopped', withTrigger: true, scheduleExpired: true });
+
+    await runPathA();
+    await runPathA();
+
+    expect(task(seeded.taskId).status).toBe('failed');
+  });
+
+  /** An expired snapshot must not preserve — the bound (`.claude/rules/58` req 3). */
+  it('terminalizes through the real idle-cleanup trigger once the snapshot expired', async () => {
+    const seeded = seed({ nodeStatus: 'stopped', withTrigger: true, scheduleExpired: true });
+    seedSleepingSnapshot(seeded, { expiresAt: new Date(NOW - 60_000).toISOString() });
+
+    await runPathA();
+    await runPathA();
+
+    expect(task(seeded.taskId).status).toBe('failed');
   });
 
   it('keeps cron and DO-local adapters in parity on the shared classifier', async () => {

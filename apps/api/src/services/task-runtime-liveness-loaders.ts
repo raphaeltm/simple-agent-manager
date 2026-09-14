@@ -6,11 +6,11 @@
  * lookups the classifier's inputs come from; the classifier itself stays pure.
  * Re-exported from `task-runtime-liveness.ts` so existing imports are unchanged.
  */
-import { MAX_TASK_SUPERSESSION_CHAIN_DEPTH } from './task-runtime-liveness-constants';
-import type {
-  RuntimeWorkspaceSnapshot,
-  SessionResumabilitySnapshot,
-  TaskSupersession,
+import {
+  MAX_TASK_SUPERSESSION_CHAIN_DEPTH,
+  type RuntimeWorkspaceSnapshot,
+  type SessionResumabilitySnapshot,
+  type TaskSupersession,
 } from './task-runtime-liveness-types';
 
 /** Load the D1-owned workspace/node snapshot used by both liveness adapters. */

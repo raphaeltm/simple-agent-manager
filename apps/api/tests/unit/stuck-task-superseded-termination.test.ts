@@ -194,13 +194,15 @@ function env(
  * `task_status_events.reason`, so assertions about WHY a task ended read this.
  */
 function statusEventReasonOf(id: string): string | null {
-  const row = sqlite
-    .prepare(
-      `SELECT reason FROM task_status_events WHERE task_id = ?
-         ORDER BY created_at DESC, id DESC LIMIT 1`
-    )
-    .get(id) as { reason: string | null } | undefined;
-  return row?.reason ?? null;
+  // Assert the single-row assumption rather than relying on it. `id` is a ULID
+  // whose random suffix gives no monotonic guarantee inside one millisecond, so
+  // an ORDER BY alone could pick the wrong row the moment a fixture accumulates a
+  // real multi-transition history.
+  const rows = sqlite
+    .prepare(`SELECT reason FROM task_status_events WHERE task_id = ?`)
+    .all(id) as Array<{ reason: string | null }>;
+  expect(rows.length).toBeLessThanOrEqual(1);
+  return rows[0]?.reason ?? null;
 }
 
 function statusOf(id: string): { status: string; error_message: string | null } {

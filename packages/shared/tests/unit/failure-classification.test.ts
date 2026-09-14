@@ -30,6 +30,21 @@ describe('classifyFailure', () => {
     expect(classifyFailure(message).code).toBe('runtime-lost');
   });
 
+  /**
+   * The exact text the stuck-task sweep and ProjectData idle cleanup record for a
+   * benign supersession. New rows leave `tasks.error_message` NULL, so this only
+   * classifies HISTORICAL rows — but those must read as a non-diagnosable
+   * lifecycle outcome, not "Failed" (policies `a974b04f`, `486d1dd1`).
+   */
+  it('classifies a superseded-wake termination as a non-diagnosable cancellation', () => {
+    const classification = classifyFailure(
+      'Superseded by a later session wake; the conversation continued in a replacement ' +
+        'task and has since ended.'
+    );
+    expect(classification.code).toBe('cancelled');
+    expect(classification.diagnosable).toBe(false);
+  });
+
   it('uses the optional execution step as classification evidence', () => {
     expect(classifyFailure('Operation failed', 'node provisioning timed out').code).toBe(
       'provisioning'

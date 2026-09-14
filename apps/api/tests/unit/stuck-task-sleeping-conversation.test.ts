@@ -43,8 +43,12 @@ vi.mock('../../src/services/observability', () => ({
   persistError: vi.fn().mockResolvedValue(undefined),
 }));
 
-const { getTaskAcpLivenessSignalsMock } = vi.hoisted(() => ({
+const { getTaskAcpLivenessSignalsMock, containerLifecycleMock } = vi.hoisted(() => ({
   getTaskAcpLivenessSignalsMock: vi.fn(),
+  containerLifecycleMock: vi.fn(),
+}));
+vi.mock('../../src/services/vm-agent-container', () => ({
+  inspectVmAgentContainerLifecycle: containerLifecycleMock,
 }));
 vi.mock('../../src/services/project-data', () => ({
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
@@ -125,14 +129,14 @@ function seedWorkspace(
 }
 
 /** A healthy node — the production rows in this incident all had one. */
-function seedNode(o: { heartbeatAt?: string } = {}): void {
+function seedNode(o: { heartbeatAt?: string; runtime?: string } = {}): void {
   sqlite
     .prepare(
       `INSERT INTO nodes (id, user_id, name, status, health_status, last_heartbeat_at, runtime,
                         vm_size, vm_location, cloud_provider, created_at, updated_at)
-     VALUES (?, 'user-1', 'node', 'running', 'healthy', ?, 'vm', 'cpx21', 'nbg1', 'hetzner', ?, ?)`
+     VALUES (?, 'user-1', 'node', 'running', 'healthy', ?, ?, 'cpx21', 'nbg1', 'hetzner', ?, ?)`
     )
-    .run(NODE_ID, o.heartbeatAt ?? iso(0), iso(PAST_CEILING), iso(0));
+    .run(NODE_ID, o.heartbeatAt ?? iso(0), o.runtime ?? 'vm', iso(PAST_CEILING), iso(0));
 }
 
 function seedSnapshot(
@@ -226,6 +230,7 @@ function taskRow(id = TASK_ID): { status: string; error_message: string | null }
 beforeEach(() => {
   vi.clearAllMocks();
   fetchWithTimeoutMock.mockResolvedValue({ ok: true, status: 200 });
+  containerLifecycleMock.mockResolvedValue({ status: 'running', activeWorkStatus: null });
   // A live ACP session, so the "live runtime" controls below are live for a
   // reason the production system would also accept.
   getTaskAcpLivenessSignalsMock.mockResolvedValue({
@@ -285,9 +290,12 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
     seedTask({ workspaceId: null });
     seedSnapshot({ workspaceId: null });
 
-    await recoverStuckTasks(env());
+    const result = await recoverStuckTasks(env());
 
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    // Liveness pairing: 'nothing changed' is also satisfied by the sweep never
+    // reaching this candidate (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
   });
 
   /**
@@ -301,9 +309,12 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
     seedNode();
     seedSnapshot();
 
-    await recoverStuckTasks(env());
+    const result = await recoverStuckTasks(env());
 
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    // Liveness pairing: 'nothing changed' is also satisfied by the sweep never
+    // reaching this candidate (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
   });
 
   /** A snapshot recorded against a previous incarnation of the workspace. */
@@ -313,9 +324,12 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
     seedNode();
     seedSnapshot({ workspaceId: '01M06502R3MW9JY75M7WK68OLD' });
 
-    await recoverStuckTasks(env());
+    const result = await recoverStuckTasks(env());
 
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    // Liveness pairing: 'nothing changed' is also satisfied by the sweep never
+    // reaching this candidate (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
   });
 
   /**
@@ -333,9 +347,12 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
       sleepClaimedAt: iso(-60_000),
     });
 
-    await recoverStuckTasks(env());
+    const result = await recoverStuckTasks(env());
 
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    // Liveness pairing: 'nothing changed' is also satisfied by the sweep never
+    // reaching this candidate (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
   });
 
   /**
@@ -380,11 +397,17 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
    * "destroy". Paired with a liveness assertion: the sweep must have RUN, which
    * the preserved-not-absent task row plus the scanned count together prove.
    */
+  /**
+   * The fixture shape matters here. With a `deleted` workspace row,
+   * `needsSessionResumabilityProbe` fires FIRST and its own throw yields the
+   * pre-existing `workspace_deleted_resumability_unknown` escape — so the test
+   * would pass without the new guard existing at all. `workspace_id: null` makes
+   * that probe decline (`workspace === null`), leaving the task-scoped lookup as
+   * the only `session_snapshots` query the broken binding can intercept.
+   */
   it('withholds the terminal verdict when the sleep lookup fails', async () => {
-    seedTask();
-    seedWorkspace({ status: 'deleted' });
-    seedNode();
-    seedSnapshot();
+    seedTask({ workspaceId: null });
+    seedSnapshot({ workspaceId: null });
 
     const result = await recoverStuckTasks(brokenSnapshotEnv());
 
@@ -557,9 +580,12 @@ describe('liveness and reconciliation branches — the same guard applies', () =
     seedTask({ workspaceId: null, startedAt: iso(-30 * 60 * 1000) });
     seedSnapshot({ workspaceId: null });
 
-    await recoverStuckTasks(env());
+    const result = await recoverStuckTasks(env());
 
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    // Liveness pairing: 'nothing changed' is also satisfied by the sweep never
+    // reaching this candidate (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
   });
 
   /** Its discriminating control on the same branch. */
@@ -596,9 +622,12 @@ describe('liveness and reconciliation branches — the same guard applies', () =
       .run(NODE_ID, iso(-30_000), iso(PAST_HARD_TIMEOUT), iso(0));
     seedSnapshot();
 
-    await recoverStuckTasks(env());
+    const result = await recoverStuckTasks(env());
 
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    // Liveness pairing: 'nothing changed' is also satisfied by the sweep never
+    // reaching this candidate (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
   });
 
   /** Its discriminating control: a destroyed node with no sleep record still fails. */
@@ -645,9 +674,12 @@ describe('liveness and reconciliation branches — the same guard applies', () =
       sessionWork: null,
     });
 
-    await recoverStuckTasks(env());
+    const result = await recoverStuckTasks(env());
 
     expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    // Liveness pairing: 'nothing changed' is also satisfied by the sweep never
+    // reaching this candidate (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
   });
 
   /** Its discriminating control. */
@@ -675,6 +707,79 @@ describe('liveness and reconciliation branches — the same guard applies', () =
 
     expect(taskRow().status).toBe('failed');
     expect(taskRow().error_message).toContain('task_acp_session_terminal');
+  });
+
+  /**
+   * THE `cf_container_<terminal>` SHAPE — the third previously-unguarded conclusive
+   * path, and the one that matters for Instant sessions: sleeping an Instant
+   * workspace stops its container while `workspaces.status` still reads `running`.
+   */
+  it('preserves a sleeping Instant session whose container has stopped', async () => {
+    seedTask({ executionStep: 'running', startedAt: iso(PAST_HARD_TIMEOUT) });
+    seedWorkspace({ status: 'running', createdAt: iso(PAST_HARD_TIMEOUT) });
+    seedNode({ heartbeatAt: iso(-30_000), runtime: 'cf-container' });
+    seedSnapshot();
+    containerLifecycleMock.mockResolvedValue({ status: 'stopped', activeWorkStatus: null });
+
+    const result = await recoverStuckTasks(env());
+
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    expect(result.candidatesScanned).toBe(1);
+  });
+
+  /** Its discriminating control: the same stopped container with no sleep record. */
+  it('still terminalizes a stopped Instant container with no sleep record', async () => {
+    seedTask({ executionStep: 'running', startedAt: iso(PAST_HARD_TIMEOUT) });
+    seedWorkspace({ status: 'running', createdAt: iso(PAST_HARD_TIMEOUT) });
+    seedNode({ heartbeatAt: iso(-30_000), runtime: 'cf-container' });
+    containerLifecycleMock.mockResolvedValue({ status: 'stopped', activeWorkStatus: null });
+
+    await recoverStuckTasks(env());
+
+    expect(taskRow().status).toBe('failed');
+    expect(taskRow().error_message).toContain('cf_container_stopped');
+  });
+
+  /**
+   * `sleep_status='failed'` is a retry-eligible in-flight state the sleep
+   * scheduler produces routinely, and it takes a different arm of the shared
+   * predicate than `scheduled` (the `sleep_attempts < ?` retry budget).
+   */
+  it('preserves a conversation whose sleep attempt failed but is still retry-eligible', async () => {
+    seedTask({ workspaceId: null });
+    seedSnapshot({
+      workspaceId: null,
+      sleepStatus: 'failed',
+      sleepingAt: null,
+      sleepClaimedAt: iso(-60_000),
+    });
+
+    const result = await recoverStuckTasks(env());
+
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    // Liveness pairing: 'nothing changed' is also satisfied by the sweep never
+    // reaching this candidate (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
+  });
+
+  /**
+   * The guard is deliberately NOT scoped to `task_mode='conversation'`. The
+   * incident population was conversation-mode, but recoverability is a property of
+   * the SESSION, not of the task's lifecycle semantics: a task-mode row paused at
+   * `awaiting_followup` whose session slept is equally wakeable, and failing it
+   * would destroy the same recoverable work. This test pins that decision so a
+   * future reader does not "tighten" it back to conversation-only.
+   */
+  it('preserves a task-mode row whose session is asleep, not just conversation-mode', async () => {
+    seedTask({ taskMode: 'task', workspaceId: null });
+    seedSnapshot({ workspaceId: null });
+
+    const result = await recoverStuckTasks(env());
+
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    // Liveness pairing: 'nothing changed' is also satisfied by the sweep never
+    // reaching this candidate (`.claude/rules/62`).
+    expect(result.candidatesScanned).toBe(1);
   });
 
   /**
