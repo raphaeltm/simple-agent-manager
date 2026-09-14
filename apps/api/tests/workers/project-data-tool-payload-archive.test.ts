@@ -145,13 +145,16 @@ async function runArchiveCleanup(
   stub: DurableObjectStub<ProjectDataTestDouble>,
   projectId: string,
   overrides: RuntimeEnvOverride,
-  options: { now?: number; nowMs?: () => number } = {}
+  options: { now?: number; nowMs?: () => number; allowStart?: boolean } = {}
 ) {
   return withRuntimeEnv(overrides, async () =>
     runInDurableObject(stub, async (_instance, state) => {
       const config = resolveStorageSafetyConfig(testEnv);
       return runProjectDataToolPayloadCleanup(state.storage.sql, testEnv, projectId, config, {
-        allowStart: true,
+        // Production sets this from `measurement !== null` (storage-alarm.ts), i.e. only on the
+        // tick where the hourly storage measurement ran. Defaulting to true keeps every existing
+        // case unchanged; a test that wants the other half of the cadence bound passes false.
+        allowStart: options.allowStart ?? true,
         now: options.now ?? FIXED_NOW,
         ...(options.nowMs ? { nowMs: options.nowMs } : {}),
         transactionSync: (callback) => state.storage.transactionSync(callback),
@@ -628,6 +631,165 @@ describe('ProjectData tool payload R2 archival', () => {
         .events()
         .filter((entry) => entry.event === 'project_data.tool_payload_cleanup.config_refused')
     ).toHaveLength(1);
+  });
+
+  it('reports a manifest key configured without the cutoff that arms the approved-plan branch', async () => {
+    // The other refusal gate, and the more dangerous of the two. Its own comment says that
+    // without it, half-applied config — manifest key/hash set but CUTOFF_CREATED_AT dropped —
+    // "would skip the strict block entirely (including the exact single-project allowlist match)
+    // and still take the manifest branch for EVERY project". Nothing exercised it before: every
+    // other manifest test builds config through `approvedCleanupEnv`, which always sets a real
+    // cutoff, so this branch had no coverage at all.
+    const projectId = `${TEST_PREFIX}-manifest-without-cutoff`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const seeded = await seedToolMessages(stub, [
+      { id: 'manifest-without-cutoff', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'manifest-without-cutoff-plan',
+      FIXED_NOW - 1_000
+    );
+
+    const warnings = captureWarnEvents();
+    let refused: Awaited<ReturnType<typeof runArchiveCleanup>>;
+    try {
+      refused = await runArchiveCleanup(
+        stub,
+        projectId,
+        // A real, verified manifest — but the cutoff that gates the strict block is gone.
+        { ...approval, PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_CUTOFF_CREATED_AT: '' },
+        { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+      );
+    } finally {
+      warnings.restore();
+    }
+
+    expect(refused).toBeNull();
+    // The load-bearing assertion: a valid manifest plus a missing cutoff must NOT strip, because
+    // the unscoped manifest branch is exactly what this gate exists to make unreachable.
+    await expectSourcePayloadIntact(stub, seeded, 'manifest-without-cutoff');
+    const refusal = warnings
+      .events()
+      .find((entry) => entry.event === 'project_data.tool_payload_cleanup.config_refused');
+    expect(refusal).toMatchObject({
+      projectId,
+      gate: 'manifest_without_fixed_cutoff',
+      unmet: ['cutoffCreatedAt'],
+    });
+
+    // Liveness control on the same fixture: restoring the cutoff completes the config and strips.
+    const applied = await runArchiveCleanup(stub, projectId, approval, {
+      now: FIXED_NOW + 1,
+      nowMs: () => FIXED_NOW + 1,
+    });
+    expect(applied).toMatchObject({ rowsUpdated: 1, rowsFailed: 0 });
+    await expectSourcePayloadArchived(stub, seeded, 'manifest-without-cutoff');
+  });
+
+  it('stays quiet on a tick where cleanup could not have started, and names one missing field at a time', async () => {
+    // Two gaps a reviewer found in the first cut of these tests.
+    //
+    // 1. CADENCE. `shouldReportToolPayloadCleanupConfigRefusal` returns false when neither
+    //    `allowStart` nor `forceStart` is set — production sets `allowStart` only on the tick
+    //    where the hourly storage measurement ran (storage-alarm.ts). Every case here used a
+    //    helper that hardcoded `allowStart: true`, so that half of the bound was unreachable
+    //    from any test in the repository and would have survived deletion.
+    // 2. FIELD ATTRIBUTION. The earlier assertion blanked manifestKey and manifestSha256 together
+    //    and checked with `arrayContaining`, so a bug that attributed a missing hash to
+    //    'manifestKey' would still have passed. Blank exactly one and assert the exact list.
+    const projectId = `${TEST_PREFIX}-refusal-cadence-and-attribution`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await seedToolMessages(stub, [
+      { id: 'refusal-cadence', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(
+      projectId,
+      'refusal-cadence-plan',
+      FIXED_NOW - 1_000
+    );
+    const missingHashOnly = {
+      ...approval,
+      PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256: '',
+    } satisfies RuntimeEnvOverride;
+
+    const quiet = captureWarnEvents();
+    try {
+      expect(
+        await runArchiveCleanup(stub, projectId, missingHashOnly, {
+          now: FIXED_NOW,
+          nowMs: () => FIXED_NOW,
+          allowStart: false,
+        })
+      ).toBeNull();
+    } finally {
+      quiet.restore();
+    }
+    expect(
+      quiet
+        .events()
+        .filter((entry) => entry.event === 'project_data.tool_payload_cleanup.config_refused')
+    ).toEqual([]);
+
+    // Control: the identical config on a tick that COULD have started does report — so the
+    // silence above is the cadence bound, not a diagnostic that never fires.
+    const loud = captureWarnEvents();
+    try {
+      expect(
+        await runArchiveCleanup(stub, projectId, missingHashOnly, {
+          now: FIXED_NOW,
+          nowMs: () => FIXED_NOW,
+          allowStart: true,
+        })
+      ).toBeNull();
+    } finally {
+      loud.restore();
+    }
+    const refusal = loud
+      .events()
+      .find((entry) => entry.event === 'project_data.tool_payload_cleanup.config_refused');
+    // Exact, not arrayContaining: only the hash was removed, so only the hash may be named.
+    expect(refusal?.unmet).toEqual(['manifestSha256']);
+  });
+
+  it('names a malformed manifest hash differently from a missing one', async () => {
+    // `manifestSha256Format` is a distinct unmet reason reached through an `else if`, so it is
+    // unreachable whenever the missing-hash branch fires. An operator who pastes a truncated or
+    // upper-cased digest needs to be told the value is malformed, not that it is absent.
+    const projectId = `${TEST_PREFIX}-refusal-hash-format`;
+    await seedProjectGraph(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await seedToolMessages(stub, [
+      { id: 'refusal-hash-format', createdAt: FIXED_NOW - 2_000, sequence: 1 },
+    ]);
+    const approval = await approvedCleanupEnv(projectId, 'refusal-hash-format-plan', FIXED_NOW - 1_000);
+
+    const warnings = captureWarnEvents();
+    try {
+      expect(
+        await runArchiveCleanup(
+          stub,
+          projectId,
+          // Present, 64 characters, but upper-cased — the regex requires lowercase hex.
+          {
+            ...approval,
+            PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256: 'A'.repeat(64),
+          },
+          { now: FIXED_NOW, nowMs: () => FIXED_NOW }
+        )
+      ).toBeNull();
+    } finally {
+      warnings.restore();
+    }
+    const refusal = warnings
+      .events()
+      .find((entry) => entry.event === 'project_data.tool_payload_cleanup.config_refused');
+    expect(refusal?.unmet).toEqual(['manifestSha256Format']);
   });
 
   it('runs the retention path with no cutoff configured, which is the staging configuration', async () => {

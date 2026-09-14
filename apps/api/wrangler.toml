@@ -26,8 +26,14 @@ cpu_ms = 30000
 # (.claude/rules/70-flag-flips-must-verify-the-deployed-value.md). The deploy log and the job
 # summary now list every Environment override that disagrees with this file.
 #
-# DELIBERATE production divergences, as of 2026-09-14 — an override NOT listed here is either an
-# accident or a stale rollout knob, and should be reconciled or deleted:
+# Known non-flag overrides are enumerated by exact name in `EXPECTED_ENVIRONMENT_VAR_OVERRIDES`
+# (`scripts/deploy/sync-wrangler-config.ts`), each with the reason it exists. That list is the
+# machine-readable source of truth and is deliberately NOT restated here — two hand-maintained
+# copies of the same list is the drift this whole change exists to stop. Anything outside it
+# raises a deploy-time warning annotation.
+#
+# FLAG divergences are deliberately excluded from that list, so they annotate on every deploy.
+# Two exist today and both are intentional:
 #   PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED   here "true", production "false".
 #       Event-log cleanup is proven on staging (which takes this file's value) but stays GATED in
 #       production until Raphaël approves it separately. Do not "reconcile" by flipping this to
@@ -35,9 +41,6 @@ cpu_ms = 30000
 #   PROJECT_DATA_ARCHIVE_COMPACT_ENABLED     here "false", production "true".
 #       Compact archive shards were approved for production on 2026-09-08. This default is
 #       deliberately conservative for fresh self-host installs.
-#   PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_*  production runs a one-shot P0 measurement plan
-#       (plan id prod-p0-projectdata-...-20260904, completed 2026-09-04 and now terminal).
-#       These overrides size that single run and do not belong in this file.
 BASE_DOMAIN = "workspaces.example.com"
 VERSION = "0.1.0"
 # D1 Sessions API anchor for the Worker fetch handler. "first-primary" routes the first query
@@ -174,17 +177,23 @@ PROJECT_DATA_ARCHIVE_COMPACT_ENABLED = "false"
 # (.claude/rules/70).
 PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET = "800000"
 # Safety multiplier applied to the row inventory `estimateArchiveWrites` already counts, NOT
-# an independent amplification factor. MEASURED 2026-09-14 in production (Cloudflare
-# `durableObjectsPeriodicGroups`, 5-minute buckets isolating four archive ticks in namespace
-# fb36fe21): ~6,000-9,500 rowsWritten actually billed per migration against an estimate of
-# 7,442 units, i.e. an actual/units ratio of ~1.0. At factor 8 the budget therefore charged
-# ~8x what the work costs, capping production at 800000/60534 = 13 migrations/day while the
-# hourly cadence allows 24 — so ~11 ticks/day ran and reclaimed nothing.
+# an independent amplification factor. MEASURED 2026-09-14 in production two ways:
+#   - `project_data_archive_write_budget` sampled an hour apart: 726,408 reserved across 11
+#     publishes at 11:29Z, 780,016 across 12 at 12:15Z => ~65,001 writes/migration, i.e.
+#     ~8,000 inventory units at the then-shipped factor of 8.
+#   - Cloudflare `durableObjectsPeriodicGroups` 5-minute buckets isolating four archive ticks
+#     in namespace fb36fe21: 5,950 / 6,436 / 7,942 / 9,823 rowsWritten actually billed.
+# Billed rows per inventory unit therefore spans 0.74-1.23. At factor 8 the budget charged ~8x
+# what the work costs, capping production at 800000/65001 = 12 migrations/day while the hourly
+# cadence allows 24 — so half the ticks ran and reclaimed nothing.
 #
-# 2 keeps a 100% safety margin over that measurement and moves the ceiling to ~50/day, at
+# 2 exceeds the worst observed ratio of 1.23 by ~63% and moves the ceiling to ~47/day, at
 # which point the per-tick bound (one ~4,849-message candidate per hourly tick) binds first
-# at 24/day. Re-measure before changing this again: the condition it stands for is "rows this
-# migration will actually write", and only telemetry says what that is (.claude/rules/74).
+# at 24/day. Two caveats before trusting this number further: n is small (2 budget samples,
+# 4 telemetry buckets), and largest-first selection keeps pulling differently-shaped
+# candidates as the backlog drains, so the ratio can move. Re-measure before changing this
+# again — the condition it stands for is "rows this migration will actually write", and only
+# telemetry says what that is (.claude/rules/74).
 PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR = "2"
 PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS = "10000"
 PROJECT_DATA_ARCHIVE_BUDGET_RECEIPT_RETENTION_MS = "604800000"
@@ -205,9 +214,11 @@ PROJECT_DATA_ARCHIVE_SWEEP_PROJECTS = "1"
 # avg msgs each is the expected shape.
 PROJECT_DATA_ARCHIVE_SWEEP_SESSIONS = "4"
 # Cumulative message_count of NEW candidates one tick may journal. 5000/tick × 24 ticks =
-# 120k msgs/day capacity, 20% above the 100k/day target. With _DAILY_WRITE_BUDGET=800000
-# and factor 8, the derived affordability ceiling is ~49937 messages, so no production
-# session exceeds it.
+# 120k msgs/day capacity, 20% above the 100k/day target. With _DAILY_WRITE_BUDGET=800000 and
+# _WRITE_ESTIMATE_FACTOR=2 the derived affordability ceiling is ~199750 messages; at the
+# previous factor of 8 it was ~49937. Either way this 5000 is the smaller of the two and is
+# what actually binds, so the derived ceiling has never been the constraint on selection —
+# do not reason about safety margin from it.
 #
 # This budget is ALSO the per-candidate ceiling (`sweepMessageCeiling` = min(this, derived
 # affordability)), so raising it to fit more sessions per tick simultaneously admits larger

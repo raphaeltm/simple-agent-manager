@@ -115,20 +115,25 @@ five-minute buckets on 2026-09-14 isolate each archive tick cleanly:
 | 11:05Z | 609,124 | 9,823 | 11:06:17Z |
 | quiet baseline | ~96,000 | ~300 | — |
 
-Net of baseline: **~480,000 rowsRead and ~6,000-9,500 rowsWritten per migration** (mean ~7,200),
-against an estimate of `units = (60,534 − 1000) / 8 = 7,442`. The measured ratio of actual rows
-written to estimate units is therefore **≈ 1.0** — `estimateArchiveWrites` already counts the row
+Net of baseline: **~480,000 rowsRead and 5,950 / 6,436 / 7,942 / 9,823 rowsWritten per
+migration**, against `units = (65,001 − 1000) / 8 = 8,000` from the two budget samples above.
+Billed rows per inventory unit is therefore **0.74-1.23**, not the single ~1.0 an earlier draft
+of this file reported — that figure came from dividing the 11:29Z reservation total by 12
+publishes when only 11 had happened, a 9% error. `estimateArchiveWrites` already counts the row
 inventory directly, and `factor` is pure safety multiplier on top of it.
 
-Lowering `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` from 8 to **2** retains a ~100 % safety
-margin over the measurement and moves the day ceiling to roughly `800,000 / (1000 + 2×8,000) =
-47/day`, at which point the hourly per-tick cap binds at **24/day** — a ~2x increase that adds
-**no new ticks**, **no new contention window**, and **no extra allowance**. It simply stops
-wasting the ~11 hourly ticks per day that currently run and reclaim nothing.
+Lowering `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` from 8 to **2** moves the day ceiling to
+`800,000 / (1000 + 2×8,000) = 47/day`, at which point the hourly per-tick cap binds at
+**24/day** — a 2x increase that adds **no new ticks**, **no new contention window**, and **no
+extra allowance**. It simply stops wasting the ~12 hourly ticks per day that currently run and
+reclaim nothing.
 
-Sanity check on the margin using the second sample: units per migration ≈ (65,001 − 1000)/8 =
-8,000, against 6,000-9,500 rows actually billed, so billed-per-unit lands in 0.75-1.19. Factor 2
-covers the top of that range twice over.
+**Margin, stated honestly.** Factor 2 exceeds the worst observed billed-per-unit ratio (1.23) by
+**~63 %**, not the 100 % an earlier draft claimed. The safety property still holds — the
+reservation exceeded actual billed rows in every sample — but two caveats belong on the record:
+n is small (2 budget samples, 4 telemetry buckets), and largest-first selection keeps drawing
+differently-shaped candidates as the backlog drains, so the ratio can move. Widen the sample
+post-rollout before treating 2 as durably validated.
 
 This is also the lever idea `01M2A5BCJZR4SAZ78XYEJTNFPR` named: *"lower `WRITE_ESTIMATE_FACTOR`
 from 32 to a measured value"*. It was lowered to 8 without a measurement; this is the measurement.
@@ -140,11 +145,13 @@ Production DO namespace `fb36fe21`, 7-day GraphQL totals: `rowsRead` 2,089,474,3
 (~20 M/month)** and **~298 M rowsRead/day (~8.9 B/month)**, against free allowances of 50 M and
 25 B respectively.
 
-At 24 migrations/day the archive sweep adds ~174 k rowsWritten/day (~5.2 M/month) and
-~11.5 M rowsRead/day (~346 M/month). Both stay comfortably inside the free tier, so the
-incremental Cloudflare cost is **$0**. This respects Raphaël's 2026-09-08 rejection of the
-projected ~$100/month bill from sustaining the pre-#2033 drain rate — that rate was ~81
-publishes/day, roughly 6x what this change permits.
+At 24 migrations/day the archive sweep costs ~174 k rowsWritten/day (~5.2 M/month) and ~11.5 M
+rowsRead/day (~346 M/month) in total; the **marginal** cost over today's 12/day is about half
+that, ~+90 k rowsWritten/day. Totals land at ~25 M/month of the 50 M free rows-written allowance
+and ~9.2 B/month of the 25 B free rows-read allowance, so the incremental Cloudflare cost is
+**$0**. This respects Raphaël's 2026-09-08 rejection of the projected ~$100/month bill from
+sustaining the pre-#2033 drain rate — that rate was ~81 publishes/day, **~3.4x** what this
+change permits (it was ~6x today's throttled 12-13/day).
 
 ### R6 — Reclaim per archived session, measured
 
@@ -180,11 +187,28 @@ tiered, and `get_archived_tool_payloads` remains the retrieval path.
 
 ### R9 — Which production divergences are accidental and which are intentional
 
+Measured by diffing all 273 checked-in `[vars]` against the live `production` Environment,
+restricted to the names `getOptionalProcessEnvVars` actually reads. **19 overrides currently
+disagree**, of which three are flags:
+
 | flag | wrangler.toml | `production` Environment | deployed | verdict |
 |---|---|---|---|---|
 | `TOOL_PAYLOAD_CLEANUP_ENABLED` | `true` | `false` | `false` | **accidental** — eliminate |
 | `EVENT_LOG_CLEANUP_ENABLED` | `true` | `false` | `false` | **intentional** — staging-on, production-gated pending approval |
+| `ARCHIVE_COMPACT_ENABLED` | `false` | `true` | `true` | **intentional** — approved for production 2026-09-08; repo default stays conservative for fresh self-host installs |
 | `GROUPED_FTS_CLEANUP_ENABLED` | `false` | `false` | `false` | no divergence |
+
+The other 16 are per-installation operator rollout state: the eleven
+`PROJECT_DATA_STORAGE_RELIEF_PREFLIGHT_*` knobs plus `_STORAGE_RELIEF_MEASURE_MAX_BATCH_ROWS`
+that size the one-shot P0 plan, and the `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_*` plan identity and
+ceilings. These are enumerated by exact name in `EXPECTED_ENVIRONMENT_VAR_OVERRIDES`
+(`scripts/deploy/sync-wrangler-config.ts`), which is the machine-readable source of truth — the
+`wrangler.toml` comment points at it rather than restating it, so the two cannot drift.
+
+**No `*_ENABLED` flag is on that list, deliberately.** A prefix rule covering
+`PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_*` would have suppressed the warning for
+`..._CLEANUP_ENABLED`, the exact variable whose silent override started this task. The rule that
+quiets the report must not be able to grow over the case that needed it.
 
 `EVENT_LOG_CLEANUP_ENABLED` must NOT be reconciled by flipping `wrangler.toml` to `false`:
 staging's deployed value is `true` and that is where the feature is being proven, and the repo
@@ -195,30 +219,30 @@ deliberate and make the deploy surface it loudly.
 
 ### Code and config (this PR)
 
-- [ ] `apps/api/wrangler.toml`: `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` `"8"` → `"2"`, with a
+- [x] `apps/api/wrangler.toml`: `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` `"8"` → `"2"`, with a
       comment citing the measurement in R4 (per `.claude/rules/74`, name the condition the signal
       stands for).
-- [ ] `apps/api/wrangler.toml`: add a `KNOWN PRODUCTION ENVIRONMENT OVERRIDES` comment block
+- [x] `apps/api/wrangler.toml`: add a `KNOWN PRODUCTION ENVIRONMENT OVERRIDES` comment block
       recording that `PROJECT_DATA_EVENT_LOG_CLEANUP_ENABLED` is deliberately pinned `false` in
       the `production` Environment pending separate approval, so a future reader is not misled by
       the repo value (R9).
-- [ ] `tool-payload-cleanup.ts`: when `toolPayloadCleanupEnabled` is true but the approved-plan
+- [x] `tool-payload-cleanup.ts`: when `toolPayloadCleanupEnabled` is true but the approved-plan
       gate refuses for a **configuration** reason, emit a structured `log.warn` naming the missing
       or mismatched fields instead of returning `null` silently. This is the durable fix for R1 —
       it converts an invisible no-op into an observable one.
-- [ ] `scripts/deploy/sync-wrangler-config.ts`: escalate `listEnvironmentVarOverrides` reporting
+- [x] `scripts/deploy/sync-wrangler-config.ts`: escalate `listEnvironmentVarOverrides` reporting
       from a plain `console.log` to a GitHub Actions `::warning::` annotation plus a
       `$GITHUB_STEP_SUMMARY` table, so an Environment override that contradicts `wrangler.toml`
       appears in the run summary instead of being buried in deploy logs.
-- [ ] Tests:
-      - [ ] Regression test proving the R1 gate: flag on + fixed cutoff + missing manifest ⇒ no
+- [x] Tests:
+      - [x] Regression test proving the R1 gate: flag on + fixed cutoff + missing manifest ⇒ no
             plan AND a warning is emitted. Delete the guard once and confirm the test reddens.
-      - [ ] Control test: flag on + no fixed cutoff (the staging/production retention path) ⇒ a
+      - [x] Control test: flag on + no fixed cutoff (the staging/production retention path) ⇒ a
             plan IS produced. Without this the first test also passes when cleanup is broken
             outright (`.claude/rules/62`, absence assertions need a liveness assertion).
-      - [ ] `sync-wrangler-config` test covering annotation output for a differing override and
+      - [x] `sync-wrangler-config` test covering annotation output for a differing override and
             silence for a matching one.
-      - [ ] Write-budget test pinning that `factor = 2` with an 800,000 allowance admits a
+      - [x] Write-budget test pinning that `factor = 2` with an 800,000 allowance admits a
             ~7,442-unit session that `factor = 8` refuses, resolved through the real
             `archiveWriteBudgetConfig` env resolver rather than a hand-passed number
             (`.claude/rules/62`, defaults must be exercised through the real resolver).
@@ -263,12 +287,44 @@ this change: it IS the 2026-09-03 read-spike fix, and validating it is the point
 
 ### Production Environment changes (applied after the PR merges and deploys)
 
+**Why these are not in the PR, and how that squares with `.claude/rules/22-infrastructure-merge-gate.md`.**
+Rule 22 says infrastructure and configuration items must be checked off before a PR is created
+and may not be deferred. These items *cannot* exist in a git diff: they are GitHub `production`
+Environment variables, which live outside the repository by design and are read at deploy time by
+`getOptionalProcessEnvVars`. Applying them before the PR merges would also enable a destructive
+cleanup path on a Worker that does not yet carry the observability fix that makes a refusal
+visible — the inverse of the safe order. Project policy `66060db4` ("ProjectData rollout: stage
+first, production mutations last") governs this rollout specifically and requires exactly this
+sequencing, and its 2026-09-14 approval covers the mutation itself. So: rule 22's intent (no
+silent infrastructure debt) is met by enumerating every value here with its derivation, and its
+letter is satisfied by policy `66060db4`, which is the more specific instruction for this work.
+This task must NOT be archived until the Verification section below holds real evidence.
+
 Complete the approved-manifest plan that the 2026-09-04 preflight produced (R2, R10):
 
 - [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_ENABLED`: `false` → `true`
-- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY`: `""` → the preflight's
-      `target_manifest_key`
-- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256`: `""` → `c90fca2c…4e7bd3`
+Re-derive both manifest values rather than trusting this file's transcription (`.claude/rules/32`):
+
+```sql
+SELECT target_manifest_key, target_manifest_sha256, eligible_rows, eligible_bytes, status
+  FROM project_data_storage_relief_preflights
+ WHERE plan_id = 'prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904';
+```
+
+As of 2026-09-14 that returns `status = complete` and:
+
+```
+target_manifest_key    = project-data/tool-payloads/approved-plans/01KHRJGANBBWGDY1NZ0KVF0D4J/prod-p0-projectdata-01khrjganbbwgdy1nz0kvf0d4j-20260904/root.c90fca2c30186b628bcf5c18a0744657bf7347901754789bfafb4f79504e7bd3.json
+target_manifest_sha256 = c90fca2c30186b628bcf5c18a0744657bf7347901754789bfafb4f79504e7bd3
+eligible_rows          = 15539
+eligible_bytes         = 165879666
+```
+
+A wrong hash fails closed in `readToolPayloadCleanupManifestRoot` (the plan throws rather than
+stripping anything), so the risk of a transcription error is a visible abort, not data loss.
+
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_KEY`: `""` → `target_manifest_key` above
+- [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MANIFEST_SHA256`: `""` → `c90fca2c30186b628bcf5c18a0744657bf7347901754789bfafb4f79504e7bd3`
 - [ ] `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_MAX_TOTAL_ROWS`: `""` → `15539` (the manifest gate
       throws when `root.eligibleRows > maxTotalRows`, so this is the tightest cap that admits
       exactly the measured plan and nothing more)

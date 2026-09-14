@@ -2,19 +2,26 @@
  * The shipped `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` must buy the throughput it was
  * lowered to buy.
  *
- * Measured in production on 2026-09-14 (Cloudflare `durableObjectsPeriodicGroups`, 5-minute
- * buckets isolating four archive ticks in DO namespace fb36fe21): a published migration bills
- * ~6,000-9,500 `rowsWritten` against an `estimateArchiveWrites` inventory of ~7,442 units, so
- * the true multiplier between units and billed rows is ~1.0 and `factor` is pure safety margin.
- * At factor 8 the daily allowance bought only 800000 / (1000 + 8 x 7442) = 13 migrations/day
- * while the hourly cadence allows 24, so ~11 ticks/day ran and reclaimed nothing.
+ * Measured in production on 2026-09-14 by sampling `project_data_archive_write_budget` twice,
+ * an hour apart: 726,408 reserved across 11 publishes at 11:29Z, 780,016 across 12 at 12:15Z.
+ * That gives ~65,001 estimated writes per migration and therefore ~8,000 inventory units at the
+ * then-shipped factor of 8. Cloudflare `durableObjectsPeriodicGroups` 5-minute buckets isolating
+ * four archive ticks in DO namespace fb36fe21 billed 5,950 / 6,436 / 7,942 / 9,823 `rowsWritten`,
+ * so billed rows per inventory unit spans 0.74-1.23. `factor` is pure safety margin over that.
+ *
+ * At factor 8 the daily allowance bought only 800000 / (1000 + 8 x 8000) = 12 migrations/day
+ * while the hourly cadence allows 24, so half the ticks ran and reclaimed nothing. Confirmed
+ * forward: at 12:15Z only 19,984 units remained, and the 13:00Z tick was refused.
  *
  * These cases read the value this repository actually ships rather than a number retyped into
  * the test, because a test that pins a hand-copied constant stays green when someone edits
  * `wrangler.toml` — the exact "the diff is not the deployed value" failure class in
- * `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`. The env-var name is also not
- * present in either GitHub Environment (verified 2026-09-14), so for this var the checked-in
- * value IS the deployed value; if that ever changes, the deploy now annotates the override.
+ * `.claude/rules/70-flag-flips-must-verify-the-deployed-value.md`. BOTH vars these cases read —
+ * `PROJECT_DATA_ARCHIVE_WRITE_ESTIMATE_FACTOR` and `PROJECT_DATA_ARCHIVE_DAILY_WRITE_BUDGET` —
+ * were verified absent from the `production` and `staging` Environments on 2026-09-14, so for
+ * both the checked-in value IS the deployed value. The assertions below depend on the allowance
+ * as much as on the factor, so that second check is load-bearing, not incidental. If either ever
+ * gains an Environment override, the deploy now annotates it as unexpected.
  *
  * The reservation runs against a real SQLite engine through `createSqliteD1`, not a stub,
  * because the thing under test is a conditional UPDATE predicate: a mock that ignores its
@@ -24,6 +31,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import * as TOML from '@iarna/toml';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -34,18 +42,29 @@ import {
 } from '../../../src/project-data-archive/write-budget';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
-/** Row inventory of the largest candidate the production sweep was selecting on 2026-09-14. */
-const MEASURED_UNITS_PER_MIGRATION = 7_442;
+/**
+ * Row inventory per migration the production sweep was reserving on 2026-09-14, derived from the
+ * two budget samples above rather than from a single reading. An earlier draft of this test used
+ * 7,442, which came from dividing the 11:29Z reservation total by 12 publishes when only 11 had
+ * occurred — a 9% error that made the margin look better than it is.
+ */
+const MEASURED_UNITS_PER_MIGRATION = 8_000;
 const WINDOW_START = Date.UTC(2026, 8, 14, 0, 0, 0);
 
+/**
+ * Read a shipped `[vars]` value structurally, the same way `sync-wrangler-config.ts` reads this
+ * file. A regex over the raw text would produce failures unrelated to archive throughput the
+ * first time someone adds an inline comment or reflows a line.
+ */
 function readShippedVar(name: string): string {
-  const toml = readFileSync(
-    resolve(import.meta.dirname, '../../../wrangler.toml'),
-    'utf-8'
-  );
-  const match = new RegExp(`^${name}\\s*=\\s*"(.*)"\\s*$`, 'm').exec(toml);
-  if (!match) throw new Error(`${name} is not set in apps/api/wrangler.toml`);
-  return match[1]!;
+  const parsed = TOML.parse(
+    readFileSync(resolve(import.meta.dirname, '../../../wrangler.toml'), 'utf-8')
+  ) as { vars?: Record<string, unknown> };
+  const value = parsed.vars?.[name];
+  if (typeof value !== 'string') {
+    throw new Error(`${name} is not a string in the [vars] table of apps/api/wrangler.toml`);
+  }
+  return value;
 }
 
 /** The env shape `archiveWriteBudgetConfig` reads, populated from the shipped config. */
@@ -104,7 +123,9 @@ describe('shipped archive write-estimate factor', () => {
     sqlite.exec('DELETE FROM project_data_archive_write_budget');
     const previous = await reserveUntilRefused(allowance, 8);
 
-    expect(previous).toBe(13);
+    expect(previous).toBe(12);
+    // 24 is the real ceiling: the hourly cadence admits one ~26.6s migration per tick, so the
+    // budget must clear that bar with room, not merely beat 12.
     expect(shipped).toBeGreaterThanOrEqual(24);
     expect(shipped).toBeGreaterThan(previous);
   });
@@ -112,10 +133,13 @@ describe('shipped archive write-estimate factor', () => {
   it('keeps a safety margin over the measured billed-rows ratio', async () => {
     const { factor } = archiveWriteBudgetConfig(shippedBudgetEnv());
 
-    // The measurement says billed rows per estimate unit is ~1.0. A factor below that would
-    // let the budget under-charge real work; a factor far above it is what wasted 11 ticks a
-    // day. Bracket both directions so neither drifts back unnoticed without a fresh
-    // measurement and a deliberate edit to this test.
+    // Billed rows per estimate unit spans 0.74-1.23 across the four measured ticks, so the
+    // worst observed case leaves factor 2 with ~63% headroom — real, but NOT the "100% margin"
+    // an earlier draft claimed off a miscounted sample. A factor below the worst observed ratio
+    // would let the budget under-charge real work; a factor far above it is what wasted half
+    // the ticks each day. Bracket both directions so neither drifts back without a fresh
+    // measurement and a deliberate edit here. n is small (2 budget samples, 4 telemetry
+    // buckets); widen the sample before treating 2 as durably validated.
     expect(factor).toBeGreaterThanOrEqual(2);
     expect(factor).toBeLessThanOrEqual(4);
   });

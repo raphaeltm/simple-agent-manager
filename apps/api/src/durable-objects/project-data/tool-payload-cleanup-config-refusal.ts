@@ -107,14 +107,26 @@ export function describeToolPayloadCleanupConfigRefusal(
 /**
  * Whether a refusal for `projectId` is worth a log line.
  *
- * Two independent bounds, because an unbounded warn here would fire on every alarm of every
- * ProjectData object in the installation:
+ * `createToolPayloadCleanupPlan` runs on every storage alarm of every ProjectData object, so an
+ * unbounded warn here would trade a silent no-op for an unreadable log. Two bounds apply, and
+ * they are NOT equally strong:
  *
- * - **Scope.** A project outside `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS` is refused by
- *   the allowlist anyway, so its `projectIdsMatch` failure is expected, not a misconfiguration.
- * - **Cadence.** `allowStart` is set only on the tick where the storage measurement ran, which
- *   `PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS` holds to once an hour. `forceStart` marks an
- *   operator-initiated run, which is low volume and is exactly when the answer is wanted.
+ * - **Cadence — always applies.** `allowStart` is set only on the tick where the storage
+ *   measurement ran, which `PROJECT_DATA_STORAGE_MEASURE_INTERVAL_MS` holds to once an hour per
+ *   object. `forceStart` marks an operator-initiated run, which is low volume and is exactly
+ *   when the answer is wanted.
+ * - **Scope — applies only when an allowlist is configured.** A project outside
+ *   `PROJECT_DATA_TOOL_PAYLOAD_CLEANUP_PROJECT_IDS` is refused by the allowlist anyway, so its
+ *   `projectIdsMatch` failure is expected rather than a misconfiguration. When that var is
+ *   unset there is no allowlist to be outside of, so this bound does nothing and EVERY object
+ *   reports on its own hourly tick.
+ *
+ * The unscoped case is deliberate, not an oversight: a half-applied config with no allowlist is
+ * installation-wide breakage, and per-object-per-hour is the right volume for that. It matters
+ * most for `manifest_without_fixed_cutoff`, which cannot consult the allowlist at all — that
+ * gate fires before the approved-plan block that would have required a single-project match. So
+ * the worst case is one line per active ProjectData object per hour, for as long as an operator
+ * leaves a manifest key set with no cutoff. Bounded, and loud on purpose.
  *
  * This governs logging only. The refusal itself is returned unconditionally.
  */
