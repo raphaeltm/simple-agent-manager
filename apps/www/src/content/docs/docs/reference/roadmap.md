@@ -90,6 +90,22 @@ Agent-first deployment environments:
 - Docker Compose release submission with SAM extensions and server-side image publishing.
 - Deployment logs, status, environment config, secrets, and safe named volume management.
 
+## Complete: Comments
+
+Threads that become agent context:
+
+- Comments on chat messages and project library files.
+- Comment inboxes for project-wide and session-scoped follow-up.
+- Agent replies and resolution through MCP tools.
+
+## Complete: Event Streams & Triggers
+
+Visible project automation:
+
+- Cron, GitHub, and authenticated webhook triggers.
+- One-off schedules and standing watches.
+- Agent event subscriptions and project activity streams.
+
 ## Planned: More Providers
 
 - AWS and expanded provider coverage.
