@@ -84,11 +84,13 @@ func (s *Server) reconcilePendingEvictionStop(ctx context.Context, delivery *per
 	if err != nil {
 		return false, err
 	}
-	if !dockerContainerIdentityMatches(currentID, delivery.ContainerID) {
+	if currentID != "" && !dockerContainerIdentityMatches(currentID, delivery.ContainerID) {
 		return false, fmt.Errorf("pending eviction container no longer current")
 	}
-	if err := s.stopEvictionContainer(ctx, delivery.ContainerID); err != nil {
-		return false, err
+	if currentID != "" {
+		if err := s.stopEvictionContainer(ctx, delivery.ContainerID); err != nil {
+			return false, err
+		}
 	}
 	delivery.ContainerStopped = true
 	applied, err := s.store.RecordWorkspaceEviction(ctx, *delivery)

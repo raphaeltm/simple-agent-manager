@@ -257,6 +257,40 @@ func TestEvictionPreparedStopRecoversAfterAgentRestart(t *testing.T) {
 	}
 }
 
+func TestEvictionPreparedStopReconcilesAlreadyStoppedContainer(t *testing.T) {
+	s := newEvictionTestServer()
+	initializeEvictionTestStore(t, s)
+	logPath := setupEvictionDocker(t, "")
+	d := queueEvictionFixture(t, s, false)
+	requests := make(chan map[string]interface{}, 1)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		requests <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer api.Close()
+	s.config.ControlPlaneURL = api.URL
+	if err := s.deliverPendingWorkspaceEvictionAt(context.Background(), d.ID, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-requests:
+		if body["containerStopped"] != true {
+			t.Fatalf("already-stopped container was not finalized: %v", body)
+		}
+	default:
+		t.Fatal("already-stopped container delivery was not sent")
+	}
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(calls); !strings.Contains(got, "ps --all") || strings.Contains(got, "stop --time") {
+		t.Fatalf("already-stopped reconciliation called unexpected docker commands: %s", got)
+	}
+}
+
 func TestEvictionPreparedStopCannotStopLaterGeneration(t *testing.T) {
 	s := newEvictionTestServer()
 	initializeEvictionTestStore(t, s)

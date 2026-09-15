@@ -238,6 +238,9 @@ func (s *Server) latestEvictionContainer(ctx context.Context, labelValue string)
 		return "", fmt.Errorf("resolve eviction container: %w", err)
 	}
 	id := strings.TrimSpace(string(output))
+	if id == "" {
+		return "", nil
+	}
 	if !isValidContainerID(id) {
 		return "", fmt.Errorf("eviction container identity unavailable")
 	}

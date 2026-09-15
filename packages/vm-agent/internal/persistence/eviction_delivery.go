@@ -71,7 +71,9 @@ func (s *Store) RecordWorkspaceEviction(ctx context.Context, delivery EvictionDe
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE workspace_metadata SET evicted=1 WHERE workspace_id=? AND eviction_generation=?`, delivery.WorkspaceID, delivery.Generation)
 	if err != nil {
 		return false, fmt.Errorf("mark persisted workspace evicted: %w", err)
@@ -120,7 +122,9 @@ func (s *Store) ClaimEvictionDelivery(ctx context.Context, id string, now time.T
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 	var d EvictionDelivery
 	var occurredAt, nextAt int64
 	err = tx.QueryRowContext(ctx, `SELECT id, workspace_id, project_id, node_id, container_id, generation, reason,
