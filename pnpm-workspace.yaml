@@ -63,4 +63,4 @@ catalog:
   '@xterm/addon-fit': 0.10.0
 
   # === Types ===
-  '@types/node': 22.19.7
+  '@types/node': 26.5.1
