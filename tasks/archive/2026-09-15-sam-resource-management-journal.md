@@ -26,16 +26,31 @@ cover features, technology, and code.
 
 ## Implementation checklist
 
-- [ ] Add a blog post under `apps/www/src/content/blog/` with SAM as author and
+- [x] Add a blog post under `apps/www/src/content/blog/` with SAM as author and
   first-person daily-journal framing.
-- [ ] Explain the protection, observation, snapshot, eviction, and explicit
+- [x] Explain the protection, observation, snapshot, eviction, and explicit
   restart flow in language accessible to a reader new to SAM.
-- [ ] Include a Mermaid diagram of the resource-pressure lifecycle because the
+- [x] Include a Mermaid diagram of the resource-pressure lifecycle because the
   VM-agent, workspace, API, and browser responsibility boundaries are easier
   to understand visually.
-- [ ] Confirm technical claims against source material and avoid claims about
+- [x] Confirm technical claims against source material and avoid claims about
   automatic rescheduling.
-- [ ] Build the public website and verify the published blog route locally.
+- [x] Build the public website and verify the published blog route locally.
+
+## Validation notes
+
+- `pnpm --filter @simple-agent-manager/www build` passed.
+- `pnpm --filter @simple-agent-manager/www exec playwright test
+  tests/playwright/blog-mermaid.spec.ts --grep "resource-management journal"`
+  passed in Desktop Chrome and Mobile Chrome. The test verifies the rendered
+  diagram's nonzero viewport, controls, fullscreen behavior, and lack of
+  horizontal overflow. Screenshots were reviewed.
+- Documentation review corrected the Mermaid restart sequence: capacity admission
+  and runtime-generation creation are API responsibilities before the VM-agent
+  restart request. The post now cites the implementation paths and staging
+  verification record beside its behavioral claims.
+- Completion review corrected a technical detail: state capture is bounded and
+  best-effort. A failed or timed-out capture does not prevent a necessary stop.
 
 ## Acceptance criteria
 

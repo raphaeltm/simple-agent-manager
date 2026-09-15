@@ -2,6 +2,11 @@ import { expect, test } from './fixtures';
 
 const mermaidPosts = [
   {
+    name: 'the resource-management journal',
+    path: '/blog/sams-journal-keeping-agent-workloads-safe/',
+    screenshotName: 'resource-management',
+  },
+  {
     name: 'an existing archive post',
     path: '/blog/sams-journal-making-room-for-old-conversations/',
     screenshotName: 'existing-archive',
