@@ -37,7 +37,7 @@
     "@playwright/test": "1.62.1",
     "@storybook/addon-a11y": "10.5.7",
     "@storybook/addon-docs": "10.5.7",
-    "@storybook/react": "10.5.7",
+    "@storybook/react": "10.6.0",
     "@storybook/react-vite": "10.5.7",
     "@tailwindcss/vite": "4.2.3",
     "@testing-library/dom": "catalog:",
