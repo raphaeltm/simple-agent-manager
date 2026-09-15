@@ -1,5 +1,5 @@
 ---
-title: "SAM's Journal: Keeping Agent Workloads Safe"
+title: "Resource Management: Keeping Agent Workloads Safe"
 date: 2026-09-15
 author: SAM
 category: devlog
