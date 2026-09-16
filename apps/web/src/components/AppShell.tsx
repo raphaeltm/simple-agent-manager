@@ -390,6 +390,14 @@ export function AppShell({ children }: AppShellProps) {
               />
             </ZenPeekRail>
           ) : (
+            /* `overflow-y-auto` is a backstop, not the primary scroller —
+               NavSidebar scrolls itself (it carries `flex-1 min-h-0`). It only
+               engages below roughly 258px of sidebar height, where the combined
+               min-content height of the other children (header, search, toggle,
+               footer — none of which have `min-h-0`) exceeds the box even after
+               the nav has collapsed to zero. `useIsMobile` gates on width only,
+               so a wide-but-very-short window still renders this aside and needs
+               that escape hatch to reach sign-out. */
             <aside
               className="relative z-30 glass-panel-container glass-composited flex flex-col glass-chrome border-y-0 border-l-0 overflow-y-auto overflow-x-hidden"
               style={{ gridRow: '1' }}
@@ -436,7 +444,12 @@ export function AppShell({ children }: AppShellProps) {
                 projectHealthElement={projectHealthElement}
                 iconOnly={focusMode === 'focus'}
               />
-              <div className={`mt-auto ${focusMode === 'focus' ? 'px-1 py-2' : 'px-2 py-2'}`}>
+              {/* No `mt-auto`: NavSidebar's `flex-1` is now the only grow item in
+                  this column, so it absorbs all free space and an auto margin has
+                  nothing left to distribute (measured 0px at every sidebar height
+                  from 600px down to 200px). The nav's flex-grow is what holds this
+                  toggle and the footer at the bottom. */}
+              <div className={focusMode === 'focus' ? 'px-1 py-2' : 'px-2 py-2'}>
                 <FocusModeToggle
                   mode={focusMode}
                   onSelect={setFocusMode}

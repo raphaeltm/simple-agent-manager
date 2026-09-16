@@ -12,14 +12,20 @@
  * Why the existing suite did not catch it: `findClippedOverflow`
  * (audit-helpers.ts) only detects HORIZONTAL clipping. There is no vertical
  * counterpart, so a nav sheared off at the bottom was invisible to every guard.
- * `assertNoVerticalClipping` below is that counterpart, scoped to the sidebar.
+ * `assertNoVerticalClipping` (audit-helpers.ts) is that counterpart, added by
+ * this change so other audits can adopt it.
  *
  * Per rule 17, the spatial claims here are asserted as MEASURED COORDINATES —
  * `toBeVisible()` passes for an element parked 95px below the fold.
  */
 import { expect, type Locator, type Page, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import {
+  assertNoOverflow,
+  assertNoVerticalClipping,
+  makeMockUser,
+  screenshot,
+} from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Mock data
@@ -122,38 +128,6 @@ async function measure(locator: Locator): Promise<ScrollBox> {
       overflowY: getComputedStyle(el).overflowY,
     };
   });
-}
-
-/**
- * The vertical counterpart to `findClippedOverflow`: walks the ancestors of
- * `selector` and reports any that clip vertically (`overflow-y: hidden|clip`)
- * while holding content taller than their box. That combination is content the
- * user can neither see nor scroll to — exactly the reported bug.
- */
-async function assertNoVerticalClipping(page: Page, selector: string) {
-  const offenders = await page.evaluate((sel) => {
-    const found: string[] = [];
-    let el = document.querySelector(sel)?.parentElement ?? null;
-    while (el && el !== document.documentElement) {
-      const style = getComputedStyle(el);
-      const clips = style.overflowY === 'hidden' || style.overflowY === 'clip';
-      // +1 absorbs sub-pixel layout rounding.
-      if (clips && el.scrollHeight > el.clientHeight + 1) {
-        const cls = (el.getAttribute('class') ?? '').slice(0, 90);
-        found.push(
-          `<${el.tagName.toLowerCase()} class="${cls}"> content ${el.scrollHeight}px ` +
-            `clipped to ${el.clientHeight}px with overflow-y:${style.overflowY}`
-        );
-      }
-      el = el.parentElement;
-    }
-    return found;
-  }, selector);
-
-  expect(
-    offenders,
-    `Vertically clipped, unreachable sidebar content:\n${offenders.join('\n')}`
-  ).toEqual([]);
 }
 
 /**
@@ -427,6 +401,52 @@ test.describe('Project sidebar scroll — tablet (768x1024)', () => {
 
     await assertNoVerticalClipping(page, PROJECT_NAV);
     await screenshot(page, 'project-sidebar-scroll-tablet');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Zen peek rail — the SECOND NavSidebar mount (AppShell.tsx:384), inside
+// ZenPeekRail's hover panel rather than the `aside`.
+//
+// Measured: the peek panel is exactly viewport height (`height: 200%` of an
+// `h-1/2` wrapper) and is `flex flex-col overflow-hidden`, so it has the same
+// collapsing-flex-item problem as the `aside` — the nav's 604px of content
+// overflows any viewport shorter than that. 1280x500 is used here rather than
+// 600 so the overflow is ~104px and the assertion is solidly discriminating
+// instead of hinging on 6px.
+// ---------------------------------------------------------------------------
+
+test.describe('Zen peek rail — second NavSidebar mount (1280x500)', () => {
+  test.use({ viewport: { width: 1280, height: 500 }, isMobile: false, hasTouch: false });
+
+  test('peek panel nav scrolls to its last item', async ({ page }) => {
+    await setupApiMocks(page);
+    await page.addInitScript(() => window.localStorage.setItem('sam:focus-mode', 'zen'));
+    await page.goto(`/projects/${PROJECT.id}/chat`);
+
+    // Enter through the real trigger: hover the Zen seam to open the peek panel.
+    await page.getByRole('button', { name: /Navigation \(Zen mode\)/ }).hover();
+    await waitForSidebar(page, PROJECT_NAV);
+
+    const nav = page.locator(PROJECT_NAV);
+    const lastItem = nav.getByRole('link', { name: LAST_PROJECT_ITEM, exact: true });
+
+    const before = await measure(nav);
+    expect(
+      before.scrollHeight,
+      'the peek panel nav must overflow at 500px, else this proves nothing'
+    ).toBeGreaterThan(before.clientHeight + 1);
+    expect(before.overflowY).toMatch(/auto|scroll/);
+
+    await lastItem.scrollIntoViewIfNeeded();
+    const after = await measure(nav);
+    const box = await lastItem.boundingBox();
+    expect(box!.y).toBeGreaterThanOrEqual(after.top - 1);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(after.bottom + 1);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(500);
+
+    await assertNoVerticalClipping(page, PROJECT_NAV);
+    await screenshot(page, 'project-sidebar-scroll-zen-peek');
   });
 });
 
