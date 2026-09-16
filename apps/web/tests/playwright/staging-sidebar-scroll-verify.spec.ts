@@ -23,28 +23,56 @@ const GLOBAL_NAV = 'nav[aria-label="Primary navigation"]';
 const LAST_PROJECT_ITEM = 'Settings';
 
 /**
- * Resolve the signed-in user id and suppress the first-run cloud wizard.
+ * Per-worker cache for the two facts every test here needs.
  *
- * Two hazards on staging, both test-side, both hit on the first run of this spec:
- *
- * 1. The wizard (`ChoosePathWizard`, `role="dialog"` / `aria-label="Account setup"`)
- *    is an `inset-0 z-50` overlay that SWALLOWS CLICKS. `dismissStagingOnboarding`
- *    probes for it for only 2s by design, and over a real network the dialog
- *    reliably mounted AFTER that window — so the probe returned "absent" and the
- *    modal then covered the page. Pre-seeding the same flag the "Exit setup"
- *    button writes (`OnboardingContext.tsx:41`) before first paint is the
- *    deterministic equivalent, with no race to lose.
- * 2. Its presence is NOT a product blocker. Staging has an enabled platform cloud
- *    credential, so a smoke user without their own cloud credential is expected
- *    (CLAUDE.md, Architecture Principle 1).
- *
- * `dismissStagingOnboarding` is still called afterwards as a belt-and-braces
- * fallback in case the flag ever stops being read.
+ * Resolving them per test hammered rate-limited endpoints and was the direct
+ * cause of an intermittent failure: roughly one run in three, some test timed out
+ * waiting for the sidebar while Playwright's page snapshot showed the app parked
+ * on `status "Verifying your session"` — the auth bootstrap, not the sidebar.
+ * `stagingLogin` already caches its cookie per worker for exactly this reason
+ * ("token-login is rate limited per principal and every test gets a fresh
+ * context"); these two lookups need the same treatment. One resolution per worker
+ * instead of five.
  */
-async function suppressOnboarding(page: Page): Promise<void> {
+let cachedUserId: string | null = null;
+let cachedProjects: Array<{ id: string; name: string }> | null = null;
+
+async function resolveUserId(page: Page): Promise<string> {
+  if (cachedUserId) return cachedUserId;
   const res = await page.request.get(`${STAGING_API}/api/auth/get-session`);
   const userId = (await res.json().catch(() => null))?.user?.id as string | undefined;
   expect(userId, `could not resolve the staging user id (status ${res.status()})`).toBeTruthy();
+  cachedUserId = userId as string;
+  return cachedUserId;
+}
+
+async function resolveProjects(page: Page): Promise<Array<{ id: string; name: string }>> {
+  if (cachedProjects) return cachedProjects;
+  const res = await page.request.get(`${STAGING_API}/api/projects`);
+  expect(res.status(), 'GET /api/projects must succeed').toBe(200);
+  const projects = (await res.json())?.projects as Array<{ id: string; name: string }>;
+  expect(projects?.length, 'staging user must have at least one project').toBeGreaterThan(0);
+  cachedProjects = projects;
+  return projects;
+}
+
+/**
+ * Suppress the first-run cloud wizard before the page paints.
+ *
+ * The wizard (`ChoosePathWizard`, `role="dialog"` / `aria-label="Account setup"`)
+ * is an `inset-0 z-50` overlay that SWALLOWS CLICKS. `dismissStagingOnboarding`
+ * probes for it for only 2s by design, and over a real network the dialog
+ * reliably mounted AFTER that window — so the probe returned "absent" and the
+ * modal then covered the page, failing every test in this file on its first run.
+ * Pre-seeding the same flag the "Exit setup" button writes
+ * (`OnboardingContext.tsx:41`) is the deterministic equivalent, with no race.
+ *
+ * Its presence is NOT a product blocker: staging has an enabled platform cloud
+ * credential, so a smoke user without their own cloud credential is expected
+ * (CLAUDE.md, Architecture Principle 1).
+ */
+async function suppressOnboarding(page: Page): Promise<void> {
+  const userId = await resolveUserId(page);
   await page.addInitScript((id) => {
     window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true');
   }, userId);
@@ -56,20 +84,21 @@ async function suppressOnboarding(page: Page): Promise<void> {
  * Deliberately resolves the id from the API and navigates by URL rather than
  * clicking a card on `/projects`: project cards are NOT anchors, so an
  * `a[href^="/projects/"]` locator matches only the sidebar nav and finds no
- * project (the first version of this spec failed all five tests on exactly
- * that). Navigating to the route is also how a user arrives here from a
- * bookmark or the sidebar.
+ * project (the first version of this spec failed all five tests on exactly that).
+ * Navigating to the route is also how a user arrives here from a bookmark.
  */
 async function openFirstProject(page: Page): Promise<string> {
-  const res = await page.request.get(`${STAGING_API}/api/projects`);
-  expect(res.status(), 'GET /api/projects must succeed').toBe(200);
-  const projects = (await res.json())?.projects as Array<{ id: string; name: string }>;
-  expect(projects?.length, 'staging user must have at least one project').toBeGreaterThan(0);
-  const id = projects[0].id;
+  const id = (await resolveProjects(page))[0].id;
 
   await page.goto(`${STAGING_APP}/projects/${id}/chat`);
   await dismissStagingOnboarding(page);
-  await page.locator(`${PROJECT_NAV} a`).first().waitFor({ state: 'visible', timeout: 30_000 });
+  /*
+   * Generous budget because this waits on staging's auth bootstrap, not on the
+   * sidebar: the API is measurably slow (Worker in CDG, D1 in DFW, ~100-300ms per
+   * round trip), so a cold "Verifying your session" can outlast a tight timeout
+   * and read as "the sidebar is broken" when it is nothing of the sort.
+   */
+  await page.locator(`${PROJECT_NAV} a`).first().waitFor({ state: 'visible', timeout: 60_000 });
   // The wizard must not be covering the surface under test.
   await expect(page.getByTestId('onboarding-wizard')).toHaveCount(0);
   return id;
@@ -175,9 +204,7 @@ test.describe('STAGING — project sidebar scroll (1280x600, the reported laptop
     await stagingLogin(page);
     await suppressOnboarding(page);
 
-    const listed = await page.request.get(`${STAGING_API}/api/projects`);
-    const projectName = (await listed.json())?.projects?.[0]?.name as string;
-    expect(projectName, 'staging user must have at least one project').toBeTruthy();
+    const projectName = (await resolveProjects(page))[0].name;
 
     await page.goto(`${STAGING_APP}/dashboard`);
     await dismissStagingOnboarding(page);
@@ -219,9 +246,7 @@ test.describe('STAGING — mobile drawer unaffected (375x667)', () => {
   test('mobile nav still reaches its last item', async ({ page }) => {
     await stagingLogin(page);
     await suppressOnboarding(page);
-    const res = await page.request.get(`${STAGING_API}/api/projects`);
-    const id = (await res.json())?.projects?.[0]?.id as string;
-    expect(id, 'staging user must have at least one project').toBeTruthy();
+    const id = (await resolveProjects(page))[0].id;
     await page.goto(`${STAGING_APP}/projects/${id}/chat`);
     await dismissStagingOnboarding(page);
 

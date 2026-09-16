@@ -424,8 +424,20 @@ test.describe('Zen peek rail — second NavSidebar mount (1280x500)', () => {
     await page.addInitScript(() => window.localStorage.setItem('sam:focus-mode', 'zen'));
     await page.goto(`/projects/${PROJECT.id}/chat`);
 
-    // Enter through the real trigger: hover the Zen seam to open the peek panel.
-    await page.getByRole('button', { name: /Navigation \(Zen mode\)/ }).hover();
+    /*
+     * Enter through a real trigger, but the KEYBOARD one rather than hover.
+     * `ZenPeekRail` opens on `onFocusCapture` as well as `onMouseEnter`
+     * (ZenPeekRail.tsx:44-52), so focusing the seam is a genuine user path, not a
+     * test shortcut — and it is the stable one. Hover alone timed out in CI: the
+     * panel is held open by `open` state, and a re-render triggered by a late data
+     * fetch closes it, after which no `mouseenter` re-fires because the pointer
+     * never moved. Focus survives that, because `onMouseLeave` explicitly keeps the
+     * panel open while focus lives inside it.
+     */
+    const seam = page.getByRole('button', { name: /Navigation \(Zen mode\)/ });
+    await seam.waitFor({ state: 'visible' });
+    await seam.focus();
+    await seam.hover();
     await waitForSidebar(page, PROJECT_NAV);
 
     const nav = page.locator(PROJECT_NAV);
