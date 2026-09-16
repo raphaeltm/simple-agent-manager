@@ -175,6 +175,10 @@ test.describe('STAGING — project sidebar scroll (1280x600, the reported laptop
     await stagingLogin(page);
     await suppressOnboarding(page);
 
+    const listed = await page.request.get(`${STAGING_API}/api/projects`);
+    const projectName = (await listed.json())?.projects?.[0]?.name as string;
+    expect(projectName, 'staging user must have at least one project').toBeTruthy();
+
     await page.goto(`${STAGING_APP}/dashboard`);
     await dismissStagingOnboarding(page);
     await expect(page.locator(`${GLOBAL_NAV} a`).first()).toBeVisible({ timeout: 30_000 });
@@ -182,7 +186,16 @@ test.describe('STAGING — project sidebar scroll (1280x600, the reported laptop
 
     await page.goto(`${STAGING_APP}/projects`);
     await dismissStagingOnboarding(page);
-    await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible({
+    /*
+     * Assert on something a USER can see. The obvious `heading "Projects"` is an
+     * `sr-only` h1 with a 1x1 box — it proves the route mounted and nothing else,
+     * and it flaked once here for that reason. The New Project control plus a real
+     * project card together prove the page actually rendered its data.
+     */
+    await expect(page.getByRole('button', { name: /New Project/i })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByText(projectName, { exact: true }).first()).toBeVisible({
       timeout: 30_000,
     });
     await stagingShot(page, 'staging-projects');
