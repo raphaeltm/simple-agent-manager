@@ -218,17 +218,26 @@ export function NavSidebar({
       /* `data-intentional-clip`: this is a two-panel carousel — both panels sit
          side by side (2x width) and are translated into view, so its content is
          deliberately wider than its box. Marks it as intentional for the
-         `assertNoClippedOverflow` audit guard. */
-      <div data-intentional-clip className={`relative overflow-hidden ${className ?? ''}`}>
+         `assertNoClippedOverflow` audit guard.
+
+         `flex-1 min-h-0`: `overflow: hidden` resolves this flex item's automatic
+         minimum size to 0, so without `flex-1` it collapses to the leftover space
+         and silently clips the bottom nav items — with no scrollbar, because the
+         `aside` then never overflows either. Claiming the leftover space and
+         letting each panel scroll (below) is what makes them reachable. */
+      <div
+        data-intentional-clip
+        className={`relative flex-1 min-h-0 overflow-hidden ${className ?? ''}`}
+      >
         {/* Sliding container — holds both panels side by side */}
         <div
-          className="flex transition-transform duration-200 ease-out motion-reduce:transition-none"
+          className="flex h-full transition-transform duration-200 ease-out motion-reduce:transition-none"
           style={{ transform: showGlobalNav ? 'translateX(-100%)' : 'translateX(0)' }}
         >
           {/* Panel 1: Project nav */}
           <nav
             aria-label="Project navigation"
-            className="flex flex-col gap-1 p-2 w-full shrink-0"
+            className="flex flex-col gap-1 p-2 w-full shrink-0 h-full overflow-y-auto"
             aria-hidden={showGlobalNav || undefined}
             inert={showGlobalNav ? true : undefined}
           >
@@ -277,7 +286,7 @@ export function NavSidebar({
           {/* Panel 2: Global nav (shown when toggled) */}
           <nav
             aria-label="Primary navigation"
-            className="flex flex-col gap-1 p-2 w-full shrink-0"
+            className="flex flex-col gap-1 p-2 w-full shrink-0 h-full overflow-y-auto"
             aria-hidden={!showGlobalNav || undefined}
             inert={!showGlobalNav ? true : undefined}
           >
@@ -328,7 +337,13 @@ export function NavSidebar({
     : GLOBAL_NAV_ITEMS;
 
   return (
-    <nav aria-label="Primary navigation" className={`flex flex-col gap-1 p-2 ${className ?? ''}`}>
+    // `flex-1 min-h-0 overflow-y-auto`: same reason as the project carousel above
+    // — the list must own the leftover column space and scroll itself, so the
+    // `aside`'s header and user footer stay pinned on short viewports.
+    <nav
+      aria-label="Primary navigation"
+      className={`flex flex-col gap-1 p-2 flex-1 min-h-0 overflow-y-auto ${className ?? ''}`}
+    >
       {globalItems.map((item) => {
         const active = isActive(item.path, location.pathname);
         return (
