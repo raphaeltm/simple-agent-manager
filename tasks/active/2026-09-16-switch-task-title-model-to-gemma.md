@@ -24,7 +24,7 @@ The production Cloudflare cost audit in idea `01M2CSWVTGDXPSS3RCHY5GCQRV` found 
 - [x] Run local checks for the touched packages.
 - [x] Run specialist review evidence and address findings.
 - [x] Deploy to staging and exercise real task/chat title generation with realistic prompts.
-- [ ] Create the PR with staging title examples, local evidence, specialist evidence, and the GLM thinking-token finding.
+- [x] Create the PR with staging title examples, local evidence, specialist evidence, and the GLM thinking-token finding.
 - [ ] Apply `coderabbit-review` once after other gates are green, address feedback, merge, monitor production deploy, and verify the deployed `TASK_TITLE_MODEL` binding.
 
 ## Acceptance Criteria
@@ -89,3 +89,9 @@ The same production title-generation prompt and Workers AI Gateway request shape
 | Archived ProjectData search coverage | Investigate archived ProjectData search coverage in MCP tools | Investigate archived ProjectData message inclusion in MCP session searches |
 | Token-login smoke test | Tighten staging smoke test for token login to verify app entry with project data | Enhance staging smoke test to verify project data loading after token login |
 | Queued task cleanup | Refactor task cleanup to tear down orphaned chat sessions | Refactor task cleanup to remove orphaned chat sessions and unify lifecycle events |
+
+## Pull Request Evidence
+
+- Opened PR #2093: https://github.com/raphaeltm/simple-agent-manager/pull/2093
+- PR body includes local validation, staging title examples, direct GLM/Gemma comparison, specialist review evidence, and the GLM thinking-token finding.
+- Updated the PR External References wording to explicitly say "Cloudflare official documentation" after the first Preflight Evidence CI run required the literal official-documentation phrasing for an external API change.
