@@ -1,0 +1,183 @@
+/**
+ * C6: the workspace chat surface must group tool calls exactly like project
+ * chat, with the SAME parent-held expansion and the SAME live signal — not an
+ * uncontrolled copy that flickers and forgets its expansion on scroll
+ * (`.claude/rules/24`).
+ *
+ * Entered through the real `getChatSession` payload (rule 62), so the whole
+ * conversion → grouping → row-render path runs.
+ */
+import { act, render, screen, waitFor } from '@testing-library/react';
+import type { ReactElement, ReactNode } from 'react';
+import { MemoryRouter } from 'react-router';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  getChatSession: vi.fn(),
+  getChatSessionState: vi.fn(),
+  getTranscribeApiUrl: vi.fn(() => 'https://api.test/api/transcribe'),
+  getTtsApiUrl: vi.fn(() => 'https://api.test/api/tts'),
+  resetIdleTimer: vi.fn(),
+  sendFollowUpPrompt: vi.fn(),
+  uploadSessionFiles: vi.fn(),
+  cancelAgentPrompt: vi.fn(),
+}));
+
+vi.mock('../../../src/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api')>()),
+  getChatSession: mocks.getChatSession,
+  getChatSessionState: mocks.getChatSessionState,
+  getTranscribeApiUrl: mocks.getTranscribeApiUrl,
+  getTtsApiUrl: mocks.getTtsApiUrl,
+  resetIdleTimer: mocks.resetIdleTimer,
+  sendFollowUpPrompt: mocks.sendFollowUpPrompt,
+  uploadSessionFiles: mocks.uploadSessionFiles,
+  cancelAgentPrompt: mocks.cancelAgentPrompt,
+}));
+
+/** Captured so a test can push a row the way the DO socket does. */
+let capturedWsOnMessage: ((msg: unknown) => void) | null = null;
+
+vi.mock('../../../src/hooks/useChatWebSocket', () => ({
+  useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void }) => {
+    capturedWsOnMessage = opts.onMessage ?? null;
+    return { connectionState: 'connected', wsRef: { current: null }, retry: vi.fn() };
+  },
+}));
+
+vi.mock('../../../src/contexts/GlobalAudioContext', () => ({
+  useGlobalAudio: () => ({ startPlayback: vi.fn() }),
+}));
+
+vi.mock('react-virtuoso', async () => {
+  const { createVirtuosoModuleMock } = await import('../../helpers/virtuoso-mock');
+  return createVirtuosoModuleMock();
+});
+
+// The generic tool card is stubbed to its title so "hidden while collapsed" is
+// unambiguous; the real card is exercised in ToolCallGroupCard.test.tsx.
+vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@simple-agent-manager/acp-client')>();
+  return {
+    ...actual,
+    MessageBubble: ({ text, role }: { text: string; role: string }) => (
+      <div data-testid={`acp-message-${role}`}>{text}</div>
+    ),
+    ToolCallCard: ({ toolCall }: { toolCall: { title: string } }) => (
+      <div data-testid="acp-tool-call">{toolCall.title}</div>
+    ),
+  };
+});
+
+const { WorkspaceChatView } = await import('../../../src/pages/workspace/WorkspaceChatView');
+
+const SESSION_ID = 'ws-session-1';
+
+function toolMessage(id: string, title: string, createdAt: number, status = 'completed') {
+  return {
+    id,
+    sessionId: SESSION_ID,
+    role: 'tool' as const,
+    content: '(tool call)',
+    toolMetadata: { toolCallId: `tc-${id}`, title, kind: 'execute', status, contentSize: 64 },
+    createdAt,
+  };
+}
+
+function textMessage(id: string, role: 'user' | 'assistant', content: string, createdAt: number) {
+  return { id, sessionId: SESSION_ID, role, content, toolMetadata: null, createdAt };
+}
+
+function renderView(ui: ReactElement) {
+  const Wrapper = ({ children }: { children: ReactNode }) => (
+    <MemoryRouter>{children}</MemoryRouter>
+  );
+  return render(ui, { wrapper: Wrapper });
+}
+
+describe('WorkspaceChatView — tool activity cards', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedWsOnMessage = null;
+    mocks.getChatSessionState.mockResolvedValue({
+      state: null,
+      agentSessionId: null,
+      agentType: null,
+    });
+    mocks.getChatSession.mockResolvedValue({
+      session: {
+        id: SESSION_ID,
+        workspaceId: 'ws-1',
+        topic: 'Workspace chat',
+        status: 'active',
+        messageCount: 5,
+        createdAt: 1_000,
+        endedAt: null,
+      },
+      messages: [
+        textMessage('m-user', 'user', 'Run the checks please.', 1_000),
+        toolMessage('m-t1', 'Bash: pnpm lint', 2_000),
+        toolMessage('m-t2', 'Bash: pnpm typecheck', 3_000),
+        toolMessage('m-t3', 'Bash: pnpm test', 4_000),
+      ],
+      hasMore: false,
+    });
+  });
+
+  it('collapses a run of tool calls into one card', async () => {
+    renderView(<WorkspaceChatView projectId="proj-1" sessionId={SESSION_ID} />);
+
+    const header = await screen.findByRole('button', { name: /3 tool calls/ });
+    expect(header).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryAllByTestId('acp-tool-call')).toHaveLength(0);
+  });
+
+  /*
+   * Same F5b guard as project chat, reached through this surface's real working
+   * signal: `getChatSession`'s state snapshot is hydrated on load
+   * (`hydrateActivity`), which is how a page opened mid-turn knows the agent is
+   * busy. Nothing in the group's own statuses can produce the running glyph —
+   * every call is `completed` — so only the `live` prop can.
+   *
+   * NOTE the surfaces are NOT identical upstream of this: this view's
+   * `onMessage` only moves activity for `role === 'assistant'`, while project
+   * chat moves it for every non-user row. That asymmetry predates grouping and
+   * is recorded in the task file rather than changed here.
+   */
+  /*
+   * A row arriving over the DO socket must join the EXISTING tail group rather
+   * than start a second card — the live-tail case, driven through this view's
+   * real `onMessage` handler.
+   */
+  it('absorbs a tool row that streams in over the socket into the tail group', async () => {
+    renderView(<WorkspaceChatView projectId="proj-1" sessionId={SESSION_ID} />);
+
+    await screen.findByRole('button', { name: /3 tool calls/ });
+
+    await act(async () => {
+      capturedWsOnMessage!(toolMessage('m-t4', 'Bash: pnpm build', 5_000));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /4 tool calls/ })).toBeTruthy();
+    });
+    // Still ONE card, not a second one appended after it.
+    expect(screen.getAllByTestId('tool-call-group')).toHaveLength(1);
+  });
+
+  it('puts the tail group in motion when the session hydrates as working', async () => {
+    mocks.getChatSession.mockResolvedValue({
+      ...(await mocks.getChatSession()),
+      state: { activity: 'prompting', activityAt: 5_000 },
+    });
+
+    renderView(<WorkspaceChatView projectId="proj-1" sessionId={SESSION_ID} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tool-group-glyph')).toHaveAttribute('data-state', 'running');
+    });
+    expect(screen.getByText('· working')).toBeTruthy();
+    // Liveness: the group is still the grouped row, not some other card.
+    expect(screen.getByRole('button', { name: /3 tool calls/ })).toBeTruthy();
+  });
+});
