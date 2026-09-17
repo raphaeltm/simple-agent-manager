@@ -53,7 +53,13 @@ export async function handleListSessions(
 }
 
 // Roles whose consecutive tokens should be concatenated into a single logical message.
-// Mirrors the frontend groupMessages() in ProjectMessageView.tsx.
+// The frontend equivalent is `chatMessagesToConversationItems()` in
+// `apps/web/src/components/project-message-view/types.ts` (consecutive assistant
+// and thinking tokens merge; tool rows merge by `toolCallId`), followed by
+// `groupToolCallItems()` in
+// `apps/web/src/components/project-message-view/tool-call-groups.ts`, which folds
+// a run of tool/thinking items into one collapsed activity row. The old
+// `groupMessages()` helper this used to cite was dead code and has been removed.
 const GROUPABLE_ROLES = new Set(['assistant', 'tool', 'thinking']);
 
 export interface TokenRow {

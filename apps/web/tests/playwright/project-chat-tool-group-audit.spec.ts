@@ -162,6 +162,39 @@ function singleCall() {
   ];
 }
 
+/**
+ * (h) hostile / non-ASCII content. The `<script>` string must reach the DOM as
+ * TEXT: the tool title renders in a plain span and the agent text goes through
+ * react-markdown with no `rehype-raw`, so neither may execute.
+ */
+const XSS_TOOL_TITLE =
+  'Bash: echo "<script>alert(1)</script>" &amp; &lt;b&gt;bold&lt;/b&gt; — ✅🚀 日本語 «quoted»';
+const UNICODE_TOOL_TITLE = 'Read: packages/ünïcödé/файл-测试-🧪.ts';
+const XSS_AGENT_TEXT =
+  'Rendered literally: <script>alert(1)</script> plus ✅🚀 日本語 «quoted» and &amp; entities.';
+/**
+ * What the markdown renderer is expected to SHOW: the script markup escaped to
+ * text and the `&amp;` entity decoded to `&`. Asserting the rendered form rather
+ * than the source pins both behaviours — a renderer that started executing raw
+ * HTML would drop the literal markup and fail this.
+ */
+const XSS_AGENT_TEXT_RENDERED =
+  'Rendered literally: <script>alert(1)</script> plus ✅🚀 日本語 «quoted» and & entities.';
+
+function specialCharacters() {
+  resetClock();
+  return [
+    textMessage(
+      'msg-user-1',
+      'user',
+      'Echo the weird string ✅🚀 日本語 <script>alert(1)</script>'
+    ),
+    toolMessage('msg-tool-1', XSS_TOOL_TITLE, 'in_progress'),
+    toolMessage('msg-tool-2', UNICODE_TOOL_TITLE, 'completed'),
+    textMessage('msg-assistant-1', 'assistant', XSS_AGENT_TEXT),
+  ];
+}
+
 /** (e) a document card between two runs. */
 function documentBetweenRuns() {
   resetClock();
@@ -210,10 +243,15 @@ function groupCard(page: Page) {
  * the comparison is against the bubble's own flex wrapper, which spans the row's
  * content box, times the shared 80% cap. Removing `max-w-[80%]` from the card
  * makes `card.width === wrapper.width` and fails this.
+ *
+ * The assistant bubble is the reference, falling back to the user bubble when a
+ * scenario has no assistant message yet (a still-running turn). Either wrapper
+ * spans the same row content box — `justify-start` vs `justify-end` moves the
+ * bubble inside the wrapper, not the wrapper.
  */
 async function assertCardWithinBubbleColumn(page: Page) {
   await expect(groupCard(page)).toBeVisible();
-  await expect(page.locator('.glass-msg-assistant').first()).toBeVisible();
+  await expect(page.locator('.glass-msg-assistant, .glass-msg-user').first()).toBeVisible();
 
   const geometry = await page.evaluate(() => {
     const rect = (el: Element | null | undefined) => {
@@ -222,7 +260,8 @@ async function assertCardWithinBubbleColumn(page: Page) {
       return { left: box.left, right: box.right, width: box.width };
     };
     const card = document.querySelector('[data-testid="tool-call-group"]');
-    const bubble = document.querySelector('.glass-msg-assistant');
+    const bubble =
+      document.querySelector('.glass-msg-assistant') ?? document.querySelector('.glass-msg-user');
     return {
       card: rect(card),
       cardColumn: rect(card?.parentElement),
@@ -311,6 +350,7 @@ function suite(label: string) {
     // The long title is truncated inside the card, not pushed past its box.
     const box = (await card.boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await assertCardWithinBubbleColumn(page);
 
     await screenshot(page, 'tool-group-running-long-title');
     await assertNoOverflow(page);
@@ -363,6 +403,47 @@ function suite(label: string) {
     ]);
 
     await screenshot(page, 'tool-group-call-output-loaded');
+    await assertNoOverflow(page);
+  });
+
+  test(`${label} — unicode, entities and a literal <script> render as text`, async ({ page }) => {
+    // Registered before navigation: an executed `alert(1)` would open a dialog,
+    // and an unhandled dialog would hang the page rather than fail loudly.
+    const dialogs: string[] = [];
+    page.on('dialog', (dialog) => {
+      dialogs.push(dialog.message());
+      void dialog.dismiss();
+    });
+
+    await setupMocks(page, specialCharacters());
+    await open(page);
+
+    const header = page.getByRole('button', { name: /2 tool calls/ });
+    await expect(header).toBeVisible();
+    // The live line carries the hostile title while collapsed, as text.
+    await expect(page.getByTestId('tool-group-glyph')).toHaveAttribute('data-state', 'running');
+    await expect(page.getByText(XSS_TOOL_TITLE).first()).toBeVisible();
+    await expect(page.getByText(XSS_AGENT_TEXT_RENDERED)).toBeVisible();
+
+    await assertCardWithinBubbleColumn(page);
+    await screenshot(page, 'tool-group-special-characters');
+    await assertNoOverflow(page);
+
+    await header.click();
+    /*
+     * Both titles are present as TEXT, script markup included. `.last()` because
+     * the hostile title now legitimately appears twice — the collapsed live line
+     * keeps it while the group is open — and unlike the markdown bubble a plain
+     * title span does NOT decode `&amp;`, so the raw string is what must show.
+     */
+    await expect(page.getByText(XSS_TOOL_TITLE).last()).toBeVisible();
+    await expect(page.getByText(UNICODE_TOOL_TITLE).last()).toBeVisible();
+
+    // Nothing executed, and no script element was injected into the conversation.
+    expect(dialogs, 'a dialog means the injected script executed').toEqual([]);
+    expect(await page.locator('.sam-message-entry script').count()).toBe(0);
+
+    await screenshot(page, 'tool-group-special-characters-expanded');
     await assertNoOverflow(page);
   });
 
