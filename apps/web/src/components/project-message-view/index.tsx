@@ -7,11 +7,7 @@
  * render instantly.
  */
 // FILE SIZE EXCEPTION: Pre-existing large chat surface; this production hotfix adds a narrow URL-driven jump entry point that must stay colocated with existing Virtuoso jump/highlight state. See .claude/rules/18-file-size-limits.md
-import type {
-  ConversationItem,
-  SlashCommand,
-  ToolCallContentItem,
-} from '@simple-agent-manager/acp-client';
+import type { SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
@@ -46,14 +42,17 @@ import { SessionToolRail } from './SessionToolRail';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import { nearestItemId } from './timeline-jump';
 import type { TimelineJumpTarget } from './timeline-types';
-import { chatMessagesToConversationItems } from './types';
+import type { DisplayItem } from './tool-call-groups';
+import { groupToolCallItems } from './tool-call-groups';
+import { chatMessagesToConversationItems, isWorkingActivity } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
 import { useSessionTools } from './useSessionTools';
+import { isToolCallGroupExpanded, useToolCallGroupExpansion } from './useToolCallGroupExpansion';
 import { WakeProgressBanner } from './WakeProgressBanner';
 
 // Re-export utilities used by external consumers
-export { chatMessagesToConversationItems, groupMessages } from './types';
+export { chatMessagesToConversationItems } from './types';
 
 interface ProjectMessageViewProps {
   projectId: string;
@@ -163,26 +162,33 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   );
   const unresolvedCommentCount = commentCounts.all - commentCounts.resolved;
 
-  // Convert DO messages to conversation items (single source)
-  const conversationItems = useMemo<ConversationItem[]>(() => {
-    return chatMessagesToConversationItems(lc.messages);
+  // Convert DO messages to conversation items (single source), then fold
+  // consecutive tool activity into one collapsed group row. Both passes live in
+  // the same memo because every item object is rebuilt on every incoming token.
+  const displayItems = useMemo<DisplayItem[]>(() => {
+    return groupToolCallItems(chatMessagesToConversationItems(lc.messages));
   }, [lc.messages]);
 
   // Build item-id → 0-based data index map for jump-to-message from the timeline.
   // Includes EVERY conversation item so any timeline anchor resolves. The value is
-  // the ZERO-BASED index into `conversationItems` — Virtuoso's `scrollToIndex`
+  // the ZERO-BASED index into `displayItems` — Virtuoso's `scrollToIndex`
   // operates on the data-array coordinate, NOT the `firstItemIndex`-offset
   // absolute coordinate used for `itemContent`'s `index` arg. Passing the offset
   // value (VIRTUAL_START + i ≈ 100000) is out of range, so Virtuoso never scrolls
   // and the highlighted row stays virtualized-out → a dead click on real
   // (virtualized) sessions. jsdom renders all rows, which hid this locally.
+  // Absorbed tool/thinking ids map to their GROUP's row index, so a timeline
+  // jump to a tool message still lands on a row that exists.
   const itemIndexById = useMemo(() => {
     const map = new Map<string, number>();
-    conversationItems.forEach((item, i) => {
+    displayItems.forEach((item, i) => {
       map.set(item.id, i);
+      if (item.kind === 'tool_call_group') {
+        for (const inner of item.items) map.set(inner.id, i);
+      }
     });
     return map;
-  }, [conversationItems]);
+  }, [displayItems]);
 
   const timeline = useSessionTimeline(
     projectId,
@@ -261,12 +267,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     } else if (!lc.loadingMore) {
       // No exact anchor, or the anchor never materialized after loading
       // settled → jump to the nearest loaded message by timestamp.
-      targetId = nearestItemId(conversationItems, pendingJump.timestamp);
+      targetId = nearestItemId(displayItems, pendingJump.timestamp);
     }
     if (targetId && scrollAndHighlight(targetId)) {
       setPendingJump(null);
     }
-  }, [pendingJump, itemIndexById, conversationItems, lc.loadingMore, scrollAndHighlight]);
+  }, [pendingJump, itemIndexById, displayItems, lc.loadingMore, scrollAndHighlight]);
 
   // Auto-clear the jump highlight after the flash animation. The 2200ms here is
   // coupled to the `.sam-message-highlight` animation-duration (2.2s) in index.css
@@ -320,10 +326,30 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   // agent_message. If a tool_call or thinking block is the latest item, the
   // previous agent_message should NOT be animated — its text is settled.
   const animationTargetIdx = useMemo(() => {
-    const lastIdx = conversationItems.length - 1;
-    if (lastIdx >= 0 && conversationItems[lastIdx]?.kind === 'agent_message') return lastIdx;
+    const lastIdx = displayItems.length - 1;
+    if (lastIdx >= 0 && displayItems[lastIdx]?.kind === 'agent_message') return lastIdx;
     return -1;
-  }, [conversationItems]);
+  }, [displayItems]);
+
+  // Expanded tool-call groups are parent state so they survive virtualization.
+  const groupExpansion = useToolCallGroupExpansion();
+  const onToggleGroup = groupExpansion.toggleGroup;
+
+  // A jump can target an absorbed tool id, which resolves to its GROUP's row.
+  // Resolve it to the row's own id (not an index): `itemContent`'s `index` is
+  // Virtuoso's firstItemIndex-offset coordinate, so comparing indices here would
+  // re-introduce the coordinate-space trap `itemIndexById` documents above.
+  const highlightedRowId = useMemo(() => {
+    if (highlightedItemId === null) return null;
+    const index = itemIndexById.get(highlightedItemId);
+    return index === undefined ? null : (displayItems[index]?.id ?? null);
+  }, [highlightedItemId, itemIndexById, displayItems]);
+
+  // Statuses flip per call, so a purely status-derived glyph would flash
+  // check → spinner between calls. The tail row stays "live" for as long as the
+  // agent is mid-turn.
+  const lastDisplayId = displayItems[displayItems.length - 1]?.id ?? null;
+  const agentIsWorking = isWorkingActivity(lc.agentActivity);
 
   // Only pass a file-click handler through when the session can actually serve
   // files; hoisted so `renderConversationItem` has a stable dependency instead of
@@ -334,7 +360,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const commentUi = useProjectMessageCommentUi({
     messageComments,
     canWriteSession,
-    hasMessages: conversationItems.length > 0,
+    hasMessages: displayItems.length > 0,
     chatLogRef,
     sessionId,
     onRequestCommentSurface: openComments,
@@ -382,14 +408,14 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
    * note on `itemIndexById` above.
    */
   const renderConversationItem = useCallback(
-    (index: number, item: ConversationItem) => {
+    (index: number, item: DisplayItem) => {
       return (
         <CommentableConversationItem
           index={index}
           firstItemIndex={lc.firstItemIndex}
           item={item}
           projectId={projectId}
-          highlighted={highlightedItemId === item.id}
+          highlighted={highlightedRowId === item.id}
           onFileClick={fileClickHandler}
           onLoadToolContent={handleLoadToolContent}
           animateAgentText
@@ -398,11 +424,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           agentActivity={lc.agentActivity}
           animationTargetIdx={animationTargetIdx}
           commentState={commentUi.rowState}
+          groupExpanded={
+            item.kind === 'tool_call_group'
+              ? isToolCallGroupExpanded(groupExpansion, item.id)
+              : undefined
+          }
+          onToggleGroup={onToggleGroup}
+          groupLive={agentIsWorking && item.id === lastDisplayId}
         />
       );
     },
     [
-      highlightedItemId,
+      highlightedRowId,
       projectId,
       fileClickHandler,
       handleLoadToolContent,
@@ -412,6 +445,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       animatedUserMsgIds,
       canWriteSession,
       commentUi.rowState,
+      groupExpansion,
+      onToggleGroup,
+      agentIsWorking,
+      lastDisplayId,
     ]
   );
 
@@ -570,7 +607,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
 
       {/* Messages area — virtualized, DO-only */}
-      {conversationItems.length === 0 ? (
+      {displayItems.length === 0 ? (
         <div className="relative flex flex-1 min-h-0 min-w-0 flex-row">
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
             <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -635,9 +672,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                 <Virtuoso
                   ref={virtuosoRef}
                   style={{ height: '100%' }}
-                  data={conversationItems}
+                  data={displayItems}
                   firstItemIndex={lc.firstItemIndex}
-                  initialTopMostItemIndex={conversationItems.length - 1}
+                  initialTopMostItemIndex={displayItems.length - 1}
                   followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
                   alignToBottom
                   atBottomThreshold={50}

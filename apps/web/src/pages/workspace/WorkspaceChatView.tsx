@@ -11,7 +11,6 @@
  * message delivery (~2s intervals) to maintain the perception of continuous
  * streaming.
  */
-import type { ConversationItem } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
 import { type FC, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -19,6 +18,8 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { AcpConversationItemView } from '../../components/project-message-view/AcpConversationItemView';
 import { FollowUpInput } from '../../components/project-message-view/FollowUpInput';
+import type { DisplayItem } from '../../components/project-message-view/tool-call-groups';
+import { groupToolCallItems } from '../../components/project-message-view/tool-call-groups';
 import type { AgentActivityState } from '../../components/project-message-view/types';
 import { chatMessagesToConversationItems, deriveSessionState, isWorkingActivity, VIRTUAL_START } from '../../components/project-message-view/types';
 import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
@@ -158,8 +159,12 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   }, [sessionId, stopVerifyDecayTimer]);
 
   // ── Conversation items from DO messages only (single source) ──
-  const conversationItems = useMemo<ConversationItem[]>(() => {
-    return chatMessagesToConversationItems(messages);
+  // Consecutive tool calls fold into one collapsed activity row, matching the
+  // project-chat surface (`.claude/rules/24`). The card is UNCONTROLLED here:
+  // this view has no parent-held row state, and its simpler `itemContent` does
+  // not carry the group-expansion plumbing.
+  const conversationItems = useMemo<DisplayItem[]>(() => {
+    return groupToolCallItems(chatMessagesToConversationItems(messages));
   }, [messages]);
 
   // ── Cancel the current in-flight prompt ──

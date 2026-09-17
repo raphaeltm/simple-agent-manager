@@ -19,7 +19,8 @@ While chatting with an agent, you can browse the workspace's file system directl
 
 - Open the file browser panel to navigate the file tree and view files
 - View git status and diffs to see what the agent changed
-- Click file references in tool-call cards to jump directly to that file
+- Click file references in tool-call cards to jump directly to that file (expand the
+  tool activity card first — see [Tool Activity Cards](#tool-activity-cards))
 
 ### What You Can Do
 
@@ -58,6 +59,30 @@ When browsing files, images are rendered inline with a dedicated viewer:
 - Toggle between **fit-to-panel** and **1:1** zoom modes
 
 Supported formats include PNG, JPG, GIF, SVG, WebP, and other common image types.
+
+## Tool Activity Cards
+
+A single agent turn often runs dozens of tools between two sentences of prose. To
+keep the conversation readable, SAM folds a run of consecutive tool calls into one
+compact **activity card** that simply states how many ran — for example
+`7 tool calls`.
+
+- While the run is in progress the card shows a motion indicator plus the tool
+  currently executing (or `thinking…` while the agent reasons between calls). When
+  the run finishes the indicator settles to a check mark, with no layout jump.
+- If any call failed, the card says so in text — for example `7 tool calls · 2 failed`.
+- **Tap the card** to expand it into the individual tool-call cards, in order.
+- **Tap an individual call** to load its output (diff, terminal output, or text).
+  Output is fetched on demand, so a long run costs nothing until you ask for it.
+- Expanded cards stay expanded while you scroll away and back.
+- Thinking blocks that sit between tool calls are folded into the same card; they
+  are not counted in the tool-call total.
+
+Document cards are never hidden inside an activity card — a document the agent
+chose to show you always renders on its own (see below).
+
+Add `?tools=expanded` to a chat URL to open every activity card by default. That
+is a debugging aid rather than a setting, and it is not remembered between visits.
 
 ## Document Cards
 

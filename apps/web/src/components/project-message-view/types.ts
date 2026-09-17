@@ -164,42 +164,6 @@ function legacyDocumentRawOutput(toolName: string | undefined, content: string):
   return payload ? [{ type: 'text', text: JSON.stringify(payload) }] : undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Message grouping — merges consecutive same-role messages for clean display
-// ---------------------------------------------------------------------------
-
-interface MessageGroup {
-  id: string; // ID of first message in group
-  role: string;
-  messages: ChatMessageResponse[];
-  createdAt: number; // Timestamp of first message
-}
-
-/** Groups consecutive messages by role. Assistant chunks become one bubble,
- *  consecutive tool messages become one activity block. */
-export function groupMessages(msgs: ChatMessageResponse[]): MessageGroup[] {
-  const groups: MessageGroup[] = [];
-  for (const msg of msgs) {
-    const last = groups[groups.length - 1];
-    // Merge into existing group if same role and both are groupable roles
-    if (
-      last &&
-      last.role === msg.role &&
-      (msg.role === 'assistant' || msg.role === 'tool' || msg.role === 'thinking')
-    ) {
-      last.messages.push(msg);
-    } else {
-      groups.push({
-        id: msg.id,
-        role: msg.role,
-        messages: [msg],
-        createdAt: msg.createdAt,
-      });
-    }
-  }
-  return groups;
-}
-
 export function formatCountdown(ms: number): string {
   if (ms <= 0) return '0:00';
   const totalSec = Math.ceil(ms / 1000);
@@ -259,7 +223,7 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         origin: msg.origin === 'system' ? 'system' : 'user',
       });
     } else if (msg.role === 'assistant') {
-      // Merge consecutive assistant chunks into one item (same as groupMessages logic)
+      // Merge consecutive assistant chunks into one item
       const last = acc[acc.length - 1];
       if (last?.kind === 'agent_message') {
         (last as { text: string }).text += msg.content;
@@ -348,17 +312,13 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       const validStatuses = new Set(['pending', 'in_progress', 'completed', 'failed']);
       const rawStatus = meta && typeof meta.status === 'string' ? meta.status : '';
       const status = (validStatuses.has(rawStatus) ? rawStatus : 'completed') as
-        | 'pending'
-        | 'in_progress'
-        | 'completed'
-        | 'failed';
+        'pending' | 'in_progress' | 'completed' | 'failed';
 
       // Project chat loads tool output on demand from the persisted message.
       // Live WebSocket rows and compact history rows are normalized to the
       // same lazy-load pointer so inline content cannot disappear on refresh.
       const structuredContent = meta?.content as
-        | Array<{ type: string } & Record<string, unknown>>
-        | undefined;
+        Array<{ type: string } & Record<string, unknown>> | undefined;
       const contentSize = typeof meta?.contentSize === 'number' ? meta.contentSize : undefined;
       const contentPointer = buildToolContentPointer(msg, structuredContent, contentSize);
       const contentItems: ToolCallContentItem[] = [];

@@ -83,8 +83,8 @@ let capturedWsOnCatchUp:
   | ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void)
   | null = null;
 let capturedWsOnCommentEvent:
-  | ((event: import('../../../src/lib/api/comments').MessageCommentRealtimeEvent) => void)
-  | null = null;
+  ((event: import('../../../src/lib/api/comments').MessageCommentRealtimeEvent) => void) | null =
+  null;
 let mockWsConnectionState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' =
   'connected';
 
@@ -2781,5 +2781,218 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
     for (const idx of indices) {
       expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
     }
+  });
+});
+
+describe('ProjectMessageView — tool call activity groups', () => {
+  function makeToolMessage(
+    id: string,
+    sessionId: string,
+    createdAt: number,
+    metadata: Record<string, unknown>
+  ) {
+    return {
+      id,
+      sessionId,
+      role: 'tool' as const,
+      content: '(tool call)',
+      toolMetadata: {
+        toolCallId: `tc-${id}`,
+        kind: 'execute',
+        status: 'completed',
+        contentSize: 64,
+        ...metadata,
+      },
+      createdAt,
+      sequence: null,
+    };
+  }
+
+  function makeTypedMessage(id: string, sessionId: string, createdAt: number) {
+    return {
+      id,
+      sessionId,
+      role: 'tool' as const,
+      content: '(tool call)',
+      toolMetadata: {
+        toolCallId: `tc-${id}`,
+        title: 'display_from_library',
+        toolName: 'mcp__sam-mcp__display_from_library',
+        kind: 'fetch',
+        status: 'completed',
+        rawInput: { fileId: 'file-1' },
+        rawOutput: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              id: 'file-1',
+              filename: 'design-notes.pdf',
+              mimeType: 'application/pdf',
+              sizeBytes: 2048,
+            }),
+          },
+        ],
+      },
+      createdAt,
+      sequence: null,
+    };
+  }
+
+  function makeTextMessage(
+    id: string,
+    sessionId: string,
+    role: 'user' | 'assistant',
+    content: string,
+    createdAt: number
+  ) {
+    return { id, sessionId, role, content, toolMetadata: null, createdAt, sequence: null };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    virtuosoMock.reset();
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
+    mocks.listActivityEvents.mockResolvedValue({ events: [] });
+    mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
+    mocks.listMessageComments.mockResolvedValue({ comments: [] });
+  });
+
+  /** user → tool ×3 → assistant, entered through the real `messages` payload. */
+  function threeCallSession(sid: string) {
+    return [
+      makeTextMessage('msg-user-1', sid, 'user', 'Run the checks please.', 1_000),
+      makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: pnpm lint' }),
+      makeToolMessage('msg-tool-2', sid, 3_000, { title: 'Bash: pnpm typecheck' }),
+      makeToolMessage('msg-tool-3', sid, 4_000, { title: 'Bash: pnpm test' }),
+      makeTextMessage('msg-assistant-1', sid, 'assistant', 'All three checks passed.', 5_000),
+    ];
+  }
+
+  it('collapses a run of tool calls into one card and keeps the assistant text visible', async () => {
+    const sid = 'session-groups';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: threeCallSession(sid),
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    expect(groupButton).toHaveAttribute('aria-expanded', 'false');
+
+    // The prose on both sides of the run is what this feature exists to surface.
+    expect(screen.getByText('Run the checks please.')).toBeTruthy();
+    expect(screen.getByText('All three checks passed.')).toBeTruthy();
+
+    // Exactly one card between them — no per-call titles until it is expanded.
+    expect(screen.queryAllByTestId('acp-tool-call')).toHaveLength(0);
+    expect(screen.queryByText('Bash: pnpm typecheck')).toBeNull();
+
+    fireEvent.click(groupButton);
+
+    expect(groupButton).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByTestId('acp-tool-call')).toHaveLength(3);
+    expect(screen.getByText('Bash: pnpm typecheck')).toBeTruthy();
+  });
+
+  it('leaves a document card standalone between two runs', async () => {
+    const sid = 'session-groups-doc';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: [
+        makeTextMessage('msg-user-1', sid, 'user', 'Show me the notes.', 1_000),
+        makeToolMessage('msg-tool-1', sid, 2_000, { title: 'Bash: ls' }),
+        makeTypedMessage('msg-doc-1', sid, 3_000),
+        makeToolMessage('msg-tool-2', sid, 4_000, { title: 'Bash: cat' }),
+        makeTextMessage('msg-assistant-1', sid, 'assistant', 'Here they are.', 5_000),
+      ],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    // Two single-call groups, one on each side of the document card.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /1 tool call/ })).toHaveLength(2);
+    });
+    // The document card was never swallowed — it renders outside any group.
+    const docCard = screen.getByText('design-notes.pdf');
+    expect(docCard.closest('[data-testid="tool-call-group"]')).toBeNull();
+  });
+
+  it('renders no comment anchor or comment action row for a group row', async () => {
+    const sid = 'session-groups-comments';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'active'),
+      messages: threeCallSession(sid),
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    const groupRow = groupButton.closest('.sam-message-entry');
+    expect(groupRow).toBeTruthy();
+    expect(groupRow!.querySelector('[data-comment-anchor]')).toBeNull();
+    expect(within(groupRow as HTMLElement).queryByRole('button', { name: /comment/i })).toBeNull();
+
+    // Liveness control: commentable rows still get their anchor, so the
+    // assertions above cannot pass because comments stopped rendering entirely.
+    expect(document.querySelector('[data-comment-anchor="msg-assistant-1"]')).toBeTruthy();
+  });
+
+  // A deep link (Project → Comments, or any URL target) can point at a tool
+  // message id that is now absorbed into a group. `itemIndexById` registers
+  // every absorbed id against its GROUP's row index, so the jump lands on a row
+  // that exists instead of dead-clicking.
+  //
+  // The group sits at 0-based index 1 (user 0, group 1, assistant 2), and no
+  // `targetMessageTimestamp` is supplied — so the nearest-by-timestamp fallback
+  // would resolve to the LAST row (index 2). Asserting index 1 (and NOT 2) is
+  // what discriminates the inner-id registration from the fallback.
+  it('jumps to the GROUP row when the deep-link target is an absorbed tool message', async () => {
+    const sid = 'session-groups-jump';
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'stopped'),
+      messages: threeCallSession(sid),
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} targetMessageId="msg-tool-3" />);
+
+    await waitFor(() => {
+      expect(virtuosoMock.scrollToIndexCalls.length).toBeGreaterThan(0);
+    });
+
+    const indices = virtuosoMock.scrollToIndexCalls.map((c) =>
+      typeof c === 'number' ? c : c.index
+    );
+    expect(indices).toContain(1);
+    // Not the timestamp fallback's answer, and not a firstItemIndex-offset value.
+    expect(indices).not.toContain(2);
+    for (const idx of indices) {
+      expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
+    }
+
+    // The highlight lands on the group row, not on a virtualized-out tool row.
+    const groupButton = await screen.findByRole('button', { name: /3 tool calls/ });
+    const groupRow = groupButton.closest('.sam-message-entry');
+    await waitFor(() => {
+      expect(groupRow!.className).toContain('sam-message-highlight');
+    });
   });
 });
