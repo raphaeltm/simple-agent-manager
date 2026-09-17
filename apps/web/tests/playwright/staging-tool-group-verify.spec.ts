@@ -90,6 +90,19 @@ const LIVE_POLL_INTERVAL_MS = Number.parseInt(
   10
 );
 
+/**
+ * The completion marker must be read from ASSISTANT output only.
+ *
+ * The prompt itself says "Then reply with exactly: TOOLS DONE", so a document-wide
+ * `getByText(LIVE_DONE_MARKER)` matches the USER's bubble the instant the page paints.
+ * That is what broke the first live run: phase 1 saw "done" before a single tool had
+ * run, and phase 2 then passed on the prompt echo. The observation has to come from the
+ * agent (`.claude/rules/62`).
+ */
+function assistantDoneMarker(page: Page) {
+  return page.locator('.glass-msg-assistant', { hasText: LIVE_DONE_MARKER });
+}
+
 const GROUP = '[data-testid="tool-call-group"]';
 const GLYPH = '[data-testid="tool-group-glyph"]';
 /** Accessible-name shape of a group header, whatever the count turns out to be. */
@@ -98,6 +111,19 @@ const GROUP_HEADER_NAME = /^\d+ tool calls?/;
 // ---------------------------------------------------------------------------
 // Expected-shape derivation from the real rows
 // ---------------------------------------------------------------------------
+
+/** What the in-page observer records the first time a row flashes highlighted. */
+interface HighlightObservation {
+  landedOnGroup: boolean;
+  label: string;
+  rect: { top: number; bottom: number; left: number; right: number };
+  viewport: { w: number; h: number };
+}
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __samHighlight: HighlightObservation | undefined;
+}
 
 interface StagingMessage {
   id: string;
@@ -274,6 +300,21 @@ async function fetchSessionMessages(page: Page): Promise<StagingMessage[]> {
   expect(res.status(), `session fetch failed: ${await res.text()}`).toBe(200);
   const body = (await res.json()) as { messages?: StagingMessage[] };
   return body.messages ?? [];
+}
+
+/** Role histogram for a session, for failure reports. */
+async function roleCounts(page: Page, sessionId: string): Promise<string> {
+  const res = await page.request.get(
+    `${STAGING_API}/api/projects/${PROJECT_ID}/sessions/${sessionId}?limit=500`
+  );
+  if (res.status() !== 200) return `session fetch returned ${res.status()}`;
+  const body = (await res.json()) as { messages?: StagingMessage[] };
+  const counts = new Map<string, number>();
+  for (const msg of body.messages ?? []) {
+    counts.set(msg.role, (counts.get(msg.role) ?? 0) + 1);
+  }
+  const parts = [...counts.entries()].map(([role, n]) => `${role}=${n}`);
+  return parts.length > 0 ? parts.join(' ') : 'no messages';
 }
 
 async function openFixtureSession(page: Page, query = ''): Promise<void> {
@@ -511,47 +552,68 @@ test.describe('Staging — tool activity cards', () => {
     page,
   }) => {
     await stagingLogin(page);
-    await openFixtureSession(page, `?commentMessage=${ABSORBED_TOOL_MESSAGE_ID}`);
+    test.info().annotations.push({
+      type: 'deep-link-target',
+      description: `${ABSORBED_TOOL_MESSAGE_ID} (a tool_call_update row — the item's messageId, not its id)`,
+    });
 
     /*
-     * `.sam-message-highlight` self-clears after ~2.2s (the flash animation), so
-     * the presence check and the geometry read must be ONE atomic step —
-     * `waitFor({state:'attached'})` followed by `boundingBox()` can lose the race
-     * and report a null box as if the jump had failed.
+     * `.sam-message-highlight` self-clears after ~2.2 s (the flash animation), and
+     * `openFixtureSession` spends up to 2 s in the onboarding probe plus a bubble
+     * wait BEFORE any assertion could run — so polling from Playwright races the
+     * animation and a SUCCESSFUL jump can read as a failure.
+     *
+     * Record the flash inside the page instead, from a `MutationObserver`
+     * installed before any app script runs: that observes the event the way
+     * production produces it (`.claude/rules/62`) and captures the geometry at the
+     * moment it happens rather than whenever the test next gets a turn.
      */
-    const geometry = await page
-      .waitForFunction(
-        () => {
-          const el = document.querySelector(
-            '.sam-message-entry.sam-message-highlight [data-testid="tool-call-group"]'
-          );
-          if (!el) return null;
-          const box = el.getBoundingClientRect();
-          return {
-            top: box.top,
-            bottom: box.bottom,
-            left: box.left,
-            right: box.right,
-            viewportHeight: window.innerHeight,
-            viewportWidth: window.innerWidth,
-            label: (el.textContent ?? '').trim().slice(0, 60),
-          };
-        },
-        null,
-        { timeout: 10_000, polling: 100 }
-      )
+    await page.addInitScript(() => {
+      const record = (el: Element) => {
+        if (globalThis.__samHighlight) return;
+        const group = el.querySelector('[data-testid="tool-call-group"]');
+        const box = el.getBoundingClientRect();
+        globalThis.__samHighlight = {
+          landedOnGroup: group !== null,
+          label: (group?.textContent ?? el.textContent ?? '').trim().slice(0, 60),
+          rect: { top: box.top, bottom: box.bottom, left: box.left, right: box.right },
+          viewport: { w: window.innerWidth, h: window.innerHeight },
+        };
+      };
+      const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          const el = mutation.target as Element;
+          if (el.classList?.contains('sam-message-highlight')) record(el);
+        }
+      });
+      const start = () =>
+        observer.observe(document.documentElement, {
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['class'],
+        });
+      if (document.documentElement) start();
+      else document.addEventListener('DOMContentLoaded', start);
+    });
+
+    await openFixtureSession(page, `?commentMessage=${ABSORBED_TOOL_MESSAGE_ID}`);
+
+    const highlight = await page
+      .waitForFunction(() => globalThis.__samHighlight, null, { timeout: 15_000 })
       .then((handle) => handle.jsonValue());
 
-    expect(geometry, 'the highlighted row never contained an activity card').not.toBeNull();
-    expect(geometry!.label).toMatch(GROUP_HEADER_NAME);
-    // The jump must actually land: the group has to intersect the viewport, not
-    // merely exist in the DOM (rule 17, virtualized-list section).
-    expect(geometry!.bottom).toBeGreaterThan(0);
-    expect(geometry!.top).toBeLessThan(geometry!.viewportHeight);
-    expect(geometry!.right).toBeGreaterThan(0);
-    expect(geometry!.left).toBeLessThan(geometry!.viewportWidth);
+    expect(highlight, 'no row ever flashed highlighted').toBeTruthy();
+    expect(highlight!.landedOnGroup, `highlighted row was "${highlight!.label}"`).toBe(true);
+    expect(highlight!.label).toMatch(GROUP_HEADER_NAME);
+    // The jump must actually land: the group has to intersect the viewport AT THE
+    // MOMENT OF THE FLASH, not merely exist in the DOM (rule 17, virtualized-list
+    // section).
+    expect(highlight!.rect.bottom).toBeGreaterThan(0);
+    expect(highlight!.rect.top).toBeLessThan(highlight!.viewport.h);
+    expect(highlight!.rect.right).toBeGreaterThan(0);
+    expect(highlight!.rect.left).toBeLessThan(highlight!.viewport.w);
 
-    // Taken after the assertions, so the 2.2s flash is already gone — this shot
+    // Taken after the assertions, so the 2.2 s flash is already gone — this shot
     // documents where the jump LANDED, not the highlight itself.
     await stagingShot(page, 'staging-tool-group-deep-link');
   });
@@ -614,6 +676,18 @@ test.describe('Staging — tool activity cards, live run', () => {
       await expect(page.getByText('Something went wrong')).toHaveCount(0);
       await dismissStagingOnboarding(page);
 
+      /*
+       * Control for the scoping above: the marker IS on the page from the first
+       * paint (the prompt echoes it) while the assistant-scoped locator is still
+       * empty. If this ever inverts, phase 2 has stopped discriminating and is
+       * passing on the echo again.
+       */
+      await expect(page.locator('.glass-msg-user', { hasText: LIVE_DONE_MARKER })).toHaveCount(1);
+      expect(
+        await assistantDoneMarker(page).count(),
+        'the agent cannot have answered before it has run'
+      ).toBe(0);
+
       // Phase 1: catch the motion indicator at least once. A fast run can finish
       // inside a single poll interval, which is recorded rather than failed.
       const runningDeadline = Date.now() + LIVE_RUN_TIMEOUT_MS;
@@ -623,7 +697,7 @@ test.describe('Staging — tool activity cards, live run', () => {
           await stagingShot(page, 'staging-tool-group-live-running');
           break;
         }
-        if ((await page.getByText(LIVE_DONE_MARKER).count()) > 0) break;
+        if ((await assistantDoneMarker(page).count()) > 0) break;
         await page.waitForTimeout(LIVE_POLL_INTERVAL_MS);
       }
       test.info().annotations.push({
@@ -633,7 +707,7 @@ test.describe('Staging — tool activity cards, live run', () => {
 
       // Phase 2: the run completes and the agent says so.
       await expect
-        .poll(async () => page.getByText(LIVE_DONE_MARKER).count(), {
+        .poll(async () => assistantDoneMarker(page).count(), {
           timeout: LIVE_RUN_TIMEOUT_MS,
           intervals: [LIVE_POLL_INTERVAL_MS],
         })
@@ -643,6 +717,14 @@ test.describe('Staging — tool activity cards, live run', () => {
       // tail after completion is the agent's text, and the group above it can sit
       // outside Virtuoso's mounted window.
       const found = await scrollToFirstGroup(page);
+      if (!found) {
+        // Say whether tool rows existed at all, so a failure report separates
+        // "the agent never called a tool" from "the card did not render".
+        test.info().annotations.push({
+          type: 'live-session-roles',
+          description: await roleCounts(page, liveSessionId!),
+        });
+      }
       expect(found, 'the live run produced no activity card').toBe(true);
       const states = await glyphStates(page);
       expect(states.length).toBeGreaterThan(0);

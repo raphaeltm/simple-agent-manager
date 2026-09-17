@@ -647,3 +647,84 @@ previous commit remains valid.
 Verification: `pnpm --filter @simple-agent-manager/web test` — 313 files / 3791 tests
 passed, 0 failed, 0 skipped. Typecheck clean; lint 0 errors / 3 pre-existing warnings;
 format ratchet passed.
+
+## Rounds 3c / 3d (2026-09-17, staging findings)
+
+Staging read-only run at `56333eda1`: collapsed-by-default and expand + real lazy
+load **PASSED** on both projects. The deep-link test **FAILED** on both, from two
+independent causes.
+
+### 3c-1 RUNTIME — a merged tool call answers to more than one message id
+
+`chatMessagesToConversationItems` keeps the FIRST row's id as `item.id` and repoints
+`messageId` at whichever row carries the content, so a `tool_call_update` row id lived
+in neither place. `itemIndexById` registered `item.id` and absorbed `inner.id` only, so
+a deep link anchored on an update row — which is what the staging fixture targets, and
+what an MCP-created comment thread can also produce (`create_message_comment_thread`
+has no role restriction) — resolved to nothing and fell through to
+`nearestItemId(displayItems, Date.now())`, i.e. the bottom of the conversation.
+
+Fixed by registering every id a merged tool call is known by (`item.id` **and**
+`item.messageId` when present and different) for absorbed inner items and standalone
+`tool_call` rows alike. Aliases go in a second pass and never overwrite a real item id,
+so a canonical row can't be shadowed by another row's alias (`.claude/rules/44` —
+enumerate every consumer of the id). Pre-existing for standalone tool calls; in scope
+and cheap here.
+
+**Reddened test:** `jumps to the GROUP row when the deep-link target is a tool call
+UPDATE row` — red with the alias pass removed (it resolves to the trailing assistant
+row, index 2, instead of the group at index 1), green after; the other 73 in that file
+stay green either way.
+
+### 3c-2 SPEC — the test raced the highlight animation
+
+`.sam-message-highlight` self-clears after ~2.2 s, and `openFixtureSession` spends up
+to 2 s in the onboarding probe plus a bubble wait before any assertion can run, so a
+_successful_ jump could read as a failure. The staging deep-link test now installs a
+`MutationObserver` via `page.addInitScript` **before** navigating, records the first
+row to gain the class (whether it contains a group, its label, its rect and the
+viewport), and asserts on that snapshot — the event observed the way production
+produces it, with geometry captured at the moment of the flash (`.claude/rules/62`).
+The target id is annotated on the test.
+
+### 3d — the live marker matched the prompt echo
+
+The live run started a real Instant session (cf-container, workspace
+`01M2RSHHCCFE45TS8HJH95WFAE`, session `bf08eee5-2210-4934-8388-d942d5bd7f76`) and failed
+after 32 s with "the live run produced no activity card". Cause was the spec, not the
+app: the prompt itself contains "Then reply with exactly: TOOLS DONE", so the
+document-wide `getByText(LIVE_DONE_MARKER)` matched the **user's** bubble on first
+paint. Phase 1 broke out before a single tool ran and phase 2 then passed on the echo.
+
+Both phases now read the marker through
+`page.locator('.glass-msg-assistant', { hasText: LIVE_DONE_MARKER })`, with an explicit
+up-front control asserting the marker IS in the user bubble while the assistant-scoped
+locator is still empty — so if that ever inverts, the discrimination loss is visible
+rather than silent. Phase 3 additionally annotates the session's role histogram when no
+card is found, separating "the agent never called a tool" from "the card did not
+render". Cleanup was already correct and is unchanged (stop in `finally`, status
+asserted; the session is `stopped` on staging).
+
+### Final line counts
+
+| File                                                                       | Lines                                              |
+| -------------------------------------------------------------------------- | -------------------------------------------------- |
+| `apps/web/src/components/project-message-view/index.tsx`                   | 858 (pre-existing exception; 804 on `origin/main`) |
+| `apps/web/src/pages/workspace/WorkspaceChatView.tsx`                       | 446                                                |
+| `apps/web/src/pages/workspace/useWorkspaceChatSocket.ts`                   | 148                                                |
+| `apps/web/src/components/project-message-view/useToolCallGroupRowState.ts` | 73                                                 |
+
+`pnpm quality:file-sizes` passes.
+
+### Verification
+
+- `pnpm --filter @simple-agent-manager/web test` — **313 files / 3792 tests passed, 0
+  failed, 0 skipped**.
+- Typecheck clean; lint 0 errors / 3 pre-existing warnings; format ratchet passed.
+- Playwright: `project-chat-tool-group-audit` 16/16 under
+  `CI=true … --project='iPhone 14 (390x844)'`; `project-chat-tool-call-audit` +
+  `light-mode-slice-b-audit` + `project-chat-document-card-audit` on both projects 35
+  passed / 1 failed (the known pre-existing document-card mobile virtualization
+  failure, reproduced on `HEAD~1`).
+- The staging spec collects (4 tests/project) and skips cleanly without the token; it
+  was **not** executed from here.
